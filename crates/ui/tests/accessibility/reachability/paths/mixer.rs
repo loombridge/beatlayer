@@ -22,6 +22,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // themes spec, R16, R17): from the title bar with the context menu
         // keys, then Up and Down, and Enter on a swatch or an item.
         (
+            "track.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a track is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
+        (
             "track.set_colour",
             Exception(Equivalent(
                 "the track's context menu, opened with the Context Menu key or Shift-F10 \

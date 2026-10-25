@@ -63,6 +63,7 @@ pub mod focus;
 pub mod follow_controls;
 mod generator_panel;
 pub mod in_out;
+mod info_text;
 pub mod input;
 pub mod keymap;
 pub mod launch_panel;

@@ -34,6 +34,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("clip.quantize_audio", query(Clip, "data.audio.warp_markers")),
     ("clip.replace_sample", query(Clip, "data.audio.media")),
     ("clip.rename", query(Clip, "name")),
+    ("clip.set_info_text", query(Clip, "info_text")),
     ("clip.set_colour", query(Clip, "colour")),
     ("clip.reverse", query(Clip, "data")),
     ("clip.reverse_file", query(Clip, "data")),

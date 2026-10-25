@@ -828,6 +828,7 @@ impl Shell {
                             // The render plays the groove, so it holds it.
                             groove: None,
                             colour: None,
+                            info_text: String::new(),
                         };
                         let look = &shell.prefs.look;
                         let placed = shell.editor.transact(label_of(scene), |editor| {

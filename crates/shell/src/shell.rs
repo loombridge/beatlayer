@@ -97,6 +97,7 @@ mod capture;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
+pub use info_text::InfoTarget;
 mod file_manager;
 mod freeze;
 mod grooves;
@@ -118,6 +119,7 @@ mod device_commands;
 mod document_edits;
 mod focus;
 mod gestures;
+mod info_text;
 mod invoke;
 mod menus;
 mod midi_input;
@@ -351,6 +353,11 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Turn the Info View into a text field for an item's info text, with
+    /// the keyboard focus; Return runs the item's command with the text
+    /// ([`Shell::info_text_invocation`]), Option-Return starts a new line
+    /// and Esc drops the change (Edit Info Text; the Info View spec, R10).
+    EditInfoText(InfoTarget),
     /// Start renaming a take lane in its header, where the person types the
     /// new name; Return runs `take_lane.rename` with it, and Tab goes on to
     /// the next lane or track's name (WP-6.22; the comping spec, R28).

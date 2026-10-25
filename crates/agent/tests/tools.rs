@@ -190,6 +190,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.set_colour",
             "track.set_devices_enabled",
             "track.set_frozen",
+            "track.set_info_text",
             "track.set_link_group",
             "track.set_tuning_bypass",
             "track.unfreeze",

@@ -47,9 +47,9 @@ pub struct ChangeSet {
     /// The track tree changed: a track was added, removed, or moved, so
     /// routing may have changed.
     pub layout: bool,
-    /// The colour of a track, a clip, or a scene changed. The engine never
-    /// hears a colour, so nothing else is listed for it (the themes spec,
-    /// R27), but the set did change.
+    /// The colour of a track, a clip, or a scene changed, or a track's info
+    /// text. The engine never hears a colour, so nothing else is listed for
+    /// it (the themes spec, R27), but the set did change.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub colours: bool,
     /// Tracks whose own settings changed: name, mixer, sends, the tracks
@@ -131,7 +131,7 @@ impl ChangeSet {
         if old.own_settings_differ(new) {
             record(&mut self.tracks, id, Change::Modified);
         }
-        self.colours |= old.colour != new.colour;
+        self.colours |= old.colour != new.colour || old.info_text != new.info_text;
         if !(old.children.ptr_eq(&new.children) || old.children == new.children) {
             self.layout = true;
         }

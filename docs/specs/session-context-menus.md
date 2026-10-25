@@ -48,7 +48,7 @@ This spec covers the four menus, their rows, which item runs which command, the 
 - **R13.** An item whose command isn't built is drawn disabled in its place and names its package in its AccessKit description and its hover text, as "Not built yet: arrives with …" ([track-context-menu.md](track-context-menu.md) R6):
   - Freeze Track (C-SLOT-001, C-CLIP-SES-010): WP-4.14.
   - Bounce Track in Place, Bounce to New Track and Paste Bounced Audio (C-SLOT-002 to C-SLOT-004, C-CLIP-SES-011 to C-CLIP-SES-013), and Bounce Group to New Track (C-SLOT-009): WP-4.15.
-  - Edit Info Text (C-CLIP-SES-006, C-SCENE-006, and the Clip View title bar's): WP-6.58.
+  - Edit Info Text (C-CLIP-SES-006, C-SCENE-006, and the Clip View title bar's): the command works from Edit ▸ Edit Info Text with the clip or scene selected ([info-view.md](info-view.md) R10, WP-6.58); the items wait for these menus.
   - Extract Groove(s) (C-CLIP-SES-007): WP-6.20.
   - Slice to New MIDI Track (C-CLIP-SES-019): WP-4.16.
   - Convert Harmony, Melody and Drums to New MIDI Track (C-CLIP-SES-019): Phase 9 (audio to MIDI, IMP-06).

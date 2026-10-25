@@ -12,6 +12,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // The scene's colour palette comes with the Session View's context
         // menus (the themes spec, R16).
         (
+            "scene.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a scene is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
+        (
             "scene.set_colour",
             Exception(LaterView(
                 "the scene's context menu and its colour palette, which come with the Session \

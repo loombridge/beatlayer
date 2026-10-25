@@ -252,6 +252,7 @@ impl View<'_> {
             "kind": track.kind(),
             "name": track.name(),
             "colour": track.colour(),
+            "info_text": track.info_text(),
             "group": self.document.parent(track.id()),
             "mixer": {
                 "volume": mixer.volume,
@@ -347,6 +348,7 @@ impl View<'_> {
             "id": clip.id,
             "name": clip.name,
             "colour": clip.colour,
+            "info_text": clip.info_text,
             "kind": kind,
             "track": self.document.clip_track(clip.id),
             "start": self.position(clip.start),
@@ -393,6 +395,7 @@ impl View<'_> {
         let mut value = json!({
             "id": device.id,
             "name": device.name,
+            "info_text": device.info_text,
             "kind": device.kind,
             "role": device.role,
             "enabled": device.enabled,
@@ -559,7 +562,13 @@ impl View<'_> {
 
     fn scene_summary(&self, scene: &Scene) -> Value {
         let number = self.document.scene_position(scene.id).map(|at| at + 1);
-        json!({ "id": scene.id, "name": scene.name, "colour": scene.colour, "number": number })
+        json!({
+            "id": scene.id,
+            "name": scene.name,
+            "colour": scene.colour,
+            "info_text": scene.info_text,
+            "number": number,
+        })
     }
 
     fn scene(&self, scene: &Scene) -> Value {

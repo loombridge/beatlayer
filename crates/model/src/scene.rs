@@ -44,6 +44,9 @@ pub struct Scene {
     /// R14): a new scene has none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<u8>,
+    /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the scene; empty for none, and left out of the saved set then (the Info View spec, R9).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub info_text: String,
 }
 
 /// The lowest tempo a scene can set (Live's scene tempo range).
@@ -71,6 +74,7 @@ impl Scene {
             signature: None,
             follow: FollowActions::default(),
             colour: None,
+            info_text: String::new(),
         }
     }
 }

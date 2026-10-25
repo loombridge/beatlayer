@@ -4,7 +4,7 @@
 
 use crate::common;
 use bl_core::time::Frames;
-use bl_devices::cv_triggers::{self, Field, OUTPUTS, param};
+use bl_devices::cv_triggers::{Field, OUTPUTS, param};
 use bl_devices::cv_triggers_type;
 use bl_engine::{Block, Node, NoteBuffer, NoteEvent, NoteKind, Registry, TransportInfo};
 use bl_model::ParamId;
@@ -103,8 +103,8 @@ fn a_trigger_is_a_pulse_of_its_length_on_its_key_and_nothing_on_others() {
         // Key 37 answers output 2, a key no output answers does nothing.
         assert!(out[1][900..1380].iter().all(|&v| v == 0.5));
         assert_eq!(out[1][1380], 0.0);
-        for other in 2..OUTPUTS {
-            assert!(out[other].iter().all(|&v| v == 0.0), "output {other}");
+        for (other, out) in out.iter().enumerate().skip(2) {
+            assert!(out.iter().all(|&v| v == 0.0), "output {other}");
         }
     }
 }
@@ -180,7 +180,7 @@ fn the_outputs_fall_when_the_device_lets_go() {
         velocity: 1.0,
         note_id: None,
     };
-    let mut run = |notes: &[NoteEvent], node: &mut Box<dyn Node>| {
+    let run = |notes: &[NoteEvent], node: &mut Box<dyn Node>| {
         let mut data = vec![0.0f32; CHANNELS * 64];
         let mut cv = vec![0.0f32; OUTPUTS * CHANNELS * 64];
         let mut sink = NoteBuffer::with_capacity(4);
@@ -202,5 +202,4 @@ fn the_outputs_fall_when_the_device_lets_go() {
     let mut sink = NoteBuffer::with_capacity(4);
     node.release(&mut sink);
     assert_eq!(run(&[], &mut node), 0.0);
-    let _ = cv_triggers::OUTPUT_NAMES;
 }

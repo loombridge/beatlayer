@@ -448,3 +448,32 @@ fn a_calibrated_pitch_makes_the_oscillator_sound_the_keys_frequency() {
         assert!(cents.abs() < 1.0, "key {key}: {cents} cents off");
     }
 }
+
+// Spec: cv-tools R19
+#[test]
+fn a_notes_own_bend_slide_and_pressure_reach_the_pitch_and_the_mod_outputs() {
+    use bl_devices::cv_instrument::BEND_RANGE;
+    let [source1, _, _] = mod_params(0);
+    let [source2, _, _] = mod_params(1);
+    // Mod 1 follows Slide (the seventh choice), Mod 2 Pressure (the fourth).
+    let mut rig = Rig::new(&[(BEND_RANGE, 12.0), (source1, 6.0), (source2, 3.0)], 64);
+    let own = |at: usize, expression, value: f32| {
+        Played(at, NoteKind::Expression { expression, value }, 60, 0.0)
+    };
+    let out = rig.render(
+        1000,
+        &[
+            on(0, 60),
+            own(100, bl_engine::NoteExpression::Bend, 1.0),
+            own(300, bl_engine::NoteExpression::Slide, 0.5),
+            own(500, bl_engine::NoteExpression::Pressure, 1.0),
+        ],
+    );
+    assert_eq!(out.pitch[50], 0.0);
+    // The note's own bend of a whole range up is an octave, as the channel's
+    // bend would be.
+    assert!((out.pitch[200] - 0.1).abs() < 1e-6, "{}", out.pitch[200]);
+    // Slide and Pressure follow the sounding note's: Max is 5 V.
+    assert!((out.mod1[400] - 0.25).abs() < 1e-6, "{}", out.mod1[400]);
+    assert!((out.mod2[800] - 0.5).abs() < 1e-6, "{}", out.mod2[800]);
+}

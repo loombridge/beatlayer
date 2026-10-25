@@ -175,7 +175,7 @@ impl CvCalibration {
     #[must_use]
     pub fn fit(measured: &[(f64, f64)]) -> Option<Self> {
         let n = measured.len() as f64;
-        if measured.len() < 2 || measured.iter().any(|&(_, hz)| !(hz > 0.0)) {
+        if measured.len() < 2 || measured.iter().any(|&(_, hz)| hz.is_nan() || hz <= 0.0) {
             return None;
         }
         let (sv, sl) = measured.iter().fold((0.0, 0.0), |(v, l), &(volts, hz)| {
@@ -225,13 +225,13 @@ impl CvCalibration {
             pitches[at - 1] > 0.0 && (2f64.powf(0.5)..=2f64.powf(1.5)).contains(&ratio)
         };
         let (mut best, mut start) = ((0, 0), 0);
-        for at in 0..pitches.len() {
-            if pitches[at] <= 0.0 {
+        for (at, &pitch) in pitches.iter().enumerate() {
+            if pitch <= 0.0 {
                 start = at + 1;
             } else if at > start && !rising(at) {
                 start = at;
             }
-            if at + 1 - start > best.1 && pitches[at] > 0.0 {
+            if at + 1 - start > best.1 && pitch > 0.0 {
                 best = (start, at + 1 - start);
             }
         }

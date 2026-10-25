@@ -44,7 +44,10 @@ const IDLE_PERIOD: Duration = Duration::from_millis(1);
 /// fills every input channel's next block, one block later (WP-7.17). A test
 /// patches a simulated oscillator or any other hardware with it.
 #[derive(Clone)]
-pub struct Cable(Arc<Mutex<dyn FnMut(&[Vec<f32>], &mut [Vec<f32>]) + Send>>);
+pub struct Cable(Arc<Mutex<Patch>>);
+
+/// What a cable runs after each block.
+type Patch = dyn FnMut(&[Vec<f32>], &mut [Vec<f32>]) + Send;
 
 impl Cable {
     /// A cable that runs `patch` after each block with the block the outputs

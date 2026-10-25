@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use bl_audio_io::{BackendKind, Cable, NullBackend, NullControl, NullOptions, Pacing};
-use bl_devices::{CV_INSTRUMENT, Tuner, cv_instrument_type, cv_triggers_type};
+use bl_audio_io::{Cable, NullBackend, NullControl, NullOptions, Pacing};
+use bl_devices::{Tuner, cv_instrument_type, cv_triggers_type};
 use bl_engine::DeviceType;
 use bl_engine::NodeConfig;
-use bl_model::{Channel, CvCalibration, DeviceId, External};
+use bl_model::{CvCalibration, DeviceId, External};
 use bl_shell::device_commands::DeviceAdded;
 use bl_shell::export_commands::{self as export_ids, ExportResult};
 use bl_shell::routing::{self, Interface};
@@ -305,7 +305,6 @@ fn calibrate_is_refused_while_pitch_or_audio_from_is_unset_and_fails_on_silence(
             json!({ "device": bench.device, "cv_outputs": [{ "name": "Pitch" }] }),
         )
         .unwrap();
-    let before = steps(&bench.shell);
     let error = bench
         .shell
         .run("cv.calibrate", json!({ "device": bench.device }))
@@ -349,7 +348,6 @@ fn calibrate_is_refused_while_pitch_or_audio_from_is_unset_and_fails_on_silence(
     assert!(error.contains("-2"), "{error}");
     assert_eq!(steps(&bench.shell), before_silence, "nothing changed");
     assert_eq!(external(&bench.shell, bench.device).cv_calibration, None);
-    let _ = before;
     stop.store(true, Ordering::Relaxed);
     driver.join().unwrap();
 }
@@ -436,7 +434,6 @@ fn calibrate_tunes_every_c_from_c1_to_c6_within_a_cent_as_one_undo_step() {
         let cents = 1200.0 * (pitch.expect("a pitch") / want).log2();
         assert!(cents.abs() < 1.0, "key {key}: {cents} cents off");
     }
-    let _ = CV_INSTRUMENT;
 }
 
 // Spec: cv-tools R14
@@ -482,7 +479,7 @@ fn cv_clear_calibration_takes_it_away_in_one_undo_step() {
 
 // Spec: cv-tools R7
 #[test]
-fn an_offline_preview_names_a_routed_cv_device_and_an_export_renders_in_real_time() {
+fn an_offline_preview_names_a_routed_cv_device_and_it_needs_real_time() {
     let mut shell = Shell::headless();
     let device = add(&mut shell, &cv_instrument_type());
     let track = shell.editor().document().top_level().next().unwrap();
@@ -549,10 +546,84 @@ fn an_offline_preview_names_a_routed_cv_device_and_an_export_renders_in_real_tim
         shell.editor().document(),
         None
     ));
-    let _ = (
-        export_ids::AUDIO,
-        Channel::Mono(1),
-        std::mem::size_of::<ExportResult>(),
-    );
-    let _ = BackendKind::Null;
+}
+
+/// A one-beat mono tone as a WAV file at `path`.
+fn tone(path: &std::path::Path) {
+    let frames = 24_000u32;
+    let data = frames * 2;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    for field in [16u32, 1 | 1 << 16, 48_000, 96_000, 2 | 16 << 16] {
+        bytes.extend_from_slice(&field.to_le_bytes());
+    }
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data.to_le_bytes());
+    for i in 0..frames {
+        let sample: i16 = if i % 100 < 50 { 8_000 } else { -8_000 };
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    std::fs::write(path, bytes).unwrap();
+}
+
+// Spec: cv-tools R7. An export of a set with a CV device routed renders in
+// real time on the running engine, whichever device it is.
+#[test]
+fn an_export_with_a_routed_cv_device_renders_in_real_time() {
+    for t in [cv_instrument_type(), cv_triggers_type()] {
+        let folder =
+            std::env::temp_dir().join(format!("bl-cv-export-{}-{}", t.name, std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("Tone.wav");
+        tone(&file);
+        let backend = NullBackend::default()
+            .with_latency(400, 600)
+            .with_loopback(1_000);
+        let devices = backend.clone();
+        let audio = bl_shell::audio::AudioHost::with_backends(
+            vec![bl_audio_io::BackendKind::Null],
+            Box::new(move |_| Ok(Box::new(devices.clone()))),
+            bl_shell::audio::AudioSettings::default(),
+        );
+        let mut shell = Shell::new(
+            bl_shell::settings::Preferences::default(),
+            None,
+            audio,
+            Box::new(bl_shell::files::ProjectFiles::new()),
+        );
+        shell
+            .run("audio.configure", json!({ "input_device": "null:null" }))
+            .unwrap();
+        shell.start_audio();
+        shell
+            .run(
+                bl_shell::browser_commands::ADD_TO_ARRANGEMENT,
+                json!({ "paths": [file.to_string_lossy()], "at": 0 }),
+            )
+            .unwrap();
+        let device = add(&mut shell, &t);
+        let port = external(&shell, device).cv_outputs[0].name.clone();
+        shell
+            .run(
+                "device.set_external",
+                json!({ "device": device, "cv_outputs": [{ "name": port, "channel": 1 }] }),
+            )
+            .unwrap();
+        let out = folder.join("Live.wav");
+        let result: ExportResult = serde_json::from_value(
+            shell
+                .run(
+                    export_ids::AUDIO,
+                    json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                            "sample_rate": 48000, "wait_seconds": 0 }),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(result.real_time, "{}: rendered in real time", t.name);
+        assert!(out.exists());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

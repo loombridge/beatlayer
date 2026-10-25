@@ -414,7 +414,6 @@ fn latency_controls(
 /// A CV device's section (L-DEV-026): a chooser per CV output and input
 /// under its name, then Audio From and Hardware Latency, and for CV
 /// Instrument the Calibrate and Clear buttons with the readout.
-#[expect(clippy::too_many_arguments, reason = "the section's inputs")]
 fn draw_cv(
     ui: &mut Ui,
     shell: &Shell,

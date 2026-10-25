@@ -997,6 +997,7 @@ dependencies = [
  "bl-commands",
  "bl-core",
  "bl-model",
+ "flate2",
  "libc",
  "proptest",
  "ruzstd",
@@ -1004,6 +1005,7 @@ dependencies = [
  "serde",
  "serde_json",
  "windows-sys 0.52.0",
+ "zip",
 ]
 
 [[package]]

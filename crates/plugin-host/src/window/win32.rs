@@ -22,8 +22,8 @@ use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetClientRect,
     GetWindowLongPtrW, IsWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE,
-    SWP_NOZORDER, SendMessageW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_STYLE,
-    WM_CLOSE, WM_DPICHANGED, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
+    SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_STYLE, WM_CLOSE,
+    WM_DPICHANGED, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
 };
 
 use super::WindowEvent;
@@ -189,6 +189,7 @@ impl Window {
     /// Windows' close button does.
     #[cfg(test)]
     pub fn pretend_closed(&self) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
         // SAFETY: `hwnd` is this window, used on its own thread; the
         // message goes through the window procedure.
         unsafe { SendMessageW(self.hwnd, WM_CLOSE, 0, 0) };

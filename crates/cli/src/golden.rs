@@ -140,7 +140,12 @@ impl Scene {
     /// `bl-cli render` plays a saved set.
     #[must_use]
     pub fn plays_as_saved(&self) -> bool {
-        self.schedule.is_empty() && self.cues == [Cue::PLAY] && self.launches.is_empty()
+        // A render that captures device channels isn't one: a saved set sends
+        // no CV when it renders offline (the CV tools spec, R7).
+        self.schedule.is_empty()
+            && self.cues == [Cue::PLAY]
+            && self.launches.is_empty()
+            && self.device_channels == 0
     }
 }
 

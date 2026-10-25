@@ -160,11 +160,7 @@ fn difference(ours: &[i32], reference: &[i32]) -> (usize, f64) {
 /// scheduled, and (since an export plays straight through) its loop off.
 fn exports_as_rendered(fixture: &Fixture) -> bool {
     let scene = fixture.scene();
-    // An export is Main's two channels: it sends no CV (the CV tools spec,
-    // R7), so a fixture that captures device channels isn't one.
-    scene.plays_as_saved()
-        && scene.device_channels == 0
-        && !scene.document().settings().arrangement_loop.enabled
+    scene.plays_as_saved() && !scene.document().settings().arrangement_loop.enabled
 }
 
 /// Spec: export R2, R4, R12.

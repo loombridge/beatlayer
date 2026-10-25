@@ -469,6 +469,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::ArrowDown,
             ),
         ),
+        // The CV Instrument's section (WP-7.17): Enter on its buttons.
+        (
+            "cv.calibrate",
+            main(a_cv_instrument, device_view, "Calibrate", Key::Enter),
+        ),
+        (
+            "cv.clear_calibration",
+            main(a_calibrated_cv_instrument, device_view, "Clear", Key::Enter),
+        ),
+        (
+            "cv.set_calibration",
+            Exception(Equivalent(
+                "Calibrate (`cv.calibrate`), which measures a calibration and stores it",
+            )),
+        ),
         (
             "device.set_sidechain_mix",
             main(a_sidechained_device, device_view, "Mix", Key::ArrowDown),

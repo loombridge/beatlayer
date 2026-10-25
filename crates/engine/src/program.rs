@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
 
 use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
-use bl_model::{ChainId, Channel, LaunchMode, ParamId, Scale, SceneId, Tap, TrackId};
+use bl_model::{ChainId, Channel, ParamId, Scale, SceneId, Tap, TrackId};
 
 use crate::disjoint::Shared;
 use crate::drum::DrumNotes;
@@ -21,7 +21,7 @@ use crate::node::{
 use crate::points::MeterPoint;
 use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool, Sched, Wake};
-use crate::session::{SceneMaps, SessionPlayback};
+use crate::session::{Button, SceneMaps, SessionPlayback, SlotRow};
 use crate::sidechain::SidechainKey;
 use crate::state::{ChainMeter, PlayedParam};
 use crate::zones::{ChainSelector, ZoneFilter};
@@ -179,7 +179,7 @@ pub struct EngineProgram {
     /// launch mode)` triples sorted by scene and then track: what a scene
     /// launch queues (WP-3.2) and where a press finds its clip's mode
     /// (WP-3.3).
-    pub(crate) scene_slots: Vec<(SceneId, TrackId, LaunchMode)>,
+    pub(crate) scene_slots: Vec<SlotRow>,
     /// Every slot clip's and scene's follow actions and the quantisation
     /// and length a follow launch needs (WP-3.10).
     pub(crate) follow: crate::session::FollowTable,
@@ -928,21 +928,24 @@ impl EngineProgram {
         &self.time_signatures
     }
 
-    /// The slots of `scene` that hold a clip, as `(scene, track, launch
-    /// mode)` triples in track order: what a scene launch queues.
-    pub(crate) fn scene_slots(&self, scene: SceneId) -> &[(SceneId, TrackId, LaunchMode)] {
-        let start = self.scene_slots.partition_point(|&(s, ..)| s < scene);
-        let end = start + self.scene_slots[start..].partition_point(|&(s, ..)| s == scene);
+    /// The slots of `scene` that hold a clip, in track order: what a scene
+    /// launch queues.
+    pub(crate) fn scene_slots(&self, scene: SceneId) -> &[SlotRow] {
+        let start = self.scene_slots.partition_point(|row| row.scene < scene);
+        let end = start + self.scene_slots[start..].partition_point(|row| row.scene == scene);
         &self.scene_slots[start..end]
     }
 
-    /// The launch mode of the clip in the slot `(track, scene)`, or `None`
-    /// for an empty slot.
-    pub(crate) fn launch_mode(&self, track: TrackId, scene: SceneId) -> Option<LaunchMode> {
-        self.scene_slots(scene)
-            .iter()
-            .find(|&&(_, t, _)| t == track)
-            .map(|&(.., mode)| mode)
+    /// The slot `(track, scene)`, or `None` for an empty one.
+    pub(crate) fn slot_row(&self, track: TrackId, scene: SceneId) -> Option<&SlotRow> {
+        self.scene_slots(scene).iter().find(|row| row.track == track)
+    }
+
+    /// What a press or a release of the launch button of `(track, scene)`
+    /// reads from its clip; the default, a Trigger on the global grid, for
+    /// an empty slot (R22).
+    pub(crate) fn launch_button(&self, track: TrackId, scene: SceneId) -> Button {
+        self.slot_row(track, scene).map_or_else(Button::default, |row| row.button)
     }
 
     /// What a MIDI track's input received in the last block, and whether

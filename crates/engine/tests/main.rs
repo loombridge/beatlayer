@@ -11,6 +11,7 @@ mod analysis;
 mod automation;
 mod capture_midi;
 mod clip_envelopes;
+mod clip_launch;
 mod clip_settings;
 mod clips;
 mod common;

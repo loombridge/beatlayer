@@ -172,8 +172,8 @@ pub use registry::{DeviceType, NodeFactory, Registry};
 pub use render::{RenderOutput, RenderPlan};
 pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
-    SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
-    StoppedClip,
+    ClipOffset, SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState,
+    SlotStatus, StoppedClip,
 };
 pub use state::{
     ChainMeter, EngineCounters, EngineState, MeterOwner, MeterSite, Monitor, PlayedParam,

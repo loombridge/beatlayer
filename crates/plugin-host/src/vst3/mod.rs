@@ -129,19 +129,56 @@ pub struct PluginStatus {
     pub values: Vec<(ParamId, f64)>,
 }
 
+/// How many segments the sampled curve of a parameter whose controller
+/// maps its values other than linearly has.
+const CURVE_SEGMENTS: usize = 256;
+
 /// One of a plug-in's parameters, as the node needs it to turn the
 /// device's plain values into the normalized values a process block
 /// carries.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ParamMap {
     pub(crate) id: u32,
     pub(crate) min: f64,
     pub(crate) max: f64,
     pub(crate) default: f64,
     pub(crate) steps: i32,
+    /// The controller's plain value at `CURVE_SEGMENTS + 1` evenly spaced
+    /// normalized values, when its mapping isn't linear over `min..max`
+    /// (a log frequency, a skewed gain): the audio thread can't ask the
+    /// controller, so it inverts this instead.
+    pub(crate) curve: Option<Arc<[f64]>>,
 }
 
 impl ParamMap {
+    /// The map of a parameter whose controller maps normalized values to
+    /// plain ones with `to_plain`: linear if the controller's mapping is,
+    /// else sampled.
+    pub(crate) fn new(
+        id: u32,
+        (min, max): (f64, f64),
+        default: f64,
+        steps: i32,
+        to_plain: impl Fn(f64) -> f64,
+    ) -> Self {
+        let linear = [0.25, 0.5, 0.75]
+            .iter()
+            .all(|n| (to_plain(*n) - (min + n * (max - min))).abs() <= 1e-6 * (max - min));
+        let curve = (!linear).then(|| {
+            (0..=CURVE_SEGMENTS)
+                .map(|at| to_plain(at as f64 / CURVE_SEGMENTS as f64))
+                .collect()
+        });
+        Self {
+            id,
+            min,
+            max,
+            default,
+            steps,
+            curve,
+        }
+    }
+
     /// The normalized value of `plain`, over the parameter's plain range
     /// and steps.
     pub(crate) fn normalized(&self, plain: f64) -> f64 {
@@ -149,7 +186,10 @@ impl ParamMap {
         if !span.is_finite() || span <= 0.0 {
             return 0.0;
         }
-        let value = ((plain - self.min) / span).clamp(0.0, 1.0);
+        let value = match &self.curve {
+            Some(curve) => curve_normalized(curve, plain),
+            None => ((plain - self.min) / span).clamp(0.0, 1.0),
+        };
         if self.steps > 0 {
             let steps = f64::from(self.steps);
             (value * steps).round() / steps
@@ -157,6 +197,28 @@ impl ParamMap {
             value
         }
     }
+}
+
+/// The normalized value at which `curve`, the plain values at evenly
+/// spaced normalized ones, passes `plain`: a bisection, then a line
+/// through the segment found. A curve that isn't increasing (a plug-in
+/// with an odd mapping) lands somewhere on it, never out of range.
+fn curve_normalized(curve: &[f64], plain: f64) -> f64 {
+    let last = curve.len() - 1;
+    let below = curve.partition_point(|point| *point < plain);
+    if below == 0 {
+        return 0.0;
+    }
+    if below > last {
+        return 1.0;
+    }
+    let (from, to) = (curve[below - 1], curve[below]);
+    let along = if to > from {
+        ((plain - from) / (to - from)).clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    ((below - 1) as f64 + along) / last as f64
 }
 
 /// A parameter change a plug-in's controller made itself, such as from its
@@ -1189,8 +1251,14 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
             controller.cast::<IConnectionPoint>(),
         ) {
             (Some(component_side), Some(controller_side)) => {
-                // SAFETY: both are live objects of the interface.
-                (unsafe { component_side.connect(controller_side.as_ptr()) }) == kResultOk
+                // SAFETY: both are live objects of the interface. Each
+                // gets the other as its peer, as the SDK's
+                // `PlugProvider::connectComponents` does.
+                unsafe {
+                    let component_to = component_side.connect(controller_side.as_ptr());
+                    let controller_to = controller_side.connect(component_side.as_ptr());
+                    component_to == kResultOk && controller_to == kResultOk
+                }
             }
             _ => false,
         };
@@ -1255,7 +1323,10 @@ fn teardown(instance: &mut Instance) {
             instance.controller.cast::<IConnectionPoint>(),
         ) {
             // SAFETY: both are live objects of the interface.
-            unsafe { component_side.disconnect(controller_side.as_ptr()) };
+            unsafe {
+                component_side.disconnect(controller_side.as_ptr());
+                controller_side.disconnect(component_side.as_ptr());
+            }
         }
         instance.connected = false;
     }
@@ -1426,6 +1497,7 @@ fn borrow(
         lent.ends.status.latency.store(active.latency, Relaxed);
         let generation = active.generation;
         if lent.ends.to_node.push(active).is_ok() {
+            lent.ends.handed = Some(generation);
             instance.handed = Some(generation);
         }
     }
@@ -1655,25 +1727,39 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
     let outputs_count = unsafe { component.getBusCount(audio, output) }.clamp(0, MAX_BUSES as i32);
     let mut in_channels = [0usize; MAX_BUSES];
     let mut out_channels = [0usize; MAX_BUSES];
-    for bus in 0..inputs_count {
-        // SAFETY: an all-zero bus info is valid; the component fills it.
-        let mut info: BusInfo = unsafe { std::mem::zeroed() };
-        // SAFETY: the component reports its buses by index.
-        if unsafe { component.getBusInfo(audio, input, bus, &mut info) } == kResultOk {
-            in_channels[bus as usize] = usize::try_from(info.channelCount.max(0)).unwrap_or(0);
+    // A bus is activated only if the node's buffers hold all its channels,
+    // so a block never gives the plug-in fewer than its arrangement (the
+    // VST3 contract); one that doesn't fit is left inactive, with no
+    // channels. The main bus has to fit.
+    for (direction, count, channels) in [
+        (input, inputs_count, &mut in_channels),
+        (output, outputs_count, &mut out_channels),
+    ] {
+        let mut fed = 0usize;
+        for bus in 0..count {
+            // SAFETY: an all-zero bus info is valid; the component fills it.
+            let mut info: BusInfo = unsafe { std::mem::zeroed() };
+            // SAFETY: the component reports its buses by index.
+            let found = unsafe { component.getBusInfo(audio, direction, bus, &mut info) };
+            let wanted = if found == kResultOk {
+                usize::try_from(info.channelCount.max(0)).unwrap_or(0)
+            } else {
+                0
+            };
+            let fits = fed + wanted <= node::MAX_CHANNELS;
+            if bus == 0 && !fits {
+                return Err(format!(
+                    "its main bus has {wanted} channels; at most {} are supported",
+                    node::MAX_CHANNELS
+                ));
+            }
+            if fits {
+                channels[bus as usize] = wanted;
+                fed += wanted;
+            }
+            // SAFETY: as above.
+            unsafe { component.activateBus(audio, direction, bus, TBool::from(fits)) };
         }
-        // SAFETY: as above.
-        unsafe { component.activateBus(audio, input, bus, 1) };
-    }
-    for bus in 0..outputs_count {
-        // SAFETY: an all-zero bus info is valid; the component fills it.
-        let mut info: BusInfo = unsafe { std::mem::zeroed() };
-        // SAFETY: the component reports its buses by index.
-        if unsafe { component.getBusInfo(audio, output, bus, &mut info) } == kResultOk {
-            out_channels[bus as usize] = usize::try_from(info.channelCount.max(0)).unwrap_or(0);
-        }
-        // SAFETY: as above.
-        unsafe { component.activateBus(audio, output, bus, 1) };
     }
     // SAFETY: as above.
     if unsafe { component.setActive(1) } != kResultOk {
@@ -1700,7 +1786,7 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
         outputs: outputs_count as usize,
         in_channels,
         out_channels,
-        params: instance.params.iter().map(|p| p.map).collect(),
+        params: instance.params.iter().map(|p| p.map.clone()).collect(),
         midi: midi_map(&instance.controller),
         expressions: note_expressions(&instance.controller),
         pending: std::mem::take(&mut instance.pending),
@@ -1801,6 +1887,7 @@ fn deactivate(instance: &mut Instance) {
 /// changed.
 fn take_back(instance: &mut Instance) -> bool {
     let mut returned = Vec::new();
+    let mut lost = false;
     let lent = instance.lent.iter_mut().map(|lent| &mut lent.ends);
     for ends in instance
         .ends
@@ -1808,9 +1895,18 @@ fn take_back(instance: &mut Instance) -> bool {
         .chain(instance.retired.iter_mut())
         .chain(lent)
     {
+        // Asked before the queue is emptied: everything a dropped node gave
+        // back is in it by now.
+        let dropped = ends.from_node.is_abandoned();
         while let Ok(active) = ends.from_node.pop() {
+            if ends.handed == Some(active.generation) {
+                ends.handed = None;
+            }
             returned.push(active);
         }
+        // A node dropped before it took the component, or lost it in a full
+        // queue: it will never come back.
+        lost |= dropped && ends.handed.is_some() && ends.handed == instance.handed;
     }
     let mut changed = false;
     for active in returned {
@@ -1819,6 +1915,30 @@ fn take_back(instance: &mut Instance) -> bool {
             deactivate(instance);
             changed = true;
         }
+    }
+    if lost && instance.handed.is_some() {
+        instance.handed = None;
+        deactivate(instance);
+        // The values it was to start with went with it: its next node gets
+        // the controller's, which are the device's (R5). A render's loan
+        // ends with the state it had instead.
+        if instance.lent.is_none() {
+            instance.pending = instance
+                .params
+                .iter()
+                .map(|param| {
+                    let id = param.map.id;
+                    // SAFETY: the controller maps its own parameter's value,
+                    // by ID, on the main thread.
+                    let plain = unsafe {
+                        let normalized = instance.controller.getParamNormalized(id);
+                        instance.controller.normalizedParamToPlain(id, normalized)
+                    };
+                    (id, plain)
+                })
+                .collect();
+        }
+        changed = true;
     }
     changed
 }
@@ -1895,7 +2015,11 @@ fn pump(
                     ends.status.latency.store(active.latency, Relaxed);
                 }
                 let pushed = instance.ends.as_mut().is_some_and(|ends| {
-                    !ends.to_node.is_abandoned() && ends.to_node.push(active).is_ok()
+                    let pushed = !ends.to_node.is_abandoned() && ends.to_node.push(active).is_ok();
+                    if pushed {
+                        ends.handed = Some(generation);
+                    }
+                    pushed
                 });
                 if pushed {
                     instance.handed = Some(generation);

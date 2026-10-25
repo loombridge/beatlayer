@@ -31,7 +31,8 @@ use vst3::{Class, ComPtr, ComRef, ComWrapper};
 use super::ParamMap;
 use crate::drive::Driver;
 
-/// The most channels the node feeds across a plug-in's buses.
+/// The most channels the node feeds across a plug-in's buses; `activate`
+/// leaves the buses past it inactive.
 pub(crate) const MAX_CHANNELS: usize = 8;
 /// The most buses a plug-in's arrangement is taken from each way.
 pub(crate) const MAX_BUSES: usize = 8;
@@ -97,6 +98,9 @@ pub(crate) struct HostEnds {
     /// gives the controller so its parameters are the device's (R5).
     pub(crate) applied: Consumer<(u32, f64)>,
     pub(crate) status: Arc<Status>,
+    /// The generation of the component handed to this node and not yet
+    /// given back, so the host can tell the node was dropped holding it.
+    pub(crate) handed: Option<u64>,
 }
 
 /// The plug-in as the main thread activated it for a node: the component
@@ -277,6 +281,7 @@ impl HostParams {
             queue.reset();
         }
         self.used.set(0);
+        self.dropped.set(0);
     }
 
     /// The number of changes dropped because a queue was full.
@@ -683,6 +688,7 @@ impl Vst3Node {
             from_node,
             applied: reported,
             status,
+            handed: None,
         };
         (node, ends)
     }
@@ -749,7 +755,7 @@ impl Vst3Node {
         let stride = self.max_frames;
         let mut at = 0usize;
         for (bus, channels) in in_channels.iter().enumerate().take(inputs) {
-            let count = (*channels).min(MAX_CHANNELS.saturating_sub(at));
+            let count = *channels;
             self.in_buses[bus] = AudioBusBuffers {
                 numChannels: i32::try_from(count).unwrap_or(i32::MAX),
                 silenceFlags: if count == 0 { 1 } else { 0 },
@@ -778,7 +784,7 @@ impl Vst3Node {
 
         let mut at = 0usize;
         for (bus, channels) in out_channels.iter().enumerate().take(outputs) {
-            let count = (*channels).min(MAX_CHANNELS.saturating_sub(at));
+            let count = *channels;
             self.out_buses[bus] = AudioBusBuffers {
                 numChannels: i32::try_from(count).unwrap_or(i32::MAX),
                 silenceFlags: 0,
@@ -1292,5 +1298,21 @@ impl Drop for Vst3Node {
         if let Some(active) = self.active.take() {
             self.give_back(active);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dropped_change_is_counted_in_its_own_block_only() {
+        let params = HostParams::new();
+        for id in 0..=MAX_QUEUES as u32 {
+            params.push(id, 0, 0.5);
+        }
+        assert_eq!(params.dropped(), 1);
+        params.reset();
+        assert_eq!(params.dropped(), 0);
     }
 }

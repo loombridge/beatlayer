@@ -6243,6 +6243,73 @@ fn an_agent_scrolls_the_return_tracks_with_the_tracks_and_reads_it_back() {
     assert_eq!(state["return_tracks_scroll"], false);
 }
 
+// Spec: mixer-view R32, R36 to R38. An agent sets a view's height, its own
+// sections and a column's width by command ID, and reads them all back in
+// `mixer_view.state`.
+#[test]
+fn an_agent_sets_the_mixers_height_sections_and_column_widths_and_reads_them_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("mixer").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0]["result"].clone()
+    };
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["session"]["height"], 123.0);
+    assert_eq!(state["arrangement"]["height"], 123.0);
+    // A view's height.
+    let set = run(
+        &mut client,
+        "mixer_view.set_height",
+        json!({ "view": "session", "height": 210.0 }),
+    );
+    assert_eq!(set["session"]["height"], 210.0);
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["session"]["height"], 210.0);
+    assert_eq!(state["arrangement"]["height"], 123.0);
+    // A view's own sections.
+    run(
+        &mut client,
+        "mixer_view.sends",
+        json!({ "view": "session", "shown": false }),
+    );
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert_eq!(state["session"]["sends"], false);
+    assert_eq!(state["arrangement"]["sends"], true);
+    // A column's width, and every track's.
+    let columns = state["column_widths"].as_array().unwrap().clone();
+    let first = columns[0]["track"].clone();
+    assert_eq!(columns[0]["width"], 94.0);
+    let set = run(
+        &mut client,
+        "mixer_view.set_column_width",
+        json!({ "track": first, "width": 150.0 }),
+    );
+    assert_eq!(set["column_widths"][0]["width"], 150.0);
+    assert_eq!(set["column_widths"][1]["width"], 94.0);
+    let set = run(
+        &mut client,
+        "mixer_view.set_column_width",
+        json!({ "width": 5.0 }),
+    );
+    assert_eq!(set["column_widths"][0]["width"], 40.0, "at least 40");
+    let last = set["column_widths"]
+        .as_array()
+        .unwrap()
+        .last()
+        .unwrap()
+        .clone();
+    assert_eq!(last["width"], 104.0, "Main keeps its own");
+    // The held peaks read back too; resetting one is accepted.
+    run(&mut client, "mixer_view.reset_peak", json!({}));
+    let state = run(&mut client, "mixer_view.state", json!({}));
+    assert!(state["peaks"].is_array());
+}
+
 // Spec: mixer-view R24, R31. An agent shows the Devices section, reads the
 // switch back in the mixers' state, and reads the devices the section lists
 // with their `enabled` from the query tool.
@@ -6260,19 +6327,19 @@ fn an_agent_shows_the_devices_section_and_reads_it_back() {
     };
     // Hidden in a new install.
     assert_eq!(
-        run(&mut client, "mixer_view.state", json!({}))["devices"],
+        run(&mut client, "mixer_view.state", json!({}))["arrangement"]["devices"],
         false
     );
     let on = run(&mut client, "mixer_view.devices", json!({ "shown": true }));
-    assert_eq!(on["devices"], true);
+    assert_eq!(on["arrangement"]["devices"], true);
     assert_eq!(
-        run(&mut client, "mixer_view.state", json!({}))["devices"],
+        run(&mut client, "mixer_view.state", json!({}))["arrangement"]["devices"],
         true
     );
     let off = run(&mut client, "mixer_view.devices", json!({}));
-    assert_eq!(off["devices"], false);
+    assert_eq!(off["arrangement"]["devices"], false);
     assert_eq!(
-        run(&mut client, "mixer_view.state", json!({}))["devices"],
+        run(&mut client, "mixer_view.state", json!({}))["arrangement"]["devices"],
         false
     );
     // The devices the section lists, and whether each is on, are the

@@ -15,9 +15,9 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaneViews,
-    LaunchSettings, MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind,
-    WindowViews, registry,
+    ClipFolds, ColumnWidths, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor,
+    LaneViews, LaunchSettings, MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId,
+    TrackKind, WindowViews, registry,
 };
 use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
@@ -271,6 +271,17 @@ pub trait SetStore {
         LaneViews::new()
     }
 
+    /// Gives the store the columns' widths (WP-6.65), for the next save to
+    /// write beside the document. A store that keeps none ignores them.
+    fn set_column_widths(&mut self, widths: ColumnWidths) {
+        let _ = widths;
+    }
+
+    /// The open set's columns' widths, as it was saved.
+    fn column_widths(&self) -> ColumnWidths {
+        ColumnWidths::new()
+    }
+
     /// Writes `editor` to `path` as a copy without making it the open set:
     /// the default set and templates (WP-2.25). Returns warnings about
     /// things that went wrong without stopping the write. A store that
@@ -376,6 +387,9 @@ pub struct ProjectFiles {
     /// The Arrangement's automation lanes (WP-6.57): the open set's, then
     /// the shell's for the next save.
     lane_views: LaneViews,
+    /// The columns' widths (WP-6.65): the open set's, then the shell's for
+    /// the next save.
+    column_widths: ColumnWidths,
 }
 
 impl ProjectFiles {
@@ -406,6 +420,7 @@ impl SetStore for ProjectFiles {
         self.window_views = project.window_views;
         self.mpe_view = project.mpe_view;
         self.lane_views = project.lane_views;
+        self.column_widths = project.column_widths;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -480,6 +495,7 @@ impl SetStore for ProjectFiles {
         self.window_views = WindowViews::default();
         self.mpe_view = MpeView::default();
         self.lane_views = LaneViews::new();
+        self.column_widths = ColumnWidths::new();
         self.added.clear();
     }
 
@@ -503,6 +519,7 @@ impl SetStore for ProjectFiles {
             .with_window_views(self.window_views)
             .with_mpe_view(&self.mpe_view)
             .with_lane_views(&self.lane_views)
+            .with_column_widths(&self.column_widths)
     }
 
     fn adopt(&mut self, set: Option<SetFile>, project: Project) {
@@ -518,6 +535,7 @@ impl SetStore for ProjectFiles {
         self.window_views = project.window_views;
         self.mpe_view = project.mpe_view;
         self.lane_views = project.lane_views;
+        self.column_widths = project.column_widths;
         self.added.clear();
     }
 
@@ -605,6 +623,14 @@ impl SetStore for ProjectFiles {
         self.lane_views.clone()
     }
 
+    fn set_column_widths(&mut self, widths: ColumnWidths) {
+        self.column_widths = widths;
+    }
+
+    fn column_widths(&self) -> ColumnWidths {
+        self.column_widths.clone()
+    }
+
     fn launch(&self) -> LaunchSettings {
         self.launch
     }
@@ -677,7 +703,8 @@ impl SetStore for ProjectFiles {
             .with_launch(self.launch)
             .with_window_views(self.window_views)
             .with_mpe_view(&self.mpe_view)
-            .with_lane_views(&self.lane_views);
+            .with_lane_views(&self.lane_views)
+            .with_column_widths(&self.column_widths);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -879,7 +906,8 @@ impl ProjectFiles {
             .with_launch(self.launch)
             .with_window_views(self.window_views)
             .with_mpe_view(&self.mpe_view)
-            .with_lane_views(&self.lane_views);
+            .with_lane_views(&self.lane_views)
+            .with_column_widths(&self.column_widths);
         let mut set = self
             .set
             .clone()

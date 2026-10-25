@@ -6217,6 +6217,41 @@ One of:
 
 </details>
 
+### `ColumnWidth`
+
+One column's width, as `mixer_view.state` reports it (R36, R38).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track, return track or Main whose column it is. |
+| `width` | number | yes | Its width in points at 100%: 94 in a new set (Main's 104). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One column's width, as `mixer_view.state` reports it (R36, R38).",
+  "properties": {
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track, return track or Main whose column it is."
+    },
+    "width": {
+      "description": "Its width in points at 100%: 94 in a new set (Main's 104).",
+      "format": "float",
+      "type": "number"
+    }
+  },
+  "required": [
+    "track",
+    "width"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ColumnsState`
 
 The content pane's columns, sort and file extensions (spec: browser-tags R27, R28).
@@ -17844,18 +17879,12 @@ What `mixer_view.state` and the other view commands return.
 |---|---|---|---|
 | `session` | [`ViewMixerState`](#viewmixerstate) | yes | The Session View's mixer. |
 | `arrangement` | [`ViewMixerState`](#viewmixerstate) | yes | The Arrangement View's mixer. |
-| `in_out` | boolean | yes | Whether the In/Out section shows, in both mixers. |
-| `sends` | boolean | yes | Whether the Sends section shows. |
-| `volume` | boolean | yes | Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show. |
-| `crossfader` | boolean | yes | Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
 | `scene_tempo` | boolean | yes | Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set. |
-| `return_tracks` | boolean | yes | Whether the return tracks' columns show. |
 | `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
-| `track_options` | boolean | yes | Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set. |
-| `performance_impact` | boolean | yes | Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set. |
-| `devices` | boolean | yes | Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 | `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
+| `peaks` | array of [`TrackPeak`](#trackpeak) | yes | Each track's held peak and its meters' peak lines (R33, R34); empty when no engine has published meters. |
+| `column_widths` | array of [`ColumnWidth`](#columnwidth) | yes | Every column's width, in the order the columns run: the tracks, the return tracks, Main (R36, R38). |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
 | `racks` | array of [`RackFold`](#rackfold) | no | The racks whose chains fold out in the mixers (racks spec, R27): the track each is on, the rack, and whether its chains are folded out. |
 
@@ -17876,14 +17905,13 @@ What `mixer_view.state` and the other view commands return.
       },
       "type": "array"
     },
-    "crossfader": {
-      "description": "Whether the Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
-      "type": "boolean"
-    },
-    "devices": {
-      "default": false,
-      "description": "Whether the Devices section shows: between In/Out and Sends, each track's top-level devices with their activators (IMP-25, the mixer view spec R24). Hidden in a new install; the devices and whether each is on are the query tool's `track` devices with their `enabled`.",
-      "type": "boolean"
+    "column_widths": {
+      "default": [],
+      "description": "Every column's width, in the order the columns run: the tracks, the return tracks, Main (R36, R38).",
+      "items": {
+        "$ref": "#/$defs/ColumnWidth"
+      },
+      "type": "array"
     },
     "gain_reduction": {
       "default": [],
@@ -17893,13 +17921,13 @@ What `mixer_view.state` and the other view commands return.
       },
       "type": "array"
     },
-    "in_out": {
-      "description": "Whether the In/Out section shows, in both mixers.",
-      "type": "boolean"
-    },
-    "performance_impact": {
-      "description": "Whether the Performance Impact section shows: under each strip, the six segments that light up from the left with the track's share of the set's processing time. Hidden in a new set.",
-      "type": "boolean"
+    "peaks": {
+      "default": [],
+      "description": "Each track's held peak and its meters' peak lines (R33, R34); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackPeak"
+      },
+      "type": "array"
     },
     "performance_impact_values": {
       "default": [],
@@ -17916,10 +17944,6 @@ What `mixer_view.state` and the other view commands return.
       },
       "type": "array"
     },
-    "return_tracks": {
-      "description": "Whether the return tracks' columns show.",
-      "type": "boolean"
-    },
     "return_tracks_scroll": {
       "description": "Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live.",
       "type": "boolean"
@@ -17928,38 +17952,20 @@ What `mixer_view.state` and the other view commands return.
       "description": "Whether the Session View's Main column shows the scenes' tempo and time signature fields (View > Scene Tempo and Time Signature). Hidden in a new set.",
       "type": "boolean"
     },
-    "sends": {
-      "description": "Whether the Sends section shows.",
-      "type": "boolean"
-    },
     "session": {
       "$ref": "#/$defs/ViewMixerState",
       "description": "The Session View's mixer."
-    },
-    "track_options": {
-      "description": "Whether the tracks' Track Options sections show (track delay and Keep Monitoring Latency). Shown only while this shows; hidden in a new set.",
-      "type": "boolean"
-    },
-    "volume": {
-      "description": "Whether the mixer strips (volume, pan, the meter, the activator, Solo, Arm) show.",
-      "type": "boolean"
     }
   },
   "required": [
     "session",
     "arrangement",
-    "in_out",
-    "sends",
-    "volume",
-    "crossfader",
     "scene_tempo",
-    "return_tracks",
     "return_tracks_scroll",
-    "track_options",
-    "performance_impact",
-    "devices",
     "performance_impact_values",
-    "gain_reduction"
+    "gain_reduction",
+    "peaks",
+    "column_widths"
   ],
   "type": "object"
 }
@@ -29272,6 +29278,53 @@ One of:
 
 </details>
 
+### `TrackPeak`
+
+One track's held peak, as `mixer_view.state` reports it (R33, R34).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `peak` | number | yes | The highest peak since the readout was last reset, as a linear amplitude: zero for silence. |
+| `hold` | array of number, at least 2 | yes | The line each channel's meter marks its highest recent peak with, as a linear amplitude: it holds for two seconds, then falls to the current peak. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's held peak, as `mixer_view.state` reports it (R33, R34).",
+  "properties": {
+    "hold": {
+      "description": "The line each channel's meter marks its highest recent peak with, as a linear amplitude: it holds for two seconds, then falls to the current peak.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "peak": {
+      "description": "The highest peak since the readout was last reset, as a linear amplitude: zero for silence.",
+      "format": "float",
+      "type": "number"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "peak",
+    "hold"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TrackRef`
 
 A track, by ID and name.
@@ -30729,32 +30782,87 @@ One of:
 
 ### `ViewMixerState`
 
-One view's mixer.
+One view's mixer: whether it shows, how far it is scrolled, how tall its strip section is and which sections it shows (R32, R37).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `shown` | boolean | yes | Whether the mixer shows in that view. |
 | `scroll` | number | yes | How far its track columns are scrolled sideways, in points at 100%. |
+| `height` | number | yes | The height of its strip section in points at 100%: 123 in a new set. The window limits what shows, so a larger height reads back as set. |
+| `in_out` | boolean | yes | Whether its In/Out section shows. |
+| `sends` | boolean | yes | Whether its Sends section shows. |
+| `volume` | boolean | yes | Whether its mixer strips (volume, pan, the meter, the activator, Solo, Arm) show. |
+| `crossfader` | boolean | yes | Whether its Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set. |
+| `return_tracks` | boolean | yes | Whether its return tracks' columns show. |
+| `track_options` | boolean | yes | Whether its tracks' Track Options sections show (track delay and Keep Monitoring Latency). Hidden in a new set. |
+| `performance_impact` | boolean | yes | Whether its Performance Impact section shows. Hidden in a new set. |
+| `devices` | boolean | yes | Whether its Devices section shows (IMP-25, R24). Hidden in a new install. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "One view's mixer.",
+  "description": "One view's mixer: whether it shows, how far it is scrolled, how tall its strip section is and which sections it shows (R32, R37).",
   "properties": {
+    "crossfader": {
+      "description": "Whether its Crossfader section shows: the tracks' A and B assign buttons and Main's crossfader. Hidden in a new set.",
+      "type": "boolean"
+    },
+    "devices": {
+      "description": "Whether its Devices section shows (IMP-25, R24). Hidden in a new install.",
+      "type": "boolean"
+    },
+    "height": {
+      "description": "The height of its strip section in points at 100%: 123 in a new set. The window limits what shows, so a larger height reads back as set.",
+      "format": "float",
+      "type": "number"
+    },
+    "in_out": {
+      "description": "Whether its In/Out section shows.",
+      "type": "boolean"
+    },
+    "performance_impact": {
+      "description": "Whether its Performance Impact section shows. Hidden in a new set.",
+      "type": "boolean"
+    },
+    "return_tracks": {
+      "description": "Whether its return tracks' columns show.",
+      "type": "boolean"
+    },
     "scroll": {
       "description": "How far its track columns are scrolled sideways, in points at 100%.",
       "format": "double",
       "type": "number"
     },
+    "sends": {
+      "description": "Whether its Sends section shows.",
+      "type": "boolean"
+    },
     "shown": {
       "description": "Whether the mixer shows in that view.",
+      "type": "boolean"
+    },
+    "track_options": {
+      "description": "Whether its tracks' Track Options sections show (track delay and Keep Monitoring Latency). Hidden in a new set.",
+      "type": "boolean"
+    },
+    "volume": {
+      "description": "Whether its mixer strips (volume, pan, the meter, the activator, Solo, Arm) show.",
       "type": "boolean"
     }
   },
   "required": [
     "shown",
-    "scroll"
+    "scroll",
+    "height",
+    "in_out",
+    "sends",
+    "volume",
+    "crossfader",
+    "return_tracks",
+    "track_options",
+    "performance_impact",
+    "devices"
   ],
   "type": "object"
 }

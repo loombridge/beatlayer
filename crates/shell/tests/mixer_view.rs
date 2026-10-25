@@ -57,20 +57,26 @@ fn select(shell: &mut Shell, selected: &[TrackId], title_bars: bool) {
 #[test]
 fn track_options_show_and_hide_and_are_hidden_in_a_new_set() {
     let mut shell = Shell::headless();
-    assert!(!state(&mut shell).track_options, "hidden in a new set");
+    assert!(
+        !state(&mut shell).arrangement.track_options,
+        "hidden in a new set"
+    );
     let before = undo_steps(&shell);
     shell.invoke(ids::TRACK_OPTIONS, json!({})).unwrap();
-    assert!(state(&mut shell).track_options);
+    assert!(state(&mut shell).arrangement.track_options);
     assert_eq!(undo_steps(&shell), before, "view state, not an undo step");
     shell.invoke(ids::TRACK_OPTIONS, json!({})).unwrap();
-    assert!(!state(&mut shell).track_options, "it hides again");
+    assert!(
+        !state(&mut shell).arrangement.track_options,
+        "it hides again"
+    );
     shell
         .invoke(ids::TRACK_OPTIONS, json!({ "shown": true }))
         .unwrap();
-    assert!(state(&mut shell).track_options);
+    assert!(state(&mut shell).arrangement.track_options);
     // A new set hides it, as it starts.
     shell.run("set.new", json!({})).unwrap();
-    assert!(!state(&mut shell).track_options);
+    assert!(!state(&mut shell).arrangement.track_options);
 }
 
 // Spec: mixer-view R11, R12.
@@ -80,8 +86,10 @@ fn a_new_set_shows_the_session_mixer_and_hides_the_arrangement_s() {
     let shown = state(&mut shell);
     assert!(shown.session.shown);
     assert!(!shown.arrangement.shown);
-    assert!(shown.in_out && shown.sends && shown.volume && shown.return_tracks);
-    assert!(!shown.crossfader, "the Crossfader section starts hidden");
+    for mixer in [shown.session, shown.arrangement] {
+        assert!(mixer.in_out && mixer.sends && mixer.volume && mixer.return_tracks);
+        assert!(!mixer.crossfader, "the Crossfader section starts hidden");
+    }
     // The Arrangement is in front in a new set: the Mixer item is
     // unticked there, and ticked in the Session View.
     assert_eq!(shell.switch_state(ids::TOGGLE), Some(false));
@@ -96,7 +104,7 @@ fn a_new_set_shows_the_session_mixer_and_hides_the_arrangement_s() {
     shell.run(ids::SENDS, json!({})).unwrap();
     shell.run("set.new", json!({})).unwrap();
     let shown = state(&mut shell);
-    assert!(!shown.arrangement.shown && shown.sends);
+    assert!(!shown.arrangement.shown && shown.session.sends);
 }
 
 // Spec: mixer-view R11, R12.
@@ -117,13 +125,13 @@ fn mixer_and_section_commands_switch_and_tick_their_items() {
     for (id, read, initial) in [
         (
             ids::IN_OUT,
-            (|s: &MixerViewState| s.in_out) as fn(&MixerViewState) -> bool,
+            (|s: &MixerViewState| s.arrangement.in_out) as fn(&MixerViewState) -> bool,
             true,
         ),
-        (ids::SENDS, |s| s.sends, true),
-        (ids::VOLUME, |s| s.volume, true),
-        (ids::CROSSFADER, |s| s.crossfader, false),
-        (ids::RETURN_TRACKS, |s| s.return_tracks, true),
+        (ids::SENDS, |s| s.arrangement.sends, true),
+        (ids::VOLUME, |s| s.arrangement.volume, true),
+        (ids::CROSSFADER, |s| s.arrangement.crossfader, false),
+        (ids::RETURN_TRACKS, |s| s.arrangement.return_tracks, true),
     ] {
         assert!(shell.can_invoke(id, &json!({})), "{id}");
         assert_eq!(shell.switch_state(id), Some(initial), "{id}");
@@ -528,32 +536,311 @@ fn the_return_tracks_scroll_with_the_tracks_and_are_kept_between_launches() {
 #[test]
 fn the_devices_section_is_hidden_in_a_new_set_and_switches_as_view_state() {
     let mut shell = Shell::headless();
-    assert!(!state(&mut shell).devices);
+    assert!(!state(&mut shell).arrangement.devices);
     assert_eq!(shell.switch_state(ids::DEVICES), Some(false));
     let before = undo_steps(&shell);
     shell.invoke(ids::DEVICES, json!({})).unwrap();
-    assert!(state(&mut shell).devices);
+    assert!(state(&mut shell).arrangement.devices);
     assert_eq!(shell.switch_state(ids::DEVICES), Some(true));
     shell
         .invoke(ids::DEVICES, json!({ "shown": false }))
         .unwrap();
-    assert!(!state(&mut shell).devices);
+    assert!(!state(&mut shell).arrangement.devices);
     shell
         .invoke(ids::DEVICES, json!({ "shown": true }))
         .unwrap();
     // View state: no undo step, and a new set hides it again.
     assert_eq!(undo_steps(&shell), before);
     shell.run("set.new", json!({})).unwrap();
-    assert!(!state(&mut shell).devices);
+    assert!(!state(&mut shell).arrangement.devices);
     // It changes only the Devices section.
     let other = state(&mut shell);
     shell.invoke(ids::DEVICES, json!({})).unwrap();
     let now = state(&mut shell);
     assert_eq!(
         MixerViewState {
-            devices: false,
+            arrangement: bl_shell::mixer_view::ViewMixerState {
+                devices: false,
+                ..now.arrangement
+            },
             ..now
         },
         other
     );
+}
+
+// Spec: mixer-view R12, R32, R37, R38.
+#[test]
+fn each_views_mixer_keeps_its_own_sections_and_height() {
+    let mut shell = Shell::headless();
+    let before = undo_steps(&shell);
+    // A new set: both mixers show In/Out, Sends, the strips and the
+    // returns, at the default height.
+    for mixer in [state(&mut shell).session, state(&mut shell).arrangement] {
+        assert!(mixer.in_out && mixer.sends && mixer.volume && mixer.return_tracks);
+        assert_eq!(mixer.height, 123.0);
+    }
+    // Sends unticked in the Session View, named by `view`, leaves the
+    // Arrangement's mixer showing it.
+    shell
+        .run(ids::SENDS, json!({ "view": "session", "shown": false }))
+        .unwrap();
+    let now = state(&mut shell);
+    assert!(!now.session.sends && now.arrangement.sends);
+    // The menu's tick follows the view in front (the Arrangement here).
+    assert_eq!(shell.switch_state(ids::SENDS), Some(true));
+    shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    assert_eq!(shell.switch_state(ids::SENDS), Some(false));
+    // Without `view`, the section commands act on the view in front.
+    shell.run(ids::SENDS, json!({})).unwrap();
+    let now = state(&mut shell);
+    assert!(now.session.sends && now.arrangement.sends);
+    shell
+        .run(ids::TRACK_OPTIONS, json!({ "shown": true }))
+        .unwrap();
+    let now = state(&mut shell);
+    assert!(now.session.track_options && !now.arrangement.track_options);
+    // The strip section's height is each view's own, at least 64 points.
+    shell
+        .run(
+            ids::SET_HEIGHT,
+            json!({ "view": "arrangement", "height": 240.0 }),
+        )
+        .unwrap();
+    let now = state(&mut shell);
+    assert_eq!((now.session.height, now.arrangement.height), (123.0, 240.0));
+    shell
+        .run(ids::SET_HEIGHT, json!({ "height": 10.0 }))
+        .unwrap();
+    assert_eq!(state(&mut shell).session.height, 64.0, "the front view");
+    assert!(shell.run(ids::SET_HEIGHT, json!({})).is_err());
+    assert!(
+        shell
+            .run(ids::SET_HEIGHT, json!({ "height": "tall" }))
+            .is_err()
+    );
+    // View state only: no undo step, nothing for the set.
+    assert_eq!(undo_steps(&shell), before);
+    assert!(!shell.is_dirty());
+    // A new set goes back to the defaults.
+    shell.run("set.new", json!({})).unwrap();
+    let now = state(&mut shell);
+    assert_eq!((now.session.height, now.arrangement.height), (123.0, 123.0));
+    assert!(now.session.sends && now.arrangement.sends);
+}
+
+// Spec: mixer-view R36, R38.
+#[test]
+fn a_columns_width_is_set_within_its_limits_and_read_back() {
+    let mut shell = Shell::headless();
+    let before = undo_steps(&shell);
+    let t = tracks(&shell);
+    let main = shell.editor().document().main_id();
+    let returns: Vec<TrackId> = shell.editor().document().returns().collect();
+    // 94 points in a new set, and Main's 104; the tracks, the returns, then
+    // Main.
+    let widths = |shell: &mut Shell| -> Vec<(TrackId, f32)> {
+        state(shell)
+            .column_widths
+            .iter()
+            .map(|c| (c.track, c.width))
+            .collect()
+    };
+    let all = widths(&mut shell);
+    let order: Vec<TrackId> = t.iter().chain(&returns).chain([&main]).copied().collect();
+    assert_eq!(all.iter().map(|(t, _)| *t).collect::<Vec<_>>(), order);
+    assert!(
+        all.iter()
+            .all(|(track, w)| *w == if *track == main { 104.0 } else { 94.0 })
+    );
+    // One track.
+    shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": t[1], "width": 150.0 }),
+        )
+        .unwrap();
+    let now = widths(&mut shell);
+    assert_eq!(now[1], (t[1], 150.0));
+    assert_eq!(now[0], (t[0], 94.0));
+    // From 40 to 400 points.
+    shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": t[0], "width": 5.0 }),
+        )
+        .unwrap();
+    shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": main, "width": 9000.0 }),
+        )
+        .unwrap();
+    let now = widths(&mut shell);
+    assert_eq!(now[0].1, 40.0);
+    assert_eq!(now.last().unwrap().1, 400.0);
+    // A return's too.
+    shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": returns[0], "width": 200.0 }),
+        )
+        .unwrap();
+    assert_eq!(widths(&mut shell)[t.len()], (returns[0], 200.0));
+    // With no track, every track's column changes, not the returns' or
+    // Main's.
+    shell
+        .run(ids::SET_COLUMN_WIDTH, json!({ "width": 120.0 }))
+        .unwrap();
+    let now = widths(&mut shell);
+    assert!(now[..t.len()].iter().all(|(_, w)| *w == 120.0));
+    assert_eq!(now[t.len()].1, 200.0);
+    assert_eq!(now.last().unwrap().1, 400.0);
+    // Back to the default has nothing to save.
+    shell
+        .run(ids::SET_COLUMN_WIDTH, json!({ "width": 94.0 }))
+        .unwrap();
+    assert!(
+        shell
+            .mixer_view()
+            .widths()
+            .keys()
+            .all(|track| !t.contains(track))
+    );
+    // A track that isn't there, and no width, are refused.
+    assert!(
+        shell
+            .run(
+                ids::SET_COLUMN_WIDTH,
+                json!({ "track": 9999, "width": 100.0 })
+            )
+            .is_err()
+    );
+    assert!(shell.run(ids::SET_COLUMN_WIDTH, json!({})).is_err());
+    // No undo step, and the set isn't changed.
+    assert_eq!(undo_steps(&shell), before);
+    assert!(!shell.is_dirty());
+    // The mixers scroll by the widths: the furthest is the last track's
+    // column at the left.
+    shell
+        .run(ids::SET_COLUMN_WIDTH, json!({ "width": 200.0 }))
+        .unwrap();
+    shell
+        .run(ids::SCROLL, json!({ "view": "session", "x": 1e6 }))
+        .unwrap();
+    assert_eq!(
+        state(&mut shell).session.scroll,
+        f64::from(200.0 * (t.len() - 1) as f32)
+    );
+}
+
+// Spec: mixer-view R36.
+#[test]
+fn widths_are_saved_with_the_set_and_open_again_without_an_undo_step() {
+    let mut shell = Shell::headless();
+    let t = tracks(&shell);
+    let main = shell.editor().document().main_id();
+    shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": t[0], "width": 160.0 }),
+        )
+        .unwrap();
+    shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": main, "width": 250.0 }),
+        )
+        .unwrap();
+    let dir = std::env::temp_dir().join(format!("bl-widths-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let saved: bl_shell::commands::SetResult = serde_json::from_value(
+        shell
+            .run(
+                "set.save_as",
+                json!({ "path": dir.join("Widths.blset").to_string_lossy() }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        undo_steps(&shell),
+        0,
+        "resizing and saving are no undo steps"
+    );
+    // The set opens with the widths it was saved with.
+    let mut other = Shell::headless();
+    other
+        .run("set.open", json!({ "path": saved.path.unwrap() }))
+        .unwrap();
+    let opened = state(&mut other).column_widths;
+    let width_of = |track: TrackId| opened.iter().find(|c| c.track == track).unwrap().width;
+    assert_eq!(width_of(t[0]), 160.0);
+    assert_eq!(width_of(t[1]), 94.0);
+    assert_eq!(width_of(main), 250.0);
+    // A new set forgets them.
+    other.run("set.new", json!({})).unwrap();
+    assert!(other.mixer_view().widths().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: mixer-view R33, R34, R38.
+#[test]
+fn a_peak_line_holds_two_seconds_of_the_test_clock_then_falls() {
+    use bl_core::clock::TestClock;
+    use bl_engine::TrackMeter;
+    use std::time::Duration;
+
+    let mut shell = Shell::headless();
+    let clock = TestClock::new();
+    shell.use_test_clock(clock.clone());
+    let t = tracks(&shell);
+    let meter = |peak: [f32; 2]| TrackMeter {
+        track: t[0],
+        peak,
+        rms: [0.0; 2],
+        impact: 0.0,
+        gain_reduction: 0.0,
+    };
+    let line = |shell: &mut Shell| state(shell).peaks[0];
+    // A loud hit: the line marks it, and so does the held peak.
+    shell.set_meters(&[meter([0.5, 0.25])]);
+    assert_eq!(line(&mut shell).hold, [0.5, 0.25]);
+    assert_eq!(line(&mut shell).peak, 0.5);
+    // The signal falls silent: the line holds for two seconds…
+    clock.advance(Duration::from_millis(100));
+    shell.set_meters(&[meter([0.0; 2])]);
+    assert_eq!(line(&mut shell).hold, [0.5, 0.25]);
+    clock.advance(Duration::from_millis(1800));
+    shell.set_meters(&[meter([0.0; 2])]);
+    assert_eq!(line(&mut shell).hold, [0.5, 0.25], "1.9 seconds on");
+    // …then falls to the current peak.
+    clock.advance(Duration::from_millis(200));
+    shell.set_meters(&[meter([0.0; 2])]);
+    assert_eq!(line(&mut shell).hold, [0.0, 0.0], "2.1 seconds on");
+    // The held peak stays until it is reset, to the current peak.
+    assert_eq!(line(&mut shell).peak, 0.5);
+    shell.set_meters(&[meter([0.125, 0.0])]);
+    shell
+        .run(ids::RESET_PEAK, json!({ "track": t[0] }))
+        .unwrap();
+    assert_eq!(line(&mut shell).peak, 0.125);
+    // A louder hit while the line holds a quieter one lifts it, and the two
+    // seconds start over.
+    shell.set_meters(&[meter([0.75, 0.0])]);
+    clock.advance(Duration::from_millis(1900));
+    shell.set_meters(&[meter([0.5, 0.0])]);
+    assert_eq!(line(&mut shell).hold[0], 0.75);
+    // Without a track, every track's readout is reset; a track that isn't
+    // there is refused.
+    shell.run(ids::RESET_PEAK, json!({})).unwrap();
+    assert_eq!(line(&mut shell).peak, 0.5);
+    assert!(
+        shell
+            .run(ids::RESET_PEAK, json!({ "track": 9999 }))
+            .is_err()
+    );
+    assert_eq!(undo_steps(&shell), 0);
 }

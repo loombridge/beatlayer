@@ -33,32 +33,60 @@ use serde_json::json;
 
 use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
-    ARRANGEMENT_TITLE_ROW, ChainColumn, ChainStripLayout, Column, ColumnKind, MixerLayout,
-    SCALE_LABELS, Sections, SessionLayout, StripLayout, TrackColumn, crossfade_buttons,
-    crossfader_slider, device_row, device_row_parts, in_out_row, performance_impact, send_knob,
-    split_pans, track_options,
+    ARRANGEMENT_TITLE_ROW, ChainColumn, ChainStripLayout, Column, ColumnKind, MIN_STRIP_HEIGHT,
+    MixerLayout, SCALE_LABELS, Sections, SessionLayout, StripLayout, TrackColumn, arrangement_room,
+    crossfade_buttons, crossfader_slider, device_row, device_row_parts, in_out_row,
+    performance_impact, send_knob, split_pans, track_options,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
 use crate::track_menu::{TrackMenus, rename_edit};
 use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
 
-/// The mixer's sections as the shell has them.
+/// The sections of one view's mixer as the shell has them (R37), with the
+/// strip section as tall as that view's is (R32).
 #[must_use]
-pub fn sections(shell: &Shell) -> Sections {
+pub fn sections(shell: &Shell, of: MixerOf) -> Sections {
     let view = shell.mixer_view();
+    let mixer = view.of(of);
     Sections {
-        in_out: view.in_out(),
-        sends: view.sends(),
-        volume: view.volume(),
-        crossfader: view.crossfader(),
-        returns: view.return_tracks(),
-        track_options: view.track_options(),
-        performance_impact: view.performance_impact(),
-        devices: view.devices(),
+        in_out: mixer.in_out,
+        sends: mixer.sends,
+        volume: mixer.volume,
+        strip: mixer.height,
+        crossfader: mixer.crossfader,
+        returns: mixer.return_tracks,
+        track_options: mixer.track_options,
+        performance_impact: mixer.performance_impact,
+        devices: mixer.devices,
         return_tracks_scroll: view.return_tracks_scroll(),
     }
 }
+
+/// A view's mixer laid out in `area`: its columns at the widths the set
+/// keeps for them (R36), its sections as that view shows them (R37), and
+/// the view's own scroll.
+pub(crate) fn mixer_layout(shell: &Shell, area: Rect, of: MixerOf, folds: &Folds) -> MixerLayout {
+    let doc = shell.editor().document();
+    let view = shell.mixer_view();
+    let returns: Vec<f32> = shell
+        .shown_returns()
+        .into_iter()
+        .map(|track| view.column_width(doc, track))
+        .collect();
+    MixerLayout::compute_with_widths(
+        area,
+        &folds.columns,
+        &returns,
+        view.column_width(doc, doc.main_id()),
+        sections(shell, of),
+        view.of(of).scroll as f32,
+    )
+}
+
+/// The dB below 0 that the extended meters mark with a tick every 6 dB
+/// (R33).
+const TICKS: [i8; 11] = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60];
 
 /// The ID of a track header's volume field.
 #[must_use]
@@ -263,7 +291,7 @@ impl MixerUi {
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let sections = sections(shell);
+        let sections = sections(shell, MixerOf::Session);
         let shown = shell.mixer_view().of(MixerOf::Session).shown;
         let layout = SessionLayout::compute(rect, shown.then_some(sections));
         // Spec: command-palette R11. With the Session mixer hidden, the
@@ -271,15 +299,16 @@ impl MixerUi {
         if !shown && let Some((MixerOf::Session, track)) = self.reveal {
             self.reveal = None;
             let columns = shell.mixer_columns();
-            let columns_layout = MixerLayout::compute(
-                layout.slots,
-                &folds(shell, &columns).columns,
-                shell.shown_returns().len(),
-                sections,
-                shell.mixer_view().of(MixerOf::Session).scroll as f32,
-            );
+            let folds = folds(shell, &columns);
+            let columns_layout = mixer_layout(shell, layout.slots, MixerOf::Session, &folds);
             if let Some(index) = columns.iter().position(|c| *c == track) {
-                scroll_into_view(&columns_layout, index, MixerOf::Session, events);
+                scroll_into_view(
+                    &columns_layout,
+                    &folds.columns,
+                    index,
+                    MixerOf::Session,
+                    events,
+                );
             }
         }
         let painter = ui.painter_at(rect);
@@ -300,27 +329,27 @@ impl MixerUi {
             Stroke::new(1.0, theme.colors.separator.0),
         );
         if let Some(mixer) = layout.mixer {
-            self.show_mixer(ui, shell, theme, mixer, MixerOf::Session, events);
+            self.show_mixer(ui, shell, theme, mixer, rect, MixerOf::Session, events);
         }
     }
 
-    /// Draws one view's mixer in `area` and adds what the person did to
-    /// `events` (R1 to R3, R5, R10, R13, R14). The Arrangement's has a row
-    /// of title bars along its top.
+    /// Draws one view's mixer in `area`, in the main view `view`, and adds
+    /// what the person did to `events` (R1 to R3, R5, R10, R13, R14, R32).
+    /// The Arrangement's has a row of title bars along its top.
+    #[expect(clippy::too_many_arguments, reason = "the mixer's inputs")]
     pub fn show_mixer(
         &mut self,
         ui: &mut Ui,
         shell: &Shell,
         theme: &Theme,
         area: Rect,
+        view: Rect,
         of: MixerOf,
         events: &mut Vec<UiEvent>,
     ) {
         let doc = shell.editor().document();
         let columns = shell.mixer_columns();
         let returns: Vec<TrackId> = shell.shown_returns();
-        let sections = sections(shell);
-        let scroll = shell.mixer_view().of(of).scroll as f32;
         let folds = folds(shell, &columns);
         let region = Id::new(("mixer", of));
         let _ = ui.interact(area, region, Sense::hover());
@@ -344,13 +373,7 @@ impl MixerUi {
         } else {
             area
         };
-        let layout = MixerLayout::compute(
-            sections_area,
-            &folds.columns,
-            returns.len(),
-            sections,
-            scroll,
-        );
+        let layout = mixer_layout(shell, sections_area, of, &folds);
         if let Some(drop) = layout.drop_area {
             ui.painter_at(drop).text(
                 drop.center(),
@@ -528,10 +551,11 @@ impl MixerUi {
                 json!({ "view": of, "x": -delta.x }),
             )));
         }
-        self.focus(shell, &layout, &columns, of, events);
+        self.focus(shell, &layout, &folds.columns, &columns, of, events);
         // A chain dropped out of the mixer's tracks (drum racks spec, R23,
         // R24).
         chain_extract(&ui, shell, &layout, events);
+        height_drag(&ui, shell, &layout, area, view, of, events);
     }
 
     /// A chain's strip in the mixer (racks spec, R27): the column, the
@@ -655,6 +679,7 @@ impl MixerUi {
         &mut self,
         shell: &Shell,
         layout: &MixerLayout,
+        tracks: &[TrackColumn],
         columns: &[TrackId],
         of: MixerOf,
         events: &mut Vec<UiEvent>,
@@ -675,7 +700,7 @@ impl MixerUi {
         {
             self.reveal = None;
             if let Some(index) = columns.iter().position(|c| *c == track) {
-                scroll_into_view(layout, index, of, events);
+                scroll_into_view(layout, tracks, index, of, events);
             }
         }
         let Some(target) = self.focus_to else {
@@ -685,13 +710,19 @@ impl MixerUi {
             self.focus_to = None;
             return;
         };
-        scroll_into_view(layout, index, of, events);
+        scroll_into_view(layout, tracks, index, of, events);
     }
 }
 
 /// Scrolls a mixer so the track column at `index` is wholly in view, if it
 /// isn't.
-fn scroll_into_view(layout: &MixerLayout, index: usize, of: MixerOf, events: &mut Vec<UiEvent>) {
+fn scroll_into_view(
+    layout: &MixerLayout,
+    tracks: &[TrackColumn],
+    index: usize,
+    of: MixerOf,
+    events: &mut Vec<UiEvent>,
+) {
     let in_view = layout
         .columns
         .iter()
@@ -699,12 +730,14 @@ fn scroll_into_view(layout: &MixerLayout, index: usize, of: MixerOf, events: &mu
     if in_view {
         return;
     }
-    let width = f64::from(crate::layout::mixer::COLUMN_WIDTH);
-    let left = width * index as f64 - f64::from(layout.scroll);
+    let Some((left, right)) = layout.track_span(tracks, index) else {
+        return;
+    };
+    let left = f64::from(left) - f64::from(layout.scroll);
     let x = if left < 0.0 {
         left
     } else {
-        left + width - f64::from(layout.tracks.width())
+        f64::from(right) - f64::from(layout.scroll) - f64::from(layout.tracks.width())
     };
     events.push(UiEvent::Invoke(Invocation::new(
         ids::SCROLL,
@@ -730,9 +763,8 @@ fn title_bars(
     let doc = shell.editor().document();
     let columns = shell.mixer_columns();
     let returns: Vec<TrackId> = shell.shown_returns();
-    let scroll = shell.mixer_view().of(of).scroll as f32;
     let folds = folds(shell, &columns);
-    let layout = MixerLayout::compute(row, &folds.columns, returns.len(), sections(shell), scroll);
+    let layout = mixer_layout(shell, row, of, &folds);
     for column in layout.every_column() {
         if let ColumnKind::Chain(chain) = column.kind {
             let Some(strip) = folds.strips.iter().find(|s| s.chain == chain.chain) else {
@@ -810,10 +842,163 @@ fn title_bars(
         );
         crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Track(track));
     }
+    // The Session View's title bars are resized by their edges (R36).
+    if of == MixerOf::Session {
+        width_drags(ui, shell, &layout, &columns, &returns, events);
+    }
     // A chain dropped out of the row leaves its rack (drum racks spec,
     // R23, R24) before a drop among the strips moves it (racks spec, R29).
     chain_extract(ui, shell, &layout, events);
     chain_drop(ui, &layout, &folds.strips, events);
+}
+
+/// Resizes a column by dragging its title bar's edge (R36, I-DRAG-004,
+/// I-DRAG-005): a track's or a scrolling return's right edge, and a pinned
+/// return's or Main's left, the edge that moves with the pointer. With
+/// Option (Alt) held it resizes every track's column; dragging Main's edge
+/// also shows the scene tempo and signature fields. Each step runs
+/// `mixer_view.set_column_width`, which is no undo step.
+fn width_drags(
+    ui: &Ui,
+    shell: &Shell,
+    layout: &MixerLayout,
+    columns: &[TrackId],
+    returns: &[TrackId],
+    events: &mut Vec<UiEvent>,
+) {
+    const GRAB: f32 = 3.0;
+    let doc = shell.editor().document();
+    let view = shell.mixer_view();
+    let title = layout.area;
+    for column in layout.every_column() {
+        let (track, left_edge) = match column.kind {
+            ColumnKind::Track => (columns[column.index], false),
+            ColumnKind::Return => (returns[column.index], !layout.returns_scroll),
+            ColumnKind::Main => (doc.main_id(), true),
+            ColumnKind::Chain(_) => continue,
+        };
+        let x = if left_edge {
+            column.rect.left()
+        } else {
+            column.rect.right()
+        };
+        let visible = match column.kind {
+            ColumnKind::Track => layout.tracks,
+            ColumnKind::Return if layout.returns_scroll => layout.tracks,
+            _ => title,
+        };
+        if x < visible.left() || x > visible.right() {
+            continue;
+        }
+        let handle =
+            Rect::from_min_max(pos2(x - GRAB, title.top()), pos2(x + GRAB, title.bottom()));
+        let id = Id::new(("mixer-width", track));
+        let response = ui.interact(handle, id, Sense::drag());
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            let start = view.column_width(doc, track);
+            ui.data_mut(|d| d.insert_temp(drag_id, (start, 0.0f32)));
+        }
+        if response.dragged() {
+            let dx = response.drag_delta().x;
+            let Some((start, moved)) = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<(f32, f32)>(drag_id);
+                drag.1 += if left_edge { -dx } else { dx };
+                Some(*drag)
+            }) else {
+                continue;
+            };
+            let every = ui.input(|i| i.modifiers.alt);
+            let args = if every {
+                json!({ "width": start + moved })
+            } else {
+                json!({ "track": track, "width": start + moved })
+            };
+            if dx != 0.0 {
+                // Dragging Main's edge reveals the scene tempo and
+                // signature fields (I-DRAG-005).
+                if column.kind == ColumnKind::Main && !view.scene_tempo() {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::SCENE_TEMPO,
+                        json!({ "shown": true }),
+                    )));
+                }
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SET_COLUMN_WIDTH,
+                    args,
+                )));
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<(f32, f32)>(drag_id));
+        }
+    }
+}
+
+/// Resizes the strip section by dragging the mixer's top edge or the strip
+/// section's top border (R32, I-DRAG-030): up makes it taller, down
+/// shorter, between 64 points and what leaves the view the rest of its
+/// rows. Each step runs `mixer_view.set_height` for this view.
+fn height_drag(
+    ui: &Ui,
+    shell: &Shell,
+    layout: &MixerLayout,
+    area: Rect,
+    view: Rect,
+    of: MixerOf,
+    events: &mut Vec<UiEvent>,
+) {
+    const GRAB: f32 = 3.0;
+    let Some(strip) = layout.strip else {
+        return;
+    };
+    let sections = sections(shell, of);
+    let room = match of {
+        MixerOf::Session => SessionLayout::room(view),
+        MixerOf::Arrangement => arrangement_room(view),
+    };
+    let most = Sections {
+        strip: f32::MAX,
+        ..sections
+    }
+    .fitted(room)
+    .strip;
+    for (edge, y) in [("top", area.top() + 1.0), ("strip", strip.0)] {
+        let handle = Rect::from_min_max(
+            pos2(area.left(), y - GRAB),
+            pos2(layout.tracks.right().max(area.left() + 1.0), y + GRAB / 2.0),
+        );
+        let id = Id::new(("mixer-height", of, edge));
+        let response = ui.interact(handle, id, Sense::drag());
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+        }
+        let drag_id = id.with("drag");
+        if response.drag_started() {
+            ui.data_mut(|d| d.insert_temp(drag_id, (strip.1 - strip.0, 0.0f32)));
+        }
+        if response.dragged() {
+            let dy = response.drag_delta().y;
+            let (start, moved) = ui.data_mut(|d| {
+                let drag = d.get_temp_mut_or_default::<(f32, f32)>(drag_id);
+                drag.1 += dy;
+                *drag
+            });
+            if dy != 0.0 {
+                let height = (start - moved).clamp(MIN_STRIP_HEIGHT, most.max(MIN_STRIP_HEIGHT));
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SET_HEIGHT,
+                    json!({ "view": of, "height": height }),
+                )));
+            }
+        }
+        if response.drag_stopped() {
+            ui.data_mut(|d| d.remove::<(f32, f32)>(drag_id));
+        }
+    }
 }
 
 /// Moves a chain dragged from its strip among its rack's chains (racks
@@ -927,7 +1112,7 @@ pub(crate) fn folds(shell: &Shell, tracks: &[TrackId]) -> Folds {
     let (racks, strips) = shell.mixer_view().folds(doc, shell.arrangement());
     let mut columns: Vec<TrackColumn> = Vec::with_capacity(tracks.len() + strips.len());
     for track in tracks {
-        columns.push(TrackColumn::track());
+        columns.push(TrackColumn::track().wide(shell.mixer_view().column_width(doc, *track)));
         for strip in strips.iter().filter(|s| s.track == *track) {
             columns.push(TrackColumn::chain(ChainColumn {
                 chain: strip.chain,
@@ -1163,7 +1348,7 @@ impl StripParts<'_> {
         );
         self.register(ui, response.id, crate::focus::Slot::Send(index));
         self.escape_to_title(ui, &response);
-        self.value_drag(ui, &response, control, events);
+        self.value_drag(ui, &response, control, control.drag_travel(), events);
         self.value_keys(ui, &response, control, events);
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));
@@ -1276,19 +1461,38 @@ impl StripParts<'_> {
         if midi {
             self.midi_meter(ui, strip.meter);
         } else {
-            self.peak_field(ui, strip.peak_field);
-            self.pan(ui, strip.pan, Some(strip.pan_triangle), events);
-            // In Split Stereo Pan Mode two controls sit beside the pan knob,
-            // one placing each input channel (the mixer spec, R29).
-            if self.split_mode() {
-                let [left, right] = split_pans(strip.pan);
-                self.split_pan(ui, left, SplitSide::Left, events);
-                self.split_pan(ui, right, SplitSide::Right, events);
+            // A column narrower than 94 points, or a strip shorter than
+            // 100, leaves out the readout and the pan knob (R32, R36).
+            if strip.peak_shown {
+                self.peak_field(ui, strip, events);
+            }
+            if strip.pan_shown {
+                self.pan(ui, strip.pan, Some(strip.pan_triangle), events);
+                // In Split Stereo Pan Mode two controls sit beside the pan
+                // knob, one placing each input channel (the mixer spec,
+                // R29).
+                if self.split_mode() {
+                    let [left, right] = split_pans(strip.pan);
+                    self.split_pan(ui, left, SplitSide::Left, events);
+                    self.split_pan(ui, right, SplitSide::Right, events);
+                }
             }
             self.fader(ui, strip.fader, events);
             self.meter(ui, strip.meter);
             self.gain_reduction(ui, strip.gain_reduction);
-            self.scale(ui, strip);
+            if strip.extended {
+                self.ticks(ui, strip);
+                // The volume field under the fader (R33).
+                if let Some(field) = strip.volume_field {
+                    self.volume_field(ui, field, events);
+                    let id = volume_field_id(self.place, self.track);
+                    ui.ctx()
+                        .accesskit_node_builder(id, |node| node.set_role(Role::SpinButton));
+                }
+            }
+            if strip.labels_shown {
+                self.scale(ui, strip);
+            }
         }
         match kind {
             ColumnKind::Main => {
@@ -2380,6 +2584,7 @@ impl StripParts<'_> {
         ui: &Ui,
         response: &Response,
         control: Control,
+        travel: f32,
         events: &mut Vec<UiEvent>,
     ) {
         let id = response.id.with("drag");
@@ -2403,8 +2608,7 @@ impl StripParts<'_> {
             let drag = ui.data_mut(|d| {
                 let drag = d.get_temp_mut_or_default::<ValueDrag>(id);
                 if dy != 0.0 {
-                    drag.moved +=
-                        f64::from(-dy / control.drag_travel() / if fine { FINE } else { 1.0 });
+                    drag.moved += f64::from(-dy / travel / if fine { FINE } else { 1.0 });
                 }
                 drag.clone()
             });
@@ -2472,7 +2676,13 @@ impl StripParts<'_> {
         let id = volume_field_id(self.place, self.track);
         let response = ui.interact(rect, id, Sense::click_and_drag());
         self.register(ui, id, crate::focus::Slot::Volume);
-        self.value_drag(ui, &response, Control::Volume, events);
+        self.value_drag(
+            ui,
+            &response,
+            Control::Volume,
+            Control::Volume.drag_travel(),
+            events,
+        );
         self.value_keys(ui, &response, Control::Volume, events);
         let typed = self.typing(ui, &response, events);
         let c = &self.theme.colors;
@@ -2656,7 +2866,11 @@ impl StripParts<'_> {
         );
         self.register(ui, response.id, crate::focus::Slot::Volume);
         self.escape_to_title(ui, &response);
-        self.value_drag(ui, &response, Control::Volume, events);
+        // The handle moves a point per point along the scale, however far
+        // the strip's height stretches it (R6, R32): a drag of the pointer
+        // covers that many points of the default scale.
+        let stretch = rect.height() / controls::FADER_TRAVEL_POINTS as f32;
+        self.value_drag(ui, &response, Control::Volume, stretch, events);
         self.value_keys(ui, &response, Control::Volume, events);
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(3.0));
@@ -2734,7 +2948,13 @@ impl StripParts<'_> {
         );
         self.register(ui, response.id, crate::focus::Slot::Pan);
         self.escape_to_title(ui, &response);
-        self.value_drag(ui, &response, Control::Pan, events);
+        self.value_drag(
+            ui,
+            &response,
+            Control::Pan,
+            Control::Pan.drag_travel(),
+            events,
+        );
         self.value_keys(ui, &response, Control::Pan, events);
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect.expand(2.0));
@@ -3131,13 +3351,32 @@ impl StripParts<'_> {
 
     /// The peak level readout at the strip's top left (observed: `-inf`
     /// with nothing playing; the fader doesn't change it). It shows the
-    /// meter's peak; whether Live holds it until clicked isn't observed.
-    fn peak_field(&self, ui: &mut Ui, rect: Rect) {
+    /// meter's peak; while the extended meters show it is a button that
+    /// holds the highest peak until a click sets it back to the current one
+    /// (R33, R39).
+    fn peak_field(&self, ui: &mut Ui, strip: &StripLayout, events: &mut Vec<UiEvent>) {
+        let rect = strip.peak_field;
         let (peak, _) = self.levels();
-        let loudest = f64::from(peak[0].max(peak[1]));
+        let shown = if strip.extended {
+            self.shell.mixer_view().held_peak(self.track)
+        } else {
+            peak[0].max(peak[1])
+        };
+        let loudest = f64::from(shown);
         let id = Id::new(("mixer-peak", self.place, self.track));
         // In the strip's Tab order (observed in Live 12.4.6).
-        let response = ui.interact(rect, id, Sense::focusable_noninteractive());
+        let sense = if strip.extended {
+            Sense::click()
+        } else {
+            Sense::focusable_noninteractive()
+        };
+        let response = ui.interact(rect, id, sense);
+        if strip.extended && response.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::RESET_PEAK,
+                json!({ "track": self.track }),
+            )));
+        }
         self.register(ui, id, crate::focus::Slot::Peak);
         self.escape_to_title(ui, &response);
         focus_ring(
@@ -3156,9 +3395,18 @@ impl StripParts<'_> {
             self.theme.small_font(),
             c.text_dim.0,
         );
-        response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, "Peak Level"));
+        let widget = if strip.extended {
+            WidgetType::Button
+        } else {
+            WidgetType::Label
+        };
+        response.widget_info(|| WidgetInfo::labeled(widget, true, "Peak Level"));
         ui.ctx().accesskit_node_builder(id, |node| {
-            node.set_role(Role::Label);
+            node.set_role(if strip.extended {
+                Role::Button
+            } else {
+                Role::Label
+            });
             node.set_label("Peak Level".to_owned());
             node.set_value(volume_spoken(loudest));
         });
@@ -3169,13 +3417,46 @@ impl StripParts<'_> {
     fn scale(&self, ui: &Ui, strip: &StripLayout) {
         let (left, right) = strip.labels;
         let painter = ui.painter();
-        for (label, y) in SCALE_LABELS {
+        let font = egui::FontId::proportional(self.theme.sizes.small_text * 0.8);
+        // While the extended meters show in a wide column, every tick mark
+        // has its value beside it (R35); otherwise the labels are R3's,
+        // left out where a short strip crowds them.
+        let marks: Vec<(String, f32)> = if strip.tick_labels {
+            TICKS
+                .iter()
+                .map(|db| (db.to_string(), strip.tick_y(-f64::from(*db))))
+                .collect()
+        } else {
+            SCALE_LABELS
+                .iter()
+                .map(|(label, y)| ((*label).to_owned(), strip.scale_y(*y)))
+                .collect()
+        };
+        let mut last = f32::NEG_INFINITY;
+        for (label, y) in marks {
+            if y - last < self.theme.sizes.small_text * 0.8 {
+                continue;
+            }
+            last = y;
             painter.text(
-                pos2((left + right) / 2.0, strip.top + y),
+                pos2((left + right) / 2.0, y),
                 Align2::CENTER_CENTER,
                 label,
-                egui::FontId::proportional(self.theme.sizes.small_text * 0.8),
+                font.clone(),
                 self.theme.colors.text_dim.0,
+            );
+        }
+    }
+
+    /// The extended meters' tick marks across the meter, one every 6 dB
+    /// from 0 to −60 dB (R33).
+    fn ticks(&self, ui: &Ui, strip: &StripLayout) {
+        let painter = ui.painter_at(strip.meter);
+        for db in TICKS {
+            let y = strip.tick_y(-f64::from(db));
+            painter.line_segment(
+                [pos2(strip.meter.left(), y), pos2(strip.meter.right(), y)],
+                Stroke::new(1.0, self.theme.colors.text_dim.0.gamma_multiply(0.7)),
             );
         }
     }
@@ -3206,6 +3487,16 @@ impl StripParts<'_> {
                 0.0,
                 c.meter.0,
             );
+            // The line marking the channel's highest recent peak, which
+            // holds for two seconds (R34).
+            let line = self.shell.mixer_view().peak_line(self.track)[side];
+            if line > 0.0 {
+                let y = level(line).clamp(bar.top(), bar.bottom() - 1.0);
+                painter.line_segment(
+                    [pos2(bar.left(), y + 0.5), pos2(bar.right(), y + 0.5)],
+                    Stroke::new(1.0, c.text.0),
+                );
+            }
         }
         let id = meter_id(self.place, self.track);
         let response = ui.interact(rect, id, Sense::hover());

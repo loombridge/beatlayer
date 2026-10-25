@@ -83,6 +83,7 @@ impl Shell {
         self.arrangement.restore_lanes(self.store.lane_views());
         self.clip_view.forget_selection();
         self.mixer.reset();
+        self.mixer.restore_widths(self.store.column_widths());
         self.session.reset();
         self.new_set_transport();
         self.document_changed();

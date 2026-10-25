@@ -7676,6 +7676,55 @@ A CV output or input by its `name` in the device (Pitch, Gate, Mod 1 and so on) 
 
 </details>
 
+### `CvSection`
+
+A CV device's part of its routing section (L-DEV-026): the choosers of its outputs and inputs come from the shell's choosers; this holds what they don't.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `calibrates` | boolean | yes | Whether the device calibrates, with Calibrate and Clear buttons under its choosers (CV Instrument). |
+| `calibrated` | boolean | yes | Whether the device holds a calibration, which Clear takes away. |
+| `readout` | string | yes | What the readout under the buttons says: `Not calibrated`, `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps, worst 0.6 cents`. Empty where the device doesn't calibrate. |
+| `ports` | array of string | yes | The ports' names, outputs then inputs, in the order their choosers are drawn. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A CV device's part of its routing section (L-DEV-026): the choosers of its outputs and inputs come from the shell's choosers; this holds what they don't.",
+  "properties": {
+    "calibrated": {
+      "description": "Whether the device holds a calibration, which Clear takes away.",
+      "type": "boolean"
+    },
+    "calibrates": {
+      "description": "Whether the device calibrates, with Calibrate and Clear buttons under its choosers (CV Instrument).",
+      "type": "boolean"
+    },
+    "ports": {
+      "description": "The ports' names, outputs then inputs, in the order their choosers are drawn.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "readout": {
+      "description": "What the readout under the buttons says: `Not calibrated`, `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps, worst 0.6 cents`. Empty where the device doesn't calibrate.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "calibrates",
+    "calibrated",
+    "readout",
+    "ports"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CvStep`
 
 One step of a CV Instrument's calibration: the voltage written and the pitch the oscillator gave back (`docs/specs/cv-tools.md`, R14).
@@ -11545,6 +11594,7 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
 | `audio_from` | string | yes | What Audio From shows: a channel `3` or a pair `3/4`. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | yes | Hardware Latency, in the unit its switch is on. |
 | `audio_to` | string or null | no | What Audio To shows: a channel `3` or a pair `3/4`, for a device that sends its signal to the interface's outputs. |
+| `cv` | [`CvSection`](#cvsection) or null | no | What a CV device adds to its section (the CV tools spec, R3, R14; L-DEV-026): left out for any other. |
 | `output` | boolean | no | Whether the device sends its signal to the interface's outputs and hears it back, as the External Audio Effect does: it has an Audio To and no MIDI To (WP-5.35). |
 
 <details><summary>JSON Schema</summary>
@@ -11570,6 +11620,17 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
       "maximum": 255,
       "minimum": 0,
       "type": "integer"
+    },
+    "cv": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CvSection"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a CV device adds to its section (the CV tools spec, R3, R14; L-DEV-026): left out for any other."
     },
     "hardware_latency": {
       "$ref": "#/$defs/HardwareLatency",

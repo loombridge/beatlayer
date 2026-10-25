@@ -687,6 +687,7 @@ dependencies = [
  "bl-devices",
  "bl-engine",
  "bl-media",
+ "bl-midi-io",
  "bl-midi-tools",
  "bl-model",
  "bl-plugin-host",

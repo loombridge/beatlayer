@@ -210,9 +210,9 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R43 | scenes_follow_the_file | unit |
 | R44 | `devices_follow_the_file` | unit |
 | R45 | `devices_follow_the_file` | unit |
-| R46 | `devices_follow_the_file`; `crates/shell/tests/dawproject.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold`, `a_plugin_that_is_not_installed_saves_its_state_back_byte_for_byte` | unit |
-| R47 | `devices_follow_the_file`; `crates/shell/tests/dawproject.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold` | unit |
-| R48 | `a_vst3_preset_becomes_the_hosts_state`; `bl-model`'s `a_preset_reads_back_the_streams_it_wrote`; `crates/shell/tests/dawproject.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold` | unit |
+| R46 | `devices_follow_the_file`; `crates/shell/tests/dawproject_plugins.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold`, `a_plugin_that_is_not_installed_saves_its_state_back_byte_for_byte` | unit |
+| R47 | `devices_follow_the_file`; `crates/shell/tests/dawproject_plugins.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold` | unit |
+| R48 | `a_vst3_preset_becomes_the_hosts_state`; `bl-model`'s `a_preset_reads_back_the_streams_it_wrote`; `crates/shell/tests/dawproject_plugins.rs`, `plugins_found_on_this_machine_load_with_the_gain_their_states_hold` | unit |
 | R49 | `devices_follow_the_file` | unit |
 | R50 | `devices_follow_the_file` | unit |
 | R51 | `generic_devices_become_the_values_their_tables_give` | unit |
@@ -221,7 +221,7 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R54 | `generic_devices_become_the_values_their_tables_give` | unit |
 | R55 | `generic_devices_become_the_values_their_tables_give`; `generic.rs`, `values_convert_from_their_units_and_stay_in_range`, `a_ratio_in_percent_is_one_over_the_rest` | unit |
 | R56 | `automation_becomes_the_envelopes_the_file_asks_for`, `every_fixture_gives_the_report_it_should` | unit |
-| R57 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/shell/tests/dawproject.rs`, `a_plugin_parameters_normalized_automation_goes_through_its_mapping` | unit |
+| R57 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/shell/tests/dawproject_plugins.rs`, `a_plugin_parameters_normalized_automation_goes_through_its_mapping` | unit |
 | R58 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/cli/tests/dawproject_goldens.rs`, `an_imported_volume_ramp_renders_the_same_as_a_hand_drawn_one` | unit, golden render |
 | R59 | `automation_becomes_the_envelopes_the_file_asks_for`, `clip_automation_and_audio_expressions_follow_the_file` | unit |
 | R60 | `midi_controllers_and_note_expressions_follow_the_file` | unit |

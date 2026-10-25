@@ -1717,7 +1717,8 @@ impl Compiler {
             &mut dependencies,
             (
                 MeterOwner::Track(track.id()),
-                track.kind() == TrackKind::Midi,
+                // A frozen track plays its freeze file: audio from the start.
+                track.kind() == TrackKind::Midi && !track.is_frozen(),
             ),
         );
         let sidechains = Span {

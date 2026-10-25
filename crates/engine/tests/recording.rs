@@ -571,3 +571,108 @@ fn playing_from_inside_the_brace_records_from_play_start() {
     );
     assert_eq!(drain(&mut rings[0]).len(), 12_000);
 }
+
+// Spec: recording R4, transport R15. T296 finding 8: a new tempo map moves
+// the playhead to the same beat, and the take goes on from it.
+#[test]
+fn a_take_goes_on_through_a_tempo_change_and_holds_its_beats() {
+    let mut rig = Rig::with_input(256, 4);
+    let a = armed(&mut rig, 3);
+    rig.sync();
+
+    let (plan, mut rings, _) = plan(&[(a, Channel::Mono(3))], 1 << 18);
+    rig.sender.record(rig.collector.handle().wrap(plan));
+    rig.sender.transport(TransportCommand::SetRecording(true));
+    rig.sender.transport(TransportCommand::Play);
+    let mut next = 0;
+    // 2,560 frames at 120 BPM, then 60 BPM: a frame is twice the ticks it
+    // was, so the playhead's frame doubles to stay on its beat.
+    for _ in 0..10 {
+        let input = Input::ramp(&mut next, 256);
+        rig.block_with_input(256, &input);
+    }
+    rig.apply(bl_model::Command::SetTempo {
+        tempo: bl_core::time::TempoMap::constant(bl_core::time::Bpm::new(60.0).unwrap()),
+    });
+    for _ in 0..10 {
+        let input = Input::ramp(&mut next, 256);
+        rig.block_with_input(256, &input);
+    }
+    assert!(rig.monitor.state().recording, "the take goes on");
+    rig.sender.transport(TransportCommand::Stop);
+    let input = Input::ramp(&mut next, 256);
+    rig.block_with_input(256, &input);
+
+    let state = rig.monitor.state();
+    assert_eq!(
+        state.take,
+        Some(TakeBounds {
+            start: Frames::ZERO,
+            end: Frames(2_560 * 2 + 2_560),
+            wrap: None,
+            frames: 5_120,
+        }),
+        "the take's bounds are frames of the new tempo map"
+    );
+    rig.collector.collect();
+    let samples = drain(&mut rings[0]);
+    assert_eq!(samples.len(), 5_120);
+    for (i, sample) in samples.iter().enumerate() {
+        assert_eq!(*sample, i as f32, "frame {i} follows the one before it");
+    }
+}
+
+/// An armed track on Monitor Auto with a slot clip of DC 0.25 that nothing
+/// has launched, on a rig whose input carries 0.5.
+fn auto_with_a_slot_clip() -> (Rig, TrackId, bl_model::SceneId) {
+    let mut media = MediaMap::new();
+    let hash = ContentHash([7; 32]);
+    media.insert(hash, dc_file(0.25));
+    let mut rig = Rig::with_input_and_registry(256, 4, |registry: &mut Registry| {
+        registry.set_media(Arc::new(media.clone()));
+    });
+    let a = armed(&mut rig, 3);
+    let scene = rig.editor.document().scenes().next().unwrap().id;
+    let clip = rig.editor.new_id();
+    rig.editor
+        .apply(bl_model::Command::CreateSlotClip {
+            track: a,
+            scene,
+            clip: bl_model::Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::QUARTER,
+                bl_model::ClipData::Audio(bl_model::AudioData::new(hash)),
+            ),
+        })
+        .unwrap();
+    rig.sync();
+    (rig, a, scene)
+}
+
+// Spec: routing R11. T296 finding 4: a Session clip nothing has launched
+// isn't playing, and one that has launched is.
+#[test]
+fn a_slot_clip_closes_an_auto_tracks_input_only_while_it_is_launched() {
+    let (mut rig, track, scene) = auto_with_a_slot_clip();
+    let level = |v: f32| Input {
+        channels: vec![vec![v; 256]; 4],
+    };
+    rig.sender.transport(TransportCommand::Play);
+    rig.render_with_input(1920, 256, &level(0.5));
+    let last = rig.last();
+    assert!(
+        last.iter().all(|&s| s == 0.5),
+        "the input is heard while the slot clip waits: {last:?}"
+    );
+
+    rig.sender
+        .session(bl_engine::SessionCommand::Launch { track, scene });
+    // The launch waits for the 2.1.1 line; the 20 ms glide follows it.
+    rig.render_with_input(96_000, 256, &level(0.5));
+    let last = rig.last();
+    assert!(
+        last.iter().all(|&s| s == 0.25),
+        "the launched clip alone plays: {last:?}"
+    );
+}

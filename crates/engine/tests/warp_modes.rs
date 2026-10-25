@@ -631,6 +631,47 @@ fn a_formants_change_keeps_the_pool_and_goes_on_sounding() {
     );
 }
 
+// Spec: warp-modes R5, R22, R35. A transposed Complex Pro clip, whose
+// formants Beatlayer's own correction holds after the stretcher, plays under
+// the allocation trap at small blocks, and the correction changes the sound
+// that Formants 0 % leaves as the stretcher made it.
+#[test]
+fn a_transposed_complex_pro_clip_corrects_formants_under_the_allocation_trap() {
+    let render = |formants: f64, block: usize| {
+        let mut editor = song(120.0, Ticks::WHOLE, beats(), WarpMode::ComplexPro);
+        let clip = editor
+            .document()
+            .tracks()
+            .flat_map(|track| track.clips())
+            .next()
+            .unwrap()
+            .id;
+        editor
+            .apply(Command::SetClipPitch {
+                clip,
+                transpose: Some(7),
+                detune: None,
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetClipWarpSettings {
+                clip,
+                beats: None,
+                tones: None,
+                texture: None,
+                complex_pro: Some(ComplexProUpdate {
+                    formants: Some(formants),
+                    envelope: Some(294),
+                }),
+            })
+            .unwrap();
+        play(&editor, 48_000, block)
+    };
+    let corrected = render(100.0, 64);
+    assert_eq!(corrected, render(100.0, 512), "the same at any block size");
+    assert_ne!(corrected, render(0.0, 64), "the correction changed nothing");
+}
+
 // Spec: warp-modes R8. A change of a playing clip's warp mode crossfades from
 // what was playing, in a straight line over 20 ms.
 #[test]

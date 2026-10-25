@@ -743,6 +743,16 @@ impl AudioHost {
         }
     }
 
+    /// The devices whose node reports another latency than the engine
+    /// compensates for, as a native device's look-ahead moves it (WP-2.11):
+    /// each goes to [`set_device_latency`](Self::set_device_latency). Empty
+    /// while no engine runs.
+    pub fn latency_changes(&mut self) -> Vec<(bl_model::DeviceId, u32)> {
+        self.engine
+            .as_mut()
+            .map_or_else(Vec::new, |engine| engine.state().latency_changes.clone())
+    }
+
     /// Sends a transport command, which the engine runs at the start of its
     /// next block.
     ///

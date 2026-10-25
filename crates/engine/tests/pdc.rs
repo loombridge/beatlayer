@@ -383,6 +383,39 @@ fn a_latency_change_recompiles_and_the_compensation_follows() {
     assert_null(&out, "aligned at the new latency");
 }
 
+// WP-2.11. A native device whose node's latency moves while it runs, as a
+// look-ahead does, is published for the shell to report; once reported, the
+// compensation follows and nothing is published.
+#[test]
+fn a_node_whose_latency_moves_is_published_until_it_is_reported() {
+    const MOVING: &str = "test.moving";
+    let latency = Arc::new(AtomicU32::new(0));
+    let shared = Arc::clone(&latency);
+    let mut rig = Rig::with_registry(64, move |registry| {
+        registry.add_native(MOVING, move |_device, config| {
+            Box::new(Restarted::new(config, Arc::clone(&shared)))
+        });
+    });
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    let t = track(&mut rig.editor, TrackKind::Audio, None);
+    let d = device(&mut rig.editor, t, MOVING, &[]);
+    rig.sync();
+    rig.block(64);
+    assert!(rig.monitor.state().latency_changes.is_empty(), "as compiled");
+
+    latency.store(300, Relaxed);
+    rig.block(64);
+    assert_eq!(rig.monitor.state().latency_changes, [(d, 300)]);
+
+    let update = rig.compiler.latency(d, 300);
+    rig.sender.send_update(update);
+    assert!(rig.sender.flush(), "the queue is full");
+    rig.block(64);
+    rig.block(64);
+    assert!(rig.monitor.state().latency_changes.is_empty(), "reported");
+}
+
 /// A rig with an impulse of `value` for each of `values`, playing.
 fn impulses(values: &[f32]) -> Rig {
     let mut media = MediaMap::new();

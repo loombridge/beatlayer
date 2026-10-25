@@ -383,3 +383,55 @@ fn the_filter_shapes_the_repeats() {
     assert!(shaped(0.0) > 0.9, "unfiltered, the repeat is whole");
     assert!(shaped(1.0) < 0.1, "the band-pass takes it out");
 }
+
+// Spec: delay R1
+#[test]
+fn a_synced_repeat_longer_than_the_free_time_range_lands_on_its_frame() {
+    // Sixteen sixteenths at 40 BPM is 6.0 s, 288,000 frames at 48 kHz.
+    let params = vec![
+        (SYNC, 1.0),
+        (LINK, 1.0),
+        (L_SYNC, 16.0),
+        (R_SYNC, 16.0),
+        (FEEDBACK, 0.0),
+        (DRY_WET, 100.0),
+    ];
+    let mut delay = node(&registry(), &device(&delay_type(), &params), 300_000);
+    let out = run_at(
+        delay.as_mut(),
+        &impulse(300_000),
+        &[],
+        &tempo(40.0),
+        TransportInfo::default(),
+    );
+    assert!(out[0][288_000].abs() > 0.99, "at 6.0 s");
+    assert!(out[0][245_760].abs() < 1e-6, "not at the old 5.12 s cap");
+}
+
+// Spec: delay R7
+#[test]
+fn freeze_keeps_the_dry_signal_and_ignores_new_input() {
+    let params = vec![
+        (SYNC, 0.0),
+        (LINK, 1.0),
+        (L_TIME, 100.0),
+        (FEEDBACK, 50.0),
+        (DRY_WET, 50.0),
+        (FREEZE, 1.0),
+    ];
+    let mut delay = node(&registry(), &device(&delay_type(), &params), 12_000);
+    let out = run_at(
+        delay.as_mut(),
+        &step(12_000),
+        &[],
+        &tempo(120.0),
+        TransportInfo::default(),
+    );
+    // The lines are empty and stay empty, so only the dry half is heard.
+    for channel in &out {
+        assert!(
+            channel.iter().all(|s| (s - 0.5).abs() < 1e-6),
+            "half dry, nothing frozen in"
+        );
+    }
+}

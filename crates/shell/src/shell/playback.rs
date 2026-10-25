@@ -78,11 +78,13 @@ impl Shell {
         }
         // A plug-in that changed its latency: the engine recompiles with
         // it, so delay compensation follows it (WP-2.7, WP-2.11).
+        let native = self.audio.latency_changes();
         for (device, frames) in self
             .vst3
             .take_latency_changes()
             .into_iter()
             .chain(self.lv2.take_latency_changes())
+            .chain(native)
         {
             self.audio.set_device_latency(device, frames);
             changed = true;

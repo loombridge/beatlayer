@@ -754,7 +754,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |
 | 6.57 | todo |  |  |
-| 6.58 | todo |  |  |
+| 6.58 | done | 25 October 2026 | [#447](https://github.com/loombridge/beatlayer/pull/447); Edit Info Text from the Edit menu and the track, clip, device, chain, macro and locator context menus edits the item's own info text in the Info View as one undo step (`track`, `clip`, `scene` and `device.set_info_text`), hovering shows it, and it saves with the set; the scene and Session clip menus' items wait on WP-6.56 |
 | 6.59 | todo |  |  |
 | 6.60 | todo |  |  |
 | 6.61 | todo |  |  |

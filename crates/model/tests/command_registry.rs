@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        260,
+        261,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -64,7 +64,7 @@ fn every_document_command_is_registered() {
              WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
              clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-6.25 \
              set_automation_envelope and set_lock_envelopes, WP-3.15 six for clip \
-             envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
+             envelopes, WP-6.25c set_clip_envelope, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
              two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
              settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
              set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
@@ -2073,6 +2073,14 @@ fn every_command_runs_by_id() {
         "clip.set_envelope_linked",
         json!({ "clip": riff, "target": volume, "linked": false }),
     );
+    // WP-6.25c: the whole envelope.
+    agent.run(
+        "clip.set_envelope",
+        json!({ "clip": riff, "target": volume, "points": [
+            { "at": 0, "value": 1.0, "bend": 0.0 },
+            { "at": bar, "value": 0.5, "bend": 0.25 },
+        ] }),
+    );
     assert!(
         !agent
             .editor
@@ -2887,6 +2895,21 @@ fn schemas_match_what_commands_serialise() {
                     param: MixerParam::Volume,
                 },
                 linked: false,
+            },
+        ),
+        (
+            "clip.set_envelope",
+            Command::SetClipEnvelope {
+                kind: bl_model::EnvelopeKind::Modulation,
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                points: vec![Breakpoint {
+                    at: Ticks::QUARTER,
+                    value: 0.5,
+                    bend: 0.0,
+                }],
             },
         ),
         (

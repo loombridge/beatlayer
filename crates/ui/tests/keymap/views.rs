@@ -35,6 +35,62 @@ fn the_tags_shortcuts_reach_their_commands() {
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
 }
 
+#[test]
+fn the_collection_keys_and_rename_reach_the_browser() {
+    // Spec: browser-tags R35 and R38. The keys 1 to 7 and 0 are the
+    // browser's list's own (S-BRW-008, S-BRW-009), and Cmd-R (Ctrl-R)
+    // renames the chosen label, a collection among them, while the sidebar
+    // has the keyboard (S-EDIT-008).
+    let keymap = Keymap::live12();
+    for (shortcut, keys) in [
+        (
+            "S-BRW-008",
+            vec![
+                Key::Num1,
+                Key::Num2,
+                Key::Num3,
+                Key::Num4,
+                Key::Num5,
+                Key::Num6,
+                Key::Num7,
+            ],
+        ),
+        ("S-BRW-009", vec![Key::Num0]),
+    ] {
+        let entry = keymap.entry_for(shortcut).expect("the shortcut");
+        assert!(
+            matches!(entry.status, Status::Widget(_)),
+            "{shortcut}: {:?}",
+            entry.status
+        );
+        for platform in [Platform::Mac, Platform::Other] {
+            let chords: Vec<Key> = entry
+                .chords(platform)
+                .iter()
+                .map(|chord| chord.key)
+                .collect();
+            assert_eq!(chords, keys, "{shortcut}");
+            assert!(
+                entry
+                    .chords(platform)
+                    .iter()
+                    .all(|chord| chord.mods == mods(false, false, false, false))
+            );
+        }
+    }
+    for (platform, cmd, ctrl) in [(Platform::Mac, true, false), (Platform::Other, false, true)] {
+        let hit = keymap
+            .resolve(
+                platform,
+                Key::R,
+                mods(cmd, ctrl, false, false),
+                &[Context::BrowserSidebar, Context::Global],
+            )
+            .expect("Cmd+R is bound");
+        assert_eq!(hit.command.id, "browser.rename_label");
+    }
+}
+
 // Spec: second-window R1, R4, R8, R11. Cmd+Shift+W (Ctrl+Shift+W) opens and
 // closes the second window from any context, and Option+1 and Option+2 move
 // the focus to the main view in whichever window shows it.

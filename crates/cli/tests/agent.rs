@@ -5654,6 +5654,79 @@ fn an_agent_tags_browser_items_by_command_id_and_reads_them_back() {
     assert_eq!(read["items"][0]["tags"][0]["source"], json!("own"));
 }
 
+// Spec: browser-tags R40, browser R25.
+#[test]
+fn an_agent_collects_browser_items_by_command_id_and_reads_them_back() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("collections").unwrap();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let out = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        out["results"][0].clone()
+    };
+    let folder = std::env::temp_dir().join(format!("bl-agent-collections-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("Kick.wav");
+    std::fs::write(&file, b"RIFF").unwrap();
+    let item = file.to_string_lossy().into_owned();
+    // The item goes into Yellow and Gray; the rows name its collections.
+    for collection in [3, 7] {
+        let put = run(
+            &mut client,
+            "browser.set_collection",
+            json!({ "items": [item], "collection": collection, "member": true }),
+        );
+        assert!(put["error"].is_null(), "{put}");
+    }
+    let opened = run(
+        &mut client,
+        "browser.open_place",
+        json!({ "label": { "collection": 3 } }),
+    );
+    let row = &opened["result"]["rows"][0];
+    assert_eq!(row["name"], json!("Kick.wav"), "{opened}");
+    assert_eq!(row["collections"], json!([3, 7]));
+    // A collection is renamed and hidden, and the labels read back.
+    run(
+        &mut client,
+        "browser.rename_label",
+        json!({ "label": { "collection": 3 }, "name": "Keepers" }),
+    );
+    let hidden = run(
+        &mut client,
+        "browser.set_label_shown",
+        json!({ "label": { "collection": 7 }, "shown": false }),
+    );
+    let labels = hidden["result"]["labels"].as_array().expect("the labels");
+    let yellow = &labels[2];
+    assert_eq!(yellow["label"], json!({ "collection": 3 }));
+    assert_eq!(yellow["name"], json!("Keepers"));
+    assert_eq!(yellow["section"], json!("collections"));
+    assert_eq!(labels[6]["shown"], json!(false));
+    // Show in Finder is a registered external command, and the file's name
+    // comes back with the state.
+    let shown = run(&mut client, "browser.reveal", json!({ "paths": [item] }));
+    assert!(shown["error"].is_null(), "{shown}");
+    // 0 clears every collection.
+    run(
+        &mut client,
+        "browser.clear_collections",
+        json!({ "items": [item] }),
+    );
+    let cleared = run(&mut client, "browser.state", json!({}));
+    assert!(
+        cleared["result"]["rows"]
+            .as_array()
+            .expect("rows")
+            .is_empty()
+    );
+    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_dir(&folder);
+}
+
 // Spec: browser-tags R32, browser R26.
 #[test]
 fn an_agent_filters_the_browser_keeps_labels_and_reads_them_back() {

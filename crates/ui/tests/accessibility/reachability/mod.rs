@@ -108,6 +108,31 @@ pub(crate) const CLIP_ENVELOPES: Reason = Equivalent(
          and Cmd-Delete clears the envelope (S-ENV-005)",
 );
 
+// The Envelope Editor's selections, edit commands, shapes, stretch and skew
+// (WP-6.25c): the Edit keys act on its time selection, and Simplify Envelope
+// is in the Edit menu and the selection's menu.
+pub(crate) const CLIP_ENVELOPE_EDIT: Reason = Equivalent(
+    "the Envelope Editor: Cut, Copy, Paste and Duplicate (S-EDIT-001 to S-EDIT-004) act on \
+         its time selection, Delete (S-A11Y-025) deletes it while no breakpoint is selected, \
+         and the arrows move a selected breakpoint (clip-envelopes R12, R14)",
+);
+
+pub(crate) const CLIP_ENVELOPE_SHAPES: Reason = Equivalent(
+    "the buttons of the time selection's context menu in the Envelope Editor, and Edit \
+         menu's Simplify Envelope (M-EDIT-039), which runs while the editor has the \
+         focus (clip-envelopes R13)",
+);
+
+pub(crate) const CLIP_HANDLES: Reason = Live(
+    "the handles of a time selection in the Envelope Editor are dragged; the manual gives \
+         them no keys (manual 25.5.3 and 27.5.4; clip-envelopes R13)",
+);
+
+pub(crate) const CLIP_SELECTING: Reason = Unobserved(
+    "selecting time or a segment in the Envelope Editor from the keyboard: Live's manual \
+         (41.5) names no key for it, and whether Live has one isn't observed",
+);
+
 pub(crate) const CURVING: Reason = Unobserved(
     "curving a segment from the keyboard: Live's manual (41.5) names no key for it, and \
          whether Live has one isn't observed",

@@ -2454,6 +2454,22 @@ const ENTRIES: &[Entry] = &[
             one, so a switch thrown before anything is drawn sets what drawing will use.",
     },
     Entry {
+        id: "clip.set_envelope",
+        action: Action::Apply("set_clip_envelope"),
+        label: "Set Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Replaces one of a clip's envelopes with the breakpoints given, as the \
+            Envelope Editor's edits do when they write a shape, a stretch or a paste over a span \
+            of time. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does, and `points` are the envelope's breakpoints in position order, each with its \
+            position in ticks from the beginning of the clip's contents, its value in the \
+            parameter's own units and the bend of the segment starting at it. The breakpoints \
+            must be in order, no two at one position, and no position before 1.1.1; an empty \
+            list takes the envelope with it. The envelope keeps its Linked switch.",
+    },
+    Entry {
         id: "clip.trim_start",
         action: Action::Apply("trim_clip_start"),
         label: "Trim Clip Start",

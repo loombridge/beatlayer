@@ -572,6 +572,33 @@ impl Keymap {
         })
     }
 
+    /// [`Keymap::command_for`], where the first command that `runs` decides,
+    /// and the first one at all if none does: Edit ▸ Copy is the Envelope
+    /// Editor's only while it has a time selection to copy, and the note
+    /// editor's otherwise.
+    #[must_use]
+    pub fn command_for_running(
+        &self,
+        shortcut: &str,
+        contexts: &[Context],
+        runs: impl Fn(&KeyCommand) -> bool,
+    ) -> Option<&KeyCommand> {
+        let entry = self.entry_for(shortcut)?;
+        if entry.status != Status::Bound {
+            return None;
+        }
+        let mut candidates = contexts.iter().filter_map(|context| {
+            entry
+                .commands
+                .iter()
+                .find(|command| command.contexts.contains(context))
+        });
+        candidates
+            .clone()
+            .find(|command| runs(command))
+            .or_else(|| candidates.next())
+    }
+
     /// The first key chord that runs a command, for showing beside it in a
     /// menu.
     #[must_use]

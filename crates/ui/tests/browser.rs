@@ -306,10 +306,10 @@ fn every_part_reaches_assistive_technology() {
     // for a label whose content is still to come.
     let sounds = Harness::node(&nodes, "Sounds");
     assert!(sounds.description.contains("M2"));
-    assert!(
-        Harness::node(&nodes, "Favorites").disabled,
-        "collections are M6"
-    );
+    // Spec: browser-tags R34. The collections are labels like the others.
+    let favorites = Harness::node(&nodes, "Favorites");
+    assert_eq!(favorites.role, Role::ListItem);
+    assert!(!favorites.disabled, "collections are usable");
     // Rows name their kind.
     let samples = nodes
         .iter()

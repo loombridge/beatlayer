@@ -5238,6 +5238,53 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
 
 </details>
 
+### `ClipEnvelopeResult`
+
+What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipFileKind`
 
 What a clip file holds.
@@ -5648,6 +5695,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `mpe` | [`MpeTabState`](#mpetabstate) | yes | The MPE tab's lanes, grid and selected breakpoints (WP-6.18). |
 | `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
+| `envelope_segment` | [`Ticks`](#ticks) or null | no | The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it. |
+| `envelope_selection` | [`TimeRange`](#timerange) or null | no | The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it. |
 
 <details><summary>JSON Schema</summary>
 
@@ -5716,6 +5765,28 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "envelope_segment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it."
+    },
+    "envelope_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it."
     },
     "filters": {
       "$ref": "#/$defs/NoteFilters",
@@ -13439,6 +13510,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `collections` | array of integer from 0 to 255 | no | The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40). |
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
@@ -13459,6 +13531,16 @@ One row of the content pane.
         }
       ],
       "description": "For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6)."
+    },
+    "collections": {
+      "description": "The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "depth": {
       "description": "How deep it's indented: 0 at the top of the list.",
@@ -14127,7 +14209,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
 
 One of:
 
@@ -14148,12 +14230,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
+- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -14254,6 +14337,22 @@ One of:
       },
       "required": [
         "saved"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "properties": {
+        "collection": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection"
       ],
       "type": "object"
     }
@@ -24521,7 +24620,7 @@ A sidebar section.
 
 One of:
 
-- `"collections"`: Collections (M6).
+- `"collections"`: The seven collections (spec: browser-tags R34).
 - `"library"`: The Library labels.
 - `"places"`: Places: folders on disk.
 
@@ -24533,7 +24632,7 @@ One of:
   "oneOf": [
     {
       "const": "collections",
-      "description": "Collections (M6).",
+      "description": "The seven collections (spec: browser-tags R34).",
       "type": "string"
     },
     {

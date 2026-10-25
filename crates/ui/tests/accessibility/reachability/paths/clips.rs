@@ -110,6 +110,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("clip.move_envelope_breakpoint", Exception(CLIP_ENVELOPES)),
         ("clip.delete_envelope_breakpoint", Exception(CLIP_ENVELOPES)),
         ("clip.delete_envelope", Exception(CLIP_ENVELOPES)),
+        ("clip.set_envelope", Exception(CLIP_ENVELOPE_EDIT)),
+        ("clip.delete_envelope_range", Exception(CLIP_ENVELOPE_EDIT)),
+        (
+            "clip.move_envelope_breakpoints",
+            Exception(CLIP_ENVELOPE_EDIT),
+        ),
+        ("clip.select_envelope_time", Exception(CLIP_SELECTING)),
+        ("clip.select_envelope_segment", Exception(CLIP_SELECTING)),
+        (
+            "clip.insert_envelope_shape",
+            Exception(CLIP_ENVELOPE_SHAPES),
+        ),
+        ("clip.simplify_envelope", Exception(CLIP_ENVELOPE_SHAPES)),
+        ("clip.stretch_envelope_values", Exception(CLIP_HANDLES)),
+        ("clip.stretch_envelope_time", Exception(CLIP_HANDLES)),
+        ("clip.skew_envelope", Exception(CLIP_HANDLES)),
         (
             "clip.set_envelope_linked",
             main(

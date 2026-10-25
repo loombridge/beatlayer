@@ -481,3 +481,26 @@ fn an_engine_without_a_queue_to_the_ports_sends_no_clock() {
     assert!(state.playing);
     assert_eq!(state.sync_out.clocks, 0);
 }
+
+// Spec: midi-clock R3, R5. A new tempo map swapped in while the song plays
+// moves frames under the playhead but not its beat: it is no jump, so no
+// pointer or Continue goes out, and the clocks carry on at the new tempo.
+#[test]
+fn a_tempo_change_while_playing_is_not_a_jump() {
+    let mut clock = Clock::new(512, 0, 8192, &[song()]);
+    clock.run();
+    clock.command(TransportCommand::Play);
+    clock.run_to(30_000);
+    clock.sent();
+    clock.rig.apply(Command::SetTempo {
+        tempo: TempoMap::constant(bpm(90.0)),
+    });
+    clock.run_to(120_000);
+    let sent = clock.sent();
+    assert!(clocks(&sent).len() > 40, "the clocks go on");
+    assert!(
+        sent.iter()
+            .all(|e| e.message.padded()[0] != 0xF2 && e.message.padded()[0] != 0xFB),
+        "no pointer or Continue for a tempo change"
+    );
+}

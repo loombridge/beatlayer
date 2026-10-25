@@ -303,7 +303,7 @@ impl SyncOut {
         self.outputs
             .iter()
             .map(|o| {
-                let early = (f64::from(-o.delay_ms) * rate / 1000.0).ceil() as i64;
+                let early = (-f64::from(o.delay_ms) * rate / 1000.0).ceil() as i64;
                 (early - i64::from(p.output_latency)).max(0)
             })
             .max()
@@ -341,6 +341,10 @@ impl SyncOut {
 
     /// Writes the clocks (and the Start and resync due before one) whose
     /// frames lie before `horizon`.
+    // shortcut: clocks written ahead for a negative sync delay stay queued when
+    // the song stops or jumps, so up to that many milliseconds of stale clock
+    // follow the Stop or pointer; upgrade by stamping a cancel the output thread
+    // honours.
     fn clocks(&mut self, p: &Part<'_>, mut cursor: i64, horizon: Frames, midi: &mut MidiIn) {
         for _ in 0..MAX_CLOCKS_PER_PART {
             let tick = Ticks(cursor * CLOCK_TICKS);

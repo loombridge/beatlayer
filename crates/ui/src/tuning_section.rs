@@ -188,7 +188,9 @@ pub fn show(
             });
         }
         // Delete on the name removes the tuning (R28).
-        if response.has_focus() && ui.input(|i| i.key_pressed(Key::Delete)) {
+        if response.has_focus()
+            && ui.input(|i| i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace))
+        {
             invoke(events, "tuning.remove", json!({}));
         }
         if *open {

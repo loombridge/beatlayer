@@ -23,6 +23,7 @@ pub(super) const fn has_menu(kind: ItemKind) -> bool {
             | ItemKind::Set
             | ItemKind::Preset
             | ItemKind::ChordBank
+            | ItemKind::Groove
             | ItemKind::Plugin
             | ItemKind::Device
             | ItemKind::Clip

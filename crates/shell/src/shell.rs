@@ -588,6 +588,10 @@ pub struct Shell {
     /// Whether the browser's Tuning section shows (the tunings spec, R28):
     /// view state, hidden in a new set.
     tuning_section: bool,
+    /// The Groove Pool's view: whether it shows in the browser column and
+    /// what the browser's hot-swap replaces (the grooves spec R24, R32).
+    /// View state, never part of the set.
+    groove_pool: bl_shell_spec::groove::GroovePoolView,
     full_screen: bool,
     settings_open: bool,
     /// The themes the Theme chooser offers, which the host reads from the
@@ -1238,6 +1242,7 @@ impl Shell {
             browser: true,
             info_view: true,
             tuning_section: false,
+            groove_pool: bl_shell_spec::groove::GroovePoolView::default(),
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
@@ -1906,8 +1911,23 @@ impl Shell {
             // Spec: tunings R27. A tuning chosen in the browser loads as
             // `tuning.load` loads it, and the Tuning section shows.
             Self::args::<NoArgs>(id, args)?;
-            self.tuning_section = true;
-            return self.run(bl_shell_spec::tunings::LOAD, json!({ "path": path }));
+            let loaded = self.run(bl_shell_spec::tunings::LOAD, json!({ "path": path }));
+            if loaded.is_ok() {
+                self.tuning_section = true;
+            }
+            return loaded;
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_groove()
+        {
+            // Spec: grooves R32, R33. A groove file chosen in the browser
+            // loads into the pool, replacing the groove being hot-swapped.
+            Self::args::<NoArgs>(id, args)?;
+            let mut load = json!({ "path": path.to_string_lossy() });
+            if let Some(target) = self.groove_pool_view().hot_swap {
+                load["replace"] = json!(target);
+            }
+            return self.run(bl_shell_spec::groove::LOAD, load);
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.browser_view.selected_chord_bank()

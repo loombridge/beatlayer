@@ -91,6 +91,7 @@ mod plugin_scanning;
 mod plugins;
 mod plugins_au;
 mod plugins_lv2;
+mod preset_preview;
 mod processed_files;
 mod project_folders;
 mod rack_presets;

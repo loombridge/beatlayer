@@ -200,8 +200,6 @@ pub struct Compiler {
     hits: ChainHits,
 }
 
-/// The set's Global Amount of groove as a transport command carries it, in
-/// tenths of a percent.
 /// Whether the set's tuning hides the scales (the tunings spec, R16): it
 /// holds other than twelve notes to its pseudo-octave.
 fn scales_hidden(document: &Document) -> bool {
@@ -212,6 +210,8 @@ fn scales_hidden(document: &Document) -> bool {
         .is_some_and(bl_model::Tuning::hides_scales)
 }
 
+/// The set's Global Amount of groove as a transport command carries it, in
+/// tenths of a percent.
 fn groove_amount(document: &Document) -> u16 {
     (document.settings().grooves.global_amount * 10.0).round() as u16
 }

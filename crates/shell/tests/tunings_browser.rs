@@ -306,7 +306,11 @@ fn a_tuning_of_other_than_twelve_notes_hides_the_scales() {
 
 fn python() -> Command {
     for name in ["python3", "python"] {
-        if Command::new(name).arg("--version").output().is_ok() {
+        if Command::new(name)
+            .arg("--version")
+            .output()
+            .is_ok_and(|output| output.status.success())
+        {
             return Command::new(name);
         }
     }

@@ -15,6 +15,7 @@
 //! | Loop Start, Loop Length | `transport.set_loop` |
 //! | Tempo | `song.set_tempo` |
 //! | Numerator, Denominator | `song.set_time_signatures` |
+//! | Global Amount (L-CTRL-008) | `groove.set_global_amount` |
 //!
 //! [`step`] is a change by the arrow keys, a drag, or a screen reader;
 //! [`typed`] a value typed in and confirmed; [`reset`] Delete or a
@@ -36,6 +37,11 @@ pub const TEMPO_MAX: f64 = 999.0;
 /// The tempo Delete and a double-click return the Tempo field to: a new
 /// set's.
 pub const DEFAULT_TEMPO: f64 = 120.0;
+/// The Global Amount's largest value, in percent (the grooves spec, R2).
+pub const GLOBAL_AMOUNT_MAX: f64 = bl_model::GLOBAL_AMOUNT_MAX;
+/// The Global Amount Delete and a double-click return its field to: every
+/// groove plays as set (the grooves spec, R10).
+pub const DEFAULT_GLOBAL_AMOUNT: f64 = 100.0;
 /// The denominators the time-signature field takes, as the document does.
 pub const DENOMINATORS: [u8; 5] = [1, 2, 4, 8, 16];
 /// A new set's numerator and denominator, which Delete returns them to.
@@ -60,6 +66,8 @@ pub enum Group {
     Numerator,
     /// The time signature's denominator (L-CTRL-007).
     Denominator,
+    /// The Global Amount, in percent (L-CTRL-008, the grooves spec R30).
+    GlobalAmount,
 }
 
 impl Group {
@@ -69,7 +77,7 @@ impl Group {
     pub const fn parts(self) -> usize {
         match self {
             Self::Position | Self::LoopStart | Self::LoopLength => 3,
-            Self::Tempo | Self::Numerator | Self::Denominator => 1,
+            Self::Tempo | Self::Numerator | Self::Denominator | Self::GlobalAmount => 1,
         }
     }
 
@@ -82,6 +90,7 @@ impl Group {
             Self::LoopStart | Self::LoopLength => Some("Change loop"),
             Self::Tempo => Some("Change tempo"),
             Self::Numerator | Self::Denominator => Some("Change time signatures"),
+            Self::GlobalAmount => Some("Change Global Amount"),
         }
     }
 }
@@ -146,7 +155,7 @@ fn parts(doc: &Document, shell: &Shell, group: Group) -> [i64; 3] {
         Group::Position => bbs(signatures, shown_position(shell)),
         Group::LoopStart => bbs(signatures, brace.start),
         Group::LoopLength => length_parts(signatures, brace.start, brace.length),
-        Group::Tempo => [0; 3],
+        Group::Tempo | Group::GlobalAmount => [0; 3],
         Group::Numerator => [i64::from(signature(doc, shell).numerator()), 0, 0],
         Group::Denominator => [i64::from(signature(doc, shell).denominator()), 0, 0],
     }
@@ -192,7 +201,23 @@ pub fn editable(shell: &Shell, group: Group) -> bool {
                     .is_some_and(|segment| segment.start_bpm() == segment.end_bpm())
         }
         Group::Numerator | Group::Denominator => settings.time_signatures.changes().len() == 1,
-        Group::Position | Group::LoopStart | Group::LoopLength => true,
+        Group::Position | Group::LoopStart | Group::LoopLength | Group::GlobalAmount => true,
+    }
+}
+
+/// The Global Amount, in percent.
+#[must_use]
+pub fn global_amount(shell: &Shell) -> f64 {
+    shell.editor().document().settings().grooves.global_amount
+}
+
+/// A percentage as the Global Amount's field reads it: `100 %`, or `62.5 %`.
+#[must_use]
+pub fn percent_text(percent: f64) -> String {
+    if (percent - percent.round()).abs() < 0.05 {
+        format!("{} %", percent.round())
+    } else {
+        format!("{percent:.1} %")
     }
 }
 
@@ -201,6 +226,7 @@ pub fn editable(shell: &Shell, group: Group) -> bool {
 pub fn text(shell: &Shell, field: Field) -> String {
     match field.group {
         Group::Tempo => format!("{:.2}", tempo(shell)),
+        Group::GlobalAmount => percent_text(global_amount(shell)),
         group => parts(shell.editor().document(), shell, group)[field.part.min(2)].to_string(),
     }
 }
@@ -210,6 +236,7 @@ pub fn text(shell: &Shell, field: Field) -> String {
 pub fn number(shell: &Shell, field: Field) -> f64 {
     match field.group {
         Group::Tempo => tempo(shell),
+        Group::GlobalAmount => global_amount(shell),
         group => parts(shell.editor().document(), shell, group)[field.part.min(2)] as f64,
     }
 }
@@ -220,6 +247,7 @@ pub fn number(shell: &Shell, field: Field) -> f64 {
 pub fn group_text(shell: &Shell, group: Group) -> String {
     match group {
         Group::Tempo => format!("{:.2}", tempo(shell)),
+        Group::GlobalAmount => percent_text(global_amount(shell)),
         group if group.parts() == 3 => {
             let [a, b, c] = parts(shell.editor().document(), shell, group);
             format!("{a}.{b}.{c}")
@@ -271,6 +299,10 @@ pub fn step(shell: &Shell, field: Field, steps: i32, fine: bool) -> Option<Invoc
             let by = if fine { 0.01 } else { 1.0 };
             set_tempo(shell, tempo(shell) + by * f64::from(steps))
         }
+        Group::GlobalAmount => {
+            let by = if fine { 0.1 } else { 1.0 };
+            set_global_amount(shell, global_amount(shell) + by * f64::from(steps))
+        }
         Group::Numerator => {
             let now = i64::from(signature(doc, shell).numerator());
             set_numerator(shell, now + steps64)
@@ -299,6 +331,7 @@ pub fn reset(shell: &Shell, field: Field) -> Option<Invocation> {
         Group::LoopStart => set_loop(doc, Ticks::ZERO, brace.length),
         Group::LoopLength => set_loop(doc, brace.start, DEFAULT_LOOP_LENGTH),
         Group::Tempo => set_tempo(shell, DEFAULT_TEMPO),
+        Group::GlobalAmount => set_global_amount(shell, DEFAULT_GLOBAL_AMOUNT),
         Group::Numerator => set_numerator(shell, i64::from(DEFAULT_SIGNATURE.0)),
         Group::Denominator => set_denominator(shell, DEFAULT_SIGNATURE.1),
     }
@@ -368,6 +401,10 @@ pub fn typed(shell: &Shell, group: Group, typed: &[Option<String>; 3]) -> Option
             None => None,
             Some(text) => set_tempo(shell, text.replace(',', ".").parse::<f64>().ok()?),
         },
+        Group::GlobalAmount => match entered(0)? {
+            None => None,
+            Some(text) => set_global_amount(shell, text.replace(',', ".").parse::<f64>().ok()?),
+        },
         Group::Numerator => set_numerator(shell, whole(0, -1)?),
         Group::Denominator => {
             let typed = whole(0, -1)?;
@@ -405,6 +442,21 @@ fn set_tempo(shell: &Shell, bpm: f64) -> Option<Invocation> {
     let map = TempoMap::constant(Bpm::new(bpm).ok()?);
     (shell.editor().document().settings().tempo != map)
         .then(|| Invocation::new(ids::SET_TEMPO, json!({ "tempo": map })))
+}
+
+/// `groove.set_global_amount`, brought within 0 to 130 percent and to tenths
+/// of a percent, if it changes the amount.
+fn set_global_amount(shell: &Shell, percent: f64) -> Option<Invocation> {
+    if !percent.is_finite() {
+        return None;
+    }
+    let amount = (percent.clamp(0.0, GLOBAL_AMOUNT_MAX) * 10.0).round() / 10.0;
+    ((global_amount(shell) - amount).abs() > f64::EPSILON).then(|| {
+        Invocation::new(
+            bl_shell_spec::groove::SET_GLOBAL_AMOUNT,
+            json!({ "amount": amount }),
+        )
+    })
 }
 
 /// `song.set_time_signatures` with the numerator `numerator` (brought

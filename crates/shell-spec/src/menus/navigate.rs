@@ -7,6 +7,7 @@ use crate::commands::{
     FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR, FOCUS_TOGGLE_TAB_NAVIGATION,
     FOCUS_TOGGLE_WRAP_NAVIGATION, FOCUS_TUNING,
 };
+use crate::groove::FOCUS_GROOVE_POOL;
 use crate::mixer_view::FOCUS as MIXER_FOCUS;
 
 pub(super) const NAVIGATE: &[Row] = &[
@@ -16,7 +17,7 @@ pub(super) const NAVIGATE: &[Row] = &[
     ("M-NAV-004", "Clip View", Cmd(FOCUS_CLIP_VIEW)),
     ("M-NAV-005", "Device View", Cmd(FOCUS_DEVICE_VIEW)),
     ("M-NAV-006", "Browser", Key(&["S-FOCUS-006"])),
-    ("M-NAV-007", "Groove Pool", Key(&["S-FOCUS-007"])),
+    ("M-NAV-007", "Groove Pool", Cmd(FOCUS_GROOVE_POOL)),
     ("M-NAV-008", "Learn View", Key(&["S-FOCUS-008"])),
     ("M-NAV-009", "Tuning", Cmd(FOCUS_TUNING)),
     SEPARATOR,

@@ -64,10 +64,6 @@ pub(crate) const CLIP_VIEW: Reason = LaterView("the Clip View (milestone M2)");
 pub(crate) const TUNING_SECTION: Reason =
     LaterView("the browser's Tunings label and the Tuning section (WP-6.10)");
 
-pub(crate) const GROOVE_POOL: Reason = LaterView(
-    "the Groove Pool, the Clip View's groove controls and the browser's Grooves label (WP-6.20)",
-);
-
 // The Clip View's note editing (WP-2.3): the pointer reaches each of
 // these — a click, a marquee, and drags in the note editor — and their
 // keys (shortcuts.md, `note-editor` and `note-selection`) come with a

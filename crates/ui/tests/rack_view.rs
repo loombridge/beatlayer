@@ -724,13 +724,16 @@ fn the_device_list_shows_racks_as_a_hierarchy() {
         .1;
     let nodes = Harness::nodes(&right_click(&mut h, selector.center()));
     // Every device, chain by chain, and a device two levels down.
+    // A name may be a device's at more than one level: the first is the
+    // shallowest.
     let level = |label: &str| {
         nodes
             .iter()
-            .find(|n| n.role == Role::Button && n.label == label)
+            .filter(|n| n.role == Role::Button && n.label == label)
+            .map(|n| n.description.clone())
+            .filter(|description| description.starts_with("Level"))
+            .min()
             .unwrap_or_else(|| panic!("no item {label:?}"))
-            .description
-            .clone()
     };
     assert_eq!(level("Audio Effect Rack"), "Level 1");
     assert_eq!(level("Wet"), "Level 2");

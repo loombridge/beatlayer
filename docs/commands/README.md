@@ -12694,6 +12694,8 @@ What `groove.to_clip` returns.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip it made. |
+| `track` | [`TrackId`](#trackid) | yes | The track it is on: the one named, or the new one. |
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove it holds the notes of. |
 
 <details><summary>JSON Schema</summary>
 
@@ -12704,10 +12706,20 @@ What `groove.to_clip` returns.
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip it made."
+    },
+    "groove": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove it holds the notes of."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track it is on: the one named, or the new one."
     }
   },
   "required": [
-    "clip"
+    "clip",
+    "track",
+    "groove"
   ],
   "type": "object"
 }
@@ -12772,6 +12784,45 @@ What `groove.extract` returns.
     "grooves"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `GrooveHotSwap`
+
+What the browser's hot-swap replaces (R32): a groove of the pool, which is a clip's, or the auto-load groove.
+
+One of:
+
+- an object with `groove` ([`GrooveId`](#grooveid)): A groove of the pool.
+- `"auto_load"`: The auto-load groove, whichever it is, or the next one loaded while it has none.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the browser's hot-swap replaces (R32): a groove of the pool, which is a clip's, or the auto-load groove.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "A groove of the pool.",
+      "properties": {
+        "groove": {
+          "$ref": "#/$defs/GrooveId"
+        }
+      },
+      "required": [
+        "groove"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "auto_load",
+      "description": "The auto-load groove, whichever it is, or the next one loaded while it has none.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -12976,6 +13027,7 @@ What `groove.pool` returns.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `view` | [`GroovePoolView`](#groovepoolview) | yes | The pool's view: whether it shows, and what is being hot-swapped. |
 | `grooves` | array of [`GroovePoolEntry`](#groovepoolentry) | yes | The grooves, in the order they were added. |
 | `global_amount` | number | yes | The Global Amount, from 0 to 130 percent. |
 | `auto_load` | boolean | yes | The Auto Load Groove switch. |
@@ -13013,12 +13065,57 @@ What `groove.pool` returns.
         "$ref": "#/$defs/GroovePoolEntry"
       },
       "type": "array"
+    },
+    "view": {
+      "$ref": "#/$defs/GroovePoolView",
+      "description": "The pool's view: whether it shows, and what is being hot-swapped."
     }
   },
   "required": [
+    "view",
     "grooves",
     "global_amount",
     "auto_load"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GroovePoolView`
+
+The Groove Pool's view: what `view.toggle_groove_pool`, `focus.groove_pool` and `groove.hot_swap` return, and `groove.pool` holds. View state: never part of the set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the pool shows in the browser column. |
+| `hot_swap` | [`GrooveHotSwap`](#groovehotswap) or null | no | What the browser's hot-swap replaces, while it is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Groove Pool's view: what `view.toggle_groove_pool`, `focus.groove_pool` and `groove.hot_swap` return, and `groove.pool` holds. View state: never part of the set.",
+  "properties": {
+    "hot_swap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrooveHotSwap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the browser's hot-swap replaces, while it is on."
+    },
+    "shown": {
+      "description": "Whether the pool shows in the browser column.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown"
   ],
   "type": "object"
 }
@@ -13981,6 +14078,7 @@ One of:
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
 - `"tuning"`: A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).
+- `"groove"`: A groove file (`.blgroove`), which loads into the Groove Pool, or replaces the groove being hot-swapped (WP-6.20; the grooves spec R32, R33).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 - `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
@@ -14031,6 +14129,11 @@ One of:
     {
       "const": "tuning",
       "description": "A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).",
+      "type": "string"
+    },
+    {
+      "const": "groove",
+      "description": "A groove file (`.blgroove`), which loads into the Groove Pool, or replaces the groove being hot-swapped (WP-6.20; the grooves spec R32, R33).",
       "type": "string"
     },
     {
@@ -20837,6 +20940,7 @@ One of:
 - `"sidebar"`: The sidebar's labels.
 - `"content"`: The content pane's list.
 - `"search"`: The search field.
+- `"groove_pool"`: The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.
 
 <details><summary>JSON Schema</summary>
 
@@ -20857,6 +20961,11 @@ One of:
     {
       "const": "search",
       "description": "The search field.",
+      "type": "string"
+    },
+    {
+      "const": "groove_pool",
+      "description": "The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.",
       "type": "string"
     }
   ]
@@ -21874,7 +21983,7 @@ The preview: the switch, the volume, and what plays.
 | `position_seconds` | number | yes | How far it has played, in seconds. |
 | `length_seconds` | number | yes | How long it is, in seconds. |
 | `loading` | string or null | no | The file being decoded for a preview, if any. |
-| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it. |
+| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, a clip file whose audio is missing, or a preset that is an effect's or needs a plug-in this machine lacks. The preview strip shows it. |
 | `playing` | string or null | no | The file playing, if any. |
 
 <details><summary>JSON Schema</summary>
@@ -21896,7 +22005,7 @@ The preview: the switch, the volume, and what plays.
       ]
     },
     "note": {
-      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it.",
+      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, a clip file whose audio is missing, or a preset that is an effect's or needs a plug-in this machine lacks. The preview strip shows it.",
       "type": [
         "string",
         "null"

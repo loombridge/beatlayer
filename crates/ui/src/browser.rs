@@ -56,6 +56,8 @@ pub fn part_of(id: Id) -> Option<&'static str> {
         Some("sidebar")
     } else if id == list_id() {
         Some("content")
+    } else if id == crate::groove_pool::pool_id() {
+        Some("groove_pool")
     } else {
         None
     }
@@ -283,6 +285,8 @@ pub enum ClipDropTarget {
     Folder(String),
     /// The Clips label: the User Library's `Clips` folder.
     Clips,
+    /// The Groove Pool: the clip's groove is extracted (grooves R28).
+    GroovePool,
 }
 
 /// A save that waits for the person's answer to Collect Files on Export's
@@ -349,6 +353,15 @@ pub fn save_clip(
     let folder = match target {
         ClipDropTarget::Folder(path) => Some(path.clone()),
         ClipDropTarget::Clips => None,
+        ClipDropTarget::GroovePool => {
+            // Spec: grooves R28 (I-DROP-010). A groove is extracted.
+            invoke(
+                events,
+                bl_shell::groove_commands::EXTRACT,
+                json!({ "clips": [clip] }),
+            );
+            return;
+        }
     };
     if shell.clip_save_asks(clip, folder.as_deref().map(Path::new)) {
         let what = SaveWhat::Clip(clip);
@@ -373,6 +386,15 @@ pub fn save_clips_as_set(
     target: &ClipDropTarget,
     events: &mut Vec<UiEvent>,
 ) {
+    if *target == ClipDropTarget::GroovePool {
+        // Spec: grooves R28. A groove is extracted from each.
+        invoke(
+            events,
+            bl_shell::groove_commands::EXTRACT,
+            json!({ "clips": clips }),
+        );
+        return;
+    }
     let ClipDropTarget::Folder(folder) = target else {
         for clip in clips {
             save_clip(ctx, shell, clip, target, events);
@@ -465,7 +487,7 @@ fn drop_tracks(
 
 /// While a clip is dragged, outlines `rect` and notes `target` when the
 /// pointer is over it.
-fn note_clip_target(ui: &Ui, theme: &Theme, rect: Rect, target: ClipDropTarget) {
+pub(crate) fn note_clip_target(ui: &Ui, theme: &Theme, rect: Rect, target: ClipDropTarget) {
     let ctx = ui.ctx();
     if !ctx
         .data(|data| data.get_temp::<bool>(clip_drag_id()))
@@ -719,16 +741,20 @@ impl BrowserUi {
         if view.focus_requests() != self.seen_focus_requests {
             self.seen_focus_requests = view.focus_requests();
             let target = match view.focus() {
-                Part::Search => search_id(),
-                Part::Sidebar => sidebar_id(),
-                Part::Content => list_id(),
+                Part::Search => Some(search_id()),
+                Part::Sidebar => Some(sidebar_id()),
+                Part::Content => Some(list_id()),
+                // Spec: grooves R24. The pool takes it itself.
+                Part::GroovePool => None,
             };
             // Asking again would reset the arrows' lock filter.
-            ui.memory_mut(|m| {
-                if !m.has_focus(target) {
-                    m.request_focus(target);
-                }
-            });
+            if let Some(target) = target {
+                ui.memory_mut(|m| {
+                    if !m.has_focus(target) {
+                        m.request_focus(target);
+                    }
+                });
+            }
             // Spec: browser-tags R22. Cmd-F selects the search field's text
             // rather than clearing it, so typing replaces it.
             if view.focus() == Part::Search {
@@ -2137,7 +2163,7 @@ impl BrowserUi {
             ),
             ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Clip | ItemKind::SessionClip => glyph(&painter, mark, Glyph::Clip, ink),
-            ItemKind::Preset | ItemKind::ChordBank | ItemKind::Tuning => {
+            ItemKind::Preset | ItemKind::ChordBank | ItemKind::Tuning | ItemKind::Groove => {
                 glyph(&painter, mark, Glyph::Preset, ink);
             }
             ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
@@ -2311,6 +2337,14 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
+                // Spec: grooves R32, R33. A groove loads into the pool, or
+                // replaces the groove being hot-swapped.
+                ItemKind::Groove => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
                 // Spec: midi-generators R26, tunings R27. A chord bank loads
                 // into Stacks, and a tuning becomes the set's.
                 ItemKind::ChordBank | ItemKind::Tuning => {
@@ -2404,6 +2438,16 @@ impl BrowserUi {
                         plugin: Some(item.path.clone()),
                     },
                 );
+            } else if item.kind == ItemKind::Groove {
+                // Spec: grooves R28. A groove file: dropped on a clip, a MIDI
+                // track or the pool.
+                DragAndDrop::set_payload(
+                    ui.ctx(),
+                    crate::groove_pool::GrooveDrag {
+                        groove: None,
+                        path: Some(item.path.clone()),
+                    },
+                );
             } else if let Some(drag) = set_drag(item, &paths) {
                 // Spec: set-exchange R3, R4, R8. A set, tracks of one or a
                 // Devices row.
@@ -2434,6 +2478,9 @@ impl BrowserUi {
             .or_else(|| {
                 DragAndDrop::payload::<DevicesDrag>(ui.ctx()).map(|d| (d.paths.clone(), false))
             });
+        if response.dragged() && item.kind == ItemKind::Groove {
+            drag_label(ui, theme, &item.name);
+        }
         if response.dragged()
             && let Some((drag, plugin)) = dragged
             && let Some(pointer) = ui.input(|i| i.pointer.hover_pos())
@@ -2481,6 +2528,7 @@ impl BrowserUi {
             ItemKind::Preset => "Beatlayer device preset",
             ItemKind::ChordBank => "Stacks chord bank",
             ItemKind::Tuning => "tuning",
+            ItemKind::Groove => "groove",
             ItemKind::Plugin => match item.format {
                 Some(bl_model::PluginFormat::Clap) => "CLAP plug-in",
                 Some(bl_model::PluginFormat::Vst3) => "VST3 plug-in",
@@ -2823,6 +2871,8 @@ impl BrowserUi {
         }
         match part {
             Part::Sidebar => Self::sidebar_keys(shell, up, down, right, events),
+            // The Groove Pool's keys are its own.
+            Part::GroovePool => {}
             Part::Content | Part::Search => {
                 self.list_keys(shell, up, down, left, right, shift, cmd, events);
                 if shift_enter && view.can_run(ids::PREVIEW, &json!({})) {
@@ -2981,6 +3031,7 @@ impl BrowserUi {
         let ctx = ui.ctx().clone();
         let payload = DragAndDrop::payload::<BrowserDrag>(&ctx);
         let set_payload = DragAndDrop::payload::<SetDrag>(&ctx);
+        let groove_payload = DragAndDrop::payload::<crate::groove_pool::GrooveDrag>(&ctx);
         let (dropped, hovering, released, pointer, modifiers) = ctx.input(|i| {
             let dropped: Vec<String> = i
                 .raw
@@ -2997,7 +3048,12 @@ impl BrowserUi {
                 i.modifiers,
             )
         });
-        if payload.is_none() && set_payload.is_none() && dropped.is_empty() && !hovering {
+        if payload.is_none()
+            && set_payload.is_none()
+            && groove_payload.is_none()
+            && dropped.is_empty()
+            && !hovering
+        {
             return;
         }
         if crate::window::main_view(ui.ctx(), shell) != MainView::Arrangement {
@@ -3051,6 +3107,74 @@ impl BrowserUi {
                 ignore_snap,
             )
         });
+        if let Some(drag) = groove_payload {
+            // Spec: grooves R28 (I-DROP-017). A groove dropped on a clip
+            // becomes its groove; on a MIDI track's lane or in the drop area
+            // it becomes a clip of its notes.
+            let hit = pointer.filter(|p| lanes.contains(*p)).and_then(|p| {
+                bl_shell::browser::drop::groove_drop_target(
+                    view,
+                    doc,
+                    lanes.height(),
+                    p.x - lanes.left(),
+                    p.y - lanes.top(),
+                    ignore_snap,
+                )
+            });
+            match &hit {
+                Some((_, target)) => {
+                    draw_target(
+                        ui,
+                        theme,
+                        lanes,
+                        view,
+                        doc,
+                        target,
+                        "Drop to make a new MIDI track",
+                    );
+                }
+                None if pointer.is_some_and(|p| main_view.contains(p)) => {
+                    ctx.set_cursor_icon(CursorIcon::NoDrop);
+                }
+                None => {}
+            }
+            if released {
+                DragAndDrop::clear_payload(&ctx);
+                if let Some((what, target)) = hit {
+                    // The groove of the pool, or the file's.
+                    let mut args = json!({});
+                    if let Some(groove) = drag.groove {
+                        args["groove"] = json!(groove);
+                    }
+                    if let Some(path) = &drag.path {
+                        args["path"] = json!(path);
+                    }
+                    match what {
+                        bl_shell::browser::drop::GrooveDrop::Clip(clip) => match drag.groove {
+                            Some(groove) => invoke(
+                                events,
+                                "clip.set_groove",
+                                json!({ "clips": [clip], "groove": groove }),
+                            ),
+                            None => {
+                                args["clips"] = json!([clip]);
+                                invoke(events, bl_shell::groove_commands::LOAD, args);
+                            }
+                        },
+                        bl_shell::browser::drop::GrooveDrop::Track(track) => {
+                            args["track"] = json!(track);
+                            args["at"] = json!(target.at);
+                            invoke(events, bl_shell::groove_commands::TO_CLIP, args);
+                        }
+                        bl_shell::browser::drop::GrooveDrop::NewTrack => {
+                            args["at"] = json!(target.at);
+                            invoke(events, bl_shell::groove_commands::TO_CLIP, args);
+                        }
+                    }
+                }
+            }
+            return;
+        }
         if let Some(drag) = set_payload {
             // Spec: set-exchange R3, R8 (I-DROP-021, I-DROP-022). A set, its
             // tracks or a chain go into the drop area under the tracks.
@@ -3215,7 +3339,7 @@ fn draw_target(
 /// a part (a hover-only one) doesn't get its place by itself. The tree's
 /// root carries the interface zoom (WP-1.17), so its nodes' bounds are in
 /// points, as the main window's regions are.
-fn bounds(rect: Rect) -> egui::accesskit::Rect {
+pub(crate) fn bounds(rect: Rect) -> egui::accesskit::Rect {
     egui::accesskit::Rect {
         x0: rect.left().into(),
         y0: rect.top().into(),
@@ -3358,6 +3482,25 @@ fn file_name(path: &str) -> String {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default()
+}
+
+/// A label that follows the pointer while something is dragged.
+pub(crate) fn drag_label(ui: &Ui, theme: &Theme, text: &str) {
+    let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        Id::new("browser-drag"),
+    ));
+    let galley = painter.layout_no_wrap(text.to_owned(), theme.small_font(), theme.colors.text.0);
+    let at = pointer + vec2(12.0, 4.0);
+    painter.rect_filled(
+        Rect::from_min_size(at, galley.size()).expand(3.0),
+        theme.sizes.corner,
+        theme.colors.control.0,
+    );
+    painter.galley(at, galley, theme.colors.text.0);
 }
 
 /// Scrolls an area with the wheel while the pointer is over it; returns

@@ -19,8 +19,10 @@ use bl_model::{
 use bl_project::groove_file::{GROOVE_EXTENSION, GrooveFile, GrooveFileError};
 use bl_shell_spec::groove::{
     self as ids, COMMIT_STEP, CommitGrooveArgs, EXTRACT_STEP, ExtractGrooveArgs, GrooveClip,
-    GrooveCommitted, GrooveExtracted, GrooveLoaded, GroovePoolEntry, GroovePoolState, GrooveSaved,
-    GrooveToClipArgs, LOAD_STEP, LoadGrooveArgs, SaveGrooveArgs, TO_CLIP_STEP,
+    GrooveCommitted, GrooveExtracted, GrooveHotSwap, GrooveLoaded, GroovePoolEntry,
+    GroovePoolState, GroovePoolView, GrooveSaved, GrooveToClipArgs, HOT_SWAP_STEP,
+    HotSwapGrooveArgs, LOAD_STEP, LoadGrooveArgs, SaveGrooveArgs, TO_CLIP_STEP,
+    ToggleGroovePoolArgs,
 };
 use serde_json::Value;
 
@@ -72,8 +74,99 @@ impl Shell {
                 Self::args::<NoArgs>(id, args)?;
                 Ok(to_value(&self.groove_pool()))
             }
+            ids::VIEW_TOGGLE_GROOVE_POOL => {
+                // Spec: grooves R24. View state: no undo step.
+                let ToggleGroovePoolArgs { shown } = Self::args(id, args)?;
+                self.groove_pool.shown = shown.unwrap_or(!self.groove_pool.shown);
+                if self.groove_pool.shown {
+                    self.show_browser_in(self.acting_window());
+                }
+                self.touch();
+                Ok(to_value(&self.groove_pool_view()))
+            }
+            ids::FOCUS_GROOVE_POOL => {
+                // Spec: grooves R24. The pool shows, and takes the keyboard.
+                Self::args::<NoArgs>(id, args)?;
+                self.groove_pool.shown = true;
+                self.run(
+                    crate::browser_commands::FOCUS_BROWSER,
+                    json!({ "part": "groove_pool" }),
+                )?;
+                Ok(to_value(&self.groove_pool_view()))
+            }
+            ids::HOT_SWAP => self.hot_swap_groove(id, args),
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// Whether the Control Bar shows the Global Amount field: while the pool
+    /// holds a groove (R30, L-CTRL-008).
+    #[must_use]
+    pub fn global_amount_shown(&self) -> bool {
+        !self.editor.document().settings().grooves.pool.is_empty()
+    }
+
+    /// The Groove Pool's view: whether it shows and what the browser's
+    /// hot-swap replaces (R24, R32). A hot-swap aimed at a groove that has
+    /// left the pool is over.
+    #[must_use]
+    pub fn groove_pool_view(&self) -> GroovePoolView {
+        let pool = &self.editor.document().settings().grooves;
+        let hot_swap = match self.groove_pool.hot_swap {
+            Some(GrooveHotSwap::Groove(groove)) if pool.get(groove).is_none() => None,
+            other => other,
+        };
+        GroovePoolView {
+            shown: self.groove_pool.shown,
+            hot_swap,
+        }
+    }
+
+    /// `groove.hot_swap` (R32): makes a groove, or the auto-load groove, the
+    /// browser's target, and opens its Grooves label; or ends it.
+    fn hot_swap_groove(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let HotSwapGrooveArgs {
+            groove,
+            auto_load,
+            on,
+        } = Self::args(id, args)?;
+        let target = match (groove, auto_load) {
+            (Some(_), true) => {
+                return Err(ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: "name `groove` or `auto_load`, not both".to_owned(),
+                });
+            }
+            (Some(groove), false) => {
+                self.pool_groove(id, groove)?;
+                Some(GrooveHotSwap::Groove(groove))
+            }
+            (None, true) => Some(GrooveHotSwap::AutoLoad),
+            (None, false) => None,
+        };
+        let armed = self.groove_pool_view().hot_swap;
+        match target {
+            Some(target) if on.unwrap_or(armed != Some(target)) => {
+                self.groove_pool.hot_swap = Some(target);
+                // The Grooves label opens, with the search cleared as a new
+                // step, as a device's hot-swap does.
+                self.browser_view.hot_swap_started();
+                self.show_browser_in(self.acting_window());
+                self.run(
+                    crate::browser_commands::OPEN_PLACE,
+                    json!({ "label": "grooves" }),
+                )?;
+            }
+            None if on == Some(true) => {
+                return Err(ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: "name `groove` or `auto_load` to hot-swap".to_owned(),
+                });
+            }
+            _ => self.groove_pool.hot_swap = None,
+        }
+        self.touch();
+        Ok(to_value(&self.groove_pool_view()))
     }
 
     /// The set's grooves as `groove.pool` reports them (R23).
@@ -82,6 +175,7 @@ impl Shell {
         let doc = self.editor.document();
         let pool = &doc.settings().grooves;
         GroovePoolState {
+            view: self.groove_pool_view(),
             grooves: pool
                 .pool
                 .iter()
@@ -165,20 +259,66 @@ impl Shell {
             })
     }
 
-    /// `groove.load` (R5).
-    fn load_groove(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let LoadGrooveArgs { path, clips } = Self::args(id, args)?;
+    /// The groove file at `path`, named after the file when it holds no name.
+    fn read_groove(&self, id: &str, path: &str) -> Result<GrooveFile, ShellError> {
         let path = PathBuf::from(path);
         let mut file = GrooveFile::load(&path).map_err(|error| file_error(id, &error))?;
         if file.name.is_empty() {
             file.name = bl_project::preset::preset_name(&path);
         }
+        Ok(file)
+    }
+
+    /// `groove.load` (R5).
+    fn load_groove(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        let LoadGrooveArgs {
+            path,
+            clips,
+            replace,
+        } = Self::args(id, args)?;
+        let file = self.read_groove(id, &path)?;
+        // Spec: grooves R32. What the file's groove takes the place of: the
+        // old groove, the clips that used it, and the auto-load setting.
+        let doc = self.editor.document();
+        let pool = &doc.settings().grooves;
+        let old = match replace {
+            Some(GrooveHotSwap::Groove(old)) => Some(self.pool_groove(id, old)?.id),
+            Some(GrooveHotSwap::AutoLoad) => pool.auto_load_groove,
+            None => None,
+        };
+        let swapped = old.map(|old| (old, doc.clips_using_groove(old), pool.auto_load_groove));
         let groove: GrooveId = self.editor.new_id();
         let name = file.name.clone();
-        self.groove_edit(id, LOAD_STEP, |editor| {
+        let step = if replace.is_some() {
+            HOT_SWAP_STEP
+        } else {
+            LOAD_STEP
+        };
+        self.groove_edit(id, step, |editor| {
             editor.apply(Command::AddGroove {
                 groove: file.into_groove(groove),
             })?;
+            let auto_load = replace == Some(GrooveHotSwap::AutoLoad);
+            if let Some((old, users, auto)) = swapped {
+                if !users.is_empty() {
+                    editor.apply(Command::SetClipGroove {
+                        clips: users,
+                        groove: Some(groove),
+                    })?;
+                }
+                if auto == Some(old) {
+                    editor.apply(Command::SetAutoLoadGroove {
+                        enabled: None,
+                        groove: Some(groove),
+                    })?;
+                }
+                editor.apply(Command::DeleteGroove { groove: old })?;
+            } else if auto_load {
+                editor.apply(Command::SetAutoLoadGroove {
+                    enabled: None,
+                    groove: Some(groove),
+                })?;
+            }
             if !clips.is_empty() {
                 editor.apply(Command::SetClipGroove {
                     clips,
@@ -187,6 +327,13 @@ impl Shell {
             }
             Ok(())
         })?;
+        // A hot-swap aimed at the groove that left stays on, aimed at its
+        // replacement.
+        if let (Some(old), Some(GrooveHotSwap::Groove(armed))) = (old, self.groove_pool.hot_swap)
+            && old == armed
+        {
+            self.groove_pool.hot_swap = Some(GrooveHotSwap::Groove(groove));
+        }
         Ok(to_value(&GrooveLoaded { groove, name }))
     }
 
@@ -238,6 +385,8 @@ impl Shell {
         GrooveFile::of(&groove)
             .save(&path)
             .map_err(|error| file_error(id, &error))?;
+        // The Grooves label lists it.
+        self.browser_view.files_written();
         self.touch();
         Ok(to_value(&GrooveSaved {
             path: path.display().to_string(),
@@ -246,48 +395,96 @@ impl Shell {
 
     /// `groove.to_clip` (R18).
     fn groove_to_clip(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
-        let GrooveToClipArgs { groove, track, at } = Self::args(id, args)?;
-        let groove = self.pool_groove(id, groove)?;
+        let GrooveToClipArgs {
+            groove,
+            path,
+            track,
+            at,
+        } = Self::args(id, args)?;
         if at < Ticks::ZERO {
             return Err(ShellError::InvalidArgs {
                 command: id.to_owned(),
                 message: "`at` can't be before the song's start".to_owned(),
             });
         }
-        let doc = self.editor.document();
-        match doc.track(track).map(bl_model::Track::kind) {
-            Some(TrackKind::Midi) => {}
-            Some(_) => {
-                return Err(unavailable(
-                    id,
-                    format!("track {} isn't a MIDI track", track.0),
-                ));
+        // A groove of the pool, or a file's, which joins the pool.
+        let (groove, joins) = match (groove, path) {
+            (Some(groove), None) => (self.pool_groove(id, groove)?, false),
+            (None, Some(path)) => {
+                let file = self.read_groove(id, &path)?;
+                (file.into_groove(self.editor.new_id()), true)
             }
-            None => {
+            _ => {
                 return Err(ShellError::InvalidArgs {
                     command: id.to_owned(),
-                    message: format!("track {} does not exist", track.0),
+                    message: "give `groove` or `path`, not both".to_owned(),
                 });
+            }
+        };
+        if let Some(track) = track {
+            match self
+                .editor
+                .document()
+                .track(track)
+                .map(bl_model::Track::kind)
+            {
+                Some(TrackKind::Midi) => {}
+                Some(_) => {
+                    return Err(unavailable(
+                        id,
+                        format!("track {} isn't a MIDI track", track.0),
+                    ));
+                }
+                None => {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("track {} does not exist", track.0),
+                    });
+                }
             }
         }
         let clip: ClipId = self.editor.new_id();
+        let new_track: TrackId = track.unwrap_or_else(|| self.editor.new_id());
         let mut data = MidiData::new(groove_notes(&groove));
         data.looping = true;
         data.loop_end = Some(groove.length);
         let mut made = Clip::new(clip, at, groove.length, ClipData::Midi(data));
-        made.name = groove.name;
+        made.name.clone_from(&groove.name);
+        let (groove_id, length, name) = (groove.id, groove.length, groove.name.clone());
+        let look = self.prefs.look.clone();
         self.groove_edit(id, TO_CLIP_STEP, |editor| {
+            if joins {
+                editor.apply(Command::AddGroove { groove })?;
+            }
+            if track.is_none() {
+                let top = editor.document().top_level().len();
+                editor.apply(Command::CreateTrack {
+                    id: new_track,
+                    kind: TrackKind::Midi,
+                    name,
+                    parent: None,
+                    index: top,
+                })?;
+                crate::colours::colour_new(editor, &look, &[new_track], &[])?;
+            }
             crate::arrangement::placing::clear(
                 editor,
-                track,
+                new_track,
                 at,
-                at.saturating_add(groove.length),
+                at.saturating_add(length),
                 &BTreeSet::new(),
             )?;
-            editor.apply(Command::CreateClip { track, clip: made })?;
+            editor.apply(Command::CreateClip {
+                track: new_track,
+                clip: made,
+            })?;
             Ok(())
         })?;
-        Ok(to_value(&GrooveClip { clip }))
+        Ok(to_value(&GrooveClip {
+            clip,
+            track: new_track,
+            groove: groove_id,
+        }))
     }
 
     /// Runs `edit` as one undo step named `label`, and marks the set

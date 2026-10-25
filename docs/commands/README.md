@@ -21977,7 +21977,7 @@ The preview: the switch, the volume, and what plays.
 | `position_seconds` | number | yes | How far it has played, in seconds. |
 | `length_seconds` | number | yes | How long it is, in seconds. |
 | `loading` | string or null | no | The file being decoded for a preview, if any. |
-| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it. |
+| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, a clip file whose audio is missing, or a preset that is an effect's or needs a plug-in this machine lacks. The preview strip shows it. |
 | `playing` | string or null | no | The file playing, if any. |
 
 <details><summary>JSON Schema</summary>
@@ -21999,7 +21999,7 @@ The preview: the switch, the volume, and what plays.
       ]
     },
     "note": {
-      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it.",
+      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, a clip file whose audio is missing, or a preset that is an effect's or needs a plug-in this machine lacks. The preview strip shows it.",
       "type": [
         "string",
         "null"

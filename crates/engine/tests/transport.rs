@@ -649,6 +649,8 @@ fn every_transport_command_runs_by_id() {
         json!({ "recording": true }),
     );
     run(&mut rig, "transport.stop_recording", json!({}));
+    // Spec: transport R23
+    run(&mut rig, "transport.scrub", json!({ "position": 0 }));
 
     let mut registered: Vec<String> = commands
         .iter()
@@ -884,4 +886,133 @@ fn a_locate_replaces_a_jump_waiting_for_a_line() {
         after.extend_from_slice(&rig.last());
     }
     plays_from(&after, 0..after.len(), frames(&tempo, BAR * 4));
+}
+
+/// Where the song plays `count` frames on from `from`, with the Arrangement
+/// loop from `start` to `end` frames, if it is on.
+fn runs_on(from: i64, count: usize, arrangement_loop: Option<(i64, i64)>) -> Vec<f32> {
+    let mut at = from;
+    (0..count)
+        .map(|_| {
+            let now = at as f32;
+            at += 1;
+            if let Some((start, end)) = arrangement_loop
+                && at == end
+            {
+                at = start;
+            }
+            now
+        })
+        .collect()
+}
+
+#[test]
+fn a_held_scrub_loops_its_span_on_exact_frames_until_released_then_playback_goes_on() {
+    // Spec: transport R23; time-editing R25
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    // The span: bar 3, a bar long, from the line at or before 3.2.1.
+    let (span_start, span_end) = (BAR * 2, BAR * 3);
+    let (first, last) = (frames(&tempo, span_start), frames(&tempo, span_end));
+    // An Arrangement loop over the span's second half and beyond, which the
+    // held loop must ignore while it's held.
+    let brace = (BAR * 2 + BAR / 2, BAR);
+    let brace_frames = (frames(&tempo, brace.0), frames(&tempo, brace.0 + brace.1));
+    for block in [1, 64, 512, 4096] {
+        for arrangement_loop in [None, Some(brace_frames)] {
+            let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+            if arrangement_loop.is_some() {
+                set_loop(&mut rig, brace.0, brace.1);
+            }
+            rig.sender.transport(TransportCommand::Play);
+            let mut out = rig.render((bar / 2) as usize, block);
+            rig.sender.transport(TransportCommand::Scrub {
+                point: BAR * 2 + BEAT,
+                held: true,
+            });
+            // The jump waits for the next bar, then the span repeats.
+            out.extend(rig.render((bar * 3) as usize, block));
+            let (at, to) = jump(&out);
+            assert_eq!(to, first, "block {block}");
+            assert_eq!(
+                out[at - 1] as i64 + 1,
+                bar,
+                "block {block}: the next bar line"
+            );
+            for (i, &sample) in out[at..].iter().enumerate() {
+                assert_eq!(
+                    sample as i64,
+                    first + (i as i64) % (last - first),
+                    "block {block}: frame {i} of the held loop"
+                );
+            }
+            // Released a third of the way into a pass: playback carries on
+            // from there, past the span's end.
+            let left = out.len();
+            let release = (bar * 2 / 3) as usize - (left - at) % bar as usize;
+            out.extend(rig.render(release, block));
+            rig.sender.transport(TransportCommand::Scrub {
+                point: BAR * 2 + BEAT,
+                held: false,
+            });
+            let held_to = *out.last().unwrap() as i64;
+            let after = rig.render((bar * 2) as usize, block);
+            let expected = runs_on(held_to + 1, after.len(), arrangement_loop);
+            assert_eq!(after, expected, "block {block}, loop {arrangement_loop:?}");
+            assert!(rig.monitor.state().playing);
+        }
+    }
+}
+
+#[test]
+fn a_held_scrub_while_stopped_starts_playback_at_its_start() {
+    // Spec: transport R23; time-editing R25
+    let tempo = TempoMap::constant(bpm(120.0));
+    // A quarter note long, from the line at or before the point.
+    let (first, last) = (frames(&tempo, BAR + BEAT), frames(&tempo, BAR + BEAT * 2));
+    for block in [1, 64, 512, 4096] {
+        let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Quarter);
+        rig.sender.transport(TransportCommand::Scrub {
+            point: BAR + BEAT * 3 / 2,
+            held: true,
+        });
+        let out = rig.render(((last - first) * 3 + 100) as usize, block);
+        for (i, &sample) in out.iter().enumerate() {
+            assert_eq!(
+                sample as i64,
+                first + (i as i64) % (last - first),
+                "block {block}"
+            );
+        }
+        rig.sender.transport(TransportCommand::Scrub {
+            point: BAR + BEAT * 3 / 2,
+            held: false,
+        });
+        let after = rig.render(2_000, block);
+        let from = out.len() as i64 % (last - first) + first;
+        plays_from(&after, 0..2_000, from);
+    }
+}
+
+#[test]
+fn a_scrub_with_none_held_plays_from_the_point() {
+    // Spec: transport R23; time-editing R28
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Scrub {
+        point: BAR * 5,
+        held: false,
+    });
+    let out = rig.render(1_000, 64);
+    plays_from(&out, 0..1_000, frames(&tempo, BAR * 5));
+    // While the song plays, the jump waits for the next bar line.
+    rig.sender.transport(TransportCommand::Scrub {
+        point: BAR * 8,
+        held: false,
+    });
+    let out = rig.render((bar * 2) as usize, 64);
+    let (at, to) = jump(&out);
+    assert_eq!(to, frames(&tempo, BAR * 8));
+    assert_eq!((out[at - 1] as i64 + 1) % bar, 0);
 }

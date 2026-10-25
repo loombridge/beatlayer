@@ -142,6 +142,7 @@ impl Shell {
                     .open
                     .then(|| self.zoom_percent_of(WindowKind::Second)),
                 outline_view_in_focus: self.outline_view_in_focus(),
+                permanent_scrub_areas: self.permanent_scrub_areas(),
                 use_tab_key_to_move_focus: self.tab_navigation(),
                 wrap_tab_navigation: self.wrap_navigation(),
             },
@@ -274,6 +275,13 @@ impl Shell {
         self.prefs.outline_view_in_focus.0
     }
 
+    /// Whether a click and a hold in the Arrangement's scrub area play and
+    /// loop (Permanent Scrub Areas; the time editing spec, R26).
+    #[must_use]
+    pub fn permanent_scrub_areas(&self) -> bool {
+        self.prefs.permanent_scrub_areas.0
+    }
+
     /// Uses `path` as the browser's User Library, as the app does at
     /// start-up with the preference or the default place (browser R3).
     pub fn set_user_library(&mut self, path: Option<PathBuf>) {
@@ -324,6 +332,14 @@ impl Shell {
             ids::SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.outline_view_in_focus = OnByDefault(on);
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            // Spec: time-editing R26.
+            ids::SETTINGS_SET_PERMANENT_SCRUB_AREAS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.permanent_scrub_areas = OnByDefault(on);
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&SwitchResult { on }))

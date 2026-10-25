@@ -1061,11 +1061,28 @@ fn display_page(
     for row in &NAVIGATION {
         rows.pending(ui, row);
     }
+    // Spec: time-editing R26 (L-SET-010): Permanent Scrub Areas, the one
+    // Mouse and Pen Input setting built so far.
+    rows.heading(ui, "Mouse and Pen Input");
+    let rect = rows.row(ui, "Permanent Scrub Areas", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "permanent-scrub-areas",
+        "Permanent Scrub Areas",
+        rect,
+        shell.permanent_scrub_areas(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_PERMANENT_SCRUB_AREAS,
+            json!({ "on": on }),
+        )));
+    }
     rows.note(
         ui,
         "The zoom scales the main window and this one; View > Zoom and its keys change the \
-         zoom of the window in front. The Mouse and Pen Input and Application Options \
-         settings come with later packages.",
+         zoom of the window in front. The rest of the Mouse and Pen Input settings and the \
+         Application Options settings come with later packages.",
     );
 }
 

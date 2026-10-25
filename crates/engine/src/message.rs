@@ -94,6 +94,19 @@ pub enum TransportCommand {
     /// quantisation, and lands on that line's exact frame (the transport
     /// spec, R22). A second one before the line replaces the first.
     QuantizedLocate(Ticks),
+    /// A press, or its release, in the scrub area (the time editing spec,
+    /// R25 and R28). With `held`, loops the span of the global launch
+    /// quantisation at `point` until it is released, and starts playback at
+    /// its start if the song is stopped (the transport spec, R23). Without
+    /// it, ends a held loop and plays on from where it is; with none held,
+    /// plays from `point` as a click in the scrub area does, a quantised
+    /// locate that starts playback when the song is stopped.
+    Scrub {
+        /// Where the scrub area was pressed or clicked.
+        point: Ticks,
+        /// Whether the button is held.
+        held: bool,
+    },
     /// Moves the insert marker to the song position.
     InsertMarkerToPlayhead,
     /// Moves the insert marker and nothing else: playback, if the song

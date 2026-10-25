@@ -937,6 +937,7 @@ impl GridUi {
         let ctx = ui.ctx().clone();
         let payload = egui::DragAndDrop::payload::<crate::browser::BrowserDrag>(&ctx);
         let set_payload = egui::DragAndDrop::payload::<crate::browser::SetDrag>(&ctx);
+        let groove_payload = egui::DragAndDrop::payload::<crate::groove_pool::GrooveDrag>(&ctx);
         let (dropped, released, pointer, modifiers) = ctx.input(|i| {
             (
                 i.raw
@@ -949,13 +950,43 @@ impl GridUi {
                 i.modifiers,
             )
         });
-        if payload.is_none() && set_payload.is_none() && dropped.is_empty() {
+        if payload.is_none()
+            && set_payload.is_none()
+            && groove_payload.is_none()
+            && dropped.is_empty()
+        {
             return;
         }
         let state = shell.session().state();
         let Some(pos) = pointer else {
             return;
         };
+        if let Some(drag) = groove_payload {
+            // Spec: grooves R28 (I-DROP-017). A groove dropped on a slot's
+            // clip becomes the clip's groove, loaded first if it is a file.
+            let clip = slot_at(session, layout, columns, scenes, state.scroll_y as f32, pos)
+                .and_then(|(track, scene)| shell.editor().document().slot(track, scene))
+                .map(|clip| clip.id);
+            if released {
+                egui::DragAndDrop::clear_payload(&ctx);
+                if let Some(clip) = clip {
+                    events.push(UiEvent::Invoke(match (drag.groove, &drag.path) {
+                        (Some(groove), _) => Invocation::new(
+                            "clip.set_groove",
+                            json!({ "clips": [clip], "groove": groove }),
+                        ),
+                        (None, Some(path)) => Invocation::new(
+                            bl_shell::groove_commands::LOAD,
+                            json!({ "path": path, "clips": [clip] }),
+                        ),
+                        (None, None) => return,
+                    }));
+                }
+            } else if clip.is_none() {
+                ctx.set_cursor_icon(egui::CursorIcon::NoDrop);
+            }
+            return;
+        }
         if let Some(drag) = set_payload {
             // Spec: set-exchange R3, R8 (I-DROP-021, I-DROP-022). A set, its
             // tracks or a chain go into the drop area right of the tracks.

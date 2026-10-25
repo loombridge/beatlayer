@@ -5,6 +5,7 @@ use super::{IMP_12, Row, SEPARATOR, SystemItem};
 use crate::automation::SIMPLIFY;
 use crate::commands::EDIT_INFO_TEXT;
 use crate::devices::COMPARE_COPY;
+use crate::groove::EXTRACT as EXTRACT_GROOVE;
 
 pub(super) const EDIT: &[Row] = &[
     ("M-EDIT-001", "Undo", Key(&["S-EDIT-006"])),
@@ -92,7 +93,7 @@ pub(super) const EDIT: &[Row] = &[
         "Quantize Settings...",
         Key(&["S-NOTE-012", "S-SAMPLE-002"]),
     ),
-    ("M-EDIT-037", "Extract Groove(s)", Pending(None)),
+    ("M-EDIT-037", "Extract Groove(s)", Cmd(EXTRACT_GROOVE)),
     ("M-EDIT-038", "Record Quantization", Submenu),
     ("M-EDIT-038a", "No Quantization", Pending(None)),
     ("M-EDIT-038b", "Quarter-Note Quantization", Pending(None)),

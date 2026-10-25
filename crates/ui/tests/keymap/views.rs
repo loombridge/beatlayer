@@ -210,6 +210,44 @@ fn the_detail_views_shortcuts_reach_their_commands() {
     }
 }
 
+// Spec: grooves R24. Cmd+Option+6 (Ctrl+Alt+6) shows and hides the Groove
+// Pool and Option+6 (Alt+6) moves the keyboard to it, from anywhere.
+#[test]
+fn the_groove_pool_shortcuts_reach_their_commands() {
+    let keymap = Keymap::live12();
+    for (id, command) in [
+        ("S-VIEW-017", "view.toggle_groove_pool"),
+        ("S-FOCUS-007", "focus.groove_pool"),
+    ] {
+        let entry = keymap.entry_for(id).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{id}");
+        assert_eq!(entry.commands.len(), 1, "{id}");
+        assert_eq!(entry.commands[0].id, command, "{id}");
+        assert_eq!(entry.commands[0].contexts, [Context::Global], "{id}");
+    }
+    for platform in [Platform::Mac, Platform::Other] {
+        let (cmd, ctrl) = match platform {
+            Platform::Mac => (true, false),
+            Platform::Other => (false, true),
+        };
+        let toggle = mods(cmd, ctrl, true, false);
+        let focus = mods(false, false, true, false);
+        for contexts in [
+            &[Context::Global][..],
+            &[Context::Browser, Context::Global][..],
+            &[Context::Arrangement, Context::Global][..],
+        ] {
+            let at = |m| {
+                keymap
+                    .resolve(platform, Key::Num6, m, contexts)
+                    .map(|hit| hit.command.id.clone())
+            };
+            assert_eq!(at(toggle).as_deref(), Some("view.toggle_groove_pool"));
+            assert_eq!(at(focus).as_deref(), Some("focus.groove_pool"));
+        }
+    }
+}
+
 // Spec: track-context-menu R16. The whole-track commands have their keys
 // on the track headers, and the Arrangement's own edits keep them where
 // clips or time are selected.

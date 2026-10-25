@@ -135,6 +135,8 @@ pub struct MainWindowUi {
     arrangement: ArrangementUi,
     /// The browser's scrolling and search field (WP-1.10).
     browser: BrowserUi,
+    /// The Groove Pool under the browser's list (WP-6.20).
+    groove_pool: crate::groove_pool::GroovePoolUi,
     /// The Control Bar's transport fields: a value being typed, a drag
     /// (WP-1.18).
     transport: TransportFields,
@@ -272,6 +274,7 @@ impl MainWindowUi {
             pending: None,
             arrangement: ArrangementUi::new(),
             browser: BrowserUi::new(),
+            groove_pool: crate::groove_pool::GroovePoolUi::new(),
             transport: TransportFields::new(),
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
@@ -391,6 +394,7 @@ impl MainWindowUi {
             || self.mixer_typing
             || self.menu_open
             || self.devices.is_typing()
+            || self.groove_pool.is_typing()
             || self.clip_view.is_typing()
             || self.arrangement.is_dragging_header()
             || self.search_field.is_open()
@@ -508,6 +512,18 @@ impl MainWindowUi {
         crate::mapping::set_held(ctx, held_params(shell));
         crate::mapping::set_hover_hold(ctx, None);
         crate::mapping::escape(ctx, self.is_typing(), &mut events);
+        // Spec: grooves R32. Esc ends a hot-swap of a groove, as a device's
+        // ends.
+        if shell.groove_pool_view().hot_swap.is_some()
+            && !self.is_typing()
+            && !ctx.text_edit_focused()
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::groove_commands::HOT_SWAP,
+                json!({ "on": false }),
+            )));
+        }
         self.order = crate::focus::take(ctx);
         crate::focus::set_outlined(ctx, shell.outline_view_in_focus());
         if let Some(step) = self.focus_move.take() {
@@ -546,7 +562,8 @@ impl MainWindowUi {
             let undo_history = (shell.undo_history_open() || shell.save_history_open())
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
             let detail = crate::layout::DetailViews::of(shell.detail_of(self.window))
-                .with_browser_width(shell.browser_view().width());
+                .with_browser_width(shell.browser_view().width())
+                .with_global_amount(shell.global_amount_shown());
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
                 // or Undo History; the Control Bar is cut off.
@@ -576,8 +593,20 @@ impl MainWindowUi {
                     // browser.
                     let browser =
                         crate::device_view::hot_swap_bar(ui, shell, theme, browser, &mut events);
+                    // Spec: grooves R24. The Groove Pool takes the column's
+                    // lower half, the browser above it shrinking to make
+                    // room.
+                    let (browser, pool) = if shell.groove_pool_view().shown {
+                        let (browser, pool) = crate::groove_pool::split(browser);
+                        (browser, Some(pool))
+                    } else {
+                        (browser, None)
+                    };
                     self.browser.show(ui, shell, theme, browser, &mut events);
                     tag_editor = shell.browser_view().tag_editor().then_some(browser);
+                    if let Some(pool) = pool {
+                        self.groove_pool.show(ui, shell, theme, pool, &mut events);
+                    }
                 }
             }
             // Spec: browser R29. The browser's right edge, in the gap
@@ -1126,6 +1155,11 @@ impl MainWindowUi {
             }
             // The assistant's toggle stays the main window's alone (D24).
             if self.window == WindowKind::Second && *el == Element::AssistantToggle {
+                continue;
+            }
+            // Spec: grooves R30. The Global Amount shows while the pool holds
+            // a groove, and the layout has room for it.
+            if *el == Element::GlobalAmount && rect.width() <= 0.0 {
                 continue;
             }
             let mut look = self

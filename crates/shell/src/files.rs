@@ -1182,6 +1182,24 @@ pub fn factory_default_set() -> Editor {
         )
         .expect("the factory default set's scenes are valid");
     }
+    // Spec: grooves R38. Swing 16ths 60 is the auto-load groove, with the
+    // Global Amount at 0 %, so a new MIDI clip carries a groove that
+    // changes nothing until the amount is raised.
+    let swing = bl_project::groove_file::bundled()
+        .into_iter()
+        .find(|groove| groove.name == "Swing 16ths 60")
+        .expect("Swing 16ths 60 is a bundled groove");
+    let groove: bl_model::GrooveId = editor.new_id();
+    for (id, args) in [
+        ("groove.add", json!({ "groove": swing.into_groove(groove) })),
+        (
+            "groove.set_auto_load",
+            json!({ "enabled": true, "groove": groove }),
+        ),
+        ("groove.set_global_amount", json!({ "amount": 0.0 })),
+    ] {
+        registry::run(&mut editor, id, args).expect("the factory default set's groove is valid");
+    }
     editor
         .clear_history()
         .expect("no transaction is open while building the default set");

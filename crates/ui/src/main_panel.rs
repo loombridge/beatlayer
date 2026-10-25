@@ -12,13 +12,13 @@
 //! place and order only.
 
 use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
-use bl_model::{AudioData, Clip, ClipData, ClipId, Document};
+use bl_model::{AudioData, Clip, ClipData, ClipId, Document, GrooveId};
 use bl_shell::clip_properties_commands::{Marker, Properties};
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{
-    Align2, Event, Id, Key, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo, WidgetType,
-    pos2, vec2,
+    Align2, Event, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2, WidgetInfo,
+    WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -39,6 +39,10 @@ const GAP: f32 = 3.0;
 const MARGIN: f32 = 4.0;
 /// A signature field's size.
 const SIGNATURE: Vec2 = vec2(40.0, 17.0);
+/// The Clip Groove chooser's width, and a Hot-Swap Groove or Commit button's
+/// side.
+const CHOOSER: f32 = 62.0;
+const ICON: f32 = 15.0;
 /// What one step of a field moves: a sixteenth of the clip's contents, or a
 /// hundredth of a second in an unwarped clip's file.
 const STEP_SECONDS: f64 = 0.01;
@@ -203,7 +207,7 @@ fn parse_time(text: &str) -> Option<f64> {
 }
 
 /// What the person did to a field.
-enum Entry {
+pub(crate) enum Entry {
     /// Typed a value and pressed Return.
     Typed(String),
     /// Dragged or pressed Up or Down by this many steps.
@@ -300,13 +304,29 @@ fn typing_id() -> Id {
     Id::new("clip-field-typing")
 }
 
+/// Where a [`field`] is in the window, for the Tab order, and whether it is
+/// drawn grey.
+#[derive(Clone, Copy)]
+pub(crate) struct Place {
+    pub area: Area,
+    pub dim: bool,
+}
+
 /// A field that shows a position or a length and takes a typed value (Return
 /// to confirm, Esc to cancel) or steps by dragging or Up and Down. The keys
 /// go to it while it has the keyboard focus, as to a text field.
-fn field(ui: &mut Ui, theme: &Theme, name: &str, rect: Rect, text: &str) -> Option<Entry> {
-    let id = Id::new(("number-box", name));
+pub(crate) fn field(
+    ui: &mut Ui,
+    theme: &Theme,
+    id: Id,
+    name: &str,
+    rect: Rect,
+    text: &str,
+    place: Place,
+) -> (Option<Entry>, egui::Response) {
+    let Place { area, dim } = place;
     let response = ui.interact(rect, id, Sense::click_and_drag());
-    crate::focus::register(ui.ctx(), id, Area::Detail, None);
+    crate::focus::register(ui.ctx(), id, area, None);
     if response.clicked() || response.drag_started() {
         response.request_focus();
     }
@@ -425,7 +445,7 @@ fn field(ui: &mut Ui, theme: &Theme, name: &str, rect: Rect, text: &str) -> Opti
         Align2::CENTER_CENTER,
         typed.as_deref().unwrap_or(text),
         theme.small_font(),
-        c.text.0,
+        if dim { c.pending.0 } else { c.text.0 },
     );
     if response.has_focus() && crate::focus::outlined(&response.ctx) {
         painter.rect_stroke(
@@ -446,10 +466,13 @@ fn field(ui: &mut Ui, theme: &Theme, name: &str, rect: Rect, text: &str) -> Opti
         node.add_action(accesskit::Action::Increment);
         node.add_action(accesskit::Action::Decrement);
     });
-    result.or((steps != 0).then_some(Entry::Steps(steps)))
+    (
+        result.or((steps != 0).then_some(Entry::Steps(steps))),
+        response,
+    )
 }
 
-fn digit(key: Key) -> Option<char> {
+pub(crate) fn digit(key: Key) -> Option<char> {
     Some(match key {
         Key::Num0 => '0',
         Key::Num1 => '1',
@@ -540,6 +563,106 @@ fn edit_marker(events: &mut Vec<UiEvent>, targets: &[&Clip], marker: Marker, val
     }
 }
 
+/// The Groove row's controls (the grooves spec R29): the Clip Groove chooser,
+/// listing None and then the pool's grooves and showing the groove of the clip
+/// the Clip View shows, which sets every clip it shows; Hot-Swap Groove, which
+/// makes that groove the browser's hot-swap target; and Commit, which writes
+/// the grooves of the clips it shows into them.
+fn groove_row(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    at: Pos2,
+    shown: &Clip,
+    ids: &[ClipId],
+    events: &mut Vec<UiEvent>,
+) {
+    let state = shell.groove_pool();
+    let chooser = Rect::from_min_size(at, vec2(CHOOSER, FIELD.y));
+    let choices: Vec<widgets::Choice<Option<GrooveId>>> = std::iter::once(widgets::Choice {
+        label: "None".to_owned(),
+        value: None,
+        leds: widgets::NO_LEDS,
+    })
+    .chain(state.grooves.iter().map(|entry| widgets::Choice {
+        label: entry.groove.name.clone(),
+        value: Some(entry.groove.id),
+        leds: widgets::NO_LEDS,
+    }))
+    .collect();
+    crate::focus::register(
+        ui.ctx(),
+        Id::new(("chooser", "clip-groove")),
+        Area::Detail,
+        None,
+    );
+    if let Some(groove) = widgets::chooser(
+        ui,
+        theme,
+        "clip-groove",
+        "Groove",
+        chooser,
+        &choices,
+        Some(&shown.groove),
+        true,
+    ) {
+        let mut args = json!({ "clips": ids });
+        if let Some(groove) = groove {
+            args["groove"] = json!(groove);
+        }
+        invoke(events, "clip.set_groove", args);
+    }
+    let doc = shell.editor().document();
+    let any = ids
+        .iter()
+        .any(|id| doc.clip(*id).is_some_and(|clip| clip.groove.is_some()));
+    let swap = Rect::from_min_size(
+        pos2(chooser.right() + GAP, at.y + (FIELD.y - ICON) / 2.0),
+        vec2(ICON, ICON),
+    );
+    let lit = shown.groove.is_some_and(|groove| {
+        state.view.hot_swap == Some(bl_shell::groove_commands::GrooveHotSwap::Groove(groove))
+    });
+    if crate::groove_pool::icon_button(
+        ui,
+        theme,
+        Id::new(("clip-groove", "hot-swap")),
+        "Hot-Swap Groove",
+        "",
+        swap,
+        crate::groove_pool::Button::HotSwap,
+        lit,
+        shown.groove.is_some(),
+        Area::Detail,
+    ) && let Some(groove) = shown.groove
+    {
+        invoke(
+            events,
+            bl_shell::groove_commands::HOT_SWAP,
+            json!({ "groove": groove }),
+        );
+    }
+    let commit = Rect::from_min_size(pos2(swap.right() + GAP, swap.top()), vec2(ICON, ICON));
+    if crate::groove_pool::icon_button(
+        ui,
+        theme,
+        Id::new(("clip-groove", "commit")),
+        "Commit",
+        "",
+        commit,
+        crate::groove_pool::Button::Commit,
+        false,
+        any,
+        Area::Detail,
+    ) {
+        invoke(
+            events,
+            bl_shell::groove_commands::COMMIT,
+            json!({ "clips": ids }),
+        );
+    }
+}
+
 /// Draws the Main Properties panel for the clip `clip` in `rect`, under the
 /// selector row.
 pub fn show(
@@ -625,7 +748,20 @@ pub fn show(
         if first_control && first {
             ui.memory_mut(|mem| mem.request_focus(Id::new(("number-box", label))));
         }
-        if let Some(entry) = field(ui, theme, label, Rect::from_min_size(at, FIELD), &text) {
+        let id = Id::new(("number-box", label));
+        let rect = Rect::from_min_size(at, FIELD);
+        if let (Some(entry), _) = field(
+            ui,
+            theme,
+            id,
+            label,
+            rect,
+            &text,
+            Place {
+                area: Area::Detail,
+                dim: false,
+            },
+        ) {
             let next = match entry {
                 Entry::Steps(steps) => Some(current + f64::from(steps) * reading.step()),
                 Entry::Typed(typed) if is_length => reading.parse_length(&typed),
@@ -796,16 +932,11 @@ pub fn show(
         pending(ui, theme, "Signature Denominator", denominator, "-", reason);
     }
 
-    // The Groove and Scale rows wait for their own packages.
+    // The Groove row (R29 of the grooves spec): the Clip Groove chooser, with
+    // Hot-Swap Groove and Commit.
     let at = row("Groove");
-    pending(
-        ui,
-        theme,
-        "Groove",
-        Rect::from_min_size(at, vec2(FIELD.x + GAP + SHOW.x, FIELD.y)),
-        "None",
-        "Not built yet: the Groove controls come with the Groove Pool.",
-    );
+    groove_row(ui, shell, theme, at, value, &ids, events);
+    // The Scale row waits for its own package.
     let at = row("Scale");
     pending(
         ui,

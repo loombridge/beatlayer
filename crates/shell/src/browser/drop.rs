@@ -3,7 +3,7 @@
 //! or the drop area under the last track, which makes a new track.
 
 use bl_core::time::Ticks;
-use bl_model::{Document, TakeLaneId, TrackId, TrackKind};
+use bl_model::{ClipId, Document, TakeLaneId, TrackId, TrackKind};
 
 use crate::arrangement::ArrangementView;
 
@@ -95,4 +95,77 @@ pub fn drop_target_on(
         height: lane.map_or(row.height, |lane| lane.height),
         lane: lane.map(|lane| lane.lane),
     })
+}
+
+/// What a groove dropped on the Arrangement does (the grooves spec R28,
+/// I-DROP-017).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GrooveDrop {
+    /// It becomes the groove of the clip under the pointer.
+    Clip(ClipId),
+    /// It becomes a clip of its notes on the MIDI track.
+    Track(TrackId),
+    /// It becomes a clip of its notes on a new MIDI track, from the drop area
+    /// under the tracks.
+    NewTrack,
+}
+
+/// Where a groove dropped at `(x, y)`, in points from the lanes' top-left
+/// corner, lands, with the lanes `height` points tall: on a clip, on a MIDI
+/// track's lane, or in the drop area; `None` on an audio track's empty lane
+/// and elsewhere. The position of a clip made snaps as [`drop_target`]'s
+/// does.
+#[must_use]
+pub fn groove_drop_target(
+    view: &ArrangementView,
+    doc: &Document,
+    height: f32,
+    x: f32,
+    y: f32,
+    ignore_snap: bool,
+) -> Option<(GrooveDrop, DropTarget)> {
+    if x < 0.0 || y < 0.0 || y > height {
+        return None;
+    }
+    let raw = view.horizontal(doc).at(f64::from(x)).max(Ticks::ZERO);
+    let at = if ignore_snap {
+        raw
+    } else {
+        view.snap(doc, raw)
+    };
+    let rows = view.rows(doc);
+    let scroll = view.scroll_y() as f32;
+    let content_y = y + scroll;
+    let last = rows.last().map_or(0.0, |row| row.bottom());
+    if content_y >= last {
+        let top = last - scroll;
+        let target = DropTarget {
+            track: None,
+            at,
+            top,
+            height: height - top,
+            lane: None,
+        };
+        return Some((GrooveDrop::NewTrack, target));
+    }
+    let row = rows
+        .iter()
+        .find(|row| row.top <= content_y && content_y < row.bottom())?;
+    let target = DropTarget {
+        track: Some(row.track),
+        at,
+        top: row.top - scroll,
+        height: row.height,
+        lane: None,
+    };
+    let clip = doc
+        .track(row.track)?
+        .clips()
+        .find(|clip| clip.start <= raw && raw < clip.start + clip.length)
+        .map(|clip| clip.id);
+    match (clip, row.kind) {
+        (Some(clip), _) => Some((GrooveDrop::Clip(clip), target)),
+        (None, TrackKind::Midi) => Some((GrooveDrop::Track(row.track), target)),
+        (None, _) => None,
+    }
 }

@@ -18,6 +18,7 @@ use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
+use crate::groove::EXTRACT as EXTRACT_GROOVE;
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
@@ -67,7 +68,7 @@ const CLIP: &[Row] = &[
         "Edit Info Text",
         Cmd("clip.set_info_text"),
     ),
-    ("C-CLIP-ARR-009", "Extract Groove(s)", Pending(None)),
+    ("C-CLIP-ARR-009", "Extract Groove(s)", Cmd(EXTRACT_GROOVE)),
     ("C-CLIP-ARR-010", "Deactivate Clip", Key(&["S-ARR-027"])),
     ("C-CLIP-ARR-011", "Export MIDI Clip...", Pending(None)),
     SEPARATOR,

@@ -398,28 +398,28 @@
               "Result": {
                 "id": "call_track_drums",
                 "name": "track_create",
-                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"16\":\"added\"}}"
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"17\":\"added\"}}"
               }
             },
             {
               "Result": {
                 "id": "call_track_bass",
                 "name": "track_create",
-                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"17\":\"added\"}}"
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"18\":\"added\"}}"
               }
             },
             {
               "Result": {
                 "id": "call_track_chords",
                 "name": "track_create",
-                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"18\":\"added\"}}"
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"19\":\"added\"}}"
               }
             },
             {
               "Result": {
                 "id": "call_track_lead",
                 "name": "track_create",
-                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"19\":\"added\"}}"
+                "content": "{\"clips\":{},\"devices\":{},\"layout\":true,\"scenes\":{},\"settings\":false,\"tracks\":{\"20\":\"added\"}}"
               }
             }
           ]
@@ -513,28 +513,28 @@
               "Result": {
                 "id": "call_device_drums",
                 "name": "device_add",
-                "content": "{\"default_preset\":null,\"device\":20,\"new_track\":false,\"track\":16}"
+                "content": "{\"default_preset\":null,\"device\":21,\"new_track\":false,\"track\":17}"
               }
             },
             {
               "Result": {
                 "id": "call_device_bass",
                 "name": "device_add",
-                "content": "{\"default_preset\":null,\"device\":21,\"new_track\":false,\"track\":17}"
+                "content": "{\"default_preset\":null,\"device\":22,\"new_track\":false,\"track\":18}"
               }
             },
             {
               "Result": {
                 "id": "call_device_chords",
                 "name": "device_add",
-                "content": "{\"default_preset\":null,\"device\":22,\"new_track\":false,\"track\":18}"
+                "content": "{\"default_preset\":null,\"device\":23,\"new_track\":false,\"track\":19}"
               }
             },
             {
               "Result": {
                 "id": "call_device_lead",
                 "name": "device_add",
-                "content": "{\"default_preset\":null,\"device\":23,\"new_track\":false,\"track\":19}"
+                "content": "{\"default_preset\":null,\"device\":24,\"new_track\":false,\"track\":20}"
               }
             }
           ]
@@ -2284,28 +2284,28 @@
               "Result": {
                 "id": "call_clip_drums",
                 "name": "clip_create",
-                "content": "{\"clips\":{\"24\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+                "content": "{\"clips\":{\"25\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
               }
             },
             {
               "Result": {
                 "id": "call_clip_bass",
                 "name": "clip_create",
-                "content": "{\"clips\":{\"25\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+                "content": "{\"clips\":{\"26\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
               }
             },
             {
               "Result": {
                 "id": "call_clip_chords",
                 "name": "clip_create",
-                "content": "{\"clips\":{\"26\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+                "content": "{\"clips\":{\"27\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
               }
             },
             {
               "Result": {
                 "id": "call_clip_lead",
                 "name": "clip_create",
-                "content": "{\"clips\":{\"27\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
+                "content": "{\"clips\":{\"28\":\"added\"},\"devices\":{},\"layout\":false,\"scenes\":{},\"settings\":false,\"tracks\":{}}"
               }
             }
           ]

@@ -12,6 +12,7 @@ use crate::commands::{
     VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET,
 };
 use crate::file_manager::VIEW_TOGGLE_FILE_MANAGER;
+use crate::groove::VIEW_TOGGLE_GROOVE_POOL;
 use crate::mixer_view::{
     CROSSFADER as MIXER_CROSSFADER, DEVICES as MIXER_DEVICES, IN_OUT as MIXER_IN_OUT,
     PERFORMANCE_IMPACT as MIXER_PERFORMANCE_IMPACT, RETURN_TRACKS as MIXER_RETURN_TRACKS,
@@ -84,7 +85,7 @@ pub(super) const VIEW: &[Row] = &[
     ("M-VIEW-020", "Expression Editor", Key(&["S-CLIPMODE-005"])),
     SEPARATOR,
     ("M-VIEW-021", "Browser", Cmd(VIEW_TOGGLE_BROWSER)),
-    ("M-VIEW-022", "Groove Pool", Key(&["S-VIEW-017"])),
+    ("M-VIEW-022", "Groove Pool", Cmd(VIEW_TOGGLE_GROOVE_POOL)),
     ("M-VIEW-023", "Tuning", Pending(None)),
     (
         "M-VIEW-024",

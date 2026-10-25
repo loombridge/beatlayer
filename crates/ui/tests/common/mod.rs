@@ -18,6 +18,20 @@ use egui::{
 };
 use serde_json::json;
 
+/// The main window's layout for a set like the harness's, which holds the
+/// factory default set's groove, so the Control Bar shows the Global Amount
+/// field (the grooves spec R30, R38).
+pub fn layout(size: egui::Vec2, browser: bool, info_view: bool) -> bl_ui::layout::ShellLayout {
+    bl_ui::layout::ShellLayout::compute_with_detail(
+        size,
+        browser,
+        info_view,
+        None,
+        None,
+        bl_ui::layout::DetailViews::default().with_global_amount(true),
+    )
+}
+
 /// Which window a harness draws.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Window {

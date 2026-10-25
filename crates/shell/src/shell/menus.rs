@@ -101,7 +101,14 @@ impl Shell {
                         }
                         MainView::Session => contexts.push(Context::Session),
                     },
-                    Area::Browser => contexts.push(self.browser_view.focus().context()),
+                    Area::Browser => {
+                        // The Groove Pool's keys are its own: only the
+                        // global ones apply (grooves R24).
+                        let part = self.browser_view.focus().context();
+                        if part != Context::Global {
+                            contexts.push(part);
+                        }
+                    }
                     Area::Detail if self.value_focused => contexts.push(Context::ValueField),
                     // Spec: piano-roll. With the Clip View open, its MIDI
                     // Note Editor holds the detail area's keys.
@@ -195,6 +202,7 @@ impl Shell {
             ids::VIEW_TOGGLE_SECOND_WINDOW => Some(self.second.open),
             ids::VIEW_TOGGLE_BROWSER => Some(self.browser_of(self.acting_window())),
             ids::VIEW_TOGGLE_FULL_HEIGHT_BROWSER => Some(self.browser_view.full_height()),
+            bl_shell_spec::groove::VIEW_TOGGLE_GROOVE_POOL => Some(self.groove_pool.shown),
             ids::VIEW_TOGGLE_CLIP_VIEW => Some(self.detail_of(self.acting_window()).clip_shown()),
             ids::VIEW_TOGGLE_DEVICE_VIEW => {
                 Some(self.detail_of(self.acting_window()).device_shown())
@@ -712,6 +720,11 @@ impl Shell {
         }
         if ids::handles(id) || transport_ids::handles(id) {
             return true;
+        }
+        if id == bl_shell_spec::groove::EXTRACT && args.get("clips").is_none() {
+            // Spec: grooves R34. Extract Groove(s) is disabled while no clip
+            // is selected.
+            return !self.scale_targets().is_empty();
         }
         if id == browser_ids::LOAD_SELECTED
             && (self.devices_load().is_some()

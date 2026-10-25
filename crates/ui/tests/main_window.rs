@@ -298,7 +298,7 @@ fn controls_are_drawn_where_the_layout_places_them() {
     let mut h = Harness::new(Window::Main);
     let output = h.settle();
     let nodes = Harness::nodes(&output);
-    let layout = ShellLayout::compute(REFERENCE, true, true);
+    let layout = common::layout(REFERENCE, true, true);
     println!("| Row | Element | x from | x to | y from | y to |");
     for placement in ELEMENTS {
         let node = nodes

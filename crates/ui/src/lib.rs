@@ -63,6 +63,7 @@ pub mod file_manager;
 pub mod focus;
 pub mod follow_controls;
 mod generator_panel;
+pub mod groove_pool;
 pub mod in_out;
 mod info_text;
 pub mod input;

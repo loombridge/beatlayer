@@ -99,6 +99,17 @@ fn centre_of(nodes: &[common::Node], role: Role, label: &str) -> Pos2 {
     pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
 }
 
+/// The centre of the Collections heading's button, which Edit and Done share:
+/// the Library's heading has an Edit button of its own with the same name.
+fn collections_button(nodes: &[common::Node]) -> Pos2 {
+    let node = nodes
+        .iter()
+        .find(|n| n.id == collections_edit_id().accesskit_id())
+        .expect("the Collections heading's button");
+    let b = node.bounds.expect("the button has a place");
+    pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32)
+}
+
 fn right_click(h: &mut Harness, at: Pos2) {
     h.frame(vec![Event::PointerMoved(at)]);
     for pressed in [true, false] {
@@ -417,7 +428,7 @@ fn edit_and_done_show_and_hide_collections() {
         .find(|n| n.id == collections_edit_id().accesskit_id())
         .expect("the Collections heading's button");
     assert_eq!((edit.role, edit.label.as_str()), (Role::Button, "Edit"));
-    h.click(centre_of(&nodes, Role::Button, "Edit"));
+    h.click(collections_button(&nodes));
     let nodes = look(&mut h);
     assert!(
         nodes
@@ -455,7 +466,7 @@ fn edit_and_done_show_and_hide_collections() {
             .iter()
             .any(|n| n.role == Role::CheckBox && n.label == "Green")
     );
-    h.click(centre_of(&nodes, Role::Button, "Done"));
+    h.click(collections_button(&nodes));
     let nodes = look(&mut h);
     assert!(
         !nodes

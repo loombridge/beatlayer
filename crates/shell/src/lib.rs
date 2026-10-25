@@ -101,6 +101,7 @@ pub mod plugins;
 pub mod processed;
 pub mod realtime;
 pub mod recording;
+pub mod resources;
 pub mod routing;
 pub mod sample_editor;
 pub mod scales;
@@ -145,6 +146,7 @@ pub use bl_shell_spec::devices as device_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).
 pub use bl_shell_spec::envelope_keys as envelope_commands;
@@ -153,6 +155,9 @@ pub use bl_shell_spec::export as export_commands;
 /// The File Manager's command IDs and their argument and result types
 /// (WP-6.63).
 pub use bl_shell_spec::file_manager as file_manager_commands;
+/// The grooves' commands that need the shell, and the Groove Pool's view
+/// (WP-6.19, WP-6.20), for the UI to run by ID.
+pub use bl_shell_spec::groove as groove_commands;
 /// The Arrangement's locator command IDs and their argument and result
 /// types (WP-6.24).
 pub use bl_shell_spec::locator as locator_commands;

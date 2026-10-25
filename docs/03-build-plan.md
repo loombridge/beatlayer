@@ -764,7 +764,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.65 | done | 25 October 2026 | [#461](https://github.com/loombridge/beatlayer/pull/461); the mixer strip section drags taller with extended meters from 200 points, columns resize from 40 to 400 points and are saved with the set, and each view's mixer keeps its own sections ([mixer view](specs/mixer-view.md) R32 to R39) |
 | 6.66 | todo |  |  |
 | 6.67 | todo |  |  |
-| 6.68 | todo |  |  |
+| 6.68 | done | 25 October 2026 | [#464](https://github.com/loombridge/beatlayer/pull/464); the Arpeggiator's Groove chooser offers None and the ten bundled swing grooves, and with Sync on every second step moves as a grooved clip note would, scaled by the Global Amount; older sets load with None ([arpeggiator](specs/arpeggiator.md) R18 to R20) |
 | 6.69 | todo |  |  |
 | 6.70 | todo |  |  |
 | 6.71 | done | 22 October 2026 | [#320](https://github.com/loombridge/beatlayer/pull/320); the Export Audio/Video dialog on ⇧⌘R and the File menu, with a progress window and Cancel, exports on a worker thread, and Convert to Mono, Encode MP3 beside a PCM file and Create Analysis File ([export](specs/export.md) R28 to R45) |

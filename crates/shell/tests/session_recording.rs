@@ -394,6 +394,83 @@ fn an_overdub_adds_each_loop_pass_as_an_undo_step() {
     }
 }
 
+// Spec: launch-quantisation R33. An overdub into a clip that was nudged
+// records at the clip's own time. Two armed tracks record the same take, so
+// their clips loop alike; one is nudged a quarter note forward, and the one
+// note played into both lands as much later in the nudged clip's loop as its
+// clip time is ahead of the other's.
+#[test]
+fn an_overdub_into_a_nudged_clip_records_at_its_clip_time() {
+    let (mut shell, control) = rig();
+    let plain = midi_track(&mut shell, "Plain");
+    let nudged = midi_track(&mut shell, "Nudged");
+    let scene = first_scene(&shell);
+    let map = bl_core::time::TempoMap::constant(bl_core::time::Bpm::new(240.0).unwrap());
+    shell
+        .run("song.set_tempo", json!({ "tempo": map }))
+        .unwrap();
+    // Both record the same half-second take, with one note.
+    shell.run("session.record", json!({})).unwrap();
+    pass_time(&control, &mut shell, 100);
+    play_a(&control, &mut shell, 50);
+    pass_time(&control, &mut shell, 250);
+    shell.run("session.stop_recording", json!({})).unwrap();
+    poll_until(&control, &mut shell, "the recording to end", recorded);
+    let length = slot_clip(&shell, plain, scene).unwrap().length;
+    assert_eq!(slot_clip(&shell, nudged, scene).unwrap().length, length);
+    let first = |track| midi_notes(&slot_clip(&shell, track, scene).unwrap())[0].start;
+    let (first_plain, first_nudged) = (first(plain), first(nudged));
+    poll_until(&control, &mut shell, "the clips to play", |shell| {
+        shell
+            .session_states()
+            .iter()
+            .filter(|s| s.state == SlotState::Playing)
+            .count()
+            == 2
+    });
+    // Eight thirty-seconds, which the global value None gives, are a
+    // quarter note.
+    shell
+        .run(
+            "session.nudge",
+            json!({ "track": nudged, "scene": scene, "steps": 8 }),
+        )
+        .unwrap();
+    pass_time(&control, &mut shell, 10);
+    // How far ahead the nudged clip's own time is of the other's, at any
+    // one moment: the nudge, less the later launch of one of them.
+    let tempo = shell.editor().document().settings().tempo.clone();
+    let rate = bl_core::time::SampleRate::new(shell.audio().sample_rate().unwrap()).unwrap();
+    let ahead = {
+        let states = shell.session_states();
+        let of = |track| states.iter().find(|s| s.track == track && s.scene == scene).unwrap();
+        let (a, b) = (of(plain), of(nudged));
+        assert_eq!(b.offset.ticks, Ticks::QUARTER, "the nudge moved a quarter note");
+        assert_eq!(a.offset.ticks, Ticks::ZERO);
+        b.offset.ticks - a.offset.ticks
+            - (tempo.frames_to_ticks(b.started.unwrap(), rate)
+                - tempo.frames_to_ticks(a.started.unwrap(), rate))
+    };
+    shell.run("session.record", json!({})).unwrap();
+    pass_time(&control, &mut shell, 60);
+    play_a(&control, &mut shell, 30);
+    pass_time(&control, &mut shell, 100);
+    shell.run("session.stop_recording", json!({})).unwrap();
+    poll_until(&control, &mut shell, "the recording to end", recorded);
+    // The note added is the one that isn't the take's own.
+    let added = |track, own| {
+        let notes = midi_notes(&slot_clip(&shell, track, scene).unwrap());
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        notes.iter().find(|note| note.start != own).unwrap().start
+    };
+    let moved = (added(nudged, first_nudged) - added(plain, first_plain)).rem_euclid(length);
+    let ahead = ahead.rem_euclid(length);
+    assert!(
+        (moved - ahead).get().abs() < Ticks::SIXTEENTH.get() / 8,
+        "the note moved {moved:?}, not {ahead:?}, in a loop of {length:?}"
+    );
+}
+
 // Spec: session-recording R6. An armed audio track records its input to a
 // WAV and the file becomes a looping clip in the slot.
 #[test]

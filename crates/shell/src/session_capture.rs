@@ -450,6 +450,79 @@ mod tests {
         );
     }
 
+    // Spec: launch-quantisation R33. A nudge ends the stretch it falls in and
+    // starts the next, which carries the clip time it jumped to, so the
+    // second copy begins with its start marker where the clip then was in its
+    // loop; a stretch that began with a Legato start does so too.
+    #[test]
+    fn a_nudge_splits_the_copy_and_the_second_part_starts_where_the_clip_jumped_to() {
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: bl_model::TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let scene = editor.document().scenes().next().unwrap().id;
+        let data = bl_model::MidiData {
+            looping: true,
+            loop_end: Some(Ticks::WHOLE),
+            ..bl_model::MidiData::new([])
+        };
+        let id = editor.new_id();
+        let clip = Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Midi(data));
+        editor
+            .apply(Command::CreateSlotClip { track, scene, clip })
+            .unwrap();
+        // Launched at the bar line, nudged a half bar on at 1.2 bars, and
+        // the take ends at the third bar.
+        let jump = Ticks::WHOLE / 2;
+        let nudged = bl_engine::ClipOffset {
+            ticks: jump,
+            frames: 0,
+        };
+        let events = [
+            start(track, scene, BAR, BAR),
+            end(track, scene, BAR + BAR / 5),
+            SessionEvent {
+                offset: nudged,
+                ..start(track, scene, BAR + BAR / 5, BAR)
+            },
+        ];
+        let found = runs(&events, Frames(3 * BAR), &tempo(), RATE);
+        assert_eq!(found.len(), 2);
+        assert_eq!((found[0].offset, found[1].offset), (Ticks::ZERO, jump));
+        let mut target = editor;
+        target
+            .transact("Record", |editor| {
+                place(editor, &Watch::default(), &found, &[], Ticks::WHOLE * 3)
+            })
+            .unwrap();
+        let mut copies: Vec<_> = target
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .map(|clip| match &clip.data {
+                ClipData::Midi(midi) => (clip.start, clip.end(), midi.start),
+                ClipData::Audio(_) => unreachable!("a MIDI clip"),
+            })
+            .collect();
+        copies.sort();
+        let split = ticks(BAR + BAR / 5);
+        // The first part is the clip as launched: it is a fifth of a bar in
+        // at the split. The second begins half a bar further on in its loop,
+        // as a clip launched half a bar earlier would be.
+        assert_eq!(copies[0], (ticks(BAR), split, Ticks::ZERO));
+        let fifth = split - ticks(BAR);
+        let expected = (fifth + jump).rem_euclid(Ticks::WHOLE);
+        assert_eq!(copies[1], (split, ticks(3 * BAR), expected));
+    }
+
     // Spec: session-to-arrangement R4. An armed track's recorded input is
     // kept up to where its first copy begins; any other track keeps its
     // older clips beyond the copy.

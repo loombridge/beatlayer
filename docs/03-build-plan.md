@@ -753,7 +753,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.54 | done | 25 October 2026 | [#440](https://github.com/loombridge/beatlayer/pull/440); the MIDI Note Editor's zoom and scroll (`clip_view.note_view`: Z, X, W, H, Plus and Minus, the Page keys, the rulers, the wheel and the Clip View Selector's outline), Follow in the editor, the Clip Markers items and Cmd-F9 to Cmd-F12 (`clip_view.set_marker`), Duplicate, Insert and Delete Time on the clip's notes, and Crop Clip to the editor's time selection ([the piano roll spec](specs/piano-roll.md) R32 to R40, R42); the note-editor shortcut rows for Duplicate and Delete Time and Insert Time's menu place wait on a maintainer |
 | 6.55 | todo |  |  |
 | 6.56 | todo |  |  |
-| 6.57 | todo |  |  |
+| 6.57 | done | 25 October 2026 | [#445](https://github.com/loombridge/beatlayer/pull/445); a track's main automation lane draws over its clips, Show Automation in New Lane adds lanes that hide, fold, filter to automated parameters and save with the set, a control's menus Delete, Re-Enable and Show its automation, and breakpoints snap to the grid while Snap Automation to Grid is on ([automation](specs/automation.md) R24 to R33) |
 | 6.58 | done | 25 October 2026 | [#447](https://github.com/loombridge/beatlayer/pull/447); Edit Info Text from the Edit menu and the track, clip, device, chain, macro and locator context menus edits the item's own info text in the Info View as one undo step (`track`, `clip`, `scene` and `device.set_info_text`), hovering shows it, and it saves with the set; the scene and Session clip menus' items wait on WP-6.56 |
 | 6.59 | todo |  |  |
 | 6.60 | todo |  |  |

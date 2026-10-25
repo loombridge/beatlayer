@@ -1276,6 +1276,7 @@ impl EngineProgram {
             session,
             groove_amount,
             set_scale,
+            scales_hidden,
             ..
         } = *block;
         // Where the block sits in the song, for the automation a route plays
@@ -1323,6 +1324,7 @@ impl EngineProgram {
                     session,
                     groove_amount,
                     set_scale,
+                    scales_hidden,
                     scale: ScaleRuns::of(set_scale),
                     modulation: turn.bus(frames),
                     rows: None,
@@ -1500,6 +1502,7 @@ impl EngineProgram {
                 session,
                 groove_amount,
                 set_scale,
+                scales_hidden,
                 scale: ScaleRuns::of(set_scale),
                 modulation: turn.bus(frames),
                 rows: None,
@@ -1837,6 +1840,8 @@ pub(crate) struct Blk<'a> {
     pub(crate) groove_amount: f32,
     /// The set's current scale (the scales spec, R9).
     pub(crate) set_scale: Scale,
+    /// Whether the set's tuning hides the scales (the tunings spec, R16).
+    pub(crate) scales_hidden: bool,
     /// The scale of the clip playing on the task's track over the block (the
     /// scales spec, R15): the set's until the task's clip player has run.
     pub(crate) scale: ScaleRuns,
@@ -2245,6 +2250,7 @@ impl EngineProgram {
                 session: block.session,
                 groove_amount: block.groove_amount,
                 set_scale: block.set_scale,
+                scales_hidden: block.scales_hidden,
                 scale: block.scale,
                 // A modulator driven by the signal writes its own rows, and
                 // hears the rows of the modulators before it.
@@ -2486,6 +2492,7 @@ impl EngineProgram {
             session: block.session,
             groove_amount: block.groove_amount,
             set_scale: block.set_scale,
+            scales_hidden: block.scales_hidden,
             scale: block.scale,
             modulation: turn.bus(frames),
             rows: None,
@@ -2686,6 +2693,7 @@ impl EngineProgram {
                     session: block.session,
                     groove_amount: block.groove_amount,
                     set_scale: block.set_scale,
+                    scales_hidden: block.scales_hidden,
                     scale: block.scale,
                     modulation: turn.bus(frames),
                     rows: None,

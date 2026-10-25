@@ -27,9 +27,7 @@ use crate::arrangement::automation::{
     BREAKPOINT_GRAB, BREAKPOINT_SIZE, CURVE_PER_POINT, FINE_VALUE, SEGMENT_GRAB,
 };
 use crate::arrangement::editing::EditKeys;
-use crate::clip_view::{
-    KEY_HEIGHT, KEY_WIDTH, STRIP_HEIGHT, TOOLBAR_HEIGHT, key_name, tick_at, x_of_tick,
-};
+use crate::clip_view::{KEY_HEIGHT, KEY_WIDTH, STRIP_HEIGHT, TOOLBAR_HEIGHT, tick_at, x_of_tick};
 use crate::main_window::UiEvent;
 use crate::note_lanes::NoteLayout;
 use crate::theme::Theme;
@@ -245,6 +243,9 @@ pub struct Target {
 pub struct Frame<'a> {
     /// The clip.
     pub clip: ClipId,
+    /// The tuning the clip's track plays, which names the notes (the tunings
+    /// spec, R29).
+    pub tuning: Option<&'a bl_model::Tuning>,
     /// The note area.
     pub grid: Rect,
     /// The contents tick at the note area's left edge, and the clip's
@@ -2118,7 +2119,7 @@ impl MpeUi {
                     node.set_label(format!(
                         "{} of {}",
                         expression_name(expression),
-                        key_name(note.key)
+                        crate::clip_view::key_label(frame.tuning, note.key)
                     ));
                     node.set_value(format!("{} breakpoints", points.len()));
                     node.set_bounds(bounds(rect));

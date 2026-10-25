@@ -27,7 +27,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | The `.scl` or `.ascl` file to read, absolute or relative to the app's working directory. The tuning is named after the file, without its extension. |
+| `path` | string | yes | The `.scl` or `.ascl` file to read, absolute or relative to the app's working directory, or the path of one of Beatlayer's own tunings, `tunings:/` and its name. The tuning is named after the file, without its extension. |
 | `retune` | boolean or null | no | Whether every note of the MIDI clips on tracks that play the tuning moves to the key whose new pitch is nearest the pitch it had. Left out, it follows Retune Set On Loading Tuning Systems. |
 
 Result: [`TuningState`](#tuningstate).

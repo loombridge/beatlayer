@@ -13980,6 +13980,7 @@ One of:
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
+- `"tuning"`: A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 - `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
@@ -14025,6 +14026,11 @@ One of:
     {
       "const": "chord_bank",
       "description": "A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).",
+      "type": "string"
+    },
+    {
+      "const": "tuning",
+      "description": "A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).",
       "type": "string"
     },
     {
@@ -30885,6 +30891,7 @@ What the view commands return: the window's view state afterwards.
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
 | `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
+| `tuning_section` | boolean | yes | Whether the browser's Tuning section shows (the tunings spec, R28); hidden in a new set. |
 | `browser_width` | number | yes | The browser's width in points at 100%, as it was set; a window too narrow for it shows the browser narrower (browser R29). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
@@ -30923,6 +30930,11 @@ What the view commands return: the window's view state afterwards.
       "description": "The main view: `arrangement` or `session`.",
       "type": "string"
     },
+    "tuning_section": {
+      "default": false,
+      "description": "Whether the browser's Tuning section shows (the tunings spec, R28); hidden in a new set.",
+      "type": "boolean"
+    },
     "zoom": {
       "description": "The interface zoom, where 1 is 100%.",
       "format": "float",
@@ -30933,6 +30945,7 @@ What the view commands return: the window's view state afterwards.
     "main_view",
     "browser",
     "full_height_browser",
+    "tuning_section",
     "browser_width",
     "info_view",
     "full_screen",

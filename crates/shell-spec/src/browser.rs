@@ -334,7 +334,6 @@ impl Label {
                  its own sound library comes in milestone M9.",
             ),
             Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
-            Self::Tunings => Some("Tunings arrive in milestone M6."),
             _ => None,
         }
     }
@@ -427,6 +426,9 @@ pub enum ItemKind {
     Preset,
     /// A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
     ChordBank,
+    /// A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one
+    /// of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).
+    Tuning,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
     /// One of Beatlayer's own devices, listed under a device label (the

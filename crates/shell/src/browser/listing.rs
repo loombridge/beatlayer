@@ -14,6 +14,10 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
     "m4a", "aac",
 ];
 
+/// The extensions of the tuning files Beatlayer opens (the tunings spec, R25),
+/// lower-case.
+pub const TUNING_EXTENSIONS: &[&str] = &["scl", "ascl"];
+
 /// What a file is, by its name: an audio file, an SFZ instrument, a
 /// Beatlayer set, a device preset, a clip file, a chord bank, or none of these
 /// (`None`), which the browser leaves out.
@@ -33,6 +37,8 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
         Some(ItemKind::Clip)
     } else if extension == bl_midi_tools::BANK_EXTENSION {
         Some(ItemKind::ChordBank)
+    } else if TUNING_EXTENSIONS.contains(&extension.as_str()) {
+        Some(ItemKind::Tuning)
     } else {
         None
     }
@@ -43,6 +49,12 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
 /// behaves as one (set exchange R2).
 #[must_use]
 pub fn path_kind(path: &Path) -> Option<ItemKind> {
+    if path
+        .to_string_lossy()
+        .starts_with(super::tunings::BUNDLED_PREFIX)
+    {
+        return Some(ItemKind::Tuning);
+    }
     if let Some((_, row)) = crate::set_exchange::parse_key(&path.to_string_lossy()) {
         return matches!(row, crate::set_exchange::Row::Clip(_)).then_some(ItemKind::Clip);
     }
@@ -209,6 +221,8 @@ mod tests {
         assert_eq!(file_kind("Bank.SFZ"), Some(ItemKind::Sfz));
         assert_eq!(file_kind("Jazz.blstacks"), Some(ItemKind::ChordBank));
         assert_eq!(file_kind("Idea.blclip"), Some(ItemKind::Clip));
+        assert_eq!(file_kind("Meantone.SCL"), Some(ItemKind::Tuning));
+        assert_eq!(file_kind("Meantone.ascl"), Some(ItemKind::Tuning));
         assert_eq!(file_kind("notes.txt"), None);
         assert_eq!(file_kind("README"), None);
         assert!(is_hidden(".DS_Store"));

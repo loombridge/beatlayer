@@ -63,6 +63,9 @@ pub const VIEW_TOGGLE_BROWSER: &str = "view.toggle_browser";
 /// Runs the browser down to the Status Bar, or back to the detail area's
 /// top (Full-Height Browser; spec: browser R26).
 pub const VIEW_TOGGLE_FULL_HEIGHT_BROWSER: &str = "view.toggle_full_height_browser";
+/// `view.tuning_section`: show or hide the browser's Tuning section (WP-6.10;
+/// the tunings spec, R28).
+pub const VIEW_TUNING_SECTION: &str = "view.tuning_section";
 /// `view.toggle_clip_view`: show or hide the Clip View (WP-2.3).
 pub const VIEW_TOGGLE_CLIP_VIEW: &str = "view.toggle_clip_view";
 /// `view.toggle_device_view`: show or hide the Device View (WP-6.27).
@@ -150,6 +153,9 @@ pub const VIEW_TOGGLE_UNDO_HISTORY: &str = "view.toggle_undo_history";
 pub const VIEW_TOGGLE_SAVE_HISTORY: &str = "view.toggle_save_history";
 /// `focus.control_bar`: move the keyboard focus to the Control Bar.
 pub const FOCUS_CONTROL_BAR: &str = "focus.control_bar";
+/// `focus.tuning`: show the browser's Tuning section and move the keyboard
+/// focus to it (WP-6.10; the tunings spec, R28).
+pub const FOCUS_TUNING: &str = "focus.tuning";
 /// `focus.arrangement`: move the keyboard focus to the Arrangement View.
 pub const FOCUS_ARRANGEMENT: &str = "focus.arrangement";
 /// `focus.next`: move the keyboard focus to the next control.
@@ -300,6 +306,7 @@ pub const IDS: &[&str] = &[
     VIEW_TOGGLE_SECOND_WINDOW,
     VIEW_TOGGLE_BROWSER,
     VIEW_TOGGLE_FULL_HEIGHT_BROWSER,
+    VIEW_TUNING_SECTION,
     VIEW_TOGGLE_CLIP_VIEW,
     VIEW_TOGGLE_DEVICE_VIEW,
     VIEW_SHOW_DETAIL_VIEWS,
@@ -335,6 +342,7 @@ pub const IDS: &[&str] = &[
     VIEW_TOGGLE_UNDO_HISTORY,
     VIEW_TOGGLE_SAVE_HISTORY,
     FOCUS_CONTROL_BAR,
+    FOCUS_TUNING,
     FOCUS_ARRANGEMENT,
     FOCUS_NEXT,
     FOCUS_PREVIOUS,
@@ -1065,6 +1073,10 @@ pub struct ViewResult {
     /// Browser, spec: browser R26).
     #[serde(default)]
     pub full_height_browser: bool,
+    /// Whether the browser's Tuning section shows (the tunings spec, R28);
+    /// hidden in a new set.
+    #[serde(default)]
+    pub tuning_section: bool,
     /// The browser's width in points at 100%, as it was set; a window too
     /// narrow for it shows the browser narrower (browser R29).
     #[serde(default = "default_browser_width")]
@@ -1447,6 +1459,19 @@ fn specs() -> Vec<CommandSpec> {
                  `window.full_height_browser`. Changes nothing in the set.",
             )
             .permission(Permission::Edit)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ViewResult>(),
+        CommandSpec::new(VIEW_TUNING_SECTION, "Tuning")
+            .description(
+                "Shows or hides the Tuning section at the bottom of the browser's content pane, which \
+                 shows the set's tuning: its name (or that the set plays twelve equal steps), \
+                 and under its triangle Octave, Note, Ref. Pitch, Lowest Note and Highest Note, \
+                 then the save and link buttons. It is hidden in a new set, and loading a \
+                 tuning from the browser shows it. Read in `view.state`'s \
+                 `window.tuning_section`. Changes nothing in the set and isn't an undo step.",
+            )
+            .permission(Permission::Read)
             .context(Global)
             .args::<NoArgs>()
             .result::<ViewResult>(),
@@ -1940,6 +1965,16 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-FOCUS-001")
             .args::<NoArgs>()
             .result::<()>(),
+        CommandSpec::new(FOCUS_TUNING, "Tuning")
+            .description(
+                "Shows the browser, and in it the Tuning section, if either is hidden, and \
+                 moves the keyboard focus to the section's name, so Delete there removes the \
+                 set's tuning. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ViewResult>(),
         CommandSpec::new(FOCUS_ARRANGEMENT, "Arrangement View")
             .description(
                 "Shows the Arrangement View if the Session View is in front, and moves the \

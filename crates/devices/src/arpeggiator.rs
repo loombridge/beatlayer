@@ -15,7 +15,7 @@ use bl_model::{
 };
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, scale_choices, scale_named, seed, value};
+use crate::midi_fx::{Key, Router, scale_choices, scale_named, seed, use_current_scale, value};
 
 /// The Arpeggiator device type's ID.
 pub const ARPEGGIATOR: &str = "beatlayer.arpeggiator";
@@ -526,7 +526,7 @@ impl NativeDevice for Arpeggiator {
         // Spec: arpeggiator R15, R16. Distance counts degrees of the current
         // scale, or of the Root and Scale chosen here, or semitones for
         // Chromatic.
-        let use_scale = value(params, USE_SCALE) >= 0.5;
+        let use_scale = use_current_scale(audio, params, USE_SCALE);
         let chosen_scale = scale_named(value(params, SCALE) as usize)
             .map_or(OFF, |name| Scale::new(value(params, ROOT) as u8, name));
         let scale_at = |audio: &Audio<'_, '_>, offset: u32| {

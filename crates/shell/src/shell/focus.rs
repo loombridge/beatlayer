@@ -150,6 +150,17 @@ impl Shell {
             | ids::FOCUS_DEVICE_VIEW
             | ids::FOCUS_CONTROL_BAR
             | ids::FOCUS_ARRANGEMENT => self.run_window_view(id, args),
+            ids::FOCUS_TUNING => {
+                // Spec: tunings R28. The section shows, in the browser,
+                // and its name takes the keys.
+                Self::args::<NoArgs>(id, args)?;
+                self.tuning_section = true;
+                self.show_browser_in(self.acting_window());
+                self.focus_area(Area::Browser);
+                self.effects.push(Effect::FocusTuning);
+                self.touch();
+                Ok(self.view_result())
+            }
             ids::FOCUS_NEXT | ids::FOCUS_PREVIOUS => {
                 Self::args::<NoArgs>(id, args)?;
                 self.effects.push(Effect::MoveFocus {

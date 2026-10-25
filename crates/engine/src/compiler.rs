@@ -84,12 +84,14 @@ impl Update {
 /// start held, unless RAM Mode is on (the multisampler spec, R23).
 const LONG_LAYER_SECONDS: u64 = 10;
 
-/// The tuning `track` plays in `document`: the set's, unless the track
-/// bypasses it (the tunings spec, R14).
+/// The tuning the devices of `track` follow in `document`: the set's, unless
+/// the track is a MIDI track that bypasses it (the tunings spec, R14). A
+/// track that isn't a MIDI track plays no instrument; its Tuner names the
+/// notes of the tuning (R33).
 fn tuning_of(document: &Document, track: TrackId) -> Option<&bl_model::Tuning> {
     document
         .track(track)
-        .filter(|track| track.plays_tuning())
+        .filter(|track| track.kind() != bl_model::TrackKind::Midi || track.plays_tuning())
         .and_then(|_| document.settings().tuning.as_ref())
 }
 
@@ -200,6 +202,16 @@ pub struct Compiler {
 
 /// The set's Global Amount of groove as a transport command carries it, in
 /// tenths of a percent.
+/// Whether the set's tuning hides the scales (the tunings spec, R16): it
+/// holds other than twelve notes to its pseudo-octave.
+fn scales_hidden(document: &Document) -> bool {
+    document
+        .settings()
+        .tuning
+        .as_ref()
+        .is_some_and(bl_model::Tuning::hides_scales)
+}
+
 fn groove_amount(document: &Document) -> u16 {
     (document.settings().grooves.global_amount * 10.0).round() as u16
 }
@@ -487,6 +499,12 @@ impl Compiler {
                 update
                     .transport
                     .push(TransportCommand::SetScale(document.settings().scale));
+            }
+            // Spec: tunings R16
+            if scales_hidden(&old) != scales_hidden(document) {
+                update
+                    .transport
+                    .push(TransportCommand::SetScalesHidden(scales_hidden(document)));
             }
             if old.settings().metronome != document.settings().metronome {
                 update.transport.push(TransportCommand::SetMetronome(
@@ -1288,6 +1306,7 @@ impl Compiler {
                 TransportCommand::SetMetronome(document.settings().metronome),
                 TransportCommand::SetGrooveAmount(groove_amount(document)),
                 TransportCommand::SetScale(document.settings().scale),
+                TransportCommand::SetScalesHidden(scales_hidden(document)),
             ],
             params: build.restate,
             unhosted: build.unhosted,
@@ -1367,8 +1386,8 @@ impl Compiler {
         let Some(track) = document.track(track) else {
             return;
         };
-        let tuning = document.settings().tuning.as_ref().filter(|_| tuned);
-        if tuned && !(tuning.is_some() && track.plays_tuning()) {
+        let tuning = tuning_of(document, track.id()).filter(|_| tuned);
+        if tuned && tuning.is_none() {
             return;
         }
         let pitches = crate::KeyPitches::of(tuning);
@@ -1462,6 +1481,12 @@ impl Compiler {
             .is_none_or(|old| old.settings().scale != document.settings().scale)
         {
             commands.push(TransportCommand::SetScale(document.settings().scale));
+        }
+        if old
+            .as_ref()
+            .is_none_or(|old| scales_hidden(old) != scales_hidden(document))
+        {
+            commands.push(TransportCommand::SetScalesHidden(scales_hidden(document)));
         }
         commands
     }
@@ -3672,6 +3697,7 @@ mod tests {
                 session: &[],
                 groove_amount: 1.0,
                 set_scale: bl_model::Scale::default(),
+                scales_hidden: false,
                 scale: crate::scales::ScaleRuns::of(bl_model::Scale::default()),
             };
             program.run(None, &mut lane, block);

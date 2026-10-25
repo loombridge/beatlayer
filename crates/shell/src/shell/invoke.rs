@@ -222,6 +222,13 @@ impl Shell {
     pub(super) fn invoke_inner(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let has = |key: &str| args.get(key).is_some();
         match id {
+            // Spec: tunings R15, R27. A tuning chosen in the browser loads as
+            // a person loads one, asked first where the setting says so.
+            browser_ids::LOAD_SELECTED if self.browser_view.selected_tuning().is_some() => {
+                let path = self.browser_view.selected_tuning().unwrap_or_default();
+                self.tuning_section = true;
+                self.invoke_inner(tuning_ids::LOAD, json!({ "path": path }))
+            }
             ids::SET_NEW | ids::APP_QUIT if self.unsaved_changes() => {
                 self.effects.push(Effect::ConfirmDiscard {
                     then: Invocation::new(id, args),

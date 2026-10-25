@@ -328,6 +328,9 @@ pub enum Effect {
     /// Move the keyboard focus to the first control of the Clip View's
     /// panels (Navigate ▸ Clip Panels).
     FocusClipPanels,
+    /// Move the keyboard focus to the name in the browser's Tuning section
+    /// (Navigate ▸ Tuning).
+    FocusTuning,
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -582,6 +585,9 @@ pub struct Shell {
     /// Whether the Info View shows (L-INFO-001): view state, never part of
     /// the set, like the browser's.
     info_view: bool,
+    /// Whether the browser's Tuning section shows (the tunings spec, R28):
+    /// view state, hidden in a new set.
+    tuning_section: bool,
     full_screen: bool,
     settings_open: bool,
     /// The themes the Theme chooser offers, which the host reads from the
@@ -1231,6 +1237,7 @@ impl Shell {
             main_view: MainView::Arrangement,
             browser: true,
             info_view: true,
+            tuning_section: false,
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
@@ -1892,6 +1899,15 @@ impl Shell {
                 session_ids::DROP_FILES,
                 json!({ "paths": paths, "track": track, "scene": scene }),
             );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_tuning()
+        {
+            // Spec: tunings R27. A tuning chosen in the browser loads as
+            // `tuning.load` loads it, and the Tuning section shows.
+            Self::args::<NoArgs>(id, args)?;
+            self.tuning_section = true;
+            return self.run(bl_shell_spec::tunings::LOAD, json!({ "path": path }));
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.browser_view.selected_chord_bank()

@@ -425,6 +425,9 @@ struct KeyRows {
     /// How tall a row is, in points: [`KEY_HEIGHT`] unless the note editor's
     /// view has zoomed the rows (piano-roll R32, R34).
     height: f32,
+    /// The highest key shown: 127, or the last key of the tuning the clip's
+    /// track plays (the tunings spec, R29).
+    limit: u8,
 }
 
 impl KeyRows {
@@ -436,7 +439,18 @@ impl KeyRows {
             top,
             first,
             height: KEY_HEIGHT,
+            limit: 127,
         }
+    }
+
+    /// These rows with keys past `limit` not shown.
+    fn with_limit(self, limit: u8) -> Self {
+        Self { limit, ..self }
+    }
+
+    /// The key a continuous row position names, kept to the keys shown.
+    fn clamp_key(&self, key: f32) -> u8 {
+        key.round().clamp(0.0, f32::from(self.limit)) as u8
     }
 
     /// These rows with the view `rows` the shell holds for them: the row at
@@ -608,6 +622,14 @@ pub(crate) fn stem_x(grid: Rect, start: Ticks, length: Ticks, note: &Note) -> f3
 /// A note's name as Live writes it: C3 is middle C (MIDI key 60).
 pub(crate) fn key_name(key: u8) -> String {
     bl_midi_tools::key_name(key)
+}
+
+/// A key's name in the editor of a clip on a track that plays `tuning`, or
+/// the twelve-step name without one (the tunings spec, R29).
+pub(crate) fn key_label(tuning: Option<&bl_model::Tuning>, key: u8) -> String {
+    tuning
+        .and_then(|tuning| tuning.key_note(key).map(|note| tuning.note_name(note)))
+        .unwrap_or_else(|| key_name(key))
 }
 
 /// Where on a note the pointer is.
@@ -871,14 +893,17 @@ impl NoteMenus {
 /// What the key track and the note area show of the shown clip's scale, and
 /// how they spell keys (the scales spec, R21, R22, R24).
 #[derive(Clone, Copy, Debug)]
-struct KeyStyle {
+struct KeyStyle<'a> {
     scale: Scale,
     highlight: bool,
     spelling: NoteSpelling,
+    /// The tuning the clip's track plays, whose notes the rows are (the
+    /// tunings spec, R29); none on a track that bypasses it.
+    tuning: Option<&'a bl_model::Tuning>,
 }
 
-impl KeyStyle {
-    fn of(shell: &Shell, clip: ClipId) -> Self {
+impl<'a> KeyStyle<'a> {
+    fn of(shell: &'a Shell, clip: ClipId) -> Self {
         let view = shell.clip_view();
         Self {
             scale: shell
@@ -888,22 +913,109 @@ impl KeyStyle {
                 .map_or_else(Scale::default, |clip| clip.scale),
             highlight: view.highlight_scales(),
             spelling: view.note_spelling(),
+            tuning: tuning_of_clip(shell, clip),
         }
     }
 
+    /// The highest key the editor shows: the tuning's highest note's, or 127
+    /// (R29).
+    fn limit(&self) -> u8 {
+        self.tuning.map_or(127, key_limit)
+    }
+
     /// Whether `key` is a key of the clip's scale; none is while Scale Mode
-    /// is off.
+    /// is off, or while the tuning hides the scales (R16).
     fn in_scale(&self, key: u8) -> bool {
-        self.scale.enabled && self.scale.holds(key)
+        self.scale.enabled
+            && !self.tuning.is_some_and(bl_model::Tuning::hides_scales)
+            && self.scale.holds(key)
     }
 
     fn is_root(&self, key: u8) -> bool {
         self.in_scale(key) && key % 12 == self.scale.root
     }
 
-    fn name(&self, key: u8) -> String {
-        self.spelling.key_name(key, &self.scale)
+    /// Whether `key` is degree 0 of the tuning, which a row names even when
+    /// it is short.
+    fn is_unison(&self, key: u8) -> bool {
+        match self.tuning {
+            Some(tuning) => tuning.key_note(key).is_some_and(|note| note.degree == 0),
+            None => key.is_multiple_of(12),
+        }
     }
+
+    fn name(&self, key: u8) -> String {
+        match self.tuning {
+            Some(tuning) => tuning
+                .key_note(key)
+                .map_or_else(String::new, |note| tuning.note_name(note)),
+            None => self.spelling.key_name(key, &self.scale),
+        }
+    }
+}
+
+/// The tuning that sets the rows of the editor of `clip`: the set's, unless
+/// the clip's track bypasses it (the tunings spec, R14, R29).
+fn tuning_of_clip(shell: &Shell, clip: ClipId) -> Option<&bl_model::Tuning> {
+    let doc = shell.editor().document();
+    let track = doc.track(doc.clip_track(clip)?)?;
+    track
+        .plays_tuning()
+        .then(|| doc.settings().tuning.as_ref())
+        .flatten()
+}
+
+/// What the Status Bar shows while the pointer is over a note or a row of
+/// the editor of a clip on a track that plays a tuning (the tunings spec,
+/// R30): its name, its frequency in Hz, and the key of an incoming keyboard
+/// that plays it. Every key plays itself until the MIDI Controller Layouts
+/// are built (R22), so that is the twelve-step key of the same number.
+fn tuning_readout(
+    ui: &Ui,
+    shell: &Shell,
+    clip: ClipId,
+    layout: &NoteLayout,
+    rows: &KeyRows,
+    notes: &[Note],
+    hovered: Option<u32>,
+) {
+    let Some(tuning) = tuning_of_clip(shell, clip) else {
+        return;
+    };
+    let Some(pos) = ui.input(|i| i.pointer.hover_pos()) else {
+        return;
+    };
+    let grid = layout.grid;
+    let keys = Rect::from_min_max(
+        pos2(grid.left() - KEY_WIDTH, grid.top()),
+        pos2(grid.left(), grid.bottom()),
+    );
+    let key = match hovered.and_then(|place| notes.get(place as usize)) {
+        Some(note) => note.key,
+        None if grid.contains(pos) || keys.contains(pos) => {
+            let Some(key) = rows.key_at(grid, pos.y) else {
+                return;
+            };
+            rows.clamp_key(key)
+        }
+        None => return,
+    };
+    let (Some(note), Some(frequency)) = (tuning.key_note(key), tuning.key_frequency(key)) else {
+        return;
+    };
+    crate::mixer::show_readout(
+        ui.ctx(),
+        format!(
+            "{}, {frequency:.2} Hz, key {}",
+            tuning.note_name(note),
+            key_name(key)
+        ),
+    );
+}
+
+/// The highest key a tuning's rows reach (R29).
+fn key_limit(tuning: &bl_model::Tuning) -> u8 {
+    u8::try_from(tuning.key_count().saturating_sub(1)).unwrap_or(127)
 }
 
 /// Paints the key track left of `grid`: white and black keys, each named when
@@ -912,21 +1024,26 @@ impl KeyStyle {
 /// marked, and with Highlight Scales on the root more strongly (the scales
 /// spec, R21, R22); each key is named for assistive technology with whether
 /// it is in the scale and the root (R25).
-fn paint_key_track(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &KeyStyle) {
+fn paint_key_track(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &KeyStyle<'_>) {
     let painter = ui.painter();
     let colours = &theme.colors;
-    let named = |key: u8| rows.height >= 7.0 || key.is_multiple_of(12);
+    let named = |key: u8| rows.height >= 7.0 || style.is_unison(key);
     for (row, key) in rows.keys.iter().enumerate() {
         let y0 = rows.y_of_row(grid, row);
         if y0 + rows.height < grid.top() || y0 > grid.bottom() {
             continue;
         }
         let key = *key;
+        // Spec: tunings R29. Keys past the tuning's range aren't shown.
+        if key > style.limit() {
+            continue;
+        }
         let rect = Rect::from_min_max(
             pos2(grid.left() - KEY_WIDTH, y0),
             pos2(grid.left(), y0 + rows.height),
         );
-        let black = matches!(key % 12, 1 | 3 | 6 | 8 | 10);
+        // A tuning's rows have no black and white keys: they are its notes.
+        let black = style.tuning.is_none() && matches!(key % 12, 1 | 3 | 6 | 8 | 10);
         painter.rect_filled(
             rect,
             0.0,
@@ -980,13 +1097,17 @@ fn paint_key_track(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &K
 
 /// Shades the rows of the clip's scale across `grid` while Highlight Scales
 /// is on (the scales spec, R22).
-fn paint_scale_rows(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &KeyStyle) {
+fn paint_scale_rows(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &KeyStyle<'_>) {
     if !style.highlight || !style.scale.enabled {
         return;
     }
     for (row, key) in rows.keys.iter().enumerate() {
         let y0 = rows.y_of_row(grid, row);
-        if !style.in_scale(*key) || y0 + rows.height < grid.top() || y0 > grid.bottom() {
+        if !style.in_scale(*key)
+            || *key > style.limit()
+            || y0 + rows.height < grid.top()
+            || y0 > grid.bottom()
+        {
             continue;
         }
         ui.painter().rect_filled(
@@ -999,11 +1120,14 @@ fn paint_scale_rows(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &
 }
 
 /// Paints the lines between the key rows across `grid`.
-fn paint_row_lines(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows) {
+fn paint_row_lines(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, limit: u8) {
     let painter = ui.painter();
     let colours = &theme.colors;
     let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
-    for row in 0..rows.keys.len() {
+    for (row, key) in rows.keys.iter().enumerate() {
+        if *key > limit {
+            continue;
+        }
         let y = rows.y_of_row(grid, row) + rows.height;
         if y < grid.top() || y > grid.bottom() {
             continue;
@@ -1332,7 +1456,8 @@ fn scale_buttons(ui: &mut Ui, shell: &Shell, theme: &Theme, view: Rect, events: 
     let Some(clip) = shell.clip_view().shown_clip(doc, shell.arrangement()) else {
         return;
     };
-    if !doc.clip(clip).is_some_and(|clip| clip.scale.enabled) {
+    // Spec: tunings R16. A tuning of other than twelve notes hides them.
+    if shell.scales_hidden() || !doc.clip(clip).is_some_and(|clip| clip.scale.enabled) {
         return;
     }
     let colours = &theme.colors;
@@ -1876,6 +2001,7 @@ impl ClipViewUi {
             Some(chosen) => rows.shown(layout.grid, chosen),
             None => rows,
         };
+        let rows = rows.with_limit(tuning_of_clip(shell, clip).map_or(127, key_limit));
         self.top = rows.top;
         self.first = rows.first;
         let selected = shell
@@ -1919,6 +2045,7 @@ impl ClipViewUi {
             .and_then(|held| held.colour)
             .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
         let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, span_len);
+        tuning_readout(ui, shell, clip, &layout, &rows, &notes, hovered);
         let frame = note_lanes::Frame {
             clip,
             layout: &layout,
@@ -1931,6 +2058,7 @@ impl ClipViewUi {
             hovered,
             step: shell.arrangement().grid_ticks(doc),
             snap: shell.arrangement().grid().snap,
+            tuning: tuning_of_clip(shell, clip),
         };
         // Spec: mpe R24, R25. Each selected note's Pitch envelope is drawn
         // over it, except while Fold is on or on a Drum Rack's track.
@@ -1967,6 +2095,7 @@ impl ClipViewUi {
         };
         let mpe_frame = mpe_tab.then(|| mpe_tab::Frame {
             clip,
+            tuning: tuning_of_clip(shell, clip),
             grid: layout.grid,
             start: axis,
             length: span_len,
@@ -2110,10 +2239,7 @@ impl ClipViewUi {
         let held = ui
             .input(|i| i.pointer.primary_down())
             .then(|| ui.input(|i| i.pointer.press_origin()));
-        let row = |y: f32| {
-            rows.key_at(*grid, y)
-                .map(|key| key.round().clamp(0.0, 127.0) as u8)
-        };
+        let row = |y: f32| rows.key_at(*grid, y).map(|key| rows.clamp_key(key));
         let want = match (shell.clip_view().preview(), held.flatten(), pointer) {
             (true, Some(press), Some(pos)) if keys_rect.contains(press) => {
                 row(pos.y).map(|key| (key, 100))
@@ -2298,9 +2424,20 @@ impl ClipViewUi {
         // notes over them.
         paint_scale_rows(ui, theme, grid, rows, &style);
         paint_grid_lines(ui, shell, theme, grid, start, length);
-        paint_row_lines(ui, theme, grid, rows);
+        // Spec: tunings R29. The rows past the tuning's range aren't shown.
+        let limit = style.limit();
+        if limit < 127
+            && let Some(edge) = rows.y_of(grid, limit)
+        {
+            let past = Rect::from_min_max(grid.min, pos2(grid.right(), edge.min(grid.bottom())));
+            ui.painter().rect_filled(past, 0.0, colours.window.0);
+        }
+        paint_row_lines(ui, theme, grid, rows, limit);
         let face = frame.face;
         for (place, note) in notes.iter().enumerate() {
+            if note.key > limit {
+                continue;
+            }
             let Some(y) = rows.y_of(grid, note.key) else {
                 continue;
             };
@@ -2923,7 +3060,7 @@ impl ClipViewUi {
                         );
                         // Folded, a click draws on the rows that show.
                         if let Some(key) = rows.key_at(grid, pos.y) {
-                            let key = key.round().clamp(0.0, 127.0) as u8;
+                            let key = rows.clamp_key(key);
                             events.push(UiEvent::Invoke(Invocation::new(
                                 ids::ADD_NOTE,
                                 json!({ "clip": clip, "key": key, "start": at, "length": step }),
@@ -3060,10 +3197,7 @@ impl ClipViewUi {
         let option = ui.data(|d| d.get_temp::<(u8, bool)>(drag).is_some())
             || ui.input(|i| i.modifiers.alt)
                 && crate::tool_panel::ruler_set(shell, clip, 0, 0).is_some();
-        let pick = |pos: Pos2| {
-            rows.key_at(grid, pos.y)
-                .map(|key| key.round().clamp(0.0, 127.0) as u8)
-        };
+        let pick = |pos: Pos2| rows.key_at(grid, pos.y).map(|key| rows.clamp_key(key));
         if option {
             if keys_response.drag_started()
                 && let Some(key) = ui.input(|i| i.pointer.press_origin()).and_then(pick)
@@ -3099,7 +3233,7 @@ impl ClipViewUi {
             && let Some(pos) = keys_response.interact_pointer_pos()
             && let Some(key) = rows.key_at(grid, pos.y)
         {
-            let key = key.round().clamp(0.0, 127.0) as u8;
+            let key = rows.clamp_key(key);
             events.push(UiEvent::Invoke(Invocation::new(
                 ids::SELECT_NOTES,
                 json!({
@@ -3152,7 +3286,7 @@ impl ClipViewUi {
             && let Some(pos) = keys_response.interact_pointer_pos()
             && let Some(key) = rows.key_at(grid, pos.y)
         {
-            let key = key.round().clamp(0.0, 127.0) as u8;
+            let key = rows.clamp_key(key);
             events.push(UiEvent::Invoke(Invocation::new(
                 ids::SELECT_NOTES,
                 json!({ "clip": clip, "notes": [], "select": { "key": key } }),

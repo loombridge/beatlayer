@@ -1298,6 +1298,67 @@ fn the_use_current_scale_switch_is_drawn_in_the_title_bar_and_not_the_panel() {
     let _ = LIFT;
 }
 
+// Spec: tunings R16. Under a tuning of other than twelve notes a scale-aware
+// device's Use Current Scale is drawn off and disabled, and pressing it does
+// nothing; a twelve-note tuning changes nothing; it is back with the tuning
+// gone, as the device kept it.
+#[test]
+fn the_use_current_scale_switch_is_disabled_under_a_tuning_of_other_than_twelve_notes() {
+    use bl_devices::lift::USE_SCALE;
+
+    let mut h = harness();
+    let t = bl_devices::lift_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    h.shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": USE_SCALE.0, "value": 1.0 }),
+        )
+        .unwrap();
+    let switch = |h: &mut Harness| {
+        let nodes = Harness::nodes(&h.settle());
+        let node = nodes
+            .iter()
+            .find(|n| n.label == "Use Current Scale")
+            .expect("the switch is in the title bar");
+        (node.toggled, node.disabled)
+    };
+    let load = |h: &mut Harness, file: &str| {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/tunings")
+            .join(file);
+        h.shell
+            .run("tuning.load", json!({ "path": path.to_string_lossy() }))
+            .unwrap();
+    };
+    assert_eq!(switch(&mut h), (Some(true), false));
+    load(&mut h, "equal-12.scl");
+    assert_eq!(
+        switch(&mut h),
+        (Some(true), false),
+        "twelve notes change nothing"
+    );
+    load(&mut h, "equal-19.scl");
+    assert_eq!(switch(&mut h), (Some(false), true), "off and disabled");
+    let frame = frame_of(&mut h, device);
+    let steps = h.shell.editor().undo_history().len();
+    h.click(title_switch_rect(frame, false).center());
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps,
+        "it does nothing"
+    );
+    h.shell.run("tuning.remove", json!({})).unwrap();
+    assert_eq!(
+        switch(&mut h),
+        (Some(true), false),
+        "back as the device kept it"
+    );
+}
+
 // Spec: midi-scale-map R12, arpeggiator R16. With Use Current Scale on, Scale's
 // Base and Scale Name show the set's current scale, and they and
 // Arpeggiator's Root and Scale are drawn disabled.

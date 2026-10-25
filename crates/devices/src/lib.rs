@@ -169,6 +169,21 @@ pub fn display_for_view(
     data: Option<&[f32]>,
     view: Option<&str>,
 ) -> Option<DeviceDisplay> {
+    display_in(device_type, device, description, values, data, view, None)
+}
+
+/// As [`display_for_view`], for a device that follows the set's `tuning`
+/// (the tunings spec, R33): a Tuner names its notes by it.
+#[must_use]
+pub fn display_in(
+    device_type: &str,
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+    view: Option<&str>,
+    tuning: Option<&bl_model::Tuning>,
+) -> Option<DeviceDisplay> {
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
@@ -207,12 +222,13 @@ pub fn display_for_view(
             values,
             data,
         )),
-        TUNER => Some(tuner::display_for_view(
+        TUNER => Some(tuner::display_in(
             device,
             description,
             values,
             data,
             view,
+            tuning,
         )),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),

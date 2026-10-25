@@ -104,6 +104,7 @@ pub mod theme_look;
 pub mod tool_displays;
 pub mod tool_panel;
 pub mod track_menu;
+pub mod tuning_section;
 pub mod undo_history_panel;
 pub mod widgets;
 pub mod window;

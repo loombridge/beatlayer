@@ -628,6 +628,9 @@ pub struct BrowserUi {
     /// column ends.
     spans: Vec<columns::Span>,
     name_right: f32,
+    /// Whether the Tuning section's triangle is closed (the tunings spec,
+    /// R28); it opens with the section.
+    tuning_folded: bool,
 }
 
 /// The text after the last `#` in the search field, when a `#` term is
@@ -700,6 +703,7 @@ impl BrowserUi {
                 quick_tags: view.quick_tags_shown(),
                 filter_view: view.filter_view_shown(),
                 results_bar: view.results_bar(),
+                tuning_rows: crate::tuning_section::rows(shell, !self.tuning_folded),
             },
         );
         let region = Id::new("region-browser");
@@ -748,6 +752,11 @@ impl BrowserUi {
                     self.results_bar(ui, shell, theme, &layout, events);
                 }
                 self.content(ui, shell, theme, &layout, events);
+                if layout.tuning.height() > 0.0 {
+                    let mut open = !self.tuning_folded;
+                    crate::tuning_section::show(ui, shell, theme, layout.tuning, &mut open, events);
+                    self.tuning_folded = !open;
+                }
                 if view.quick_tags_shown() {
                     self.quick_tags(ui, shell, theme, layout.quick_tags, events);
                 }
@@ -2128,7 +2137,9 @@ impl BrowserUi {
             ),
             ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Clip | ItemKind::SessionClip => glyph(&painter, mark, Glyph::Clip, ink),
-            ItemKind::Preset | ItemKind::ChordBank => glyph(&painter, mark, Glyph::Preset, ink),
+            ItemKind::Preset | ItemKind::ChordBank | ItemKind::Tuning => {
+                glyph(&painter, mark, Glyph::Preset, ink);
+            }
             ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
                 glyph(&painter, mark, Glyph::Plugin, ink);
             }
@@ -2300,8 +2311,9 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                // Spec: midi-generators R26. A chord bank loads into Stacks.
-                ItemKind::ChordBank => {
+                // Spec: midi-generators R26, tunings R27. A chord bank loads
+                // into Stacks, and a tuning becomes the set's.
+                ItemKind::ChordBank | ItemKind::Tuning => {
                     if !selected {
                         invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
                     }
@@ -2375,7 +2387,16 @@ impl BrowserUi {
                 vec![item.path.clone()]
             };
             paths.sort_by_key(|p| view.position_of(Path::new(p)));
-            if item.kind == ItemKind::Plugin {
+            if item.kind == ItemKind::Tuning {
+                // Spec: tunings R27. A tuning dropped on the Tuning section
+                // loads.
+                DragAndDrop::set_payload(
+                    ui.ctx(),
+                    crate::tuning_section::TuningDrag {
+                        path: item.path.clone(),
+                    },
+                );
+            } else if item.kind == ItemKind::Plugin {
                 DragAndDrop::set_payload(
                     ui.ctx(),
                     BrowserDrag {
@@ -2459,6 +2480,7 @@ impl BrowserUi {
             ItemKind::Set => "Beatlayer set",
             ItemKind::Preset => "Beatlayer device preset",
             ItemKind::ChordBank => "Stacks chord bank",
+            ItemKind::Tuning => "tuning",
             ItemKind::Plugin => match item.format {
                 Some(bl_model::PluginFormat::Clap) => "CLAP plug-in",
                 Some(bl_model::PluginFormat::Vst3) => "VST3 plug-in",

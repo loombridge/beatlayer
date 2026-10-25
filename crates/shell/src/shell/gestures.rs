@@ -34,6 +34,8 @@ use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes as note_ids;
+use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use serde_json::Value;
 
@@ -97,6 +99,11 @@ impl Shell {
                 || note_ids::handles(id)
                 || (tool_ids::handles(id) && self.audio_apply(id, &args).is_none())
                 || midi_ids::handles(id)
+                // Spec: agent-permissions R6. The Session View's edits and
+                // loading a plug-in open a transaction of their own, which
+                // this one holds, so the step carries the label given.
+                || session_ids::handles(id)
+                || id == plugin_ids::LOAD
                 || matches!(
                     id,
                     browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED

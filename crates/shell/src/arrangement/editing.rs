@@ -1134,6 +1134,7 @@ impl ArrangementView {
         self.title_bars = from.title_bars;
         self.selected_lane = from.selected_lane;
         self.selected_breakpoint = from.selected_breakpoint;
+        self.selected_signature = from.selected_signature;
     }
 
     /// Drops selected clips the document no longer has.
@@ -1361,6 +1362,8 @@ pub fn label(id: &str, args: &Value) -> &'static str {
         ids::PASTE_TIME => "Paste Time",
         ids::DUPLICATE_TIME => "Duplicate Time",
         ids::DELETE_TIME => "Delete Time",
+        ids::DELETE_FRAGMENTARY_BAR_TIME => "Delete Fragmentary Bar Time",
+        ids::COMPLETE_FRAGMENTARY_BAR => "Complete Fragmentary Bar",
         ids::LOOP_SELECTION => "Loop selection",
         ids::CREATE_FADE => "Create Fade",
         ids::DELETE_FADES => "Delete Fades",
@@ -1403,6 +1406,7 @@ pub fn can_run(
         | ids::PASTE_TIME
         | ids::DUPLICATE_TIME
         | ids::DELETE_TIME => super::time_commands::can_run(id, args, view, clipboard),
+        ids::DELETE_FRAGMENTARY_BAR_TIME | ids::COMPLETE_FRAGMENTARY_BAR => given("at"),
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
         ids::INSERT_EMPTY_MIDI_CLIP => {
@@ -2210,7 +2214,9 @@ pub fn run(
         | ids::COPY_TIME
         | ids::PASTE_TIME
         | ids::DUPLICATE_TIME
-        | ids::DELETE_TIME => {
+        | ids::DELETE_TIME
+        | ids::DELETE_FRAGMENTARY_BAR_TIME
+        | ids::COMPLETE_FRAGMENTARY_BAR => {
             super::time_commands::run(id, args, editor, view, clipboard, edge_fades)
         }
         other => Err(invalid(format!("`{other}` isn't an editing command"))),

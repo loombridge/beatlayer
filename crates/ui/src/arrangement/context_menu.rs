@@ -37,6 +37,10 @@ pub enum MenuKind {
     Locator,
     /// The loop brace's (C-TIME-023).
     Brace,
+    /// A short bar's (C-TIME-024).
+    FragmentaryBar,
+    /// A time-signature marker's (C-TIME-027).
+    Signature,
     /// An automation breakpoint's: Edit Value (C-TIME-026).
     Breakpoint,
     /// An envelope's line: Add Value (C-TIME-026).
@@ -187,6 +191,18 @@ impl ContextMenus {
         self.kind = MenuKind::Brace;
     }
 
+    /// A right-click on the short bar that starts at `start` in the
+    /// time-signature lane.
+    pub fn open_fragmentary_bar(&mut self, start: bl_core::time::Ticks) {
+        self.kind = MenuKind::FragmentaryBar;
+        self.scrub_at = Some(start);
+    }
+
+    /// A right-click on a time-signature marker, which is selected.
+    pub fn open_signature(&mut self) {
+        self.kind = MenuKind::Signature;
+    }
+
     /// The keys opened a menu (S-CTX-002): the clips' if any are selected,
     /// otherwise the time selection's.
     pub fn open_from_keys(&mut self, clips_selected: bool) {
@@ -217,6 +233,8 @@ impl ContextMenus {
             MenuKind::Scrub => context_menus::arrangement_scrub_in(),
             MenuKind::Locator => context_menus::arrangement_locator_in(),
             MenuKind::Brace => context_menus::arrangement_brace_in(),
+            MenuKind::FragmentaryBar => context_menus::arrangement_fragmentary_bar_in(),
+            MenuKind::Signature => context_menus::arrangement_signature_in(),
             MenuKind::Breakpoint | MenuKind::Line => return,
         };
         let menu = &menu;
@@ -290,6 +308,11 @@ impl ContextMenus {
                     (MenuKind::Scrub, Action::Command(id))
                         if id == bl_shell::locator_commands::ADD =>
                     {
+                        self.scrub_at.map(|at| json!({ "at": at }))
+                    }
+                    // Spec: time-editing R34. Both items act on the short bar
+                    // that was right-clicked.
+                    (MenuKind::FragmentaryBar, Action::Command(_)) => {
                         self.scrub_at.map(|at| json!({ "at": at }))
                     }
                     // Spec: session-context-menus R16. Export MIDI Clip...

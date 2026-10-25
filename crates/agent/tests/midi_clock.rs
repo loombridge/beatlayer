@@ -4,8 +4,8 @@
 //! reports the sending half. The shell plays through the null device paced
 //! by hand (T199), as the app's host does.
 
-use bl_agent::client::{Client, InProcess};
 use bl_agent::Agent;
+use bl_agent::client::{Client, InProcess};
 use bl_audio_io::NullControl;
 use bl_midi_io::{Direction, TestBackend};
 use bl_shell::testing;

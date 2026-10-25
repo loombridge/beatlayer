@@ -892,7 +892,10 @@ impl ShellLayout {
         let wanted = f32::from(u8::from(want_lamps)) * lamps_width
             + f32::from(u8::from(want_resync)) * resync_width;
         let room = w >= MINIMUM.x + groove_shift + wanted;
-        let (lamps_shown, resync_shown) = (want_lamps && !second && room, want_resync && !second && room);
+        let (lamps_shown, resync_shown) = (
+            want_lamps && !second && room,
+            want_resync && !second && room,
+        );
         let sync_shift = f32::from(u8::from(lamps_shown)) * lamps_width
             + f32::from(u8::from(resync_shown)) * resync_width;
         let sync_at = placement(Element::TapTempo).x;
@@ -925,7 +928,11 @@ impl ShellLayout {
                         } else {
                             0.0
                         };
-                        let sync = if placement.x >= sync_at { sync_shift } else { 0.0 };
+                        let sync = if placement.x >= sync_at {
+                            sync_shift
+                        } else {
+                            0.0
+                        };
                         groove + sync
                     }
                     Left => 0.0,

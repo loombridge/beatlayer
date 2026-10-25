@@ -651,6 +651,8 @@ fn every_transport_command_runs_by_id() {
     run(&mut rig, "transport.stop_recording", json!({}));
     // Spec: transport R23
     run(&mut rig, "transport.scrub", json!({ "position": 0 }));
+    // Spec: midi-clock R11. With no output port on, it changes nothing.
+    run(&mut rig, "transport.resync_external_hardware", json!({}));
 
     let mut registered: Vec<String> = commands
         .iter()

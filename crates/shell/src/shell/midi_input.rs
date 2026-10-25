@@ -64,10 +64,9 @@ impl Shell {
     /// Sync on (midi-clock R15).
     #[must_use]
     pub fn sync_lamps_shown(&self) -> bool {
-        self.midi
-            .ports()
-            .iter()
-            .any(|p| p.direction == bl_shell_spec::midi_io::PortDirection::Input && p.sync && p.open)
+        self.midi.ports().iter().any(|p| {
+            p.direction == bl_shell_spec::midi_io::PortDirection::Input && p.sync && p.open
+        })
     }
 
     /// Whether the Control Bar shows the Resync External Hardware button:

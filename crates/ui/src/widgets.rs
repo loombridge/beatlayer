@@ -130,7 +130,11 @@ fn paint(
             ink
         };
         painter.text(pos, anchor, text, font, ink);
-    } else if matches!(placement.element, Element::MidiIndicators | Element::SyncLamps) && live {
+    } else if matches!(
+        placement.element,
+        Element::MidiIndicators | Element::SyncLamps
+    ) && live
+    {
         lamps(
             &painter,
             rect,

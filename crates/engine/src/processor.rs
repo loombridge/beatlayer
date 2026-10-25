@@ -19,7 +19,6 @@ use crate::message::{
 };
 use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
-use crate::sync_out::{Beats, Part, SyncOut};
 use crate::node::{NodeData, NodeKey, ParamValue, TransportInfo};
 use crate::program::{Blk, EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
@@ -31,6 +30,7 @@ use crate::session::{
     SlotState, SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
+use crate::sync_out::{Beats, Part, SyncOut};
 
 /// A parameter change waiting for its frame.
 #[derive(Clone, Copy, Debug)]
@@ -1086,7 +1086,9 @@ impl Processor {
             }
             // Spec: midi-clock R11
             TransportCommand::ResyncExternalHardware => {
-                let position = self.tempo().frames_to_ticks(self.position, self.config.sample_rate);
+                let position = self
+                    .tempo()
+                    .frames_to_ticks(self.position, self.config.sample_rate);
                 let signatures = match &self.program {
                     Some(p) => &p.get().time_signatures,
                     None => &self.fallback_time_signatures,

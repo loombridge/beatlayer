@@ -2030,15 +2030,20 @@ fn disclosure(ui: &mut Ui, name: &str, rect: Rect) -> bool {
     let ink = ui.visuals().text_color();
     let c = rect.center();
     let points = if open {
-        vec![c + vec2(-4.0, -2.0), c + vec2(4.0, -2.0), c + vec2(0.0, 3.0)]
+        vec![
+            c + vec2(-4.0, -2.0),
+            c + vec2(4.0, -2.0),
+            c + vec2(0.0, 3.0),
+        ]
     } else {
-        vec![c + vec2(-2.0, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.0, 4.0)]
+        vec![
+            c + vec2(-2.0, -4.0),
+            c + vec2(3.0, 0.0),
+            c + vec2(-2.0, 4.0),
+        ]
     };
-    ui.painter().add(egui::Shape::convex_polygon(
-        points,
-        ink,
-        egui::Stroke::NONE,
-    ));
+    ui.painter()
+        .add(egui::Shape::convex_polygon(points, ink, egui::Stroke::NONE));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(Role::DisclosureTriangle);
         node.set_label(name.to_owned());

@@ -290,12 +290,8 @@ impl MidiPorts {
             return;
         }
         if entry.output {
-            self.output.set_switches(
-                self.owner,
-                port,
-                entry.switches.track,
-                entry.switches.sync,
-            );
+            self.output
+                .set_switches(self.owner, port, entry.switches.track, entry.switches.sync);
             return;
         }
         let opened = match entry.direction {

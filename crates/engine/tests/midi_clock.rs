@@ -7,6 +7,7 @@
 use crate::common;
 use std::time::{Duration, Instant};
 
+use bl_core::clock::TestClock;
 use bl_core::midi::{ClockType, HardwareResync, MidiOutputEvent, PortId, SyncOutput};
 use bl_core::time::{Bpm, TempoMap, Ticks};
 use bl_engine::{LoopRegion, NoInput, TransportCommand};
@@ -68,7 +69,7 @@ impl Clock {
         Self {
             rig,
             out,
-            start: Instant::now(),
+            start: TestClock::new().now(),
             block,
             blocks: 0,
             latency,
@@ -347,7 +348,7 @@ fn a_count_in_sends_nothing_until_the_transport_moves() {
 // Spec: midi-clock R4
 #[test]
 fn the_sync_delay_moves_every_stamp_by_exactly_itself() {
-    let base = Instant::now();
+    let base = TestClock::new().now();
     let play = |delay: i16, block: usize, latency: u32| {
         let mut clock = Clock::new(
             block,

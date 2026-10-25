@@ -95,7 +95,11 @@ impl MidiMessage {
     /// 14-bit range (16,383) are sent as 16,383.
     #[must_use]
     pub const fn song_position(sixteenths: u32) -> Self {
-        let beats = if sixteenths > 0x3FFF { 0x3FFF } else { sixteenths };
+        let beats = if sixteenths > 0x3FFF {
+            0x3FFF
+        } else {
+            sixteenths
+        };
         Self {
             bytes: [0xF2, (beats & 0x7F) as u8, (beats >> 7) as u8],
             len: 3,

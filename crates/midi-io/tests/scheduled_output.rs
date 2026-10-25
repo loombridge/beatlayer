@@ -448,7 +448,10 @@ fn sync_messages_follow_the_sync_switch_and_notes_the_track_switch() {
     let stamped = |name| test.sent_at(name);
     let drums = stamped("Drum machine");
     assert_eq!(
-        drums.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>(),
+        drums
+            .iter()
+            .map(|(_, bytes)| bytes.clone())
+            .collect::<Vec<_>>(),
         sync.iter().map(|m| m.bytes().to_vec()).collect::<Vec<_>>()
     );
     assert_eq!(drums[1].1, vec![0xF2, 0x34, 0x24]);

@@ -649,8 +649,14 @@ fn a_frozen_tail_that_keeps_taking_input_stays_finite() {
     // A sustained offset, a minute of it: each pass adds to the lossless loop.
     let dc = vec![0.5f32; 4_800 * 600];
     let [left, right] = stream(node.as_mut(), &dc, 4_800);
-    let peak = left.iter().chain(&right).fold(0.0f32, |m, s| m.max(s.abs()));
-    assert!(peak.is_finite() && peak < 16.0, "the tail stays bounded: {peak}");
+    let peak = left
+        .iter()
+        .chain(&right)
+        .fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        peak.is_finite() && peak < 16.0,
+        "the tail stays bounded: {peak}"
+    );
     // Lifting Freeze lets it decay: the loop is not poisoned.
     let silent = vec![0.0f32; 4_800];
     let out = run_stereo_with(node.as_mut(), &silent, &silent, &[set(0, FREEZE, 0.0)]);

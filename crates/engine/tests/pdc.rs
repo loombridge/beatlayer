@@ -402,7 +402,10 @@ fn a_node_whose_latency_moves_is_published_until_it_is_reported() {
     let d = device(&mut rig.editor, t, MOVING, &[]);
     rig.sync();
     rig.block(64);
-    assert!(rig.monitor.state().latency_changes.is_empty(), "as compiled");
+    assert!(
+        rig.monitor.state().latency_changes.is_empty(),
+        "as compiled"
+    );
 
     latency.store(300, Relaxed);
     rig.block(64);

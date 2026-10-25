@@ -430,11 +430,10 @@ impl DuplexInput {
         }
         // Until the input side has delivered anything, silence is what a
         // stream that just opened plays, not an xrun.
-        if whole > 0 {
-            self.started = true;
-        } else if self.started && whole < frames {
+        if whole < frames && (self.started || whole > 0) {
             self.counters.record_xrun();
         }
+        self.started |= whole > 0;
     }
 }
 
@@ -771,6 +770,17 @@ fn build(
     stream.map_err(from_cpal)
 }
 
+/// The stream's counters. When a duplex stream follows the default device
+/// and the default changes, only its output has moved: the input stays on the
+/// old device, on another clock, with the old device's latency and workgroup.
+/// So the stream reports itself invalidated, and the supervisor reopens both
+/// sides on the new default.
+fn duplex_stats(counters: &Counters, duplex_follows_default: bool) -> StreamStats {
+    let mut stats = counters.snapshot();
+    stats.invalidated |= duplex_follows_default && stats.device_changes > 0;
+    stats
+}
+
 struct CpalStream {
     stream: cpal::Stream,
     /// The device's input stream, when it runs duplex.
@@ -818,7 +828,10 @@ impl Stream for CpalStream {
     }
 
     fn stats(&self) -> StreamStats {
-        self.counters.snapshot()
+        duplex_stats(
+            &self.counters,
+            self.input.is_some() && self.info.follows_default,
+        )
     }
 
     fn current_buffer_size(&self) -> Option<u32> {
@@ -936,6 +949,36 @@ mod tests {
         let view = out.scratch.view(4);
         assert_eq!(view.channel(0), &[0.0, 2.0, 4.0, 6.0]);
         assert_eq!(view.channel(1), &[1.0, 3.0, 5.0, 7.0]);
+    }
+
+    #[test]
+    fn a_partial_shortfall_in_the_duplex_bridge_counts_an_xrun() {
+        let counters = Arc::new(Counters::new());
+        let config = RtThreadConfig {
+            period: frames_to_duration(4, 48_000),
+            promote: false,
+            workgroup: None,
+        };
+        let gauge = Gauge::new(Slot::default(), 48_000);
+        let (mut out, mut inp) = duplex_input(1, 4, Arc::clone(&counters), config, gauge);
+
+        // The ring holds one frame when the output asks for two: the rest is
+        // silence, and it's an xrun even though the input has just started.
+        inp.push(&[1.0f32], 1);
+        out.drain(2);
+        assert_eq!(out.scratch.view(2).channel(0), &[1.0, 0.0]);
+        assert_eq!(counters.snapshot().xruns, 1);
+    }
+
+    #[test]
+    fn a_duplex_stream_on_the_default_device_is_invalidated_when_the_default_changes() {
+        let counters = Counters::new();
+        counters.record_device_change();
+        // Only the output follows the default, so the stream reopens.
+        assert!(duplex_stats(&counters, true).invalidated);
+        // An output alone, or a stream on a chosen device, carries on.
+        assert!(!duplex_stats(&counters, false).invalidated);
+        assert!(!duplex_stats(&Counters::new(), true).invalidated);
     }
 
     #[test]

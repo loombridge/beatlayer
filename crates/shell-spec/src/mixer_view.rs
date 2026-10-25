@@ -47,6 +47,12 @@ pub const DEVICES: &str = "mixer_view.devices";
 pub const SCROLL: &str = "mixer_view.scroll";
 /// `mixer_view.focus`: move the keyboard focus to the Arrangement's mixer.
 pub const FOCUS: &str = "mixer_view.focus";
+/// `mixer_view.set_height`: set the height of a view's strip section (R32).
+pub const SET_HEIGHT: &str = "mixer_view.set_height";
+/// `mixer_view.set_column_width`: set a column's width (R36).
+pub const SET_COLUMN_WIDTH: &str = "mixer_view.set_column_width";
+/// `mixer_view.reset_peak`: set the held peak back to the current one (R33).
+pub const RESET_PEAK: &str = "mixer_view.reset_peak";
 /// `mixer_view.fold_chains`: fold a rack's chains out as strips in the
 /// mixers, or fold them back in (racks spec, R27).
 pub const FOLD_CHAINS: &str = "mixer_view.fold_chains";
@@ -69,6 +75,9 @@ pub const IDS: &[&str] = &[
     SCROLL,
     FOCUS,
     FOLD_CHAINS,
+    SET_HEIGHT,
+    SET_COLUMN_WIDTH,
+    RESET_PEAK,
 ];
 
 /// Whether `id` is one of the Mixer view's commands.
@@ -82,6 +91,28 @@ pub fn handles(id: &str) -> bool {
 /// this width.
 pub const COLUMN_WIDTH: f32 = 94.0;
 
+/// The Main track's column width in a new set (L-SES-006).
+pub const MAIN_COLUMN_WIDTH: f32 = 104.0;
+
+/// The strip section's height at 100% in a new set (L-MIX-003).
+pub const STRIP_HEIGHT: f32 = 123.0;
+
+/// The least the strip section goes down to (R32).
+pub const MIN_STRIP_HEIGHT: f32 = 64.0;
+
+/// The strip section's height below which the pan knob hides (R32).
+pub const PAN_HIDES_BELOW: f32 = 100.0;
+
+/// The strip section's height from which the extended meters show (R33).
+pub const EXTENDED_METERS_HEIGHT: f32 = 200.0;
+
+/// The column width from which the extended meters label their tick marks
+/// (R35).
+pub const TICK_LABELS_WIDTH: f32 = 120.0;
+
+/// How long a meter's peak line holds before it falls, in seconds (R34).
+pub const PEAK_HOLD_SECONDS: f64 = 2.0;
+
 /// Which view's mixer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -93,13 +124,81 @@ pub enum MixerOf {
     Arrangement,
 }
 
-/// One view's mixer.
+/// One view's mixer: whether it shows, how far it is scrolled, how tall its
+/// strip section is and which sections it shows (R32, R37).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ViewMixerState {
     /// Whether the mixer shows in that view.
     pub shown: bool,
     /// How far its track columns are scrolled sideways, in points at 100%.
     pub scroll: f64,
+    /// The height of its strip section in points at 100%: 123 in a new set.
+    /// The window limits what shows, so a larger height reads back as set.
+    pub height: f32,
+    /// Whether its In/Out section shows.
+    pub in_out: bool,
+    /// Whether its Sends section shows.
+    pub sends: bool,
+    /// Whether its mixer strips (volume, pan, the meter, the activator, Solo,
+    /// Arm) show.
+    pub volume: bool,
+    /// Whether its Crossfader section shows: the tracks' A and B assign
+    /// buttons and Main's crossfader. Hidden in a new set.
+    pub crossfader: bool,
+    /// Whether its return tracks' columns show.
+    pub return_tracks: bool,
+    /// Whether its tracks' Track Options sections show (track delay and
+    /// Keep Monitoring Latency). Hidden in a new set.
+    pub track_options: bool,
+    /// Whether its Performance Impact section shows. Hidden in a new set.
+    pub performance_impact: bool,
+    /// Whether its Devices section shows (IMP-25, R24). Hidden in a new
+    /// install.
+    pub devices: bool,
+}
+
+impl ViewMixerState {
+    /// A new set's mixer: shown or hidden as `shown` says, at the default
+    /// height, with In/Out, Sends, the strips and the returns showing (R37).
+    #[must_use]
+    pub const fn new(shown: bool) -> Self {
+        Self {
+            shown,
+            scroll: 0.0,
+            height: STRIP_HEIGHT,
+            in_out: true,
+            sends: true,
+            volume: true,
+            crossfader: false,
+            return_tracks: true,
+            track_options: false,
+            performance_impact: false,
+            devices: false,
+        }
+    }
+}
+
+/// One column's width, as `mixer_view.state` reports it (R36, R38).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ColumnWidth {
+    /// The track, return track or Main whose column it is.
+    pub track: TrackId,
+    /// Its width in points at 100%: 94 in a new set (Main's 104).
+    pub width: f32,
+}
+
+/// One track's held peak, as `mixer_view.state` reports it (R33, R34).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackPeak {
+    /// The track.
+    pub track: TrackId,
+    /// The highest peak since the readout was last reset, as a linear
+    /// amplitude: zero for silence.
+    pub peak: f32,
+    /// The line each channel's meter marks its highest recent peak with, as
+    /// a linear amplitude: it holds for two seconds, then falls to the
+    /// current peak.
+    pub hold: [f32; 2],
 }
 
 /// One track's gain reduction, as `mixer_view.state` reports it (IMP-25,
@@ -121,42 +220,15 @@ pub struct MixerViewState {
     pub session: ViewMixerState,
     /// The Arrangement View's mixer.
     pub arrangement: ViewMixerState,
-    /// Whether the In/Out section shows, in both mixers.
-    pub in_out: bool,
-    /// Whether the Sends section shows.
-    pub sends: bool,
-    /// Whether the mixer strips (volume, pan, the meter, the activator,
-    /// Solo, Arm) show.
-    pub volume: bool,
-    /// Whether the Crossfader section shows: the tracks' A and B assign buttons
-    /// and Main's crossfader. Hidden in a new set.
-    pub crossfader: bool,
     /// Whether the Session View's Main column shows the scenes' tempo and
     /// time signature fields (View > Scene Tempo and Time Signature). Hidden
     /// in a new set.
     pub scene_tempo: bool,
-    /// Whether the return tracks' columns show.
-    pub return_tracks: bool,
     /// Whether the return tracks scroll with the tracks (IMP-01, the
     /// mixer view spec R21): they come after the drop area and only Main
     /// stays pinned. Off in a new install, so the returns stay pinned, as
     /// in Live.
     pub return_tracks_scroll: bool,
-    /// Whether the tracks' Track Options sections show (track delay and
-    /// Keep Monitoring Latency). Shown only while this shows; hidden in a
-    /// new set.
-    pub track_options: bool,
-    /// Whether the Performance Impact section shows: under each strip, the
-    /// six segments that light up from the left with the track's share of
-    /// the set's processing time. Hidden in a new set.
-    pub performance_impact: bool,
-    /// Whether the Devices section shows: between In/Out and Sends, each
-    /// track's top-level devices with their activators (IMP-25, the mixer
-    /// view spec R24). Hidden in a new install; the devices and whether
-    /// each is on are the query tool's `track` devices with their
-    /// `enabled`.
-    #[serde(default)]
-    pub devices: bool,
     /// Each track's Performance Impact, as the engine last published it:
     /// the track, how many of its six segments are lit, and its share of
     /// the set's processing time (the mixer spec, R31).
@@ -166,6 +238,14 @@ pub struct MixerViewState {
     /// R40); empty when no engine has published meters.
     #[serde(default)]
     pub gain_reduction: Vec<TrackGainReduction>,
+    /// Each track's held peak and its meters' peak lines (R33, R34); empty
+    /// when no engine has published meters.
+    #[serde(default)]
+    pub peaks: Vec<TrackPeak>,
+    /// Every column's width, in the order the columns run: the tracks, the
+    /// return tracks, Main (R36, R38).
+    #[serde(default)]
+    pub column_widths: Vec<ColumnWidth>,
     /// The racks whose chains fold out in the mixers (racks spec, R27): the
     /// track each is on, the rack, and whether its chains are folded out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -273,6 +353,50 @@ pub struct SectionArgs {
     pub shown: Option<bool>,
 }
 
+/// Arguments of the commands that show or hide one of a mixer's sections.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ViewSectionArgs {
+    /// Which view's mixer; the view in front if left out (R37, R38).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<MixerOf>,
+    /// Show it (true) or hide it (false); switches it if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
+/// Arguments of `mixer_view.set_height`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetHeightArgs {
+    /// Which view's mixer; the view in front if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub view: Option<MixerOf>,
+    /// The height of the strip section in points at 100%, at least 64.
+    pub height: f32,
+}
+
+/// Arguments of `mixer_view.set_column_width`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetColumnWidthArgs {
+    /// The track, return track or Main whose column it is; every track's
+    /// (not the returns' or Main's) if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The width in points at 100%, from 40 to 400.
+    pub width: f32,
+}
+
+/// Arguments of `mixer_view.reset_peak`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResetPeakArgs {
+    /// The track; every track if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+}
+
 /// Arguments of `mixer_view.return_tracks_scroll`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -330,9 +454,11 @@ fn specs() -> Vec<CommandSpec> {
         view(
             STATE,
             "Mixer View State",
-            "Reports what the mixers show: whether the Session View's and the Arrangement \
-             View's mixers are shown and how far each is scrolled, and which sections (In/Out, \
-             Sends, the volume strips, the return tracks, the Performance Impact, the Devices) show. The \
+            "Reports what the mixers show: for the Session View's and the Arrangement \
+             View's mixers each, whether it is shown, how far it is scrolled, the height of its strip \
+             section, and which sections (In/Out, Sends, the volume strips, the Crossfader, the \
+             return tracks, the Track Options, the Performance Impact, the Devices) it shows; every \
+             column's width; and each track's held peak. The \
              Performance Impact values are the engine's last, one entry per track: how many of \
              the six segments are lit and the track's share of the set's processing time. \
              Track values (volume, pan, the activator, Solo, Arm, routing, sends, the \
@@ -362,17 +488,17 @@ fn specs() -> Vec<CommandSpec> {
         )
         .context(Global)
         .binding("S-VIEW-012")
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             SENDS,
             "Mixer Sends",
             "Shows or hides the mixers' Sends section (a send knob per return track), as View > \
-             Mixer Controls > Sends does. Switches unless `shown` says which. Changes only the \
+             Mixer Controls > Sends does. Acts on the mixer of the view in front unless `view` names one, and switches unless `shown` says which; each view's mixer keeps its own sections. Changes only the \
              view.",
         )
         .context(Global)
         .binding("S-VIEW-013")
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             VOLUME,
             "Mixer Volume",
@@ -382,7 +508,7 @@ fn specs() -> Vec<CommandSpec> {
              their controls.",
         )
         .context(Global)
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             CROSSFADER,
             "Mixer Crossfader",
@@ -393,13 +519,13 @@ fn specs() -> Vec<CommandSpec> {
              the set (`mixer.set_crossfade_assign`, `mixer.set_crossfader`).",
         )
         .context(Global)
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             SCENE_TEMPO,
             "Scene Tempo and Time Signature",
             "Shows or hides the Session View's scene tempo and time signature fields, at the \
              left of the Main track's column, as View > Scene Tempo and Time Signature does. \
-             Hidden in a new set. Switches unless `shown` says which. Changes only the view; a \
+             Hidden in a new set. Acts on the mixer of the view in front unless `view` names one, and switches unless `shown` says which; each view's mixer keeps its own sections. Changes only the view; a \
              scene's own tempo and signature are in the set (`scene.set_tempo`, \
              `scene.set_time_signature`).",
         )
@@ -409,12 +535,12 @@ fn specs() -> Vec<CommandSpec> {
             RETURN_TRACKS,
             "Return Tracks",
             "Shows or hides the return tracks' columns in the mixers, as View > Mixer Controls > \
-             Return Tracks does. Switches unless `shown` says which. Changes only the view; the \
+             Return Tracks does. Acts on the mixer of the view in front unless `view` names one, and switches unless `shown` says which; each view's mixer keeps its own sections. Changes only the view; the \
              returns keep playing.",
         )
         .context(Global)
         .binding(Binding::new("S-TRACK-011"))
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             RETURN_TRACKS_SCROLL,
             "Return Tracks Scroll with Tracks",
@@ -433,23 +559,23 @@ fn specs() -> Vec<CommandSpec> {
             "Shows or hides the tracks' Track Options sections, as View > Mixer Controls > \
              Track Options does: under each strip, the track delay (with its ms/samples unit \
              switch) and Keep Monitoring Latency. Hidden in a new set; shown only while this \
-             shows. Switches unless `shown` says which. Changes only the view; the delay and \
+             shows. Acts on the mixer of the view in front unless `view` names one, and switches unless `shown` says which; each view's mixer keeps its own sections. Changes only the view; the delay and \
              the Keep Monitoring Latency switch are in the set (`mixer.set_track_delay`, \
              `mixer.set_keep_monitoring_latency`).",
         )
         .context(Global)
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             PERFORMANCE_IMPACT,
             "Performance Impact",
             "Shows or hides the mixers' Performance Impact section, as View > Mixer Controls > \
              Performance Impact does: under each strip, the six segments that light up from the \
              left with the track's share of the set's processing time. Hidden in a new set. \
-             Switches unless `shown` says which. Changes only the view; the shares themselves \
+             Acts on the mixer of the view in front unless `view` names one, and switches unless `shown` says which; each view's mixer keeps its own sections. Changes only the view; the shares themselves \
              are in `mixer_view.state`, as `performance_impact_values`.",
         )
         .context(Global)
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             DEVICES,
             "Mixer Devices",
@@ -457,11 +583,11 @@ fn specs() -> Vec<CommandSpec> {
              does: between In/Out and Sends, each track's top-level devices in chain order, \
              each with its activator and name. A click on a name selects the device and shows \
              the Device View; a click on an activator switches the device. Hidden in a new \
-             install. Switches unless `shown` says which. Changes only the view; the devices \
+             install. Acts on the mixer of the view in front unless `view` names one, and switches unless `shown` says which; each view's mixer keeps its own sections. Changes only the view; the devices \
              and whether each is on are in the query tool's `track` devices, as `enabled`.",
         )
         .context(Global)
-        .args::<SectionArgs>(),
+        .args::<ViewSectionArgs>(),
         view(
             SCROLL,
             "Scroll Mixer",
@@ -496,6 +622,42 @@ fn specs() -> Vec<CommandSpec> {
         )
         .context(Global)
         .args::<FoldChainsArgs>(),
+        view(
+            SET_HEIGHT,
+            "Set Mixer Height",
+            "Sets the height of a view's mixer strip section in points at 100%, as dragging the \
+             mixer's top edge does: the sections above it move with it, and the clip slots or \
+             the lanes give up or take back the height. At least 64; the window limits what \
+             shows, since the Session View keeps its status row and one clip slot row, and the \
+             Arrangement its rulers and one track row. Below 100 the pan knob hides; from 200 the \
+             extended meters show (tick marks, a volume field, a resettable peak readout). Each \
+             view's height is its own. Acts on the view in front unless `view` names one. \
+             Changes only the view; it isn't saved with the set and isn't an undo step.",
+        )
+        .context(Global)
+        .args::<SetHeightArgs>(),
+        view(
+            SET_COLUMN_WIDTH,
+            "Set Column Width",
+            "Sets the width of a track's, a return track's or Main's column, in points at 100% from \
+             40 to 400 (94 in a new set), as dragging the right edge of a Session View title bar \
+             does: the clip grid and both mixers follow. With `track` left out it sets every \
+             track's column, as Option-dragging does (the return tracks' and Main's keep theirs). \
+             A column narrower than 94 hides the pan knob, the peak readout and the scale's \
+             labels. Saved with the set, and not an undo step; the widths read back in \
+             `mixer_view.state`.",
+        )
+        .context(Global)
+        .args::<SetColumnWidthArgs>(),
+        view(
+            RESET_PEAK,
+            "Reset Peak",
+            "Sets a track's peak level readout back to its current peak, as clicking the readout \
+             does while the extended meters show; every track's if `track` is left out. Changes \
+             only the view; the held peaks read back in `mixer_view.state`.",
+        )
+        .context(Global)
+        .args::<ResetPeakArgs>(),
     ]
 }
 

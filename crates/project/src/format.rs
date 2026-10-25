@@ -15,6 +15,7 @@
 //!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
 //!      "mpe_view": { … },       the MPE tab's lanes, their heights and the clips with its grid on
 //!      "lane_views": { "3": { … } }, each track's automation lanes (R24 to R26)
+//!      "column_widths": { "3": 120.0 }, the columns resized from their default width
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
@@ -41,7 +42,7 @@ use std::io::Read;
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, DeviceWindows, Document, Editor, LaneViews, LaunchSettings, MpeView,
+    ClipFolds, ColumnWidths, DeviceWindows, Document, Editor, LaneViews, LaunchSettings, MpeView,
     MultisamplerViews, RackViewMap, WindowViews,
 };
 use ruzstd::decoding::StreamingDecoder;
@@ -109,6 +110,10 @@ pub struct Project {
     /// (the automation spec, R24 to R26): saved with the set, but not part of
     /// the document, so changing them is no undo step.
     pub lane_views: LaneViews,
+    /// The width of each track's, return's and Main's column where it isn't
+    /// the default (the mixer view spec, R36): saved with the set, but not
+    /// part of the document, so resizing a column is no undo step.
+    pub column_widths: ColumnWidths,
 }
 
 impl Project {
@@ -135,6 +140,7 @@ impl Project {
             window_views: WindowViews::default(),
             mpe_view: MpeView::default(),
             lane_views: LaneViews::new(),
+            column_widths: ColumnWidths::new(),
         }
     }
 
@@ -211,6 +217,18 @@ impl Project {
             .iter()
             .filter(|(track, _)| self.document.track(**track).is_some())
             .map(|(track, lanes)| (*track, lanes.clone()))
+            .collect();
+        self
+    }
+
+    /// The same project with these column widths, keeping only the tracks
+    /// its document has and widths within the limits.
+    #[must_use]
+    pub fn with_column_widths(mut self, widths: &ColumnWidths) -> Self {
+        self.column_widths = widths
+            .iter()
+            .filter(|(track, width)| self.document.track(**track).is_some() && width.is_finite())
+            .map(|(track, width)| (*track, bl_model::clamp_column_width(*width)))
             .collect();
         self
     }
@@ -337,6 +355,8 @@ struct Saving<'a> {
     mpe_view: &'a MpeView,
     #[serde(skip_serializing_if = "LaneViews::is_empty")]
     lane_views: &'a LaneViews,
+    #[serde(skip_serializing_if = "ColumnWidths::is_empty")]
+    column_widths: &'a ColumnWidths,
     document: &'a Document,
 }
 
@@ -358,6 +378,7 @@ impl<'a> Saving<'a> {
             window_views: project.window_views,
             mpe_view: &project.mpe_view,
             lane_views: &project.lane_views,
+            column_widths: &project.column_widths,
             document: &project.document,
         }
     }
@@ -406,6 +427,10 @@ struct Saved {
     /// track showing its main lane only (R33).
     #[serde(default)]
     lane_views: LaneViews,
+    /// The columns' widths (WP-6.65). Sets saved before it open with every
+    /// column at its default width (the mixer view spec, R36).
+    #[serde(default)]
+    column_widths: ColumnWidths,
     document: Document,
 }
 
@@ -514,6 +539,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         window_views,
         mpe_view,
         lane_views,
+        column_widths,
         document,
         ..
     } = saved;
@@ -545,12 +571,14 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         window_views,
         mpe_view: MpeView::default(),
         lane_views: LaneViews::new(),
+        column_widths: ColumnWidths::new(),
     }
     .with_windows(&windows)
     .with_rack_views(&rack_views)
     .with_folds(&folds)
     .with_mpe_view(&mpe_view)
     .with_lane_views(&lane_views)
+    .with_column_widths(&column_widths)
     .with_midi_tools(&midi_tools)
     .with_multisamplers(&multisamplers);
     let info = SetInfo {

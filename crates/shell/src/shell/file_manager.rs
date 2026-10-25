@@ -719,6 +719,7 @@ impl Shell {
         self.arrangement.restore_lanes(self.store.lane_views());
         self.clip_view.forget_selection();
         self.mixer.reset();
+        self.mixer.restore_widths(self.store.column_widths());
         self.session.reset();
         for (hash, path, size) in self.store.media_files() {
             self.media

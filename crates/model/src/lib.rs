@@ -67,6 +67,7 @@ mod changes;
 mod clip;
 mod clip_param;
 mod colour;
+mod column_widths;
 mod command;
 pub mod comp;
 mod device;
@@ -131,6 +132,7 @@ pub use clip::{
     consolidated_midi, crossfades, fade_power,
 };
 pub use clip_param::ClipParam;
+pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
 pub use command::{Command, tempo_shape, write_tempo_shape};
 pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,

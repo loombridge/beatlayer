@@ -512,7 +512,9 @@ pub fn header(
     }
     // The Track Options row (L-MIX-005): the Track Delay with its unit
     // switch and Keep Monitoring Latency, as far down as the height allows.
-    if crate::mixer::sections(shell).track_options && height >= 68.0 {
+    if crate::mixer::sections(shell, bl_shell::mixer_view::MixerOf::Arrangement).track_options
+        && height >= 68.0
+    {
         let row4 = column(MIXER, row_top + 48.0, row_top + 62.0);
         parts.track_options_section(ui, row4, (row4.top(), row4.bottom()), events);
     }

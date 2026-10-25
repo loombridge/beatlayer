@@ -510,7 +510,7 @@ impl ArrangementUi {
                 rect,
                 view.overview(),
                 pinned.len(),
-                crate::mixer::sections(shell),
+                crate::mixer::sections(shell, bl_shell::mixer_view::MixerOf::Arrangement),
             )
         } else {
             ArrangementLayout::compute(rect, view.overview(), pinned.len())

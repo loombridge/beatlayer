@@ -2129,12 +2129,12 @@ fn committed_field(
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label.to_owned());
     });
+    if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, text));
+        return None;
+    }
     if response.changed() {
         draft = Some(text);
-    }
-    if response.has_focus() {
-        ui.data_mut(|d| d.insert_temp(id, draft.clone().unwrap_or_default()));
-        return None;
     }
     ui.data_mut(|d| d.remove_temp::<String>(id));
     let escaped = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape));

@@ -9,6 +9,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
+        // The scene's colour palette comes with the Session View's context
+        // menus (the themes spec, R16).
+        (
+            "scene.set_colour",
+            Exception(LaterView(
+                "the scene's context menu and its colour palette, which come with the Session \
+                 View's context menus (WP-6.56)",
+            )),
+        ),
         (
             "session.scroll",
             Exception(Equivalent(
@@ -27,6 +36,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Equivalent(
                 "Option-dragging (Ctrl-dragging) a clip to another slot; dragging moves it \
                  (`clip.move_to_slot`)",
+            )),
+        ),
+        (
+            "session.copy_to_arrangement",
+            Exception(Equivalent(
+                "dragging clips onto the Arrangement View or into the other window; Copy in \
+                 the Session View and Paste in the Arrangement (`arrangement.paste`) do the \
+                 same from the keyboard",
+            )),
+        ),
+        (
+            "session.copy_to_session",
+            Exception(Equivalent(
+                "dragging clips onto the Session View or into the other window; Copy in the \
+                 Arrangement and Paste in the Session View (`session.paste`) do the same from \
+                 the keyboard",
             )),
         ),
         (

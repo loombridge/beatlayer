@@ -1438,6 +1438,15 @@ pub struct ClipViewState {
     /// `clip.select_envelope_breakpoint` sets it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub envelope_breakpoint: Option<Ticks>,
+    /// The time selected in the Envelope Editor (WP-6.25c), in ticks from
+    /// the beginning of the clip's contents: `clip.select_envelope_time`
+    /// sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_selection: Option<crate::arrangement::TimeRange>,
+    /// The segment selected in the Envelope Editor, as the breakpoint it
+    /// starts at: `clip.select_envelope_segment` sets it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub envelope_segment: Option<Ticks>,
     /// The MPE tab's lanes, grid and selected breakpoints (WP-6.18).
     #[serde(default)]
     pub mpe: MpeTabState,

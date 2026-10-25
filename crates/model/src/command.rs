@@ -366,6 +366,27 @@ pub enum Command {
         /// Where it goes in its list, from 0 to the list's length.
         index: usize,
     },
+    /// Colours tracks, Main and the returns among them, with a swatch of the
+    /// palette of 5 rows of 14 (0 to 69). Their clips keep their colours.
+    SetTrackColour {
+        /// The tracks, each listed once.
+        tracks: Vec<TrackId>,
+        /// The swatch.
+        colour: u8,
+    },
+    /// Gives every clip of each track its track's colour: in the
+    /// Arrangement, in its Session slots and in its take lanes. Tracks that
+    /// hold no clips are left as they are.
+    AssignColourToClips {
+        /// The tracks, each listed once.
+        tracks: Vec<TrackId>,
+    },
+    /// Gives each group track's colour to every track inside it, at any
+    /// depth, and to all their clips, in both views and their take lanes.
+    AssignColourToGrouped {
+        /// The group tracks, each listed once.
+        tracks: Vec<TrackId>,
+    },
     /// Deletes a track with its clips and devices. Deleting a group deletes
     /// every track inside it. Main can't be deleted.
     DeleteTrack {
@@ -868,6 +889,14 @@ pub enum Command {
         clips: Vec<ClipId>,
         /// How far to move them; negative moves them earlier.
         by: Ticks,
+    },
+    /// Colours clips, in the Arrangement, a Session slot or a take lane, with
+    /// a swatch of the palette of 5 rows of 14 (0 to 69).
+    SetClipColour {
+        /// The clips, each listed once.
+        clips: Vec<ClipId>,
+        /// The swatch.
+        colour: u8,
     },
     /// Changes a clip's length, keeping its start.
     SetClipLength {
@@ -1530,6 +1559,25 @@ pub enum Command {
         /// Whether the envelope follows the clip's timeline.
         linked: bool,
     },
+    /// Replaces one of a clip's envelopes with the breakpoints given, as the
+    /// clip envelope editing commands do when they write a shape, a stretch or
+    /// a paste over a span (the clip envelopes spec, R12, R13). The envelope
+    /// keeps its Linked switch.
+    SetClipEnvelope {
+        /// The clip.
+        clip: ClipId,
+        /// The parameter of the clip's track.
+        target: AutomationTarget,
+        /// Which of the clip's envelopes for the parameter: `modulation`
+        /// (the default) or a Session clip's `automation`.
+        #[serde(default)]
+        kind: EnvelopeKind,
+        /// The envelope's breakpoints, in position order, each with its
+        /// position in ticks from the beginning of the clip's contents, its
+        /// value in the parameter's own units and the bend of the segment
+        /// starting at it. Empty takes the envelope with it.
+        points: Vec<Breakpoint>,
+    },
 
     /// Inserts a new empty scene at `index` among the scenes: it holds an
     /// empty slot in every audio and MIDI track. A new set opens with eight
@@ -1574,6 +1622,15 @@ pub enum Command {
         scene: SceneId,
         /// The new name.
         name: String,
+    },
+
+    /// Colours scenes with a swatch of the palette of 5 rows of 14 (0 to
+    /// 69), or clears their colour with `null`.
+    SetSceneColour {
+        /// The scenes, each listed once.
+        scenes: Vec<SceneId>,
+        /// The swatch, or `null` for none.
+        colour: Option<u8>,
     },
 
     /// Puts a clip in a track's Session slot at `scene`: what Insert Empty
@@ -1678,6 +1735,27 @@ pub enum Command {
         /// device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         articulations: Option<Vec<crate::articulation::Articulation>>,
+        /// A plug-in's MPE Mode and settings (the MPE spec, R14), which a
+        /// preset of one holds; `null` to keep the ones the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mpe: Option<crate::PluginMpe>,
+    },
+    /// Switches a plug-in device's MPE Mode (the MPE spec, R14): on, the
+    /// plug-in gets each note's pitch, slide and pressure as its format takes
+    /// them; off, only its pressure as polyphonic key pressure.
+    SetPluginMpeMode {
+        /// The device, which must be a plug-in.
+        device: DeviceId,
+        /// Whether MPE Mode is on.
+        on: bool,
+    },
+    /// Sets the MPE/Multi-channel Settings a plug-in device's MPE MIDI goes
+    /// out on (the MPE spec, R18).
+    SetPluginMpeSettings {
+        /// The device, which must be a plug-in.
+        device: DeviceId,
+        /// The settings.
+        settings: crate::MpeSettings,
     },
     /// Floats a device in a window of its own, or docks it back in the
     /// Device View (IMP-14, WP-2.5b). Only native devices float.
@@ -2132,6 +2210,11 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(range(min = 1, max = 16))]
         channel: Option<u8>,
+        /// MPE, chosen in place of a channel, with the MPE/Multi-channel
+        /// Settings the notes go out on (the MPE spec, R19). Giving a
+        /// `channel` instead sends on that channel again.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mpe: Option<crate::MpeSettings>,
         /// Audio From: the audio interface's inputs it comes back on.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         audio_from: Option<Channel>,
@@ -2699,6 +2782,12 @@ impl Command {
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
             Self::RenameTrack { .. } => "Rename track",
+            // Spec: themes R16, R17. Beatlayer's own names.
+            Self::SetTrackColour { .. } => "Change Track Color",
+            Self::AssignColourToClips { .. } => "Assign Track Color to Clips",
+            Self::AssignColourToGrouped { .. } => "Assign Track Color to Grouped Tracks and Clips",
+            Self::SetClipColour { .. } => "Change Clip Color",
+            Self::SetSceneColour { .. } => "Change Scene Color",
             Self::FreezeTracks { .. } => "Freeze tracks",
             Self::UnfreezeTracks { .. } => "Unfreeze tracks",
             Self::BounceTrackInPlace { .. } => "Bounce track in place",
@@ -2812,6 +2901,7 @@ impl Command {
             Self::DeleteClipEnvelopeBreakpoint { .. } => "Delete Envelope Breakpoint",
             Self::DeleteClipEnvelope { .. } => "Clear Envelope",
             Self::SetClipEnvelopeLinked { .. } => "Link Envelope",
+            Self::SetClipEnvelope { .. } => "Set Envelope",
             Self::CreateScene { .. } => "Create scene",
             Self::DeleteScene { .. } => "Delete scene",
             Self::MoveScene { .. } => "Move scene",
@@ -2838,6 +2928,9 @@ impl Command {
             Self::MoveDevice { .. } => "Move Device",
             Self::RenameDevice { .. } => "Change \"Device Name\"",
             Self::SetShowPresetName { .. } => "Toggle Show Preset Name",
+            // Spec: mpe R14, R18. Beatlayer's own names.
+            Self::SetPluginMpeMode { .. } => "Change MPE Mode",
+            Self::SetPluginMpeSettings { .. } => "Change MPE Settings",
             Self::SetDeviceState { .. } => "Load Preset",
             Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
             // IMP-14: Beatlayer's own, so Live has no name for them.
@@ -2915,6 +3008,7 @@ impl Command {
             Self::SetExternal {
                 midi_to: None,
                 channel: None,
+                mpe: None,
                 audio_from: None,
                 ..
             } => "Change \"Hardware Latency\"",
@@ -3245,6 +3339,35 @@ impl Document {
             Command::RenameTrack { track, name } => {
                 if self.track_ref(*track)?.name != *name {
                     self.track_mut(*track)?.name.clone_from(name);
+                }
+                Ok(())
+            }
+            Command::SetTrackColour { tracks, colour } => {
+                crate::colour::check_swatch("track colour", *colour)?;
+                for track in each_once(tracks, |t| t.0)? {
+                    self.track_ref(track)?;
+                    self.colour_track(track, *colour)?;
+                }
+                Ok(())
+            }
+            Command::AssignColourToClips { tracks } => {
+                for track in each_once(tracks, |t| t.0)? {
+                    let colour = self.track_ref(track)?.colour;
+                    self.colour_clips_of(track, colour)?;
+                }
+                Ok(())
+            }
+            Command::AssignColourToGrouped { tracks } => {
+                for group in each_once(tracks, |t| t.0)? {
+                    let group_track = self.track_ref(group)?;
+                    check_kind(group_track, |k| k == TrackKind::Group, "a group track")?;
+                    let colour = group_track.colour;
+                    let mut inside: Vec<TrackId> = group_track.children.iter().copied().collect();
+                    while let Some(track) = inside.pop() {
+                        inside.extend(self.track_ref(track)?.children.iter().copied());
+                        self.colour_track(track, colour)?;
+                        self.colour_clips_of(track, colour)?;
+                    }
                 }
                 Ok(())
             }
@@ -3703,6 +3826,15 @@ impl Document {
                 start,
             } => self.move_clip_to_lane(*clip, *track, *lane, *start),
             Command::MoveClips { clips, by } => self.move_clips(clips, *by),
+            Command::SetClipColour { clips, colour } => {
+                crate::colour::check_swatch("clip colour", *colour)?;
+                for clip in each_once(clips, |c| c.0)? {
+                    if self.clip_ref(clip)?.colour != Some(*colour) {
+                        self.clip_mut(clip)?.colour = Some(*colour);
+                    }
+                }
+                Ok(())
+            }
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
                 check_extent(current.start, *length)?;
@@ -4241,6 +4373,12 @@ impl Document {
                 kind,
                 linked,
             } => self.set_clip_envelope_linked(*clip, *target, *kind, *linked),
+            Command::SetClipEnvelope {
+                clip,
+                target,
+                kind,
+                points,
+            } => self.set_clip_envelope(*clip, *target, *kind, points),
             Command::CreateScene { id, index } => self.create_scene(*id, *index),
             Command::DeleteScene { scene } => self.delete_scene(*scene),
             Command::MoveScene { scene, index } => self.move_scene(*scene, *index),
@@ -4248,6 +4386,20 @@ impl Document {
                 self.duplicate_scene(*scene, *id, clips)
             }
             Command::RenameScene { scene, name } => self.rename_scene(*scene, name),
+            Command::SetSceneColour { scenes, colour } => {
+                if let Some(colour) = colour {
+                    crate::colour::check_swatch("scene colour", *colour)?;
+                }
+                for id in each_once(scenes, |s| s.0)? {
+                    let position = self.scene_position(id).ok_or(ModelError::NoSuchScene(id))?;
+                    if let Some(scene) = self.scenes.get_mut(position)
+                        && scene.colour != *colour
+                    {
+                        scene.colour = *colour;
+                    }
+                }
+                Ok(())
+            }
             Command::SetSceneTempo { scene, tempo } => self.set_scene_tempo(*scene, *tempo),
             Command::SetSceneFollowActions { scene, patch } => {
                 let targets = self.scenes.len();
@@ -4315,12 +4467,19 @@ impl Document {
                 name,
                 shape,
                 articulations,
+                mpe,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
                 if let Some(articulations) = articulations {
                     loaded.set_articulations(articulations.clone());
+                }
+                if let Some(mpe) = mpe {
+                    mpe.settings.check()?;
+                    if matches!(loaded.kind, DeviceKind::Plugin { .. }) {
+                        loaded.mpe = *mpe;
+                    }
                 }
                 loaded.set_name(name);
                 // The preset the device holds is the one its name names (the
@@ -4331,6 +4490,13 @@ impl Document {
                     *self.device_mut(*device)? = loaded;
                 }
                 Ok(())
+            }
+            Command::SetPluginMpeMode { device, on } => {
+                self.edit_plugin_mpe(*device, |mpe| mpe.on = *on)
+            }
+            Command::SetPluginMpeSettings { device, settings } => {
+                settings.check()?;
+                self.edit_plugin_mpe(*device, |mpe| mpe.settings = *settings)
             }
             Command::SetDeviceFloating { device, floating } => {
                 let current = self.device_ref(*device)?;
@@ -4652,6 +4818,7 @@ impl Document {
                 device,
                 midi_to,
                 channel,
+                mpe,
                 audio_from,
                 audio_to,
                 hardware_latency,
@@ -4666,7 +4833,23 @@ impl Document {
                     Some(ExternalPort::Port { name }) => external.port = Some(name.clone()),
                     None => {}
                 }
-                external.channel = channel.unwrap_or(external.channel);
+                // Spec: mpe R19. A channel chosen takes MPE's place.
+                match (channel, mpe) {
+                    (Some(_), Some(_)) => {
+                        return Err(ModelError::InvalidInput(
+                            "MIDI To is a channel or MPE, not both",
+                        ));
+                    }
+                    (Some(channel), None) => {
+                        external.channel = *channel;
+                        external.mpe = None;
+                    }
+                    (None, Some(mpe)) => {
+                        mpe.check()?;
+                        external.mpe = Some(*mpe);
+                    }
+                    (None, None) => {}
+                }
                 external.audio_from = audio_from.unwrap_or(external.audio_from);
                 if let Some(channel) = audio_to {
                     external.audio_to = Some(*channel);
@@ -5308,6 +5491,26 @@ impl Document {
 
     /// Changes a device's sidechain settings with `edit`, if it has a
     /// sidechain input.
+    /// Changes a plug-in device's MPE Mode and settings with `change`.
+    fn edit_plugin_mpe(
+        &mut self,
+        device: DeviceId,
+        change: impl FnOnce(&mut crate::PluginMpe),
+    ) -> Result<(), ModelError> {
+        let current = self.device_ref(device)?;
+        if !matches!(current.kind, DeviceKind::Plugin { .. }) {
+            return Err(ModelError::InvalidInput(
+                "only a plug-in device has an MPE Mode",
+            ));
+        }
+        let mut mpe = current.mpe;
+        change(&mut mpe);
+        if mpe != current.mpe {
+            self.device_mut(device)?.mpe = mpe;
+        }
+        Ok(())
+    }
+
     fn edit_sidechain(
         &mut self,
         id: DeviceId,
@@ -5446,13 +5649,20 @@ impl Document {
                     )
                 })
                 .collect();
+            let colour = track.colour;
             track.clips = clips
                 .into_iter()
-                .map(|clip| (clip.id, Shared::new(clip)))
+                .map(|mut clip| {
+                    clip.colour.get_or_insert(colour);
+                    (clip.id, Shared::new(clip))
+                })
                 .collect();
             track.slots = slots
                 .into_iter()
-                .map(|(scene, clip)| (scene, Shared::new(clip)))
+                .map(|(scene, mut clip)| {
+                    clip.colour.get_or_insert(colour);
+                    (scene, Shared::new(clip))
+                })
                 .collect();
         }
         for clip in clip_ids.into_iter().chain(slot_ids) {
@@ -5651,6 +5861,7 @@ impl Document {
         if clip.scale.is_default() {
             clip.scale = self.settings.scale;
         }
+        clip.colour.get_or_insert(self.track_ref(track)?.colour);
         let id = clip.id;
         self.track_mut(track)?.clips.insert(id, Shared::new(clip));
         self.index.clip_track.insert(id, track);
@@ -5668,7 +5879,11 @@ impl Document {
             TrackKind::holds_clips,
             AUDIO_OR_MIDI,
         )?;
-        let lane = new.lane()?;
+        let mut lane = new.lane()?;
+        let track_colour = self.track_ref(track)?.colour;
+        for clip in &mut lane.clips {
+            clip.colour.get_or_insert(track_colour);
+        }
         self.check_fresh(lane.id.0)?;
         let mut seen = BTreeSet::from([lane.id.0]);
         for clip in &lane.clips {
@@ -5719,6 +5934,7 @@ impl Document {
         if clip.scale.is_default() {
             clip.scale = self.settings.scale;
         }
+        clip.colour.get_or_insert(self.track_ref(owner)?.colour);
         let id = clip.id;
         self.lane_mut(lane)?.clips.push(clip);
         self.index.clip_track.insert(id, owner);
@@ -6091,6 +6307,7 @@ impl Document {
         if clip.scale.is_default() {
             clip.scale = self.settings.scale;
         }
+        clip.colour.get_or_insert(target.colour);
         let id = clip.id;
         self.track_mut(track)?
             .slots
@@ -6920,6 +7137,30 @@ impl Document {
         check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).linked = linked;
+        Ok(())
+    }
+
+    /// Replaces the breakpoints of the clip's envelope for `target`, giving
+    /// the clip that envelope, linked, if it has none. An empty list takes
+    /// the envelope with it.
+    fn set_clip_envelope(
+        &mut self,
+        clip: ClipId,
+        target: AutomationTarget,
+        kind: EnvelopeKind,
+        points: &[Breakpoint],
+    ) -> Result<(), ModelError> {
+        self.check_clip_envelope_target(clip, target)?;
+        check_clip_setting_kind(target, kind)?;
+        self.check_envelope_kind(clip, kind)?;
+        for point in points {
+            check_clip_envelope_value(target, point.value)?;
+        }
+        let envelope = Envelope::from_points(points.to_vec())?;
+        if envelope.is_empty() {
+            return self.delete_clip_envelope(clip, target, kind);
+        }
+        clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind).envelope = envelope;
         Ok(())
     }
 
@@ -7930,6 +8171,28 @@ impl Document {
             .ok_or(ModelError::NoSuchClip(id))
     }
 
+    fn colour_track(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+        if self.track_ref(id)?.colour != colour {
+            self.track_mut(id)?.colour = colour;
+        }
+        Ok(())
+    }
+
+    /// Colours every clip a track holds: its Arrangement lane, its Session
+    /// slots and its take lanes.
+    fn colour_clips_of(&mut self, id: TrackId, colour: u8) -> Result<(), ModelError> {
+        let clips: Vec<ClipId> = self
+            .track_ref(id)?
+            .all_clips()
+            .filter(|clip| clip.colour != Some(colour))
+            .map(|clip| clip.id)
+            .collect();
+        for clip in clips {
+            self.clip_mut(clip)?.colour = Some(colour);
+        }
+        Ok(())
+    }
+
     /// Forgets what a track held for the devices and chains that left it,
     /// and the inputs that tapped those chains.
     fn forget_in(&mut self, track: TrackId, gone: &Gone) -> Result<(), ModelError> {
@@ -8164,6 +8427,21 @@ fn automation_point_error(error: PointError) -> ModelError {
             at,
         },
     }
+}
+
+/// The items of a list that names each object once, or the duplicated ID's
+/// error.
+fn each_once<T: Copy>(
+    items: &[T],
+    raw: impl Fn(T) -> Id,
+) -> Result<impl Iterator<Item = T> + '_, ModelError> {
+    let mut seen = BTreeSet::new();
+    for &item in items {
+        if !seen.insert(raw(item)) {
+            return Err(ModelError::DuplicateId(raw(item)));
+        }
+    }
+    Ok(items.iter().copied())
 }
 
 pub(crate) fn check_value(what: &'static str, value: f64, ok: bool) -> Result<(), ModelError> {
@@ -8503,6 +8781,9 @@ pub(crate) fn check_marker_order(audio: &AudioData) -> Result<(), ModelError> {
 /// and an audio clip's is 0, since its Start marker says where it starts
 /// playing (the audio clips spec, R16).
 pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
+    if let Some(colour) = clip.colour {
+        crate::colour::check_swatch("clip colour", colour)?;
+    }
     check_offset(clip.offset)?;
     if clip.data.is_audio() && clip.offset != Ticks::ZERO {
         return Err(ModelError::AudioClipOffset(clip.offset));
@@ -8525,6 +8806,8 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
         check_value("parameter value", *value, value.is_finite())?;
     }
     device.layers.check()?;
+    // Spec: mpe R18. Settings out of range don't load.
+    device.mpe.settings.check()?;
     crate::modulator::check_mappings(device)?;
     if let Some(shape) = &device.shape {
         crate::modulator::check_shape(shape)?;
@@ -10840,6 +11123,7 @@ mod tests {
             name: "Warm".to_owned(),
             shape: None,
             articulations: None,
+            mpe: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -10853,6 +11137,7 @@ mod tests {
                 name: String::new(),
                 shape: None,
                 articulations: None,
+                mpe: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -11415,6 +11700,57 @@ mod tests {
         assert!(!enabled(&song, pan) && !enabled(&song, volume));
         song.apply(Command::ReEnableAutomation {}).unwrap();
         assert!(enabled(&song, pan) && enabled(&song, volume));
+    }
+
+    // Spec: clip-envelopes R12, R13
+    #[test]
+    fn a_whole_clip_envelope_replaces_the_breakpoints_and_keeps_the_linked_switch() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.clip(track, 0);
+        let pan = AutomationTarget::Mixer {
+            param: MixerParam::Pan,
+        };
+        let set = |points: Vec<Breakpoint>| Command::SetClipEnvelope {
+            kind: EnvelopeKind::Modulation,
+            clip,
+            target: pan,
+            points,
+        };
+        let point = |at: Ticks, value: f64| Breakpoint {
+            at,
+            value,
+            bend: 0.0,
+        };
+        song.apply(Command::SetClipEnvelopeLinked {
+            kind: EnvelopeKind::Modulation,
+            clip,
+            target: pan,
+            linked: false,
+        })
+        .unwrap();
+        song.apply(set(vec![
+            point(Ticks::ZERO, -1.0),
+            point(Ticks::WHOLE, 1.0),
+        ]))
+        .unwrap();
+        let envelope = song.doc.clip(clip).unwrap().envelope(&pan).unwrap();
+        assert!(!envelope.linked, "the switch stays as it was");
+        assert_eq!(envelope.envelope.value_at(Ticks::WHOLE / 2), Some(0.0));
+        // A value that isn't a number, a position out of order and a
+        // position before zero are refused, and change nothing.
+        for broken in [
+            vec![point(Ticks::ZERO, f64::NAN)],
+            vec![point(Ticks::WHOLE, 0.0), point(Ticks::ZERO, 0.0)],
+            vec![point(Ticks(-1), 0.0)],
+        ] {
+            let before = song.doc.clone();
+            song.reject(set(broken));
+            assert_eq!(song.doc, before);
+        }
+        // An empty list takes the envelope with it.
+        song.apply(set(Vec::new())).unwrap();
+        assert!(song.doc.clip(clip).unwrap().envelope(&pan).is_none());
     }
 
     // Spec: clip-envelopes R1, R5
@@ -12952,6 +13288,7 @@ mod tests {
             name: String::new(),
             shape: None,
             articulations: None,
+            mpe: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

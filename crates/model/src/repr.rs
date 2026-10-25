@@ -95,6 +95,10 @@ struct TrackRepr {
     /// before it have none, which loads unlinked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     link: Option<crate::ids::LinkGroupId>,
+    /// The track's colour (the themes spec, R14). Sets saved before
+    /// WP-6.30b have none, which loads as `id mod 14` (R21).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    colour: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -231,6 +235,7 @@ impl TrackRepr {
             keep_monitoring_latency: track.keep_monitoring_latency(),
             tuning_bypass: track.tuning_bypass(),
             link: track.link(),
+            colour: Some(track.colour()),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -297,6 +302,9 @@ impl TryFrom<DocumentRepr> for Document {
         if let Some(scenes) = &scenes {
             for scene in scenes {
                 loader.claim(scene.id.0)?;
+                if let Some(colour) = scene.colour {
+                    crate::colour::check_swatch("scene colour", colour)?;
+                }
             }
         }
         let mut document = Self {
@@ -427,6 +435,10 @@ impl Loader {
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
         track.tuning_bypass = repr.tuning_bypass;
         track.link = repr.link;
+        if let Some(colour) = repr.colour {
+            crate::colour::check_swatch("track colour", colour)?;
+            track.colour = colour;
+        }
         track.frozen = repr.frozen;
         if let Some(routing) = repr.routing {
             track.routing = routing;
@@ -480,6 +492,7 @@ impl Loader {
                 midi.repair_groups();
             }
             check_clip(&clip)?;
+            clip.colour.get_or_insert(track.colour);
             self.index.clip_track.insert(clip.id, id);
             track.clips.insert(clip.id, Shared::new(clip));
         }
@@ -497,6 +510,7 @@ impl Loader {
                 midi.repair_groups();
             }
             check_clip(&slot.clip)?;
+            slot.clip.colour.get_or_insert(track.colour);
             self.index.clip_track.insert(slot.clip.id, id);
             if track
                 .slots
@@ -516,6 +530,7 @@ impl Loader {
                     midi.repair_groups();
                 }
                 check_clip(clip)?;
+                clip.colour.get_or_insert(track.colour);
                 self.index.clip_track.insert(clip.id, id);
             }
             self.index.lane_track.insert(lane.id, id);
@@ -1962,6 +1977,159 @@ mod tests {
             "{error}"
         );
     }
+    // Spec: mpe R14, R18, R19. MPE saves with the MIDI To port, the
+    // External Instrument and the plug-in device, leaving out what is new.
+    #[test]
+    fn mpe_saves_with_a_midi_to_port_an_external_device_and_a_plugin() {
+        use crate::device::PluginFormat;
+        use crate::mpe_settings::{MpeMode, MpeSettings, MpeZone, PluginMpe};
+        use crate::track::MidiTo;
+
+        let mut editor = Editor::new();
+        let keys = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: keys,
+                kind: TrackKind::Midi,
+                name: "T".to_owned(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let upper = MpeSettings {
+            zone: MpeZone::Upper,
+            channels: 7,
+            ..MpeSettings::default()
+        };
+        editor
+            .apply(Command::SetMidiOutput {
+                track: keys,
+                to: Some(MidiTo::Port {
+                    name: "Synth".to_owned(),
+                    channel: 3,
+                    mpe: Some(upper),
+                }),
+            })
+            .unwrap();
+        let outboard = editor.new_id();
+        let synth = editor.new_id();
+        for device in [
+            Device::new(
+                outboard,
+                "Hardware",
+                DeviceKind::Native {
+                    device_type: "beatlayer.test".to_owned(),
+                },
+            )
+            .with_external(),
+            Device::new(
+                synth,
+                "Synth",
+                DeviceKind::Plugin {
+                    format: PluginFormat::Clap,
+                    plugin_id: "com.example.synth".to_owned(),
+                },
+            ),
+        ] {
+            let index = editor.document().track(keys).unwrap().devices().len();
+            editor
+                .apply(Command::InsertDevice {
+                    track: keys,
+                    index,
+                    device,
+                })
+                .unwrap();
+        }
+        let multi = MpeSettings {
+            mode: MpeMode::MultiChannel,
+            first: 3,
+            last: 8,
+            ..MpeSettings::default()
+        };
+        editor
+            .apply(Command::SetExternal {
+                device: outboard,
+                midi_to: None,
+                channel: None,
+                mpe: Some(multi),
+                audio_from: None,
+                audio_to: None,
+                hardware_latency: None,
+            })
+            .unwrap();
+        // A new plug-in's MPE is left out of the saved set.
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        let at = |saved: &Value| {
+            saved["tracks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .position(|track| track["name"] == "T")
+                .unwrap()
+        };
+        assert!(
+            saved["tracks"][at(&saved)]["devices"][1]
+                .get("mpe")
+                .is_none()
+        );
+        editor
+            .apply(Command::SetPluginMpeMode {
+                device: synth,
+                on: true,
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetPluginMpeSettings {
+                device: synth,
+                settings: upper,
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        let track = &saved["tracks"][at(&saved)];
+        assert_eq!(
+            track["routing"]["midi_output"],
+            json!({ "name": "Synth", "channel": 3, "mpe": { "zone": "upper", "channels": 7 } })
+        );
+        assert_eq!(
+            track["devices"][0]["external"]["mpe"],
+            json!({ "mode": "multi_channel", "first": 3, "last": 8 })
+        );
+        assert_eq!(
+            track["devices"][1]["mpe"],
+            json!({ "on": true, "settings": { "zone": "upper", "channels": 7 } })
+        );
+        let back = load(saved).unwrap();
+        assert_eq!(&back, editor.document());
+        assert_eq!(
+            back.device(synth).unwrap().mpe,
+            PluginMpe {
+                on: true,
+                settings: upper
+            }
+        );
+        // A set saved before MPE opens with none.
+        let mut older = serde_json::to_value(editor.document()).unwrap();
+        let at = at(&older);
+        older["tracks"][at]["devices"][1]
+            .as_object_mut()
+            .unwrap()
+            .remove("mpe");
+        assert_eq!(
+            load(older.clone()).unwrap().device(synth).unwrap().mpe,
+            PluginMpe::default()
+        );
+        // Settings out of range don't load: on a plug-in, or an External
+        // Instrument's MIDI To.
+        let mut broken = older.clone();
+        broken["tracks"][at]["devices"][1]["mpe"] =
+            json!({ "on": true, "settings": { "mode": "multi_channel", "first": 0 } });
+        assert!(load(broken).is_err());
+        let mut broken = older;
+        broken["tracks"][at]["devices"][0]["external"]["mpe"] =
+            json!({ "mode": "multi_channel", "first": 9, "last": 17 });
+        assert!(load(broken).is_err());
+    }
+
     // Spec: external-devices R2, R15
     #[test]
     fn a_midi_to_port_saves_and_a_set_without_one_opens_as_before() {
@@ -2000,6 +2168,7 @@ mod tests {
         let by_port = set(Some(MidiTo::Port {
             name: "Synth".to_owned(),
             channel: 3,
+            mpe: None,
         }));
         assert_eq!(routing(&by_port), json!({ "name": "Synth", "channel": 3 }));
         for (value, expected) in [
@@ -2010,6 +2179,7 @@ mod tests {
                 Some(MidiTo::Port {
                     name: "Synth".to_owned(),
                     channel: 3,
+                    mpe: None,
                 }),
             ),
         ] {
@@ -2022,6 +2192,7 @@ mod tests {
             let to = Some(MidiTo::Port {
                 name: name.to_owned(),
                 channel,
+                mpe: None,
             });
             assert!(
                 editor
@@ -2056,6 +2227,7 @@ mod tests {
                 device: outboard,
                 midi_to: None,
                 channel: Some(2),
+                mpe: None,
                 audio_from: None,
                 audio_to: None,
                 hardware_latency: Some(HardwareLatency::Samples { value: 64 }),

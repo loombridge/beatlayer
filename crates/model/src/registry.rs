@@ -835,6 +835,38 @@ const ENTRIES: &[Entry] = &[
             changes only the name in the track's title bar.",
     },
     Entry {
+        id: "track.set_colour",
+        action: Action::Apply("set_track_colour"),
+        label: "Change Track Color",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Colours tracks, Main and the returns among them, with swatch `colour` of the \
+            palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row by row: swatch \
+            14 is row 2, colour 1). Their clips keep their colours. A colour is never heard: the \
+            engine gets nothing.",
+    },
+    Entry {
+        id: "track.assign_colour_to_clips",
+        action: Action::Apply("assign_colour_to_clips"),
+        label: "Assign Track Color to Clips",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Gives every clip of each track its track's colour: in the Arrangement, in \
+            its Session slots and in its take lanes. A track that holds no clips is left as it is.",
+    },
+    Entry {
+        id: "track.assign_colour_to_grouped",
+        action: Action::Apply("assign_colour_to_grouped"),
+        label: "Assign Track Color to Grouped Tracks and Clips",
+        permission: Permission::Edit,
+        contexts: &[TrackHeaders],
+        keys: &[],
+        description: "Gives each group track's colour to every track inside it, at any depth, and \
+            to all their clips in both views and their take lanes. The tracks must be group tracks.",
+    },
+    Entry {
         id: "track.set_frozen",
         action: Action::Apply("freeze_tracks"),
         label: "Set Tracks Frozen",
@@ -1405,7 +1437,15 @@ const ENTRIES: &[Entry] = &[
             pitch bend and pressure messages that reach the end of its device \
             chain (a track with an instrument sends none, the instrument playing them), at \
             the moment their frame is heard at the audio interface's output; it keeps a missing \
-            port's name and sends again when the port returns. Choosing a port takes channel 1.",
+            port's name and sends again when the port returns. Choosing a port takes channel 1. \
+            Give `mpe` beside the port, `{ \"name\": \"Synth\", \"channel\": 1, \"mpe\": {} }`, to send MPE \
+            MIDI in place of one channel, as the channel chooser's MPE does: each note on a \
+            member channel of its own with its pitch bend, slide and pressure, the rest on the \
+            zone's master channel. `mpe` holds the MPE/Multi-channel Settings: `mode` (`zone` or \
+            `multi_channel`), `zone` (`lower` or `upper`), `channels` (1 to 15), and for \
+            multi-channel mode `first` and `last` (1 to 16); what it leaves out takes the new \
+            settings' value, the lower zone with 15 note channels. The track query's routing \
+            reads it back.",
     },
     Entry {
         id: "routing.set_main_out",
@@ -1617,6 +1657,17 @@ const ENTRIES: &[Entry] = &[
         keys: &[Key::Runs("S-EDIT-008")],
         description: "Renames a clip. A name may be empty. It changes only the name shown on \
             the clip.",
+    },
+    Entry {
+        id: "clip.set_colour",
+        action: Action::Apply("set_clip_colour"),
+        label: "Change Clip Color",
+        permission: Permission::Edit,
+        contexts: &[Arrangement],
+        keys: &[],
+        description: "Colours clips, in the Arrangement, a Session slot or a take lane, with swatch \
+            `colour` of the palette of 5 rows of 14 (0 to 69, numbered from the top row's left, row \
+            by row: swatch 14 is row 2, colour 1). A colour is never heard: the engine gets nothing.",
     },
     Entry {
         id: "clip.set_mute",
@@ -2403,6 +2454,22 @@ const ENTRIES: &[Entry] = &[
             one, so a switch thrown before anything is drawn sets what drawing will use.",
     },
     Entry {
+        id: "clip.set_envelope",
+        action: Action::Apply("set_clip_envelope"),
+        label: "Set Envelope",
+        permission: Permission::Edit,
+        contexts: &[ClipView],
+        keys: &[],
+        description: "Replaces one of a clip's envelopes with the breakpoints given, as the \
+            Envelope Editor's edits do when they write a shape, a stretch or a paste over a span \
+            of time. `clip` and `target` name the envelope as `clip.set_envelope_breakpoint` \
+            does, and `points` are the envelope's breakpoints in position order, each with its \
+            position in ticks from the beginning of the clip's contents, its value in the \
+            parameter's own units and the bend of the segment starting at it. The breakpoints \
+            must be in order, no two at one position, and no position before 1.1.1; an empty \
+            list takes the envelope with it. The envelope keeps its Linked switch.",
+    },
+    Entry {
         id: "clip.trim_start",
         action: Action::Apply("trim_clip_start"),
         label: "Trim Clip Start",
@@ -2516,6 +2583,17 @@ const ENTRIES: &[Entry] = &[
         keys: &[],
         description: "Renames a scene. A name may be empty: a scene without a name shows its \
             number, which is its position.",
+    },
+    Entry {
+        id: "scene.set_colour",
+        action: Action::Apply("set_scene_colour"),
+        label: "Change Scene Color",
+        permission: Permission::Edit,
+        contexts: &[Session],
+        keys: &[],
+        description: "Colours scenes with swatch `colour` of the palette of 5 rows of 14 (0 to 69, \
+            numbered from the top row's left, row by row: swatch 14 is row 2, colour 1), or clears \
+            their colour with null, as a new scene has none.",
     },
     Entry {
         id: "scene.set_tempo",
@@ -3087,6 +3165,38 @@ const ENTRIES: &[Entry] = &[
             the bass compressor's source to the kick's track and switch External on.",
     },
     Entry {
+        id: "plugin.set_mpe",
+        action: Action::Apply("set_plugin_mpe_mode"),
+        label: "Set MPE Mode",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a plug-in device's MPE Mode, the item of its title bar menu \
+            (`on`). On, the plug-in gets each note's pitch, slide and pressure as its format \
+            takes them: CLAP note expressions, VST3 note expression, or MPE MIDI (an Audio Unit \
+            gets MPE MIDI, each note on a channel of its own in the zone the MPE/Multi-channel \
+            Settings name). Off, it gets only each note's pressure, as polyphonic key \
+            pressure. Off in a new device; saved with the set, the device's presets and its \
+            default preset. One undo step (Change MPE Mode). `plugin.info` reports it. A device \
+            that isn't a plug-in has no MPE Mode.",
+    },
+    Entry {
+        id: "plugin.set_mpe_settings",
+        action: Action::Apply("set_plugin_mpe_settings"),
+        label: "Set MPE/Multi-channel Settings",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Sets the MPE/Multi-channel Settings of a plug-in device, the dialog its \
+            title bar menu opens: `settings` gives the `mode` (`zone` or `multi_channel`); for a \
+            zone its `zone` (`lower`, master channel 1, or `upper`, master channel 16) and \
+            `channels` (its note channels, 1 to 15); for multi-channel mode the `first` and \
+            `last` channel, 1 to 16. What it leaves out takes the new settings' value: the lower \
+            zone with 15 note channels. They shape only the MPE MIDI the device is sent. One \
+            undo step (Change MPE Settings); saved with the device; `plugin.info` reports \
+            them.",
+    },
+    Entry {
         id: "device.set_external",
         action: Action::Apply("set_external"),
         label: "Set External Device",
@@ -3098,7 +3208,10 @@ const ENTRIES: &[Entry] = &[
             in its title bar do; give only the settings to change. `midi_to` is `{ \"type\": \
             \"none\" }` (No Output, a new device's) or `{ \"type\": \"port\", \"name\": ... }` \
             with a MIDI output port's name as `midi.ports` lists it, with its Track switch \
-            on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); \
+            on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device), which \
+            takes MPE's place; `mpe` sends MPE MIDI in place of one channel, with the \
+            MPE/Multi-channel Settings it gives (`{}` for the new ones: the lower zone with 15 \
+            note channels), the notes on the zone's member channels and the rest on its master; \
             `audio_from` is the audio interface's inputs the hardware's sound comes back on, \
             a channel or a pair (`{ \"type\": \"pair\", \"channel\": 1 }`, the first pair on a \
             new device); `audio_to` is the audio interface's outputs an External Audio Effect \

@@ -1705,3 +1705,80 @@ fn a_set_saved_before_loop_back_and_forth_became_the_default_still_plays_loop_fo
     );
     assert_eq!(render(&loaded.document), expected);
 }
+
+// Spec: themes R21. A set saved before tracks, clips and scenes had colours
+// loads with each track at swatch `id mod 14` of the top row, as such sets
+// were drawn, each clip in its track's colour and every scene with none, so
+// nothing changes colour on loading.
+#[test]
+fn a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in() {
+    let mut editor = Editor::new();
+    let mut tracks = Vec::new();
+    for index in 0..3 {
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: format!("Audio {index}"),
+                parent: None,
+                index,
+            })
+            .unwrap();
+        tracks.push(track);
+    }
+    let scene = editor.document().scenes().next().unwrap().id;
+    let mut clips = Vec::new();
+    for &track in &tracks {
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Audio(AudioData::new(MEDIA)),
+                ),
+            })
+            .unwrap();
+        let slot = editor.new_id();
+        editor
+            .apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    slot,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Audio(AudioData::new(MEDIA)),
+                ),
+            })
+            .unwrap();
+        clips.push((track, clip, slot));
+    }
+    let mut old: Value =
+        serde_json::from_slice(&encode_json(&project_of(&editor), 1).unwrap()).unwrap();
+    // As schema 10 wrote it: no colour anywhere.
+    fn strip(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                map.remove("colour");
+                map.values_mut().for_each(strip);
+            }
+            Value::Array(items) => items.iter_mut().for_each(strip),
+            _ => {}
+        }
+    }
+    strip(&mut old["document"]);
+    old["schema"] = 10.into();
+    let (loaded, _) =
+        decode_json(&serde_json::to_vec(&old).unwrap(), &LoadOptions::default()).unwrap();
+    for (track, clip, slot) in clips {
+        let swatch = (track.0.get() % 14) as u8;
+        assert_eq!(loaded.document.track(track).unwrap().colour(), swatch);
+        assert_eq!(loaded.document.clip(clip).unwrap().colour, Some(swatch));
+        assert_eq!(loaded.document.clip(slot).unwrap().colour, Some(swatch));
+    }
+    assert!(loaded.document.scenes().all(|scene| scene.colour.is_none()));
+}

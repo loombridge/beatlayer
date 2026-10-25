@@ -4,6 +4,7 @@
 //! `cargo xtask check` fails on a file in tests/ that isn't listed.
 
 mod clip_params;
+mod colours;
 mod command_registry;
 mod device_media;
 mod drum_racks;

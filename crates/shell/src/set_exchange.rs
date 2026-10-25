@@ -217,6 +217,7 @@ impl Opened {
             format: None,
             clip_kind: None,
             details: None,
+            collections: Vec::new(),
         });
         if !shown {
             return;
@@ -247,6 +248,7 @@ impl Opened {
                         format: None,
                         clip_kind: Some(clip_file_kind(&clip.data)),
                         details: None,
+                        collections: Vec::new(),
                     });
                 }
             }
@@ -262,6 +264,7 @@ impl Opened {
             format: None,
             clip_kind: None,
             details: None,
+            collections: Vec::new(),
         });
     }
 }

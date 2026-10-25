@@ -709,6 +709,7 @@ fn loopback_rig(rate: bl_core::time::SampleRate, latency: bl_model::HardwareLate
     instrument.external = Some(External {
         port: None,
         channel: 1,
+        mpe: None,
         audio_from: Channel::Pair(3),
         audio_to: None,
         hardware_latency: latency,

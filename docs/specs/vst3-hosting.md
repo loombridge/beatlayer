@@ -1,6 +1,6 @@
 # VST3 hosting
 
-- **Status:** partial (loading, processing, and the component's and the controller's state, latency, restarts and the changes from the plug-in's own controller are built; the plug-in's own editor is WP-2.10's; the scanner reads VST3 plug-ins, with WP-2.9; per-note expression and MPE, R19 to R21, are WP-6.17b's)
+- **Status:** partial (loading, processing, and the component's and the controller's state, latency, restarts and the changes from the plug-in's own controller are built; the plug-in's own editor is WP-2.10's; the scanner reads VST3 plug-ins, with WP-2.9; per-note expression and MPE, R19 to R21, are built)
 - **Work packages:** WP-2.7 (parts 1 and 2: this spec's rules; part 3: the scanner, with WP-2.9). The rule numbers mirror [the CLAP hosting spec](clap-hosting.md)'s, so the plug-in's own editor (R13) is WP-2.10's; delay compensation, which the latency rules feed, is WP-2.11's; offline renders (export, agents' previews) running plug-ins are WP-2.6b's for CLAP and WP-4.21's for VST3, which lends its instances as [offline plug-in renders](offline-plugin-renders.md) say (built). WP-6.17b adds per-note expression and MPE (R19 to R21, with [MPE](mpe.md) R14 to R21).
 - **Parity-matrix row:** Plug-in formats: VST3
 - **Checked against:** the VST3 SDK's headers through the `vst3` crate 0.3 (Coupler)'s generated bindings — `ipluginbase.h`, `ivstaudioprocessor.h`, `ivsteditcontroller.h`, `ivstevents.h`, `vstprocess.h`, and the module documentation: each side's state through `IBStream` (`getState`/`setState`, with `setComponentState` telling the controller what the component's means), the component handler's `beginEdit`/`performEdit`/`endEdit` and its `restartComponent` ask, and `getLatencySamples`; [the architecture](../02-architecture.md), "Plug-in hosting" and "Real-time rules"; [the CLAP hosting spec](clap-hosting.md), which VST3 hosting mirrors wherever the formats allow
@@ -75,6 +75,6 @@ The test plug-in, Test Gain Echo, is built from source in `crates/test-vst3` and
 | R16 | `crates/agent/tests/plugin_vst3.rs`, `a_vst3_plugin_loads_by_path_through_the_agent_api`; `crates/shell/tests/plugins.rs`, `a_vst3_plugin_loads_runs_and_processes_through_the_commands`; `crates/plugin-host/tests/vst3.rs`, `audio_runs_through_the_plugin_and_a_change_lands_on_its_frame` (the host's report) | unit |
 | R17 | every block in `crates/plugin-host/tests/vst3.rs` runs as a real-time section under the allocation trap | real-time trap |
 | R18 | `crates/plugin-host/tests/vst3.rs`, `channel_messages_set_the_parameters_the_controller_maps_them_to` | unit, real-time trap |
-| R19 | to be written in WP-6.17b | unit, real-time trap |
-| R20 | to be written in WP-6.17b | unit, real-time trap |
-| R21 | to be written in WP-6.17b | unit, real-time trap |
+| R19 | `crates/plugin-host/tests/mpe.rs`, `with_mpe_mode_off_a_vst3_plugin_gets_polyphonic_pressure_only` | unit, real-time trap |
+| R20 | `crates/plugin-host/tests/mpe.rs`, `a_vst3_controller_with_note_expression_gets_note_expression_values`, `pressure_the_controller_maps_to_no_type_is_polyphonic_pressure`, `a_vst3_controller_without_note_expression_gets_mpe_through_its_midi_mapping` | unit, real-time trap |
+| R21 | `crates/plugin-host/tests/mpe.rs`, `note_expression_values_a_vst3_plugin_sends_out_reach_the_next_device` | unit, real-time trap |

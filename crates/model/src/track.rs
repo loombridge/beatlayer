@@ -46,6 +46,7 @@ fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
         launch: crate::launch::ClipLaunch::default(),
         scale: crate::scale::Scale::default(),
         groove: None,
+        colour: None,
     }
 }
 
@@ -549,7 +550,9 @@ pub enum Output {
 #[schemars(
     description = "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output \
                    port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's \
-                   name as the MIDI settings list it, and the channel to send on, 1 to 16."
+                   name as the MIDI settings list it, and the channel to send on, 1 to 16; \
+                   with `mpe` (the MPE/Multi-channel Settings, `{}` for the new ones) the \
+                   track sends MPE MIDI in place of one channel."
 )]
 pub enum MidiTo {
     /// Another MIDI track's Track In.
@@ -562,6 +565,11 @@ pub enum MidiTo {
         name: String,
         /// The channel, 1 to 16.
         channel: u8,
+        /// MPE, chosen after the 16 channels in the channel chooser, with
+        /// the MPE/Multi-channel Settings the notes go out on (the MPE
+        /// spec, R19); `None` sends on `channel`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mpe: Option<crate::MpeSettings>,
     },
 }
 
@@ -573,6 +581,7 @@ impl MidiTo {
         Self::Port {
             name: name.into(),
             channel: 1,
+            mpe: None,
         }
     }
 
@@ -785,6 +794,9 @@ pub struct Track {
     /// linked-track editing spec, R1). A group always has two tracks or
     /// more.
     pub(crate) link: Option<crate::ids::LinkGroupId>,
+    /// The track's colour, a swatch from 0 to 69 (the themes spec, R14). A
+    /// new track takes swatch `id mod 14`.
+    pub(crate) colour: u8,
 }
 
 impl Track {
@@ -793,6 +805,7 @@ impl Track {
             id,
             kind,
             name,
+            colour: crate::colour::id_swatch(id.0),
             mixer: Mixer::default(),
             sends: OrdMap::new(),
             routing: Routing::new(kind),
@@ -861,6 +874,12 @@ impl Track {
     #[must_use]
     pub fn id(&self) -> TrackId {
         self.id
+    }
+
+    /// The track's colour: a swatch from 0 to 69.
+    #[must_use]
+    pub fn colour(&self) -> u8 {
+        self.colour
     }
 
     /// The track's kind.
@@ -993,6 +1012,14 @@ impl Track {
     /// Only audio and MIDI tracks have clips.
     pub fn clips(&self) -> impl ExactSizeIterator<Item = &Clip> + DoubleEndedIterator {
         self.clips.values().map(|clip| &**clip)
+    }
+
+    /// Every clip the track holds: its main lane's, its Session slots' and
+    /// its take lanes'.
+    pub fn all_clips(&self) -> impl Iterator<Item = &Clip> + '_ {
+        self.clips()
+            .chain(self.slots().map(|(_, clip)| clip))
+            .chain(self.take_lanes().flat_map(|lane| lane.clips.iter()))
     }
 
     /// The Arrangement clips the track plays: its main lane's, or those of
@@ -1182,6 +1209,23 @@ impl Track {
         }
     }
 
+    /// Whether the take lanes differ in more than the colours of their clips.
+    fn take_lanes_differ(&self, other: &Self) -> bool {
+        if self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes {
+            return false;
+        }
+        self.take_lanes.len() != other.take_lanes.len()
+            || self.take_lanes.iter().zip(&other.take_lanes).any(|(a, b)| {
+                a.id != b.id
+                    || a.name != b.name
+                    || a.clips.len() != b.clips.len()
+                    || a.clips
+                        .iter()
+                        .zip(&b.clips)
+                        .any(|(x, y)| x != y && !x.differs_only_in_colour(y))
+            })
+    }
+
     /// Whether the track's own settings differ from another version's:
     /// its name, mixer, sends, routing, children, automation, its frozen
     /// audio, or the order of its device chain, but not the clips or devices
@@ -1198,7 +1242,7 @@ impl Track {
             || self.removed_stop_buttons != other.removed_stop_buttons
             || self.frozen != other.frozen
             || self.audition != other.audition
-            || !(self.take_lanes.ptr_eq(&other.take_lanes) || self.take_lanes == other.take_lanes)
+            || self.take_lanes_differ(other)
             || !(self.sends.ptr_eq(&other.sends) || self.sends == other.sends)
             || !(self.children.ptr_eq(&other.children) || self.children == other.children)
             || !(self.automation.ptr_eq(&other.automation) || self.automation == other.automation)

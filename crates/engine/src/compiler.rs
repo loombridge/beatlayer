@@ -546,6 +546,17 @@ impl Compiler {
                     self.gc.data(crate::modbus::Shape(shape)),
                 ));
             }
+            // Spec: mpe R14, R18. A plug-in's MPE Mode and settings reach
+            // its node as node data, with no new program.
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.mpe != after.mpe
+            {
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc.data(crate::node::PluginMpeData(after.mpe)),
+                ));
+            }
             // Spec: articulation-map R14. An Articulation Map's list reaches
             // its node as node data, so a change to it reaches the playing
             // device without a new program.
@@ -1325,6 +1336,19 @@ impl Compiler {
             // Spec: tunings R18. Every node is new too, so each instrument
             // on a track that plays the tuning is sent its pitches.
             self.send_key_pitches(document, id, true, &mut update);
+            // Spec: mpe R14. A plug-in's node starts with MPE Mode off, so
+            // each one whose mode or settings differ is sent them.
+            for device in document
+                .track(id)
+                .into_iter()
+                .flat_map(bl_model::Track::devices_deep)
+                .filter(|device| !device.mpe.is_default())
+            {
+                update.data.push((
+                    NodeKey::Device(device.id),
+                    self.gc.data(crate::node::PluginMpeData(device.mpe)),
+                ));
+            }
         }
         update
     }
@@ -3338,6 +3362,49 @@ mod tests {
         assert!(!update.data.is_empty(), "the audio track's clips go again");
         let other = f.compiler.media_analysed(bl_model::ContentHash([8; 32]));
         assert!(other.data.is_empty());
+    }
+
+    // Spec: themes R27. A colour is never heard: colouring a track, a clip or a
+    // scene sends the engine no program, no parameter and no clip data.
+    #[test]
+    fn a_colour_edit_sends_the_engine_nothing() {
+        let mut f = Fixture::new();
+        let audio_track = track(&mut f.editor, TrackKind::Audio, None);
+        let clip = bl_model::Clip::new(
+            f.editor.new_id(),
+            bl_core::time::Ticks::ZERO,
+            bl_core::time::Ticks::WHOLE,
+            bl_model::ClipData::Audio(bl_model::AudioData::new(bl_model::ContentHash([7; 32]))),
+        );
+        let clip_id = clip.id;
+        f.apply(Command::CreateClip {
+            track: audio_track,
+            clip,
+        });
+        let scene = f.editor.document().scenes().next().unwrap().id;
+        for command in [
+            Command::SetTrackColour {
+                tracks: vec![audio_track, f.group],
+                colour: 40,
+            },
+            Command::SetClipColour {
+                clips: vec![clip_id],
+                colour: 41,
+            },
+            Command::SetSceneColour {
+                scenes: vec![scene],
+                colour: Some(42),
+            },
+            Command::AssignColourToClips {
+                tracks: vec![audio_track],
+            },
+            Command::AssignColourToGrouped {
+                tracks: vec![f.group],
+            },
+        ] {
+            let update = f.apply(command.clone());
+            assert!(update.is_empty(), "{command:?}");
+        }
     }
 
     #[test]

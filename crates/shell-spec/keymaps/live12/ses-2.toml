@@ -69,3 +69,59 @@ status = "bound"
 commands = [
   { id = "clip.crop", contexts = ["session"] },
 ]
+
+[[shortcut]]
+id = "S-SES-029"
+action = "Cut slot clips across all tracks"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+Shift+X"]
+win = ["Ctrl+Shift+X"]
+status = "bound"
+commands = [
+  { id = "session.cut", contexts = ["session"], args = { all_tracks = true } },
+]
+
+[[shortcut]]
+id = "S-SES-030"
+action = "Copy slot clips across all tracks"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+Shift+C"]
+win = ["Ctrl+Shift+C"]
+status = "bound"
+commands = [
+  { id = "session.copy", contexts = ["session"], args = { all_tracks = true } },
+]
+
+[[shortcut]]
+id = "S-SES-031"
+action = "Paste slot clips from the first track"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+Shift+V"]
+win = ["Ctrl+Shift+V"]
+status = "bound"
+commands = [
+  { id = "session.paste", contexts = ["session"], args = { all_tracks = true } },
+]
+
+[[shortcut]]
+id = "S-SES-032"
+action = "Duplicate slot clips across all tracks"
+context = "session"
+kind = "key"
+trigger = "press"
+milestone = "M3"
+mac = ["Cmd+Shift+D"]
+win = ["Ctrl+Shift+D"]
+status = "bound"
+commands = [
+  { id = "session.duplicate", contexts = ["session"], args = { all_tracks = true } },
+]

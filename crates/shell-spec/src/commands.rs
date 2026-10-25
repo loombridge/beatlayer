@@ -16,7 +16,7 @@ use bl_model::{LaunchMode, LaunchQuantization};
 
 use crate::audio::{AudioDevices, AudioStatus, ConfigureAudio};
 use crate::notes::{ClipTab, ClipViewState, NoteField};
-use crate::settings::{Appearance, SettingsPage, Tone};
+use crate::settings::{Appearance, ClipColour, SettingsPage, Tone};
 
 /// `set.new`: replace the set with the factory default set.
 pub const SET_NEW: &str = "set.new";
@@ -180,6 +180,14 @@ pub const SETTINGS_SET_BRIGHTNESS: &str = "settings.set_brightness";
 pub const SETTINGS_SET_COLOR_INTENSITY: &str = "settings.set_color_intensity";
 /// `settings.set_color_hue`: how far the interface's colours are turned.
 pub const SETTINGS_SET_COLOR_HUE: &str = "settings.set_color_hue";
+/// `settings.set_auto_assign_track_colours`: switch Auto-Assign Track Colors.
+pub const SETTINGS_SET_AUTO_ASSIGN_TRACK_COLOURS: &str = "settings.set_auto_assign_track_colours";
+/// `settings.set_default_track_colour`: choose Default Track Color.
+pub const SETTINGS_SET_DEFAULT_TRACK_COLOUR: &str = "settings.set_default_track_colour";
+/// `settings.set_reduced_automatic_colours`: switch Reduced Automatic Colors.
+pub const SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS: &str = "settings.set_reduced_automatic_colours";
+/// `settings.set_clip_colour`: choose Clip Color.
+pub const SETTINGS_SET_CLIP_COLOUR: &str = "settings.set_clip_colour";
 /// `settings.set_create_fades_on_clip_edges`: switch Create Fades on Clip
 /// Edges.
 pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_fades_on_clip_edges";
@@ -324,6 +332,10 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_BRIGHTNESS,
     SETTINGS_SET_COLOR_INTENSITY,
     SETTINGS_SET_COLOR_HUE,
+    SETTINGS_SET_AUTO_ASSIGN_TRACK_COLOURS,
+    SETTINGS_SET_DEFAULT_TRACK_COLOUR,
+    SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
+    SETTINGS_SET_CLIP_COLOUR,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
     SETTINGS_SET_TEMPORARY_FOLDER,
@@ -500,6 +512,23 @@ pub struct PercentArgs {
     /// A whole percentage from 0 to 200, in steps of 5.
     #[schemars(range(min = 0, max = 200))]
     pub percent: i16,
+}
+
+/// Arguments of `settings.set_default_track_colour`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SwatchArgs {
+    /// A swatch of the palette of 5 rows of 14, from 0 to 69.
+    #[schemars(range(min = 0, max = 69))]
+    pub colour: u8,
+}
+
+/// Arguments of `settings.set_clip_colour`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClipColourArgs {
+    /// `track-color` or `random`.
+    pub clip_colour: ClipColour,
 }
 
 /// Arguments of `settings.set_brightness`.
@@ -1986,6 +2015,48 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Edit)
             .context(Settings)
             .args::<PercentArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_AUTO_ASSIGN_TRACK_COLOURS, "Auto-Assign Track Colors")
+            .description(
+                "Switches Auto-Assign Track Colors, on in a new install. On, a new track takes \
+                 swatch `id mod n` of the automatic colours, `id` being its ID; off, every new \
+                 track takes Default Track Color. Kept for the next start; changes nothing in \
+                 the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_DEFAULT_TRACK_COLOUR, "Default Track Color")
+            .description(
+                "Chooses the swatch (0 to 69, from the palette's top row's left, row by row) \
+                 that every new track takes while Auto-Assign Track Colors is off; 12 in a new \
+                 install. Kept for the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwatchArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS, "Reduced Automatic Colors")
+            .description(
+                "Switches Reduced Automatic Colors, off in a new install. Off, Auto-Assign \
+                 Track Colors cycles the palette's top row of 14 swatches; on, only its seven \
+                 even-numbered swatches, 0, 2, 4 and so on to 12. Kept for the next start; \
+                 changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<SwitchArgs>()
+            .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_CLIP_COLOUR, "Clip Color")
+            .description(
+                "Chooses what colour a new clip takes: `track-color`, its track's, or `random`, \
+                 a swatch from a hash of the clip's ID. `track-color` in a new install. Kept for \
+                 the next start; changes nothing in the set.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<ClipColourArgs>()
             .result::<()>(),
         CommandSpec::new(SETTINGS_SET_COLOR_HUE, "Color Hue")
             .description(

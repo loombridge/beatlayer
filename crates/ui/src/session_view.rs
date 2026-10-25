@@ -19,6 +19,7 @@
 use bl_core::time::TICKS_PER_QUARTER;
 use bl_engine::SlotState;
 use bl_model::{ClipId, Document, SceneId, TrackId, TrackKind};
+use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as mixer_ids;
 use bl_shell::session_view_commands as ids;
@@ -31,7 +32,6 @@ use egui::{
 };
 use serde_json::{Value, json};
 
-use crate::arrangement::scene::track_colour;
 use crate::layout::mixer::{
     Column, ColumnKind, MainStatusCells, MixerLayout, SLOT_ROW, SceneRow, SessionLayout,
     StatusCells,
@@ -121,6 +121,9 @@ pub struct GridUi {
     /// The widgets the grid drew that can hold its keyboard: the group, the
     /// slots, and the scenes' rows.
     focus_ids: Vec<Id>,
+    /// The slot under the pointer in the last frame, which clips dragged
+    /// from the Arrangement are dropped on (second-window R21).
+    hover: Option<(TrackId, SceneId)>,
 }
 
 impl GridUi {
@@ -141,6 +144,14 @@ impl GridUi {
     #[must_use]
     pub fn focused(&self) -> bool {
         self.focused
+    }
+
+    /// The slot the pointer was over in the last frame, for clips dragged
+    /// from the Arrangement to drop on.
+    #[must_use]
+    pub fn drop_spot(&self) -> Option<DropSpot> {
+        let (track, scene) = self.hover?;
+        Some(DropSpot::Session { track, scene })
     }
 
     /// Draws the grid in the Session View's slots area and adds what the
@@ -270,9 +281,16 @@ impl GridUi {
                 json!({ "y": -delta.y }),
             )));
         }
+        self.hover = ui
+            .input(|i| i.pointer.latest_pos())
+            .and_then(|pos| slot_at(session, &layout, &columns, &scenes, scroll_y, pos));
         // A clip drag that ended: move it to the slot it was released on, or
-        // copy it with the copy modifier held (I-DRAG-001, I-DRAG-002).
-        if let Some((clip, from)) = self.released.take() {
+        // copy it with the copy modifier held (I-DRAG-001, I-DRAG-002). Esc
+        // ended the drag before it, which leaves everything as it was
+        // (second-window R18).
+        if let Some((clip, from)) = self.released.take()
+            && shell.clip_drag().is_some()
+        {
             let (pos, modifiers) = ui.input(|i| (i.pointer.interact_pos(), i.modifiers));
             // Released over a folder or label of the browser, the clip is
             // saved as a clip file there instead (clip files R3).
@@ -362,7 +380,9 @@ impl GridUi {
         }
         let painter = ui.painter_at(cell.expand(1.0));
         let fill = match clip {
-            Some(_) => track_colour(theme, track).gamma_multiply(0.75),
+            Some(held) => theme
+                .swatch(held.colour.unwrap_or_default())
+                .gamma_multiply(0.75),
             None => theme.colors.lane.0,
         };
         painter.rect_filled(cell, 0.0, fill);
@@ -454,6 +474,22 @@ impl GridUi {
             });
             // Spec: clip files R3. A clip can be dropped on the browser.
             crate::browser::begin_clip_drag(ui.ctx());
+            // Spec: second-window R18, R19. The selected clips, the one
+            // dragged among them, can be carried to the Arrangement.
+            let clips: Vec<ClipId> = if selected {
+                shell
+                    .session()
+                    .selected_slots()
+                    .iter()
+                    .filter_map(|slot| doc.slot(slot.track, slot.scene))
+                    .map(|clip| clip.id)
+                    .collect()
+            } else {
+                vec![clip]
+            };
+            events.push(UiEvent::ClipDrag(ClipDragEvent::Begin(DragSource::Slots(
+                clips,
+            ))));
         }
         if response.drag_stopped()
             && let Some(Drag::Clip { clip, from }) = self.drag.take()
@@ -671,7 +707,15 @@ impl GridUi {
         }
         let selected = state.scenes.contains(&scene);
         let painter = ui.painter().clone();
-        painter.rect_filled(row.name.shrink(1.0), 0.0, theme.colors.lane.0);
+        // Spec: themes R18. A scene with a colour has its name field filled
+        // with it.
+        let fill = shell
+            .editor()
+            .document()
+            .scene(scene)
+            .and_then(|held| held.colour)
+            .map_or(theme.colors.lane.0, |swatch| theme.swatch(swatch));
+        painter.rect_filled(row.name.shrink(1.0), 0.0, fill);
         // Spec: session-view R21. View > Scene Tempo and Time Signature
         // puts the scene's fields where the name was (L-SES-007); they're
         // drawn last, above the row's own click.
@@ -812,6 +856,8 @@ impl GridUi {
                 i.modifiers.shift,
             )
         });
+        // Esc during a drag of clips ends the drag, nothing else.
+        let esc = esc && shell.clip_drag().is_none();
         let state = shell.session().state();
         // Where the arrows move from: the selected slot, else the selected
         // scene or track.

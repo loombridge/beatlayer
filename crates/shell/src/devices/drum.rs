@@ -29,6 +29,7 @@ type PresetState = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<bl_model::PluginMpe>,
 );
 
 /// The notes the pad view can start at: the last group of sixteen.
@@ -600,6 +601,7 @@ impl DeviceView {
                             bl_project::preset::preset_name(&path),
                             loaded.shape,
                             loaded.articulations,
+                            loaded.mpe,
                         )),
                     ))
                 }
@@ -923,13 +925,14 @@ impl DeviceView {
                             index,
                             device,
                         })?;
-                        if let Some((params, name, shape, articulations)) = state {
+                        if let Some((params, name, shape, articulations, mpe)) = state {
                             editor.apply(Command::SetDeviceState {
                                 device: id,
                                 params,
                                 name,
                                 shape,
                                 articulations,
+                                mpe,
                             })?;
                         }
                     }
@@ -1263,6 +1266,7 @@ impl DeviceView {
     pub(super) fn extract_chain(
         &mut self,
         editor: &mut Editor,
+        look: &bl_shell_spec::settings::ThemeLook,
         args: ExtractChainArgs,
     ) -> Result<Extracted, DeviceError> {
         let doc = editor.document();
@@ -1325,6 +1329,7 @@ impl DeviceView {
                     parent: None,
                     index: top,
                 })?;
+                crate::colours::colour_new(editor, look, &[new_track], &[])?;
                 for (n, device) in devices.iter().enumerate() {
                     editor.apply(Command::MoveDevice {
                         device: *device,
@@ -1398,6 +1403,7 @@ impl DeviceView {
     pub(super) fn extract_return(
         &mut self,
         editor: &mut Editor,
+        look: &bl_shell_spec::settings::ThemeLook,
         args: ExtractChainArgs,
     ) -> Result<Extracted, DeviceError> {
         let doc = editor.document();
@@ -1427,6 +1433,7 @@ impl DeviceView {
                     parent: None,
                     index: count,
                 })?;
+                crate::colours::colour_new(editor, look, &[new_track], &[])?;
                 for (n, device) in devices.iter().enumerate() {
                     editor.apply(Command::MoveDevice {
                         device: *device,

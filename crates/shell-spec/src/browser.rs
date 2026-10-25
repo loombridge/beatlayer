@@ -29,7 +29,8 @@ pub const OPEN_PLACE: &str = "browser.open_place";
 pub const OPEN_FOLDER: &str = "browser.open_folder";
 /// `browser.select`: select items in the content pane.
 pub const SELECT: &str = "browser.select";
-/// `browser.show_file`: show an audio file in the browser (Show in Browser).
+/// `browser.show_file`: show a file or folder in the browser (Show in Browser,
+/// Show in Places).
 pub const SHOW_FILE: &str = "browser.show_file";
 /// `browser.add_folder`: add a folder to Places.
 pub const ADD_FOLDER: &str = "browser.add_folder";
@@ -102,6 +103,12 @@ pub const REMOVE_LABEL: &str = "browser.remove_label";
 /// `browser.set_columns`: the content pane's columns, sort and file
 /// extensions.
 pub const SET_COLUMNS: &str = "browser.set_columns";
+/// `browser.set_collection`: put items in a collection, or take them out.
+pub const SET_COLLECTION: &str = "browser.set_collection";
+/// `browser.clear_collections`: take items out of every collection.
+pub const CLEAR_COLLECTIONS: &str = "browser.clear_collections";
+/// `browser.reveal`: show items in the system's file manager.
+pub const REVEAL: &str = "browser.reveal";
 /// `browser.back`: go back one step in the browser's history.
 pub const BACK: &str = "browser.back";
 /// `browser.forward`: go forward one step in the browser's history.
@@ -152,6 +159,9 @@ pub const IDS: &[&str] = &[
     RESET_LABEL_ORDER,
     REMOVE_LABEL,
     SET_COLUMNS,
+    SET_COLLECTION,
+    CLEAR_COLLECTIONS,
+    REVEAL,
     BACK,
     FORWARD,
     FOCUS_BROWSER,
@@ -179,7 +189,8 @@ pub const MAX_PREVIEW_VOLUME: f64 = 1.995_262_314_968_879_5;
                    `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, \
                    `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place \
                    (`user_library`, `current_project`), or a folder added to Places, as \
-                   `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`."
+                   `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a \
+                   collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`."
 )]
 pub enum Label {
     /// Everything: the places as folders, searched together.
@@ -216,6 +227,9 @@ pub enum Label {
     Folder(String),
     /// A saved label, by its ID (spec: browser-tags R24).
     Saved(i64),
+    /// A collection, by its number: 1 is Favorites, 7 Gray (spec:
+    /// browser-tags R34).
+    Collection(u8),
 }
 
 impl Label {
@@ -261,6 +275,9 @@ impl Label {
                 .file_name()
                 .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned()),
             Self::Saved(_) => "Saved Label".to_owned(),
+            Self::Collection(number) => COLLECTIONS
+                .get(usize::from(*number).wrapping_sub(1))
+                .map_or_else(|| "Collection".to_owned(), |name| (*name).to_owned()),
         }
     }
 
@@ -287,6 +304,7 @@ impl Label {
             Self::CurrentProject => "current_project".to_owned(),
             Self::Folder(path) => format!("folder:{path}"),
             Self::Saved(id) => format!("saved:{id}"),
+            Self::Collection(number) => format!("collection:{number}"),
         }
     }
 
@@ -296,8 +314,14 @@ impl Label {
     pub const fn is_library(&self) -> bool {
         !matches!(
             self,
-            Self::UserLibrary | Self::CurrentProject | Self::Folder(_)
+            Self::UserLibrary | Self::CurrentProject | Self::Folder(_) | Self::Collection(_)
         )
+    }
+
+    /// Whether it's one of the seven collections.
+    #[must_use]
+    pub const fn is_collection(&self) -> bool {
+        matches!(self, Self::Collection(number) if *number >= 1 && *number <= 7)
     }
 
     /// For a Library label Beatlayer has no content for yet, what will fill
@@ -329,13 +353,25 @@ impl Label {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Section {
-    /// Collections (M6).
+    /// The seven collections (spec: browser-tags R34).
     Collections,
     /// The Library labels.
     Library,
     /// Places: folders on disk.
     Places,
 }
+
+/// The seven collections' names, in the sidebar's order (spec: browser R2,
+/// browser-tags R34).
+pub const COLLECTIONS: [&str; 7] = [
+    "Favorites",
+    "Orange",
+    "Yellow",
+    "Green",
+    "Blue",
+    "Purple",
+    "Gray",
+];
 
 /// A label as the sidebar lists it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -460,6 +496,10 @@ pub struct Item {
     /// (spec: browser-tags R27).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub details: Option<ItemDetails>,
+    /// The collections it is in, by their numbers (1 is Favorites), in
+    /// order; left out while it is in none (spec: browser-tags R35, R40).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub collections: Vec<u8>,
 }
 
 /// What an item's optional columns show (spec: browser-tags R27); a value
@@ -869,6 +909,43 @@ pub struct TagItemsArgs {
     pub attach: Option<bool>,
 }
 
+/// Arguments of `browser.set_collection`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetCollectionArgs {
+    /// The collection: 1 is Favorites, 2 Orange, 3 Yellow, 4 Green, 5 Blue,
+    /// 6 Purple, 7 Gray.
+    pub collection: u8,
+    /// The items, by their keys as `browser.tag_items` names them. Left out,
+    /// the selected items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<String>>,
+    /// Put them in the collection (true) or take them out (false). Left
+    /// out, as the keys 1 to 7 do: if every item is in it already they all
+    /// come out, otherwise they all go in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member: Option<bool>,
+}
+
+/// Arguments of `browser.clear_collections`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearCollectionsArgs {
+    /// The items, by their keys as `browser.tag_items` names them. Left out,
+    /// the selected items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub items: Option<Vec<String>>,
+}
+
+/// Arguments of `browser.reveal`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RevealArgs {
+    /// The files and folders to show, by path. Left out, the selected items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<String>>,
+}
+
 /// Arguments of `browser.add_tag`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1042,7 +1119,7 @@ pub struct SetLabelIconArgs {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetLabelShownArgs {
-    /// The Library label or saved label.
+    /// The Library label, saved label or collection.
     pub label: Label,
     /// Whether the sidebar shows it.
     pub shown: bool,
@@ -1172,7 +1249,7 @@ pub struct OpenFolderArgs {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ShowFileArgs {
-    /// The file to show, by path. Give this or `clip`.
+    /// The file or folder to show, by path. Give this or `clip`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
     /// An audio clip whose file to show. Give this or `path`.
@@ -1455,10 +1532,10 @@ fn specs() -> Vec<CommandSpec> {
             .result::<BrowserState>(),
         CommandSpec::new(SHOW_FILE, "Show in Browser")
             .description(
-                "Shows an audio file in the browser, as Show in Browser does in the Sample \
-                 Editor: shows the browser, chooses the place the file lies in, opens the \
-                 folders down to it and selects it. Name the file by `path`, or by the `clip` \
-                 that plays it. Refused if the file lies in none of the browser's places; \
+                "Shows a file or folder in the browser, as Show in Browser does in the Sample \
+                 Editor and Show in Places does in a browser item's context menu: shows the \
+                 browser, chooses the place it lies in, opens the folders down to it and \
+                 selects it. Name it by `path`, or an audio file by the `clip` that plays it. Refused if the file lies in none of the browser's places; \
                  `browser.add_folder` adds one. Changes nothing in the set, but reads folders \
                  outside the project.",
             )
@@ -1797,9 +1874,9 @@ fn specs() -> Vec<CommandSpec> {
             .result::<BrowserState>(),
         CommandSpec::new(RENAME_LABEL, "Rename Label")
             .description(
-                "Renames a saved label or a Library label, as Rename (Cmd-R) in its context \
-                 menu does (`label`, or the chosen label). With `name`, the label has that name (empty gives a Library label \
-                 its own name back). Without it, the name opens for editing, or, if it is open \
+                "Renames a saved label, a Library label or a collection, as Rename (Cmd-R) in its \
+                 context menu does (`label`, or the chosen label). With `name`, the label has \
+                 that name (empty gives a Library label or a collection its own name back). Without it, the name opens for editing, or, if it is open \
                  already, editing ends and the name is kept. A place's label (the User Library, \
                  Current Project, an added folder) takes its folder's name and isn't renamed. \
                  Kept for the next start.",
@@ -1822,13 +1899,52 @@ fn specs() -> Vec<CommandSpec> {
             .result::<BrowserState>(),
         CommandSpec::new(SET_LABEL_SHOWN, "Show Label in Sidebar")
             .description(
-                "Shows or hides a Library label or a saved label in the sidebar, as the check \
-                 boxes in the Library section's Edit mode do. All can't be hidden. Hiding the \
-                 chosen label chooses All. Kept for the next start.",
+                "Shows or hides a Library label, a saved label or a collection in the sidebar, \
+                 as the check boxes in the Library and Collections sections' Edit mode do. All \
+                 can't be hidden. Hiding the chosen label chooses All. Kept for the next start.",
             )
             .permission(Permission::Edit)
             .contexts([Global, Browser, BrowserSidebar])
             .args::<SetLabelShownArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(SET_COLLECTION, "Set Collection")
+            .description(
+                "Puts items in one of the seven collections (`collection`: 1 Favorites, 2 \
+                 Orange, 3 Yellow, 4 Green, 5 Blue, 6 Purple, 7 Gray), or takes them out, as the \
+                 keys 1 to 7 and the items of a browser item's context menu do. The items are \
+                 named by their keys as `browser.tag_items` names them (`items`; left out, the \
+                 selected items). With `member` true they go in, with false they come out; left \
+                 out, they all come out if every one is in the collection already, otherwise \
+                 they all go in. An item can be in several collections. A hidden collection \
+                 comes back into the sidebar when an item goes in. Changes the browser's \
+                 database, not the files, and isn't an undo step of the set.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetCollectionArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(CLEAR_COLLECTIONS, "Clear All Colors")
+            .description(
+                "Takes items out of every collection, as the key 0 and Clear All Colors in a \
+                 browser item's context menu do. The items are named by their keys as \
+                 `browser.tag_items` names them (`items`; left out, the selected items). \
+                 Changes the browser's database, not the files.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<ClearCollectionsArgs>()
+            .result::<BrowserState>(),
+        CommandSpec::new(REVEAL, "Show in Finder")
+            .description(
+                "Shows files and folders in the system's file manager (Finder on macOS, File \
+                 Explorer on Windows, the default file manager on Linux), as Show in Finder in \
+                 a browser item's context menu does. Name them by `paths`; left out, the \
+                 selected items, which must be files or folders. Opens another application and \
+                 changes nothing in the set.",
+            )
+            .permission(Permission::External)
+            .contexts([Global, Browser])
+            .args::<RevealArgs>()
             .result::<BrowserState>(),
         CommandSpec::new(MOVE_LABEL, "Move Label")
             .description(
@@ -1946,6 +2062,7 @@ mod tests {
             ADD_TO_ARRANGEMENT,
             SAVE_CLIP_FILE,
             RENAME_FILE,
+            REVEAL,
         ] {
             assert_eq!(class(id), Permission::External, "{id} reads outside");
         }
@@ -1969,6 +2086,8 @@ mod tests {
             MOVE_LABEL,
             RESET_LABEL_ORDER,
             SET_COLUMNS,
+            SET_COLLECTION,
+            CLEAR_COLLECTIONS,
         ] {
             assert_eq!(class(id), Permission::Edit, "{id}");
         }
@@ -2002,5 +2121,18 @@ mod tests {
         assert!(Label::Sounds.pending().is_some());
         assert!(Label::All.pending().is_none() && Label::Samples.pending().is_none());
         assert!(Label::Clips.pending().is_none(), "clip files are built");
+        // Spec: browser-tags R34.
+        assert_eq!(
+            serde_json::to_value(Label::Collection(3)).unwrap(),
+            serde_json::json!({ "collection": 3 })
+        );
+        assert_eq!(
+            COLLECTIONS.to_vec(),
+            (1..=7)
+                .map(|n| Label::Collection(n).name())
+                .collect::<Vec<_>>()
+        );
+        assert!(Label::Collection(1).is_collection() && !Label::Collection(1).is_library());
+        assert!(!Label::Collection(8).is_collection());
     }
 }

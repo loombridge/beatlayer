@@ -20,14 +20,15 @@ use bl_shell::audio::{
 use bl_shell::keymap::Origin;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
-    Appearance, BRIGHTNESS, COLOR_HUE, COLOR_INTENSITY, DefaultWarpMode, GRID_LINE_INTENSITY,
-    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, Tone, ZOOM_MAX_PERCENT,
-    ZOOM_MIN_PERCENT, zoom_step,
+    Appearance, BRIGHTNESS, COLOR_HUE, COLOR_INTENSITY, ClipColour, DefaultWarpMode,
+    GRID_LINE_INTENSITY, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, Tone,
+    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
 use egui::{
-    Align2, CentralPanel, Frame, Id, Key, RawInput, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2,
+    Align2, CentralPanel, Frame, Id, Key, RawInput, Rect, Sense, Stroke, StrokeKind, Ui,
+    WidgetInfo, WidgetType, pos2, vec2,
 };
 use serde_json::{Value, json};
 
@@ -1665,6 +1666,144 @@ fn theme_page(
             )));
         }
     }
+    // Spec: themes R23, R24 (L-SET-011).
+    rows.heading(ui, "Track and Clip Colors");
+    let rect = rows.row(ui, "Auto-Assign Track Colors", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "auto-assign-track-colours",
+        "Auto-Assign Track Colors",
+        rect,
+        look.auto_assign_track_colours,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_AUTO_ASSIGN_TRACK_COLOURS,
+            json!({ "on": on }),
+        )));
+    }
+    let rect = rows.row(ui, "Default Track Color", SettingsLayout::CHOOSER);
+    if let Some(colour) = swatch_chooser(
+        ui,
+        theme,
+        "default-track-colour",
+        "Default Track Color",
+        rect,
+        look.default_track_colour,
+        !look.auto_assign_track_colours,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_DEFAULT_TRACK_COLOUR,
+            json!({ "colour": colour }),
+        )));
+    }
+    let rect = rows.row(ui, "Reduced Automatic Colors", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "reduced-automatic-colours",
+        "Reduced Automatic Colors",
+        rect,
+        look.reduced_automatic_colours,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS,
+            json!({ "on": on }),
+        )));
+    }
+    let rect = rows.row(ui, "Clip Color", SettingsLayout::CHOOSER);
+    let clip_colours = choices(ClipColour::ALL.map(|c| (c.label().to_owned(), c)));
+    if let Some(clip_colour) = chooser(
+        ui,
+        theme,
+        "clip-colour",
+        "Clip Color",
+        rect,
+        &clip_colours,
+        Some(&look.clip_colour),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_CLIP_COLOUR,
+            json!({ "clip_colour": clip_colour }),
+        )));
+    }
+}
+
+/// A chooser of the palette's 70 swatches (Default Track Color): a button
+/// showing the swatch, which opens the palette. Returns the swatch chosen.
+fn swatch_chooser(
+    ui: &mut Ui,
+    theme: &Theme,
+    id_salt: &str,
+    name: &str,
+    rect: Rect,
+    current: u8,
+    enabled: bool,
+) -> Option<u8> {
+    let id = Id::new(("chooser", id_salt));
+    let response = ui.interact(
+        rect,
+        id,
+        if enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        },
+    );
+    let mut chosen = None;
+    if response.has_focus() {
+        ui.memory_mut(|m| {
+            m.set_focus_lock_filter(
+                id,
+                egui::EventFilter {
+                    vertical_arrows: true,
+                    ..Default::default()
+                },
+            );
+        });
+        let step = ui.input(|i| {
+            i32::from(i.key_pressed(Key::ArrowDown)) - i32::from(i.key_pressed(Key::ArrowUp))
+        });
+        let next = (i32::from(current) + step).clamp(0, i32::from(bl_model::SWATCHES) - 1) as u8;
+        if step != 0 && next != current {
+            chosen = Some(next);
+        }
+    }
+    let swatch = theme.swatch(current);
+    let painter = ui.painter_at(rect.expand(3.0));
+    painter.rect_filled(
+        rect,
+        theme.sizes.corner,
+        if enabled {
+            swatch
+        } else {
+            swatch.gamma_multiply(0.45)
+        },
+    );
+    if response.has_focus() && crate::focus::outlined(&response.ctx) {
+        painter.rect_stroke(
+            rect,
+            theme.sizes.corner,
+            Stroke::new(1.5, theme.colors.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, enabled, name));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_value(format!(
+            "Row {}, colour {}",
+            current / crate::palette::COLUMNS + 1,
+            current % crate::palette::COLUMNS + 1
+        ));
+    });
+    egui::Popup::menu(&response).show(|ui| {
+        if let Some(swatch) = crate::palette::show(ui, theme, id_salt, Some(current)) {
+            chosen = Some(swatch);
+            ui.close();
+        }
+    });
+    chosen
 }
 
 /// File & Folder (L-SET-015): the Sample Editor and Temporary Folder rows,

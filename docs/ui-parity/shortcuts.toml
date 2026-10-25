@@ -4297,6 +4297,54 @@ same_as = "S-ARR-003"
 confirmed = true
 
 [[shortcut]]
+id = "S-SES-029"
+action = "Cut slot clips across all tracks"
+context = "session"
+mac = ["Cmd+Shift+X"]
+win = ["Ctrl+Shift+X"]
+kind = "key"
+trigger = "press"
+milestone = "M3"
+source = "manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View"
+notes = "Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live."
+
+[[shortcut]]
+id = "S-SES-030"
+action = "Copy slot clips across all tracks"
+context = "session"
+mac = ["Cmd+Shift+C"]
+win = ["Ctrl+Shift+C"]
+kind = "key"
+trigger = "press"
+milestone = "M3"
+source = "manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View"
+notes = "Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live."
+
+[[shortcut]]
+id = "S-SES-031"
+action = "Paste slot clips from the first track"
+context = "session"
+mac = ["Cmd+Shift+V"]
+win = ["Ctrl+Shift+V"]
+kind = "key"
+trigger = "press"
+milestone = "M3"
+source = "manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View"
+notes = "Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live."
+
+[[shortcut]]
+id = "S-SES-032"
+action = "Duplicate slot clips across all tracks"
+context = "session"
+mac = ["Cmd+Shift+D"]
+win = ["Ctrl+Shift+D"]
+kind = "key"
+trigger = "press"
+milestone = "M3"
+source = "manual 42.5 (Shift with an editing command applies it across all tracks, S-EDIT-014); Beatlayer's reading for the Session View"
+notes = "Beatlayer's own keys for S-EDIT-014 in the Session View, by the same pattern as the Arrangement's time commands across all tracks (S-ARR-015 to S-ARR-018). The manual says Shift extends the command to clips and slots across all tracks but not which keys; not yet observed in Live."
+
+[[shortcut]]
 id = "S-ARR-037"
 action = "Insert an empty MIDI clip in the time selection"
 context = "arrangement"

@@ -225,6 +225,9 @@ pub struct Context<'a> {
     pub auto_hide: bool,
     /// Whether View ▸ Plug-In Windows shows the windows.
     pub windows_shown: bool,
+    /// The colour settings, for a track a command makes (the themes spec,
+    /// R19).
+    pub look: &'a bl_shell_spec::settings::ThemeLook,
 }
 
 /// The display of a device whose type draws none.
@@ -1404,6 +1407,7 @@ impl DeviceView {
             floating: d.floating,
             b_active: d.b_active,
             configure: self.configuring.contains(&d.id),
+            mpe: matches!(d.kind, DeviceKind::Plugin { .. }).then_some(d.mpe),
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),
@@ -1689,6 +1693,7 @@ impl DeviceView {
             zoom,
             auto_hide,
             windows_shown,
+            look,
         } = ctx;
         let track = shown_track(arrangement, editor.document());
         let windows = |view: &Self, editor: &Editor| {
@@ -1808,7 +1813,7 @@ impl DeviceView {
             ids::ADD => {
                 let args: AddDeviceArgs = parse(args)?;
                 let ready = self.default_rack(editor, &args, user_library, media, &mut outcome);
-                let added = self.add(&args, editor, arrangement, user_library, track, ready)?;
+                let added = self.add(&args, editor, arrangement, user_library, look, ready)?;
                 if let Some(name) = &added.default_preset {
                     // Spec: device-chains R13, as Live's "Using Default
                     // Preset Auto Filter.adv."
@@ -2127,13 +2132,13 @@ impl DeviceView {
             }
             pad_ids::CHAIN_EXTRACT => {
                 let args: pad_ids::ExtractChainArgs = parse(args)?;
-                outcome.value = to_value(&self.extract_chain(editor, args)?);
+                outcome.value = to_value(&self.extract_chain(editor, look, args)?);
                 outcome.document_changed = true;
                 return Ok(outcome);
             }
             pad_ids::CHAIN_EXTRACT_RETURN => {
                 let args: pad_ids::ExtractChainArgs = parse(args)?;
-                outcome.value = to_value(&self.extract_return(editor, args)?);
+                outcome.value = to_value(&self.extract_return(editor, look, args)?);
                 outcome.document_changed = true;
                 return Ok(outcome);
             }
@@ -2450,8 +2455,7 @@ impl DeviceView {
                 let args: AddPresetArgs = parse(args)?;
                 let (add, ready) =
                     self.ready_to_add(&args, editor, user_library, media, &mut outcome)?;
-                let added =
-                    self.add(&add, editor, arrangement, user_library, track, Some(ready))?;
+                let added = self.add(&add, editor, arrangement, user_library, look, Some(ready))?;
                 outcome.document_changed = true;
                 outcome.value = to_value(&added);
                 return Ok(outcome);
@@ -2580,7 +2584,7 @@ impl DeviceView {
         editor: &mut Editor,
         arrangement: &mut ArrangementView,
         user_library: Option<&Path>,
-        shown: Option<TrackId>,
+        look: &bl_shell_spec::settings::ThemeLook,
         ready: Option<Ready>,
     ) -> Result<DeviceAdded, DeviceError> {
         if let Some(chain) = args.chain {
@@ -2589,7 +2593,7 @@ impl DeviceView {
         let role = args.device.role;
         let target = args
             .track
-            .or(shown)
+            .or_else(|| shown_track(arrangement, editor.document()))
             .ok_or_else(|| DeviceError::Unavailable("select a track first".to_owned()))?;
         let kind = editor
             .document()
@@ -2630,19 +2634,21 @@ impl DeviceView {
                     parent: None,
                     index: top,
                 })?;
+                crate::colours::colour_new(editor, look, &[track_id], &[])?;
             }
             editor.apply(Command::InsertDevice {
                 track: track_id,
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations)) = state {
+            if let Some((params, name, shape, articulations, mpe)) = state {
                 editor.apply(Command::SetDeviceState {
                     device: id,
                     params,
                     name,
                     shape,
                     articulations,
+                    mpe,
                 })?;
             }
             map_inner_copies(editor, &pairs)
@@ -2690,6 +2696,7 @@ impl DeviceView {
                 preset::preset_name(&path),
                 preset.shape,
                 preset.articulations,
+                preset.mpe,
             )
         });
         Ready {
@@ -2743,13 +2750,14 @@ impl DeviceView {
                     index,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations)) = state {
+                if let Some((params, name, shape, articulations, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        mpe,
                     })?;
                 }
                 map_inner_copies(editor, &pairs)
@@ -3198,7 +3206,7 @@ impl DeviceView {
                     chain.receive = bl_model::Receive::Note(note);
                 }
                 editor.apply(Command::AddChain { rack, index, chain })?;
-                if let (Some(device), Some((params, name, shape, articulations))) =
+                if let (Some(device), Some((params, name, shape, articulations, mpe))) =
                     (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {
@@ -3207,6 +3215,7 @@ impl DeviceView {
                         name,
                         shape,
                         articulations,
+                        mpe,
                     })?;
                 }
                 if let Some(device) = move_device {
@@ -3472,6 +3481,7 @@ fn load_preset(
             name: preset::preset_name(path),
             shape: loaded.shape,
             articulations: loaded.articulations,
+            mpe: loaded.mpe,
         })
         .map(|_| ())
         .map_err(|e| DeviceError::Failed(e.to_string()))

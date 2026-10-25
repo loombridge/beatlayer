@@ -275,6 +275,7 @@ impl Shell {
                     .chain(midi.iter().map(|take| take.track))
                     .collect();
                 let before = self.editor.document().clone();
+                let look = &self.prefs.look;
                 self.editor.transact(label, |editor| {
                     for (track, hash, path, _) in &imported {
                         let id = editor.new_id();
@@ -296,10 +297,12 @@ impl Shell {
                         let mut clip =
                             Clip::new(id, start, end.saturating_sub(start), ClipData::Audio(audio));
                         clip.name = file_stem(path);
+                        clip.colour = look.new_clip_colour(id);
                         // Spec: comping R10. The take goes on a take lane too,
                         // and the main lane's clip is a copy of it.
                         crate::recording::put_on_lane(editor, *track, clip.clone())?;
                         clip.id = editor.new_id();
+                        clip.colour = look.new_clip_colour(clip.id);
                         crate::arrangement::placing::clear(editor, *track, start, end, &placed)?;
                         placed.insert(clip.id);
                         editor.apply(bl_model::Command::CreateClip {
@@ -316,6 +319,8 @@ impl Shell {
                         true,
                         &mut placed,
                     )?;
+                    let made: Vec<_> = placed.iter().copied().collect();
+                    crate::colours::colour_new(editor, look, &[], &made)?;
                     crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
                     // Spec: audio-clips R26. A take that meets a clip
                     // already there is crossfaded with it.
@@ -419,6 +424,8 @@ impl Shell {
         let warp_recorded = self.warp_recorded_audio();
         let warp_mode = auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
         let overdub = self.editor.document().settings().midi_overdub;
+        let look = self.prefs.look.clone();
+        let look = &look;
         let (lead_in, passes) = crate::recording::passes(take, frames);
         let (midi_lead_in, midi_passes) = crate::recording::passes(take, take.frames);
         let later = Frames((-delay).max(0));
@@ -462,6 +469,7 @@ impl Shell {
                     ClipData::Audio(data),
                 );
                 clip.name = name.to_owned();
+                clip.colour = look.new_clip_colour(clip.id);
                 clip
             };
         let put_on_main =
@@ -498,8 +506,10 @@ impl Shell {
                         // is copied to the main lane.
                         let clip = clip_of(editor, &name, pass, audio(*hash, pass));
                         crate::recording::put_on_lane(editor, *track, clip.clone())?;
+                        let id = editor.new_id();
                         let copy = Clip {
-                            id: editor.new_id(),
+                            id,
+                            colour: look.new_clip_colour(id),
                             ..clip
                         };
                         put_on_main(editor, *track, copy)?;
@@ -529,6 +539,8 @@ impl Shell {
                             &mut placed,
                         )?;
                     }
+                    let made: Vec<_> = placed.iter().copied().collect();
+                    crate::colours::colour_new(editor, look, &[], &made)?;
                     Ok::<(), bl_model::EditError>(())
                 })?;
         }

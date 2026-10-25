@@ -21,7 +21,7 @@ use crate::param::{DeviceDescription, ParamDescriptor, ParamUnit};
 
 /// How many colours a chain can take: the palette's 5 rows of 14 swatches
 /// (C-TRACK-015).
-pub const CHAIN_COLOURS: u8 = 70;
+pub const CHAIN_COLOURS: u8 = crate::colour::SWATCHES;
 
 /// The rack's chain selector (racks spec, R33): a whole number from 0 to 127.
 pub const CHAIN_SELECTOR: ParamId = ParamId(0);

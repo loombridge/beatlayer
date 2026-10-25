@@ -783,8 +783,10 @@ impl Shell {
                     if scene.is_some() {
                         clip.start = Ticks::ZERO;
                     }
+                    let look = &self.prefs.look;
                     let placed = self.editor.transact(label_of(scene), |editor| {
-                        place(editor, lane, scene, start, end, clip)
+                        place(editor, lane, scene, start, end, clip)?;
+                        crate::colours::colour_new(editor, look, &[], &[new_id])
                     });
                     match placed {
                         Ok(()) => order.push((index, track, new_id, None)),
@@ -838,9 +840,12 @@ impl Shell {
                             scale,
                             // The render plays the groove, so it holds it.
                             groove: None,
+                            colour: None,
                         };
+                        let look = &shell.prefs.look;
                         let placed = shell.editor.transact(label_of(scene), |editor| {
-                            place(editor, lane, scene, start, end, clip)
+                            place(editor, lane, scene, start, end, clip)?;
+                            crate::colours::colour_new(editor, look, &[], &[new_id])
                         });
                         match placed {
                             Ok(()) => {

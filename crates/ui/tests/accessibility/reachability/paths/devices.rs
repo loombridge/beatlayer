@@ -743,6 +743,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::Enter,
             ),
         ),
+        // A plug-in's MPE Mode and settings (WP-6.17b): in its menu, and the
+        // dialog's controls, which a keyboard reaches by Tab.
+        ("plugin.set_mpe", Exception(DEVICE_MENU)),
+        ("plugin.show_mpe_settings", Exception(DEVICE_MENU)),
+        (
+            "plugin.set_mpe_settings",
+            Exception(Equivalent(
+                "the MPE/Multi-channel Settings dialog's controls (Tab to one, then Enter), \
+                 opened from the plug-in's menu",
+            )),
+        ),
         (
             "plugin.set_window",
             Exception(Equivalent(

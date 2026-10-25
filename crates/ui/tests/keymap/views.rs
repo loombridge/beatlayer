@@ -35,6 +35,62 @@ fn the_tags_shortcuts_reach_their_commands() {
     assert_eq!(entry.win, vec!["Ctrl+E".to_owned()]);
 }
 
+#[test]
+fn the_collection_keys_and_rename_reach_the_browser() {
+    // Spec: browser-tags R35 and R38. The keys 1 to 7 and 0 are the
+    // browser's list's own (S-BRW-008, S-BRW-009), and Cmd-R (Ctrl-R)
+    // renames the chosen label, a collection among them, while the sidebar
+    // has the keyboard (S-EDIT-008).
+    let keymap = Keymap::live12();
+    for (shortcut, keys) in [
+        (
+            "S-BRW-008",
+            vec![
+                Key::Num1,
+                Key::Num2,
+                Key::Num3,
+                Key::Num4,
+                Key::Num5,
+                Key::Num6,
+                Key::Num7,
+            ],
+        ),
+        ("S-BRW-009", vec![Key::Num0]),
+    ] {
+        let entry = keymap.entry_for(shortcut).expect("the shortcut");
+        assert!(
+            matches!(entry.status, Status::Widget(_)),
+            "{shortcut}: {:?}",
+            entry.status
+        );
+        for platform in [Platform::Mac, Platform::Other] {
+            let chords: Vec<Key> = entry
+                .chords(platform)
+                .iter()
+                .map(|chord| chord.key)
+                .collect();
+            assert_eq!(chords, keys, "{shortcut}");
+            assert!(
+                entry
+                    .chords(platform)
+                    .iter()
+                    .all(|chord| chord.mods == mods(false, false, false, false))
+            );
+        }
+    }
+    for (platform, cmd, ctrl) in [(Platform::Mac, true, false), (Platform::Other, false, true)] {
+        let hit = keymap
+            .resolve(
+                platform,
+                Key::R,
+                mods(cmd, ctrl, false, false),
+                &[Context::BrowserSidebar, Context::Global],
+            )
+            .expect("Cmd+R is bound");
+        assert_eq!(hit.command.id, "browser.rename_label");
+    }
+}
+
 // Spec: second-window R1, R4, R8, R11. Cmd+Shift+W (Ctrl+Shift+W) opens and
 // closes the second window from any context, and Option+1 and Option+2 move
 // the focus to the main view in whichever window shows it.
@@ -300,4 +356,55 @@ fn tab_esc_and_delete_in_the_envelope_context_fall_through_when_they_cannot_run(
         )
         .expect("Enter is the envelope's");
     assert_eq!(hit.command.id, "envelope.enter");
+}
+
+// Spec: session-view R39 to R43, second-window R22 (S-EDIT-001 to S-EDIT-004,
+// S-EDIT-014). Cut, Copy, Paste and Duplicate reach the Session View's
+// commands in the `session` context, and Shift with them runs the same with
+// `all_tracks` (S-SES-029 to S-SES-032).
+#[test]
+fn the_edit_keys_reach_the_session_views_commands() {
+    let keymap = Keymap::live12();
+    let session = [Context::Session, Context::Global];
+    for (shortcut, command, key, all_tracks) in [
+        ("S-EDIT-001", "session.cut", Key::X, false),
+        ("S-EDIT-002", "session.copy", Key::C, false),
+        ("S-EDIT-003", "session.paste", Key::V, false),
+        ("S-EDIT-004", "session.duplicate", Key::D, false),
+        ("S-SES-029", "session.cut", Key::X, true),
+        ("S-SES-030", "session.copy", Key::C, true),
+        ("S-SES-031", "session.paste", Key::V, true),
+        ("S-SES-032", "session.duplicate", Key::D, true),
+    ] {
+        let entry = keymap.entry_for(shortcut).unwrap();
+        assert_eq!(entry.status, Status::Bound, "{shortcut}");
+        for (platform, held) in [
+            (Platform::Mac, mods(true, false, false, all_tracks)),
+            (Platform::Other, mods(false, true, false, all_tracks)),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, held, &session)
+                .unwrap_or_else(|| panic!("{shortcut} on {platform:?}"));
+            assert_eq!(hit.command.id, command, "{shortcut} on {platform:?}");
+            assert_eq!(hit.context, Context::Session, "{shortcut}");
+            assert_eq!(
+                hit.command.args.get("all_tracks").and_then(|v| v.as_bool()),
+                all_tracks.then_some(true),
+                "{shortcut}"
+            );
+        }
+    }
+    match &keymap.entry_for("S-EDIT-014").unwrap().status {
+        Status::Widget(handler) => {
+            for command in [
+                "session.cut",
+                "session.copy",
+                "session.paste",
+                "session.duplicate",
+            ] {
+                assert!(handler.contains(command), "{handler}");
+            }
+        }
+        other => panic!("S-EDIT-014 is {other:?}"),
+    }
 }

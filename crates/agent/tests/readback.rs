@@ -443,6 +443,11 @@ fn fixture() -> Project {
     device.external = Some(External {
         port: Some("Synth".to_owned()),
         channel: 5,
+        mpe: Some(bl_model::MpeSettings {
+            zone: bl_model::MpeZone::Upper,
+            channels: 7,
+            ..bl_model::MpeSettings::default()
+        }),
         audio_from: Channel::Mono(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },
@@ -808,6 +813,14 @@ fn fixture() -> Project {
         Command::RenameScene {
             scene: scenes[0],
             name: "Verse".to_owned(),
+        },
+    );
+    // WP-6.30b: a colour on the scene, which a new one doesn't have.
+    apply(
+        &mut editor,
+        Command::SetSceneColour {
+            scenes: vec![scenes[0]],
+            colour: Some(47),
         },
     );
     apply(
@@ -1523,6 +1536,82 @@ fn the_note_value_commands_run_by_id_and_read_back() {
     assert_eq!(after[0]["mute"], before[0]["mute"], "the others untouched");
 }
 
+// Spec: themes R25. The colour commands run by ID through the agent API, and
+// the query tool's track, clip and scene objects read the swatch back.
+#[test]
+fn the_colour_commands_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "colours");
+    let keys = query(
+        &mut client,
+        json!({ "path": "track \"Keys\"", "detail": "full" }),
+    );
+    let track = keys["id"].clone();
+    let clip = keys["saved"]["clips"]["items"][0]["id"].clone();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    let colour = |client: &mut Client<InProcess>, what: &Value| -> Value {
+        query(client, json!({ "id": what }))["colour"].clone()
+    };
+
+    run(
+        &mut client,
+        "track.set_colour",
+        json!({ "tracks": [track], "colour": 44 }),
+    );
+    assert_eq!(colour(&mut client, &track), 44);
+    run(
+        &mut client,
+        "clip.set_colour",
+        json!({ "clips": [clip], "colour": 7 }),
+    );
+    assert_eq!(colour(&mut client, &clip), 7);
+    // Assign Track Color to Clips gives the clip its track's colour back.
+    run(
+        &mut client,
+        "track.assign_colour_to_clips",
+        json!({ "tracks": [track] }),
+    );
+    assert_eq!(colour(&mut client, &clip), 44);
+
+    let scenes = query(&mut client, json!({ "path": "scene 1" }));
+    let scene = scenes["id"].clone();
+    assert!(
+        scenes["colour"].is_number(),
+        "the fixture's scene has one: {scenes}"
+    );
+    run(
+        &mut client,
+        "scene.set_colour",
+        json!({ "scenes": [scene], "colour": null }),
+    );
+    assert_eq!(colour(&mut client, &scene), Value::Null);
+    run(
+        &mut client,
+        "scene.set_colour",
+        json!({ "scenes": [scene], "colour": 69 }),
+    );
+    assert_eq!(colour(&mut client, &scene), 69);
+    // A swatch outside the palette is refused.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{
+                "command": "track.set_colour",
+                "args": { "tracks": [track], "colour": 70 }
+            }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err());
+}
+
 // Spec: note-editing R32. Group Notes and Ungroup Notes run by ID through the
 // agent API, and the query tool reads the clip's groups and each note's group
 // back.
@@ -1632,4 +1721,63 @@ fn the_multi_clip_commands_run_by_id_and_read_back() {
     );
     let state = run(&mut client, "clip_view.focus_mode", json!({ "on": true }));
     assert!(state.to_string().contains("\"focus_mode\":true"), "{state}");
+}
+
+// Spec: second-window R23. The copies between the Session and the
+// Arrangement run by ID through the agent API and read back through the
+// query tool's track: its Arrangement clips and its slots.
+#[test]
+fn the_copies_between_the_views_run_by_id_and_read_back() {
+    let mut client = open(&fixture(), "copies");
+    let full = |client: &mut Client<InProcess>| {
+        query(
+            client,
+            json!({ "path": "track \"Keys\"", "detail": "full", "limit": 100 }),
+        )
+    };
+    let track = full(&mut client)["id"].clone();
+    let before = full(&mut client)["saved"]["clips"]["total"]
+        .as_u64()
+        .unwrap();
+    let slot = query(&mut client, json!({ "path": "track \"Keys\" / slot 2" }));
+    let clip = slot["clip"]["id"].clone();
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": "Copies", "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"))
+    };
+    run(
+        &mut client,
+        "session.copy_to_arrangement",
+        json!({ "clips": [clip], "track": track, "at": 40 * BAR }),
+    );
+    let after = full(&mut client);
+    assert_eq!(
+        after["saved"]["clips"]["total"].as_u64().unwrap(),
+        before + 1
+    );
+    let copy = after["saved"]["clips"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["start"] == 40 * BAR)
+        .unwrap_or_else(|| panic!("{after}"))
+        .clone();
+    assert_eq!(copy["name"], "Loop");
+    let scene = query(&mut client, json!({ "path": "scene 3" }))["id"].clone();
+    run(
+        &mut client,
+        "session.copy_to_session",
+        json!({ "clips": [copy["id"]], "track": track, "scene": scene }),
+    );
+    let third = query(&mut client, json!({ "path": "track \"Keys\" / slot 3" }));
+    assert_eq!(third["clip"]["name"], "Loop");
+    // The Session clip it came from is where it was.
+    let again = query(&mut client, json!({ "path": "track \"Keys\" / slot 2" }));
+    assert_eq!(again["clip"]["id"], slot["clip"]["id"]);
 }

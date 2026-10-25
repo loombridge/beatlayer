@@ -28,6 +28,7 @@ use bl_shell_spec::comping::{self as comping_ids, MoveCompEdgeArgs};
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use bl_shell_spec::midi_tools as tool_ids;
+use bl_shell_spec::session_view as session_ids;
 use serde_json::Value;
 
 use crate::arrangement::ArrangementView;
@@ -55,6 +56,10 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     edit_ids::NUDGE,
     edit_ids::DUPLICATE,
     edit_ids::PASTE,
+    session_ids::PASTE,
+    session_ids::DUPLICATE,
+    session_ids::COPY_TO_ARRANGEMENT,
+    session_ids::COPY_TO_SESSION,
     browser_ids::ADD_TO_ARRANGEMENT,
     browser_ids::LOAD_SELECTED,
     midi_ids::IMPORT,
@@ -155,6 +160,8 @@ pub(crate) struct Scene<'a> {
     pub(crate) editor: &'a mut Editor,
     pub(crate) view: &'a ArrangementView,
     pub(crate) clipboard: &'a Option<Clipboard>,
+    /// The Session View's selection, which its clipboard commands act on.
+    pub(crate) session: &'a crate::session_view::SessionView,
     pub(crate) insert_marker: Ticks,
     pub(crate) selected_track: Option<TrackId>,
     /// The clip the shell's Clip View shows, which a call naming no clip
@@ -484,6 +491,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
         editor,
         view,
         clipboard,
+        session,
         ..
     } = scene;
     // The clips the call acts on: those it moves or resizes keep their
@@ -526,6 +534,20 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
     // The fades an edit settles change no clip's place, so the dry run skips them.
     let ran = if comping_ids::handles(id) {
         crate::arrangement::comping::run(id, args.clone(), editor, &mut view, false).is_ok()
+    } else if session_ids::handles(id) {
+        // Spec: second-window R23. A copy between the views, or a paste in
+        // the Session View, replaces the clips it lands on.
+        let mut session = session.clone();
+        crate::session_clips::run(
+            id,
+            args.clone(),
+            editor,
+            &mut session,
+            &mut view,
+            &mut clipboard,
+            false,
+        )
+        .is_ok()
     } else {
         editing::run(id, args.clone(), editor, &mut view, &mut clipboard, false).is_ok()
     };

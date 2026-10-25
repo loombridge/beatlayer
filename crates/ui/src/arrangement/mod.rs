@@ -36,11 +36,12 @@ use bl_model::{ClipId, Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{DROP_AREA, FOLDED_HEIGHT, Row, rows_between};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
+use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::locator_commands as locator_ids;
 use bl_shell::{GesturePhase, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{
-    Align2, Color32, CursorIcon, EventFilter, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
+    Align2, CursorIcon, EventFilter, Id, Key, Pos2, Rect, Sense, Stroke, StrokeKind, Ui,
     WidgetInfo, WidgetType, pos2,
 };
 use serde_json::{Value, json};
@@ -639,7 +640,7 @@ impl ArrangementUi {
                 None => self.menus.open(&clip_lanes, pos, events),
             }
         }
-        lanes_response.context_menu(|ui| self.menus.show(ui, shell, events));
+        lanes_response.context_menu(|ui| self.menus.show(ui, theme, shell, events));
         // S-CTX-002: the keys open the same menu, for the selected clips or
         // at the insert marker (the accessibility spec, R8).
         if ui.ctx().memory(|m| m.has_focus(main_view_id()))
@@ -669,7 +670,7 @@ impl ArrangementUi {
             crate::menus::open_keyboard_context_menu(ui.ctx(), lanes_id(), at);
         }
         crate::menus::keyboard_context_menu(&lanes_response, |ui| {
-            self.menus.show(ui, shell, events);
+            self.menus.show(ui, theme, shell, events);
         });
         self.draw_overlays(ui, view, doc, theme, &layout, horizontal);
         {
@@ -787,6 +788,41 @@ impl ArrangementUi {
         }
     }
 
+    /// Puts a move of clips back where it began, as Esc does, so the clips
+    /// can be carried to the Session View instead (second-window R18, R19).
+    pub fn abandon_drag(&mut self, ctx: &egui::Context, events: &mut Vec<UiEvent>) {
+        if self.drag == Some(Drag::Clips) && self.clips.moving().is_some() {
+            crate::browser::end_clip_drag(ctx);
+            self.clips.cancel(events);
+            self.drag = None;
+        }
+    }
+
+    /// The place in the lanes under `pos` that Session clips dropped there
+    /// start at (second-window R20): the track under the pointer, and the
+    /// position snapped as dragging Arrangement clips snaps it, which the
+    /// bypass key (`modifiers`) turns round (I-DRAG-021).
+    #[must_use]
+    pub fn drop_spot(
+        &self,
+        shell: &Shell,
+        pos: Pos2,
+        modifiers: egui::Modifiers,
+    ) -> Option<DropSpot> {
+        let lanes = self.lanes.filter(|lanes| lanes.contains(pos))?;
+        let (view, doc) = (shell.arrangement(), shell.editor().document());
+        let row = self.row_at(lanes, view.scroll_y() as f32, pos)?;
+        let track = self.rows[row].track;
+        if !bl_shell::arrangement::editing::lanes(doc).contains(&track) {
+            return None;
+        }
+        let at = view.horizontal(doc).at(f64::from(pos.x - lanes.left()));
+        Some(DropSpot::Arrangement {
+            track,
+            at: view.snap_drag(doc, at, EditKeys::from(modifiers).bypass),
+        })
+    }
+
     /// The row under a point in the lanes, if any.
     fn row_at(&self, lanes: Rect, scroll_y: f32, pos: Pos2) -> Option<usize> {
         let y = pos.y - lanes.top() + scroll_y;
@@ -855,8 +891,13 @@ impl ArrangementUi {
             } else if self.clips.begin(&clip_lanes, press, keys, events) {
                 // WP-1.8b: a clip's title bar or edge. Spec: clip files R3. A
                 // clip moved by its title bar can be dropped on the browser.
-                if self.clips.moving().is_some() {
+                if let Some(clips) = self.clips.moving_clips() {
                     crate::browser::begin_clip_drag(ui.ctx());
+                    // Spec: second-window R18, R19. The clips can be carried
+                    // to the Session View.
+                    events.push(UiEvent::ClipDrag(ClipDragEvent::Begin(
+                        DragSource::Arrangement(clips.to_vec()),
+                    )));
                 }
                 Drag::Clips
             } else if keys.extend {
@@ -1491,7 +1532,7 @@ impl ArrangementUi {
             }
             // The menu must be drawn every frame it is open, not only the
             // frame it opened.
-            response.context_menu(|ui| self.menus.show(ui, shell, events));
+            response.context_menu(|ui| self.menus.show(ui, theme, shell, events));
             let name = locator.name.clone();
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &name));
             ui.ctx().accesskit_node_builder(id, |node| {
@@ -1642,7 +1683,7 @@ impl ArrangementUi {
             self.menus.open_scrub(None, at);
         }
         if !on_locator {
-            scrub.context_menu(|ui| self.menus.show(ui, shell, events));
+            scrub.context_menu(|ui| self.menus.show(ui, theme, shell, events));
         }
         // The loop brace's menu (C-TIME-023).
         let brace = brace_rect(layout.beat_ruler, horizontal, &view.transport());
@@ -1650,7 +1691,7 @@ impl ArrangementUi {
         if brace.secondary_clicked() {
             self.menus.open_brace();
         }
-        brace.context_menu(|ui| self.menus.show(ui, shell, events));
+        brace.context_menu(|ui| self.menus.show(ui, theme, shell, events));
         scrub.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, "Scrub Area"));
         ui.ctx().accesskit_node_builder(scrub.id, |node| {
             node.set_role(Role::Group);
@@ -1781,7 +1822,7 @@ impl ArrangementUi {
                         pos2(column.right(), top + row.height),
                     ),
                     activator: (visible.start + index + 1).to_string(),
-                    colour: scene::track_colour(theme, row.track),
+                    colour: scene::track_colour(theme, doc, row.track),
                     folded: row.folded,
                     selected: is_selected,
                     title_selected: is_selected && title_bars,
@@ -1828,7 +1869,7 @@ impl ArrangementUi {
                             pos2(column.left(), top),
                             pos2(column.right(), top + lane.height),
                         ),
-                        colour: scene::track_colour(theme, row.track),
+                        colour: scene::track_colour(theme, doc, row.track),
                         selected: view.is_take_lane_selected(lane.lane),
                         auditioned: doc
                             .track(row.track)
@@ -1908,7 +1949,7 @@ impl ArrangementUi {
                                 as u8,
                         )
                         .to_string(),
-                        colour: scene::track_colour(theme, *id),
+                        colour: scene::track_colour(theme, doc, *id),
                         folded: true,
                         selected: is_selected,
                         title_selected: is_selected && title_bars,
@@ -1958,7 +1999,7 @@ impl ArrangementUi {
                     colour: if track.kind() == TrackKind::Main {
                         theme.colors.control_pressed.0
                     } else {
-                        scene::track_colour(theme, *id)
+                        scene::track_colour(theme, doc, *id)
                     },
                     folded: true,
                     selected: is_selected,
@@ -2722,12 +2763,6 @@ fn ruler_drag(events: &mut Vec<UiEvent>, delta: egui::Vec2, anchor: Ticks, scale
             json!({ "x": f64::from(delta.x) * scale }),
         );
     }
-}
-
-/// Colour of a track, re-exported for the headers and the benchmark.
-#[must_use]
-pub fn colour_of(theme: &Theme, track: TrackId) -> Color32 {
-    scene::track_colour(theme, track)
 }
 
 /// The lanes a drag across the rows passed through: each row's own lane,

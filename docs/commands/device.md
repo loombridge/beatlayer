@@ -1142,7 +1142,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Set External Device**. Permission: `edit`. Contexts: `device-view`.
 
-Sets the routing of a device that works with hardware outside the computer (the External Instrument and the External Audio Effect), as the choosers in its title bar do; give only the settings to change. `midi_to` is `{ "type": "none" }` (No Output, a new device's) or `{ "type": "port", "name": ... }` with a MIDI output port's name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device); `audio_from` is the audio interface's inputs the hardware's sound comes back on, a channel or a pair (`{ "type": "pair", "channel": 1 }`, the first pair on a new device); `audio_to` is the audio interface's outputs an External Audio Effect sends its signal to, a channel or a pair (the first pair on a new device); `hardware_latency` is the delay the hardware adds that the computer can't detect, in the unit the unit switch is on: `{ "unit": "milliseconds", "value": 12.5 }` (0 to 1000, kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 600 }` (0 to 192000, kept in samples); to switch the unit, send the converted value. Each change recompiles the song's audio, so these are settings, not parameters. Read them back in the query tool's `device` result, under `external`.
+Sets the routing of a device that works with hardware outside the computer (the External Instrument and the External Audio Effect), as the choosers in its title bar do; give only the settings to change. `midi_to` is `{ "type": "none" }` (No Output, a new device's) or `{ "type": "port", "name": ... }` with a MIDI output port's name as `midi.ports` lists it, with its Track switch on; `channel` is the MIDI channel to send on, 1 to 16 (1 on a new device), which takes MPE's place; `mpe` sends MPE MIDI in place of one channel, with the MPE/Multi-channel Settings it gives (`{}` for the new ones: the lower zone with 15 note channels), the notes on the zone's member channels and the rest on its master; `audio_from` is the audio interface's inputs the hardware's sound comes back on, a channel or a pair (`{ "type": "pair", "channel": 1 }`, the first pair on a new device); `audio_to` is the audio interface's outputs an External Audio Effect sends its signal to, a channel or a pair (the first pair on a new device); `hardware_latency` is the delay the hardware adds that the computer can't detect, in the unit the unit switch is on: `{ "unit": "milliseconds", "value": 12.5 }` (0 to 1000, kept in milliseconds when the sample rate changes) or `{ "unit": "samples", "value": 600 }` (0 to 192000, kept in samples); to switch the unit, send the converted value. Each change recompiles the song's audio, so these are settings, not parameters. Read them back in the query tool's `device` result, under `external`.
 
 Default keys: none.
 
@@ -1156,6 +1156,7 @@ Arguments:
 | `channel` | integer or null | no | The MIDI channel, 1 to 16. |
 | `hardware_latency` | [`HardwareLatency`](README.md#hardwarelatency) or null | no | Hardware Latency with its unit: the unit switch is the unit given, so switching the unit sends the converted value. |
 | `midi_to` | [`ExternalPort`](README.md#externalport) or null | no | MIDI To: `none` for No Output, or `port` with the MIDI output port's name. |
+| `mpe` | [`MpeSettings`](README.md#mpesettings) or null | no | MPE, chosen in place of a channel, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19). Giving a `channel` instead sends on that channel again. |
 
 Result: [`ChangeSet`](README.md#changeset).
 
@@ -1520,6 +1521,7 @@ Arguments:
 | `params` | array of pair of [`ParamId`](README.md#paramid) and number | yes | The parameter values, as `[parameter, value]` pairs, each finite and each parameter once. |
 | `name` | string | yes | The name the title bar shows while Show Preset Name is on, such as the preset's; empty for the device's own name. |
 | `articulations` | array or null | no | An Articulation Map's articulations (the articulation map spec, R16), which a preset of one holds; `null` to keep the ones the device has. |
+| `mpe` | [`PluginMpe`](README.md#pluginmpe) or null | no | A plug-in's MPE Mode and settings (the MPE spec, R14), which a preset of one holds; `null` to keep the ones the device has. |
 | `shape` | array or null | no | A Shaper's breakpoint shape (the modulation spec, R23), which a preset of one holds; `null` for the default shape. |
 
 Result: [`ChangeSet`](README.md#changeset).

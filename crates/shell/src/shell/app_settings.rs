@@ -38,9 +38,9 @@ use crate::commands::SwitchResult;
 use crate::commands::TemporaryFolderArgs;
 use crate::commands::TemporaryFolderResult;
 use crate::commands::ThemeArgs;
-use crate::commands::ToneArgs;
 use crate::commands::UserLibraryArgs;
 use crate::commands::UserLibraryResult;
+use crate::commands::{ClipColourArgs, SwatchArgs, ToneArgs};
 use crate::settings::OnByDefault;
 use bl_commands::NoArgs;
 use serde_json::Value;
@@ -383,6 +383,36 @@ impl Shell {
             ids::SETTINGS_SET_COLOR_HUE => {
                 let HueArgs { degrees } = Self::args(id, args)?;
                 self.prefs.look.color_hue = degrees.clamp(-180, 180);
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_AUTO_ASSIGN_TRACK_COLOURS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.look.auto_assign_track_colours = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_DEFAULT_TRACK_COLOUR => {
+                let SwatchArgs { colour } = Self::args(id, args)?;
+                if colour >= bl_model::SWATCHES {
+                    return Err(ShellError::InvalidArgs {
+                        command: id.to_owned(),
+                        message: format!("swatch {colour} isn't in the palette, which has 0 to 69"),
+                    });
+                }
+                self.prefs.look.default_track_colour = colour;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_REDUCED_AUTOMATIC_COLOURS => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.look.reduced_automatic_colours = on;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_CLIP_COLOUR => {
+                let ClipColourArgs { clip_colour } = Self::args(id, args)?;
+                self.prefs.look.clip_colour = clip_colour;
                 self.save_preferences();
                 Ok(Value::Null)
             }

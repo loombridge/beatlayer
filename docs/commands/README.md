@@ -4532,7 +4532,7 @@ One of:
 
 ### `ChangeSet`
 
-What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.
+What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, whether a colour changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -4542,12 +4542,13 @@ What a command changed: whether the song settings (the tempo map, the time-signa
 | `scenes` | object of [`Change`](#change) by integer key | yes | Scenes that were added, removed, renamed, or moved. A scene whose clips changed only is listed under `clips`, not here. |
 | `clips` | object of [`Change`](#change) by integer key | yes | Clips that changed, including clips moved to another track or between the Arrangement and a Session slot. |
 | `devices` | object of [`Change`](#change) by integer key | yes | Devices whose settings changed, including devices moved to another track. |
+| `colours` | boolean | no | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.",
+  "description": "What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, whether a colour changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.",
   "properties": {
     "clips": {
       "additionalProperties": false,
@@ -4558,6 +4559,10 @@ What a command changed: whether the song settings (the tempo map, the time-signa
         }
       },
       "type": "object"
+    },
+    "colours": {
+      "description": "The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
+      "type": "boolean"
     },
     "devices": {
       "additionalProperties": false,
@@ -4867,6 +4872,7 @@ A clip on a track's arrangement lane.
 | `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
+| `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
@@ -4879,6 +4885,16 @@ A clip on a track's arrangement lane.
 {
   "description": "A clip on a track's arrangement lane.",
   "properties": {
+    "colour": {
+      "description": "The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "data": {
       "$ref": "#/$defs/ClipData",
       "description": "What the clip plays."
@@ -4943,6 +4959,37 @@ A clip on a track's arrangement lane.
     "data"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ClipColour`
+
+What Clip Color gives a new clip (themes R23).
+
+One of:
+
+- `"track-color"`: The clip takes its track's colour, as it does in Live.
+- `"random"`: The clip takes swatch `h mod 70`, `h` being a hash of its ID.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Color gives a new clip (themes R23).",
+  "oneOf": [
+    {
+      "const": "track-color",
+      "description": "The clip takes its track's colour, as it does in Live.",
+      "type": "string"
+    },
+    {
+      "const": "random",
+      "description": "The clip takes swatch `h mod 70`, `h` being a hash of its ID.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -5184,6 +5231,53 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
   "required": [
     "target",
     "envelope"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClipEnvelopeResult`
+
+What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -5644,6 +5738,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `mpe` | [`MpeTabState`](#mpetabstate) | yes | The MPE tab's lanes, grid and selected breakpoints (WP-6.18). |
 | `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
+| `envelope_segment` | [`Ticks`](#ticks) or null | no | The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it. |
+| `envelope_selection` | [`TimeRange`](#timerange) or null | no | The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it. |
 | `follow_paused` | boolean | no | Whether the note area has stopped following playback until the song starts or stops (Spec: piano-roll R35). |
 | `rows` | array or null | no | The key rows the note area shows, as the row at its top edge and the row at its bottom edge, counting down from the top of the keyboard (row 0 is key 127; while the editor is folded, row 0 is its highest key). `null` shows the rows the editor lays out by default. |
 | `span` | array or null | no | The span of the clip's contents the note area shows, in ticks from the beginning of the contents (Spec: piano-roll R32, R42); the clip's whole span until `clip_view.note_view` zooms or scrolls. `null` when no MIDI clip is shown. |
@@ -5715,6 +5811,28 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "envelope_segment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it."
+    },
+    "envelope_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it."
     },
     "filters": {
       "$ref": "#/$defs/NoteFilters",
@@ -6820,6 +6938,42 @@ What `device.convert` returns.
 
 </details>
 
+### `CopiedClips`
+
+What copying clips between the views did.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `skipped` | integer, at least 0 | yes | How many clips weren't placed, because they would land on a track of another kind or past the last track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What copying clips between the views did.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "skipped": {
+      "description": "How many clips weren't placed, because they would land on a track of another kind or past the last track.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "changes",
+    "skipped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CountArgs`
 
 The Count filter's controls in `clip_view.note_filters`.
@@ -7278,6 +7432,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
 | `media` | array of [`ContentHash`](#contenthash) or null | no | The media the device plays, by content hash, one entry per sample slot (WP-2.16, WP-5.17): the sampler's sample is slot 0, the eight-slot drum sampler's slots are 0 to 7. The media store holds each like a clip's audio (the sampler spec, R11). A slot with no sample is `None`, and the list never ends in one. Left out of the saved set for a device that plays none; a set saved before slots existed holds one hash, which loads as slot 0. |
 | `midi_sidechain` | [`MidiSidechain`](#midisidechain) or null | no | The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one. |
+| `mpe` | [`PluginMpe`](#pluginmpe) | no | A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it. |
 | `other_params` | array or null | no | The values of the state that isn't active, in the same form as [`params`](Self::params) (device compare R1, R10). `None` while the two states are equal, as a new device's are, and left out of the saved set then. Use [`other_params`](Self::other_params) to read it. |
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
@@ -7390,6 +7545,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         }
       ],
       "description": "The device's MIDI sidechain input, if its type declares one (the routing spec, R32): a MIDI track whose notes and channel messages the device hears beside its audio. Left out of the saved set for a device without one."
+    },
+    "mpe": {
+      "$ref": "#/$defs/PluginMpe",
+      "description": "A plug-in's MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). Off in a new device, and left out of the saved set until changed. Native devices never set it."
     },
     "name": {
       "description": "The name the title bar shows while Show Preset Name is on: the device's own name until a preset or Rename gives it another.",
@@ -7730,6 +7889,7 @@ One device as the Device View shows it.
 | `external` | [`ExternalSection`](#externalsection) or null | no | Its routing to hardware, if it is an external device (WP-5.34). |
 | `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
+| `mpe` | [`PluginMpe`](#pluginmpe) or null | no | A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which its title bar menu's MPE Mode and MPE Settings… edit; left out for a device that isn't a plug-in. |
 | `multisampler` | [`MultisamplerState`](#multisamplerstate) or null | no | A multisampler's views and selected layers (WP-5.13, R30); left out for any other device. |
 | `panel` | [`DevicePanel`](#devicepanel) or null | no | Its parameters and layout, for the generic UI; left out for a device whose type doesn't describe them. |
 | `rack` | [`RackFrame`](#rackframe) or null | no | A rack's frame: its views, its chain list and the selected chain's devices (WP-5.2). None for a device that isn't a rack. |
@@ -7824,6 +7984,17 @@ One device as the Device View shows it.
         }
       ],
       "description": "For a modulator, what it maps and which Map button is armed (WP-5.10)."
+    },
+    "mpe": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PluginMpe"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which its title bar menu's MPE Mode and MPE Settings… edit; left out for a device that isn't a plug-in."
     },
     "multisampler": {
       "anyOf": [
@@ -9650,6 +9821,7 @@ What an edit did, and what's selected afterwards.
 | `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected afterwards, if any. |
 | `selected_tracks` | array of [`TrackId`](#trackid) | yes | The tracks selected afterwards. |
 | `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+| `skipped` | integer, at least 0 | no | How many copied Session clips a paste didn't place, because they would land on a track of the other kind or past the last track (the second window spec, R20). |
 
 <details><summary>JSON Schema</summary>
 
@@ -9691,6 +9863,12 @@ What an edit did, and what's selected afterwards.
         "$ref": "#/$defs/TrackId"
       },
       "type": "array"
+    },
+    "skipped": {
+      "description": "How many copied Session clips a paste didn't place, because they would land on a track of the other kind or past the last track (the second window spec, R20).",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
     },
     "time_selection": {
       "anyOf": [
@@ -10555,7 +10733,7 @@ One of:
 
 ### `External`
 
-An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
+An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `mpe` (the MPE/Multi-channel Settings when MPE is chosen in place of a channel), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -10563,13 +10741,14 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
 | `audio_to` | [`Channel`](#channel) or null | no | Audio To: the interface's outputs an external effect sends its signal to, the first pair on a new effect. `None` for an external instrument: it sends notes, not audio. |
 | `channel` | integer from 0 to 255 | no | The MIDI channel, 1 to 16: 1 on a new device. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | no | Hardware Latency: 0 ms on a new device. |
+| `mpe` | [`MpeSettings`](#mpesettings) or null | no | MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19). `None` sends on `channel`. |
 | `port` | string or null | no | MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.",
+  "description": "An external device's routing: `port` (MIDI To, the MIDI output port's name as the MIDI settings list it; absent for No Output), `channel` (the MIDI channel, 1 to 16), `mpe` (the MPE/Multi-channel Settings when MPE is chosen in place of a channel), `audio_from` (the audio interface's inputs it comes back on, a channel or a pair), and `hardware_latency`.",
   "properties": {
     "audio_from": {
       "$ref": "#/$defs/Channel",
@@ -10596,6 +10775,17 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
     "hardware_latency": {
       "$ref": "#/$defs/HardwareLatency",
       "description": "Hardware Latency: 0 ms on a new device."
+    },
+    "mpe": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MpeSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19). `None` sends on `channel`."
     },
     "port": {
       "description": "MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away.",
@@ -13406,6 +13596,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `collections` | array of integer from 0 to 255 | no | The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40). |
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
@@ -13426,6 +13617,16 @@ One row of the content pane.
         }
       ],
       "description": "For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6)."
+    },
+    "collections": {
+      "description": "The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "depth": {
       "description": "How deep it's indented: 0 at the top of the list.",
@@ -14094,7 +14295,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
 
 One of:
 
@@ -14115,12 +14316,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
+- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -14221,6 +14423,22 @@ One of:
       },
       "required": [
         "saved"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "properties": {
+        "collection": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection"
       ],
       "type": "object"
     }
@@ -16927,12 +17145,12 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
 
 ### `MidiTo`
 
-Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ "name": "Synth", "channel": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16.
+Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ "name": "Synth", "channel": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16; with `mpe` (the MPE/Multi-channel Settings, `{}` for the new ones) the track sends MPE MIDI in place of one channel.
 
 One of:
 
 - [`TrackId`](#trackid): Another MIDI track's Track In.
-- an object with `name` (string), `channel` (integer from 0 to 255): A MIDI output port, by the name the MIDI system gives it, and the channel everything is sent on. The track keeps the name while the port is away and sends again when a port of that name returns.
+- an object with `name` (string), `channel` (integer from 0 to 255), `mpe` ([`MpeSettings`](#mpesettings) or null): A MIDI output port, by the name the MIDI system gives it, and the channel everything is sent on. The track keeps the name while the port is away and sends again when a port of that name returns.
 
 <details><summary>JSON Schema</summary>
 
@@ -16953,6 +17171,17 @@ One of:
           "minimum": 0,
           "type": "integer"
         },
+        "mpe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MpeSettings"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19); `None` sends on `channel`."
+        },
         "name": {
           "description": "The port's name, as the MIDI settings list it.",
           "type": "string"
@@ -16965,7 +17194,7 @@ One of:
       "type": "object"
     }
   ],
-  "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16."
+  "description": "Where a MIDI track's MIDI goes: another MIDI track (its ID), or an output port, `{ \"name\": \"Synth\", \"channel\": 1 }`: the MIDI output port's name as the MIDI settings list it, and the channel to send on, 1 to 16; with `mpe` (the MPE/Multi-channel Settings, `{}` for the new ones) the track sends MPE MIDI in place of one channel."
 }
 ```
 
@@ -17851,6 +18080,156 @@ A lane drawn in the MPE tab.
 
 </details>
 
+### `MpeMode`
+
+Whether the notes go out in a zone, or on a range of channels.
+
+One of:
+
+- `"zone"`: One zone of master and note channels.
+- `"multi_channel"`: Multi-channel mode: notes on the channels of a range, with no master.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether the notes go out in a zone, or on a range of channels.",
+  "oneOf": [
+    {
+      "const": "zone",
+      "description": "One zone of master and note channels.",
+      "type": "string"
+    },
+    {
+      "const": "multi_channel",
+      "description": "Multi-channel mode: notes on the channels of a range, with no master.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `MpeSettings`
+
+MPE/Multi-channel Settings: `mode` (`zone` or `multi_channel`), `zone` (`lower` with master channel 1, or `upper` with 16) and `channels` (its note channels, 1 to 15) for a zone; `first` and `last` (1 to 16) for multi-channel mode. Anything left out takes the new settings' value: the lower zone with 15 note channels.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `channels` | integer from 0 to 255 | no | The zone's number of note channels, 1 to 15. |
+| `first` | integer from 0 to 255 | no | Multi-channel mode's first channel, 1 to 16. |
+| `last` | integer from 0 to 255 | no | Its last channel, 1 to 16, not below the first. |
+| `mode` | [`MpeMode`](#mpemode) | no | Zone or multi-channel mode. |
+| `zone` | [`MpeZone`](#mpezone) | no | The zone, in zone mode. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "MPE/Multi-channel Settings: `mode` (`zone` or `multi_channel`), `zone` (`lower` with master channel 1, or `upper` with 16) and `channels` (its note channels, 1 to 15) for a zone; `first` and `last` (1 to 16) for multi-channel mode. Anything left out takes the new settings' value: the lower zone with 15 note channels.",
+  "properties": {
+    "channels": {
+      "description": "The zone's number of note channels, 1 to 15.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "first": {
+      "description": "Multi-channel mode's first channel, 1 to 16.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "last": {
+      "description": "Its last channel, 1 to 16, not below the first.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mode": {
+      "$ref": "#/$defs/MpeMode",
+      "description": "Zone or multi-channel mode."
+    },
+    "zone": {
+      "$ref": "#/$defs/MpeZone",
+      "description": "The zone, in zone mode."
+    }
+  },
+  "type": "object"
+}
+```
+
+</details>
+
+### `MpeSettingsDialog`
+
+What `plugin.show_mpe_settings` returns: whether the dialog is open and what it edits.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the dialog is open. |
+| `device` | [`DeviceId`](#deviceid) or null | no | The plug-in or External Instrument device it edits, if it edits one. |
+| `settings` | [`MpeSettings`](#mpesettings) or null | no | The settings it shows, while it is open. |
+| `track` | [`TrackId`](#trackid) or null | no | The track whose MIDI To it edits, if it edits one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `plugin.show_mpe_settings` returns: whether the dialog is open and what it edits.",
+  "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The plug-in or External Instrument device it edits, if it edits one."
+    },
+    "open": {
+      "description": "Whether the dialog is open.",
+      "type": "boolean"
+    },
+    "settings": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/MpeSettings"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The settings it shows, while it is open."
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track whose MIDI To it edits, if it edits one."
+    }
+  },
+  "required": [
+    "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MpeTabState`
 
 The MPE tab's selection and lanes, as `view.state` reports them (Spec: mpe R23, R25).
@@ -17919,6 +18298,37 @@ The MPE tab's selection and lanes, as `view.state` reports them (Spec: mpe R23, 
     "breakpoints"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `MpeZone`
+
+Which end of the channels a zone's master channel is on.
+
+One of:
+
+- `"lower"`: Master channel 1, note channels 2 and up.
+- `"upper"`: Master channel 16, note channels 15 and down.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which end of the channels a zone's master channel is on.",
+  "oneOf": [
+    {
+      "const": "lower",
+      "description": "Master channel 1, note channels 2 and up.",
+      "type": "string"
+    },
+    {
+      "const": "upper",
+      "description": "Master channel 16, note channels 15 and down.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -20241,6 +20651,7 @@ What `plugin.info` and `plugin.show_window` return.
 | `window_open` | boolean | yes | Whether its window is open. |
 | `window_shown` | boolean | yes | Whether its window is shown: open, and not hidden by View ▸ Plug-In Windows or Auto-Hide Plug-In Windows. Hiding is not closing: a hidden window is still open. |
 | `values` | array of pair of [`ParamId`](#paramid) and number | yes | Each parameter's value, as the plug-in itself reports it, as `[parameter, value]` pairs. |
+| `mpe` | [`PluginMpe`](#pluginmpe) | yes | Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18). |
 | `ara` | [`AraDevice`](#aradevice) or null | no | What the device is as an ARA plug-in, if it is one: the track it renders (`null` while it renders none) and how many playback regions its document holds. |
 | `failure` | string or null | no | What went wrong, if anything: it couldn't be found or loaded, refused to activate (the device passes its input through), or failed while processing (the device is silent). |
 | `window` | [`WindowFrame`](#windowframe) or null | no | Where its window sits and how big it is, once it has been placed (`plugin.set_window`); `null` until then. Saved with the set beside the document, so moving or resizing is never an undo step (WP-2.10; as [`FloatingWindow`](crate::devices::FloatingWindow)). |
@@ -20286,6 +20697,13 @@ What `plugin.info` and `plugin.show_window` return.
       "format": "uint32",
       "minimum": 0,
       "type": "integer"
+    },
+    "mpe": {
+      "$ref": "#/$defs/PluginMpe",
+      "default": {
+        "on": false
+      },
+      "description": "Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes out on (the MPE spec, R14, R18)."
     },
     "path": {
       "description": "The file it was loaded from.",
@@ -20342,7 +20760,8 @@ What `plugin.info` and `plugin.show_window` return.
     "has_window",
     "window_open",
     "window_shown",
-    "values"
+    "values",
+    "mpe"
   ],
   "type": "object"
 }
@@ -20429,6 +20848,40 @@ What `plugin.load` returns.
     "new_track",
     "plugin",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PluginMpe`
+
+A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the MPE/Multi-channel Settings; left out while they are the new settings').
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | MPE Mode. |
+| `settings` | [`MpeSettings`](#mpesettings) | no | The settings MPE MIDI goes out on, left out while they are the new settings'. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the MPE/Multi-channel Settings; left out while they are the new settings').",
+  "properties": {
+    "on": {
+      "description": "MPE Mode.",
+      "type": "boolean"
+    },
+    "settings": {
+      "$ref": "#/$defs/MpeSettings",
+      "description": "The settings MPE MIDI goes out on, left out while they are the new settings'."
+    }
+  },
+  "required": [
+    "on"
   ],
   "type": "object"
 }
@@ -24326,7 +24779,7 @@ A sidebar section.
 
 One of:
 
-- `"collections"`: Collections (M6).
+- `"collections"`: The seven collections (spec: browser-tags R34).
 - `"library"`: The Library labels.
 - `"places"`: Places: folders on disk.
 
@@ -24338,7 +24791,7 @@ One of:
   "oneOf": [
     {
       "const": "collections",
-      "description": "Collections (M6).",
+      "description": "The seven collections (spec: browser-tags R34).",
       "type": "string"
     },
     {
@@ -24528,6 +24981,44 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SessionClipboardState`
+
+What `session.copy` and `session.cut` put on the clipboard.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clips` | integer, at least 0 | yes | How many slot clips it holds. |
+| `scenes` | integer, at least 0 | yes | How many scenes it holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.copy` and `session.cut` put on the clipboard.",
+  "properties": {
+    "clips": {
+      "description": "How many slot clips it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes": {
+      "description": "How many scenes it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "clips",
+    "scenes"
+  ],
+  "type": "object"
 }
 ```
 
@@ -27117,6 +27608,10 @@ Theme & Colors in `settings.state` (themes R12).
 | `brightness` | integer from -32768 to 32767 | yes | Brightness. |
 | `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
 | `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `auto_assign_track_colours` | boolean | yes | Auto-Assign Track Colors (themes R23). |
+| `default_track_colour` | integer from 0 to 255 | yes | Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off. |
+| `reduced_automatic_colours` | boolean | yes | Reduced Automatic Colors. |
+| `clip_colour` | [`ClipColour`](#clipcolour) | yes | Clip Color. |
 | `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
 | `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
 | `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
@@ -27131,6 +27626,11 @@ Theme & Colors in `settings.state` (themes R12).
       "$ref": "#/$defs/Appearance",
       "description": "The Appearance chosen."
     },
+    "auto_assign_track_colours": {
+      "default": true,
+      "description": "Auto-Assign Track Colors (themes R23).",
+      "type": "boolean"
+    },
     "brightness": {
       "default": 0,
       "description": "Brightness.",
@@ -27138,6 +27638,11 @@ Theme & Colors in `settings.state` (themes R12).
       "maximum": 32767,
       "minimum": -32768,
       "type": "integer"
+    },
+    "clip_colour": {
+      "$ref": "#/$defs/ClipColour",
+      "default": "track-color",
+      "description": "Clip Color."
     },
     "color_hue": {
       "default": 0,
@@ -27155,6 +27660,14 @@ Theme & Colors in `settings.state` (themes R12).
       "minimum": -32768,
       "type": "integer"
     },
+    "default_track_colour": {
+      "default": 12,
+      "description": "Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
     "drawn_appearance": {
       "$ref": "#/$defs/Appearance",
       "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
@@ -27170,6 +27683,11 @@ Theme & Colors in `settings.state` (themes R12).
     "high_contrast": {
       "default": false,
       "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "reduced_automatic_colours": {
+      "default": false,
+      "description": "Reduced Automatic Colors.",
       "type": "boolean"
     },
     "theme": {
@@ -27198,6 +27716,10 @@ Theme & Colors in `settings.state` (themes R12).
     "brightness",
     "color_intensity",
     "color_hue",
+    "auto_assign_track_colours",
+    "default_track_colour",
+    "reduced_automatic_colours",
+    "clip_colour",
     "appearance",
     "drawn_appearance",
     "themes"

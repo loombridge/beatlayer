@@ -1829,6 +1829,7 @@ fn activate(
             .unwrap_or(p.default);
         (p.clone(), modulatable.contains(&p.id.0), value)
     }));
+    let midi_notes = describe::midi_notes(&mut plugin);
     let max_frames = u32::try_from(config.max_frames.max(1)).unwrap_or(u32::MAX);
     let processor = instance
         .activate(
@@ -1838,6 +1839,7 @@ fn activate(
                 defaults,
                 params,
                 drive,
+                midi_notes,
             },
             PluginAudioConfiguration {
                 sample_rate: f64::from(config.sample_rate.hz()),

@@ -10,7 +10,9 @@
 
 use bl_commands::Context::{DeviceView, Global};
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::{DeviceId, DeviceRole, ParamId, PluginFormat, TrackId, WindowFrame};
+use bl_model::{
+    DeviceId, DeviceRole, MpeSettings, ParamId, PluginFormat, PluginMpe, TrackId, WindowFrame,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -40,6 +42,9 @@ pub const CONFIGURE_PARAM: &str = "plugin.configure_param";
 pub const UNCONFIGURE_PARAM: &str = "plugin.unconfigure_param";
 /// `plugin.move_configured_param`: reorders the configured list (WP-5.40).
 pub const MOVE_CONFIGURED_PARAM: &str = "plugin.move_configured_param";
+/// `plugin.show_mpe_settings`: opens or closes the MPE/Multi-channel
+/// Settings dialog (the MPE spec, R18).
+pub const SHOW_MPE_SETTINGS: &str = "plugin.show_mpe_settings";
 /// `plugin.scan`: find the plug-ins installed on this machine (WP-2.9).
 pub const SCAN: &str = "plugin.scan";
 /// `plugin.rescan`: scan again, ignoring the cache (WP-2.9).
@@ -69,6 +74,7 @@ pub const IDS: &[&str] = &[
     CONFIGURE_PARAM,
     UNCONFIGURE_PARAM,
     MOVE_CONFIGURED_PARAM,
+    SHOW_MPE_SETTINGS,
     SCAN,
     RESCAN,
     LIST,
@@ -208,6 +214,45 @@ pub struct PluginInfo {
     /// its document holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ara: Option<AraDevice>,
+    /// Its MPE Mode and the MPE/Multi-channel Settings its MPE MIDI goes
+    /// out on (the MPE spec, R14, R18).
+    #[serde(default)]
+    pub mpe: PluginMpe,
+}
+
+/// Arguments of `plugin.show_mpe_settings`: where the dialog is for. Give a
+/// `device` (a plug-in's, or an External Instrument's, whose MIDI To is set
+/// to MPE) or a `track` (a MIDI track whose MIDI To is a port set to MPE).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowMpeSettingsArgs {
+    /// The plug-in or External Instrument device; the selected device if
+    /// neither this nor `track` is given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// A MIDI track, for its MIDI To.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// Open (true) or close (false) the dialog; opens if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
+/// What `plugin.show_mpe_settings` returns: whether the dialog is open and
+/// what it edits.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MpeSettingsDialog {
+    /// Whether the dialog is open.
+    pub open: bool,
+    /// The plug-in or External Instrument device it edits, if it edits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The track whose MIDI To it edits, if it edits one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The settings it shows, while it is open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub settings: Option<MpeSettings>,
 }
 
 /// An ARA plug-in device, as `plugin.info` reports it (IMP-20).
@@ -665,6 +710,22 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<PluginInfoArgs>()
             .result::<PluginInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SHOW_MPE_SETTINGS, "MPE Settings…")
+            .description(
+                "Opens or closes the MPE/Multi-channel Settings dialog, from a plug-in's title \
+                 bar menu, or from MIDI To once MPE is its channel: give a plug-in or External \
+                 Instrument `device`, or a MIDI `track` whose MIDI To is a port set to MPE. \
+                 Opens unless `shown` says which. The dialog's controls run \
+                 `plugin.set_mpe_settings`, `routing.set_midi_output` and \
+                 `device.set_external`. It changes only the view: it isn't an undo step. \
+                 Returns the dialog's state.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, DeviceView])
+            .args::<ShowMpeSettingsArgs>()
+            .result::<MpeSettingsDialog>(),
     )?;
     registry.register(
         CommandSpec::new(ARA_STATE, "ARA Plug-In State")

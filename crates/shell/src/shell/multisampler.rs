@@ -592,6 +592,7 @@ impl Shell {
         layers: Vec<Layer>,
     ) -> Result<(DeviceId, TrackId), ShellError> {
         let description = mosaic::multisampler_type().description;
+        let look = &self.prefs.look;
         let result = self.editor.transact(ids::IMPORT_SFZ_STEP, |editor| {
             let track = match track {
                 Some(track) => track,
@@ -605,6 +606,7 @@ impl Shell {
                         parent: None,
                         index: top,
                     })?;
+                    crate::colours::colour_new(editor, look, &[track], &[])?;
                     track
                 }
             };

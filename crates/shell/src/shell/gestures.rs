@@ -5,12 +5,14 @@ use super::{
     automation_label, clip_marker_command, edit_error, is_automation_edit, marker_label,
     sample_edit_command, to_value,
 };
+use crate::WindowKind;
 use crate::arrangement::ArrangementView;
 use crate::arrangement::automation;
 use crate::arrangement::automation::EnvelopeClipboard;
 use crate::arrangement::editing;
 use crate::arrangement::editing::Clipboard;
 use crate::arrangement::editing::EditFailure;
+use crate::clip_drag::{ClipDrag, ClipDragEvent};
 use crate::clip_view;
 use crate::clip_view::ClipView;
 use crate::devices::DeviceView;
@@ -22,6 +24,7 @@ use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
 use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -58,7 +61,10 @@ impl Shell {
     pub fn gesture_under_way(&self) -> bool {
         // The edit a selected breakpoint opens isn't one: it can last
         // minutes, and another command ends it (automation-editing R23).
-        self.edit_gesture.is_some() || (self.gesture && self.key_edit.is_none())
+        self.edit_gesture.is_some()
+            || (self.gesture && self.key_edit.is_none())
+            // Spec: second-window R23. Clips dragged between the views.
+            || self.clip_drag.is_some()
     }
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
@@ -142,6 +148,7 @@ impl Shell {
                 editor: &mut self.editor,
                 view: &self.arrangement,
                 clipboard: &self.clipboard,
+                session: &self.session,
             },
         )
     }
@@ -187,6 +194,7 @@ impl Shell {
                 && !tool_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !automation_ids::handles(&invocation.id)
+                && !clip_envelope_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
                 && !arrangement_clip_command(&invocation.id)
                 && !comping_drag(&invocation.id)
@@ -220,6 +228,8 @@ impl Shell {
             clip_view::label(&invocation.id)
         } else if automation_ids::handles(&invocation.id) {
             automation::label(&invocation.id)
+        } else if clip_envelope_ids::handles(&invocation.id) {
+            crate::clip_envelope_edit::label(&invocation.id)
         } else if locator_ids::handles(&invocation.id) {
             crate::arrangement::locator::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
@@ -320,6 +330,19 @@ impl Shell {
                     &invocation.id,
                     invocation.args.clone(),
                     editor,
+                    arrangement,
+                    envelope_clipboard,
+                    devices,
+                )
+            } else if clip_envelope_ids::handles(&invocation.id) {
+                // Spec: clip-envelopes R12, R13. A drag in the Envelope
+                // Editor moves breakpoints, or a handle of its time
+                // selection stretches or skews them.
+                crate::clip_envelope_edit::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    clip_view,
                     arrangement,
                     envelope_clipboard,
                     devices,
@@ -454,6 +477,17 @@ impl Shell {
                     &self.arrangement,
                 )
                 .map(|_| ())
+            } else if clip_envelope_ids::handles(&step.id) {
+                crate::clip_envelope_edit::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.clip_view,
+                    &self.arrangement,
+                    &mut self.envelope_clipboard,
+                    &self.devices,
+                )
+                .map(|_| ())
             } else if is_automation_edit(&step.id) {
                 model::run(&mut self.editor, &step.id, step.args.clone())
                     .map(|_| ())
@@ -504,5 +538,59 @@ impl Shell {
         self.automation_take
             .release(self.arrangement.transport().position);
         self.release_session_moves();
+    }
+}
+
+impl Shell {
+    /// The drag of clips between the views, if one is under way.
+    #[must_use]
+    pub fn clip_drag(&self) -> Option<&ClipDrag> {
+        self.clip_drag.as_ref()
+    }
+
+    /// Takes a step of the drag of clips between the views, from `window`: a
+    /// drop runs its command (errors show in the Status Bar) and ends the
+    /// drag.
+    ///
+    /// # Errors
+    ///
+    /// [`ShellError`] if the drop's command failed; the drag has ended.
+    pub fn clip_drag_event(
+        &mut self,
+        window: WindowKind,
+        event: ClipDragEvent,
+    ) -> Result<(), ShellError> {
+        match event {
+            ClipDragEvent::Begin(source) => {
+                self.clip_drag = Some(ClipDrag {
+                    source,
+                    window,
+                    over: None,
+                });
+                self.touch();
+            }
+            ClipDragEvent::Over(spot) => {
+                if let Some(drag) = &mut self.clip_drag {
+                    match spot {
+                        Some(spot) => drag.over = Some((window, spot)),
+                        // Only the window the pointer was over forgets the place.
+                        None if drag.over.is_some_and(|(over, _)| over == window) => {
+                            drag.over = None;
+                        }
+                        None => {}
+                    }
+                }
+            }
+            ClipDragEvent::End { drop } => {
+                let Some(drag) = self.clip_drag.take() else {
+                    return Ok(());
+                };
+                self.touch();
+                if drop && let Some((id, args)) = drag.drop_command() {
+                    self.invoke(id, args)?;
+                }
+            }
+        }
+        Ok(())
     }
 }

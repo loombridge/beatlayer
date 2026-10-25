@@ -13,16 +13,22 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
+use bl_core::midi::MidiMessage;
 use bl_core::time::TICKS_PER_QUARTER;
-use bl_engine::{AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue};
-use bl_model::ParamId;
+use bl_engine::mpe::MpeInput;
+use bl_engine::mpe_layout::MpeLayout;
+use bl_engine::{
+    AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteKind, ParamValue,
+    PluginMpeData,
+};
+use bl_model::{ParamId, PluginMpe};
 use clack_host::events::EventFlags;
 use clack_host::events::event_types::{TransportEvent, TransportFlags};
 use clack_host::prelude::*;
 use clack_host::utils::{BeatTime, SecondsTime};
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use super::events::{InputList, Out, OutputList};
+use super::events::{Expressions, InputList, Out, OutputList};
 use super::gain;
 use super::handlers::Host;
 
@@ -101,6 +107,15 @@ pub struct ClapNode {
     midi_effect: bool,
     max_frames: usize,
     steady: u64,
+    /// The device's MPE Mode and settings (the MPE spec, R14), as the
+    /// compiler last sent them; `pending_mpe` waits for the next block.
+    mpe: PluginMpe,
+    pending_mpe: Option<PluginMpe>,
+    /// MPE MIDI laid out for a note port that takes MIDI (R17), made with
+    /// the node.
+    layout: MpeLayout,
+    /// Reads the MPE MIDI the plug-in sends out (R20).
+    reader: MpeInput,
     /// The gain adjustment, in dB, the plug-in reported for the last block
     /// (the mixer view spec, R40): zero when it reports none or reduces
     /// nothing.
@@ -145,6 +160,10 @@ impl ClapNode {
             midi_effect,
             max_frames,
             steady: 0,
+            mpe: PluginMpe::default(),
+            pending_mpe: None,
+            layout: MpeLayout::new(PluginMpe::default().settings),
+            reader: MpeInput::new(),
             reduction: 0.0,
         };
         let ends = HostEnds {
@@ -163,6 +182,8 @@ impl ClapNode {
                 self.give_back(old);
             }
             self.failed = false;
+            // Spec: mpe R17. A plug-in activated again is opened again.
+            self.layout.reopen();
         }
         if self.status.hand_back.swap(false, Relaxed)
             && let Some(processor) = self.processor.take()
@@ -199,8 +220,28 @@ impl ClapNode {
         for event in &self.output.events {
             match *event {
                 Out::Note(note) => {
-                    if let Some(block) = block.as_deref_mut() {
+                    // Spec: clap-hosting R23. Note expressions go on only
+                    // while MPE Mode is on.
+                    let expression = matches!(note.kind, NoteKind::Expression { .. });
+                    if let Some(block) = block.as_deref_mut()
+                        && (self.mpe.on || !expression)
+                    {
                         block.send_note(note);
+                    }
+                }
+                Out::Midi(time, data) => {
+                    // Spec: mpe R20. The plug-in's MPE MIDI is read as an
+                    // MPE port's; otherwise its MIDI is ignored.
+                    let message = match data[0] & 0xF0 {
+                        0xC0 | 0xD0 => MidiMessage::from_bytes(&data[..2]),
+                        0x80..=0xE0 => MidiMessage::from_bytes(&data),
+                        _ => None,
+                    };
+                    if let (true, Some(message), Some(block)) =
+                        (self.mpe.on, message, block.as_deref_mut())
+                    {
+                        self.reader
+                            .read(time, &message, |note| block.send_note(note));
                     }
                 }
                 Out::Param(id, value) => {
@@ -236,6 +277,33 @@ impl ClapNode {
         self.status.failed.store(true, Relaxed);
         silence(block);
     }
+}
+
+/// Takes the MPE Mode and settings the compiler sent, at the start of a
+/// block: MPE MIDI laid out for the old ones ends its notes first, and a
+/// plug-in switched between CLAP's events and MIDI has the notes it started
+/// the other way stopped.
+fn apply_mpe(
+    pending: &mut Option<PluginMpe>,
+    mpe: &mut PluginMpe,
+    layout: &mut MpeLayout,
+    input: &mut InputList,
+    midi_notes: bool,
+) {
+    let Some(new) = pending.take() else {
+        return;
+    };
+    // A note port that takes CLAP's own events hears the same notes either
+    // way; one that takes MIDI has the notes it started the other way
+    // stopped.
+    if mpe.on != new.on && midi_notes {
+        layout.release_all(0, &mut |offset, message| input.midi(offset, message));
+        input.choke_all();
+    }
+    layout.configure(new.settings, &mut |offset, message| {
+        input.midi(offset, message);
+    });
+    *mpe = new;
 }
 
 /// The lanes of one output port: `channels` lanes `stride` apart, `frames`
@@ -359,8 +427,30 @@ impl Node for ClapNode {
             });
         });
         self.pending.clear();
-        for note in block.notes() {
-            self.input.note(note);
+        // Spec: mpe R15, R16. How the block's notes and expressions reach
+        // the plug-in follows its MPE Mode and its note port.
+        let midi_notes = started.access_handler(|d| d.midi_notes);
+        apply_mpe(
+            &mut self.pending_mpe,
+            &mut self.mpe,
+            &mut self.layout,
+            &mut self.input,
+            midi_notes,
+        );
+        if self.mpe.on && midi_notes {
+            let input = &mut self.input;
+            let mut sink = |offset, message| input.midi(offset, message);
+            self.layout.open(&mut sink);
+            self.layout.lay_out(block.notes(), &mut sink);
+        } else {
+            let expressions = if self.mpe.on {
+                Expressions::Clap
+            } else {
+                Expressions::PolyPressure
+            };
+            for note in block.notes() {
+                self.input.note(note, expressions);
+            }
         }
         self.input.sort();
 
@@ -487,6 +577,8 @@ impl Node for ClapNode {
     fn receive_data(&mut self, data: NodeData) {
         if data.downcast_ref::<AutomationList>().is_some() {
             self.automation = Some(data);
+        } else if let Some(PluginMpeData(mpe)) = data.downcast_ref() {
+            self.pending_mpe = Some(*mpe);
         }
     }
 

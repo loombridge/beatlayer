@@ -167,6 +167,8 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
         ids,
         [
             "track.add_take_lane",
+            "track.assign_colour_to_clips",
+            "track.assign_colour_to_grouped",
             "track.bounce_in_place",
             "track.bounce_to_new_track",
             "track.clear_frozen",
@@ -185,6 +187,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.paste_bounced_audio",
             "track.rename",
             "track.set_bounced",
+            "track.set_colour",
             "track.set_devices_enabled",
             "track.set_frozen",
             "track.set_link_group",

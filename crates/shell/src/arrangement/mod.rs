@@ -1613,7 +1613,7 @@ impl ArrangementView {
     }
 }
 
-fn parse<T: DeserializeOwned>(args: Value) -> Result<T, ViewError> {
+pub(crate) fn parse<T: DeserializeOwned>(args: Value) -> Result<T, ViewError> {
     let args = if args.is_null() {
         Value::Object(serde_json::Map::new())
     } else {

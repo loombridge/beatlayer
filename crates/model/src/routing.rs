@@ -63,7 +63,12 @@ impl Document {
                 MidiTo::Track(to) => {
                     self.check_target(track, *to, |kind| kind == TrackKind::Midi)?;
                 }
-                MidiTo::Port { name, channel } => check_port(name, *channel)?,
+                MidiTo::Port { name, channel, mpe } => {
+                    check_port(name, *channel)?;
+                    if let Some(mpe) = mpe {
+                        mpe.check()?;
+                    }
+                }
             }
         }
         for device in track.devices_deep() {
@@ -73,6 +78,9 @@ impl Document {
             // Spec: external-devices R9, R12
             if let Some(external) = &device.external {
                 check_port(external.port.as_deref().unwrap_or("-"), external.channel)?;
+                if let Some(mpe) = &external.mpe {
+                    mpe.check()?;
+                }
                 if !external.hardware_latency.is_valid() {
                     return Err(ModelError::InvalidInput(
                         "the hardware latency is out of range",

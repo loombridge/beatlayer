@@ -75,8 +75,11 @@ pub mod autosample;
 pub mod browser;
 mod chord_learn;
 pub mod clip_defaults;
+pub mod clip_drag;
+pub mod clip_envelope_edit;
 pub mod clip_files;
 pub mod clip_view;
+pub mod colours;
 pub mod dawproject;
 pub mod detail;
 pub mod devices;
@@ -104,6 +107,7 @@ pub mod scales;
 pub mod scene_fields;
 pub mod search;
 mod session_capture;
+pub mod session_clips;
 pub mod session_view;
 pub mod set_exchange;
 pub mod settings;
@@ -131,6 +135,9 @@ pub use bl_shell_spec::autosampler as autosampler_commands;
 pub use bl_shell_spec::browser as browser_commands;
 /// Capture MIDI's command ID and its result types (WP-3.14).
 pub use bl_shell_spec::capture_midi as capture_midi_commands;
+/// The Envelope Editor's editing command IDs and their argument and result
+/// types (WP-6.25c).
+pub use bl_shell_spec::clip_envelope_editing as clip_envelope_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;

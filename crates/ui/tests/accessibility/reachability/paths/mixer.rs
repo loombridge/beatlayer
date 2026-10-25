@@ -18,6 +18,31 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, arrangement_track_3, "Arm Recording", Key::Enter),
         ),
         ("mixer_view.state", Exception(Query)),
+        // The track menu's colour palette and Assign Track Color items (the
+        // themes spec, R16, R17): from the title bar with the context menu
+        // keys, then Up and Down, and Enter on a swatch or an item.
+        (
+            "track.set_colour",
+            Exception(Equivalent(
+                "the track's context menu, opened with the Context Menu key or Shift-F10 \
+                 (S-CTX-002) on its title bar: its colour palette, whose swatches the arrow \
+                 keys move between and Enter chooses (themes R22)",
+            )),
+        ),
+        (
+            "track.assign_colour_to_clips",
+            Exception(Equivalent(
+                "the track's context menu, from its title bar with the Context Menu key or \
+                 Shift-F10 (S-CTX-002): Assign Track Color to Clips",
+            )),
+        ),
+        (
+            "track.assign_colour_to_grouped",
+            Exception(Equivalent(
+                "a group track's context menu, from its title bar with the Context Menu key or \
+                 Shift-F10 (S-CTX-002): Assign Track Color to Grouped Tracks and Clips",
+            )),
+        ),
         (
             "mixer_view.scroll",
             Exception(Equivalent(

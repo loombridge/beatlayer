@@ -7,6 +7,11 @@ use super::{BROWSER, Readback, nothing, query};
 /// gives.
 const TAGS: &str = "the browser's tags are read with `browser.tags`, which is `external` because \
                     it lists files outside the project";
+/// Why the browser's collection commands read back through nothing a read
+/// command gives.
+const COLLECTIONS: &str = "the browser's collections are read with `browser.state`, whose rows \
+                           name the collections each item is in, and which is `external` because \
+                           it lists files outside the project";
 /// Why the File Manager's commands read back through nothing a read command
 /// gives.
 const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.state`, which \
@@ -19,6 +24,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("browser.add_tag", nothing(TAGS)),
     ("browser.add_tag_group", nothing(TAGS)),
     ("browser.add_to_arrangement", query(Track, "clips")),
+    ("browser.clear_collections", nothing(COLLECTIONS)),
     ("browser.clear_filters", nothing(BROWSER)),
     ("browser.back", nothing(BROWSER)),
     ("browser.delete_tag", nothing(TAGS)),
@@ -35,11 +41,19 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("browser.rename_file", nothing(BROWSER)),
     ("browser.rename_label", nothing(BROWSER)),
     ("browser.rename_tag", nothing(TAGS)),
+    (
+        "browser.reveal",
+        nothing(
+            "opens the system's file manager, another application; neither the browser nor the \
+             set changes",
+        ),
+    ),
     ("browser.reset_label_order", nothing(BROWSER)),
     ("browser.reset_tag_order", nothing(TAGS)),
     ("browser.scrub_preview", nothing(BROWSER)),
     ("browser.search", nothing(BROWSER)),
     ("browser.select", nothing(BROWSER)),
+    ("browser.set_collection", nothing(COLLECTIONS)),
     ("browser.set_label_shown", nothing(BROWSER)),
     ("browser.set_label_icon", nothing(BROWSER)),
     ("browser.set_filter_view", nothing(BROWSER)),

@@ -245,6 +245,13 @@ impl MixerUi {
         self.built
     }
 
+    /// The Session View's slot the pointer was over in the last frame, for
+    /// clips dragged from the Arrangement to drop on (second-window R21).
+    #[must_use]
+    pub fn drop_spot(&self) -> Option<bl_shell::clip_drag::DropSpot> {
+        self.grid.drop_spot()
+    }
+
     /// Draws the Session View in the main view `rect`: the title bars, the
     /// clip slots and status row (M3, drawn as a placeholder), and the
     /// mixer under them while it shows (R1).
@@ -426,7 +433,7 @@ impl MixerUi {
                     pos2(column.rect.right() - 0.5, layout.colour.1),
                 ),
                 0.0,
-                title_colour(theme, track, t.kind()),
+                title_colour(theme, doc, track, t.kind()),
             );
             let label = activator_label(column);
             if let Some(span) = layout.in_out
@@ -575,7 +582,7 @@ impl MixerUi {
                     pos2(column.rect.right() - 0.5, layout.colour.1),
                 ),
                 0.0,
-                crate::rack_view::swatch(theme, colour),
+                theme.swatch(colour),
             );
         }
         if let Some(span) = layout.strip {
@@ -744,7 +751,7 @@ fn title_bars(
         painter.rect_filled(
             bar,
             0.0,
-            title_colour(theme, track, t.kind()).gamma_multiply(0.82),
+            title_colour(theme, doc, track, t.kind()).gamma_multiply(0.82),
         );
         // Spec: command-palette R10. The tracks the search field finds are
         // outlined.
@@ -3335,10 +3342,15 @@ fn focus_ring(painter: &egui::Painter, theme: &Theme, rect: Rect, response: &Res
 
 /// A colour for a column's title bar and colour strip.
 #[must_use]
-pub fn title_colour(theme: &Theme, track: TrackId, kind: TrackKind) -> Color32 {
+pub fn title_colour(
+    theme: &Theme,
+    doc: &bl_model::Document,
+    track: TrackId,
+    kind: TrackKind,
+) -> Color32 {
     if kind == TrackKind::Main {
         theme.colors.control_pressed.0
     } else {
-        track_colour(theme, track)
+        track_colour(theme, doc, track)
     }
 }

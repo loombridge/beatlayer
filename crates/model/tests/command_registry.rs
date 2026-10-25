@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        253,
+        261,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -64,7 +64,7 @@ fn every_document_command_is_registered() {
              WP-2.13 the two for Main Out and Cue Out, WP-3.1 five for scenes and two for slot \
              clips, WP-3.2 set_slot_stop_button, WP-2.12 seven for automation, WP-6.25 \
              set_automation_envelope and set_lock_envelopes, WP-3.15 six for clip \
-             envelopes, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
+             envelopes, WP-6.25c set_clip_envelope, WP-3.17 two for the crossfader, WP-2.14 set_midi_overdub, WP-2.13 the \
              two punch switches, WP-2.13 add_take_lane, WP-3.4 three for a clip's launch \
              settings, WP-3.5 two for a scene's tempo and signature, WP-3.3 \
              set_clip_launch_mode, WP-4.1 seven for the warp map, WP-4.3 five for transients and ranged warp markers, WP-5.1 fifteen for racks and \
@@ -95,7 +95,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour"
     );
 
     for op in &ops {
@@ -203,6 +203,12 @@ fn every_command_runs_by_id() {
         json!({ "track": bass, "parent": group, "index": 0 }),
     );
     agent.run("track.rename", json!({ "track": drums, "name": "Break" }));
+    // Spec: themes R25.
+    agent.run(
+        "track.set_colour",
+        json!({ "tracks": [drums], "colour": 16 }),
+    );
+    assert_eq!(agent.editor.document().track(drums).unwrap().colour(), 16);
     agent.run(
         "track.set_frozen",
         json!({ "frozen": [[drums, { "clips": [], "tails": [], "output": null }]] }),
@@ -366,7 +372,8 @@ fn every_command_runs_by_id() {
             .midi_output,
         Some(MidiTo::Port {
             name: "Synth".to_owned(),
-            channel: 3
+            channel: 3,
+            mpe: None
         })
     );
     agent.run(
@@ -637,6 +644,32 @@ fn every_command_runs_by_id() {
         json!({ "clip": riff, "length": bar * 2 }),
     );
     agent.run("clip.rename", json!({ "clip": riff, "name": "Riff" }));
+    // Spec: themes R25. The clip took its track's colour as it went in.
+    let own = agent.editor.document().track(bass).unwrap().colour();
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(own)
+    );
+    agent.run("clip.set_colour", json!({ "clips": [riff], "colour": 40 }));
+    assert_eq!(agent.editor.document().clip(riff).unwrap().colour, Some(40));
+    agent.run("track.assign_colour_to_clips", json!({ "tracks": [bass] }));
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(own)
+    );
+    agent.run(
+        "track.assign_colour_to_grouped",
+        json!({ "tracks": [group] }),
+    );
+    let inside = agent.editor.document().track(group).unwrap().colour();
+    assert_eq!(
+        agent.editor.document().track(bass).unwrap().colour(),
+        inside
+    );
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(inside)
+    );
     agent.run("clip.set_mute", json!({ "clip": riff, "mute": true }));
     agent.run(
         "clip.set_data",
@@ -1169,6 +1202,14 @@ fn every_command_runs_by_id() {
 
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
+    agent.run(
+        "scene.set_colour",
+        json!({ "scenes": [first], "colour": 55 }),
+    );
+    assert_eq!(
+        agent.editor.document().scene(first).unwrap().colour,
+        Some(55)
+    );
     agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
     agent.run(
         "scene.set_follow_actions",
@@ -1655,6 +1696,25 @@ fn every_command_runs_by_id() {
             .port,
         None
     );
+    // A plug-in's MPE Mode and settings (WP-6.17b): both are one undo step,
+    // and the device keeps them.
+    let synth: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": bass, "index": 0, "device": {
+            "id": synth, "name": "Synth", "enabled": true, "params": [],
+            "kind": { "plugin": { "format": "clap", "plugin_id": "com.example.synth" } },
+        } }),
+    );
+    agent.run("plugin.set_mpe", json!({ "device": synth, "on": true }));
+    agent.run(
+        "plugin.set_mpe_settings",
+        json!({ "device": synth, "settings": { "zone": "upper", "channels": 7 } }),
+    );
+    let mpe = agent.editor.document().device(synth).unwrap().mpe;
+    assert!(mpe.on);
+    assert_eq!(mpe.settings.zone, bl_model::MpeZone::Upper);
+    assert_eq!(mpe.settings.channels, 7);
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
     // everything inside, and the chain's controls.
@@ -2012,6 +2072,14 @@ fn every_command_runs_by_id() {
     agent.run(
         "clip.set_envelope_linked",
         json!({ "clip": riff, "target": volume, "linked": false }),
+    );
+    // WP-6.25c: the whole envelope.
+    agent.run(
+        "clip.set_envelope",
+        json!({ "clip": riff, "target": volume, "points": [
+            { "at": 0, "value": 1.0, "bend": 0.0 },
+            { "at": bar, "value": 0.5, "bend": 0.25 },
+        ] }),
     );
     assert!(
         !agent
@@ -2830,6 +2898,21 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "clip.set_envelope",
+            Command::SetClipEnvelope {
+                kind: bl_model::EnvelopeKind::Modulation,
+                clip,
+                target: AutomationTarget::Mixer {
+                    param: MixerParam::Volume,
+                },
+                points: vec![Breakpoint {
+                    at: Ticks::QUARTER,
+                    value: 0.5,
+                    bend: 0.0,
+                }],
+            },
+        ),
+        (
             "routing.set_input",
             Command::SetInput {
                 track,
@@ -3367,6 +3450,7 @@ fn schemas_match_what_commands_serialise() {
                 params: [(ParamId(4), 0.5)].into_iter().collect(),
                 name: "Warm Pad".to_owned(),
                 shape: None,
+                mpe: None,
             },
         ),
         (
@@ -3703,6 +3787,21 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "plugin.set_mpe",
+            Command::SetPluginMpeMode { device, on: true },
+        ),
+        (
+            "plugin.set_mpe_settings",
+            Command::SetPluginMpeSettings {
+                device,
+                settings: bl_model::MpeSettings {
+                    zone: bl_model::MpeZone::Upper,
+                    channels: 7,
+                    ..bl_model::MpeSettings::default()
+                },
+            },
+        ),
+        (
             "device.set_external",
             Command::SetExternal {
                 device,
@@ -3711,6 +3810,7 @@ fn schemas_match_what_commands_serialise() {
                     name: "Synth".to_owned(),
                 }),
                 channel: Some(2),
+                mpe: None,
                 audio_from: Some(Channel::Pair(3)),
                 hardware_latency: Some(HardwareLatency::Samples { value: 96 }),
             },
@@ -3786,6 +3886,39 @@ fn schemas_match_what_commands_serialise() {
             "chain.set_colour",
             Command::SetChainColour {
                 chain: ChainId(fresh_id),
+                colour: Some(3),
+            },
+        ),
+        (
+            "track.set_colour",
+            Command::SetTrackColour {
+                tracks: vec![track],
+                colour: 3,
+            },
+        ),
+        (
+            "track.assign_colour_to_clips",
+            Command::AssignColourToClips {
+                tracks: vec![track],
+            },
+        ),
+        (
+            "track.assign_colour_to_grouped",
+            Command::AssignColourToGrouped {
+                tracks: vec![track],
+            },
+        ),
+        (
+            "clip.set_colour",
+            Command::SetClipColour {
+                clips: vec![clip],
+                colour: 3,
+            },
+        ),
+        (
+            "scene.set_colour",
+            Command::SetSceneColour {
+                scenes: vec![scene],
                 colour: Some(3),
             },
         ),

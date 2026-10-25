@@ -246,6 +246,33 @@ fn every_output_goes_to_zero_volts_on_switch_off_and_removal() {
     );
 }
 
+// Spec: cv-tools R18. A CV device inside a rack that is switched off sends
+// 0 V too.
+#[test]
+fn a_cv_device_in_a_switched_off_rack_sends_zero_volts() {
+    let mut rig = rig(64);
+    let a = track(&mut rig.editor, TrackKind::Audio, None);
+    let (rack, chains) = common::rack(&mut rig.editor, a, bl_model::RackKind::AudioEffect, 1);
+    let id = rig.editor.new_id();
+    let mut device = cv_probe_type().device(id);
+    device.external.as_mut().unwrap().cv_outputs[0].channel = Some(1);
+    rig.apply(Command::InsertChainDevice {
+        chain: chains[0],
+        index: 0,
+        device,
+    });
+    assert!(play(&mut rig, 64, 2)[0].iter().all(|&s| s == 0.25));
+    rig.apply(Command::SetDeviceEnabled {
+        device: rack,
+        enabled: false,
+    });
+    rig.block(64);
+    assert!(
+        play(&mut rig, 64, 1)[0].iter().all(|&s| s == 0.0),
+        "the rack is off"
+    );
+}
+
 // Spec: cv-tools R8
 #[test]
 fn a_render_is_the_same_at_any_block_size() {

@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use bl_audio_io::{Cable, NullBackend, NullControl, NullOptions, Pacing};
+use bl_audio_io::{NullBackend, NullControl, NullOptions, Pacing};
 use bl_devices::{Tuner, cv_instrument_type, cv_triggers_type};
 use bl_engine::DeviceType;
 use bl_engine::NodeConfig;
@@ -188,38 +188,6 @@ fn the_browsers_instruments_label_lists_both_devices() {
     drop(shell);
 }
 
-/// An oscillator patched to Pitch on output channel 3, whose sound comes
-/// back on input channel 4: a sine whose frequency follows the voltage the
-/// block before wrote, at 0.97 octaves a volt with an offset of +0.13 V and a
-/// slight bow. `heard` holds what it sounded while `record` is set; `silent`
-/// takes the sound away.
-fn oscillator(
-    heard: &Arc<Mutex<Vec<f32>>>,
-    record: &Arc<AtomicBool>,
-    silent: &Arc<AtomicBool>,
-) -> Cable {
-    let (heard, record, silent) = (heard.clone(), record.clone(), silent.clone());
-    let mut phase = 0.0f64;
-    Cable::new(move |played, next| {
-        let volts = f64::from(played[2].last().copied().unwrap_or(0.0)) * 10.0;
-        let hz = 164.0 * (0.97 * (volts + 0.13) + 0.00005 * (volts * volts - 3.0 * volts)).exp2();
-        let silent = silent.load(Ordering::Relaxed);
-        for (c, channel) in next.iter_mut().enumerate() {
-            for sample in channel.iter_mut() {
-                *sample = if c == 3 && !silent {
-                    phase = (phase + hz / 48_000.0).fract();
-                    (phase * std::f64::consts::TAU).sin() as f32 * 0.5
-                } else {
-                    0.0
-                };
-            }
-        }
-        if record.load(Ordering::Relaxed) {
-            heard.lock().unwrap().extend_from_slice(&next[3]);
-        }
-    })
-}
-
 struct Bench {
     shell: Shell,
     control: NullControl,
@@ -246,7 +214,7 @@ fn bench() -> Bench {
         },
         &[("null", "Null")],
     );
-    let backend = backend.with_cable(oscillator(&heard, &record, &silent));
+    let backend = backend.with_cable(testing::oscillator(&heard, &record, &silent));
     let (mut shell, control) = testing::rig_on(backend, control);
     shell
         .run("audio.configure", json!({ "input_device": "null:null" }))

@@ -6456,24 +6456,10 @@ fn an_agent_packs_a_project_and_installs_the_pack() {
 fn an_agent_routes_the_cv_devices_calibrates_and_reads_external_and_cv_back() {
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use bl_audio_io::{Cable, NullBackend, NullOptions, Pacing};
+    use bl_audio_io::{NullBackend, NullOptions, Pacing};
 
     // An oscillator on Pitch (output 3) whose sound comes back on input 4.
-    let mut phase = 0.0f64;
-    let cable = Cable::new(move |played, next| {
-        let volts = f64::from(played[2].last().copied().unwrap_or(0.0)) * 10.0;
-        let hz = 164.0 * (0.97 * (volts + 0.13)).exp2();
-        for (c, channel) in next.iter_mut().enumerate() {
-            for sample in channel.iter_mut() {
-                *sample = if c == 3 {
-                    phase = (phase + hz / 48_000.0).fract();
-                    (phase * std::f64::consts::TAU).sin() as f32 * 0.5
-                } else {
-                    0.0
-                };
-            }
-        }
-    });
+    let cable = bl_shell::testing::oscillator(&Arc::default(), &Arc::default(), &Arc::default());
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             pacing: Pacing::Manual,

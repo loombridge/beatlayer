@@ -3099,6 +3099,11 @@ impl EngineProgram {
                         {
                             node.flush(pass.scratch);
                         }
+                        // Spec: cv-tools R18. A rack that is off sends 0 V
+                        // from the CV devices inside it.
+                        if let Some(at) = turn.slot(slot).cv {
+                            turn.outputs(self.cv_devices[at as usize].buffers).fill(0.0);
+                        }
                     }
                 }
             }

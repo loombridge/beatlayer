@@ -1508,27 +1508,13 @@ fn a_devices_menu_edit_info_text_types_the_text_in_the_info_view() {
 // the fit; Clear takes it away.
 #[test]
 fn a_cv_instruments_section_routes_it_and_calibrate_runs() {
-    use bl_audio_io::{Cable, NullBackend, NullOptions, Pacing};
+    use bl_audio_io::{NullBackend, NullOptions, Pacing};
     use bl_ui::external::cv_row;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     // An oscillator on Pitch (output 3) whose sound comes back on input 4.
-    let mut phase = 0.0f64;
-    let cable = Cable::new(move |played, next| {
-        let volts = f64::from(played[2].last().copied().unwrap_or(0.0)) * 10.0;
-        let hz = 164.0 * (0.97 * (volts + 0.13)).exp2();
-        for (c, channel) in next.iter_mut().enumerate() {
-            for sample in channel.iter_mut() {
-                *sample = if c == 3 {
-                    phase = (phase + hz / 48_000.0).fract();
-                    (phase * std::f64::consts::TAU).sin() as f32 * 0.5
-                } else {
-                    0.0
-                };
-            }
-        }
-    });
+    let cable = bl_shell::testing::oscillator(&Arc::default(), &Arc::default(), &Arc::default());
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             pacing: Pacing::Manual,

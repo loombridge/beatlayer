@@ -956,6 +956,29 @@ pub struct ExternalSection {
     pub output: bool,
     /// Hardware Latency, in the unit its switch is on.
     pub hardware_latency: bl_model::HardwareLatency,
+    /// What a CV device adds to its section (the CV tools spec, R3, R14;
+    /// L-DEV-026): left out for any other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cv: Option<CvSection>,
+}
+
+/// A CV device's part of its routing section (L-DEV-026): the choosers of its
+/// outputs and inputs come from the shell's choosers; this holds what they
+/// don't.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct CvSection {
+    /// Whether the device calibrates, with Calibrate and Clear buttons under
+    /// its choosers (CV Instrument).
+    pub calibrates: bool,
+    /// Whether the device holds a calibration, which Clear takes away.
+    pub calibrated: bool,
+    /// What the readout under the buttons says: `Not calibrated`,
+    /// `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps,
+    /// worst 0.6 cents`. Empty where the device doesn't calibrate.
+    pub readout: String,
+    /// The ports' names, outputs then inputs, in the order their choosers
+    /// are drawn.
+    pub ports: Vec<String>,
 }
 
 /// A device's MIDI sidechain section, in the same left strip as a

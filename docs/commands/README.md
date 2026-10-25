@@ -40,6 +40,7 @@ The commands, by the part of their ID before its first dot:
 - [`chain`](chain.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
+- [`cv`](cv.md)
 - [`device`](device.md)
 - [`device_view`](device_view.md)
 - [`edit`](edit.md)
@@ -3603,6 +3604,78 @@ What the browser shows: most browser commands return it.
     "columns",
     "can_back",
     "can_forward"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Calibrated`
+
+What `cv.calibrate` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `calibration` | [`CvCalibration`](#cvcalibration) | yes | The calibration stored: the line fitted and each step used, with its pitch and its error in cents. |
+| `measured` | array of number | yes | The pitch each of the eight steps from −2 V to +5 V gave, in hertz, 0 for a step the detector could not read or that was left out of the fit. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `cv.calibrate` returns.",
+  "properties": {
+    "calibration": {
+      "$ref": "#/$defs/CvCalibration",
+      "description": "The calibration stored: the line fitted and each step used, with its pitch and its error in cents."
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "measured": {
+      "description": "The pitch each of the eight steps from −2 V to +5 V gave, in hertz, 0 for a step the detector could not read or that was left out of the fit.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "device",
+    "calibration",
+    "measured"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CalibrationCleared`
+
+What `cv.clear_calibration` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `cleared` | boolean | yes | Whether the device held a calibration. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `cv.clear_calibration` returns.",
+  "properties": {
+    "cleared": {
+      "description": "Whether the device held a calibration.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cleared"
   ],
   "type": "object"
 }
@@ -7519,6 +7592,133 @@ One of:
 
 </details>
 
+### `CvCalibration`
+
+A calibration: `octaves_per_volt` and `hz_at_zero_volts` of the fitted line and the `steps` it was fitted to, each with the pitch it gave and its error in cents.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `octaves_per_volt` | number | yes | The octaves the oscillator rises per volt. |
+| `hz_at_zero_volts` | number | yes | The frequency the fitted line gives at 0 V. |
+| `steps` | array of [`CvStep`](#cvstep) | yes | The steps, by rising voltage. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A calibration: `octaves_per_volt` and `hz_at_zero_volts` of the fitted line and the `steps` it was fitted to, each with the pitch it gave and its error in cents.",
+  "properties": {
+    "hz_at_zero_volts": {
+      "description": "The frequency the fitted line gives at 0 V.",
+      "format": "double",
+      "type": "number"
+    },
+    "octaves_per_volt": {
+      "description": "The octaves the oscillator rises per volt.",
+      "format": "double",
+      "type": "number"
+    },
+    "steps": {
+      "description": "The steps, by rising voltage.",
+      "items": {
+        "$ref": "#/$defs/CvStep"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "octaves_per_volt",
+    "hz_at_zero_volts",
+    "steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CvPort`
+
+A CV output or input by its `name` in the device (Pitch, Gate, Mod 1 and so on) and the interface's `channel` it is set to, counted from 1; absent for No Output or No Input.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name the device gives it. |
+| `channel` | integer or null | no | The interface channel, from 1, or `None` for No Output or No Input. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A CV output or input by its `name` in the device (Pitch, Gate, Mod 1 and so on) and the interface's `channel` it is set to, counted from 1; absent for No Output or No Input.",
+  "properties": {
+    "channel": {
+      "description": "The interface channel, from 1, or `None` for No Output or No Input.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The name the device gives it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `CvStep`
+
+One step of a CV Instrument's calibration: the voltage written and the pitch the oscillator gave back (`docs/specs/cv-tools.md`, R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `volts` | number | yes | The voltage written on Pitch. |
+| `hz` | number | yes | The pitch measured, in hertz. |
+| `error_cents` | number | yes | How far the measured pitch is from the fitted line, in cents. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One step of a CV Instrument's calibration: the voltage written and the pitch the oscillator gave back (`docs/specs/cv-tools.md`, R14).",
+  "properties": {
+    "error_cents": {
+      "description": "How far the measured pitch is from the fitted line, in cents.",
+      "format": "double",
+      "type": "number"
+    },
+    "hz": {
+      "description": "The pitch measured, in hertz.",
+      "format": "double",
+      "type": "number"
+    },
+    "volts": {
+      "description": "The voltage written on Pitch.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "volts",
+    "hz",
+    "error_cents"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DefaultWarpMode`
 
 Default Warp Mode (Record, Warp & Launch, Warp/Fades, L-SET-018): the warp mode a new warped clip takes (the warping spec, R29 and R33).
@@ -11097,6 +11297,9 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
 | `audio_from` | [`Channel`](#channel) | no | Audio From: the interface's inputs the sound comes back on, the first pair on a new device. |
 | `audio_to` | [`Channel`](#channel) or null | no | Audio To: the interface's outputs an external effect sends its signal to, the first pair on a new effect. `None` for an external instrument: it sends notes, not audio. |
 | `channel` | integer from 0 to 255 | no | The MIDI channel, 1 to 16: 1 on a new device. |
+| `cv_calibration` | [`CvCalibration`](#cvcalibration) or null | no | The calibration a CV Instrument holds (R14), if it has been calibrated. |
+| `cv_inputs` | array of [`CvPort`](#cvport) | no | The CV inputs the device declares, as `cv_outputs`. |
+| `cv_outputs` | array of [`CvPort`](#cvport) | no | The CV outputs the device declares, in its order, and the interface channel each is set to (`docs/specs/cv-tools.md`, R3, R4). Empty for a device without CV, and then left out of the saved set. |
 | `hardware_latency` | [`HardwareLatency`](#hardwarelatency) | no | Hardware Latency: 0 ms on a new device. |
 | `mpe` | [`MpeSettings`](#mpesettings) or null | no | MPE, chosen after the 16 channels in the channel chooser, with the MPE/Multi-channel Settings the notes go out on (the MPE spec, R19). `None` sends on `channel`. |
 | `port` | string or null | no | MIDI To: the output port, by name, or `None` for No Output (a new device's). The device keeps the name while the port is away. |
@@ -11128,6 +11331,31 @@ An external device's routing: `port` (MIDI To, the MIDI output port's name as th
       "maximum": 255,
       "minimum": 0,
       "type": "integer"
+    },
+    "cv_calibration": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CvCalibration"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The calibration a CV Instrument holds (R14), if it has been calibrated."
+    },
+    "cv_inputs": {
+      "description": "The CV inputs the device declares, as `cv_outputs`.",
+      "items": {
+        "$ref": "#/$defs/CvPort"
+      },
+      "type": "array"
+    },
+    "cv_outputs": {
+      "description": "The CV outputs the device declares, in its order, and the interface channel each is set to (`docs/specs/cv-tools.md`, R3, R4). Empty for a device without CV, and then left out of the saved set.",
+      "items": {
+        "$ref": "#/$defs/CvPort"
+      },
+      "type": "array"
     },
     "hardware_latency": {
       "$ref": "#/$defs/HardwareLatency",

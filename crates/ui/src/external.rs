@@ -7,8 +7,10 @@
 //! Beatlayer's own layout; Live's is to observe.
 
 use bl_model::{DeviceId, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES};
-use bl_shell::device_commands::{EXTERNAL_SECTION_WIDTH, ExternalSection, TITLE_BAR_HEIGHT};
-use bl_shell::routing::{self, ExternalChoosers};
+use bl_shell::device_commands::{
+    CvSection, EXTERNAL_SECTION_WIDTH, ExternalSection, TITLE_BAR_HEIGHT,
+};
+use bl_shell::routing::{self, Chooser, ExternalChoosers};
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::Role;
 use egui::{Align2, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
@@ -34,6 +36,27 @@ const DRAG_PER_POINT: f64 = 0.008;
 #[must_use]
 pub fn control_id(device: DeviceId, control: &str) -> Id {
     Id::new(("external-control", device, control))
+}
+
+/// The height of a row of a CV device's section, and the gap between rows:
+/// the name sits in the row's left, the control to its right, so the eight
+/// outputs of CV Triggers and its return fit the body (L-DEV-026).
+const CV_ROW: f32 = 13.0;
+const CV_GAP: f32 = 2.0;
+/// The width the name of a port takes at the row's left.
+const CV_NAME: f32 = 42.0;
+
+/// Row `n` of a CV device's section, from 0: its name's room and its
+/// control's.
+#[must_use]
+pub fn cv_row(frame: Rect, n: usize) -> (Rect, Rect) {
+    let section = section_rect(frame).shrink2(vec2(3.0, 0.0));
+    let top = section.top() + 3.0 + (CV_ROW + CV_GAP) * n as f32;
+    let row = Rect::from_min_size(pos2(section.left(), top), vec2(section.width(), CV_ROW));
+    (
+        Rect::from_min_size(row.min, vec2(CV_NAME, CV_ROW)),
+        Rect::from_min_max(pos2(row.left() + CV_NAME, row.top()), row.max),
+    )
 }
 
 /// The section down the left of an unfolded frame, under its title bar.
@@ -150,10 +173,27 @@ pub fn draw(
         channel: channel_chooser,
         audio_from: audio_from_chooser,
         audio_to: audio_to_chooser,
+        cv_outputs,
+        cv_inputs,
     }) = routing::external_choosers(shell.editor().document(), device, &shell.interface())
     else {
         return;
     };
+    // Spec: cv-tools R3, R10, R14; L-DEV-026. A CV device's section lists its
+    // CV outputs and inputs, then its return.
+    if let Some(cv) = &section.cv {
+        let ports: Vec<_> = cv_outputs.iter().chain(&cv_inputs).collect();
+        draw_cv(
+            ui,
+            shell,
+            theme,
+            (device, section, cv),
+            (&ports, &audio_from_chooser),
+            frame,
+            events,
+        );
+        return;
+    }
     // The External Audio Effect sends its signal out and hears it back: it
     // has an Audio To and no MIDI To (WP-5.35, R17).
     let (midi_to, channel, audio_to, audio_from, latency, unit) = if section.output {
@@ -225,12 +265,34 @@ pub fn draw(
         events,
     );
 
+    latency_controls(
+        ui,
+        shell,
+        theme,
+        device,
+        section.hardware_latency,
+        (latency, unit),
+        events,
+    );
+}
+
+/// Hardware Latency's number box and its unit switch, in `latency` and
+/// `unit`.
+fn latency_controls(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    device: DeviceId,
+    current: HardwareLatency,
+    (latency, unit): (Rect, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
     // Hardware Latency: a number box a vertical drag changes, as one undo
     // step; a double-click puts it back to 0. Spec: delay-compensation R7.
     // While Delay Compensation is off both it and its unit switch are
     // disabled, keeping the value.
     let available = shell.editor().document().settings().delay_compensation;
-    let current = section.hardware_latency;
     let text = latency_text(current);
     let id = control_id(device, "latency");
     let response = ui.interact(
@@ -347,6 +409,149 @@ pub fn draw(
             node.set_description("Unavailable while Delay Compensation is off".to_owned());
         });
     }
+}
+
+/// A CV device's section (L-DEV-026): a chooser per CV output and input
+/// under its name, then Audio From and Hardware Latency, and for CV
+/// Instrument the Calibrate and Clear buttons with the readout.
+#[expect(clippy::too_many_arguments, reason = "the section's inputs")]
+fn draw_cv(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    (device, section, cv): (DeviceId, &ExternalSection, &CvSection),
+    (ports, audio_from): (&[&(String, Chooser)], &Chooser),
+    frame: Rect,
+    events: &mut Vec<UiEvent>,
+) {
+    let c = &theme.colors;
+    let painter = ui.painter_at(section_rect(frame));
+    let name = |rect: Rect, text: &str| {
+        painter.text(
+            pos2(rect.left() + 1.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            theme.small_font(),
+            c.text_dim.0,
+        );
+    };
+    for (n, (port, chooser)) in ports.iter().map(|p| (&p.0, &p.1)).enumerate() {
+        let (label, control) = cv_row(frame, n);
+        name(label, port);
+        let id = control_id(device, &format!("cv-{port}"));
+        draw_chooser(ui, theme, id, control, chooser, events);
+        describe(
+            ui,
+            id,
+            Role::ComboBox,
+            &format!("{} {port}", chooser.name),
+            &chooser.text,
+        );
+    }
+    let rows = ports.len();
+    let (label, control) = cv_row(frame, rows);
+    name(label, "Audio From");
+    draw_chooser(
+        ui,
+        theme,
+        control_id(device, "audio-from"),
+        control,
+        audio_from,
+        events,
+    );
+    // Hardware Latency, its box then its unit switch beside it.
+    let (label, row) = cv_row(frame, rows + 1);
+    name(label, "Latency");
+    let unit = Rect::from_min_size(pos2(row.right() - 22.0, row.top()), vec2(22.0, CV_ROW));
+    let latency = Rect::from_min_max(row.min, pos2(unit.left() - 2.0, row.bottom()));
+    latency_controls(
+        ui,
+        shell,
+        theme,
+        device,
+        section.hardware_latency,
+        (latency, unit),
+        events,
+    );
+    if !cv.calibrates {
+        return;
+    }
+    // Calibrate and Clear, side by side, and the readout under them.
+    let (_, row) = cv_row(frame, rows + 2);
+    let (_, readout) = cv_row(frame, rows + 3);
+    let half = (row.width() + CV_NAME) / 2.0;
+    let left = Rect::from_min_size(
+        pos2(row.left() - CV_NAME, row.top()),
+        vec2(half - 1.0, CV_ROW),
+    );
+    let right = Rect::from_min_max(pos2(left.right() + 2.0, row.top()), row.max);
+    for (rect, label, command) in [
+        (left, "Calibrate", "cv.calibrate"),
+        (right, "Clear", "cv.clear_calibration"),
+    ] {
+        let id = control_id(device, label);
+        let args = json!({ "device": device });
+        // Calibrate plays through the interface, so it needs an engine.
+        let enabled = if command == "cv.calibrate" {
+            shell.audio().engine_running()
+        } else {
+            cv.calibrated
+        };
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        if enabled {
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+            if pressed(ui, &response) {
+                invoke(events, command, args);
+            }
+        }
+        let painter = ui.painter_at(rect.expand(2.0));
+        painter.rect(
+            rect,
+            theme.sizes.corner,
+            if enabled {
+                c.control.0
+            } else {
+                c.control.0.gamma_multiply(0.6)
+            },
+            Stroke::new(1.0, c.separator.0),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            theme.small_font(),
+            if enabled { c.text.0 } else { c.pending.0 },
+        );
+        focus_ring(ui, theme, rect, &response);
+        describe(ui, id, Role::Button, label, "");
+        if !enabled {
+            ui.ctx()
+                .accesskit_node_builder(id, |node| node.set_disabled());
+        }
+    }
+    let readout_rect = Rect::from_min_max(
+        pos2(readout.left() - CV_NAME, readout.top()),
+        pos2(readout.right(), readout.top() + 2.0 * CV_ROW),
+    );
+    let id = control_id(device, "calibration");
+    ui.interact(readout_rect, id, Sense::focusable_noninteractive());
+    ui.painter_at(readout_rect).text(
+        pos2(readout_rect.left() + 1.0, readout_rect.top()),
+        Align2::LEFT_TOP,
+        &cv.readout,
+        theme.small_font(),
+        c.text_dim.0,
+    );
+    describe(ui, id, Role::Label, "Calibration", &cv.readout);
 }
 
 fn invoke_latency(events: &mut Vec<UiEvent>, device: DeviceId, latency: HardwareLatency) {

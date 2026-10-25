@@ -47,7 +47,8 @@ or an observation of Live running, as the clean-room policy allows.
   repeat of a signal lands on the exact frame the division names at the
   current tempo, at any tempo, and it follows a tempo change: changing the
   tempo from 120 to 60 BPM moves a one-sixteenth repeat from 6,000 to 12,000
-  frames at 48 kHz. (S1, S5)
+  frames at 48 kHz. The delay lines hold sixteen sixteenths with a +50% Offset
+  at 20 BPM, the slowest tempo the transport allows. (S1, S5)
 - **R2.** Link gives both channels the left channel's delay time; with Link
   off each channel uses its own. Each channel's Offset stays its own even
   when Link is on, and moves its repeat earlier or later within the

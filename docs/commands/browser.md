@@ -342,7 +342,7 @@ Result: [`BrowserState`](#browserstate).
 
 **Preview**. Permission: `external`. Contexts: `browser`.
 
-Previews an audio file (`path`, or the selected file): plays it once from its start through the main output, at the preview volume, on a voice of its own, replacing any preview, whether or not the Preview switch is on, as Shift-Enter and Right do. The file is decoded in the background, so it starts a moment later; `browser.state` reports it loading, then playing. Never changes the set. Plays through the audio device.
+Previews an audio file (`path`, or the selected file): plays it once from its start through the main output, at the preview volume, on a voice of its own, replacing any preview, whether or not the Preview switch is on, as Shift-Enter and Right do. The file is decoded in the background, so it starts a moment later; `browser.state` reports it loading, then playing. An instrument, Instrument Rack or Drum Rack preset is rendered offline playing a short phrase instead, and plays once whatever the Raw switch says; any other preset plays nothing, and `note` says why. Never changes the set. Plays through the audio device.
 
 Default keys: none.
 
@@ -350,7 +350,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `path` | string or null | no | The audio file to preview. Left out, the selected file. |
+| `path` | string or null | no | The audio file, clip file or instrument preset to preview. Left out, the selected file. |
 
 Result: [`PreviewState`](README.md#previewstate).
 

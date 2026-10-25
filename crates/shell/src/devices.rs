@@ -732,6 +732,7 @@ impl DeviceView {
                     list
                 })
                 .unwrap_or_default(),
+            meters: Vec::new(),
             armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
             map_mode: self.map_mode,
         }

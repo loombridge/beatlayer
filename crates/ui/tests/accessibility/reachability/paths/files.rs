@@ -39,6 +39,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "set.import_report",
             Exception(LaterView("the DAWproject Import window (WP-6.37b)")),
         ),
+        (
+            "set.export_dawproject",
+            Exception(LaterView(
+                "File ▸ Export DAWproject... and the DAWproject Export window (WP-6.37b)",
+            )),
+        ),
         // Separate Stems' dialog (IMP-11).
         ("stems.status", Exception(Query)),
         (

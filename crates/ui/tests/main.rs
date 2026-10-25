@@ -47,6 +47,7 @@ mod macros;
 mod main_properties;
 mod main_window;
 mod midi_input;
+mod midi_meters;
 mod midi_tools;
 mod mixer;
 mod modulation;

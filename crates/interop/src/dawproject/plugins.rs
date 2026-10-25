@@ -18,6 +18,10 @@ pub struct Installed {
     pub path: String,
     /// Its name.
     pub name: String,
+    /// Its vendor, when it gives one (R77).
+    pub vendor: Option<String>,
+    /// Its version, when it gives one (R77).
+    pub version: Option<String>,
     /// Where it goes in a chain.
     pub role: DeviceRole,
 }

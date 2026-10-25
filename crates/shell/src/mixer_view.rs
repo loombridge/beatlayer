@@ -15,10 +15,10 @@ use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
     COLUMN_WIDTH, ChainStrip, ColumnWidth, EXTENDED_METERS_HEIGHT, MAIN_COLUMN_WIDTH,
-    MIN_STRIP_HEIGHT, MixerOf, MixerViewState, PAN_HIDES_BELOW, PEAK_HOLD_SECONDS, RackFold,
-    ResetPeakArgs, STRIP_HEIGHT, ScrollArgs, ScrollReturnsArgs, SectionArgs, SetColumnWidthArgs,
-    SetHeightArgs, TICK_LABELS_WIDTH, ToggleArgs, TrackGainReduction, TrackImpact, TrackPeak,
-    ViewMixerState, ViewSectionArgs, impact_segments,
+    MIN_STRIP_HEIGHT, MeterValue, MixerOf, MixerViewState, PAN_HIDES_BELOW, PEAK_HOLD_SECONDS,
+    RackFold, ResetPeakArgs, STRIP_HEIGHT, ScrollArgs, ScrollReturnsArgs, SectionArgs,
+    SetColumnWidthArgs, SetHeightArgs, TICK_LABELS_WIDTH, ToggleArgs, TrackGainReduction,
+    TrackImpact, TrackMeterValue, TrackPeak, ViewMixerState, ViewSectionArgs, impact_segments,
 };
 use bl_shell_spec::mixer_view::{
     CROSSFADER, DEVICES, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RESET_PEAK, RETURN_TRACKS,
@@ -223,6 +223,7 @@ impl MixerView {
             return_tracks_scroll: self.return_tracks_scroll,
             performance_impact_values: Vec::new(),
             gain_reduction: Vec::new(),
+            meters: Vec::new(),
             peaks: self.peaks(),
             column_widths: self.column_widths(doc, arrangement),
             racks,

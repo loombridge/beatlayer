@@ -11,6 +11,7 @@
 //! Showing, hiding, scrolling, and focusing the mixer are the
 //! `mixer_view.*` commands. Only the columns in view are built (R17).
 
+use bl_engine::{MeterOwner, MeterSite};
 use bl_model::modulator::ModTarget;
 use bl_model::{
     AutomationTarget, ChainId, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS,
@@ -21,7 +22,7 @@ use bl_shell::mixer_controls::{
     self as controls, Control, FINE, Switch, meter_position, pan_text, volume_readout,
     volume_spoken, volume_text,
 };
-use bl_shell::mixer_view::{ChainStrip, MixerOf, RackFold};
+use bl_shell::mixer_view::{ChainStrip, MeterValue, MixerOf, RackFold};
 use bl_shell::mixer_view_commands as ids;
 use bl_shell::{InfoTarget, Invocation, Shell};
 use egui::accesskit::{self, Action, Role};
@@ -1162,13 +1163,11 @@ fn bounds(rect: Rect) -> accesskit::Rect {
     }
 }
 
-/// Whether a track's strip is a MIDI track's without an instrument: a
-/// dotted MIDI meter and the switches, without volume or pan (observed).
-/// Beatlayer has no instruments yet, so a MIDI track counts as one without
-/// while its chain holds no device that makes sound.
+/// Whether a track's strip is a MIDI track's without an instrument or audio
+/// effect: a dotted MIDI meter and the switches, without volume or pan
+/// (observed; the MIDI meters spec, R1).
 fn midi_only(doc: &Document, track: TrackId) -> bool {
-    doc.track(track)
-        .is_some_and(|t| t.kind() == TrackKind::Midi && t.devices().len() == 0)
+    doc.track(track).is_some_and(|t| t.shows_midi_meter())
 }
 
 /// Headphones in `rect`: a band over two ear cups.
@@ -1460,7 +1459,7 @@ impl StripParts<'_> {
     fn strip(&self, ui: &mut Ui, strip: &StripLayout, kind: ColumnKind, events: &mut Vec<UiEvent>) {
         let midi = midi_only(self.doc(), self.track);
         if midi {
-            self.midi_meter(ui, strip.meter);
+            self.meter(ui, strip.meter);
         } else {
             // A column narrower than 94 points, or a strip shorter than
             // 100, leaves out the readout and the pan knob (R32, R36).
@@ -3462,11 +3461,31 @@ impl StripParts<'_> {
         }
     }
 
-    /// The meter (R10): left and right side by side on the fader's scale,
-    /// the peak and the RMS level drawn as the reference describes them
-    /// (both shown); how Live draws the two together with a signal isn't
-    /// observed yet.
+    /// The track's meter: a MIDI meter while its chain holds no instrument
+    /// and no audio effect, otherwise the level meter (the MIDI meters spec,
+    /// R1); the change is as soon as the chain is.
     pub fn meter(&self, ui: &mut Ui, rect: Rect) {
+        if midi_only(self.doc(), self.track) {
+            let value = self
+                .shell
+                .chain_meter(MeterOwner::Track(self.track), MeterSite::End)
+                .unwrap_or(MeterValue::Midi {
+                    velocity: 0.0,
+                    channel: 0.0,
+                    expression: 0.0,
+                });
+            let id = meter_id(self.place, self.track);
+            crate::meters::midi(ui, self.theme, id, rect, value);
+        } else {
+            self.level_meter(ui, rect);
+        }
+    }
+
+    /// The level meter (R10): left and right side by side on the fader's
+    /// scale, the peak and the RMS level drawn as the reference describes
+    /// them (both shown); how Live draws the two together with a signal
+    /// isn't observed yet.
+    fn level_meter(&self, ui: &mut Ui, rect: Rect) {
         let c = &self.theme.colors;
         let painter = ui.painter_at(rect);
         painter.rect_filled(rect, 0.0, c.window.0);
@@ -3547,28 +3566,6 @@ impl StripParts<'_> {
             node.set_label("Gain Reduction".to_owned());
             node.set_value(format!("{reduction:.1} dB"));
             node.set_numeric_value(f64::from(reduction));
-        });
-    }
-
-    /// A MIDI track's meter (observed on a MIDI track without an
-    /// instrument: a dotted meter). It shows no notes until MIDI plays
-    /// (WP-2.1).
-    fn midi_meter(&self, ui: &mut Ui, rect: Rect) {
-        let c = &self.theme.colors;
-        let painter = ui.painter_at(rect);
-        let mut y = rect.bottom() - 2.0;
-        while y > rect.top() {
-            painter.circle_filled(pos2(rect.center().x, y), 1.0, c.separator.0);
-            y -= 4.0;
-        }
-        let id = meter_id(self.place, self.track);
-        let response = ui.interact(rect, id, Sense::hover());
-        response
-            .widget_info(|| WidgetInfo::labeled(WidgetType::ProgressIndicator, true, "MIDI Meter"));
-        ui.ctx().accesskit_node_builder(id, |node| {
-            node.set_role(Role::Meter);
-            node.set_label("MIDI Meter".to_owned());
-            node.set_value("no notes".to_owned());
         });
     }
 }

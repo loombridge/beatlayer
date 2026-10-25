@@ -778,6 +778,8 @@ pub struct Shell {
     processing: Vec<bl_model::ChainId>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
+    /// The meters between devices the engine last published (WP-6.69).
+    chain_meters: Vec<bl_engine::ChainMeter>,
     /// Whether the meters were the engine's when last polled.
     metering: bool,
     /// The agent API's last audio previews (WP-1.16).
@@ -1295,6 +1297,7 @@ impl Shell {
             processing: Vec::new(),
             modulating: false,
             meters: Vec::new(),
+            chain_meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
             recording: None,

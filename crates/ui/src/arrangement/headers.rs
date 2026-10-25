@@ -490,7 +490,7 @@ pub fn header(
         } else {
             parts.pan(ui, right_half, None, events);
         }
-        let midi_only = track.kind() == TrackKind::Midi && track.devices().len() == 0;
+        let midi_only = track.shows_midi_meter();
         if height >= 52.0 && track.kind().has_sends() && !midi_only {
             // The sends, one per return, side by side (L-ARR-009; with more
             // returns than fit, the first that do).

@@ -13,16 +13,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::SystemTime;
 
-use bl_core::time::{Bpm, TempoMap, Ticks};
+use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::preview::PreviewSamples;
 use bl_media::{Decoder, SampleData, convert_sample_rate};
-use bl_model::{ClipData, Command, ContentHash, DeviceRole, Editor, WarpMarker};
+use bl_model::{
+    Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind, DeviceRole, Document,
+    Editor, MidiData, Note, PluginFormat, RackKind, Receive, TrackId, TrackKind, WarpMarker,
+};
 use bl_plugin_host::Hosts;
 use bl_plugin_host::au::AuHost;
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::lv2::Lv2Host;
 use bl_plugin_host::vst3::Vst3Host;
 use bl_project::clip_file::ClipFile;
+use bl_project::rack_preset::Saved;
 
 use super::Waker;
 
@@ -328,21 +332,29 @@ fn decode_clip(
     if let Some(preview) = stamp.and_then(|stamp| renders.find(path, stamp, bpm, rate)) {
         return Ok(preview);
     }
+    let keep = |renders: &mut Renders, preview: &Preview| {
+        if let Some(stamp) = stamp {
+            renders.keep(Render {
+                path: path.clone(),
+                stamp,
+                bpm,
+                rate,
+                preview: preview.clone(),
+            });
+        }
+    };
+    if bl_project::preset::is_preset(path) {
+        let preview = render_preset(path, rate, bpm, &request.cancel)?;
+        keep(renders, &preview);
+        return Ok(preview);
+    }
     let file = crate::set_exchange::read_clip_file(path)?;
     let folder = path.parent().unwrap_or_else(|| Path::new("."));
     let audio = match &file.clip.data {
         ClipData::Audio(audio) => audio,
         ClipData::Midi(_) => {
             let preview = render_midi(path, file, rate, bpm, search, &request.cancel)?;
-            if let Some(stamp) = stamp {
-                renders.keep(Render {
-                    path: path.clone(),
-                    stamp,
-                    bpm,
-                    rate,
-                    preview: preview.clone(),
-                });
-            }
+            keep(renders, &preview);
             return Ok(preview);
         }
     };
@@ -428,6 +440,33 @@ pub fn render_midi(
         &BTreeSet::new(),
     )
     .map_err(|e| e.to_string())?;
+    let (data, _) = render_to(editor.document(), store, rate, length, cancel)?;
+    // The render is at the set's tempo already: one marker at its start, and
+    // the tempo it was made at, lay it on the set's beats.
+    let mut clip = bl_model::AudioData::new(ContentHash([0; 32]));
+    clip.warp = true;
+    clip.looping = true;
+    clip.tempo = Some(bpm);
+    clip.warp_markers = vec![WarpMarker {
+        time: 0.0,
+        beat: Ticks::ZERO,
+    }];
+    Ok((data, Box::new(clip)))
+}
+
+/// Renders `document` from its start to `end` for a preview, through
+/// plug-ins made from their saved state in hosts of this thread's own, so the
+/// set's instances are never borrowed (offline plug-in renders R3, R11).
+/// Stops early, with an error, when `cancel` is set. Returns the audio and
+/// what is wrong with the plug-ins, one line each: a plug-in that couldn't be
+/// made or failed, or a device nothing here hosts.
+fn render_to(
+    document: &Document,
+    store: bl_media::MediaStore,
+    rate: u32,
+    end: Ticks,
+    cancel: &AtomicBool,
+) -> Result<(SampleData, Vec<String>), String> {
     // Hosts made on this thread are this thread's main thread: the render
     // makes its plug-ins here and they end with it.
     let (clap, vst3, au, lv2) = (
@@ -444,14 +483,14 @@ pub fn render_midi(
     };
     let spec = crate::export::Render {
         start: Ticks::ZERO,
-        length: crate::export::Length::To(length),
+        length: crate::export::Length::To(end),
         sample_rate: rate,
         engine_rate: rate,
         block: crate::export::BLOCK,
     };
     let mut samples = Vec::new();
     let rendered = crate::export::render(
-        editor.document(),
+        document,
         Arc::new(store),
         hosts,
         &spec,
@@ -470,17 +509,201 @@ pub fn render_midi(
         .map(|c| samples.iter().skip(c).step_by(channels).copied().collect())
         .collect();
     let data = SampleData::new(rate, planes).map_err(|e| e.to_string())?;
-    // The render is at the set's tempo already: one marker at its start, and
-    // the tempo it was made at, lay it on the set's beats.
-    let mut clip = bl_model::AudioData::new(ContentHash([0; 32]));
-    clip.warp = true;
-    clip.looping = true;
-    clip.tempo = Some(bpm);
-    clip.warp_markers = vec![WarpMarker {
-        time: 0.0,
-        beat: Ticks::ZERO,
-    }];
-    Ok((data, Box::new(clip)))
+    let problems = document
+        .tracks()
+        .flat_map(|track| track.devices_deep().collect::<Vec<_>>())
+        .filter_map(|device| {
+            let DeviceKind::Plugin { format, .. } = device.kind else {
+                return rendered
+                    .unhosted
+                    .contains(&device.id)
+                    .then(|| format!("{} isn't available on this machine", device.title()));
+            };
+            // Each format's host has a status of its own; none means no plug-in.
+            let failure = match format {
+                PluginFormat::Clap => clap.status(device.id).map(|s| s.failure),
+                PluginFormat::Vst3 => vst3.status(device.id).map(|s| s.failure),
+                PluginFormat::AudioUnit => au.status(device.id).map(|s| s.failure),
+                PluginFormat::Lv2 => lv2.status(device.id).map(|s| s.failure),
+            };
+            let why = failure.map_or_else(
+                || "isn't available on this machine".to_owned(),
+                Option::unwrap_or_default,
+            );
+            (!why.is_empty()).then(|| format!("{}: {why}", device.title()))
+        })
+        .collect();
+    Ok((data, problems))
+}
+
+/// How long a preset's sound is followed past its phrase at most, in seconds
+/// (browser R27).
+const PRESET_TAIL_SECONDS: f64 = 2.0;
+
+/// The level, as a sample's size, below which a preset's sound has ended:
+/// −60 dBFS (browser R27).
+const PRESET_FLOOR: f32 = 0.001;
+
+/// Writes the samples a rack preset carries into `store`, as files in the
+/// system's temporary folder named by their content, so a render needs
+/// neither the User Library nor the set's media store.
+fn bring_in_samples(
+    store: &bl_media::MediaStore,
+    samples: &bl_project::rack_preset::Samples,
+) -> Result<(), String> {
+    let folder = std::env::temp_dir().join("beatlayer-preset-previews");
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    for (hash, file) in samples {
+        let name = bl_project::preset::file_safe(&file.name);
+        let at = folder.join(format!("{}-{name}", &hash.to_string()[..16]));
+        if !at.is_file() {
+            std::fs::write(&at, &file.data).map_err(|e| format!("{}: {e}", at.display()))?;
+        }
+        let wanted = bl_media::ContentHash::from_bytes(hash.0);
+        if store.import(&at).map_err(|e| e.to_string())? != wanted {
+            return Err(format!("the preset's sample {} is damaged", file.name));
+        }
+    }
+    Ok(())
+}
+
+/// Renders the preset at `path` for a preview (browser R27, R28): the
+/// preset's devices alone on a MIDI track of a set of their own, at `bpm`,
+/// playing Beatlayer's phrase, with plug-ins made from their saved state in
+/// hosts of this thread's own, as [`render_midi`] does. The phrase is the
+/// note C3 at velocity 100 for one bar of four beats for an instrument or an
+/// Instrument Rack, and for a Drum Rack each pad that holds a chain, lowest
+/// note first, a sixteenth note each. The sound is followed past the phrase
+/// until it falls below −60 dBFS, or for 2 seconds at most. Returns the
+/// audio, to be played once as it is.
+///
+/// # Errors
+///
+/// A message if the file can't be read, holds no instrument, plays nothing
+/// (a Drum Rack with no chain), needs a plug-in this machine lacks, or the
+/// render fails or is cancelled.
+pub fn render_preset(
+    path: &Path,
+    rate: u32,
+    bpm: f64,
+    cancel: &AtomicBool,
+) -> Result<Preview, String> {
+    let mut editor = Editor::new();
+    let (device, samples) = match Saved::load(path).map_err(|e| e.to_string())? {
+        Saved::Device(preset) if preset.role == DeviceRole::Instrument => {
+            let mut device = Device::new(editor.new_id(), preset.device_name, preset.kind)
+                .with_role(preset.role);
+            device.params = preset.params;
+            device.shape = preset.shape;
+            device.articulations = preset.articulations.unwrap_or_default();
+            device.mpe = preset.mpe.unwrap_or_default();
+            (device, Default::default())
+        }
+        Saved::Rack(preset) if preset.rack.role == DeviceRole::Instrument => {
+            let bl_project::rack_preset::RackPreset { mut rack, samples } = *preset;
+            rack.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+            // The modulators' targets are the other set's tracks.
+            rack.clear_mappings();
+            (rack, samples)
+        }
+        _ => {
+            return Err(
+                "only an instrument's, an Instrument Rack's or a Drum Rack's preset plays by itself"
+                    .to_owned(),
+            );
+        }
+    };
+    let quarter = Ticks(TICKS_PER_QUARTER);
+    let (notes, phrase) = if device.rack_kind() == Some(RackKind::Drum) {
+        let step = Ticks(TICKS_PER_QUARTER / 4);
+        // shortcut: a chain that answers every note is played as C3, once.
+        let mut keys: Vec<u8> = device
+            .chains
+            .iter()
+            .filter(|chain| !chain.is_return && !chain.devices.is_empty())
+            .map(|chain| match chain.receive {
+                Receive::Note(key) => key,
+                Receive::AllNotes => 60,
+            })
+            .collect();
+        keys.sort_unstable();
+        keys.dedup();
+        if keys.is_empty() {
+            return Err(
+                "this Drum Rack has no pad with a chain, so there is nothing to hear".to_owned(),
+            );
+        }
+        let notes = (0..)
+            .zip(&keys)
+            .map(|(n, &key)| Note::new(key, Ticks(step.0 * n), step, 100))
+            .collect::<Vec<_>>();
+        (notes, Ticks(step.0 * keys.len() as i64))
+    } else {
+        // shortcut: a bar is four beats; the set's time signature isn't read.
+        let bar = Ticks(4 * quarter.0);
+        (vec![Note::new(60, Ticks::ZERO, bar, 100)], bar)
+    };
+    let store = bl_media::MediaStore::new();
+    bring_in_samples(&store, &samples)?;
+    let tempo = TempoMap::constant(Bpm::new(bpm).map_err(|e| e.to_string())?);
+    editor
+        .apply(Command::SetTempo { tempo })
+        .map_err(|e| e.to_string())?;
+    let track: TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Preview".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .and_then(|_| {
+            editor.apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let clip = Clip::new(
+        editor.new_id(),
+        Ticks::ZERO,
+        phrase,
+        ClipData::Midi(MidiData::new(notes)),
+    );
+    editor
+        .apply(Command::CreateClip { track, clip })
+        .map_err(|e| e.to_string())?;
+    let tail = Ticks((PRESET_TAIL_SECONDS * bpm / 60.0 * quarter.0 as f64).round() as i64);
+    let (data, problems) = render_to(
+        editor.document(),
+        store,
+        rate,
+        Ticks(phrase.0 + tail.0),
+        cancel,
+    )?;
+    if let Some(problem) = problems.first() {
+        return Err(problem.clone());
+    }
+    // Followed past the phrase only until the sound has ended.
+    let phrase_frames = (phrase.0 as f64 / quarter.0 as f64 * 60.0 / bpm * f64::from(rate)).round();
+    let mut frames = (phrase_frames as usize).min(data.frames());
+    for frame in (frames..data.frames()).rev() {
+        if data
+            .channels()
+            .any(|channel| channel[frame].abs() >= PRESET_FLOOR)
+        {
+            frames = frame + 1;
+            break;
+        }
+    }
+    let planes = data.channels().map(|c| c[..frames].to_vec()).collect();
+    let data = SampleData::new(rate, planes).map_err(|e| e.to_string())?;
+    Ok((
+        data,
+        Box::new(bl_model::AudioData::new(ContentHash([0; 32]))),
+    ))
 }
 
 /// Decodes up to [`MAX_PREVIEW_SECONDS`] of a file and converts it to
@@ -573,6 +796,47 @@ mod tests {
         }
         assert!(!found(&renders, 2, 120.0), "the oldest went");
         assert_eq!(renders.0.len(), KEPT_RENDERS);
+    }
+
+    // Spec: browser R27. A preset's render is kept until the preset file
+    // changes, so selecting it again doesn't render it again.
+    #[test]
+    fn a_preset_render_is_kept_until_the_preset_file_changes() {
+        let folder = std::env::temp_dir().join(format!("bl-preset-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("Lead.blpreset");
+        let synth = bl_devices::polysynth_type();
+        let id = bl_core::id::Id::new(1).unwrap();
+        let device =
+            Device::new(DeviceId(id), synth.name.to_string(), synth.kind).with_role(synth.role);
+        bl_project::preset::Preset::of(&device).save(&path).unwrap();
+        let request = Request {
+            id: 1,
+            path: path.clone(),
+            rate: 48_000,
+            clip_search: Some(Vec::new()),
+            bpm: 120.0,
+            cancel: Arc::default(),
+        };
+        let mut renders = Renders::default();
+        let first = decode_clip(&request, &[], &mut renders).unwrap();
+
+        // The same size and time but other content is not read again.
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let rewrite = |modified| {
+            let size = std::fs::metadata(&path).unwrap().len();
+            std::fs::write(&path, vec![b' '; size as usize]).unwrap();
+            let file = std::fs::File::options().write(true).open(&path).unwrap();
+            file.set_modified(modified).unwrap();
+        };
+        rewrite(modified);
+        let again = decode_clip(&request, &[], &mut renders).unwrap();
+        assert_eq!(again.0.frames(), first.0.frames());
+        // A later time is a change: it is read again, and isn't a preset.
+        rewrite(modified + std::time::Duration::from_secs(1));
+        assert!(decode_clip(&request, &[], &mut renders).is_err());
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_dir(&folder);
     }
 
     // Spec: clip files R16. Selecting another file, or stopping, cancels the

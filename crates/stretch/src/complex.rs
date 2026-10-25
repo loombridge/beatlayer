@@ -15,9 +15,11 @@
 //! Complex uses the library's own default configuration and never corrects
 //! formants; Complex Pro uses a finer configuration and, when the pitch
 //! moves, holds the formants by Formants and places the formant analysis by
-//! Envelope (R22, R23). Neither is neutral, so both always run the stretcher
-//! (R21).
+//! Envelope (R22, R23): the library's correction first, then Beatlayer's own
+//! ([`formants`]), which finishes what the library leaves on an octave (R35).
+//! Neither is neutral, so both always run the stretcher (R21).
 
+use crate::formants::{self, Corrector, Tune};
 use crate::mode::{Request, WarpMode, Window};
 use crate::signalsmith::Stretcher;
 
@@ -108,6 +110,10 @@ pub struct Complex {
     pro: bool,
     formants: f64,
     envelope: u32,
+    /// Complex Pro's own formant correction, after the stretcher.
+    corrector: Option<Corrector>,
+    /// What it is asked for while the pitch moves and Formants is above 0 %.
+    correction: Option<Tune>,
     /// The song frame the last run ended at, so a run that doesn't follow it
     /// (a start, a locate, a jump) primes afresh (R7).
     ended: Option<i64>,
@@ -179,6 +185,8 @@ impl Complex {
             pro,
             formants: DEFAULT_FORMANTS,
             envelope: DEFAULT_ENVELOPE,
+            corrector: pro.then(|| Corrector::new(channels.max(1))),
+            correction: None,
             ended: None,
             clip: 0,
             fed: 0,
@@ -217,6 +225,7 @@ impl Complex {
     fn tune(&mut self, ratio: f64) {
         let ratio = ratio.max(1e-3);
         self.stretcher.set_transpose_factor(ratio);
+        self.correction = None;
         if !self.pro {
             return;
         }
@@ -236,6 +245,15 @@ impl Complex {
         // analysis assumes, 44,100 / Envelope Hz, as a fraction of the rate.
         let base = 44_100.0 / f64::from(self.envelope) / self.sample_rate;
         self.stretcher.set_formant_base(base);
+        // Spec: warp-modes R22, R23, R35. The formants move by the rest of
+        // the pitch change, in semitones; the correction smooths the envelope
+        // to the period of Envelope's fundamental, shortened by a rise in
+        // pitch so the raised pitch's own ripple stays out of it.
+        let period = self.sample_rate * f64::from(self.envelope) / 44_100.0;
+        self.correction = Some(Tune {
+            shift: ratio.powf(1.0 - share),
+            cutoff: ((period / ratio.max(1.0)).round() as usize).clamp(8, formants::FRAME / 4),
+        });
     }
 
     /// The input frames from `self.fed` up to file frame `until`, one channel
@@ -270,6 +288,9 @@ impl Complex {
         // `output_seek` resets the stretcher itself, so the settings go on
         // before it.
         self.tune(request.pitch);
+        if let Some(corrector) = &mut self.corrector {
+            corrector.reset();
+        }
         let seek = self.stretcher.output_seek_length(rate).max(1);
         let from = p0 - seek as i64;
         let before = (0..self.channels).map(|c| slice(window, c, from, seek).unwrap_or(&[]));
@@ -324,6 +345,22 @@ impl Complex {
             .map(|channel| &mut channel[..n]);
         self.stretcher.process(inputs, need, columns, n);
         self.fed = until;
+        let Some(corrector) = &mut self.corrector else {
+            return;
+        };
+        let Some(tune) = self.correction else {
+            corrector.reset();
+            return;
+        };
+        // Spec: warp-modes R35. Each hop's envelope is compared with the file
+        // around the frames it heard, which the window holds (R24).
+        for (channel, column) in out.chunks_mut(stride).take(self.channels).enumerate() {
+            corrector.run(channel, &mut column[..n], &tune, |i| {
+                let heard = request.positions[i] - rate * formants::FRAME as f64 / 2.0;
+                let first = heard.round() as i64 - formants::FRAME as i64 / 2;
+                slice(window, channel, first, formants::FRAME)
+            });
+        }
     }
 }
 
@@ -449,5 +486,25 @@ mod tests {
         // Another clip taking the instance over primes too.
         run(&mut mode, &file, 30_000.0, 20_480, 480, 8);
         assert_eq!(mode.primes, 3, "another clip must prime");
+    }
+
+    // Spec: warp-modes R22, R23, R35. Beatlayer's own formant correction runs
+    // only in Complex Pro, only while the pitch moves, and only above Formants
+    // 0 %: elsewhere the output is the stretcher's own, to the bit.
+    #[test]
+    fn the_formant_correction_runs_only_where_the_pitch_moves_and_formants_is_above_zero() {
+        let ratio = 2.0_f64.powf(7.0 / 12.0);
+        let mut pro = Complex::new(1, 48_000.0, true);
+        pro.tune(1.0);
+        assert!(pro.correction.is_none(), "no pitch change");
+        pro.tune(ratio);
+        assert!(pro.correction.is_some(), "a pitch change at Formants 100 %");
+        pro.set_formants(0.0);
+        pro.tune(ratio);
+        assert!(pro.correction.is_none(), "Formants 0 %");
+        let mut complex = Complex::new(1, 48_000.0, false);
+        complex.tune(ratio);
+        assert!(complex.correction.is_none(), "Complex");
+        assert!(complex.corrector.is_none(), "Complex makes no corrector");
     }
 }

@@ -19,6 +19,7 @@ use crate::message::{
 };
 use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
+use crate::sync_out::{Beats, Part, SyncOut};
 use crate::node::{NodeData, NodeKey, ParamValue, TransportInfo};
 use crate::program::{Blk, EngineProgram, Resolved};
 use crate::recording::{RecordingPlan, TakeBounds};
@@ -335,6 +336,8 @@ pub struct Processor {
     /// The frames MIDI to ports is sent after its block starts to be heard
     /// with the audio (WP-5.34): the device's reported output latency.
     output_latency: u32,
+    /// MIDI clock out to the ports with Sync on (WP-7.11).
+    sync_out: SyncOut,
     /// The notes monitoring MIDI tracks received, for Capture MIDI
     /// (WP-3.14).
     captured: Producer<CapturedMidi>,
@@ -398,6 +401,7 @@ impl Processor {
             log: Writer::new(),
             midi: MidiIn::new(config.sample_rate),
             output_latency: config.output_latency,
+            sync_out: SyncOut::new(),
             captured,
             config,
         }
@@ -619,6 +623,9 @@ impl Processor {
         if let Some(program) = self.program.as_mut() {
             self.midi.release(&mut program.get_mut().midi);
         }
+        // Spec: midi-clock R5. Hardware that was following stops with the
+        // stream.
+        self.sync_out.park(&mut self.midi);
         // The song stopped with the stream, so the Session View is at rest
         // too: nothing plays until a person launches again.
         self.session.clear();
@@ -742,6 +749,11 @@ impl Processor {
                     self.rendering = (!plan.get_mut().outputs.is_empty()).then_some(plan);
                 }
                 Message::OutputLatency(frames) => self.output_latency = frames,
+                Message::SyncOutput {
+                    index,
+                    count,
+                    output,
+                } => self.sync_out.set_output(index, count, output),
             }
         }
     }
@@ -1071,6 +1083,19 @@ impl Processor {
             TransportCommand::SetPunch(punch) => {
                 self.punch = punch;
                 self.update_loop_frames();
+            }
+            // Spec: midi-clock R11
+            TransportCommand::ResyncExternalHardware => {
+                let position = self.tempo().frames_to_ticks(self.position, self.config.sample_rate);
+                let signatures = match &self.program {
+                    Some(p) => &p.get().time_signatures,
+                    None => &self.fallback_time_signatures,
+                };
+                self.sync_out.resync(
+                    position,
+                    signatures,
+                    self.playing && !self.metronome.is_counting_in(),
+                );
             }
             TransportCommand::SetRecording(recording) => {
                 self.metronome.set_recording(recording);
@@ -1804,6 +1829,7 @@ impl Processor {
     /// the loop's end goes on from its start: the parts of a block end
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
+        self.write_sync(offset, length);
         let stride = self.config.max_frames;
         // The song frame this part starts at, for a real-time render's
         // range (WP-5.35).
@@ -1932,6 +1958,40 @@ impl Processor {
         if self.rendering.is_some() {
             self.capture_render(song, length);
         }
+    }
+
+    /// Writes the MIDI clock and transport messages for the part of the
+    /// block that starts at `offset` and runs `length` frames (midi-clock R3
+    /// to R8, R11).
+    fn write_sync(&mut self, offset: usize, length: usize) {
+        let (tempo, signatures) = match &self.program {
+            Some(p) => (&p.get().tempo, &p.get().time_signatures),
+            None => (&self.fallback_tempo, &self.fallback_time_signatures),
+        };
+        let counting_in = self.metronome.is_counting_in();
+        let loop_end = self
+            .held_frames
+            .or(self.loop_frames)
+            .filter(|region| self.position < region.end)
+            .map(|region| region.end);
+        self.sync_out.part(
+            &Part {
+                offset: offset as u32,
+                length: length as u32,
+                output_latency: self.output_latency,
+                playing: self.playing && !counting_in,
+                counting_in,
+                position: self.position,
+                insert_marker: self.insert_marker,
+                loop_end,
+                beats: Beats {
+                    tempo,
+                    rate: self.config.sample_rate,
+                },
+                signatures,
+            },
+            &mut self.midi,
+        );
     }
 
     /// Copies the part of the block the real-time render's range covers
@@ -2202,6 +2262,9 @@ impl Processor {
         state.cpu_load = cpu_load;
         state.cpu_load_max = self.cpu_load_max;
         state.counters = self.counters;
+        state.sync_out = self
+            .sync_out
+            .state(self.playing, self.metronome.is_counting_in());
         self.session.status(&mut self.session_status);
         if self.session_take.is_some()
             && let Some(plan) = self.plan.as_mut()

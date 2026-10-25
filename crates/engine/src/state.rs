@@ -220,6 +220,8 @@ pub struct EngineState {
     pub processing: Vec<ChainId>,
     /// The audio thread's counters.
     pub counters: EngineCounters,
+    /// The MIDI clock the engine sends (midi-clock R12).
+    pub sync_out: crate::SyncOutState,
 }
 
 impl EngineState {
@@ -260,6 +262,7 @@ impl EngineState {
             modulated: Vec::with_capacity(modulated),
             processing: Vec::with_capacity(processing),
             counters: EngineCounters::default(),
+            sync_out: crate::SyncOutState::default(),
         }
     }
 
@@ -349,6 +352,7 @@ impl Clone for EngineState {
             modulated,
             processing,
             counters: self.counters,
+            sync_out: self.sync_out,
         }
     }
 }

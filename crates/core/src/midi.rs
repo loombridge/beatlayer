@@ -74,6 +74,34 @@ impl MidiMessage {
         }
     }
 
+    /// Timing Clock (F8): sent 24 times per quarter note.
+    pub const CLOCK: Self = Self::real_time(0xF8);
+    /// Start (FA): play from the song's start on the next clock.
+    pub const START: Self = Self::real_time(0xFA);
+    /// Continue (FB): play on from the song position on the next clock.
+    pub const CONTINUE: Self = Self::real_time(0xFB);
+    /// Stop (FC).
+    pub const STOP: Self = Self::real_time(0xFC);
+
+    const fn real_time(status: u8) -> Self {
+        Self {
+            bytes: [status, 0, 0],
+            len: 1,
+        }
+    }
+
+    /// Song Position Pointer (F2) naming `sixteenths` MIDI beats from the
+    /// song's start, least significant seven bits first. Counts past the
+    /// 14-bit range (16,383) are sent as 16,383.
+    #[must_use]
+    pub const fn song_position(sixteenths: u32) -> Self {
+        let beats = if sixteenths > 0x3FFF { 0x3FFF } else { sixteenths };
+        Self {
+            bytes: [0xF2, (beats & 0x7F) as u8, (beats >> 7) as u8],
+            len: 3,
+        }
+    }
+
     /// The message's bytes.
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
@@ -236,6 +264,48 @@ pub struct MidiInputEvent {
     pub time: Instant,
     /// The message.
     pub message: MidiMessage,
+}
+
+/// How an output with Sync on sends its song position (`docs/specs/midi-clock.md`,
+/// R5, R6): the Settings window's MIDI Clock Type.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ClockType {
+    /// Song Position Pointer and Continue whenever the play position
+    /// changes.
+    #[default]
+    Song,
+    /// Only Start, at the next bar line, for hardware that doesn't read
+    /// Song Position Pointer.
+    Pattern,
+}
+
+/// What the Resync External Hardware button sends an output with Sync on
+/// (`docs/specs/midi-clock.md`, R11): the Settings window's Hardware Resync.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum HardwareResync {
+    /// Stop, then Start.
+    #[default]
+    StopAndStart,
+    /// Start.
+    StartOnly,
+    /// Nothing.
+    Off,
+}
+
+/// An output port with Sync on and its options, as the engine knows it
+/// (`docs/specs/midi-clock.md`, R1 to R4). Nothing about ports is in the
+/// document: the shell sends the list whenever it changes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SyncOutput {
+    /// The port.
+    pub port: PortId,
+    /// MIDI Clock Sync Delay in milliseconds, added to every sync message's
+    /// moment.
+    pub delay_ms: i16,
+    /// MIDI Clock Type.
+    pub clock_type: ClockType,
+    /// Hardware Resync.
+    pub resync: HardwareResync,
 }
 
 /// A message on its way from the engine to a MIDI output port: the port, the

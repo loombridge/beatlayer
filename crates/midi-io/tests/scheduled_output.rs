@@ -387,3 +387,73 @@ fn a_late_message_is_sent_at_once_and_counted() {
     assert_eq!(test.sent_at("Synth"), vec![(due, early.bytes().to_vec())]);
     assert_eq!(test.sent("Muted"), vec![muted_off.bytes().to_vec()]);
 }
+
+// Spec: midi-clock R3, R4. Clock and the other sync messages reach an output
+// by its Sync switch whatever its Track switch is, and tracks' MIDI by its
+// Track switch whatever its Sync switch is, each with its own stamp.
+#[test]
+fn sync_messages_follow_the_sync_switch_and_notes_the_track_switch() {
+    let test = TestBackend::new();
+    test.add_port(Direction::Output, "Drum machine");
+    test.add_port(Direction::Output, "Synth");
+    let (sender, _engine) = input_queue(64);
+    let mut ports = MidiPorts::new(Box::new(test.clone()), sender);
+    ports.refresh().unwrap();
+    let on = |track, sync| PortSwitches {
+        track,
+        sync,
+        ..PortSwitches::OFF
+    };
+    ports
+        .set_switches(Direction::Output, "Drum machine", on(false, true))
+        .unwrap();
+    ports
+        .set_switches(Direction::Output, "Synth", on(true, false))
+        .unwrap();
+    let mut producer = ports.output().attach(64);
+
+    let due = Instant::now() + Duration::from_millis(60);
+    let note = MidiMessage::note_on(0, 60, 100);
+    let sync = [
+        MidiMessage::START,
+        MidiMessage::song_position(0x1234),
+        MidiMessage::CONTINUE,
+        MidiMessage::CLOCK,
+        MidiMessage::STOP,
+    ];
+    for port in ["Drum machine", "Synth"] {
+        for (n, message) in [note].into_iter().chain(sync).enumerate() {
+            producer
+                .push(MidiOutputEvent {
+                    port: PortId::from_name(port),
+                    time: due + Duration::from_millis(n as u64),
+                    message,
+                })
+                .unwrap();
+        }
+    }
+
+    let waited = Instant::now();
+    loop {
+        let stats = ports.output_stats().snapshot();
+        if stats.sent == 6 && stats.unrouted == 6 {
+            break;
+        }
+        assert!(
+            waited.elapsed() < Duration::from_secs(2),
+            "the output thread handled only {stats:?}"
+        );
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let stamped = |name| test.sent_at(name);
+    let drums = stamped("Drum machine");
+    assert_eq!(
+        drums.iter().map(|(_, bytes)| bytes.clone()).collect::<Vec<_>>(),
+        sync.iter().map(|m| m.bytes().to_vec()).collect::<Vec<_>>()
+    );
+    assert_eq!(drums[1].1, vec![0xF2, 0x34, 0x24]);
+    for (n, (at, _)) in drums.iter().enumerate() {
+        assert_eq!(*at, due + Duration::from_millis(n as u64 + 1));
+    }
+    assert_eq!(stamped("Synth"), vec![(due, note.bytes().to_vec())]);
+}

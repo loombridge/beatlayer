@@ -101,6 +101,27 @@ impl Sender {
         self.push(Message::OutputLatency(frames));
     }
 
+    /// Sends the output ports with Sync on and their options, which clock
+    /// out sends to (`docs/specs/midi-clock.md`, R3). The engine keeps the
+    /// first [`MAX_SYNC_OUTPUTS`](crate::MAX_SYNC_OUTPUTS).
+    pub fn sync_outputs(&mut self, outputs: &[bl_core::midi::SyncOutput]) {
+        let count = outputs.len().min(crate::MAX_SYNC_OUTPUTS) as u8;
+        if count == 0 {
+            self.push(Message::SyncOutput {
+                index: 0,
+                count,
+                output: None,
+            });
+        }
+        for (index, &output) in outputs.iter().take(usize::from(count)).enumerate() {
+            self.push(Message::SyncOutput {
+                index: index as u8,
+                count,
+                output: Some(output),
+            });
+        }
+    }
+
     /// Sends a parameter change.
     pub fn send_param(&mut self, event: ParamEvent) {
         self.push(Message::Param(event));

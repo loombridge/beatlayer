@@ -4,7 +4,9 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
 
-use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId};
+use bl_core::midi::{
+    ClockType, HardwareResync, MidiInputEvent, MidiMessage, MidiSource, PortId, SyncOutput,
+};
 
 use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
 use crate::output::{OutputBus, OutputStats};
@@ -25,6 +27,13 @@ pub struct PortSwitches {
     /// An input's messages are read as MPE, each note on a channel of its
     /// own (`docs/specs/midi-io.md`, R27); an output's has no meaning yet.
     pub mpe: bool,
+    /// An output's MIDI Clock Sync Delay in milliseconds, from -100 to 100
+    /// (`docs/specs/midi-clock.md`, R1, R2). Kept while Sync is off.
+    pub delay_ms: i16,
+    /// An output's MIDI Clock Type.
+    pub clock_type: ClockType,
+    /// An output's Hardware Resync.
+    pub resync: HardwareResync,
 }
 
 impl PortSwitches {
@@ -34,6 +43,9 @@ impl PortSwitches {
         sync: false,
         remote: false,
         mpe: false,
+        delay_ms: 0,
+        clock_type: ClockType::Song,
+        resync: HardwareResync::StopAndStart,
     };
 
     /// Whether any switch is on, so the port is open (R4).
@@ -65,6 +77,7 @@ impl PortSwitches {
             sync: bits & 2 != 0,
             remote: bits & 4 != 0,
             mpe: bits & 8 != 0,
+            ..Self::OFF
         }
     }
 }
@@ -277,8 +290,12 @@ impl MidiPorts {
             return;
         }
         if entry.output {
-            self.output
-                .set_track(self.owner, port, entry.switches.track);
+            self.output.set_switches(
+                self.owner,
+                port,
+                entry.switches.track,
+                entry.switches.sync,
+            );
             return;
         }
         let opened = match entry.direction {
@@ -290,8 +307,13 @@ impl MidiPorts {
                     .map(|connection| entry.input = Some((connection, switches)))
             }
             Direction::Output => self.backend.open_output(&entry.name).map(|connection| {
-                self.output
-                    .insert(self.owner, port, entry.switches.track, connection);
+                self.output.insert(
+                    self.owner,
+                    port,
+                    entry.switches.track,
+                    entry.switches.sync,
+                    connection,
+                );
                 entry.output = true;
             }),
         };
@@ -319,6 +341,22 @@ impl MidiPorts {
         self.ports
             .iter()
             .map(|e| (e.direction, e.name.clone(), e.switches))
+            .collect()
+    }
+
+    /// The open outputs with Sync on and their options: what the engine
+    /// sends clock to (`docs/specs/midi-clock.md`, R3).
+    #[must_use]
+    pub fn sync_outputs(&self) -> Vec<SyncOutput> {
+        self.ports
+            .iter()
+            .filter(|e| e.direction == Direction::Output && e.output && e.switches.sync)
+            .map(|e| SyncOutput {
+                port: PortId::from_name(&e.name),
+                delay_ms: e.switches.delay_ms,
+                clock_type: e.switches.clock_type,
+                resync: e.switches.resync,
+            })
             .collect()
     }
 
@@ -549,6 +587,7 @@ mod tests {
                     sync: true,
                     remote: true,
                     mpe: false,
+                    ..PortSwitches::OFF
                 },
             )
             .unwrap();

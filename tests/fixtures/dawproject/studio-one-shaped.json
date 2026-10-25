@@ -15,7 +15,7 @@
     },
     {
       "count": 1,
-      "did": "left out",
+      "did": "kept as a missing plug-in",
       "what": "an Audio Unit plug-in",
       "where": "the track \"Guitar\""
     },
@@ -42,6 +42,12 @@
       "did": "read as a copy",
       "what": "an alias clip",
       "where": "the clip \"Idea again\" at 2.1.1 on the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a marker at the tick of an earlier one",
+      "where": "the marker \"Again\""
     }
   ]
 }

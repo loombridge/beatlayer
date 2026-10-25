@@ -1,0 +1,53 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a VST2 plug-in",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a device `Mystery` by `Acme`",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "switched off",
+      "what": "a device that isn't loaded",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a second instrument, a VST3 plug-in",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 2,
+      "did": "moved to its role's place",
+      "what": "a CLAP plug-in out of its role's place",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 4,
+      "did": "kept as a missing plug-in",
+      "what": "a CLAP plug-in",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "kept as a missing plug-in",
+      "what": "an Audio Unit plug-in",
+      "where": "the track \"Synth\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "a CLAP plug-in on a track that holds no MIDI",
+      "where": "the track \"FX Track\""
+    }
+  ]
+}

@@ -7,13 +7,14 @@
 //! as it was (the DAWproject spec, R10).
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Mutex};
 
-use bl_interop::dawproject;
-use bl_model::{ContentHash, Editor, WarpMode};
+use bl_interop::dawproject::{self, Installed, NewColours, Plugins};
+use bl_model::{ClipId, ContentHash, Editor, ParamDescriptor, TrackId, WarpMode};
 use bl_shell_spec::dawproject::{ImportReport, ImportReportEntry};
+use bl_shell_spec::settings::ThemeLook;
 
 /// Why a DAWproject command couldn't run.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,10 +55,70 @@ pub fn import_folder(temporary: &Path, source: &Path) -> PathBuf {
     temporary.join("Imported").join(name)
 }
 
+/// What an import takes from the shell besides the file (R23, R46).
+pub struct Settings {
+    /// The Default Warp Mode (R31).
+    pub default_warp_mode: WarpMode,
+    /// The 14 track colours of the theme in use (R23).
+    pub track_colours: Vec<[u8; 3]>,
+    /// The colours a new track and a new clip take (R23).
+    pub look: ThemeLook,
+    /// The plug-ins the scanner found (R46).
+    pub installed: Vec<Installed>,
+}
+
+/// The colours a new track and clip take, as the settings give them.
+struct LookColours(ThemeLook);
+
+impl NewColours for LookColours {
+    fn track(&self, id: TrackId) -> u8 {
+        self.0.new_track_colour(id)
+    }
+
+    fn clip(&self, id: ClipId) -> Option<u8> {
+        self.0.new_clip_colour(id)
+    }
+}
+
+/// A plug-in the import wants described, and where to send what it finds.
+struct Describe {
+    plugin: Installed,
+    reply: mpsc::Sender<Result<Vec<ParamDescriptor>, String>>,
+}
+
+/// The plug-ins as the worker sees them: the scanner's list, and the shell's
+/// own thread to load one on, which VST3 needs (R57).
+struct Hosted {
+    installed: Vec<Installed>,
+    ask: Mutex<mpsc::Sender<Describe>>,
+}
+
+impl Plugins for Hosted {
+    fn installed(&self) -> &[Installed] {
+        &self.installed
+    }
+
+    fn describe(&self, plugin: &Installed) -> Result<Vec<ParamDescriptor>, String> {
+        let (reply, answer) = mpsc::channel();
+        self.ask
+            .lock()
+            .map_err(|_| "the import stopped".to_owned())?
+            .send(Describe {
+                plugin: plugin.clone(),
+                reply,
+            })
+            .map_err(|_| "the import stopped".to_owned())?;
+        answer
+            .recv()
+            .unwrap_or_else(|_| Err("the shell stopped answering".to_owned()))
+    }
+}
+
 /// An import running on a worker thread (R10).
 pub struct Job {
     percent: Arc<AtomicU32>,
     finished: Receiver<Result<Imported, DawProjectError>>,
+    asked: Receiver<Describe>,
 }
 
 impl Job {
@@ -67,23 +128,48 @@ impl Job {
     /// # Errors
     ///
     /// [`DawProjectError`] if the thread can't start.
-    pub fn start(
-        path: &Path,
-        folder: &Path,
-        default_warp_mode: WarpMode,
-    ) -> Result<Self, DawProjectError> {
+    pub fn start(path: &Path, folder: &Path, settings: Settings) -> Result<Self, DawProjectError> {
         let (send, finished) = mpsc::channel();
+        let (ask, asked) = mpsc::channel();
         let percent = Arc::new(AtomicU32::new(0));
         let (path, folder, counter) = (path.to_path_buf(), folder.to_path_buf(), percent.clone());
         std::thread::Builder::new()
             .name("bl-shell-dawproject".into())
             .spawn(move || {
-                let _ = send.send(build(&path, &folder, default_warp_mode, &counter));
+                let plugins = Hosted {
+                    installed: settings.installed,
+                    ask: Mutex::new(ask),
+                };
+                let colours = LookColours(settings.look);
+                let _ = send.send(build(
+                    &path,
+                    &folder,
+                    settings.default_warp_mode,
+                    &settings.track_colours,
+                    &colours,
+                    &plugins,
+                    &counter,
+                ));
             })
             .map_err(|error| {
                 DawProjectError::Failed(format!("couldn't start reading the file: {error}"))
             })?;
-        Ok(Self { percent, finished })
+        Ok(Self {
+            percent,
+            finished,
+            asked,
+        })
+    }
+
+    /// Answers the plug-ins the worker has asked to have loaded, with
+    /// `describe` (R57). Called on the thread that owns the plug-in hosts.
+    pub fn serve(
+        &self,
+        mut describe: impl FnMut(&Installed) -> Result<Vec<ParamDescriptor>, String>,
+    ) {
+        while let Ok(Describe { plugin, reply }) = self.asked.try_recv() {
+            let _ = reply.send(describe(&plugin));
+        }
     }
 
     /// How far the import is, from 0 to 100, for the Status Bar.
@@ -109,6 +195,9 @@ fn build(
     path: &Path,
     folder: &Path,
     default_warp_mode: WarpMode,
+    track_colours: &[[u8; 3]],
+    new_colours: &dyn NewColours,
+    plugins: &dyn Plugins,
     percent: &AtomicU32,
 ) -> Result<Imported, DawProjectError> {
     let failed = |reason: String| DawProjectError::Failed(reason);
@@ -120,6 +209,9 @@ fn build(
         folder: path.parent().unwrap_or(Path::new("")),
         extract_to: folder,
         default_warp_mode,
+        track_colours,
+        new_colours,
+        plugins,
     };
     percent.store(20, Ordering::Relaxed);
     let imported =

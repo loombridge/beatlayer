@@ -399,6 +399,9 @@ struct KeyRows {
     top: f32,
     /// The row at the grid's top edge, continuous, while folded.
     first: f32,
+    /// How tall a row is, in points: [`KEY_HEIGHT`] unless the note editor's
+    /// view has zoomed the rows (piano-roll R32, R34).
+    height: f32,
 }
 
 impl KeyRows {
@@ -408,13 +411,35 @@ impl KeyRows {
             folded,
             top,
             first,
+            height: KEY_HEIGHT,
         }
+    }
+
+    /// These rows with the view `rows` the shell holds for them: the row at
+    /// the grid's top edge and the one at its bottom edge.
+    fn shown(self, grid: Rect, rows: (f64, f64)) -> Self {
+        let visible = (rows.1 - rows.0).max(1.0);
+        let height = (f64::from(grid.height()) / visible) as f32;
+        let row = rows.0 as f32;
+        Self {
+            top: 127.0 - row,
+            first: row,
+            height,
+            ..self
+        }
+    }
+
+    /// The rows the grid shows: the one at its top edge, and the one at its
+    /// bottom edge.
+    fn visible(&self, grid: Rect) -> (f64, f64) {
+        let top = f64::from(self.top_row());
+        (top, top + f64::from(grid.height() / self.height))
     }
 
     /// Where the row of `key` starts in `grid`, if it shows.
     fn y_of(&self, grid: Rect, key: u8) -> Option<f32> {
         if !self.folded {
-            return Some(y_of_key(grid, self.top, key));
+            return Some(grid.top() + (self.top - f32::from(key)) * self.height);
         }
         let row = self.keys.iter().position(|shown| *shown == key)?;
         Some(self.y_of_row(grid, row))
@@ -422,7 +447,7 @@ impl KeyRows {
 
     /// Where the row at `row` starts in `grid`.
     fn y_of_row(&self, grid: Rect, row: usize) -> f32 {
-        grid.top() + (row as f32 - self.top_row()) * KEY_HEIGHT
+        grid.top() + (row as f32 - self.top_row()) * self.height
     }
 
     /// The key at `y` in `grid`: continuous while unfolded, the shown row
@@ -431,7 +456,7 @@ impl KeyRows {
         if self.keys.is_empty() {
             return None;
         }
-        let row = (y - grid.top()) / KEY_HEIGHT + self.top_row();
+        let row = (y - grid.top()) / self.height + self.top_row();
         if !self.folded {
             return Some(127.0 - row);
         }
@@ -471,18 +496,47 @@ pub fn tick_at(grid: Rect, start: Ticks, length: Ticks, x: f32) -> Ticks {
     start + Ticks(at.round() as i64)
 }
 
+/// Asks the note area to show `width` ticks from `start`, as dragging the
+/// ruler and the wheel do: a scroll, which no X goes back through.
+fn show_span(events: &mut Vec<UiEvent>, clip: ClipId, start: Ticks, width: i64) {
+    events.push(UiEvent::Invoke(Invocation::new(
+        ids::NOTE_VIEW,
+        json!({
+            "clip": clip,
+            "show": "scroll",
+            "start": start,
+            "end": start + Ticks(width.max(1)),
+        }),
+    )));
+}
+
+/// Asks the note area to show the key rows from `top` to `bottom`.
+fn show_rows(events: &mut Vec<UiEvent>, clip: ClipId, top: f64, bottom: f64) {
+    events.push(UiEvent::Invoke(Invocation::new(
+        ids::NOTE_VIEW,
+        json!({ "clip": clip, "show": "scroll", "top": top, "bottom": bottom }),
+    )));
+}
+
 /// A note's rectangle in `grid`, for an editor whose top edge is the key
 /// `top`, unfolded.
 #[must_use]
 pub fn note_rect(grid: Rect, start: Ticks, length: Ticks, top: f32, note: &Note) -> Rect {
-    note_rect_at(grid, start, length, y_of_key(grid, top, note.key), note)
+    note_rect_at(
+        grid,
+        start,
+        length,
+        y_of_key(grid, top, note.key),
+        KEY_HEIGHT,
+        note,
+    )
 }
 
-/// A note's rectangle in `grid`, its row starting at `y`.
-fn note_rect_at(grid: Rect, start: Ticks, length: Ticks, y: f32, note: &Note) -> Rect {
+/// A note's rectangle in `grid`, its row of `height` starting at `y`.
+fn note_rect_at(grid: Rect, start: Ticks, length: Ticks, y: f32, height: f32, note: &Note) -> Rect {
     let x0 = x_of_tick(grid, start, length, note.start);
     let x1 = x_of_tick(grid, start, length, note.start + note.length);
-    Rect::from_min_max(pos2(x0, y), pos2(x1.max(x0 + 2.0), y + KEY_HEIGHT))
+    Rect::from_min_max(pos2(x0, y), pos2(x1.max(x0 + 2.0), y + height))
 }
 
 /// Where a value of `field` sits in `lane`: the field's highest at the
@@ -632,6 +686,35 @@ struct StripDrag {
     /// The clip's length in ticks, so `None` ends resolve to the clip's
     /// end.
     length: Ticks,
+    /// The span of contents the note area showed when the drag began, as
+    /// its first tick and its width, which the drag keeps measuring by.
+    window: (Ticks, Ticks),
+}
+
+/// A drag in the editor ruler: up and down zooms time about the tick
+/// pressed, sideways scrolls it (piano-roll R34).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RulerDrag {
+    clip: ClipId,
+    /// The contents tick under the press.
+    anchor: Ticks,
+    /// Where the press was.
+    press: Pos2,
+    /// The span the note area showed then, as its first tick and its width.
+    window: (Ticks, Ticks),
+}
+
+/// A drag sideways in the piano ruler, which makes the key rows taller or
+/// shorter (piano-roll R34).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct KeyDrag {
+    clip: ClipId,
+    /// The row under the press.
+    anchor: f64,
+    /// Where the press was.
+    press: Pos2,
+    /// The rows the note area showed then: the first and how many.
+    rows: (f64, f64),
 }
 
 /// A chop Cmd-E opened: the notes were chopped on the grid, and Cmd with
@@ -766,16 +849,16 @@ impl NoteMenus {
 /// hold notes show, one under the next (F).
 fn paint_key_track(painter: &egui::Painter, theme: &Theme, grid: Rect, rows: &KeyRows) {
     let colours = &theme.colors;
-    let named = |key: u8| KEY_HEIGHT >= 7.0 || key.is_multiple_of(12);
+    let named = |key: u8| rows.height >= 7.0 || key.is_multiple_of(12);
     for (row, key) in rows.keys.iter().enumerate() {
         let y0 = rows.y_of_row(grid, row);
-        if y0 + KEY_HEIGHT < grid.top() || y0 > grid.bottom() {
+        if y0 + rows.height < grid.top() || y0 > grid.bottom() {
             continue;
         }
         let key = *key;
         let rect = Rect::from_min_max(
             pos2(grid.left() - KEY_WIDTH, y0),
-            pos2(grid.left(), y0 + KEY_HEIGHT),
+            pos2(grid.left(), y0 + rows.height),
         );
         let black = matches!(key % 12, 1 | 3 | 6 | 8 | 10);
         painter.rect_filled(
@@ -809,7 +892,7 @@ fn paint_row_lines(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows) {
     let colours = &theme.colors;
     let px = (ui.ctx().pixels_per_point() * 0.5).max(0.5);
     for row in 0..rows.keys.len() {
-        let y = rows.y_of_row(grid, row) + KEY_HEIGHT;
+        let y = rows.y_of_row(grid, row) + rows.height;
         if y < grid.top() || y > grid.bottom() {
             continue;
         }
@@ -867,7 +950,7 @@ fn hit_note(
     notes.iter().enumerate().rev().find_map(|(place, note)| {
         let rect = rows
             .y_of(grid, note.key)
-            .map(|y| note_rect_at(grid, start, length, y, note))?;
+            .map(|y| note_rect_at(grid, start, length, y, rows.height, note))?;
         rect.contains(pos).then(|| {
             let grab = EDGE_GRAB.min(rect.width() / 4.0);
             let zone = if rect.right() - pos.x <= grab {
@@ -889,6 +972,7 @@ fn hit_strip(
     grid: Rect,
     start: Ticks,
     length: Ticks,
+    extent: Ticks,
     midi: &MidiData,
     pos: Pos2,
 ) -> Option<StripPart> {
@@ -903,10 +987,10 @@ fn hit_strip(
         if near(midi.start) {
             Some(StripPart::Start)
         } else {
-            near(end_tick(midi, length)).then_some(StripPart::End)
+            near(end_tick(midi, extent)).then_some(StripPart::End)
         }
     } else {
-        let (from, to) = loop_ticks(midi, length);
+        let (from, to) = loop_ticks(midi, extent);
         if near(from) {
             Some(StripPart::LoopStart)
         } else if near(to) {
@@ -989,7 +1073,7 @@ impl SplitDrag {
             .filter_map(|(place, note)| {
                 let rect = rows
                     .y_of(grid, note.key)
-                    .map(|y| note_rect_at(grid, start, length, y, note))?;
+                    .map(|y| note_rect_at(grid, start, length, y, rows.height, note))?;
                 if high < rect.top() || low > rect.bottom() {
                     return None;
                 }
@@ -1271,6 +1355,22 @@ pub struct ClipViewUi {
     drag: Option<NoteDrag>,
     /// The drag under way in the marker strip, if any.
     strip_drag: Option<StripDrag>,
+    /// The drag under way in the editor ruler, if any (piano-roll R34).
+    ruler_drag: Option<RulerDrag>,
+    /// The drag under way in the piano ruler that sizes the rows, if any.
+    key_drag: Option<KeyDrag>,
+    /// The notes selected before the last click on the piano ruler, which a
+    /// double click puts back.
+    key_selection: Option<Vec<u32>>,
+    /// The marker selected in the strip, which Cmd-click and Shift with
+    /// Left and Right then act on (piano-roll R38).
+    marker: Option<StripPart>,
+    /// Whether the shell held chosen key rows when the editor was last laid
+    /// out.
+    rows_chosen: bool,
+    /// Whether the editor's view can be zoomed now: not on the Envelopes
+    /// tab, which has its own axis.
+    zoomable: bool,
     /// The expression lanes' heights, drags and typed values (WP-6.1).
     lanes: LaneUi,
     /// The marquee under way: where it began, and where it is now.
@@ -1316,6 +1416,12 @@ impl Default for ClipViewUi {
             first: 0.0,
             drag: None,
             strip_drag: None,
+            ruler_drag: None,
+            key_drag: None,
+            key_selection: None,
+            marker: None,
+            rows_chosen: false,
+            zoomable: true,
             lanes: LaneUi::default(),
             marquee: None,
             time_drag: None,
@@ -1485,6 +1591,9 @@ impl ClipViewUi {
         // under loop bars. The MPE tab edits the foreground clip's notes.
         let several = shell.clip_view().shown(doc, shell.arrangement());
         if several.len() > 1 && !envelopes && !mpe_tab {
+            // Several clips share an axis of their own, which the note
+            // editor's zoom doesn't reach.
+            self.zoomable = false;
             self.show_multi(ui, shell, theme, rect, &several, events);
             return;
         }
@@ -1528,10 +1637,20 @@ impl ClipViewUi {
         if envelopes && let Some(value) = doc.clip(clip) {
             let target = clip_envelope::shown_target(shell, doc, clip);
             let axis = match self.strip_drag {
-                Some(drag) if drag.part == StripPart::Start => drag.start,
+                Some(drag) if drag.part == StripPart::Start => drag.window.0,
                 _ => clip_envelope::axis_start(value, &midi, target),
             };
-            self.paint_strip(ui.painter(), theme, strip, grid, &midi, axis, length);
+            self.zoomable = false;
+            self.paint_strip(
+                ui.painter(),
+                theme,
+                strip,
+                grid,
+                &midi,
+                axis,
+                length,
+                length,
+            );
             self.strip_input(
                 ui,
                 doc,
@@ -1540,7 +1659,7 @@ impl ClipViewUi {
                 grid,
                 clip,
                 &midi,
-                axis,
+                (axis, length),
                 length,
                 None,
                 events,
@@ -1555,44 +1674,78 @@ impl ClipViewUi {
             return;
         }
         let notes = notes_in_order(&midi);
-        // Spec: mpe R31. Z scrolls the key rows to the Pitch values in the
-        // time selection, once.
-        if mpe_tab
-            && !folded
-            && let Some(zoom) = shell.clip_view().mpe_zoom()
-            && zoom.clip == clip
-            && self.mpe.take_zoom(zoom.serial)
-        {
-            let visible = f64::from(layout.grid.height() / KEY_HEIGHT);
-            let top = if zoom.high - zoom.low + 2.0 <= visible {
-                (zoom.low + zoom.high) / 2.0 + visible / 2.0
-            } else {
-                zoom.high + 1.0
-            };
-            self.top = top.clamp(0.0, 127.0) as f32;
+        self.zoomable = true;
+        // Back to the rows the editor lays out itself (X, with no zoom to go
+        // back to): scroll to the notes again.
+        let chosen_rows = shell.clip_view().note_view().rows(clip);
+        if chosen_rows.is_none() && self.rows_chosen {
+            self.top = default_top(&midi);
+            self.first = 0.0;
         }
+        self.rows_chosen = chosen_rows.is_some();
         let rows = KeyRows::of(folded, &notes, self.top, self.first);
+        // Spec: piano-roll R32, R34, mpe R31. The key rows the view shows:
+        // the shell holds them, and the editor lays out its own until a
+        // zoom or a scroll chooses some. The MPE tab's Pitch plots count
+        // their semitones in rows of the usual height, so there the rows
+        // scroll to the middle of the ones asked for and keep their size.
+        let rows = match chosen_rows {
+            Some((top, bottom)) if mpe_tab => {
+                let visible = f64::from(layout.grid.height() / KEY_HEIGHT);
+                let top = ((top + bottom) / 2.0 - visible / 2.0).max(0.0);
+                rows.shown(layout.grid, (top, top + visible))
+            }
+            Some(chosen) => rows.shown(layout.grid, chosen),
+            None => rows,
+        };
+        self.top = rows.top;
+        self.first = rows.first;
         let selected = shell
             .clip_view()
             .selected_notes(doc, shell.arrangement())
             .to_vec();
-        // While the Start marker is dragged, the editor keeps the axis the
-        // drag began on, so the notes hold still under the moving marker;
-        // releasing re-anchors the contents to the new marker (R4).
-        let axis = match self.strip_drag {
-            Some(drag) if drag.part == StripPart::Start => drag.start,
-            _ => midi.start,
+        // Spec: piano-roll R32. The span of the clip's contents the note
+        // area shows: the shell holds it, and it is the whole clip until a
+        // zoom or a scroll chooses another. While the Start marker is
+        // dragged the editor keeps the window the drag began on, so the
+        // notes hold still under the moving marker; releasing re-anchors the
+        // contents to the new marker (R4).
+        let (axis, span_len) = match self.strip_drag {
+            Some(drag) => drag.window,
+            None => match shell.clip_view().note_view().span(clip) {
+                Some(_) => doc.clip(clip).map_or((midi.start, length), |value| {
+                    let (from, to) = shell.clip_view().note_span(value, &midi);
+                    (from, to - from)
+                }),
+                None => (midi.start, length),
+            },
         };
+        // Spec: piano-roll R35. Follow turns the page when the playhead
+        // leaves the part in view while the song plays, unless an edit or a
+        // scroll by hand paused it.
+        if shell.arrangement().follow()
+            && !shell.clip_view().note_view().follow_paused()
+            && shell.clip_view().note_view().span(clip).is_some()
+            && let Some(at) = shell
+                .clip_view()
+                .play_position(doc, shell.arrangement(), clip)
+            && (at < axis || at >= axis + span_len)
+        {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::NOTE_VIEW,
+                json!({ "clip": clip, "show": "page", "start": at, "end": at + span_len }),
+            )));
+        }
         let face = doc
             .clip(clip)
             .and_then(|held| held.colour)
             .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
-        let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, length);
+        let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, span_len);
         let frame = note_lanes::Frame {
             clip,
             layout: &layout,
             start: axis,
-            length,
+            length: span_len,
             notes: &notes,
             groups: &midi.groups,
             selected: &selected,
@@ -1627,7 +1780,7 @@ impl ClipViewUi {
                 .filter_map(|(place, note)| {
                     Some((
                         u32::try_from(place).ok()?,
-                        rows.y_of(layout.grid, note.key)? + KEY_HEIGHT / 2.0,
+                        rows.y_of(layout.grid, note.key)? + rows.height / 2.0,
                     ))
                 })
                 .collect()
@@ -1638,7 +1791,7 @@ impl ClipViewUi {
             clip,
             grid: layout.grid,
             start: axis,
-            length,
+            length: span_len,
             notes: &notes,
             selected: &selected,
             face,
@@ -1656,7 +1809,8 @@ impl ClipViewUi {
         });
         let toggled: Vec<MpeLane> = mpe_view.shown.iter().copied().collect();
         self.paint(
-            ui, shell, theme, clip, strip, &frame, &rows, &midi, axis, length, &notes, &selected,
+            ui, shell, theme, clip, strip, &frame, &rows, &midi, axis, span_len, length, &notes,
+            &selected,
         );
         if let (Some(mpe_frame), Some(mpe_layout)) = (&mpe_frame, &mpe_layout) {
             mpe_tab::paint_band(ui, theme, mpe_frame, mpe_layout, &toggled, mpe_view.hidden);
@@ -1674,6 +1828,7 @@ impl ClipViewUi {
             clip,
             &midi,
             axis,
+            span_len,
             length,
             &notes,
             &selected,
@@ -1946,6 +2101,7 @@ impl ClipViewUi {
         midi: &MidiData,
         axis: Ticks,
         length: Ticks,
+        extent: Ticks,
         notes: &[Note],
         selected: &[u32],
     ) {
@@ -1954,7 +2110,7 @@ impl ClipViewUi {
         let start = axis;
         let grid = frame.layout.grid;
 
-        self.paint_strip(painter, theme, strip, grid, midi, axis, length);
+        self.paint_strip(painter, theme, strip, grid, midi, axis, length, extent);
         let range = shell
             .clip_view()
             .time_selection(shell.editor().document(), shell.arrangement());
@@ -1972,7 +2128,7 @@ impl ClipViewUi {
             let Some(y) = rows.y_of(grid, note.key) else {
                 continue;
             };
-            let rect = note_rect_at(grid, start, length, y, note);
+            let rect = note_rect_at(grid, start, length, y, rows.height, note);
             if rect.right() < grid.left() || rect.left() > grid.right() {
                 continue;
             }
@@ -1989,7 +2145,7 @@ impl ClipViewUi {
             painter.rect_filled(rect, corner, colour);
             // Spec: note-editing R4. A note that doesn't always play wears a
             // corner triangle; the note the pointer marks is outlined.
-            if note_lanes::shows_corner(note, KEY_HEIGHT) {
+            if note_lanes::shows_corner(note, rows.height) {
                 note_lanes::paint_corner(painter, rect, colours.text.0);
             }
             // Hovering a grouped note marks every note of its group (R24).
@@ -2127,15 +2283,23 @@ impl ClipViewUi {
         midi: &MidiData,
         axis: Ticks,
         length: Ticks,
+        extent: Ticks,
     ) {
         let colours = &theme.colors;
         painter.rect_filled(strip, 0.0, colours.ruler.0);
         let x_of = |tick: Ticks| x_of_tick(grid, axis, length, tick);
-        let marker = |tick: Ticks| {
+        // A marker selected in the strip wears the selection's colour
+        // (piano-roll R38).
+        let marker = |tick: Ticks, part: StripPart| {
             let x = x_of(tick);
+            let colour = if self.marker == Some(part) {
+                colours.time_selection.0
+            } else {
+                colours.insert_marker.0
+            };
             painter.line_segment(
                 [pos2(x, strip.top()), pos2(x, grid.top())],
-                Stroke::new(1.0, colours.insert_marker.0),
+                Stroke::new(1.0, colour),
             );
             painter.rect_filled(
                 Rect::from_min_max(
@@ -2143,12 +2307,12 @@ impl ClipViewUi {
                     pos2(x + FLAG / 2.0, strip.top() + FLAG),
                 ),
                 0.0,
-                colours.insert_marker.0,
+                colour,
             );
         };
-        marker(midi.start);
-        marker(end_tick(midi, length));
-        let (from, to) = loop_ticks(midi, length);
+        marker(midi.start, StripPart::Start);
+        marker(end_tick(midi, extent), StripPart::End);
+        let (from, to) = loop_ticks(midi, extent);
         let brace = Rect::from_min_max(
             pos2(x_of(from), grid.top() - BRACE),
             pos2(x_of(to), grid.top()),
@@ -2230,6 +2394,7 @@ impl ClipViewUi {
         midi: &MidiData,
         axis: Ticks,
         length: Ticks,
+        extent: Ticks,
         notes: &[Note],
         selected: &[u32],
         mpe: Option<&mpe_tab::Frame<'_>>,
@@ -2247,8 +2412,8 @@ impl ClipViewUi {
             grid,
             clip,
             midi,
-            axis,
-            length,
+            (axis, length),
+            extent,
             time,
             events,
         );
@@ -2283,6 +2448,7 @@ impl ClipViewUi {
         // the keyboard back from a lane.
         if response.clicked() || response.drag_started() {
             self.lanes.leave_focus();
+            self.marker = None;
         }
 
         // Spec: find-and-select-notes R6. With the bar showing, Shift-dragging
@@ -2433,7 +2599,7 @@ impl ClipViewUi {
                     .enumerate()
                     .filter(|(_, note)| {
                         rows.y_of(grid, note.key)
-                            .map(|y| note_rect_at(grid, start, length, y, note))
+                            .map(|y| note_rect_at(grid, start, length, y, rows.height, note))
                             .is_some_and(|rect| rect.intersects(marquee))
                     })
                     .map(|(place, _)| u32::try_from(place).unwrap_or(u32::MAX))
@@ -2633,6 +2799,77 @@ impl ClipViewUi {
             Id::new(("clip-view-keys", clip)),
             Sense::click_and_drag(),
         );
+        // Spec: piano-roll R34. Dragging sideways in the piano ruler makes
+        // the key rows taller or shorter; double-clicking it fits the
+        // selected notes' rows, or with none the clip's lowest note to its
+        // highest.
+        if self.zoomable
+            && !ui.input(|i| i.modifiers.alt)
+            && keys_response.drag_started()
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            let (first, last) = rows.visible(grid);
+            self.key_drag = Some(KeyDrag {
+                clip,
+                anchor: first + f64::from((press.y - grid.top()) / rows.height),
+                press,
+                rows: (first, last),
+            });
+        }
+        if keys_response.dragged()
+            && let (Some(drag), Some(pos)) = (self.key_drag, keys_response.interact_pointer_pos())
+        {
+            // Dragging right makes the rows taller, so fewer show, about
+            // the row that was pressed.
+            let visible = ((drag.rows.1 - drag.rows.0)
+                * (-f64::from(pos.x - drag.press.x) * 0.02).exp())
+            .clamp(4.0, 128.0);
+            let fraction =
+                (drag.anchor - drag.rows.0) / (drag.rows.1 - drag.rows.0).max(f64::EPSILON);
+            let top = (drag.anchor - fraction * visible).max(0.0);
+            show_rows(events, clip, top, top + visible);
+        }
+        if keys_response.drag_stopped() {
+            self.key_drag = None;
+        }
+        if self.zoomable && keys_response.double_clicked() {
+            let before = self
+                .key_selection
+                .take()
+                .unwrap_or_else(|| selected.to_vec());
+            let chosen: Vec<u8> = if before.is_empty() {
+                notes.iter().map(|note| note.key).collect()
+            } else {
+                before
+                    .iter()
+                    .filter_map(|place| notes.get(*place as usize))
+                    .map(|note| note.key)
+                    .collect()
+            };
+            // The first click of the double click selected the key's notes;
+            // the selection is put back as it was.
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SELECT_NOTES,
+                json!({ "clip": clip, "notes": before, "mode": "replace" }),
+            )));
+            if let (Some(low), Some(high)) = (chosen.iter().min(), chosen.iter().max()) {
+                let (top, bottom) =
+                    bl_shell::clip_view::fit_key_rows(midi, rows.folded, *low, *high);
+                // With the notes out of view, it zooms out until they show.
+                let (first, last) = rows.visible(grid);
+                let (top, bottom) = if top >= first && bottom <= last {
+                    (top, bottom)
+                } else {
+                    (top.min(first), bottom.max(last))
+                };
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::NOTE_VIEW,
+                    json!({ "clip": clip, "show": "span", "top": top, "bottom": bottom }),
+                )));
+            }
+        } else if keys_response.clicked() {
+            self.key_selection = Some(selected.to_vec());
+        }
         // Spec: generators R2, I-CLICK-049. While the Generate panel shows
         // Rhythm, Seed or Shape, Option-clicking a key sets the generator's
         // pitch or a one-key range, and Option-dragging sets Seed's and
@@ -2679,6 +2916,7 @@ impl ClipViewUi {
         }
         if !option
             && keys_response.clicked()
+            && !keys_response.double_clicked()
             && let Some(pos) = keys_response.interact_pointer_pos()
             && let Some(key) = rows.key_at(grid, pos.y)
         {
@@ -2747,27 +2985,56 @@ impl ClipViewUi {
         // Spec: note-editing R1 to R9. The expression lanes under the note
         // area.
         self.lanes.input(ui, shell, frame, events);
-        // The wheel scrolls the key track.
-        if ui.rect_contains_pointer(grid) {
-            let scroll = ui.input(|i| i.smooth_scroll_delta.y);
-            if scroll != 0.0 {
-                if rows.folded {
-                    self.first = (self.first + scroll / KEY_HEIGHT).clamp(0.0, rows.scroll_room());
-                } else {
-                    self.top = (self.top + scroll / KEY_HEIGHT).clamp(0.0, 127.0);
+        // Spec: piano-roll R12, R34. The wheel scrolls the key track; Cmd
+        // (Ctrl on Windows) with it, or a pinch, zooms time about the
+        // pointer; Option (Alt) with it makes the key rows taller or
+        // shorter. Each asks the shell for the view.
+        if ui.rect_contains_pointer(grid) && self.zoomable {
+            let (scroll, zoom, alt, pointer) = ui.input(|i| {
+                (
+                    i.smooth_scroll_delta.y,
+                    i.zoom_delta(),
+                    i.modifiers.alt,
+                    i.pointer.hover_pos(),
+                )
+            });
+            if (zoom - 1.0).abs() > 1e-4 {
+                if let Some(pos) = pointer {
+                    let width = length.get().max(1) as f64;
+                    let anchor = tick_at(grid, start, length, pos.x);
+                    let fraction = (anchor - start).get() as f64 / width;
+                    let wide = (width / f64::from(zoom)).max(1.0);
+                    let from = anchor.get() as f64 - fraction * wide;
+                    show_span(
+                        events,
+                        clip,
+                        Ticks(from.round() as i64),
+                        wide.round() as i64,
+                    );
                 }
+            } else if scroll != 0.0 && alt {
+                // Spec: piano-roll R34. Rows taller: fewer of them show,
+                // about the row under the pointer.
+                let (first, last) = rows.visible(grid);
+                let anchor = pointer.map_or(first, |pos| {
+                    first + f64::from((pos.y - grid.top()) / rows.height)
+                });
+                let visible = ((last - first) * (-f64::from(scroll) * 0.01).exp()).max(4.0);
+                let fraction = (anchor - first) / (last - first).max(f64::EPSILON);
+                let top = (anchor - fraction * visible).max(0.0);
+                show_rows(events, clip, top, top + visible);
+            } else if scroll != 0.0 {
+                self.scroll_rows(events, clip, grid, rows, scroll);
             }
         }
         // Spec: view-options R1, piano-roll R44. A middle-button drag pans
         // the note area, the key track following the pointer: the rows move
         // down the view as `top` grows (`y_of_key`), as the wheel moves
         // them.
-        if let Some(delta) = crate::middle::pan(ui, grid) {
-            if rows.folded {
-                self.first = (self.first + delta.y / KEY_HEIGHT).clamp(0.0, rows.scroll_room());
-            } else {
-                self.top = (self.top + delta.y / KEY_HEIGHT).clamp(0.0, 127.0);
-            }
+        if self.zoomable
+            && let Some(delta) = crate::middle::pan(ui, grid)
+        {
+            self.scroll_rows(events, clip, grid, rows, delta.y);
         }
         // Spec: piano-roll. S-A11Y-008 and S-A11Y-009, the note-selection
         // keys: with notes selected, Up and Down transpose them a semitone,
@@ -2779,12 +3046,32 @@ impl ClipViewUi {
             doc,
             arrangement,
             frame,
-            length,
+            extent,
             midi,
             notes,
             selected,
+            rows,
             events,
         );
+    }
+
+    /// Scrolls the key track by the wheel or the middle button's `delta`
+    /// points: up shows the higher keys.
+    fn scroll_rows(
+        &self,
+        events: &mut Vec<UiEvent>,
+        clip: ClipId,
+        grid: Rect,
+        rows: &KeyRows,
+        delta: f32,
+    ) {
+        let (first, last) = rows.visible(grid);
+        let by = f64::from(delta / rows.height);
+        // Unfolded, the row at the top edge falls as the keys rise; folded
+        // the wheel runs along the rows as it always has.
+        let top = if rows.folded { first + by } else { first - by };
+        let top = top.clamp(0.0, f64::from(rows.scroll_room()));
+        show_rows(events, clip, top, top + (last - first));
     }
 
     /// The note editor's keys: the insert marker, the time selection, the
@@ -2802,6 +3089,7 @@ impl ClipViewUi {
         midi: &MidiData,
         notes: &[Note],
         selected: &[u32],
+        rows: &KeyRows,
         events: &mut Vec<UiEvent>,
     ) {
         let clip = frame.clip;
@@ -2896,6 +3184,65 @@ impl ClipViewUi {
                 continue;
             }
             match key {
+                // Spec: piano-roll R38. With the Start or End marker
+                // selected, Shift with Left and Right moves the clip's
+                // region, its markers together, a grid step.
+                Key::ArrowLeft | Key::ArrowRight
+                    if shift && !alt && !ctrl && !modifiers.command && self.marker.is_some() =>
+                {
+                    let by = if key == Key::ArrowRight { step } else { -step };
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        SET_MIDI_REGION,
+                        bl_shell::clip_view::region_moved(clip, midi, length, by.max(-midi.start)),
+                    )));
+                }
+                // Spec: piano-roll R33. Page Up and Page Down scroll the key
+                // rows an octave, and with Shift a row; with Cmd (Ctrl on
+                // Windows) they scroll time by the note area's width.
+                Key::PageUp | Key::PageDown if self.zoomable => {
+                    let up = key == Key::PageUp;
+                    if modifiers.command {
+                        let width = frame.length.get().max(1);
+                        let start = frame.start + Ticks(if up { -width } else { width });
+                        show_span(events, clip, start, width);
+                    } else {
+                        let (first, last) = rows.visible(frame.layout.grid);
+                        let by = if shift { 1.0 } else { 12.0 };
+                        let top = if up { first - by } else { first + by };
+                        let top = top.clamp(0.0, f64::from(rows.scroll_room()));
+                        show_rows(events, clip, top, top + (last - first));
+                    }
+                }
+                // Spec: piano-roll R32. Plus and Minus zoom time in and out
+                // about the time selection or the insert marker.
+                Key::Plus | Key::Equals | Key::Minus
+                    if self.zoomable && !modifiers.command && !alt && !ctrl =>
+                {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::NOTE_VIEW,
+                        json!({
+                            "clip": clip,
+                            "show": if key == Key::Minus { "out" } else { "in" },
+                        }),
+                    )));
+                }
+                // Spec: piano-roll R39. The Arrangement's keys for
+                // Duplicate Time and Delete Time act on the clip's notes
+                // while the note editor has the keyboard.
+                Key::D if modifiers.command && shift && !alt && time.is_some() => {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::DUPLICATE_TIME,
+                        json!({ "clip": clip }),
+                    )));
+                }
+                Key::Delete | Key::Backspace
+                    if modifiers.command && shift && !alt && time.is_some() =>
+                {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::DELETE_TIME,
+                        json!({ "clip": clip }),
+                    )));
+                }
                 // Spec: note-editing R35, R36. Cmd-E splits at the insert
                 // marker or the time selection's edges, or with notes
                 // selected chops them on the grid and opens the chop the
@@ -3116,7 +3463,11 @@ impl ClipViewUi {
 
     /// The marker strip's clicks and drags: each drag moves a marker or the
     /// loop brace, through the document's clip commands, as one gesture
-    /// (piano-roll R11).
+    /// (piano-roll R11). `window` is the span of contents the note area
+    /// shows, as its first tick and its width; `extent` is the clip's own
+    /// length, which the markers' default ends resolve against. A drag on
+    /// the ruler where no marker is zooms and scrolls time, and a double
+    /// click zooms to the time selection or the notes (R34).
     #[expect(clippy::too_many_arguments, reason = "the strip's whole input")]
     fn strip_input(
         &mut self,
@@ -3127,11 +3478,12 @@ impl ClipViewUi {
         grid: Rect,
         clip: ClipId,
         midi: &MidiData,
-        axis: Ticks,
-        length: Ticks,
+        window: (Ticks, Ticks),
+        extent: Ticks,
         stretch: Option<(Ticks, Ticks)>,
         events: &mut Vec<UiEvent>,
     ) {
+        let (axis, length) = window;
         let response = ui.interact(
             strip,
             Id::new(("clip-view-strip", clip)),
@@ -3149,7 +3501,7 @@ impl ClipViewUi {
             self.stretch_drag = Some(StretchDrag { clip, part, range });
         } else if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
-            && let Some(part) = hit_strip(strip, grid, axis, length, midi, press)
+            && let Some(part) = hit_strip(strip, grid, axis, length, extent, midi, press)
         {
             self.strip_drag = Some(StripDrag {
                 clip,
@@ -3160,12 +3512,43 @@ impl ClipViewUi {
                 loop_start: midi.loop_start,
                 loop_end: midi.loop_end,
                 looping: midi.looping,
-                length,
+                length: extent,
+                window,
+            });
+        } else if response.drag_started()
+            && self.zoomable
+            && let Some(press) = ui.input(|i| i.pointer.press_origin())
+        {
+            // Spec: piano-roll R34. Anywhere else on the ruler, a drag
+            // zooms and scrolls time.
+            self.ruler_drag = Some(RulerDrag {
+                clip,
+                anchor: tick_at(grid, axis, length, press.x),
+                press,
+                window,
             });
         }
         let pointer = response
             .interact_pointer_pos()
             .or_else(|| ui.input(|i| i.pointer.interact_pos()));
+        if response.dragged()
+            && let (Some(drag), Some(pos)) = (self.ruler_drag, pointer)
+        {
+            let dx = f64::from(pos.x - drag.press.x) / f64::from(grid.width().max(1.0));
+            let dy = f64::from(pos.y - drag.press.y);
+            // Dragging down zooms in, and up zooms out, about the tick that
+            // was pressed, as the Sample Editor's ruler does.
+            let width0 = drag.window.1.get().max(1) as f64;
+            let width = (width0 * (-dy * 0.01).exp()).max(1.0);
+            let fraction = (drag.anchor - drag.window.0).get() as f64 / width0;
+            let start = drag.anchor.get() as f64 - fraction * width - dx * width;
+            show_span(
+                events,
+                clip,
+                Ticks(start.round() as i64),
+                width.round() as i64,
+            );
+        }
         if response.dragged()
             && let (Some(drag), Some(pos)) = (self.stretch_drag, pointer)
         {
@@ -3177,19 +3560,78 @@ impl ClipViewUi {
             let (id, args) = drag.invocation(arrangement, doc, keys, grid, pos);
             gesture(events, GesturePhase::Update, id, args);
         }
-        // Spec: multi-clip-editing R11. A click on the loop brace selects it,
-        // which gives it Cmd-D, Duplicate Loop.
+        // Spec: multi-clip-editing R11, piano-roll R38. A click on a marker
+        // selects it, which gives Shift with Left and Right the clip's
+        // region and Cmd-click the markers' new places; a click on the loop
+        // brace selects it, which gives it Cmd-D, Duplicate Loop.
         if response.clicked()
             && let Some(pos) = response.interact_pointer_pos()
-            && matches!(
-                hit_strip(strip, grid, axis, length, midi, pos),
-                Some(StripPart::LoopStart | StripPart::LoopEnd | StripPart::LoopBody)
-            )
         {
-            events.push(UiEvent::Invoke(Invocation::new(
-                ids::SELECT_LOOP_BARS,
-                json!({ "clips": [clip] }),
-            )));
+            let part = hit_strip(strip, grid, axis, length, extent, midi, pos);
+            let command = ui.input(|i| i.modifiers.command);
+            if command && self.marker.is_some() {
+                // Spec: piano-roll R38. Cmd-click moves the Start marker to
+                // the clicked tick, and Cmd-Shift-click the End marker; the
+                // grid still snaps them, since Cmd is the gesture's own.
+                let at = arrangement.snap_drag(doc, tick_at(grid, axis, length, pos.x), false);
+                let marker = if ui.input(|i| i.modifiers.shift) {
+                    "end"
+                } else {
+                    "start"
+                };
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::SET_MARKER,
+                    json!({ "clip": clip, "marker": marker, "at": at }),
+                )));
+            } else {
+                self.marker = part.filter(|part| matches!(part, StripPart::Start | StripPart::End));
+                if matches!(
+                    part,
+                    Some(StripPart::LoopStart | StripPart::LoopEnd | StripPart::LoopBody)
+                ) {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::SELECT_LOOP_BARS,
+                        json!({ "clips": [clip] }),
+                    )));
+                }
+                if part.is_none() {
+                    // Spec: piano-roll R35. A click in the scrub area
+                    // resumes Follow.
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        ids::NOTE_VIEW,
+                        json!({ "clip": clip }),
+                    )));
+                }
+            }
+        }
+        // Spec: piano-roll R34. Double-clicking the ruler zooms to the time
+        // selection or, with none, from the first note to the last; with
+        // that out of view, it zooms out until it shows.
+        if response.double_clicked()
+            && let Some(pos) = response.interact_pointer_pos()
+            && hit_strip(strip, grid, axis, length, extent, midi, pos).is_none()
+        {
+            let target = stretch.or_else(|| {
+                let from = midi.notes.iter().map(|note| note.start).min()?;
+                let to = midi
+                    .notes
+                    .iter()
+                    .map(|note| note.start + note.length)
+                    .max()?;
+                Some((from, to))
+            });
+            if let Some((from, to)) = target.filter(|_| self.zoomable) {
+                let (view_from, view_to) = (axis, axis + length);
+                let (from, to) = if from >= view_from && to <= view_to {
+                    (from, to)
+                } else {
+                    (from.min(view_from), to.max(view_to))
+                };
+                events.push(UiEvent::Invoke(Invocation::new(
+                    ids::NOTE_VIEW,
+                    json!({ "clip": clip, "show": "span", "start": from, "end": to }),
+                )));
+            }
         }
         if (self.strip_drag.is_some() || self.stretch_drag.is_some())
             && ui.input(|i| i.key_pressed(Key::Escape))
@@ -3200,6 +3642,9 @@ impl ClipViewUi {
                 phase: GesturePhase::Cancel,
                 invocation: None,
             });
+        }
+        if response.drag_stopped() {
+            self.ruler_drag = None;
         }
         if response.drag_stopped()
             && let Some(drag) = self.stretch_drag.take()
@@ -3230,7 +3675,7 @@ impl ClipViewUi {
         if let Some(hover) = response.hover_pos()
             && (stretch.is_some_and(|range| {
                 hit_stretch(strip, grid, axis, length, range, hover).is_some()
-            }) || hit_strip(strip, grid, axis, length, midi, hover).is_some())
+            }) || hit_strip(strip, grid, axis, length, extent, midi, hover).is_some())
         {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
         }
@@ -3318,7 +3763,7 @@ impl StripDrag {
         grid: Rect,
         pos: Pos2,
     ) -> (&'static str, Value) {
-        let at = tick_at(grid, self.start, self.length, pos.x);
+        let at = tick_at(grid, self.window.0, self.window.1, pos.x);
         let snapped = arrangement.snap_drag(doc, at, keys.bypass);
         let delta = snapped - self.grab;
         let clip_end = self.start + self.length;

@@ -268,8 +268,13 @@ fn cropping(args: &Value, registered: Permission, scene: Scene<'_>) -> CallPermi
     // the call's, or the Arrangement's time selection and the clip it
     // covers. A span that can't be read, or no clip at all, leaves the
     // registered class as it is.
-    let Ok(span) = crate::shell::audio_editing::crop_span(doc, scene.view, scene.shown_clip, &args)
-    else {
+    let Ok(span) = crate::shell::audio_editing::crop_span(
+        doc,
+        scene.view,
+        scene.clip_view,
+        scene.shown_clip,
+        &args,
+    ) else {
         return unchanged;
     };
     let Some(clip) =

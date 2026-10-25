@@ -144,6 +144,8 @@ pub struct MainWindowUi {
     devices: crate::device_view::DeviceViewUi,
     /// The Clip View's note editor (WP-2.3): its scroll and drags.
     clip_view: crate::clip_view::ClipViewUi,
+    /// The Clip View Selector's outline drag (piano-roll R36).
+    clip_selector: crate::clip_selector::ClipSelectorUi,
     /// The list of the set's plug-ins (IMP-29, WP-6.41).
     plugin_list: crate::plugin_list::PluginListUi,
     /// The keymap in use, read the first time something shows a key from it
@@ -271,6 +273,7 @@ impl MainWindowUi {
             mixer: MixerUi::new(),
             devices: crate::device_view::DeviceViewUi::new(),
             clip_view: crate::clip_view::ClipViewUi::default(),
+            clip_selector: crate::clip_selector::ClipSelectorUi::default(),
             plugin_list: crate::plugin_list::PluginListUi::default(),
             keymap: None,
             file_manager: crate::file_manager::FileManagerUi::default(),
@@ -1154,6 +1157,10 @@ impl MainWindowUi {
                 let invocations = detail_click(*el, shell, self.window, option)
                     .unwrap_or_else(|| click(*el, shell, self.window).into_iter().collect());
                 events.extend(invocations.into_iter().map(UiEvent::Invoke));
+            }
+            if *el == Element::ClipSelector {
+                self.clip_selector
+                    .show(ui, shell, theme, *rect, &response, events);
             }
             if *el == Element::Metronome {
                 response.context_menu(|ui| {

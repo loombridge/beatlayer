@@ -457,6 +457,11 @@ impl Shell {
             self.dirty = true;
             self.document_changed();
         }
+        // Spec: piano-roll R35. An edit in the note editor pauses Follow
+        // until playback starts or stops.
+        if result.is_ok() && clip_view::pauses_follow(id) {
+            self.clip_view.note_follow(true);
+        }
         self.touch();
         result
     }
@@ -524,6 +529,9 @@ impl Shell {
         // Follow until playback starts or stops.
         if sample_edit_command(id) {
             self.clip_view.sample_follow(true);
+        }
+        if clip_view::pauses_follow(id) {
+            self.clip_view.note_follow(true);
         }
         for (track, target, before, value) in moved {
             self.automation_take.write(

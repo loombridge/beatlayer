@@ -1752,6 +1752,12 @@ impl Shell {
             return Ok(to_value(&bl_shell_spec::scales::ScaleList::new()));
         }
         if view_ids::handles(id) {
+            // Spec: piano-roll R35. Follow again lets the note area follow
+            // playback again.
+            if id == view_ids::FOLLOW {
+                self.clip_view
+                    .note_follow(args["paused"].as_bool() == Some(true));
+            }
             return self.run_arrangement_view(id, args);
         }
         if mixer_ids::handles(id) {

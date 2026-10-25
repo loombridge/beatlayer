@@ -246,6 +246,7 @@ impl Shell {
         // Sample Editor follow it again.
         if engine.playing != self.arrangement.transport().playing {
             self.clip_view.sample_follow(false);
+            self.clip_view.note_follow(false);
         }
         let brace = self.editor.document().settings().arrangement_loop;
         self.set_transport(TransportView {

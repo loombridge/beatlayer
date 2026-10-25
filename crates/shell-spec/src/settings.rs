@@ -400,6 +400,9 @@ pub struct DisplayInputSettings {
     pub second_window_zoom_percent: Option<u16>,
     /// Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.
     pub outline_view_in_focus: bool,
+    /// Permanent Scrub Areas, as `settings.set_permanent_scrub_areas` sets
+    /// it (the time editing spec, R26).
+    pub permanent_scrub_areas: bool,
     /// Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it.
     pub use_tab_key_to_move_focus: bool,
     /// Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it.

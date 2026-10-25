@@ -9235,6 +9235,7 @@ The Display & Input page's settings.
 |---|---|---|---|
 | `zoom_percent` | integer from 0 to 65535 | yes | The interface zoom in percent, as `view.set_zoom` takes it. |
 | `outline_view_in_focus` | boolean | yes | Outline View in Focus, as `settings.set_outline_view_in_focus` sets it. |
+| `permanent_scrub_areas` | boolean | yes | Permanent Scrub Areas, as `settings.set_permanent_scrub_areas` sets it (the time editing spec, R26). |
 | `use_tab_key_to_move_focus` | boolean | yes | Use Tab Key to Move Focus, as `focus.toggle_tab_navigation` toggles it. |
 | `wrap_tab_navigation` | boolean | yes | Wrap Tab Navigation, as `focus.toggle_wrap_navigation` toggles it. |
 | `second_window_zoom_percent` | integer or null | no | The second window's zoom in percent, as `view.set_zoom` takes it with `window` set to `second`: only while the second window is open, when the page shows Second Window Zoom (interface-zoom R12). |
@@ -9247,6 +9248,10 @@ The Display & Input page's settings.
   "properties": {
     "outline_view_in_focus": {
       "description": "Outline View in Focus, as `settings.set_outline_view_in_focus` sets it.",
+      "type": "boolean"
+    },
+    "permanent_scrub_areas": {
+      "description": "Permanent Scrub Areas, as `settings.set_permanent_scrub_areas` sets it (the time editing spec, R26).",
       "type": "boolean"
     },
     "second_window_zoom_percent": {
@@ -9278,6 +9283,7 @@ The Display & Input page's settings.
   "required": [
     "zoom_percent",
     "outline_view_in_focus",
+    "permanent_scrub_areas",
     "use_tab_key_to_move_focus",
     "wrap_tab_navigation"
   ],

@@ -67,6 +67,11 @@ pub const HEIGHT_STEP: f64 = 16.0;
 /// zooms: the factor per point dragged, down zooming in.
 const DRAG_ZOOM_PER_POINT: f64 = 0.01;
 
+/// How long a press in the scrub area or the beat-time ruler lasts before
+/// it is a hold that loops rather than a click (time-editing R25). Beatlayer's
+/// own: Live's isn't observed.
+const SCRUB_HOLD_SECONDS: f64 = 0.3;
+
 /// The ID of the track lanes' area.
 #[must_use]
 pub fn lanes_id() -> Id {
@@ -208,6 +213,9 @@ pub struct ArrangementUi {
     /// The locator being dragged in the scrub area, if a drag is under way
     /// (WP-6.24).
     locator_drag: Option<bl_model::LocatorId>,
+    /// The point a held press in the scrub area or the beat-time ruler is
+    /// looping, until the button is released (WP-6.59; time-editing R25).
+    scrub_hold: Option<Ticks>,
     /// The locators the last frame drew, so a new one can take the focus
     /// (WP-6.24; time-editing R3).
     locators_drawn: Vec<bl_model::LocatorId>,
@@ -336,6 +344,22 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
 
+/// Plays from `at`, as a click in the scrub area does: the jump waits for the
+/// global launch quantisation while the song plays, playback starts there
+/// while it's stopped, and Follow resumes (time-editing R11).
+fn play_from(events: &mut Vec<UiEvent>, playing: bool, at: Ticks) {
+    invoke(events, ids::SET_INSERT_MARKER, json!({ "at": at }));
+    invoke(
+        events,
+        "transport.locate",
+        json!({ "position": at, "quantized": true }),
+    );
+    if !playing {
+        invoke(events, "transport.play_from_insert_marker", json!({}));
+    }
+    invoke(events, ids::FOLLOW, json!({ "paused": false }));
+}
+
 impl ArrangementUi {
     /// A view with no peak source: clips draw without waveforms until one
     /// is set.
@@ -362,6 +386,7 @@ impl ArrangementUi {
             lane_menus: TakeLaneMenus::default(),
             playhead: None,
             locator_drag: None,
+            scrub_hold: None,
             locators_drawn: Vec::new(),
             mixer: None,
             described: Vec::new(),
@@ -1416,6 +1441,53 @@ impl ArrangementUi {
         });
     }
 
+    /// Starts and ends the held loop of a press in the scrub area or the
+    /// beat-time ruler (time-editing R25, R27): once the button has been down
+    /// for [`SCRUB_HOLD_SECONDS`] on `press`, a point of the area, `transport.scrub`
+    /// loops there, with `permanent` or Shift held, and releasing the button
+    /// ends it. Returns whether a hold ended this frame, so its release isn't
+    /// also a click.
+    fn scrub_hold(
+        &mut self,
+        ui: &Ui,
+        response: &egui::Response,
+        press: Option<Ticks>,
+        permanent: bool,
+        events: &mut Vec<UiEvent>,
+    ) -> bool {
+        let (down, shift, started, now) = ui.input(|i| {
+            (
+                i.pointer.primary_down(),
+                i.modifiers.shift,
+                i.pointer.press_start_time(),
+                i.time,
+            )
+        });
+        if let Some(position) = self.scrub_hold {
+            if down {
+                return false;
+            }
+            self.scrub_hold = None;
+            let args = json!({ "position": position, "held": false });
+            invoke(events, "transport.scrub", args);
+            return true;
+        }
+        if let (true, true, Some(position), Some(started)) =
+            (down, response.is_pointer_button_down_on(), press, started)
+        {
+            if now - started < SCRUB_HOLD_SECONDS {
+                // Nothing else wakes the frame that finds the press long enough.
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(50));
+            } else if permanent || shift {
+                self.scrub_hold = Some(position);
+                let args = json!({ "position": position, "held": true });
+                invoke(events, "transport.scrub", args);
+            }
+        }
+        false
+    }
+
     #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
     fn ruler_input(
         &mut self,
@@ -1439,12 +1511,23 @@ impl ArrangementUi {
         let ruler = layout.beat_ruler;
         let at = |pos: Pos2| horizontal.at(f64::from(pos.x - ruler.left()));
         let response = ui.interact(ruler, beat_ruler_id(), Sense::click_and_drag());
+        // Spec: time-editing R27. A Shift-hold in the ruler loops, and the
+        // ruler doesn't scroll or zoom while it does.
+        let press = ui.input(|i| i.pointer.press_origin()).map(at);
+        let released = self.scrub_hold(ui, &response, press, false, events);
         if response.double_clicked() {
             // I-CLICK-016.
             invoke(events, ids::ZOOM_TO_SELECTION, json!({}));
-        } else if response.clicked() {
-            // Clicking the ruler pauses Follow while the song plays.
-            invoke(events, ids::FOLLOW, json!({ "paused": true }));
+        } else if response.clicked() && !released {
+            if ui.input(|i| i.modifiers.shift) {
+                // Spec: time-editing R27 (I-CLICK-014). Shift-click scrubs.
+                if let Some(pos) = response.interact_pointer_pos() {
+                    play_from(events, view.transport().playing, view.snap(doc, at(pos)));
+                }
+            } else {
+                // Clicking the ruler pauses Follow while the song plays.
+                invoke(events, ids::FOLLOW, json!({ "paused": true }));
+            }
         }
         if response.drag_started()
             && let Some(press) = ui.input(|i| i.pointer.press_origin())
@@ -1455,6 +1538,7 @@ impl ArrangementUi {
             });
         }
         if response.dragged()
+            && self.scrub_hold.is_none()
             && let Some(Drag::Ruler {
                 anchor,
                 overview: false,
@@ -1487,6 +1571,13 @@ impl ArrangementUi {
         let scrub_at = |pos: Pos2| horizontal.at(f64::from(pos.x - layout.scrub.left()));
         let locator_at = |pos: Pos2| locator_under(doc, horizontal, layout.scrub.left(), pos);
         let pointer = scrub.interact_pointer_pos();
+        // Spec: time-editing R25 to R27. A press held away from a locator
+        // loops a span, with Permanent Scrub Areas on or Shift held.
+        let press = ui
+            .input(|i| i.pointer.press_origin())
+            .filter(|pos| locator_at(*pos).is_none())
+            .map(scrub_at);
+        let released = self.scrub_hold(ui, &scrub, press, shell.permanent_scrub_areas(), events);
         // The locators in the scrub area are controls the keyboard reaches
         // (accessibility R10).
         for locator in doc.locators() {
@@ -1644,7 +1735,7 @@ impl ArrangementUi {
                     invoke(events, "transport.play_from_insert_marker", json!({}));
                 }
             }
-        } else if scrub.clicked() {
+        } else if scrub.clicked() && !released {
             if let Some(locator) = pointer.and_then(locator_at) {
                 // Spec: time-editing R5. Clicking a locator selects it
                 // alone and jumps to it.
@@ -1662,16 +1753,13 @@ impl ArrangementUi {
                     return;
                 };
                 let at = view.snap(doc, scrub_at(pos));
-                invoke(events, ids::SET_INSERT_MARKER, json!({ "at": at }));
-                invoke(
-                    events,
-                    "transport.locate",
-                    json!({ "position": at, "quantized": true }),
-                );
-                if !view.transport().playing {
-                    invoke(events, "transport.play_from_insert_marker", json!({}));
+                if shell.permanent_scrub_areas() || ui.input(|i| i.modifiers.shift) {
+                    play_from(events, view.transport().playing, at);
+                } else {
+                    // Spec: time-editing R26. With Permanent Scrub Areas off, a
+                    // click places the insert marker, as one in a lane does.
+                    invoke(events, ids::SET_INSERT_MARKER, json!({ "at": at }));
                 }
-                invoke(events, ids::FOLLOW, json!({ "paused": false }));
             }
         }
         // The scrub area's own menu (C-TIME-022), away from a locator.

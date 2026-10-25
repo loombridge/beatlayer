@@ -447,3 +447,165 @@ fn a_locators_menu_edit_info_text_types_the_text_in_the_info_view() {
     let doc = h.shell.editor().document();
     assert_eq!(doc.locator(locator).unwrap().info_text, "Drop here");
 }
+
+/// Presses the primary button at `at`, with Shift held when `shift` says so,
+/// and runs `frames` frames with the button down.
+fn press_and_hold(h: &mut Harness, at: Pos2, shift: bool, frames: usize) {
+    let modifiers = if shift {
+        Modifiers::SHIFT
+    } else {
+        Modifiers::NONE
+    };
+    h.frame(vec![
+        Event::ModifiersChanged(modifiers),
+        Event::PointerMoved(at),
+    ]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers,
+    }]);
+    for _ in 0..frames {
+        h.frame(vec![]);
+    }
+}
+
+/// Releases the primary button at `at`.
+fn release(h: &mut Harness, at: Pos2) {
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::ModifiersChanged(Modifiers::NONE)]);
+}
+
+/// The scrub area's point at bar 3, a beat in, and the span the global
+/// launch quantisation (a bar) loops there.
+fn bar_three(h: &Harness) -> (Pos2, std::ops::Range<Ticks>) {
+    let layout = layout(h);
+    let horizontal = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
+    let x = layout.scrub.left() + horizontal.x(Ticks(2 * BAR + Ticks::QUARTER.get())) as f32;
+    (
+        pos2(x, layout.scrub.center().y),
+        Ticks(2 * BAR)..Ticks(3 * BAR),
+    )
+}
+
+#[test]
+fn holding_the_scrub_area_loops_a_span_and_the_release_ends_it() {
+    // Spec: time-editing R25; transport R23.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.settle();
+    let (at, span) = bar_three(&h);
+    press_and_hold(&mut h, at, false, 30);
+    h.wait("the held loop to play", |h| h.engine.playing);
+    let mut last = h.engine.position;
+    let mut wrapped = false;
+    h.wait("the span to repeat", |h| {
+        assert!(span.contains(&h.engine.position), "{:?}", h.engine);
+        wrapped |= h.engine.position < last;
+        last = h.engine.position;
+        wrapped
+    });
+    release(&mut h, at);
+    // Released, playback goes on past the span's end instead of wrapping.
+    h.wait("playback past the span", |h| h.engine.position >= span.end);
+    assert!(h.engine.playing);
+    // The release was no click: the insert marker is where the loop began
+    // and nothing jumped back to it.
+    assert_eq!(h.engine.insert_marker, span.start);
+}
+
+#[test]
+fn a_press_shorter_than_a_hold_is_a_click_that_plays_from_the_point() {
+    // Spec: time-editing R11, R25.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.settle();
+    let (at, span) = bar_three(&h);
+    press_and_hold(&mut h, at, false, 2);
+    release(&mut h, at);
+    h.wait("playback", |h| h.engine.playing);
+    assert!(h.engine.position >= span.start, "{:?}", h.engine);
+}
+
+#[test]
+fn with_permanent_scrub_areas_off_a_click_places_the_insert_marker_and_a_hold_loops_nothing() {
+    // Spec: time-editing R26.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell
+        .run("settings.set_permanent_scrub_areas", json!({ "on": false }))
+        .unwrap();
+    h.settle();
+    let (at, span) = bar_three(&h);
+    h.click(at);
+    h.settle();
+    assert!(state(&mut h).insert_marker > Ticks::ZERO);
+    assert!(!h.engine.playing, "a click starts nothing");
+    press_and_hold(&mut h, at, false, 60);
+    release(&mut h, at);
+    for _ in 0..60 {
+        h.frame(vec![]);
+    }
+    assert!(!h.engine.playing, "a hold loops nothing: {:?}", h.engine);
+    // Shift-click scrubs whatever the setting.
+    press_and_hold(&mut h, at, true, 2);
+    release(&mut h, at);
+    h.wait("playback", |h| h.engine.playing);
+    assert!(h.engine.position >= span.start, "{:?}", h.engine);
+}
+
+#[test]
+fn shift_click_in_the_beat_time_ruler_plays_without_scrolling() {
+    // Spec: time-editing R27; arrangement-view R10.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell
+        .run("settings.set_permanent_scrub_areas", json!({ "on": false }))
+        .unwrap();
+    h.settle();
+    let layout = layout(&h);
+    let (at, span) = bar_three(&h);
+    let in_ruler = pos2(at.x, layout.beat_ruler.center().y);
+    let view = h
+        .shell
+        .arrangement()
+        .horizontal(h.shell.editor().document());
+    press_and_hold(&mut h, in_ruler, true, 2);
+    release(&mut h, in_ruler);
+    h.wait("playback", |h| h.engine.playing);
+    assert!(h.engine.position >= span.start, "{:?}", h.engine);
+    assert_eq!(
+        h.shell
+            .arrangement()
+            .horizontal(h.shell.editor().document()),
+        view,
+        "the view didn't scroll or zoom"
+    );
+}
+
+#[test]
+fn a_shift_hold_in_the_beat_time_ruler_loops() {
+    // Spec: time-editing R27.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.settle();
+    let layout = layout(&h);
+    let (at, span) = bar_three(&h);
+    let in_ruler = pos2(at.x, layout.beat_ruler.center().y);
+    press_and_hold(&mut h, in_ruler, true, 30);
+    h.wait("the held loop to play", |h| h.engine.playing);
+    let mut last = h.engine.position;
+    let mut wrapped = false;
+    h.wait("the span to repeat", |h| {
+        assert!(span.contains(&h.engine.position), "{:?}", h.engine);
+        wrapped |= h.engine.position < last;
+        last = h.engine.position;
+        wrapped
+    });
+    release(&mut h, in_ruler);
+    h.wait("playback past the span", |h| h.engine.position >= span.end);
+}

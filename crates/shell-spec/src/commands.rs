@@ -163,6 +163,9 @@ pub const FOCUS_TOGGLE_WRAP_NAVIGATION: &str = "focus.toggle_wrap_navigation";
 /// `settings.set_outline_view_in_focus`: switch Outline View in Focus
 /// (WP-1.14).
 pub const SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS: &str = "settings.set_outline_view_in_focus";
+/// `settings.set_permanent_scrub_areas`: switch Permanent Scrub Areas
+/// (WP-6.59; the time editing spec, R26).
+pub const SETTINGS_SET_PERMANENT_SCRUB_AREAS: &str = "settings.set_permanent_scrub_areas";
 /// `settings.next_page`: show the next Settings page.
 pub const SETTINGS_NEXT_PAGE: &str = "settings.next_page";
 /// `settings.previous_page`: show the previous Settings page.
@@ -357,6 +360,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
+    SETTINGS_SET_PERMANENT_SCRUB_AREAS,
     SETTINGS_SET_COLLECT_FILES_ON_EXPORT,
     SETTINGS_SET_USER_LIBRARY,
     AUDIO_DEVICES,
@@ -2398,6 +2402,25 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<SwitchArgs>()
             .result::<SwitchResult>(),
+        // Display & Input, Mouse and Pen Input (L-SET-010; WP-6.59).
+        CommandSpec::new(
+            SETTINGS_SET_PERMANENT_SCRUB_AREAS,
+            "Permanent Scrub Areas",
+        )
+        .description(
+            "Switches Permanent Scrub Areas, on the Settings window's Display & Input page: \
+             while it's on, as it is in a new install (as Live's is), a click in the \
+             Arrangement's scrub area plays from that point and holding the mouse button there \
+             loops a short span (`transport.scrub` does both); while it's off, a click there \
+             places the insert marker, as a click in a track does, and a hold loops nothing, \
+             but Shift-click and Shift-hold still scrub. The setting is kept for the next \
+             start, and isn't part of the set or an undo step. The result's `on` is the \
+             setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         CommandSpec::new(AUDIO_DEVICES, "List Audio Devices")
             .description(
                 "Lists the driver types this computer offers and, for the chosen one, its \

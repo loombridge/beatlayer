@@ -38,6 +38,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_user_library", read("settings.state", "library.user_library")),
     ("settings.set_temporary_folder", read("settings.state", "file_folder.temporary_folder")),
     ("settings.set_outline_view_in_focus", read("settings.state", "display_input.outline_view_in_focus")),
+    ("settings.set_permanent_scrub_areas", read("settings.state", "display_input.permanent_scrub_areas")),
     ("settings.set_default_launch_mode", read("settings.state", "launch.default_mode")),
     ("settings.set_default_launch_quantization", read("settings.state", "launch.default_quantization")),
     ("settings.set_record_session_automation_in", read("settings.state", "record_session_automation_in")),

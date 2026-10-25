@@ -205,6 +205,7 @@ fn each_settings_command_reads_back_from_settings_state() {
         })
     );
     assert_eq!(before["display_input"]["outline_view_in_focus"], true);
+    assert_eq!(before["display_input"]["permanent_scrub_areas"], true);
     assert_eq!(before["display_input"]["zoom_percent"], 100);
     assert_eq!(before["automation_record_mode"], "touch");
     assert_eq!(
@@ -356,6 +357,11 @@ fn each_settings_command_reads_back_from_settings_state() {
         "settings.set_outline_view_in_focus",
         json!({ "on": false }),
     );
+    run(
+        &mut client,
+        "settings.set_permanent_scrub_areas",
+        json!({ "on": false }),
+    );
     run(&mut client, "view.set_zoom", json!({ "percent": 150 }));
     run(&mut client, "focus.toggle_tab_navigation", json!({}));
     run(&mut client, "focus.toggle_wrap_navigation", json!({}));
@@ -432,6 +438,7 @@ fn each_settings_command_reads_back_from_settings_state() {
         json!({
             "zoom_percent": 150,
             "outline_view_in_focus": false,
+            "permanent_scrub_areas": false,
             "use_tab_key_to_move_focus": true,
             "wrap_tab_navigation": false,
         })

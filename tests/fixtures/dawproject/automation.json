@@ -1,0 +1,83 @@
+{
+  "application": "Fixture DAW 1.0",
+  "entries": [
+    {
+      "count": 1,
+      "did": "kept as a missing plug-in",
+      "what": "a CLAP plug-in",
+      "where": "the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "automation of a send's Enable",
+      "where": "the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "automation of a send's pan",
+      "where": "the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "automation of a parameter the import left out",
+      "where": "the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "automation of a plug-in that isn't installed",
+      "where": "the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "automation of a device's Enabled",
+      "where": "the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "an expression that changes over an audio clip",
+      "where": "the clip \"Tuned\" at 3.1.1 on the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "an expression of an audio clip Beatlayer can't hold",
+      "where": "the clip \"Tuned\" at 3.1.1 on the track \"Audio\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "an expression of a note Beatlayer can't hold",
+      "where": "the clip \"Phrase\" at 1.1.1 on the track \"Lead\""
+    },
+    {
+      "count": 2,
+      "did": "left out",
+      "what": "a controller on a second channel",
+      "where": "the track \"Lead\""
+    },
+    {
+      "count": 2,
+      "did": "left out",
+      "what": "a MIDI controller or expression Beatlayer can't hold",
+      "where": "the track \"Lead\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "points of a MIDI controller outside every clip",
+      "where": "the track \"Lead\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "automation in a Session clip of another track's parameter",
+      "where": "the clip \"Slot\" in scene 1 on the track \"Audio\""
+    }
+  ]
+}

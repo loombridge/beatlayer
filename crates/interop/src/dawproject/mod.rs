@@ -11,13 +11,16 @@
 //! Nothing here panics on a damaged or foreign file.
 
 pub mod container;
+pub mod generic;
 pub mod import;
 pub mod model;
+pub mod plugins;
 pub mod read;
 pub mod report;
 
 pub use container::{Container, Error, read_container};
-pub use import::{Context, Extracted, Imported, import};
+pub use import::{Context, DefaultColours, Extracted, Imported, NewColours, import};
 pub use model::Project;
+pub use plugins::{Installed, NoPlugins, Plugins};
 pub use read::ReadReport;
 pub use report::{Entry, Report};

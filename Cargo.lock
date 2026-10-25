@@ -878,6 +878,8 @@ name = "bl-interop"
 version = "0.2.0"
 dependencies = [
  "bl-core",
+ "bl-devices",
+ "bl-engine",
  "bl-media",
  "bl-model",
  "bl-project",

@@ -27,7 +27,12 @@ fn fixture(name: &str) -> PathBuf {
 
 /// The file, imported with Re-Pitch as the Default Warp Mode.
 fn import() -> Imported {
-    let bytes = std::fs::read(fixture("bitwig-shaped.dawproject")).unwrap();
+    import_of("bitwig-shaped")
+}
+
+/// A fixture, imported with Re-Pitch as the Default Warp Mode.
+fn import_of(name: &str) -> Imported {
+    let bytes = std::fs::read(fixture(&format!("{name}.dawproject"))).unwrap();
     let container = dawproject::read_container(&bytes).unwrap();
     let folder = fixture("");
     let mut context = Context::new(&folder, &folder);
@@ -127,10 +132,21 @@ fn built(hash: impl Fn(&str) -> ContentHash) -> Document {
         warp_mode: WarpMode::RePitch,
         ..AudioData::new(hash("audio/loop.wav"))
     };
+    // The outer clip fades in over half a beat at its start and out over
+    // half a beat at its end: a quarter of a second each, at 120 BPM, on the
+    // first and the last of its clips (R33).
     for pass in 0..2 {
         let at = q * 4 * pass;
-        set.clip(hybrid, at, q * 2, "", warped(2));
-        set.clip(hybrid, at + q * 2, q * 2, "", warped(4));
+        let first = AudioData {
+            fade_in: if pass == 0 { 0.25 } else { 0.0 },
+            ..warped(2)
+        };
+        let last = AudioData {
+            fade_out: if pass == 1 { 0.25 } else { 0.0 },
+            ..warped(4)
+        };
+        set.clip(hybrid, at, q * 2, "", first);
+        set.clip(hybrid, at + q * 2, q * 2, "", last);
     }
 
     // An unwarped clip two seconds long that loops the first half second of
@@ -199,7 +215,7 @@ fn render(document: &Document, media: &MediaMap, block: usize) -> Vec<f32> {
     samples
 }
 
-/// Spec: dawproject R19, R22, R29 to R32, R34. The imported set renders to
+/// Spec: dawproject R19, R22, R29 to R34. The imported set, beat fades included, renders to
 /// the same samples as the set the spec describes, at two block sizes.
 #[test]
 fn the_imported_set_renders_the_same_samples_as_the_set_built_by_commands() {
@@ -228,4 +244,130 @@ fn the_imported_set_renders_the_same_samples_as_the_set_built_by_commands() {
             "block size {block}: the renders differ by {worst}"
         );
     }
+}
+
+/// The hash of the one audio file a small fixture holds.
+fn tone(imported: &Imported) -> ContentHash {
+    imported.files[0].hash
+}
+
+/// A set of one audio track `name`, built by commands.
+fn one_track(name: &str) -> (Built, TrackId) {
+    let mut set = Built {
+        editor: Editor::new(),
+    };
+    let track = set.track(TrackKind::Audio, name, None);
+    (set, track)
+}
+
+/// How far two renders of a fixture differ, at two block sizes.
+fn assert_null(imported: &Imported, expected: &Document) {
+    let (media, _) = media(imported);
+    for block in [64, 512] {
+        let from_file = render(&imported.project.document, &media, block);
+        let from_commands = render(expected, &media, block);
+        assert!(
+            from_file.iter().any(|sample| sample.abs() > 0.01),
+            "silence"
+        );
+        assert_eq!(from_file.len(), from_commands.len());
+        let worst = from_file
+            .iter()
+            .zip(&from_commands)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert_eq!(
+            worst, 0.0,
+            "block size {block}: the renders differ by {worst}"
+        );
+    }
+}
+
+/// Spec: dawproject R56 to R58. An imported volume ramp renders the same as
+/// one drawn by hand.
+#[test]
+fn an_imported_volume_ramp_renders_the_same_as_a_hand_drawn_one() {
+    let imported = import_of("ramp");
+    let (mut set, track) = one_track("Ramp");
+    let q = Ticks::QUARTER;
+    set.clip(
+        track,
+        Ticks::ZERO,
+        q * 2,
+        "Tone",
+        AudioData::new(tone(&imported)),
+    );
+    set.apply(Command::SetAutomationEnvelope {
+        track,
+        target: bl_model::AutomationTarget::Mixer {
+            param: bl_model::MixerParam::Volume,
+        },
+        points: vec![
+            bl_model::Breakpoint {
+                at: Ticks::ZERO,
+                value: 1.0,
+                bend: 0.0,
+            },
+            bl_model::Breakpoint {
+                at: q * 2,
+                value: 0.25,
+                bend: 0.0,
+            },
+        ],
+    });
+    assert_null(&imported, set.editor.document());
+}
+
+/// Spec: dawproject R33. A crossfade imported from a negative `fadeInTime`
+/// equals the one `arrangement.set_crossfade` makes between the same two
+/// clips, and renders the same.
+#[test]
+fn an_imported_crossfade_renders_the_same_as_the_one_the_command_makes() {
+    let imported = import_of("crossfade");
+    let (mut set, track) = one_track("Cross");
+    let q = Ticks::QUARTER;
+    set.clip(
+        track,
+        Ticks::ZERO,
+        q * 2,
+        "A",
+        AudioData::new(tone(&imported)),
+    );
+    set.clip(track, q * 2, q * 2, "B", AudioData::new(tone(&imported)));
+    set.apply(Command::SetCrossfade {
+        track,
+        boundary: q * 2,
+        before: 0.0,
+        after: 0.2,
+        curve: 0.0,
+    });
+    let expected = set.editor.document();
+    let on = |document: &Document| -> Vec<Clip> {
+        let track = document.tracks().find(|t| t.name() == "Cross").unwrap();
+        let mut clips: Vec<Clip> = track.clips().cloned().collect();
+        clips.sort_by_key(|clip| clip.start);
+        clips
+    };
+    let (made, imported_clips) = (on(expected), on(&imported.project.document));
+    for (made, imported) in made.iter().zip(&imported_clips) {
+        assert_eq!(made.data, imported.data);
+    }
+    assert_null(&imported, expected);
+}
+
+/// Spec: dawproject R53. A Limiter imported with Threshold −6 dB, InputGain
+/// +3 dB and OutputGain +2 dB peaks at −4 dBFS on a sine at full scale.
+#[test]
+fn an_imported_limiter_peaks_at_its_ceiling() {
+    let imported = import_of("limiter");
+    let (media, _) = media(&imported);
+    let samples = render(&imported.project.document, &media, 512);
+    // Past the limiter's lookahead and release at the start.
+    let from = samples.len() / 10;
+    let peak = samples[from..]
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0f32, f32::max);
+    let db = 20.0 * peak.log10();
+    assert!((db - -4.0).abs() < 0.1, "the peak is {db} dBFS");
 }

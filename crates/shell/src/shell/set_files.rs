@@ -325,14 +325,24 @@ impl Shell {
                 }
                 let path = PathBuf::from(&args.path);
                 let folder = crate::dawproject::import_folder(&self.temporary_folder(), &path);
-                let warp_mode = crate::auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
-                let mut job = crate::dawproject::Job::start(&path, &folder, warp_mode)
+                let settings = crate::dawproject::Settings {
+                    default_warp_mode: crate::auto_warp::warp_mode(
+                        self.prefs.warp.default_warp_mode,
+                    ),
+                    track_colours: self.track_palette.clone(),
+                    look: self.prefs.look.clone(),
+                    installed: self.installed_plugins(),
+                };
+                let mut job = crate::dawproject::Job::start(&path, &folder, settings)
                     .map_err(|error| failed(error.to_string()))?;
                 // An agent's call returns when the new set is open (R10).
                 let imported = loop {
                     if let Some(result) = job.poll() {
                         break result;
                     }
+                    // The worker asks for a plug-in's parameters here, on
+                    // the thread that owns the plug-in hosts (R57).
+                    job.serve(|plugin| self.describe_plugin(plugin));
                     self.set_message(
                         format!("Importing {} ({}%)", path.display(), job.percent()),
                         false,
@@ -383,6 +393,70 @@ impl Shell {
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+
+    /// The plug-ins the scanner found, for an import to look its plug-ins up
+    /// among (the DAWproject spec, R46).
+    fn installed_plugins(&self) -> Vec<bl_interop::dawproject::Installed> {
+        self.scanner
+            .plugins()
+            .into_iter()
+            .map(|plugin| bl_interop::dawproject::Installed {
+                format: plugin.format,
+                plugin_id: plugin.plugin_id,
+                path: plugin.path.to_string_lossy().into_owned(),
+                name: plugin.name,
+                role: plugin.role,
+            })
+            .collect()
+    }
+
+    /// Loads an installed plug-in and describes its parameters, for the
+    /// automation an import maps through them (the DAWproject spec, R57).
+    fn describe_plugin(
+        &mut self,
+        plugin: &bl_interop::dawproject::Installed,
+    ) -> Result<Vec<bl_model::ParamDescriptor>, String> {
+        use bl_model::PluginFormat;
+
+        let path = std::path::Path::new(&plugin.path);
+        let types: Vec<bl_engine::DeviceType> = match plugin.format {
+            PluginFormat::Clap => self
+                .plugins
+                .load(path)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|t| t.device_type)
+                .collect(),
+            PluginFormat::Vst3 => self
+                .vst3
+                .load(path)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|t| t.device_type)
+                .collect(),
+            PluginFormat::AudioUnit => {
+                let (kind, subtype, manufacturer) =
+                    bl_plugin_host::au::parse_description_id(&plugin.plugin_id)
+                        .ok_or("its ID doesn't read")?;
+                vec![
+                    self.au
+                        .load(kind, subtype, manufacturer)
+                        .map_err(|e| e.to_string())?
+                        .device_type,
+                ]
+            }
+            PluginFormat::Lv2 => return Err("a DAWproject file holds no LV2 plug-ins".to_owned()),
+        };
+        self.refresh_device_types();
+        types
+            .into_iter()
+            .find(|t| {
+                matches!(&t.kind, bl_model::DeviceKind::Plugin { plugin_id, .. }
+                    if *plugin_id == plugin.plugin_id)
+            })
+            .map(|t| t.description.params)
+            .ok_or_else(|| "the file doesn't hold that plug-in".to_owned())
     }
 
     /// A new or opened set starts stopped at 1.1.1

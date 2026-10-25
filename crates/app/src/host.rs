@@ -390,6 +390,17 @@ struct Surface {
     zoom: f32,
 }
 
+/// The theme's 14 track colours, from which the shell draws the palette an
+/// import places a file's colours on (the DAWproject spec, R23).
+fn track_palette(theme: &Theme) -> Vec<[u8; 3]> {
+    theme
+        .colors
+        .track_palette
+        .iter()
+        .map(|colour| [colour.0.r(), colour.0.g(), colour.0.b()])
+        .collect()
+}
+
 struct Host {
     args: Args,
     shell: Shell,
@@ -625,10 +636,12 @@ pub fn run(args: Args) -> Result<(), String> {
     // over them (the custom-shortcuts spec, R3).
     let keymap = Keymap::from_data(shell.keymap().clone());
     let keymap_revision = shell.keymap_revision();
+    let theme = library.resolve(&drawn.0, drawn.1);
+    shell.set_track_palette(track_palette(&theme));
     let mut host = Host {
         args,
         shell,
-        theme: library.resolve(&drawn.0, drawn.1),
+        theme,
         library,
         drawn,
         on_theme_page: false,
@@ -1154,6 +1167,7 @@ impl Host {
             return false;
         }
         self.theme = self.library.resolve(&drawn.0, drawn.1);
+        self.shell.set_track_palette(track_palette(&self.theme));
         self.drawn = drawn;
         true
     }

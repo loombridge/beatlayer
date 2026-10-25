@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::time::{TempoMap, TimeSignatureMap};
 use bl_model::{
     Chain, ChainId, Change, ChangeSet, ContentHash, Device, DeviceId, DeviceKind, DeviceOutput,
-    Document, LaunchMode, Mixer, OrdMap, Output, ParamId, RackKind, SceneId, Tap, Track, TrackId,
-    TrackKind,
+    DeviceRole, Document, LaunchMode, Mixer, OrdMap, Output, ParamId, RackKind, SceneId, Tap,
+    Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -22,6 +22,7 @@ use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
 use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
+use crate::points::MeterPoint;
 use crate::program::{
     ChainSendRef, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
     Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT, NO_OUTPUT_BUFFER,
@@ -34,6 +35,7 @@ use crate::session::FollowTable;
 use crate::session::{SceneMaps, SceneOverride};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
+use crate::state::{MeterOwner, MeterSite};
 use crate::warped::PoolSpec;
 use crate::zones::{self, ChainSelector, ZoneFilter};
 
@@ -1228,6 +1230,7 @@ impl Compiler {
             tasks: with_dependents(build.tasks, &dependents),
             task_inputs: build.inputs,
             steps: build.steps,
+            meter_points: build.meter_points,
             merge: Shared::new(vec![MergeCursor::default(); build.rack_chains.len()]),
             selects: Shared::new(vec![0.0; build.racks.len() * self.config.max_frames]),
             racks: build.racks,
@@ -1613,6 +1616,7 @@ impl Compiler {
             device_input: None,
             player: None,
             chain: Span::default(),
+            meters: Span::default(),
             sidechains: Span::default(),
             midi_sidechains: Span::default(),
             mixer,
@@ -1731,11 +1735,16 @@ impl Compiler {
         let midi_start = build.midi_sidechains.len() as u32;
         // A frozen track runs none of its devices: its player hands on the
         // freeze files (WP-4.14, R6).
-        let chain = self.add_flow(
+        let (chain, meters) = self.add_flow(
             build,
             track.devices().filter(|_| !track.is_frozen()),
             sidechain_inputs,
             &mut dependencies,
+            (
+                MeterOwner::Track(track.id()),
+                // A frozen track plays its freeze file: audio from the start.
+                track.kind() == TrackKind::Midi && !track.is_frozen(),
+            ),
         );
         let sidechains = Span {
             start: sidechain_start,
@@ -1764,6 +1773,7 @@ impl Compiler {
             device_input,
             player,
             chain,
+            meters,
             sidechains,
             midi_sidechains,
             midi_keep: None,
@@ -1786,16 +1796,28 @@ impl Compiler {
         devices: impl Iterator<Item = &'a Device>,
         sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
         dependencies: &mut u32,
-    ) -> Span {
+        meters: (MeterOwner, bool),
+    ) -> (Span, Span) {
         let config = self.config.node_config();
         let own = build.tasks.len() as u32;
         let mut steps = Vec::new();
+        // Spec: midi-meters R2. A meter in front of each step and after the
+        // last; the signal is MIDI until a device that isn't a MIDI effect.
+        let (owner, mut midi) = meters;
+        let mut points = Vec::new();
         for device in devices {
             if let Some(kind) = device.rack_kind() {
-                if let Some(rack) =
-                    self.add_rack(build, device, kind, sidechain_inputs, dependencies)
-                {
+                if let Some(rack) = self.add_rack(
+                    build,
+                    device,
+                    kind,
+                    sidechain_inputs,
+                    dependencies,
+                    midi && device.role != DeviceRole::AudioEffect,
+                ) {
                     steps.push(Step::Rack(rack));
+                    points.push(MeterPoint::new(owner, MeterSite::Before(device.id), midi));
+                    midi &= device.role == DeviceRole::MidiEffect;
                 }
                 continue;
             }
@@ -1877,6 +1899,8 @@ impl Compiler {
                 build.modulators.push((slot, device.id));
             }
             steps.push(Step::Node(slot));
+            points.push(MeterPoint::new(owner, MeterSite::Before(device.id), midi));
+            midi &= device.role == DeviceRole::MidiEffect;
             if let Some(settings) = &device.sidechain {
                 let sources = sidechain_inputs.remove(&device.id).unwrap_or_default();
                 *dependencies += sources.iter().filter(|s| s.from != own).count() as u32;
@@ -1894,10 +1918,21 @@ impl Compiler {
         }
         let start = build.steps.len() as u32;
         build.steps.extend(steps);
-        Span {
-            start,
-            end: build.steps.len() as u32,
-        }
+        let points_start = build.meter_points.len() as u32;
+        build.meter_points.extend(points);
+        build
+            .meter_points
+            .push(MeterPoint::new(owner, MeterSite::End, midi));
+        (
+            Span {
+                start,
+                end: build.steps.len() as u32,
+            },
+            Span {
+                start: points_start,
+                end: build.meter_points.len() as u32,
+            },
+        )
     }
 
     /// Adds a rack's chains (the racks spec, R3): each one's devices, its
@@ -1913,6 +1948,7 @@ impl Compiler {
         kind: RackKind,
         sidechain_inputs: &mut BTreeMap<DeviceId, Vec<Input>>,
         dependencies: &mut u32,
+        midi: bool,
     ) -> Option<u32> {
         if device.chains.is_empty() {
             return None;
@@ -1920,7 +1956,13 @@ impl Compiler {
         let config = self.config.node_config();
         let mut chains = Vec::with_capacity(device.chains.len());
         for chain in &device.chains {
-            let steps = self.add_flow(build, chain.devices.iter(), sidechain_inputs, dependencies);
+            let (steps, meters) = self.add_flow(
+                build,
+                chain.devices.iter(),
+                sidechain_inputs,
+                dependencies,
+                (MeterOwner::Chain(chain.id), midi),
+            );
             let silenced = silenced_by_solo(device, chain);
             let mixer = self.place(
                 build,
@@ -1949,6 +1991,7 @@ impl Compiler {
             };
             chains.push(RackChain {
                 steps,
+                meters,
                 mixer,
                 zones,
                 buffer: build.chain_buffers,
@@ -2187,6 +2230,9 @@ struct Build {
     inputs: Vec<Input>,
     /// The steps of every chain, a track's or a rack chain's (WP-5.1).
     steps: Vec<Step>,
+    /// The meter points of every chain (WP-6.69): one per step and one at
+    /// the end, in the chain's order.
+    meter_points: Vec<MeterPoint>,
     racks: Vec<Rack>,
     rack_chains: Vec<RackChain>,
     /// The sends of drum chains to their racks' return chains.

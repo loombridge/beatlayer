@@ -17,11 +17,12 @@ use crate::node::{
     Block, Node, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent, NoteKind, ParamValue,
     TransportInfo,
 };
+use crate::points::MeterPoint;
 use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool, Sched, Wake};
 use crate::session::{SceneMaps, SessionPlayback};
 use crate::sidechain::SidechainKey;
-use crate::state::PlayedParam;
+use crate::state::{ChainMeter, PlayedParam};
 use crate::zones::{ChainSelector, ZoneFilter};
 
 /// A compiled song, ready to run on the audio thread: a flat array of
@@ -78,6 +79,9 @@ pub struct EngineProgram {
     /// The steps of every chain, a track's or a rack chain's, each chain a
     /// run of them in signal order (WP-5.1).
     pub(crate) steps: Vec<Step>,
+    /// The meter points of every chain (WP-6.69): a chain's, one for each of
+    /// its steps and one at its end, in `meters`.
+    pub(crate) meter_points: Vec<MeterPoint>,
     /// The racks in the tasks' chains, children before the racks that hold
     /// them.
     pub(crate) racks: Vec<Rack>,
@@ -391,6 +395,8 @@ pub(crate) struct ChainSendRef {
 pub(crate) struct RackChain {
     /// The chain's devices, in `steps`.
     pub(crate) steps: Span,
+    /// The chain's meter points, in `meter_points`.
+    pub(crate) meters: Span,
     /// The slot of the chain's mixer.
     pub(crate) mixer: u32,
     /// The slot of the filter at the chain's input (R31).
@@ -726,6 +732,8 @@ pub(crate) struct Task {
     pub(crate) player: Option<u32>,
     /// The device chain, in `steps`.
     pub(crate) chain: Span,
+    /// The chain's meter points, in `meter_points`.
+    pub(crate) meters: Span,
     /// The sidechains of its devices, in `sidechains`.
     pub(crate) sidechains: Span,
     /// The MIDI sidechains of its devices, in `midi_sidechains`.
@@ -952,6 +960,23 @@ impl EngineProgram {
                 out.push(id);
             }
         }
+    }
+
+    /// The meters between the devices of every chain, after a block of
+    /// `frames`, which let them fall (WP-6.69). Stops when `out` is full and
+    /// says whether it did.
+    pub(crate) fn chain_meters(&self, out: &mut Vec<ChainMeter>, frames: usize) -> bool {
+        let rate = self.sample_rate.as_f64();
+        let mut full = false;
+        for point in &self.meter_points {
+            let meter = point.publish(frames, rate);
+            if out.len() < out.capacity() {
+                out.push(meter);
+            } else {
+                full = true;
+            }
+        }
+        full
     }
 
     /// The meters of a task's track.
@@ -1463,7 +1488,7 @@ impl EngineProgram {
             wake,
             delivered: 0,
         };
-        let ended = self.run_steps(&mut pass, task, task.chain, t, notes, 0);
+        let ended = self.run_steps(&mut pass, task, (task.chain, task.meters), t, notes, 0);
         delivered += pass.delivered;
 
         // Spec: external-devices R3. What reached the end of the chain
@@ -2089,7 +2114,7 @@ impl EngineProgram {
         &self,
         pass: &mut Pass<'_>,
         task: Task,
-        steps: Span,
+        (steps, points): (Span, Span),
         buffer: usize,
         pair: usize,
         mut note_idx: usize,
@@ -2097,6 +2122,19 @@ impl EngineProgram {
         let turn = pass.turn;
         let block = pass.block;
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
+        let points = &self.meter_points[points.range()];
+        // Spec: midi-meters R6. What reaches a device, measured in front of it.
+        let measure = |at: usize, note_idx: usize| {
+            // The cue task has no chain, and so no points.
+            let Some(point) = points.get(at) else {
+                return;
+            };
+            if point.midi {
+                point.measure_notes(turn.notes(pair + note_idx).notes());
+            } else {
+                point.measure_audio(turn.buffer(buffer), channels, stride, frames);
+            }
+        };
         for step_at in steps.range() {
             // Spec: device-framework R32. The note-offs of devices that left
             // the track's chain in the swap enter in front of the step that
@@ -2113,6 +2151,7 @@ impl EngineProgram {
                     turn.notes(pair + note_idx).insert(note);
                 }
             }
+            measure(step_at - steps.range().start, note_idx);
             let slot = match self.steps[step_at] {
                 Step::Node(slot) => slot,
                 Step::Rack(rack) => {
@@ -2273,6 +2312,7 @@ impl EngineProgram {
                 }
             }
         }
+        measure(steps.range().len(), note_idx);
         note_idx
     }
 
@@ -2660,7 +2700,14 @@ impl EngineProgram {
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
         let at_buffer = self.tasks.len() + chain.buffer as usize;
         let chain_pair = 2 * self.tasks.len() + 2 * chain.buffer as usize;
-        let end = self.run_steps(pass, task, chain.steps, at_buffer, chain_pair, 0);
+        let end = self.run_steps(
+            pass,
+            task,
+            (chain.steps, chain.meters),
+            at_buffer,
+            chain_pair,
+            0,
+        );
         if audio && let Some(kept) = chain.taps[RackChain::tap_index(Tap::PostFx)] {
             self.keep(&turn, kept, at_buffer, frames);
         }

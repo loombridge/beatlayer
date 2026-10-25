@@ -9,4 +9,5 @@ trigger = "held"
 milestone = "M2"
 mac = ["Cmd+Option+Shift+drag"]
 win = ["Ctrl+Alt+Shift+drag"]
-status = "pending"
+status = "widget"
+handler = "the Arrangement View: Cmd-Shift-Option-dragging (Ctrl-Shift-Alt) a warped clip's contents slides them without snapping (`clip.slide_contents`, warping R54)"

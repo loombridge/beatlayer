@@ -4651,7 +4651,10 @@ fn bindings_follow_the_spec() {
         ["S-TRACK-016 toggles mute", "S-TRANS-010 toggles mute"]
     );
     assert_eq!(bindings("mixer.set_solo"), ["S-TRACK-014 toggles solo"]);
-    assert_eq!(bindings("mixer.set_arm"), ["S-TRACK-013 toggles arm"]);
+    assert_eq!(
+        bindings("mixer.set_arm"),
+        ["S-TRACK-013 toggles arm", "S-TRANS-007 toggles arm"]
+    );
     // Spec: command-bindings R6
     assert_eq!(bindings("clip.set_mute"), ["S-ARR-027 toggles mute"]);
     // Spec: command-bindings S-TRANS-011

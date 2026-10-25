@@ -34,6 +34,7 @@ focus = "#79c0ff"
 # Meters.
 meter = "#5ccf8a"
 meter_hot = "#f2c14e"
+meter_expression = "#4da3ff"
 # The Arrangement View (WP-1.8a). Track lanes, the selected tracks' lanes,
 # and the lines between tracks.
 lane = "#2a2f36"

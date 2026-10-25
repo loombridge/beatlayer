@@ -41,6 +41,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("set.cancel_pack", read("set.pack_status", "job")),
     ("set.create_pack", nothing(FILE)),
     ("set.export_clips", nothing(BROWSER)),
+    ("set.export_dawproject", nothing(FILE)),
     ("set.export_tracks", nothing(BROWSER)),
     ("set.import", query(Song, "tracks")),
     ("set.import_dawproject", query(Song, "set.name")),

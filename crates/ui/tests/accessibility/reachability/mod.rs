@@ -444,7 +444,6 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.sort_layers",
             "set.export_clips",
             "set.export_tracks",
-            "track.move",
         ],
         "the gaps the accessibility spec lists"
     );

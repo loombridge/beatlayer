@@ -11,10 +11,6 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("modulation.state", Exception(Query)),
         // The Device View (WP-2.4): Enter on a title bar's controls.
         (
-            "device.select",
-            main(a_device, device_view, "Test Gain", Key::Enter),
-        ),
-        (
             "device.set_enabled",
             main(a_device, device_view, "Device Activator", Key::Enter),
         ),

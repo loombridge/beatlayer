@@ -108,6 +108,7 @@ pub mod mpe_layout;
 mod node;
 pub mod nodes;
 mod offline;
+mod points;
 pub mod preview;
 mod processor;
 mod program;
@@ -174,7 +175,10 @@ pub use session::{
     SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
     StoppedClip,
 };
-pub use state::{EngineCounters, EngineState, Monitor, PlayedParam, TrackMeter};
+pub use state::{
+    ChainMeter, EngineCounters, EngineState, MeterOwner, MeterSite, Monitor, PlayedParam,
+    PointReading, TrackMeter,
+};
 pub use tuned::KeyPitches;
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
@@ -226,6 +230,8 @@ pub struct EngineConfig {
     pub max_modulated: usize,
     /// Rack chains in [`EngineState::processing`].
     pub max_processing: usize,
+    /// Meters between devices in [`EngineState::chain_meters`].
+    pub max_chain_meters: usize,
 }
 
 impl EngineConfig {
@@ -259,6 +265,7 @@ impl EngineConfig {
             report_capacity: 1024,
             max_modulated: 1024,
             max_processing: 1024,
+            max_chain_meters: 8192,
         }
     }
 

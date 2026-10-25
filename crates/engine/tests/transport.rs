@@ -680,10 +680,18 @@ fn the_bindings_follow_the_spec() {
                 for (name, value) in &binding.args {
                     text.push_str(&format!(" {name}={value}"));
                 }
+                if let Some(arg) = &binding.toggles {
+                    text.push_str(&format!(" toggles {arg}"));
+                }
                 text
             })
             .collect()
     };
+    // Spec: transport R30. F9 switches recording.
+    assert_eq!(
+        bindings("transport.set_recording"),
+        ["S-TRANS-006 toggles recording"]
+    );
     // Spec: transport R5, R6, R8, R9, R10
     assert_eq!(bindings("transport.play_stop"), ["S-TRANS-001"]);
     assert_eq!(bindings("transport.continue"), ["S-TRANS-002"]);
@@ -693,7 +701,10 @@ fn the_bindings_follow_the_spec() {
         ["S-ARR-033"]
     );
     assert_eq!(bindings("transport.play_from_insert_marker"), ["S-ARR-032"]);
-    assert_eq!(bindings("transport.set_metronome_enabled"), ["S-TRANS-011"]);
+    assert_eq!(
+        bindings("transport.set_metronome_enabled"),
+        ["S-TRANS-011 toggles enabled"]
+    );
     for id in [
         "transport.play",
         "transport.stop",
@@ -702,7 +713,6 @@ fn the_bindings_follow_the_spec() {
         "transport.return_to_start",
         "transport.set_loop",
         "transport.set_loop_enabled",
-        "transport.set_recording",
         "transport.stop_recording",
         "transport.set_metronome_count_in",
         "transport.set_metronome_sound",

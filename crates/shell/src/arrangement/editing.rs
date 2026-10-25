@@ -24,9 +24,9 @@ use bl_model::{
 };
 use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
-    self as ids, ClipboardState, DeleteFadesArgs, Direction, Edge, EditResult, LoopSelectionArgs,
-    MoveClipsArgs, NudgeArgs, PasteArgs, Position, ResizeClipsArgs, SelectClipsArgs, SelectMode,
-    SplitArgs, TargetArgs,
+    self as ids, ClipboardState, DeleteFadesArgs, Direction, Edge, EditResult, InsertMidiClipArgs,
+    LoopSelectionArgs, MoveClipsArgs, NudgeArgs, PasteArgs, Position, ResizeClipsArgs,
+    SelectClipsArgs, SelectMode, SplitArgs, TargetArgs,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -1274,6 +1274,75 @@ pub(super) fn result(
     }
 }
 
+/// Runs `arrangement.insert_empty_midi_clip` (S-ARR-037): an empty MIDI clip
+/// over the span on each MIDI track, taking the set's auto-loaded groove and
+/// the colour `look` gives a new clip.
+///
+/// # Errors
+///
+/// [`EditFailure`] saying why nothing changed.
+pub fn insert_empty_midi_clips(
+    args: Value,
+    editor: &mut Editor,
+    view: &ArrangementView,
+    look: &bl_shell_spec::settings::ThemeLook,
+) -> Result<Value, EditFailure> {
+    let InsertMidiClipArgs { tracks, start, end } = parse(args)?;
+    let before = editor.document().clone();
+    let doc = &before;
+    let signatures = &doc.settings().time_signatures;
+    let (start, end) = match (start, end) {
+        (Some(start), Some(end)) => (
+            start.resolve(signatures).map_err(invalid)?,
+            end.resolve(signatures).map_err(invalid)?,
+        ),
+        (None, None) => view
+            .time_selection
+            .ok_or_else(|| unavailable("select a span of time first"))?,
+        _ => return Err(invalid("give `start` and `end`, or neither")),
+    };
+    if end <= start || start.is_negative() {
+        return Err(invalid(
+            "the clip must start at 1.1.1 or later and end after it starts",
+        ));
+    }
+    let midi: Vec<TrackId> = tracks
+        .unwrap_or_else(|| view.selected.clone())
+        .into_iter()
+        .filter(|t| doc.track(*t).is_some_and(|t| t.kind() == TrackKind::Midi))
+        .collect();
+    if midi.is_empty() {
+        return Err(unavailable("select a MIDI track first"));
+    }
+    for &track in &midi {
+        let held = doc
+            .track(track)
+            .filter(|t| t.clips().any(|clip| clip.start < end && clip.end() > start));
+        if let Some(held) = held {
+            return Err(refused(format!(
+                "track \"{}\" (ID {}) already has a clip in that span",
+                held.name(),
+                track.0
+            )));
+        }
+    }
+    let (_, recorded) = transaction(editor, "Insert Empty MIDI Clip", |editor| {
+        for &track in &midi {
+            let mut clip = Clip::new(
+                editor.new_id(),
+                start,
+                end - start,
+                ClipData::Midi(bl_model::MidiData::new(std::iter::empty())),
+            );
+            clip.groove = editor.document().settings().grooves.auto_loaded();
+            clip.colour = look.new_clip_colour(clip.id);
+            apply(editor, Command::CreateClip { track, clip })?;
+        }
+        Ok(())
+    })?;
+    Ok(to_value(&result(doc, editor, view, recorded)))
+}
+
 /// The name of the undo step an editing command makes, such as "Copy
 /// clips".
 #[must_use]
@@ -1295,6 +1364,7 @@ pub fn label(id: &str, args: &Value) -> &'static str {
         ids::LOOP_SELECTION => "Loop selection",
         ids::CREATE_FADE => "Create Fade",
         ids::DELETE_FADES => "Delete Fades",
+        ids::INSERT_EMPTY_MIDI_CLIP => "Insert Empty MIDI Clip",
         _ => "Select",
     }
 }
@@ -1335,6 +1405,14 @@ pub fn can_run(
         | ids::DELETE_TIME => super::time_commands::can_run(id, args, view, clipboard),
         ids::CREATE_FADE => create_fade_plan(doc, view, args).is_some_and(|plan| !plan.is_empty()),
         ids::DELETE_FADES => given("clips") || !view.selected_clips.is_empty(),
+        ids::INSERT_EMPTY_MIDI_CLIP => {
+            (given("start") || view.time_selection.is_some())
+                && (given("tracks")
+                    || view
+                        .selected
+                        .iter()
+                        .any(|t| doc.track(*t).is_some_and(|t| t.kind() == TrackKind::Midi)))
+        }
         ids::PASTE => {
             clipboard.is_some_and(|c| match c {
                 Clipboard::Slots(slots) => !slots.clips.is_empty(),

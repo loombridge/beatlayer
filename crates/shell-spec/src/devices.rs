@@ -1034,6 +1034,11 @@ pub struct DeviceViewState {
     /// it chain by chain: the Device View selector's list (racks spec, R25).
     #[serde(default)]
     pub device_list: Vec<DeviceListEntry>,
+    /// The meters between the devices of the track's chain and of its racks'
+    /// chains, in signal order (the MIDI meters spec, R2 and R6); empty when
+    /// no engine has published meters.
+    #[serde(default)]
+    pub meters: Vec<ChainMeterValue>,
     /// The Map button that is lit, on any track: a click on any parameter's
     /// control maps it to the slot (WP-5.10).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1042,6 +1047,24 @@ pub struct DeviceViewState {
     /// Controls tint mappable parameters and show the mappings list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map_mode: Option<DeviceId>,
+}
+
+/// One meter between the devices of a chain, as `device_view.state` reports
+/// it (the MIDI meters spec, R2 and R6).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChainMeterValue {
+    /// The track whose chain the meter is in, if it is the track's own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The rack chain the meter is in, if it is a rack chain's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chain: Option<ChainId>,
+    /// The device the meter is in front of, or `null` for the meter after
+    /// the chain's last device.
+    pub before: Option<DeviceId>,
+    /// What it shows.
+    #[serde(flatten)]
+    pub value: crate::mixer_view::MeterValue,
 }
 
 /// A lit Map button.

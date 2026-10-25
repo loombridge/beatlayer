@@ -65,6 +65,9 @@ pub struct Colours {
     pub focus: Colour,
     pub meter: Colour,
     pub meter_hot: Colour,
+    /// The lowest dot of a MIDI meter while a per-note expression passes
+    /// it (the MIDI meters spec, R5).
+    pub meter_expression: Colour,
     pub lane: Colour,
     pub lane_selected: Colour,
     pub lane_line: Colour,

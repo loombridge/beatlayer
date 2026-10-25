@@ -33,6 +33,7 @@ mod metronome;
 mod midi_clips;
 mod midi_controllers;
 mod midi_input;
+mod midi_meters;
 mod midi_output;
 mod midi_play;
 mod midi_recording;

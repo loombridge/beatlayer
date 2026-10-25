@@ -1,19 +1,25 @@
-//! DAWproject import through the shell (WP-6.36): the behaviour behind
-//! `set.import_dawproject` and `set.import_report`.
+//! DAWproject import and export through the shell (WP-6.36, WP-6.37): the
+//! behaviour behind `set.import_dawproject`, `set.import_report` and
+//! `set.export_dawproject`.
 //!
 //! The reading, the extracting and the building run on a worker thread, so
 //! the shell's own thread isn't held up while a big file is read; the set
 //! changes only when the new set is whole, and a failure leaves the open set
-//! as it was (the DAWproject spec, R10).
+//! as it was (the DAWproject spec, R10). The export runs on a worker thread
+//! too, and writes a hidden file beside the destination before it renames it
+//! into place (R65).
 
+use std::collections::{BTreeSet, HashMap};
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::sync::{Arc, Mutex};
 
-use bl_interop::dawproject::{self, Installed, NewColours, Plugins};
-use bl_model::{ClipId, ContentHash, Editor, ParamDescriptor, TrackId, WarpMode};
-use bl_shell_spec::dawproject::{ImportReport, ImportReportEntry};
+use bl_interop::dawproject::{self, Installed, MediaFiles, NewColours, Plugins};
+use bl_model::{ClipId, ContentHash, Document, Editor, ParamDescriptor, TrackId, WarpMode};
+use bl_shell_spec::dawproject::{ExportDawProjectResult, ImportReport, ImportReportEntry};
 use bl_shell_spec::settings::ThemeLook;
 
 /// Why a DAWproject command couldn't run.
@@ -278,6 +284,185 @@ fn build(
             application: imported.report.application.clone(),
             entries: imported
                 .report
+                .entries
+                .iter()
+                .map(|entry| ImportReportEntry {
+                    what: entry.what.clone(),
+                    place: entry.place.clone(),
+                    count: entry.count,
+                    did: entry.did.clone(),
+                })
+                .collect(),
+        },
+    })
+}
+
+/// What an export takes from the shell besides the file's path (R65, R73).
+pub struct ExportSettings {
+    /// The set, with the plug-ins' states taken into it.
+    pub document: Document,
+    /// The set's name, which `metadata.xml` holds as its title (R79).
+    pub title: String,
+    /// The 14 track colours of the theme in use (R23).
+    pub track_colours: Vec<[u8; 3]>,
+    /// The plug-ins the scanner found (R77).
+    pub installed: Vec<Installed>,
+    /// Where each medium the set uses is.
+    pub media: HashMap<ContentHash, PathBuf>,
+    /// Whether the media go into the file (R73).
+    pub embed_media: bool,
+}
+
+/// The media the clips and the devices of a set play.
+#[must_use]
+pub fn media_used(document: &Document) -> BTreeSet<ContentHash> {
+    let mut used = BTreeSet::new();
+    for track in document.tracks() {
+        for clip in track.all_clips() {
+            if let bl_model::ClipData::Audio(audio) = &clip.data {
+                used.insert(audio.media);
+            }
+        }
+        for device in track.devices() {
+            used.extend(device.media_used());
+        }
+    }
+    used
+}
+
+/// The media of a set, where they are.
+struct Files(HashMap<ContentHash, PathBuf>);
+
+impl MediaFiles for Files {
+    fn path(&self, hash: ContentHash) -> Option<PathBuf> {
+        self.0.get(&hash).filter(|path| path.is_file()).cloned()
+    }
+}
+
+/// An export running on a worker thread (R65).
+pub struct ExportJob {
+    percent: Arc<AtomicU32>,
+    finished: Receiver<Result<ExportDawProjectResult, DawProjectError>>,
+    asked: Receiver<Describe>,
+}
+
+impl ExportJob {
+    /// Starts writing the set as a DAWproject file at `path`.
+    ///
+    /// # Errors
+    ///
+    /// [`DawProjectError`] if the thread can't start.
+    pub fn start(path: &Path, settings: ExportSettings) -> Result<Self, DawProjectError> {
+        let (send, finished) = mpsc::channel();
+        let (ask, asked) = mpsc::channel();
+        let percent = Arc::new(AtomicU32::new(0));
+        let (path, counter) = (path.to_path_buf(), percent.clone());
+        std::thread::Builder::new()
+            .name("bl-shell-dawproject-export".into())
+            .spawn(move || {
+                let plugins = Hosted {
+                    installed: settings.installed.clone(),
+                    ask: Mutex::new(ask),
+                };
+                let _ = send.send(write(&path, &settings, &plugins, &counter));
+            })
+            .map_err(|error| {
+                DawProjectError::Failed(format!("couldn't start writing the file: {error}"))
+            })?;
+        Ok(Self {
+            percent,
+            finished,
+            asked,
+        })
+    }
+
+    /// Answers the plug-ins the worker has asked to have loaded (R76).
+    pub fn serve(
+        &self,
+        mut describe: impl FnMut(&Installed) -> Result<Vec<ParamDescriptor>, String>,
+    ) {
+        while let Ok(Describe { plugin, reply }) = self.asked.try_recv() {
+            let _ = reply.send(describe(&plugin));
+        }
+    }
+
+    /// How far the export is, from 0 to 100, for the Status Bar.
+    #[must_use]
+    pub fn percent(&self) -> u32 {
+        self.percent.load(Ordering::Relaxed)
+    }
+
+    /// The result, once the worker is done; `None` while it is still going.
+    pub fn poll(&mut self) -> Option<Result<ExportDawProjectResult, DawProjectError>> {
+        match self.finished.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(Err(DawProjectError::Failed(
+                "the writer stopped unexpectedly".to_owned(),
+            ))),
+        }
+    }
+}
+
+/// Writes a file to `path` whole or not at all (R65): `make` writes it into a
+/// hidden file beside `path`, which is renamed into place when it is whole,
+/// so `path` holds the old file or the new one whenever the write stops.
+fn write_whole<T>(
+    path: &Path,
+    make: impl FnOnce(BufWriter<File>) -> Result<(BufWriter<File>, T), dawproject::Error>,
+) -> Result<T, String> {
+    let io = |error: std::io::Error| format!("{}: {error}", path.display());
+    let folder = path
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    std::fs::create_dir_all(folder).map_err(io)?;
+    let name = path
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let hidden = folder.join(format!(".{name}.saving"));
+    let written = (|| {
+        let file = File::create(&hidden).map_err(io)?;
+        let (mut file, made) = make(BufWriter::new(file)).map_err(|error| error.to_string())?;
+        file.flush().map_err(io)?;
+        file.get_ref().sync_all().map_err(io)?;
+        drop(file);
+        std::fs::rename(&hidden, path).map_err(io)?;
+        Ok(made)
+    })();
+    if written.is_err() {
+        std::fs::remove_file(&hidden).ok();
+    }
+    written
+}
+
+/// Writes the set as a file (R65) and says what the file leaves out.
+fn write(
+    path: &Path,
+    settings: &ExportSettings,
+    plugins: &dyn Plugins,
+    percent: &AtomicU32,
+) -> Result<ExportDawProjectResult, DawProjectError> {
+    let media = Files(settings.media.clone());
+    let context = dawproject::ExportContext {
+        application_version: env!("CARGO_PKG_VERSION"),
+        title: &settings.title,
+        track_colours: &settings.track_colours,
+        embed_media: settings.embed_media,
+        media: &media,
+        plugins,
+    };
+    percent.store(10, Ordering::Relaxed);
+    let report = write_whole(path, |file| {
+        dawproject::export_to(&settings.document, &context, file)
+    })
+    .map_err(DawProjectError::Failed)?;
+    percent.store(100, Ordering::Relaxed);
+    Ok(ExportDawProjectResult {
+        path: path.to_string_lossy().into_owned(),
+        report: ImportReport {
+            application: report.application.clone(),
+            entries: report
                 .entries
                 .iter()
                 .map(|entry| ImportReportEntry {

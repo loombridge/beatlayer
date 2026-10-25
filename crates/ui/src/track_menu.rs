@@ -244,14 +244,51 @@ pub fn is_renaming(ctx: &Context) -> bool {
     false
 }
 
+/// Moves every one of `selected` a place later (or earlier) in its list, as
+/// one undo step, the selected tracks that aren't next to each other keeping
+/// their gaps (S-TRACK-012, S-SES-015).
+pub fn move_tracks(
+    events: &mut Vec<UiEvent>,
+    doc: &bl_model::Document,
+    selected: &[TrackId],
+    later: bool,
+) {
+    let moves = bl_shell::tracks::moved_by_one(doc, selected, later);
+    if moves.is_empty() {
+        return;
+    }
+    events.push(UiEvent::BeginNamedGesture("Move track".to_owned()));
+    for (track, parent, index) in moves {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "track.move",
+            json!({ "track": track, "parent": parent, "index": index }),
+        )));
+    }
+    events.push(UiEvent::EndGesture);
+}
+
+/// The track Tab moves on to while `track`'s name is being typed: the next one
+/// in display order that can be renamed (S-TRACK-005; Main can't be).
+#[must_use]
+pub fn next_renamable(doc: &bl_model::Document, track: TrackId) -> Option<TrackId> {
+    let order = doc.track_order();
+    let at = order.iter().position(|t| *t == track)?;
+    order[at + 1..].iter().copied().find(|t| {
+        doc.track(*t)
+            .is_some_and(|t| t.kind() != bl_model::TrackKind::Main)
+    })
+}
+
 /// Draws the name being typed over `rect` if it's `track`'s, and says so;
-/// Return runs `track.rename`, Esc leaves the name.
+/// Return runs `track.rename`, Esc leaves the name. Tab keeps the name and
+/// moves on to `next`'s (the keymap's S-TRACK-005; I-FOCUS-011).
 pub fn rename_edit(
     ui: &mut Ui,
     theme: &Theme,
     rect: Rect,
     track: TrackId,
     name: &str,
+    next: Option<TrackId>,
     events: &mut Vec<UiEvent>,
 ) -> bool {
     let Some(mut renaming) = renaming(ui.ctx()).filter(|r| r.track == track) else {
@@ -270,7 +307,13 @@ pub fn rename_edit(
         edit.request_focus();
         renaming.focused = true;
     }
-    let (enter, escape) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+    let (enter, escape, tab) = ui.input(|i| {
+        (
+            i.key_pressed(Key::Enter),
+            i.key_pressed(Key::Escape),
+            i.key_pressed(Key::Tab),
+        )
+    });
     if edit.lost_focus() || enter || escape {
         if enter || (edit.lost_focus() && !escape) {
             events.push(UiEvent::Invoke(Invocation::new(
@@ -280,6 +323,13 @@ pub fn rename_edit(
         }
         ui.ctx()
             .data_mut(|d| d.insert_temp(renaming_id(), None::<Renaming>));
+        if let Some(next) = next.filter(|_| tab && edit.lost_focus()) {
+            events.push(UiEvent::Invoke(Invocation::new(
+                SELECT_TRACKS,
+                json!({ "tracks": [next], "title_bars": true }),
+            )));
+            start_rename(ui.ctx(), next);
+        }
     } else {
         ui.ctx()
             .data_mut(|d| d.insert_temp(renaming_id(), Some(renaming)));

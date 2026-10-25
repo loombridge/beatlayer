@@ -1358,6 +1358,34 @@ const ENTRIES: &[Entry] = &[
             changes if the parameter has no automation.",
     },
     Entry {
+        id: "automation.clear_track",
+        action: Action::Apply("clear_track_automation"),
+        label: "Clear All Envelopes",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes every envelope of a track: the automation of its volume, pan, \
+            Track Activator, sends and every device parameter, as Clear All Envelopes in an \
+            automation lane's context menu does. The controls stay where they are and follow \
+            themselves again. It is one undo step, and nothing changes if the track has no \
+            automation. Use `automation.clear_device` for one device's or the mixer's, and \
+            `automation.delete` for one parameter's.",
+    },
+    Entry {
+        id: "automation.clear_device",
+        action: Action::Apply("clear_device_automation"),
+        label: "Clear Envelopes",
+        permission: Permission::Destructive,
+        contexts: &[Global],
+        keys: &[],
+        description: "Deletes every envelope of one device of a track, or with `device` left \
+            out or `null` of the track's mixer (its volume, pan, Track Activator and sends), \
+            as Clear Envelopes of the device an automation lane shows does. The controls stay \
+            where they are and follow themselves again. It is one undo step, and nothing \
+            changes if there is no automation to clear. A device the track doesn't have is \
+            refused.",
+    },
+    Entry {
         id: RE_ENABLE_AUTOMATION,
         action: Action::Apply("re_enable_automation"),
         label: "Re-Enable Automation",

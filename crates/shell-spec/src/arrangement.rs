@@ -90,6 +90,18 @@ pub const AUTOMATION_ARM: &str = "arrangement.automation_arm";
 /// `arrangement.show_automation`: choose the parameter a track's automation
 /// lane shows, or hide the lane.
 pub const SHOW_AUTOMATION: &str = "arrangement.show_automation";
+/// `arrangement.add_automation_lane`: give an envelope a lane of its own
+/// under the track's.
+pub const ADD_AUTOMATION_LANE: &str = "arrangement.add_automation_lane";
+/// `arrangement.remove_automation_lane`: take a track's lane of its own out
+/// of view.
+pub const REMOVE_AUTOMATION_LANE: &str = "arrangement.remove_automation_lane";
+/// `arrangement.show_automation_lanes`: show or hide all of a track's lanes of
+/// its own.
+pub const SHOW_AUTOMATION_LANES: &str = "arrangement.show_automation_lanes";
+/// `arrangement.show_automated_only`: list only automated parameters in a
+/// lane's choosers.
+pub const SHOW_AUTOMATED_ONLY: &str = "arrangement.show_automated_only";
 /// `arrangement.show_in_out`: show or hide the track headers' In/Out column.
 pub const SHOW_IN_OUT: &str = "arrangement.show_in_out";
 /// `arrangement.show_volume`: show or hide the track headers' volume, pan,
@@ -132,6 +144,10 @@ pub const IDS: &[&str] = &[
     AUTOMATION_MODE,
     AUTOMATION_ARM,
     SHOW_AUTOMATION,
+    ADD_AUTOMATION_LANE,
+    REMOVE_AUTOMATION_LANE,
+    SHOW_AUTOMATION_LANES,
+    SHOW_AUTOMATED_ONLY,
     SHOW_IN_OUT,
     SHOW_VOLUME,
     SHOW_RETURN_TRACKS,
@@ -401,9 +417,10 @@ pub struct ArrangementState {
     /// Whether Automation Arm is on: while Arrangement Record runs, moving a
     /// control writes its values into the parameter's envelope.
     pub automation_arm: bool,
-    /// The parameter each track's automation lane shows, for the tracks whose
-    /// lane isn't showing the default (their volume): the choosers' choice.
-    /// `target` `null` means the lane draws no envelope.
+    /// Each track's automation lanes, for the tracks whose lanes aren't as a
+    /// new track's (the main lane showing its volume, and no lanes of its
+    /// own): the choosers' choices, the lanes of their own and whether they
+    /// show (the automation spec, R32).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub automation_lanes: Vec<AutomationLane>,
     /// The automation lane that has the keyboard (WP-6.26): the one the
@@ -436,14 +453,57 @@ pub struct SelectedBreakpoint {
     pub at: Ticks,
 }
 
-/// One track's automation lane and the parameter it shows, as
-/// `arrangement.show_automation` last set it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// One track's automation lanes: what its main lane shows, and the lanes of
+/// its own under it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AutomationLane {
     /// The track.
     pub track: TrackId,
-    /// The parameter the lane shows, or `null` while it draws no envelope.
+    /// The parameter the main lane shows, or `null` while it draws no
+    /// envelope.
     pub target: Option<AutomationTarget>,
+    /// Whether the main lane's choosers list only automated parameters.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub only_automated: bool,
+    /// The lanes of its own, top to bottom; lane numbers count from 1 in this
+    /// list, the main lane being 0.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lanes: Vec<bl_model::LaneChoice>,
+    /// Whether the header's toggle has hidden the lanes of its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub lanes_hidden: bool,
+}
+
+/// Which of a track's automation lanes (the automation spec, R32).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+#[schemars(
+    description = "An automation lane of a track: `true` for its main lane, `false` for none, or \
+                   a number for one of its lanes of its own, counting from 1."
+)]
+pub enum LaneSelect {
+    /// The main lane (`true`), or no lane (`false`).
+    Main(bool),
+    /// The lane of its own with this number, from 1.
+    Own(u32),
+}
+
+impl Default for LaneSelect {
+    fn default() -> Self {
+        Self::Main(false)
+    }
+}
+
+impl LaneSelect {
+    /// The lane's number, 0 being the main lane, or `None` for no lane.
+    #[must_use]
+    pub const fn number(self) -> Option<usize> {
+        match self {
+            Self::Main(false) => None,
+            Self::Main(true) => Some(0),
+            Self::Own(n) => Some(n as usize),
+        }
+    }
 }
 
 /// Which lane a selection covers: a track's own lane, where its clips are, a
@@ -616,9 +676,10 @@ pub struct InsertMarkerArgs {
     pub lane: Option<TakeLaneId>,
     /// Select the track's automation lane too, as clicking the lane's
     /// background does (the automation editing spec, R1): the lane gets the
-    /// keyboard.
+    /// keyboard. `true` is the track's main lane, a number one of its lanes
+    /// of its own.
     #[serde(default)]
-    pub automation_lane: bool,
+    pub automation_lane: LaneSelect,
 }
 
 /// Arguments of `arrangement.select_tracks`.
@@ -636,9 +697,10 @@ pub struct SelectTracksArgs {
     pub title_bars: bool,
     /// Select the track's automation lane, as Up and Down do through the
     /// lanes while Automation Mode is on (the automation editing spec,
-    /// R20): the lane gets the keyboard. One track only.
+    /// R20): the lane gets the keyboard. One track only. `true` is the
+    /// track's main lane, a number one of its lanes of its own.
     #[serde(default)]
-    pub automation_lane: bool,
+    pub automation_lane: LaneSelect,
 }
 
 /// Arguments of `arrangement.select_time`.
@@ -787,9 +849,78 @@ pub struct ShowAutomationArgs {
     /// The track whose automation lane to show.
     pub track: TrackId,
     /// The parameter the lane shows: a mixer control, a send, or a device
-    /// parameter. `null` (or nothing) hides the track's automation lane.
+    /// parameter. `null` (or nothing) draws no envelope in the lane, which
+    /// stays with its choosers.
     #[serde(default)]
     pub target: Option<AutomationTarget>,
+    /// The lane: its number from 1 for one of the track's lanes of its own;
+    /// left out or 0, the main lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<u32>,
+}
+
+/// Arguments of `arrangement.add_automation_lane`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AddAutomationLaneArgs {
+    /// The track to give a lane.
+    pub track: TrackId,
+    /// The parameter to show in the new lane. Left out, the one `lane` shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<AutomationTarget>,
+    /// The lane whose envelope moves into the new lane: its number, from 1
+    /// for a lane of its own; left out or 0, the main lane. Ignored with
+    /// `target`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<u32>,
+    /// Give a lane of its own to every automated parameter of the track that
+    /// has none, in the choosers' order, as the lane button does with Alt or
+    /// Cmd held.
+    #[serde(default)]
+    pub all: bool,
+}
+
+/// Arguments of `arrangement.remove_automation_lane`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveAutomationLaneArgs {
+    /// The track.
+    pub track: TrackId,
+    /// The lane of its own to remove: its number, from 1.
+    pub lane: u32,
+    /// Remove the lanes after it too, as the hide button does with Alt or
+    /// Cmd held.
+    #[serde(default)]
+    pub and_after: bool,
+}
+
+/// Arguments of `arrangement.show_automation_lanes`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowAutomationLanesArgs {
+    /// The tracks. Left out, the selected tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+    /// Whether their lanes of their own show. Left out, the first track's
+    /// switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// Arguments of `arrangement.show_automated_only`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowAutomatedOnlyArgs {
+    /// The track.
+    pub track: TrackId,
+    /// The lane: its number, from 1, for a lane of its own; left out or 0,
+    /// the main lane.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<u32>,
+    /// Whether the lane's choosers list only automated parameters. Left out,
+    /// the switch turns over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 /// Adds the Arrangement View's commands to a registry.
@@ -1153,14 +1284,54 @@ fn specs() -> Vec<CommandSpec> {
         view(
             SHOW_AUTOMATION,
             "Show Automation",
-            "Picks the parameter `track`'s automation lane shows, as its device chooser (the \
-             track mixer, one of its devices, or `null` for None) and parameter chooser do. A \
-             track's lane shows its volume until the choosers pick another parameter; with \
-             `target` `null` it draws no envelope, while the lane and its choosers stay. Changes \
-             only the view.",
+            "Picks the parameter an automation lane of `track` shows, as its device chooser (the \
+             track mixer, one of its devices, or `null` for None) and parameter chooser do: the \
+             track's main lane, or with `lane` one of its lanes of its own. A track's main lane \
+             shows its volume until the choosers pick another parameter; with `target` `null` \
+             it draws no envelope, while the lane and its choosers stay. Changes only the view.",
         )
         .contexts([Global, Arrangement])
         .args::<ShowAutomationArgs>(),
+        view(
+            ADD_AUTOMATION_LANE,
+            "Show Automation in New Lane",
+            "Moves the envelope a lane of `track` shows (the main lane, or `lane`), or the \
+             parameter `target` names, into a lane of its own added under the track's lanes; \
+             when the track already has a lane for it, that lane is selected instead. The main \
+             lane then shows the next parameter in the choosers' order that has an envelope and \
+             no lane, or None. With `all`, every automated parameter of the track that has no \
+             lane gets one, in the choosers' order, as the lane button does with Alt or Cmd held. \
+             Changes only the view.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<AddAutomationLaneArgs>(),
+        view(
+            REMOVE_AUTOMATION_LANE,
+            "Hide Automation Lane",
+            "Takes lane `lane` of `track`'s lanes of its own out of view, its envelope still \
+             driving its parameter; with `and_after`, the lanes after it too, as the hide button \
+             does with Alt or Cmd held. Changes only the view.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<RemoveAutomationLaneArgs>(),
+        view(
+            SHOW_AUTOMATION_LANES,
+            "Show Automation Lanes",
+            "Shows or hides all the lanes of their own of `tracks` (or the selected tracks), as \
+             the toggle in a track's header and the lane menu's Show All Lanes and Hide All Lanes \
+             do; switches unless `on` says which. Changes only the view.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<ShowAutomationLanesArgs>(),
+        view(
+            SHOW_AUTOMATED_ONLY,
+            "Show Automated Parameters Only",
+            "Makes the device and parameter choosers of an automation lane of `track` (the main \
+             lane, or `lane`) list only the parameters that have an envelope; switches unless \
+             `on` says which. Changes only the view.",
+        )
+        .contexts([Global, Arrangement])
+        .args::<ShowAutomatedOnlyArgs>(),
         view(
             SHOW_IN_OUT,
             "Arrangement Track Controls In/Out",

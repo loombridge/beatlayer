@@ -3226,7 +3226,7 @@ fn schemas_match_what_commands_serialise() {
         ),
         (
             "clip.set_signature",
-            Command::SetMidiClipSignature {
+            Command::SetClipSignature {
                 clip,
                 signature: None,
             },

@@ -418,6 +418,7 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::MainView);
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
+            Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
                 // title bar.

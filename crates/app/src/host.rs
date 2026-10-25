@@ -1986,7 +1986,8 @@ impl Host {
                         .apply_effect(&main.ctx, &Effect::FocusArea(area));
                 }
             }
-            Effect::MoveFocus { .. } => match self.shell.focused_window() {
+            Effect::MoveFocus { .. } | Effect::FocusClipPanels => match self.shell.focused_window()
+            {
                 WindowKind::Main => {
                     if let Some(main) = &self.main {
                         self.main_ui.apply_effect(&main.ctx, &effect);

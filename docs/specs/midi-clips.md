@@ -15,7 +15,7 @@ The engine plays each MIDI track's clips with a MIDI clip player at the head of 
 
 This spec covers Arrangement playback, data, and file import and export of MIDI clips. It leaves to other specs and packages: the Piano Roll and MIDI note editing UI (WP-2.3); a clip's groove ([grooves](grooves.md), WP-6.19).
 
-A MIDI clip's data also carries the Clip View's Signature (`MidiData.signature`): the time signature its End is measured in, `null` for the song's signature at the clip's position. `midi.import_file` sets it from the file and `midi.export_clip` writes it (R16, R19); the Clip View's Signature numerator and denominator controls (L-CLIP-004) aren't drawn yet.
+A MIDI clip's data also carries the Clip View's Signature (`MidiData.signature`): the time signature its End is measured in, `null` for the song's signature at the clip's position. `midi.import_file` sets it from the file and `midi.export_clip` writes it (R16, R19); the Clip View's Signature numerator and denominator controls (L-CLIP-004) set it with `clip.set_signature` ([clip-properties.md](clip-properties.md) R10).
 
 ## Sources
 

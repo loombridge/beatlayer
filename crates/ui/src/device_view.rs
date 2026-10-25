@@ -423,6 +423,18 @@ impl DeviceViewUi {
                     debug_assert_eq!(frame.id, *id);
                     self.device(ui, shell, theme, frame, *at, false, events);
                 }
+                // Spec: midi-meters R2. A meter in each gap, before the first
+                // device and after the last.
+                if let Some(track) = state.track {
+                    crate::meters::in_gaps(
+                        ui,
+                        shell,
+                        theme,
+                        bl_engine::MeterOwner::Track(track),
+                        &placed,
+                        DEVICE_GAP,
+                    );
+                }
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
@@ -1861,7 +1873,16 @@ pub fn hot_swap_bar(
     rect: Rect,
     events: &mut Vec<UiEvent>,
 ) -> Rect {
-    let Some(hot) = shell.device_view_state().hot_swap else {
+    // Spec: grooves R32. A groove being hot-swapped has the same bar, which
+    // ends it the same way.
+    let (label, close_command) = if let Some(hot) = shell.device_view_state().hot_swap {
+        (hot.label, ids::HOT_SWAP)
+    } else if shell.groove_pool_view().hot_swap.is_some() {
+        (
+            "Swapping Groove".to_owned(),
+            bl_shell::groove_commands::HOT_SWAP,
+        )
+    } else {
         return rect;
     };
     let height = 20.0;
@@ -1871,7 +1892,7 @@ pub fn hot_swap_bar(
     ui.painter().text(
         pos2(bar.left() + 6.0, bar.center().y),
         Align2::LEFT_CENTER,
-        &hot.label,
+        &label,
         theme.small_font(),
         c.accent_text.0,
     );
@@ -1886,13 +1907,13 @@ pub fn hot_swap_bar(
         c.accent_text.0,
     );
     if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
-        invoke(events, ids::HOT_SWAP, json!({ "on": false }));
+        invoke(events, close_command, json!({ "on": false }));
     }
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Close Hot-Swap"));
     ui.ctx().accesskit_node_builder(id, |node| {
         node.set_role(Role::Button);
         node.set_label("Close Hot-Swap".to_owned());
-        node.set_description(hot.label.clone());
+        node.set_description(label.clone());
     });
     Rect::from_min_max(pos2(rect.left(), bar.bottom()), rect.max)
 }

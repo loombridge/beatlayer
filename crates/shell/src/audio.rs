@@ -1045,6 +1045,19 @@ impl AudioHost {
         }
     }
 
+    /// Copies the meters between devices the engine last published into
+    /// `out` (the MIDI meters spec, R6), reusing its capacity. Empty while no
+    /// engine runs or before its first block.
+    pub fn chain_meters_into(&mut self, out: &mut Vec<bl_engine::ChainMeter>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            let state = engine.state();
+            if state.program.is_some() {
+                out.extend_from_slice(&state.chain_meters);
+            }
+        }
+    }
+
     /// Copies the display data the engine's devices last published into
     /// `out`, reusing its capacity (the device framework spec, R35). Empty
     /// while no engine runs.

@@ -3987,6 +3987,122 @@ Type: integer, at least 1.
 
 </details>
 
+### `ChainMeterValue`
+
+One meter between the devices of a chain, as `device_view.state` reports it (the MIDI meters spec, R2 and R6).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `before` | [`DeviceId`](#deviceid) or null | yes | The device the meter is in front of, or `null` for the meter after the chain's last device. |
+| `chain` | [`ChainId`](#chainid) or null | no | The rack chain the meter is in, if it is a rack chain's. |
+| `track` | [`TrackId`](#trackid) or null | no | The track whose chain the meter is in, if it is the track's own. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One meter between the devices of a chain, as `device_view.state` reports it (the MIDI meters spec, R2 and R6).",
+  "oneOf": [
+    {
+      "description": "A level meter.",
+      "properties": {
+        "kind": {
+          "const": "level",
+          "type": "string"
+        },
+        "peak": {
+          "description": "The peak level of the left and right channels, as linear amplitude.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "peak"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI meter. Each value falls from 1 to 0 over 300 ms after what lights it passes.",
+      "properties": {
+        "channel": {
+          "description": "Lit while a control change, pitch bend or channel pressure passed: the lowest dot.",
+          "format": "float",
+          "type": "number"
+        },
+        "expression": {
+          "description": "Lit while a per-note expression passed: the lowest dot, blue.",
+          "format": "float",
+          "type": "number"
+        },
+        "kind": {
+          "const": "midi",
+          "type": "string"
+        },
+        "velocity": {
+          "description": "The highest note-on velocity that passed, from 0 to 1: the meter's height.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "velocity",
+        "channel",
+        "expression"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "before": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device the meter is in front of, or `null` for the meter after the chain's last device."
+    },
+    "chain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChainId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack chain the meter is in, if it is a rack chain's."
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track whose chain the meter is in, if it is the track's own."
+    }
+  },
+  "required": [
+    "before"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ChainMixer`
 
 A chain's mixer: `volume` (linear gain, 1 is 0 dB, 0 is -inf), `pan` (-1 left to 1 right), `enabled` (the Chain Activator) and `solo`. A MIDI effect rack's chains have no volume or pan.
@@ -8843,6 +8959,7 @@ What `device_view.state` returns.
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
 | `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
+| `meters` | array of [`ChainMeterValue`](#chainmetervalue) | yes | The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters. |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 | `map_mode` | [`DeviceId`](#deviceid) or null | no | The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list. |
 
@@ -8909,6 +9026,14 @@ What `device_view.state` returns.
       ],
       "description": "The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list."
     },
+    "meters": {
+      "default": [],
+      "description": "The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/ChainMeterValue"
+      },
+      "type": "array"
+    },
     "selected": {
       "anyOf": [
         {
@@ -8951,7 +9076,8 @@ What `device_view.state` returns.
     "hot_swap",
     "can_paste",
     "can_paste_chain",
-    "device_list"
+    "device_list",
+    "meters"
   ],
   "type": "object"
 }
@@ -12728,6 +12854,8 @@ What `groove.to_clip` returns.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `clip` | [`ClipId`](#clipid) | yes | The clip it made. |
+| `track` | [`TrackId`](#trackid) | yes | The track it is on: the one named, or the new one. |
+| `groove` | [`GrooveId`](#grooveid) | yes | The groove it holds the notes of. |
 
 <details><summary>JSON Schema</summary>
 
@@ -12738,10 +12866,20 @@ What `groove.to_clip` returns.
     "clip": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip it made."
+    },
+    "groove": {
+      "$ref": "#/$defs/GrooveId",
+      "description": "The groove it holds the notes of."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track it is on: the one named, or the new one."
     }
   },
   "required": [
-    "clip"
+    "clip",
+    "track",
+    "groove"
   ],
   "type": "object"
 }
@@ -12806,6 +12944,45 @@ What `groove.extract` returns.
     "grooves"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `GrooveHotSwap`
+
+What the browser's hot-swap replaces (R32): a groove of the pool, which is a clip's, or the auto-load groove.
+
+One of:
+
+- an object with `groove` ([`GrooveId`](#grooveid)): A groove of the pool.
+- `"auto_load"`: The auto-load groove, whichever it is, or the next one loaded while it has none.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the browser's hot-swap replaces (R32): a groove of the pool, which is a clip's, or the auto-load groove.",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "description": "A groove of the pool.",
+      "properties": {
+        "groove": {
+          "$ref": "#/$defs/GrooveId"
+        }
+      },
+      "required": [
+        "groove"
+      ],
+      "type": "object"
+    },
+    {
+      "const": "auto_load",
+      "description": "The auto-load groove, whichever it is, or the next one loaded while it has none.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -13010,6 +13187,7 @@ What `groove.pool` returns.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `view` | [`GroovePoolView`](#groovepoolview) | yes | The pool's view: whether it shows, and what is being hot-swapped. |
 | `grooves` | array of [`GroovePoolEntry`](#groovepoolentry) | yes | The grooves, in the order they were added. |
 | `global_amount` | number | yes | The Global Amount, from 0 to 130 percent. |
 | `auto_load` | boolean | yes | The Auto Load Groove switch. |
@@ -13047,12 +13225,57 @@ What `groove.pool` returns.
         "$ref": "#/$defs/GroovePoolEntry"
       },
       "type": "array"
+    },
+    "view": {
+      "$ref": "#/$defs/GroovePoolView",
+      "description": "The pool's view: whether it shows, and what is being hot-swapped."
     }
   },
   "required": [
+    "view",
     "grooves",
     "global_amount",
     "auto_load"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `GroovePoolView`
+
+The Groove Pool's view: what `view.toggle_groove_pool`, `focus.groove_pool` and `groove.hot_swap` return, and `groove.pool` holds. View state: never part of the set.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shown` | boolean | yes | Whether the pool shows in the browser column. |
+| `hot_swap` | [`GrooveHotSwap`](#groovehotswap) or null | no | What the browser's hot-swap replaces, while it is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Groove Pool's view: what `view.toggle_groove_pool`, `focus.groove_pool` and `groove.hot_swap` return, and `groove.pool` holds. View state: never part of the set.",
+  "properties": {
+    "hot_swap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/GrooveHotSwap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the browser's hot-swap replaces, while it is on."
+    },
+    "shown": {
+      "description": "Whether the pool shows in the browser column.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "shown"
   ],
   "type": "object"
 }
@@ -14014,6 +14237,7 @@ One of:
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
+- `"groove"`: A groove file (`.blgroove`), which loads into the Groove Pool, or replaces the groove being hot-swapped (WP-6.20; the grooves spec R32, R33).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
 - `"clip"`: A clip file (WP-6.34); the row's `clip_kind` says whether it holds an audio clip or a MIDI clip.
@@ -14059,6 +14283,11 @@ One of:
     {
       "const": "chord_bank",
       "description": "A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).",
+      "type": "string"
+    },
+    {
+      "const": "groove",
+      "description": "A groove file (`.blgroove`), which loads into the Groove Pool, or replaces the groove being hot-swapped (WP-6.20; the grooves spec R32, R33).",
       "type": "string"
     },
     {
@@ -17923,6 +18152,7 @@ What `mixer_view.state` and the other view commands return.
 | `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 | `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
+| `meters` | array of [`TrackMeterValue`](#trackmetervalue) | yes | Each track's meter, in the order the tracks run (the MIDI meters spec, R6); empty when no engine has published meters. |
 | `peaks` | array of [`TrackPeak`](#trackpeak) | yes | Each track's held peak and its meters' peak lines (R33, R34); empty when no engine has published meters. |
 | `column_widths` | array of [`ColumnWidth`](#columnwidth) | yes | Every column's width, in the order the columns run: the tracks, the return tracks, Main (R36, R38). |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
@@ -17958,6 +18188,14 @@ What `mixer_view.state` and the other view commands return.
       "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters.",
       "items": {
         "$ref": "#/$defs/TrackGainReduction"
+      },
+      "type": "array"
+    },
+    "meters": {
+      "default": [],
+      "description": "Each track's meter, in the order the tracks run (the MIDI meters spec, R6); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackMeterValue"
       },
       "type": "array"
     },
@@ -18004,6 +18242,7 @@ What `mixer_view.state` and the other view commands return.
     "return_tracks_scroll",
     "performance_impact_values",
     "gain_reduction",
+    "meters",
     "peaks",
     "column_widths"
   ],
@@ -20865,6 +21104,7 @@ One of:
 - `"sidebar"`: The sidebar's labels.
 - `"content"`: The content pane's list.
 - `"search"`: The search field.
+- `"groove_pool"`: The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.
 
 <details><summary>JSON Schema</summary>
 
@@ -20885,6 +21125,11 @@ One of:
     {
       "const": "search",
       "description": "The search field.",
+      "type": "string"
+    },
+    {
+      "const": "groove_pool",
+      "description": "The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.",
       "type": "string"
     }
   ]
@@ -21902,7 +22147,7 @@ The preview: the switch, the volume, and what plays.
 | `position_seconds` | number | yes | How far it has played, in seconds. |
 | `length_seconds` | number | yes | How long it is, in seconds. |
 | `loading` | string or null | no | The file being decoded for a preview, if any. |
-| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it. |
+| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, a clip file whose audio is missing, or a preset that is an effect's or needs a plug-in this machine lacks. The preview strip shows it. |
 | `playing` | string or null | no | The file playing, if any. |
 
 <details><summary>JSON Schema</summary>
@@ -21924,7 +22169,7 @@ The preview: the switch, the volume, and what plays.
       ]
     },
     "note": {
-      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it.",
+      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, a clip file whose audio is missing, or a preset that is an effect's or needs a plug-in this machine lacks. The preview strip shows it.",
       "type": [
         "string",
         "null"
@@ -29313,6 +29558,91 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `TrackMeterValue`
+
+One track's meter, as `mixer_view.state` reports it (the MIDI meters spec, R1 and R6): a MIDI meter for a MIDI track whose chain holds no instrument and no audio effect, a level meter for every other.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's meter, as `mixer_view.state` reports it (the MIDI meters spec, R1 and R6): a MIDI meter for a MIDI track whose chain holds no instrument and no audio effect, a level meter for every other.",
+  "oneOf": [
+    {
+      "description": "A level meter.",
+      "properties": {
+        "kind": {
+          "const": "level",
+          "type": "string"
+        },
+        "peak": {
+          "description": "The peak level of the left and right channels, as linear amplitude.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "peak"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI meter. Each value falls from 1 to 0 over 300 ms after what lights it passes.",
+      "properties": {
+        "channel": {
+          "description": "Lit while a control change, pitch bend or channel pressure passed: the lowest dot.",
+          "format": "float",
+          "type": "number"
+        },
+        "expression": {
+          "description": "Lit while a per-note expression passed: the lowest dot, blue.",
+          "format": "float",
+          "type": "number"
+        },
+        "kind": {
+          "const": "midi",
+          "type": "string"
+        },
+        "velocity": {
+          "description": "The highest note-on velocity that passed, from 0 to 1: the meter's height.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "velocity",
+        "channel",
+        "expression"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track"
+  ],
+  "type": "object"
 }
 ```
 

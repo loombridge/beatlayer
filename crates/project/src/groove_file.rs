@@ -67,7 +67,7 @@ pub struct GrooveFile {
 struct File {
     format: String,
     schema: u32,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     saved_by: String,
     name: String,
     length: Ticks,
@@ -151,10 +151,18 @@ impl GrooveFile {
     /// The file's bytes.
     #[must_use]
     pub fn encode(&self) -> Vec<u8> {
+        self.encode_by(crate::SAVED_BY)
+    }
+
+    /// The file's bytes, naming `saved_by` as what wrote them; left empty,
+    /// the file doesn't name one, so it stays the same from one version to
+    /// the next (the bundled grooves' files).
+    #[must_use]
+    pub fn encode_by(&self, saved_by: &str) -> Vec<u8> {
         let file = File {
             format: GROOVE_FORMAT.to_owned(),
             schema: GROOVE_SCHEMA,
-            saved_by: crate::SAVED_BY.to_owned(),
+            saved_by: saved_by.to_owned(),
             name: self.name.clone(),
             length: self.length,
             notes: self
@@ -255,9 +263,90 @@ impl GrooveFile {
     }
 }
 
+/// The percentages the bundled swing grooves come in.
+const SWINGS: [i64; 5] = [55, 60, 65, 70, 75];
+
+/// A groove one 4/4 bar long over steps of `base`, the second step of each
+/// pair of steps at `swing` percent of the pair's length (50 is straight). A
+/// step on a beat has velocity 127 and the others 100.
+fn stepped(name: String, base: GrooveBase, swing: i64) -> GrooveFile {
+    let quarter = GrooveBase::Quarter.ticks().get();
+    let step = base.ticks().get();
+    let length = 4 * quarter;
+    let notes = (0..length / step)
+        .map(|n| {
+            let line = n * step;
+            GrooveNote {
+                position: Ticks(if n % 2 == 1 {
+                    // The pair began one step ago, and is two steps long.
+                    line - step + 2 * step * swing / 100
+                } else {
+                    line
+                }),
+                velocity: if line % quarter == 0 { 127 } else { 100 },
+            }
+        })
+        .collect();
+    GrooveFile {
+        name,
+        length: Ticks(length),
+        notes,
+        base,
+        quantize: 0.0,
+        timing: 100.0,
+        random: 0.0,
+        velocity: 0.0,
+    }
+}
+
+/// Beatlayer's bundled grooves, in the order the browser lists them (the
+/// grooves spec R36): Swing 8ths and Swing 16ths at 55, 60, 65, 70 and 75
+/// percent, and Straight 8ths and Straight 16ths, each one 4/4 bar long.
+#[must_use]
+pub fn bundled() -> Vec<GrooveFile> {
+    let mut grooves = Vec::new();
+    for (steps, base) in [
+        ("8ths", GrooveBase::Eighth),
+        ("16ths", GrooveBase::Sixteenth),
+    ] {
+        for swing in SWINGS {
+            grooves.push(stepped(format!("Swing {steps} {swing}"), base, swing));
+        }
+        grooves.push(stepped(format!("Straight {steps}"), base, 50));
+    }
+    grooves
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Spec: grooves R36
+    #[test]
+    fn a_swing_puts_the_second_step_of_each_pair_at_its_share_of_the_pair() {
+        let bundled = bundled();
+        assert_eq!(bundled.len(), 12);
+        let find = |name: &str| bundled.iter().find(|g| g.name == name).expect(name);
+        let swing = find("Swing 16ths 60");
+        let at = |n: usize| (swing.notes[n].position.get(), swing.notes[n].velocity);
+        assert_eq!(swing.notes.len(), 16);
+        assert_eq!(swing.base, GrooveBase::Sixteenth);
+        assert_eq!((swing.quantize, swing.timing), (0.0, 100.0));
+        assert_eq!((swing.random, swing.velocity), (0.0, 0.0));
+        assert_eq!(at(0), (0, 127));
+        // 60 % of an eighth (352 800 ticks) is 211 680.
+        assert_eq!(at(1), (211_680, 100));
+        assert_eq!(at(2), (352_800, 100));
+        assert_eq!(at(4), (705_600, 127));
+        let straight = find("Straight 8ths");
+        let positions: Vec<i64> = straight.notes.iter().map(|n| n.position.get()).collect();
+        assert_eq!(positions[..3], [0, 352_800, 705_600]);
+        assert_eq!(straight.notes.len(), 8);
+        for groove in &bundled {
+            assert_eq!(groove.length.get(), 2_822_400, "{}", groove.name);
+            assert_eq!(&GrooveFile::decode(&groove.encode()).unwrap(), groove);
+        }
+    }
 
     fn groove() -> GrooveFile {
         GrooveFile {

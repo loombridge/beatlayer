@@ -1,7 +1,7 @@
 //! What the engine tells the UI: playhead, meters, CPU load, and reports.
 
 use bl_core::time::{Frames, SampleRate, Ticks};
-use bl_model::{ChainId, ParamId, TrackId};
+use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtrb::Consumer;
 
 use crate::capture::CapturedMidi;
@@ -9,6 +9,8 @@ use crate::message::{LoopRegion, Report};
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 use crate::node::NodeKey;
+#[cfg(doc)]
+use crate::points::MIDI_METER_FALL_SECONDS;
 use crate::recording::TakeBounds;
 use crate::session::{SceneOverride, SlotStatus};
 
@@ -35,6 +37,58 @@ pub struct TrackMeter {
     /// it: zero when none of them reduced (the mixer view spec, R40). Gates
     /// are left out, as they don't report one.
     pub gain_reduction: f32,
+}
+
+/// The chain a meter point sits in: a track's, or a rack chain's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MeterOwner {
+    /// The device chain of a track.
+    Track(TrackId),
+    /// The device chain of a rack chain.
+    Chain(ChainId),
+}
+
+/// Where a meter point sits in its chain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MeterSite {
+    /// In front of the device, between it and the one before.
+    Before(DeviceId),
+    /// After the chain's last device.
+    End,
+}
+
+/// What passed a meter point (the MIDI meters spec, R6).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum PointReading {
+    /// MIDI: each value is 0 when nothing of its kind passed in the last
+    /// [`MIDI_METER_FALL_SECONDS`], and otherwise falls from its peak to 0
+    /// over that time.
+    Midi {
+        /// The highest note-on velocity that passed, from 0 to 1.
+        velocity: f32,
+        /// 1 when a control change, pitch bend or channel pressure passed.
+        channel: f32,
+        /// 1 when a per-note expression passed.
+        expression: f32,
+    },
+    /// Audio: the peak level of the first two channels, as linear amplitude,
+    /// falling at [`METER_RELEASE_DB_PER_SECOND`] like a track's.
+    Audio {
+        /// Left and right.
+        peak: [f32; 2],
+    },
+}
+
+/// A meter between two devices of a chain, before the first or after the
+/// last (the MIDI meters spec, R2 and R6).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChainMeter {
+    /// The chain.
+    pub owner: MeterOwner,
+    /// The place in it.
+    pub at: MeterSite,
+    /// What passed.
+    pub reading: PointReading,
 }
 
 /// A parameter under modulation, as the last block played it (the modulation
@@ -150,6 +204,12 @@ pub struct EngineState {
     /// Whether some tracks have no meter because there are more than
     /// [`EngineConfig::max_tracks`](crate::EngineConfig::max_tracks).
     pub meters_truncated: bool,
+    /// The meters between the devices of every chain (WP-6.69), in the order
+    /// the program's chains run.
+    pub chain_meters: Vec<ChainMeter>,
+    /// Whether some chain meters are missing because there are more than
+    /// [`EngineConfig::max_chain_meters`](crate::EngineConfig::max_chain_meters).
+    pub chain_meters_truncated: bool,
     /// The parameters under modulation while the song plays, as the last
     /// block played them (WP-5.9); the rest play their base.
     pub modulated: Vec<PlayedParam>,
@@ -170,6 +230,7 @@ impl EngineState {
         slots: usize,
         modulated: usize,
         processing: usize,
+        chain_meters: usize,
         sample_rate: SampleRate,
     ) -> Self {
         Self {
@@ -194,6 +255,8 @@ impl EngineState {
             session_over: Vec::with_capacity(tracks),
             meters: Vec::with_capacity(tracks),
             meters_truncated: false,
+            chain_meters: Vec::with_capacity(chain_meters),
+            chain_meters_truncated: false,
             modulated: Vec::with_capacity(modulated),
             processing: Vec::with_capacity(processing),
             counters: EngineCounters::default(),
@@ -228,6 +291,14 @@ impl EngineState {
         self.track_meter(track).map(|meter| meter.gain_reduction)
     }
 
+    /// The meter at `at` in the chain `owner`.
+    #[must_use]
+    pub fn chain_meter(&self, owner: MeterOwner, at: MeterSite) -> Option<&ChainMeter> {
+        self.chain_meters
+            .iter()
+            .find(|meter| meter.owner == owner && meter.at == at)
+    }
+
     /// One track's meters.
     #[must_use]
     pub fn track_meter(&self, track: TrackId) -> Option<&TrackMeter> {
@@ -241,6 +312,8 @@ impl Clone for EngineState {
     fn clone(&self) -> Self {
         let mut meters = Vec::with_capacity(self.meters.capacity());
         meters.extend_from_slice(&self.meters);
+        let mut chain_meters = Vec::with_capacity(self.chain_meters.capacity());
+        chain_meters.extend_from_slice(&self.chain_meters);
         let mut session = Vec::with_capacity(self.session.capacity());
         session.extend_from_slice(&self.session);
         let mut modulated = Vec::with_capacity(self.modulated.capacity());
@@ -271,6 +344,8 @@ impl Clone for EngineState {
             session_over,
             meters,
             meters_truncated: self.meters_truncated,
+            chain_meters,
+            chain_meters_truncated: self.chain_meters_truncated,
             modulated,
             processing,
             counters: self.counters,

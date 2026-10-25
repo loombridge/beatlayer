@@ -1397,6 +1397,24 @@ impl BrowserView {
             .map(|library| library.join("Templates"))
     }
 
+    /// The folders the Grooves label lists: the bundled grooves, then the
+    /// User Library's Grooves folder (spec: grooves R33).
+    fn groove_folders(&self) -> Vec<PathBuf> {
+        crate::resources::grooves()
+            .into_iter()
+            .chain(self.user_library.as_ref().map(|lib| lib.join("Grooves")))
+            .collect()
+    }
+
+    /// The Grooves label's rows: the groove files in its folders.
+    fn groove_rows(&mut self) -> Vec<Item> {
+        let mut items = Vec::new();
+        for folder in self.groove_folders() {
+            self.list_into(&folder, 0, &mut items);
+        }
+        items
+    }
+
     /// A place's folder.
     fn place_path(&self, label: &Label) -> Option<PathBuf> {
         match label {
@@ -1680,6 +1698,12 @@ impl BrowserView {
         self.rebuild();
     }
 
+    /// Files were written in the places: list them afresh (a saved groove
+    /// shows in the Grooves label).
+    pub fn files_written(&mut self) {
+        self.files_changed();
+    }
+
     /// Shows a file the shell wrote in the content pane, selected, with its
     /// name open for editing (clip files R4; set exchange R13), if it lies in
     /// one of the places. Returns whether it was shown.
@@ -1808,6 +1832,22 @@ impl BrowserView {
                     }
                     self.rows = Rows::Items(items);
                 }
+                None if label == Label::Grooves => {
+                    // Spec: grooves R33, browser R9. Grooves aren't in the
+                    // index; the bundled ones and the User Library's folder
+                    // are listed and filtered by every word typed.
+                    let mut items = self.groove_rows();
+                    let needle = self.search.trim().to_lowercase();
+                    items.retain(|item| {
+                        let name = item.name.to_lowercase();
+                        needle.split_whitespace().all(|word| name.contains(word))
+                    });
+                    items.retain(|item| self.item_passes(&selection, &builtin, item));
+                    if items.is_empty() {
+                        self.note = Some(format!("Nothing matches \u{201c}{needle}\u{201d}."));
+                    }
+                    self.rows = Rows::Items(items);
+                }
                 None => {
                     self.rows = Rows::Items(Vec::new());
                     self.note = Some(label.pending().map_or_else(
@@ -1885,6 +1925,16 @@ impl BrowserView {
                         );
                     }
                 },
+                Label::Grooves => {
+                    items = self.groove_rows();
+                    if items.is_empty() {
+                        self.note = Some(
+                            "No grooves yet: save one from the Groove Pool, or extract one from \
+                             a clip."
+                                .to_owned(),
+                        );
+                    }
+                }
                 other => {
                     self.note = other.pending().map(str::to_owned);
                 }
@@ -2515,9 +2565,13 @@ impl BrowserView {
         let kind = listing::path_kind(path);
         // A Session clip of an opened set previews as a clip file does.
         let row = set_exchange::parse_key(&path.to_string_lossy()).is_some();
-        if !matches!(kind, Some(ItemKind::Audio | ItemKind::Clip)) || !(row || path.is_file()) {
+        if !matches!(
+            kind,
+            Some(ItemKind::Audio | ItemKind::Clip | ItemKind::Preset)
+        ) || !(row || path.is_file())
+        {
             return Err(BrowserError::InvalidArgs(format!(
-                "{} isn't an audio file or clip file Beatlayer opens",
+                "{} isn't an audio file, clip file or preset Beatlayer opens",
                 path.to_string_lossy()
             )));
         }
@@ -2530,7 +2584,8 @@ impl BrowserView {
         self.playing = None;
         self.pending_warp = None;
         self.preview_note = None;
-        let id = if kind == Some(ItemKind::Clip) {
+        // A preset is rendered like a MIDI clip file (browser R27).
+        let id = if kind != Some(ItemKind::Audio) {
             self.loader.request_clip(path, rate, search.to_vec(), bpm)
         } else {
             self.loader.request(path, rate)
@@ -2594,6 +2649,23 @@ impl BrowserView {
         }
     }
 
+    /// The groove file selected, if one file is and it is that (spec:
+    /// grooves R32, R33).
+    #[must_use]
+    pub fn selected_groove(&self) -> Option<PathBuf> {
+        match self.selected.as_slice() {
+            [one]
+                if one
+                    .file_name()
+                    .and_then(|n| file_kind(&n.to_string_lossy()))
+                    == Some(ItemKind::Groove) =>
+            {
+                Some(one.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// The selected audio files, in the content pane's order.
     pub(crate) fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
@@ -2642,10 +2714,19 @@ impl BrowserView {
 
     /// The selected clip files, in the content pane's order.
     pub(crate) fn selected_clip_files(&self) -> Vec<PathBuf> {
+        self.selected_of(ItemKind::Clip)
+    }
+
+    /// The selected presets, in the content pane's order.
+    fn selected_presets(&self) -> Vec<PathBuf> {
+        self.selected_of(ItemKind::Preset)
+    }
+
+    fn selected_of(&self, kind: ItemKind) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
             .selected
             .iter()
-            .filter(|p| listing::path_kind(p) == Some(ItemKind::Clip))
+            .filter(|p| listing::path_kind(p) == Some(kind))
             .map(|p| (self.position_of(p), p.clone()))
             .collect();
         files.sort_by_key(|(position, _)| *position);
@@ -2672,11 +2753,13 @@ impl BrowserView {
                     || self.selected_device().is_some()
                     || self.selected_sfz().is_some()
                     || self.selected_chord_bank().is_some()
+                    || self.selected_groove().is_some()
             }
             ids::PREVIEW => {
                 args.get("path").is_some()
                     || self.selected_audio().len() == 1
                     || self.selected_clip_files().len() == 1
+                    || self.selected_presets().len() == 1
             }
             ids::RENAME_LABEL => {
                 let label = args
@@ -2893,13 +2976,15 @@ impl BrowserView {
                     }
                 }
                 self.cursor = self.selected.last().and_then(|path| self.position_of(path));
-                // Spec: browser R11. One audio file previews while the switch
-                // is on; anything else stops the preview.
+                // Spec: browser R11, R27. One audio file, clip file or preset
+                // previews while the switch is on; anything else stops the
+                // preview.
                 let audio_files = self.selected_audio();
                 let clip_files = self.selected_clip_files();
+                let presets = self.selected_presets();
                 if self.preview_on
                     && self.selected.len() == 1
-                    && (audio_files.len() == 1 || clip_files.len() == 1)
+                    && (audio_files.len() == 1 || clip_files.len() == 1 || presets.len() == 1)
                 {
                     // Without a running device there's nothing to hear; the
                     // selection stands either way.
@@ -2908,6 +2993,7 @@ impl BrowserView {
                             audio_files
                                 .first()
                                 .or(clip_files.first())
+                                .or(presets.first())
                                 .expect("one file"),
                             ctx.audio,
                             ctx.search,
@@ -3005,11 +3091,13 @@ impl BrowserView {
                     None => {
                         let files = self.selected_audio();
                         let clips = self.selected_clip_files();
-                        match (files.as_slice(), clips.as_slice()) {
-                            ([one], []) | ([], [one]) => one.clone(),
+                        let presets = self.selected_presets();
+                        match (files.as_slice(), clips.as_slice(), presets.as_slice()) {
+                            ([one], [], []) | ([], [one], []) | ([], [], [one]) => one.clone(),
                             _ => {
                                 return Err(BrowserError::Unavailable(
-                                    "select one audio file or clip file to preview".to_owned(),
+                                    "select one audio file, clip file or preset to preview"
+                                        .to_owned(),
                                 ));
                             }
                         }

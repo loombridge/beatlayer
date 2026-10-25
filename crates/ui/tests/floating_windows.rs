@@ -114,7 +114,9 @@ fn float_in_the_menu_leaves_a_strip_and_the_dock_button_docks() {
         .iter()
         .position(|l| l.trim_start_matches("✔ ").starts_with("Float"))
         .unwrap();
-    assert!(fold < float, "Float comes after Fold");
+    // By where they are drawn: a list of nodes is in the order of their IDs.
+    let top = |at: usize| nodes[at].bounds.unwrap().y0;
+    assert!(top(fold) < top(float), "Float comes after Fold");
     let item = nodes[float].clone();
     assert!(!item.disabled);
     assert!(!item.label.starts_with('✔'), "not ticked while docked");

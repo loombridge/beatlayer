@@ -294,7 +294,7 @@ fn every_strip_has_its_controls_where_live_has_them() {
     assert!(rows.windows(2).all(|w| w[0] < w[1]), "{rows:?}");
     // A MIDI track without an instrument: a MIDI meter and the switches,
     // no volume or pan.
-    assert!(inside(&nodes, "1 MIDI", "MIDI Meter").is_some());
+    assert!(inside(&nodes, "1 MIDI", "MIDI Activity").is_some());
     assert!(inside(&nodes, "1 MIDI", "Track Volume").is_none());
     assert!(inside(&nodes, "1 MIDI", "Track Pan").is_none());
     assert!(inside(&nodes, "1 MIDI", "Arm Recording").is_some());
@@ -596,7 +596,12 @@ fn the_arrangement_headers_mixer_controls_are_live_and_take_typed_values() {
     assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) + 12.0).abs() < 1e-9);
     assert!(!h.main.is_typing());
     let nodes = tree(&mut h);
-    let meters = nodes.iter().filter(|n| n.label == "Track Meter").count();
+    // A MIDI track without an instrument shows a MIDI meter in its place
+    // (midi-meters R1).
+    let meters = nodes
+        .iter()
+        .filter(|n| n.label == "Track Meter" || n.label == "MIDI Activity")
+        .count();
     assert!(meters >= 7, "a meter in every header: {meters}");
 }
 
@@ -3039,11 +3044,14 @@ fn a_click_on_an_activator_switches_only_that_device_as_one_undo_step() {
     let before = h.shell.editor().undo_history().count();
     let nodes = tree(&mut h);
     let column = Harness::node(&nodes, "1 MIDI").id;
-    let switch = nodes
+    let mut switches: Vec<&common::Node> = nodes
         .iter()
         .filter(|n| n.role == Role::Switch && Harness::descends_from(&nodes, n.id, column))
-        .nth(1)
-        .unwrap();
+        .collect();
+    // Top to bottom, as the devices are listed: a list of nodes is in the
+    // order of their IDs.
+    switches.sort_by(|a, b| a.bounds.unwrap().y0.total_cmp(&b.bounds.unwrap().y0));
+    let switch = switches[1];
     click(&mut h, rect_of(switch).center(), Modifiers::NONE);
     let doc = h.shell.editor().document();
     assert!(!doc.device(devices[1]).unwrap().enabled);

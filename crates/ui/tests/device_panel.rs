@@ -493,8 +493,11 @@ fn the_spectrums_cell_draws_in_docked_and_floating_windows() {
 
     let output = h.frame(vec![]);
     let nodes = Harness::nodes(&output);
-    let node = Harness::node(&nodes, "Spectrum");
-    assert_eq!(node.role, Role::Image);
+    // The title bar's name and the cell are both labelled Spectrum.
+    let node = nodes
+        .iter()
+        .find(|n| n.label == "Spectrum" && n.role == Role::Image)
+        .expect("the Spectrum cell");
     assert!(
         node.value.contains("Spectrum peak"),
         "expected peak reading, got {}",
@@ -530,8 +533,11 @@ fn the_tuners_cell_draws_in_docked_and_floating_windows() {
 
     let output = h.frame(vec![]);
     let nodes = Harness::nodes(&output);
-    let node = Harness::node(&nodes, "Tuner");
-    assert_eq!(node.role, Role::Image);
+    // The title bar's name and the cell are both labelled Tuner.
+    let node = nodes
+        .iter()
+        .find(|n| n.label == "Tuner" && n.role == Role::Image)
+        .expect("the Tuner cell");
     assert!(
         node.value.contains("Note A4"),
         "expected note reading, got {}",

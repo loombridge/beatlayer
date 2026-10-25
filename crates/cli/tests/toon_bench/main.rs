@@ -113,15 +113,15 @@ fn current_results() -> Vec<(&'static str, Value)> {
     let mut client = Client::new(InProcess::new(Agent::headless(false), shell));
     client.initialize("toon-bench").expect("it initialises");
     // A rough mix, so the tracks differ: the Drums, Bass, Chords and Lead
-    // tracks are 16 to 19, and "4 Audio" is 5.
+    // tracks are 17 to 20 (16 is the factory default set's groove), and "4 Audio" is 5.
     let mix = [
-        ("mixer.set_volume", json!({ "track": 16, "volume": 0.8 })),
-        ("mixer.set_volume", json!({ "track": 17, "volume": 0.7 })),
-        ("mixer.set_pan", json!({ "track": 17, "pan": -0.2 })),
-        ("mixer.set_volume", json!({ "track": 18, "volume": 0.6 })),
-        ("mixer.set_pan", json!({ "track": 18, "pan": 0.35 })),
-        ("mixer.set_volume", json!({ "track": 19, "volume": 0.55 })),
-        ("mixer.set_pan", json!({ "track": 19, "pan": 0.1 })),
+        ("mixer.set_volume", json!({ "track": 17, "volume": 0.8 })),
+        ("mixer.set_volume", json!({ "track": 18, "volume": 0.7 })),
+        ("mixer.set_pan", json!({ "track": 18, "pan": -0.2 })),
+        ("mixer.set_volume", json!({ "track": 19, "volume": 0.6 })),
+        ("mixer.set_pan", json!({ "track": 19, "pan": 0.35 })),
+        ("mixer.set_volume", json!({ "track": 20, "volume": 0.55 })),
+        ("mixer.set_pan", json!({ "track": 20, "pan": 0.1 })),
         ("mixer.set_mute", json!({ "track": 5, "mute": true })),
     ];
     let commands: Vec<Value> = mix

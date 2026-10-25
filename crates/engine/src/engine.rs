@@ -44,6 +44,7 @@ pub fn channel(config: &EngineConfig) -> (Sender, Processor, Monitor) {
         config.max_slots,
         config.max_modulated,
         config.max_processing,
+        config.max_chain_meters,
         config.sample_rate,
     ));
     let sender = Sender {

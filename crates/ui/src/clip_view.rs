@@ -211,12 +211,13 @@ pub fn editor_rect(view: Rect) -> Rect {
 /// The clip title bar over the panels (L-CLIP-002): the clip's name, and on
 /// an audio clip the Save Default Clip button, which runs `clip.save_default`
 /// for the clip or for each selected audio clip (R17).
-fn title_bar(
+pub(crate) fn title_bar(
     ui: &mut Ui,
     shell: &Shell,
     theme: &Theme,
     rect: Rect,
     clip: ClipId,
+    audio: bool,
     events: &mut Vec<UiEvent>,
 ) {
     let doc = shell.editor().document();
@@ -260,6 +261,14 @@ fn title_bar(
         &mut menu_events,
     );
     events.extend(menu_events);
+    // Spec: detail-views R23, I-CLICK-008. A double-click folds or unfolds
+    // the panels.
+    if bar.double_clicked() {
+        events.push(UiEvent::Invoke(Invocation::new(
+            bl_shell::clip_properties_commands::FOLD_PANELS,
+            json!({}),
+        )));
+    }
     let clips = crate::session_menus::title_clips(shell);
     let renaming = crate::session_menus::rename_edit(
         ui,
@@ -277,6 +286,9 @@ fn title_bar(
             theme.small_font(),
             c.text.0,
         );
+    }
+    if !audio {
+        return;
     }
     // The Save Default Clip button.
     let button = Rect::from_min_size(
@@ -1728,20 +1740,9 @@ impl ClipViewUi {
             self.mpe.reset();
             return;
         };
-        // The panel groups take the left of the view (L-CLIP-003): the left
-        // group's Main Properties or Launch Properties, and the right
-        // group's Utilities, Transform and Generate.
-        let left = Rect::from_min_size(
-            rect.min,
-            vec2(launch_panel::panel_width(rect), rect.height()),
-        );
-        crate::main_panel::show_left_group(ui, shell, theme, left, clip, events);
-        let right = crate::tool_panel::panel_rect(
-            Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom())),
-            left.right(),
-        );
-        crate::tool_panel::show(ui, shell, theme, right, clip, events);
-        let rect = Rect::from_min_max(pos2(right.right(), rect.top()), rect.max);
+        // The panel groups take the left of the view (L-CLIP-003), or stack
+        // there, or fold away (R19, R23); the editor takes what's left.
+        let rect = crate::clip_panels::show(ui, shell, theme, rect, clip, false, events);
         let fold = shell.clip_view().fold(doc, clip);
         if self.shown != Some(clip) || self.fold != fold {
             // Another clip shows, or the editor was folded or unfolded:
@@ -2194,28 +2195,11 @@ impl ClipViewUi {
         let ClipData::Audio(audio) = &value.data else {
             return;
         };
-        // The panels' groups: the left group holds the Launch Properties
-        // panel (a Session clip), the right group the Audio Utilities panel
-        // (an audio clip). The clip title bar is over them (L-CLIP-002).
-        let panels = panels_rect(rect);
-        title_bar(
-            ui,
-            shell,
-            theme,
-            title_bar_rect(rect, panels.width()),
-            clip,
-            events,
-        );
-        // The left group holds Main Properties, or a Session clip's Launch
-        // Properties.
-        let left = Rect::from_min_size(
-            panels.min,
-            vec2(launch_panel::panel_width(rect), panels.height()),
-        );
-        crate::main_panel::show_left_group(ui, shell, theme, left, clip, events);
-        let right = crate::audio_panel::panel_rect(panels, left.right());
-        crate::audio_panel::show(ui, shell, theme, right, clip, events);
-        let rect = Rect::from_min_max(pos2(right.right(), rect.top()), rect.max);
+        // The panels' groups: the left group holds Main Properties or a
+        // Session clip's Launch Properties, the right group the Audio
+        // Utilities panel (an audio clip). The clip title bar is over them
+        // (L-CLIP-002).
+        let rect = crate::clip_panels::show(ui, shell, theme, rect, clip, true, events);
         // A file dropped from the browser on the Clip View replaces the
         // clip's sample (R18, I-DROP-009).
         drop_sample(ui, rect, clip, events);

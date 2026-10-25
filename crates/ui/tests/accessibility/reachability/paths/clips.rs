@@ -263,6 +263,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("clip.warp_selection_as_loop", Exception(AUTO_WARP)),
         ("clip.save_default", Exception(CLIP_TITLE_BAR)),
         ("clip.defaults", Exception(CLIP_TITLE_BAR)),
+        (
+            "clip_view.fold_panels",
+            Exception(Equivalent(
+                "Fold in the Clip View title bar's menu, which the context menu keys open while \
+                 the Clip View has the keyboard (session context menus R14, detail views R23)",
+            )),
+        ),
         ("clip.set_legato", Exception(CLIP_LAUNCH)),
         ("clip.set_launch_quantization", Exception(CLIP_LAUNCH)),
         ("clip.set_velocity_amount", Exception(CLIP_LAUNCH)),

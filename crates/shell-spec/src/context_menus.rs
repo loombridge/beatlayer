@@ -16,6 +16,7 @@
 use crate::arrangement::{SET_GRID, SHOW_TAKE_LANES};
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::automation::{INSERT_SHAPE, SIMPLIFY};
+use crate::clip_properties::{ARRANGE_PANELS, FOLD_PANELS};
 use crate::commands::{VIEW_HIGHLIGHT_SCALES, VIEW_NOTE_SPELLING};
 use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
@@ -785,22 +786,22 @@ const CLIP_TITLE: &[Row] = &[
     SEPARATOR,
     (CLIP_TITLE_COLOUR, "Colour palette", Cmd(SET_CLIP_COLOUR)),
     SEPARATOR,
-    ("C-CLIPTITLE-004", "Fold", Pending(None)),
+    ("C-CLIPTITLE-004", "Fold", Cmd(FOLD_PANELS)),
     SEPARATOR,
     (
         "C-CLIPTITLE-005",
         "Arrange Clip View Panels Automatically",
-        Pending(None),
+        Choice(ARRANGE_PANELS, r#"{"arrangement":"automatic"}"#),
     ),
     (
         "C-CLIPTITLE-006",
         "Arrange Clip View Panels Horizontally",
-        Pending(None),
+        Choice(ARRANGE_PANELS, r#"{"arrangement":"horizontal"}"#),
     ),
     (
         "C-CLIPTITLE-007",
         "Arrange Clip View Panels Vertically",
-        Pending(None),
+        Choice(ARRANGE_PANELS, r#"{"arrangement":"vertical"}"#),
     ),
 ];
 
@@ -901,9 +902,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
             Some("Phase 9 (audio to MIDI, IMP-06)")
         }
         "C-CLIP-SES-020" => Some("Phase 9 (stem separation of Session clips, IMP-11)"),
-        "C-CLIPTITLE-004" | "C-CLIPTITLE-005" | "C-CLIPTITLE-006" | "C-CLIPTITLE-007" => {
-            Some("WP-6.72 (the Clip View panels' layout)")
-        }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
@@ -1569,10 +1567,6 @@ mod tests {
                 "C-CLIP-SES-019c",
                 "C-CLIP-SES-019d",
                 "C-CLIP-SES-020",
-                "C-CLIPTITLE-004",
-                "C-CLIPTITLE-005",
-                "C-CLIPTITLE-006",
-                "C-CLIPTITLE-007",
             ]
         );
     }

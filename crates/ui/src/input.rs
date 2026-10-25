@@ -33,6 +33,9 @@ pub struct KeyDispatcher {
     /// The computer MIDI keyboard's note keys that are down, until released
     /// (the MIDI I/O spec, R21).
     notes: Vec<Key>,
+    /// Whether Space goes to the focused control and not to the keymap: a
+    /// panel selector button's tab takes it (the detail views spec, R24).
+    leave_space: bool,
 }
 
 /// What a letter does while the computer MIDI keyboard is on: A W S E D F T G
@@ -64,7 +67,13 @@ impl KeyDispatcher {
             platform,
             held: Vec::new(),
             notes: Vec::new(),
+            leave_space: false,
         }
+    }
+
+    /// Says whether the next frame's Space is left to the focused control.
+    pub fn leave_space_to_focus(&mut self, on: bool) {
+        self.leave_space = on;
     }
 
     /// Takes the key presses the keymap binds out of `input` and returns
@@ -180,6 +189,9 @@ impl KeyDispatcher {
                 return false;
             }
             if !*pressed || *repeat {
+                return true;
+            }
+            if self.leave_space && *key == Key::Space && *modifiers == egui::Modifiers::NONE {
                 return true;
             }
             let mods = mods_from_egui(*modifiers, self.platform);

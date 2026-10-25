@@ -328,6 +328,9 @@ pub enum Effect {
     /// Move the keyboard focus to the first control of the Clip View's
     /// panels (Navigate ▸ Clip Panels).
     FocusClipPanels,
+    /// Move the keyboard focus to the first control of the shown panel of
+    /// the Clip View's group the focus was last in (Option+8).
+    FocusSelectedClipPanel,
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -1181,6 +1184,7 @@ impl Shell {
         let plugin_panels = prefs.plugin_panels.clone();
         let note_preview = prefs.note_preview;
         let (highlight_scales, note_spelling) = (prefs.highlight_scales, prefs.note_spelling);
+        let panel_arrangement = prefs.panel_arrangement;
         let mut shell = Self {
             browser_view,
             media,
@@ -1267,6 +1271,7 @@ impl Shell {
                 view.set_preview(note_preview);
                 view.set_highlight_scales(highlight_scales);
                 view.set_note_spelling(note_spelling);
+                view.set_panel_arrangement(panel_arrangement);
                 view
             },
             detail: DetailArea::default(),
@@ -1547,6 +1552,7 @@ impl Shell {
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.poll_capture();
+        self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
         // opens ends when another command edits the set.
         if self.key_edit.is_some() && !self.keeps_key_edit(id) {

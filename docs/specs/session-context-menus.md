@@ -48,7 +48,6 @@ This spec covers the four menus, their rows, which item runs which command, the 
 - **R13.** An item whose command isn't built is drawn disabled in its place and names its package in its AccessKit description and its hover text, as "Not built yet: arrives with …" ([track-context-menu.md](track-context-menu.md) R6). Freeze Track (WP-4.14), Bounce Track in Place, Bounce to New Track, Paste Bounced Audio and Bounce Group to New Track (WP-4.15), Slice to New MIDI Track (WP-4.16), Extract Groove(s) (WP-6.20) and Edit Info Text (WP-6.58, which opens the Info View's field, [info-view.md](info-view.md) R10) were built before this package and run their commands on the selection, as the clipboard items do (R11). What still waits:
   - Convert Harmony, Melody and Drums to New MIDI Track (C-CLIP-SES-019): Phase 9 (audio to MIDI, IMP-06).
   - Separate Stems to New Audio Tracks on a Session clip (C-CLIP-SES-020): Phase 9 (stem separation of Session clips, IMP-11).
-  - Fold and the three Arrange Clip View Panels items (the Clip View title bar's): WP-6.72, the clip panels' layout ([detail-views.md](detail-views.md) R20, R23).
   Duplicate as Linked Clip and Unlink Clip, straight after Duplicate in the Session clip's menu, are added by WP-6.44 ([linked-clips.md](linked-clips.md) R1, R8) and aren't drawn before it. (S1, S2, S5)
 
 **Keys, assistive technology and readback**

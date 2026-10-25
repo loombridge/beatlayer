@@ -588,6 +588,7 @@ impl MainWindowUi {
             self.track_area_clicks(ctx, &layout, &mut events);
             // Where the Tag Editor opens, beside the content pane.
             let mut tag_editor = None;
+            let mut pool_drawn = false;
             self.control_bar(ui, shell, theme, &layout, &mut events);
             if let Some(browser) = layout.browser {
                 // Spec: macros R3. A rack's Map mode puts the mappings list
@@ -612,8 +613,12 @@ impl MainWindowUi {
                     tag_editor = shell.browser_view().tag_editor().then_some(browser);
                     if let Some(pool) = pool {
                         self.groove_pool.show(ui, shell, theme, pool, &mut events);
+                        pool_drawn = true;
                     }
                 }
+            }
+            if !pool_drawn {
+                self.groove_pool.hidden();
             }
             // Spec: browser R29. The browser's right edge, in the gap
             // between it and the main view, under the main view's own

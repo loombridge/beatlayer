@@ -276,6 +276,11 @@ impl GroovePoolUi {
         self.renaming.is_some()
     }
 
+    /// Drops a name being typed, for a frame the pool isn't drawn in.
+    pub fn hidden(&mut self) {
+        self.renaming = None;
+    }
+
     /// Draws the pool in `rect` and adds what the person did to `events`.
     pub fn show(
         &mut self,
@@ -371,6 +376,15 @@ impl GroovePoolUi {
                     let top = rows.top() + (first + at) as f32 * ROW - self.scroll.y;
                     let row = Rect::from_min_size(pos2(rows.left(), top), vec2(rows.width(), ROW));
                     self.row(ui, shell, theme, &state, entry, row, events);
+                }
+                // A name typed in a row scrolled out of view is dropped, so
+                // its field doesn't hold the keys while nothing shows it.
+                if self.renaming.as_ref().is_some_and(|rename| {
+                    !state.grooves[first..first + shown]
+                        .iter()
+                        .any(|g| g.groove.id == rename.groove)
+                }) {
+                    self.renaming = None;
                 }
             },
         );
@@ -892,11 +906,13 @@ impl GroovePoolUi {
                     self.reveal(next);
                 }
                 Key::R if command && !modifiers.alt => {
-                    if let Some(groove) = state
+                    if let Some((at, groove)) = state
                         .grooves
                         .iter()
-                        .find(|g| Some(g.groove.id) == self.selected)
+                        .enumerate()
+                        .find(|(_, g)| Some(g.groove.id) == self.selected)
                     {
+                        self.reveal(at);
                         self.renaming = Some(Rename {
                             groove: groove.groove.id,
                             text: groove.groove.name.clone(),

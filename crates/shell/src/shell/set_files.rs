@@ -109,6 +109,8 @@ impl Shell {
                 .send_session(bl_engine::SessionCommand::StopRecording);
             self.recording = None;
         }
+        // A groove hot-swap was aimed at the set that's gone (R32).
+        self.groove_pool.hot_swap = None;
         self.plugins.clear();
         self.au.clear();
         self.vst3.clear();

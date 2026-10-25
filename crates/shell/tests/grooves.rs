@@ -1197,6 +1197,12 @@ fn the_auto_load_groove_is_hot_swapped_and_one_loaded_into_none_becomes_it() {
     assert_eq!(pool(&mut shell)["view"].get("hot_swap"), None);
     let wrong = shell.run("groove.hot_swap", json!({ "groove": id }));
     assert!(wrong.is_err(), "a groove that isn't in the pool");
+    // A new set ends a hot-swap aimed at the old set's auto-load groove.
+    shell
+        .run("groove.hot_swap", json!({ "auto_load": true }))
+        .unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    assert_eq!(pool(&mut shell)["view"].get("hot_swap"), None);
 }
 
 // Spec: grooves R33. The Grooves label lists Beatlayer's bundled grooves and

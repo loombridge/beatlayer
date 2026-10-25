@@ -37,7 +37,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("song.set_lock_envelopes", query(Song, "settings.lock_envelopes")),
     ("set.collect_all_and_save", query(Song, "set.unsaved_changes")),
     ("set.discard_changes", query(Song, "set.unsaved_changes")),
-    ("set.discard_recovery", nothing("deletes a recovery file outside the set")),
+    ("set.discard_recovery", read("set.list_recoverable", "sets")),
     ("set.cancel_pack", read("set.pack_status", "job")),
     ("set.create_pack", nothing(FILE)),
     ("set.export_clips", nothing(BROWSER)),

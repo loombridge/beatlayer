@@ -486,6 +486,19 @@ impl SessionLauncher {
     pub(crate) fn remap(&mut self, convert: impl Fn(Frames) -> Frames) {
         for slot in &mut self.slots {
             slot.started = slot.started.map(&convert);
+        }
+        for (_, clip) in &mut self.stopped {
+            clip.launched = convert(clip.launched);
+            clip.stopped = convert(clip.stopped);
+        }
+        self.remap_pending(convert);
+    }
+
+    /// Moves the frames the launcher waits for to where `convert` puts them,
+    /// leaving those of clips that started: a queued launch, restart or stop,
+    /// a scene's tempo, a takeover and a follow action.
+    pub(crate) fn remap_pending(&mut self, convert: impl Fn(Frames) -> Frames) {
+        for slot in &mut self.slots {
             slot.due = slot.due.map(&convert);
             slot.then_stop = slot.then_stop.map(&convert);
             if let FollowState::Armed { due, .. } = &mut slot.follow {
@@ -504,10 +517,6 @@ impl SessionLauncher {
         }
         for (_, due) in &mut self.marks {
             *due = convert(*due);
-        }
-        for (_, clip) in &mut self.stopped {
-            clip.launched = convert(clip.launched);
-            clip.stopped = convert(clip.stopped);
         }
     }
 

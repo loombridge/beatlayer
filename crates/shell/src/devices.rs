@@ -32,10 +32,10 @@ use bl_shell_spec::devices::{
     ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap,
     HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MapModeArgs,
     MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame,
-    RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs, SelectChainArgs, SelectDeviceArgs,
-    SelectMacroArgs, SelectSlotArgs, SelectVariationArgs, SetAutoSelectArgs, SetMacroCountArgs,
-    SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs, ShowVariationsArgs,
-    SidechainSection, SoloChainArgs, Ungrouped,
+    RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs, ScrollDeviceViewArgs, SelectChainArgs,
+    SelectDeviceArgs, SelectMacroArgs, SelectSlotArgs, SelectVariationArgs, SetAutoSelectArgs,
+    SetMacroCountArgs, SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs,
+    ShowVariationsArgs, SidechainSection, SoloChainArgs, Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -104,6 +104,8 @@ pub struct DeviceView {
     /// The rack whose Map mode is on, if one is (WP-5.4): view state, never
     /// saved and never an undo step.
     map_mode: Option<DeviceId>,
+    /// How far the chain is scrolled sideways, in points: view state.
+    scroll: f32,
     /// The macro selected in a rack's Macro Controls, and the mapping
     /// selected in its mappings list: view state (WP-5.4).
     macro_selected: Option<(DeviceId, u8)>,
@@ -735,7 +737,14 @@ impl DeviceView {
             meters: Vec::new(),
             armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
             map_mode: self.map_mode,
+            scroll: self.scroll,
         }
+    }
+
+    /// How far the chain is scrolled sideways, in points.
+    #[must_use]
+    pub fn scroll(&self) -> f32 {
+        self.scroll
     }
 
     /// The lit Map button, if one is: its modulator and slot (WP-5.10).
@@ -1726,6 +1735,16 @@ impl DeviceView {
         match id {
             ids::STATE => {
                 parse::<bl_commands::NoArgs>(args)?;
+            }
+            ids::SCROLL => {
+                let ScrollDeviceViewArgs { x } = parse(args)?;
+                if !x.is_finite() {
+                    return Err(DeviceError::InvalidArgs(
+                        "`x` must be a finite number".to_owned(),
+                    ));
+                }
+                let shown = self.state(editor.document(), track);
+                self.scroll = (self.scroll + x).clamp(0.0, ids::chain_width(&shown.devices));
             }
             ids::WINDOWS => {
                 parse::<bl_commands::NoArgs>(args)?;

@@ -6,7 +6,7 @@
 use crate::common;
 use bl_core::time::Ticks;
 use bl_engine::TransportCommand;
-use bl_model::{AutomationTarget, Command, MixerParam, Output, TrackKind};
+use bl_model::{AutomationTarget, Command, MixerParam, Output, PanMode, TrackKind};
 use common::{Rig, dc, track};
 
 /// The volume control of a track, as an automation target.
@@ -281,4 +281,99 @@ fn deleting_the_automation_hands_the_parameter_back() {
         out[960..].iter().all(|&s| s == 1.0),
         "the control takes over"
     );
+}
+
+/// A mixer control as an automation target.
+fn mixer(param: MixerParam) -> AutomationTarget {
+    AutomationTarget::Mixer { param }
+}
+
+/// A rig playing a track of DC 1.0 whose only automated control is `param`,
+/// resting at `value`, in blocks of 64.
+fn automated_only(param: MixerParam, value: f64, split: bool) -> (Rig, bl_model::TrackId) {
+    let mut rig = Rig::new(64);
+    let a = track(&mut rig.editor, TrackKind::Midi, None);
+    dc(&mut rig.editor, a, 1.0);
+    if split {
+        rig.apply(Command::SetPanMode {
+            track: a,
+            mode: PanMode::Split,
+        });
+    }
+    rig.apply(Command::SetAutomationBreakpoint {
+        track: a,
+        target: mixer(param),
+        at: Ticks::ZERO,
+        value,
+    });
+    rig.sender.transport(TransportCommand::Play);
+    rig.render(2_048, 64);
+    (rig, a)
+}
+
+// Spec: mixer R18. A control the envelopes don't drive glides as it does with
+// none on the track, in both pan modes.
+#[test]
+fn a_fader_and_an_activator_glide_while_only_pan_is_automated() {
+    for (param, split) in [(MixerParam::Pan, false), (MixerParam::SplitLeft, true)] {
+        let (mut rig, a) = automated_only(param, 0.0, split);
+        let rest = rig.last()[0];
+        assert!(rest > 0.0, "{param:?} plays at rest");
+        rig.apply(Command::SetVolume {
+            track: a,
+            volume: 0.0,
+        });
+        let out = rig.render(2_048, 64);
+        assert!(
+            out[0] > rest * 0.99,
+            "{param:?}: the fader doesn't step: {}",
+            out[0]
+        );
+        assert!(
+            out[..960].windows(2).all(|w| w[1] < w[0]),
+            "{param:?}: the fader glides down"
+        );
+        assert!(out[960..].iter().all(|&s| s == 0.0), "{param:?}: and rests");
+
+        rig.apply(Command::SetVolume {
+            track: a,
+            volume: 1.0,
+        });
+        rig.render(2_048, 64);
+        rig.apply(Command::SetMute {
+            track: a,
+            mute: true,
+        });
+        let out = rig.render(2_048, 64);
+        assert!(
+            out[0] > rest * 0.99,
+            "{param:?}: the activator doesn't step"
+        );
+        assert!(
+            out[..960].windows(2).all(|w| w[1] < w[0]),
+            "{param:?}: the activator glides down"
+        );
+        assert!(out[960..].iter().all(|&s| s == 0.0));
+        rig.apply(Command::SetMute {
+            track: a,
+            mute: false,
+        });
+        let out = rig.render(2_048, 64);
+        assert!(
+            out[..960].windows(2).all(|w| w[1] > w[0]),
+            "{param:?}: and glides back up"
+        );
+    }
+}
+
+// Spec: mixer R18. A pan move glides while the volume is automated.
+#[test]
+fn a_pan_glides_while_only_the_volume_is_automated() {
+    let (mut rig, a) = automated_only(MixerParam::Volume, 1.0, false);
+    assert_eq!(rig.last()[0], 1.0, "centred");
+    rig.apply(Command::SetPan { track: a, pan: 1.0 });
+    let out = rig.render(2_048, 64);
+    assert!(out[0] > 0.9, "the pan doesn't step: {}", out[0]);
+    assert!(out[960..].iter().all(|&s| s < 1e-9), "and rests hard right");
+    assert!(out[..960].windows(2).all(|w| w[1] < w[0]), "gliding");
 }

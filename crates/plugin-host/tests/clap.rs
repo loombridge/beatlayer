@@ -416,6 +416,30 @@ fn a_plugin_that_refuses_to_activate_passes_its_input_through() {
     assert!(status.failure.unwrap().contains("refused to activate"));
 }
 
+// Spec: clap-hosting R6. An edit the editor queues while the plug-in isn't
+// active is collected when the plug-in asks for a flush.
+#[test]
+fn an_edit_queued_while_the_plugin_is_inactive_is_collected_by_a_flush() {
+    let host = ClapHost::new();
+    host.load(bundle()).unwrap();
+    let mut queued = device(1, &[]);
+    queued.plugin = Some(bl_model::PluginState {
+        path: bundle().to_string_lossy().into_owned(),
+        data: bl_test_clap::QUEUE_EDIT.to_vec(),
+    });
+    let _node = host.factory().create(&queued, &config()).unwrap();
+    host.idle();
+    assert!(!host.status(queued.id).unwrap().active, "it refused");
+    assert_eq!(
+        host.take_param_changes(),
+        [ParamChange {
+            device: queued.id,
+            param: ParamId(GAIN),
+            value: 0.25
+        }]
+    );
+}
+
 // Spec: clap-hosting R12
 #[test]
 fn a_plugin_that_cant_be_found_leaves_its_device_passing_audio_through() {

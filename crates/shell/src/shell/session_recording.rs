@@ -392,6 +392,7 @@ impl Shell {
             .ok_or("no audio device is open")?;
         plan.delay = delay;
         recording.delay = delay;
+        recording.began_on(&mut self.audio);
         self.audio.record(plan)?;
         self.audio.send_session(SessionCommand::Record)?;
         let started = RecordingStarted {

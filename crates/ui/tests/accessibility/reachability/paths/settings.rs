@@ -46,11 +46,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "assistant.set_base_url",
-            settings("agents", nothing, "Assistant Base URL", Key::K),
+            Exception(Equivalent(
+                "the Base URL field, typed into and then committed with Enter or by leaving \
+                 it: it sends its text once, so a typed space isn't trimmed away",
+            )),
         ),
         (
             "assistant.set_model",
-            settings("agents", nothing, "Assistant Model", Key::K),
+            Exception(Equivalent(
+                "the Model field, typed into and then committed with Enter or by leaving \
+                 it: it sends its text once, so a typed space isn't trimmed away",
+            )),
         ),
         (
             "assistant.set_key",

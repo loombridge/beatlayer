@@ -52,6 +52,7 @@ pub mod clip_panels;
 pub mod clip_selector;
 pub mod clip_view;
 pub mod control_bar;
+pub mod dawproject_window;
 pub mod detail_area;
 pub mod device_display;
 pub mod device_panel;

@@ -308,6 +308,13 @@ impl Ramp {
         self.value
     }
 
+    /// Moves the gain on by `frames` frames.
+    fn skip(&mut self, frames: usize) {
+        for _ in 0..self.moving(frames) {
+            self.next();
+        }
+    }
+
     /// How many of `frames` frames the gain moves through.
     fn moving(&self, frames: usize) -> usize {
         (self.left as usize).min(frames)
@@ -453,6 +460,10 @@ pub struct TrackMixer {
     split_ramps: [Ramp; 2],
     /// In split mode, the gliding level (volume, silenced by the activator).
     split_level: Ramp,
+    /// The gliding volume, pan and activator (1 for on), which a control the
+    /// envelopes don't drive plays through while others are automated, so a
+    /// move of it glides there as everywhere (the mixer spec, R18).
+    controls: [Ramp; 3],
     smoothing: u32,
     meters: Meters,
     /// The envelopes driving its parameters while the song plays (WP-2.12).
@@ -481,6 +492,7 @@ impl TrackMixer {
             gains: [Ramp::at(1.0); 3],
             split_ramps: [Ramp::at(0.0); 2],
             split_level: Ramp::at(1.0),
+            controls: [Ramp::at(1.0), Ramp::at(0.0), Ramp::at(1.0)],
             smoothing: smoothing_frames(config.sample_rate),
             meters: Meters::new(config),
             automation: None,
@@ -510,8 +522,14 @@ impl TrackMixer {
         node.gains = node.targets().map(Ramp::at);
         node.split_ramps = [Ramp::at(node.split_left), Ramp::at(node.split_right)];
         node.split_level = Ramp::at(node.level());
+        node.controls = node.control_targets().map(Ramp::at);
         node.crossfader = Ramp::at(node.position);
         node
+    }
+
+    /// The volume, pan and activator (1 for on) the controls glide to.
+    fn control_targets(&self) -> [f64; 3] {
+        [self.volume, self.pan, f64::from(u8::from(!self.mute))]
     }
 
     /// The gains the mixer is heading for: left, right, and other channels.
@@ -611,6 +629,10 @@ impl TrackMixer {
             ramp.toward(target, smoothing);
         }
         self.split_level.toward(self.level(), smoothing);
+        let controls = self.control_targets();
+        for (ramp, target) in self.controls.iter_mut().zip(controls) {
+            ramp.toward(target, smoothing);
+        }
         self.crossfader.toward(self.position, smoothing);
     }
 }
@@ -708,6 +730,9 @@ impl Node for TrackMixer {
                     self.split_ramps = split;
                     self.split_level = split_level;
                     self.crossfader = crossfader;
+                    for ramp in &mut self.controls {
+                        ramp.skip(segment.range.len());
+                    }
                 }
             }
         }
@@ -763,44 +788,63 @@ impl TrackMixer {
             self.scale_split(block, range, from, list, now, bus);
             return;
         }
-        let controls = [self.volume, self.pan, f64::from(u8::from(self.mute))];
-        // A pan the envelopes don't move keeps its gains over the whole
-        // range; only an automated or modulated pan works out the law frame
-        // by frame.
-        let fixed_pan =
-            (!list.drives(track::PAN) && !list.modulates(track::PAN)).then(|| pan_gains(self.pan));
+        // A control the envelopes and modulators leave alone plays through
+        // its gliding value, so a move of it glides (the mixer spec, R18).
+        let free_mute = !list.drives(track::MUTE) && !list.modulates(track::MUTE);
+        let free_pan = !list.drives(track::PAN) && !list.modulates(track::PAN);
+        let mute = f64::from(u8::from(self.mute && !free_mute));
+        // A pan the envelopes don't move keeps its gains while it rests; only
+        // an automated, modulated or gliding pan works out the law frame by
+        // frame.
+        let fixed_pan = |pan: &Ramp| (free_pan && pan.is_settled()).then(|| pan_gains(pan.value()));
         // The crossfade isn't automated: it glides on top of the envelopes,
         // the same gliding position for every channel (the mixer spec, R23).
         let (crossfade, start) = (self.crossfade, self.crossfader);
+        let rest = self.controls;
+        let fixed = fixed_pan(&rest[1]);
         for c in 0..channels {
             let index = gain_index(c, channels);
             let mut crossfader = start;
+            let [mut volume, mut pan, mut gate] = rest;
             let meter = c < 2;
             let samples = &mut block.channel_mut(c)[range.clone()];
             for (i, sample) in samples.iter_mut().enumerate() {
                 let at = range.start + i;
                 let song = from.map(|from| from + at as i64);
                 let fade = crossfade_gain(crossfader.next(), crossfade);
+                let controls = [volume.next(), pan.next(), mute];
+                let gate = if free_mute { gate.next() } else { 1.0 };
                 *sample = (f64::from(*sample)
-                    * gain_at(list, now, song, bus, at, index, controls, fixed_pan)
+                    * gain_at(list, now, song, bus, at, index, controls, fixed)
+                    * gate
                     * fade) as f32;
                 if meter {
                     self.meters.measure_one(c, *sample);
                 }
             }
         }
-        // Leave the crossfader where its glide reached over the range, once,
-        // whatever the channel count.
+        // Leave the crossfader and the controls where their glides reached
+        // over the range, once, whatever the channel count.
         let mut crossfader = start;
         for _ in range.clone() {
             crossfader.next();
         }
         self.crossfader = crossfader;
+        self.controls
+            .iter_mut()
+            .for_each(|ramp| ramp.skip(range.len()));
+        let controls = [self.controls[0].value(), self.controls[1].value(), mute];
+        let fixed = fixed_pan(&self.controls[1]);
+        let unmuted = if free_mute {
+            self.controls[2].value()
+        } else {
+            1.0
+        };
         let (last, last_song) = (range.end - 1, from.map(|from| from + range.end as i64 - 1));
         for (index, ramp) in self.gains.iter_mut().enumerate() {
-            *ramp = Ramp::at(gain_at(
-                list, now, last_song, bus, last, index, controls, fixed_pan,
-            ));
+            *ramp = Ramp::at(
+                gain_at(list, now, last_song, bus, last, index, controls, fixed) * unmuted,
+            );
         }
         for ((entry, param), control) in self
             .modulated
@@ -830,18 +874,29 @@ impl TrackMixer {
         bus: Bus<'_>,
     ) {
         let channels = block.channels();
-        let controls = [
-            self.volume,
-            f64::from(u8::from(self.mute)),
-            self.split_left,
-            self.split_right,
-        ];
+        // As in `scale_envelopes`, the controls the envelopes leave alone
+        // glide.
+        let free_mute = !list.drives(track::MUTE) && !list.modulates(track::MUTE);
+        let mute = f64::from(u8::from(self.mute && !free_mute));
+        let mut controls = [0.0; 4];
+        let mut gate = 1.0;
         let (crossfade, start) = (self.crossfade, self.crossfader);
         let mut crossfader = start;
         for at in range.clone() {
             let song = from.map(|from| from + at as i64);
             let fade = crossfade_gain(crossfader.next(), crossfade);
-            let level = split_level_at(list, now, song, bus, at, controls);
+            controls = [
+                self.controls[0].next(),
+                mute,
+                self.split_ramps[0].next(),
+                self.split_ramps[1].next(),
+            ];
+            gate = if free_mute {
+                self.controls[2].next()
+            } else {
+                1.0
+            };
+            let level = split_level_at(list, now, song, bus, at, controls) * gate;
             let sl = played(list, now, song, bus, at, track::SPLIT_LEFT, controls[2])
                 .1
                 .clamp(-1.0, 1.0);
@@ -869,8 +924,10 @@ impl TrackMixer {
             }
         }
         self.crossfader = crossfader;
+        self.controls[1].skip(range.len());
         let (last, last_song) = (range.end - 1, from.map(|from| from + range.end as i64 - 1));
-        self.split_level = Ramp::at(split_level_at(list, now, last_song, bus, last, controls));
+        self.split_level =
+            Ramp::at(split_level_at(list, now, last_song, bus, last, controls) * gate);
         self.modulated[0] =
             modulation_entry(list, now, last_song, bus, last, track::VOLUME, controls[0]);
         self.modulated[1] = None;

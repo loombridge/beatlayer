@@ -2163,7 +2163,11 @@ impl BrowserUi {
             ),
             ItemKind::Audio | ItemKind::Sfz => glyph(&painter, mark, Glyph::Wave, ink),
             ItemKind::Clip | ItemKind::SessionClip => glyph(&painter, mark, Glyph::Clip, ink),
-            ItemKind::Preset | ItemKind::ChordBank | ItemKind::Tuning | ItemKind::Groove => {
+            ItemKind::Preset
+            | ItemKind::ChordBank
+            | ItemKind::Tuning
+            | ItemKind::Groove
+            | ItemKind::DawProject => {
                 glyph(&painter, mark, Glyph::Preset, ink);
             }
             ItemKind::Plugin | ItemKind::Device | ItemKind::Devices => {
@@ -2361,12 +2365,15 @@ impl BrowserUi {
                     }
                     invoke(events, ids::LOAD_SELECTED, json!({}));
                 }
-                // Spec: set-exchange R1. A set opens like a folder.
-                ItemKind::Set => invoke(
-                    events,
-                    ids::OPEN_FOLDER,
-                    json!({ "path": item.path, "keep_others": command(modifiers) }),
-                ),
+                // Spec: browser R30, dawproject R84. A set opens as the set
+                // and a DAWproject file imports; a set's triangle lists its
+                // tracks (set-exchange R1).
+                ItemKind::Set | ItemKind::DawProject => {
+                    if !selected {
+                        invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
+                    }
+                    invoke(events, ids::LOAD_SELECTED, json!({}));
+                }
                 // Spec: set-exchange R4, R8. Double-clicking a track of an
                 // opened set adds it, and a Devices row adds its chain. A
                 // return track and Main only open, to their Devices row.
@@ -2525,6 +2532,7 @@ impl BrowserUi {
             },
             ItemKind::Sfz => "SFZ instrument",
             ItemKind::Set => "Beatlayer set",
+            ItemKind::DawProject => "DAWproject file",
             ItemKind::Preset => "Beatlayer device preset",
             ItemKind::ChordBank => "Stacks chord bank",
             ItemKind::Tuning => "tuning",

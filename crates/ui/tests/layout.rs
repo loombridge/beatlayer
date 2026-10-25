@@ -4,10 +4,12 @@
 
 use std::path::PathBuf;
 
+use bl_ui::layout::mixer::Sections;
 use bl_ui::layout::{
-    D24, ELEMENTS, Element, MINIMUM, REFERENCE, ShellLayout, Strip, TITLE_BAR, placement,
+    ArrangementLayout, D24, ELEMENTS, Element, MINIMUM, REFERENCE, ShellLayout, Strip, TITLE_BAR,
+    placement,
 };
-use egui::{Rect, Vec2, vec2};
+use egui::{Rect, Vec2, pos2, vec2};
 
 /// layout.md, or `None` in a checkout without the planning documents (they
 /// aren't published yet), where the test skips.
@@ -343,4 +345,35 @@ fn the_global_amount_hides_where_the_gaps_have_no_room_for_it() {
         bl_ui::layout::DetailViews::default().with_global_amount(true),
     );
     assert_eq!(second.rect(Element::GlobalAmount).width(), 0.0);
+}
+
+// Spec: arrangement-view R1, mixer-view R32.
+#[test]
+fn a_short_arrangement_keeps_its_parts_inside_its_view() {
+    // At the minimum window the main view is about 368 points tall, and all
+    // the mixer's sections take 340 of them.
+    let view = Rect::from_min_max(pos2(0.0, 38.0), pos2(900.0, 406.0));
+    let sections = Sections {
+        crossfader: true,
+        ..Sections::DEFAULT
+    };
+    let layout = ArrangementLayout::compute_with_mixer(view, true, 2, sections);
+    let mixer = layout.mixer.unwrap();
+    for (name, rect) in [
+        ("beat ruler", layout.beat_ruler),
+        ("scrub", layout.scrub),
+        ("set locator", layout.set_locator),
+        ("lanes", layout.lanes),
+        ("headers", layout.headers),
+        ("pinned lanes", layout.pinned_lanes),
+        ("pinned headers", layout.pinned_headers),
+        ("time ruler", layout.time_ruler),
+        ("optimize width", layout.optimize_width),
+    ] {
+        assert!(
+            rect.top() >= view.top() && rect.bottom() <= mixer.top(),
+            "{name} {rect:?} is outside the view above the mixer at {}",
+            mixer.top()
+        );
+    }
 }

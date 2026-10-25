@@ -670,7 +670,9 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             // writes, and a fired command doesn't pass through it.
             if action == Action::Transport(TransportCommand::SetRecording(true)) {
                 return failed(format!(
-                    "a scheduled `{command}` can't start a recording, which needs files set up                      first; schedule `transport.locate` to jump, and start the recording with                      `transport` when the song is there"
+                    "a scheduled `{command}` can't start a recording, which needs files set up \
+                     first; schedule `transport.locate` to jump, and start the recording with \
+                     `transport` when the song is there"
                 ));
             }
             // Try it on the song as it is now, so a mistake shows today

@@ -38,6 +38,7 @@ use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
 use bl_shell::perception_commands::View;
+use bl_shell::set_exchange_commands as exchange_ids;
 use bl_shell::settings::{Preferences, SettingsPage, ThemeLook, default_config_dir};
 use bl_shell::{Effect, Invocation, Shell, WindowKind, commands as ids};
 use bl_ui::assistant_panel::AssistantPanelUi;
@@ -553,7 +554,19 @@ pub fn run(args: Args) -> Result<(), String> {
         open_user_library(&mut shell, &args);
     }
     if let Some(set) = &args.set {
-        let _ = shell.invoke(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }));
+        // Spec: set-exchange R20. A pack opened from Finder or Explorer
+        // arrives as the path to open, as a set does.
+        let is_pack = set
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case(bl_project::pack::EXTENSION));
+        let _ = if is_pack {
+            shell.invoke(
+                exchange_ids::INSTALL_PACK,
+                json!({ "pack": set.to_string_lossy() }),
+            )
+        } else {
+            shell.invoke(ids::SET_OPEN, json!({ "path": set.to_string_lossy() }))
+        };
     }
 
     let mut builder = EventLoop::<UserEvent>::with_user_event();
@@ -1745,6 +1758,7 @@ impl Host {
                 self.cancel_renders();
                 // An export under way removes its partial files first.
                 self.shell.stop_export();
+                self.shell.stop_pack();
                 self.agent.set_view_capture(false);
                 self.quitting = true;
                 event_loop.exit();
@@ -1869,6 +1883,62 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickPackPath {
+                project,
+                file_name,
+                folder,
+            } => {
+                // Spec: set-exchange R16. Create Pack asks where to save,
+                // the project's parent folder first.
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Create Pack")
+                    .add_filter("Beatlayer Pack", &[bl_project::pack::EXTENSION])
+                    .set_file_name(file_name)
+                    .set_directory(folder);
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    let mut args = json!({ "path": path.to_string_lossy() });
+                    if let Some(project) = project {
+                        args["project"] = json!(project);
+                    }
+                    self.invoke(&Invocation::new(exchange_ids::CREATE_PACK, args));
+                }
+            }
+            Effect::PickPack => {
+                // Spec: set-exchange R20. File ▸ Install Pack... asks for the
+                // pack.
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Install Pack")
+                    .add_filter("Beatlayer Pack", &[bl_project::pack::EXTENSION]);
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.pick_file() {
+                    self.invoke(&Invocation::new(
+                        exchange_ids::INSTALL_PACK,
+                        json!({ "pack": path.to_string_lossy() }),
+                    ));
+                }
+            }
+            Effect::PickInstallFolder { pack } => {
+                // Spec: set-exchange R20. The folder to unpack into, the
+                // pack's own folder first.
+                let mut dialog = rfd::FileDialog::new().set_title("Install Pack Into");
+                if let Some(folder) = std::path::Path::new(&pack).parent() {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(folder) = dialog.pick_folder() {
+                    self.invoke(&Invocation::new(
+                        exchange_ids::INSTALL_PACK,
+                        json!({ "pack": pack, "folder": folder.to_string_lossy() }),
+                    ));
+                }
+            }
             Effect::PickExportPath { file_name, folder } => {
                 self.pick_export_path(&file_name, folder.as_deref());
             }
@@ -1910,6 +1980,14 @@ impl Host {
                 if let Some(surface) = surface {
                     ui.apply_effect(&surface.ctx, &effect);
                     surface.window.request_redraw();
+                }
+            }
+            Effect::EditInfoText(_) => {
+                // Spec: info-view R10. The Info View is the main window's.
+                if let Some(main) = &self.main {
+                    main.window.focus_window();
+                    self.main_ui.apply_effect(&main.ctx, &effect);
+                    main.window.request_redraw();
                 }
             }
             Effect::FocusSecondArea(area) => {

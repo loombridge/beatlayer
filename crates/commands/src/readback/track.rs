@@ -58,6 +58,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("track.set_bounced", query(Song, "tracks")),
     ("track.unfreeze", query(Track, "frozen")),
     ("track.rename", query(Track, "name")),
+    ("track.set_info_text", query(Track, "info_text")),
     ("track.set_colour", query(Track, "colour")),
     ("track.assign_colour_to_clips", query(Track, "clips")),
     ("track.assign_colour_to_grouped", query(Track, "colour")),

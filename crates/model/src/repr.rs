@@ -99,6 +99,10 @@ struct TrackRepr {
     /// WP-6.30b have none, which loads as `id mod 14` (R21).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     colour: Option<u8>,
+    /// The track's own info text (the Info View spec, R9). Sets saved
+    /// before WP-6.58 have none.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    info_text: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     children: Vec<TrackRepr>,
     /// The track's frozen audio (WP-4.14). Sets saved before it have none,
@@ -236,6 +240,7 @@ impl TrackRepr {
             tuning_bypass: track.tuning_bypass(),
             link: track.link(),
             colour: Some(track.colour()),
+            info_text: track.info_text.clone(),
             frozen: track.frozen.clone(),
             children: if with_children {
                 track
@@ -440,6 +445,7 @@ impl Loader {
             track.colour = colour;
         }
         track.frozen = repr.frozen;
+        track.info_text = repr.info_text;
         if let Some(routing) = repr.routing {
             track.routing = routing;
         }

@@ -24,7 +24,7 @@ use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as mixer_ids;
 use bl_shell::session_view_commands as ids;
 use bl_shell::session_view_commands::SessionViewState;
-use bl_shell::{Area, Invocation, Shell};
+use bl_shell::{Area, InfoTarget, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{
     Align2, Color32, Id, Key, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, WidgetInfo,
@@ -386,6 +386,9 @@ impl GridUi {
                 node.set_selected(selected);
                 node.set_bounds(bounds(cell));
             });
+        if let Some(clip) = clip_id {
+            crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Clip(clip));
+        }
         // The track's clip slot in the strip's Tab order, after its title
         // bar: one per track — the selected scene's, else the first
         // (observed in Live 12.4.6; the accessibility spec, R4).
@@ -782,6 +785,7 @@ impl GridUi {
                 node.set_selected(selected);
                 node.set_bounds(bounds(row_rect));
             });
+        crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Scene(scene));
         // I-CLICK-009: the scene's launch button launches every clip in it.
         let launch = ui.interact(row.launch, scene_launch_id(scene), Sense::click());
         let label = format!("Launch Scene {name}");

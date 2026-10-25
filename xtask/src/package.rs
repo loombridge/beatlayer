@@ -29,8 +29,12 @@ const CARGO_PACKAGER_VERSION: &str = "0.11.8";
 const OUT_DIR: &str = "packages";
 
 /// The Uniform Type Identifier and extension of a Beatlayer project.
-const PROJECT_UTI: &str = "io.loombridge.beatlayer.project";
-const PROJECT_EXTENSION: &str = "blset";
+/// The document types the app opens, each as its UTI and file extension: a
+/// set, and a pack (set exchange R20).
+const DOCUMENT_TYPES: [(&str, &str); 2] = [
+    ("io.loombridge.beatlayer.project", "blset"),
+    ("io.loombridge.beatlayer.pack", "blpack"),
+];
 
 /// The only architecture the macOS app runs on.
 const MACOS_ARCH: &str = "arm64";
@@ -605,31 +609,29 @@ fn check_info_plist(info: &Value, table: &Value, executable: &str) -> Vec<String
             .as_array()
             .is_some_and(|items| items.iter().any(|i| i == item))
     };
-    let opens_projects = info["CFBundleDocumentTypes"]
-        .as_array()
-        .is_some_and(|types| {
-            types
-                .iter()
-                .any(|t| lists(&t["LSItemContentTypes"], PROJECT_UTI))
-        });
-    if !opens_projects {
-        problems.push(format!("CFBundleDocumentTypes doesn't list {PROJECT_UTI}"));
-    }
-    let declares_projects = info["UTExportedTypeDeclarations"]
-        .as_array()
-        .is_some_and(|types| {
-            types.iter().any(|t| {
-                t["UTTypeIdentifier"] == PROJECT_UTI
-                    && lists(
-                        &t["UTTypeTagSpecification"]["public.filename-extension"],
-                        PROJECT_EXTENSION,
-                    )
-            })
-        });
-    if !declares_projects {
-        problems.push(format!(
-            "UTExportedTypeDeclarations doesn't declare {PROJECT_UTI} for .{PROJECT_EXTENSION}"
-        ));
+    for (uti, extension) in DOCUMENT_TYPES {
+        let opens = info["CFBundleDocumentTypes"]
+            .as_array()
+            .is_some_and(|types| types.iter().any(|t| lists(&t["LSItemContentTypes"], uti)));
+        if !opens {
+            problems.push(format!("CFBundleDocumentTypes doesn't list {uti}"));
+        }
+        let declares = info["UTExportedTypeDeclarations"]
+            .as_array()
+            .is_some_and(|types| {
+                types.iter().any(|t| {
+                    t["UTTypeIdentifier"] == uti
+                        && lists(
+                            &t["UTTypeTagSpecification"]["public.filename-extension"],
+                            extension,
+                        )
+                })
+            });
+        if !declares {
+            problems.push(format!(
+                "UTExportedTypeDeclarations doesn't declare {uti} for .{extension}"
+            ));
+        }
     }
     problems
 }
@@ -1316,12 +1318,19 @@ mod tests {
             "LSArchitecturePriority": ["arm64"],
             "NSMicrophoneUsageDescription": "Beatlayer records audio.",
             "CFBundleDocumentTypes": [
-                { "LSItemContentTypes": ["io.loombridge.beatlayer.project"] }
+                { "LSItemContentTypes": ["io.loombridge.beatlayer.project"] },
+                { "LSItemContentTypes": ["io.loombridge.beatlayer.pack"] }
             ],
-            "UTExportedTypeDeclarations": [{
-                "UTTypeIdentifier": "io.loombridge.beatlayer.project",
-                "UTTypeTagSpecification": { "public.filename-extension": ["blset"] }
-            }],
+            "UTExportedTypeDeclarations": [
+                {
+                    "UTTypeIdentifier": "io.loombridge.beatlayer.project",
+                    "UTTypeTagSpecification": { "public.filename-extension": ["blset"] }
+                },
+                {
+                    "UTTypeIdentifier": "io.loombridge.beatlayer.pack",
+                    "UTTypeTagSpecification": { "public.filename-extension": ["blpack"] }
+                }
+            ],
         })
     }
 
@@ -1345,6 +1354,23 @@ mod tests {
             json!(["als"]);
         let problems = check_info_plist(&info, &table(), "beatlayer");
         assert_eq!(problems.len(), 4, "{problems:#?}");
+    }
+
+    #[test]
+    fn info_plist_check_wants_the_pack_type_too() {
+        let mut info = good_info_plist();
+        info["CFBundleDocumentTypes"].as_array_mut().unwrap().pop();
+        info["UTExportedTypeDeclarations"]
+            .as_array_mut()
+            .unwrap()
+            .pop();
+        let problems = check_info_plist(&info, &table(), "beatlayer");
+        assert_eq!(problems.len(), 2, "{problems:#?}");
+        assert!(
+            problems
+                .iter()
+                .all(|p| p.contains("io.loombridge.beatlayer.pack"))
+        );
     }
 
     #[test]
@@ -1373,6 +1399,8 @@ mod tests {
             "<key>UTExportedTypeDeclarations</key>",
             "<string>io.loombridge.beatlayer.project</string>",
             "<string>blset</string>",
+            "<string>io.loombridge.beatlayer.pack</string>",
+            "<string>blpack</string>",
         ] {
             assert!(info.contains(needle), "Info.plist lacks {needle}");
         }

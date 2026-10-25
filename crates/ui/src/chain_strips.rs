@@ -7,7 +7,7 @@
 use bl_model::{ChainId, DeviceId};
 use bl_shell::mixer_controls;
 use bl_shell::mixer_view::ChainStrip;
-use bl_shell::{Invocation, Shell};
+use bl_shell::{InfoTarget, Invocation, Shell};
 use egui::accesskit::{Action, Role};
 use egui::{Align2, Id, Key, Rect, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, pos2};
 use serde_json::json;
@@ -196,6 +196,7 @@ pub fn title_bar(
                 .to_owned(),
         );
     });
+    crate::info_text::describe(ui.ctx(), &response, shell, InfoTarget::Chain(strip.chain));
 }
 
 /// The chains a change on a strip reaches (racks spec, R28): the chain

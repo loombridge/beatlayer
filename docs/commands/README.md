@@ -4542,7 +4542,7 @@ What a command changed: whether the song settings (the tempo map, the time-signa
 | `scenes` | object of [`Change`](#change) by integer key | yes | Scenes that were added, removed, renamed, or moved. A scene whose clips changed only is listed under `clips`, not here. |
 | `clips` | object of [`Change`](#change) by integer key | yes | Clips that changed, including clips moved to another track or between the Arrangement and a Session slot. |
 | `devices` | object of [`Change`](#change) by integer key | yes | Devices whose settings changed, including devices moved to another track. |
-| `colours` | boolean | no | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
+| `colours` | boolean | no | The colour of a track, a clip, or a scene changed, or a track's info text. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 
 <details><summary>JSON Schema</summary>
 
@@ -4561,7 +4561,7 @@ What a command changed: whether the song settings (the tempo map, the time-signa
       "type": "object"
     },
     "colours": {
-      "description": "The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
+      "description": "The colour of a track, a clip, or a scene changed, or a track's info text. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
       "type": "boolean"
     },
     "devices": {
@@ -4875,6 +4875,7 @@ A clip on a track's arrangement lane.
 | `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
+| `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
 | `offset` | [`Ticks`](#ticks) | no | How far into its contents a MIDI clip starts: its notes are placed from `start - offset`, and the part before the clip's start doesn't play. 0 (or left out) plays the contents from their beginning. Never negative. Splitting a MIDI clip or trimming its left edge changes it, so each part plays what it played before. An audio clip's is always 0: its Start marker moves instead, as Live's does. |
 | `scale` | [`Scale`](#scale) | no | The clip's scale (WP-6.7): its Scale Mode switch, its root and its scale name. It never changes what the clip plays; it tells the rest of the set which keys belong. A clip off at C, in Major, writes nothing, so a set saved before the scales loads unchanged. |
@@ -4920,6 +4921,10 @@ A clip on a track's arrangement lane.
     "id": {
       "$ref": "#/$defs/ClipId",
       "description": "The clip's ID."
+    },
+    "info_text": {
+      "description": "The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the clip; empty for none, and left out of the saved set then (the Info View spec, R9).",
+      "type": "string"
     },
     "launch": {
       "$ref": "#/$defs/ClipLaunch",
@@ -5392,6 +5397,49 @@ A Session clip's own launch settings (the Clip View's Launch panel, WP-3.4). The
 
 </details>
 
+### `ClipMarker`
+
+Which of a MIDI clip's markers `clip_view.set_marker` sets.
+
+One of:
+
+- `"start"`: The Start marker (Cmd-F9).
+- `"loop_start"`: The loop brace's start (Cmd-F10).
+- `"loop_end"`: The loop brace's end (Cmd-F11).
+- `"end"`: The End marker (Cmd-F12).
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which of a MIDI clip's markers `clip_view.set_marker` sets.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "The Start marker (Cmd-F9).",
+      "type": "string"
+    },
+    {
+      "const": "loop_start",
+      "description": "The loop brace's start (Cmd-F10).",
+      "type": "string"
+    },
+    {
+      "const": "loop_end",
+      "description": "The loop brace's end (Cmd-F11).",
+      "type": "string"
+    },
+    {
+      "const": "end",
+      "description": "The End marker (Cmd-F12).",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ClipNotes`
 
 Notes of one clip among several shown (Spec: multi-clip-editing R18).
@@ -5697,6 +5745,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
 | `envelope_segment` | [`Ticks`](#ticks) or null | no | The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it. |
 | `envelope_selection` | [`TimeRange`](#timerange) or null | no | The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it. |
+| `follow_paused` | boolean | no | Whether the note area has stopped following playback until the song starts or stops (Spec: piano-roll R35). |
+| `rows` | array or null | no | The key rows the note area shows, as the row at its top edge and the row at its bottom edge, counting down from the top of the keyboard (row 0 is key 127; while the editor is folded, row 0 is its highest key). `null` shows the rows the editor lays out by default. |
+| `span` | array or null | no | The span of the clip's contents the note area shows, in ticks from the beginning of the contents (Spec: piano-roll R32, R42); the clip's whole span until `clip_view.note_view` zooms or scrolls. `null` when no MIDI clip is shown. |
 
 <details><summary>JSON Schema</summary>
 
@@ -5800,6 +5851,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "description": "Whether the note editor shows only the rows that hold notes (Fold, F).",
       "type": "boolean"
     },
+    "follow_paused": {
+      "description": "Whether the note area has stopped following playback until the song starts or stops (Spec: piano-roll R35).",
+      "type": "boolean"
+    },
     "insert_marker": {
       "anyOf": [
         {
@@ -5852,6 +5907,25 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "$ref": "#/$defs/RandomizeAmounts",
       "description": "The Randomize amounts of the three lanes."
     },
+    "rows": {
+      "description": "The key rows the note area shows, as the row at its top edge and the row at its bottom edge, counting down from the top of the keyboard (row 0 is key 127; while the editor is folded, row 0 is its highest key). `null` shows the rows the editor lays out by default.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "selected": {
       "description": "The selected notes of the foreground clip, by their place in its notes in order (by start, then pitch).",
       "items": {
@@ -5860,6 +5934,23 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         "type": "integer"
       },
       "type": "array"
+    },
+    "span": {
+      "description": "The span of the clip's contents the note area shows, in ticks from the beginning of the contents (Spec: piano-roll R32, R42); the clip's whole span until `clip_view.note_view` zooms or scrolls. `null` when no MIDI clip is shown.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "$ref": "#/$defs/Ticks"
+        }
+      ],
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "tab": {
       "$ref": "#/$defs/ClipTab",
@@ -7048,6 +7139,59 @@ One of:
 
 </details>
 
+### `CreatedPack`
+
+What `set.create_pack` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The pack's path. |
+| `files` | integer, at least 0 | yes | How many files it holds. |
+| `bytes` | integer, at least 0 | yes | How many bytes those files hold, before compression. |
+| `left_out` | array of string | yes | The files the project's sets use from outside its folder, which the pack doesn't hold. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.create_pack` returns.",
+  "properties": {
+    "bytes": {
+      "description": "How many bytes those files hold, before compression.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "How many files it holds.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "left_out": {
+      "description": "The files the project's sets use from outside its folder, which the pack doesn't hold.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "path": {
+      "description": "The pack's path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "files",
+    "bytes",
+    "left_out"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CropResult`
 
 What `clip.crop` did.
@@ -7341,6 +7485,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `configured` | array or null | no | The plug-in parameters the device's panel holds, in order (clap-hosting R5, configure mode): the list Configure Mode edits, saved with the set. Left out until it's set: until then all of a plug-in's parameters are configured when it has no more than [`CONFIGURE_THRESHOLD`], and none when it has more (manual 24.1). Native devices never set it. |
 | `external` | [`External`](#external) or null | no | The device's routing to external hardware, if its type declares one (WP-5.34): an external instrument's output port and channel, the interface inputs it comes back on, and its Hardware Latency. Left out of the saved set for a device without one. |
 | `floating` | boolean | no | Whether the device floats in a window of its own rather than showing in the Device View (IMP-14, WP-2.5b), where its place in the chain shows as a strip. Only native devices float. Left out of the saved set while docked. Where its window sits isn't part of the document: moving or resizing a window isn't an undo step ([`WindowFrame`]). |
+| `info_text` | string | no | The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9). |
 | `layers` | [`Layers`](#layers) | no | A multisampler's layers and the options of its layer list (WP-5.13, the multisampler spec, R2). Left out of the saved set for a device that holds none. |
 | `macros` | [`RackMacros`](#rackmacros) | no | A rack's macros' settings and mappings (WP-5.4; the macros spec, R17). Left out of the saved set while it has neither. |
 | `mappings` | array of [`Mapping`](#mapping) | no | The parameters a modulator maps, one per slot (the modulation spec, R19). Left out of the saved set for a device that maps none. |
@@ -7415,6 +7560,10 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "id": {
       "$ref": "#/$defs/DeviceId",
       "description": "The device's ID."
+    },
+    "info_text": {
+      "description": "The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).",
+      "type": "string"
     },
     "kind": {
       "$ref": "#/$defs/DeviceKind",
@@ -13498,6 +13647,59 @@ One of:
 
 </details>
 
+### `InstalledPack`
+
+What `set.install_pack` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | The new project folder. |
+| `sets` | array of string | yes | The sets in it, by path. |
+| `files` | integer, at least 0 | yes | How many files were written. |
+| `bytes` | integer, at least 0 | yes | How many bytes they hold. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.install_pack` returns.",
+  "properties": {
+    "bytes": {
+      "description": "How many bytes they hold.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "How many files were written.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "folder": {
+      "description": "The new project folder.",
+      "type": "string"
+    },
+    "sets": {
+      "description": "The sets in it, by path.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "sets",
+    "files",
+    "bytes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Item`
 
 One row of the content pane.
@@ -19124,6 +19326,79 @@ One of:
 
 </details>
 
+### `NoteViewChange`
+
+How to change the MIDI Note Editor's view: `selection` zooms to the time selection and the key rows of the selected notes (Z), `back` goes to the view before the last zoom, or to the whole clip with none (X), `whole` fits the clip's span to the note area's width (W), `height` fits the key rows from the lowest note to the highest to its height (H), `in` and `out` zoom time about the time selection or the insert marker (Plus and Minus), `span` shows the ticks `start` to `end` and the key rows `top` to `bottom`, `scroll` shows them without remembering the view before, and `page` does the same without pausing Follow.
+
+One of:
+
+- `"selection"`: Zoom to the time selection and the selected notes' key rows.
+- `"back"`: Go back to the view before the last zoom.
+- `"whole"`: Fit the clip's span to the note area's width.
+- `"height"`: Fit the key rows from the lowest note to the highest.
+- `"in"`: Zoom time in about the time selection or the insert marker.
+- `"out"`: Zoom time out about the time selection or the insert marker.
+- `"span"`: Show a span of ticks and of key rows.
+- `"scroll"`: Show a span without remembering the view before, as scrolling does.
+- `"page"`: Show a span without remembering the view before or pausing Follow, as Follow turning the page does.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How to change the MIDI Note Editor's view: `selection` zooms to the time selection and the key rows of the selected notes (Z), `back` goes to the view before the last zoom, or to the whole clip with none (X), `whole` fits the clip's span to the note area's width (W), `height` fits the key rows from the lowest note to the highest to its height (H), `in` and `out` zoom time about the time selection or the insert marker (Plus and Minus), `span` shows the ticks `start` to `end` and the key rows `top` to `bottom`, `scroll` shows them without remembering the view before, and `page` does the same without pausing Follow.",
+  "oneOf": [
+    {
+      "const": "selection",
+      "description": "Zoom to the time selection and the selected notes' key rows.",
+      "type": "string"
+    },
+    {
+      "const": "back",
+      "description": "Go back to the view before the last zoom.",
+      "type": "string"
+    },
+    {
+      "const": "whole",
+      "description": "Fit the clip's span to the note area's width.",
+      "type": "string"
+    },
+    {
+      "const": "height",
+      "description": "Fit the key rows from the lowest note to the highest.",
+      "type": "string"
+    },
+    {
+      "const": "in",
+      "description": "Zoom time in about the time selection or the insert marker.",
+      "type": "string"
+    },
+    {
+      "const": "out",
+      "description": "Zoom time out about the time selection or the insert marker.",
+      "type": "string"
+    },
+    {
+      "const": "span",
+      "description": "Show a span of ticks and of key rows.",
+      "type": "string"
+    },
+    {
+      "const": "scroll",
+      "description": "Show a span without remembering the view before, as scrolling does.",
+      "type": "string"
+    },
+    {
+      "const": "page",
+      "description": "Show a span without remembering the view before or pausing Follow, as Follow turning the page does.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -19254,6 +19529,78 @@ One of:
       "type": "object"
     }
   ]
+}
+```
+
+</details>
+
+### `PackJob`
+
+What a pack job is doing.
+
+One of:
+
+- `"create"`: Packing a project.
+- `"install"`: Unpacking a pack.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a pack job is doing.",
+  "oneOf": [
+    {
+      "const": "create",
+      "description": "Packing a project.",
+      "type": "string"
+    },
+    {
+      "const": "install",
+      "description": "Unpacking a pack.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PackStatus`
+
+What `set.pack_status` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `share` | number | yes | How far it has got, from 0 to 1. |
+| `job` | [`PackJob`](#packjob) or null | no | What is going on, or nothing when no pack or unpack is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.pack_status` returns.",
+  "properties": {
+    "job": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PackJob"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What is going on, or nothing when no pack or unpack is."
+    },
+    "share": {
+      "description": "How far it has got, from 0 to 1.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "share"
+  ],
+  "type": "object"
 }
 ```
 

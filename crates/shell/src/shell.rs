@@ -97,6 +97,7 @@ mod capture;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
+pub use info_text::InfoTarget;
 mod file_manager;
 mod freeze;
 mod grooves;
@@ -118,10 +119,12 @@ mod device_commands;
 mod document_edits;
 mod focus;
 mod gestures;
+mod info_text;
 mod invoke;
 mod menus;
 mod midi_input;
 mod mixer;
+mod packs;
 mod perception_commands;
 mod playback;
 mod plugin_commands;
@@ -279,6 +282,26 @@ pub enum Effect {
         /// The folder the dialog opens in, if there is one.
         folder: Option<PathBuf>,
     },
+    /// Ask where to write a pack of the project folder `project` (the open
+    /// set's when `None`), in a save dialog that suggests `file_name` in
+    /// `folder`, then run `set.create_pack` with the path (set exchange R16).
+    PickPackPath {
+        /// The project folder to pack, when it isn't the open set's.
+        project: Option<String>,
+        /// The suggested name: the project folder's, with `.blpack`.
+        file_name: String,
+        /// The folder the dialog opens in: the project's parent.
+        folder: PathBuf,
+    },
+    /// Ask for a pack to install, then ask where to unpack it (set exchange
+    /// R20).
+    PickPack,
+    /// Ask for the folder to unpack `pack` into, the pack's own folder
+    /// first, then run `set.install_pack` with it (set exchange R20).
+    PickInstallFolder {
+        /// The pack to unpack.
+        pack: String,
+    },
     /// Quit.
     Quit,
     /// Hide the app (macOS).
@@ -365,6 +388,11 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Turn the Info View into a text field for an item's info text, with
+    /// the keyboard focus; Return runs the item's command with the text
+    /// ([`Shell::info_text_invocation`]), Option-Return starts a new line
+    /// and Esc drops the change (Edit Info Text; the Info View spec, R10).
+    EditInfoText(InfoTarget),
     /// Start renaming a take lane in its header, where the person types the
     /// new name; Return runs `take_lane.rename` with it, and Tab goes on to
     /// the next lane or track's name (WP-6.22; the comping spec, R28).
@@ -642,6 +670,7 @@ pub struct Shell {
     stems: stems::StemsState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
+    packs: packs::PackState,
     /// What the MPE/Multi-channel Settings dialog edits, while it is open
     /// (the MPE spec, R18): never part of the set.
     mpe_dialog: Option<MpeDialogTarget>,
@@ -1145,6 +1174,7 @@ impl Shell {
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             export: export_dialog::ExportState::default(),
+            packs: packs::PackState::default(),
             mpe_dialog: None,
             autosample: None,
             autosample_dialog: None,
@@ -1743,6 +1773,12 @@ impl Shell {
             return Ok(to_value(&bl_shell_spec::scales::ScaleList::new()));
         }
         if view_ids::handles(id) {
+            // Spec: piano-roll R35. Follow again lets the note area follow
+            // playback again.
+            if id == view_ids::FOLLOW {
+                self.clip_view
+                    .note_follow(args["paused"].as_bool() == Some(true));
+            }
             return self.run_arrangement_view(id, args);
         }
         if mixer_ids::handles(id) {

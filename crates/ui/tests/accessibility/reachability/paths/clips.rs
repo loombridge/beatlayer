@@ -6,8 +6,15 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, Gap, LaterView, Live, Query, Unobserved};
+    use Reason::{AgentOnly, Equivalent, Gap, LaterView, Live, Query, Unobserved};
     vec![
+        (
+            "clip.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a clip is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
         (
             "clip.set_colour",
             Exception(Equivalent(
@@ -75,8 +82,34 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  name and activates (multi-clip editing R10)",
             )),
         ),
-        ("clip.set_midi_region", Exception(CLIP_VIEW)),
         ("clip.set_data", Exception(CLIP_VIEW)),
+        // The note editor's own view and time commands (WP-6.54).
+        (
+            "clip_view.mpe_zoom",
+            Exception(Equivalent(
+                "clip_view.note_view, on Z (S-NOTE-023), which does the same in the MPE tab (mpe R31)",
+            )),
+        ),
+        (
+            "note.duplicate_time",
+            Exception(Equivalent(
+                "Edit \u{25b8} Duplicate Time (M-EDIT-021) and Cmd-Shift-D with the note editor focused, which the \
+                 editor reads itself because S-ARR-018 belongs to the Arrangement (piano-roll R39)",
+            )),
+        ),
+        (
+            "note.delete_time",
+            Exception(Equivalent(
+                "Edit \u{25b8} Delete Time (M-EDIT-022) and Cmd-Shift-Delete with the note editor focused, which the \
+                 editor reads itself because S-ARR-019 belongs to the Arrangement (piano-roll R39)",
+            )),
+        ),
+        (
+            "note.insert_time",
+            Exception(AgentOnly(
+                "Insert Time has no key or menu item until its place in the menus is settled (piano-roll R39)",
+            )),
+        ),
         // The crop's document-level commands (WP-4.13): `clip.crop` is the
         // one a person and an agent run, from the menus and Cmd-Shift-J, and
         // it applies these.

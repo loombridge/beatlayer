@@ -648,6 +648,7 @@ impl Shell {
             scale: bl_model::Scale::default(),
             groove: None,
             colour: None,
+            info_text: String::new(),
         };
         self.editor.begin(STEP);
         let outcome = (|| -> Result<(), ShellError> {

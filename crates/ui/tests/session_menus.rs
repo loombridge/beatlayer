@@ -334,10 +334,9 @@ fn a_midi_clips_menu_lists_lives_items_and_runs_the_working_ones() {
         assert!(has(&output, row), "{row}");
     }
     assert!(!has(&output, "Paste"), "nothing copied yet");
-    // The items whose packages aren't built say so (R13).
-    let info = item(&output, "Edit Info Text");
-    assert!(info.disabled);
-    assert!(info.description.contains("WP-6.58"), "{}", info.description);
+    // The items whose packages aren't built say so (R13); Edit Info Text
+    // opens the Info View's field for the clip.
+    assert!(!item(&output, "Edit Info Text").disabled);
     // Select on Launch (Pref) is ticked while it's on, as in a new set.
     assert!(
         Harness::nodes(&output)
@@ -511,7 +510,7 @@ fn a_scenes_menu_lists_lives_items_and_the_working_ones_run() {
     // A scene's Rename shows no key (C-SCENE-005), unlike the others.
     assert_eq!(item(&output, "Rename").label, "Rename");
     assert!(item(&output, "Delete").label.len() > "Delete".len());
-    assert!(item(&output, "Edit Info Text").disabled);
+    assert!(!item(&output, "Edit Info Text").disabled);
     assert!(
         Harness::nodes(&output)
             .iter()
@@ -908,4 +907,30 @@ fn a_focused_scene_field_keeps_the_delete_key() {
         None
     );
     assert!(clip_at(&h, track, g.scenes[1]).is_some(), "the clip stays");
+}
+
+// Spec: session-context-menus R13, info-view R10. Edit Info Text in the
+// clip's and the scene's menus asks the Info View to take the text of the
+// item clicked.
+#[test]
+fn edit_info_text_in_the_clip_and_scene_menus_opens_the_info_views_field() {
+    let mut h = harness();
+    let g = Grid::new(&h);
+    let track = track_of(&h, TrackKind::Midi);
+    let clip = midi_clip(&mut h, track, g.scenes[0]);
+    h.take_events();
+    choose_from(&mut h, g.slot(track, 0), "Edit Info Text");
+    let events = h.take_events();
+    assert!(
+        events.iter().any(|e| matches!(e, UiEvent::Invoke(i)
+            if i.id == "clip.set_info_text" && i.args["clip"] == json!(clip))),
+        "the clip's"
+    );
+    choose_from(&mut h, g.scene_row(1).name.center(), "Edit Info Text");
+    let events = h.take_events();
+    assert!(
+        events.iter().any(|e| matches!(e, UiEvent::Invoke(i)
+            if i.id == "scene.set_info_text" && i.args["scene"] == json!(g.scenes[1]))),
+        "the scene's"
+    );
 }

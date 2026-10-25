@@ -12,6 +12,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // The scene's colour palette is in the scene's context menu (the
         // themes spec, R16; the session context menus spec, R3, R14).
         (
+            "scene.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a scene is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
+        (
             "scene.set_colour",
             Exception(Equivalent(
                 "the scene's context menu, opened with the Context Menu key or Shift-F10 \

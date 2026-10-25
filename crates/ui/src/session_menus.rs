@@ -317,6 +317,13 @@ impl SessionMenus {
                 crate::menus::take_focus_first(ui, &response);
                 continue;
             }
+            // Edit Info Text opens the Info View's field for the first clip.
+            if item.row == "C-CLIPTITLE-002"
+                && let (Some(clip), Some(invocation)) = (clips.first(), state.invocation.as_mut())
+            {
+                invocation.args = json!({ "clip": clip });
+                state.enabled = shell.can_invoke_in(&invocation.id, &invocation.args, &contexts);
+            }
             let response = draw_item(ui, state, self.platform, events);
             let response = pending(ui, response, item.row);
             crate::menus::take_focus_first(ui, &response);
@@ -453,9 +460,10 @@ impl SessionMenus {
                     .slot
                     .map(|(track, scene)| json!({ "track": track, "scene": scene })),
                 "C-CLIP-SES-007" => Some(json!({ "clips": chosen.clips })),
-                "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a" => {
+                "C-CLIP-SES-006" | "C-CLIP-SES-009" | "C-CLIP-SES-014" | "C-CLIP-SES-019a" => {
                     clicked_clip.map(|clip| json!({ "clip": clip }))
                 }
+                "C-SCENE-006" => on.scene.map(|scene| json!({ "scene": scene })),
                 _ => None,
             };
             if let (Some(args), Some(invocation)) = (args, state.invocation.as_mut()) {

@@ -219,8 +219,8 @@ impl Entry {
             Action::Scrub => spec.args::<ScrubArgs>(),
             Action::SetRecording => spec.args::<SetRecordingArgs>(),
         };
-        for &(shortcut, argument) in TOGGLES {
-            if self.id == "transport.set_recording" {
+        if self.id == "transport.set_recording" {
+            for &(shortcut, argument) in TOGGLES {
                 spec = spec.binding(Binding::new(shortcut).toggles(argument));
             }
         }

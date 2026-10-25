@@ -1863,6 +1863,23 @@ mod tests {
     }
 
     #[test]
+    fn selected_tracks_move_a_place_in_their_own_list() {
+        // Spec: track context menu R18.
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Audio, "One", None);
+        let two = add(&mut editor, TrackKind::Audio, "Two", None);
+        let three = add(&mut editor, TrackKind::Audio, "Three", None);
+        let doc = editor.document();
+        assert_eq!(
+            moved_by_one(doc, &[one, two], true),
+            [(two, None, 2), (one, None, 1)]
+        );
+        assert_eq!(moved_by_one(doc, &[two, three], true), []);
+        assert_eq!(moved_by_one(doc, &[three], false), [(three, None, 1)]);
+        assert_eq!(moved_by_one(doc, &[doc.main_id()], false), []);
+    }
+
+    #[test]
     fn selected_places_move_one_place_and_keep_their_gaps() {
         // Spec: tracks and undo; S-TRACK-012, S-SES-016.
         assert_eq!(shifted(6, &[1, 4], false), [(1, 0), (4, 3)]);

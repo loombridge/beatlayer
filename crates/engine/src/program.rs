@@ -3,6 +3,7 @@
 
 use core::fmt;
 use core::ops::Range;
+use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
 
 use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
@@ -125,6 +126,16 @@ pub struct EngineProgram {
     /// The audio the delay lines hold: each line `channels` channels of
     /// `len` frames.
     pub(crate) delay_pool: Shared<f32>,
+    /// The note delays of the MIDI tracks that play clips (WP-2.11), one per
+    /// such track.
+    pub(crate) note_delays: Shared<NoteDelay>,
+    /// Which of `delay_lines` take their contents from the last program's
+    /// when this one replaces it: a line the same signal runs through, of the
+    /// same length (`from` in that program, `to` in this one).
+    pub(crate) delay_migrations: Vec<Migration>,
+    /// The same for `note_delays`, whose pending notes carry over whatever
+    /// their length.
+    pub(crate) note_migrations: Vec<Migration>,
     /// The audio device's input for the block being processed:
     /// `device_input_channels` channels of `max_frames` frames, filled by
     /// [`Processor::process`](crate::Processor::process) before the tasks
@@ -590,6 +601,64 @@ pub(crate) fn delay_storage(lengths: &[u32], channels: usize) -> (Shared<DelayLi
     (Shared::new(lines), Shared::new(vec![0.0; total]))
 }
 
+/// The most notes a note delay holds back at once; more are dropped.
+const NOTE_DELAY_NOTES: usize = 1024;
+
+/// Holds the notes of a MIDI track's clips back by `len` frames, for delay
+/// compensation (WP-2.11), as a delay line does the audio of an audio
+/// track's clips. It counts the frames it has run, so a note keeps its due
+/// frame when the program that made the delay is replaced.
+pub(crate) struct NoteDelay {
+    len: u32,
+    clock: u64,
+    held: VecDeque<(u64, NoteEvent)>,
+}
+
+impl NoteDelay {
+    pub(crate) fn new(len: u32) -> Self {
+        Self {
+            len,
+            clock: 0,
+            held: VecDeque::with_capacity(NOTE_DELAY_NOTES),
+        }
+    }
+
+    /// Takes over the clock and the notes still waiting from `old`, the
+    /// delay of the same track in the last program.
+    fn adopt(&mut self, old: &mut Self) {
+        std::mem::swap(&mut self.clock, &mut old.clock);
+        std::mem::swap(&mut self.held, &mut old.held);
+    }
+
+    /// Swaps `notes`, which the player wrote for a block of `frames` frames,
+    /// for the notes that fall due in the block. Never allocates.
+    fn run(&mut self, notes: &mut NoteBuffer, frames: u32) {
+        let end = self.clock + u64::from(frames);
+        if self.len == 0 && self.held.is_empty() {
+            self.clock = end;
+            return;
+        }
+        for &note in notes.notes() {
+            // shortcut: a full delay drops the note without counting it,
+            // as a second's worth of events never fills it.
+            if self.held.len() < NOTE_DELAY_NOTES {
+                let due = self.clock + u64::from(note.offset) + u64::from(self.len);
+                self.held.push_back((due, note));
+            }
+        }
+        notes.clear();
+        while let Some(&(due, mut note)) = self.held.front() {
+            if due >= end {
+                break;
+            }
+            note.offset = due.saturating_sub(self.clock) as u32;
+            notes.push(note);
+            self.held.pop_front();
+        }
+        self.clock = end;
+    }
+}
+
 /// Delays `from` by its line into `scratch`, writing `from` into the line.
 /// `scratch` and `from` are planar with `channels` channels `stride` apart,
 /// and neither may alias `ring`, the samples the line holds: `channels`
@@ -746,6 +815,9 @@ pub(crate) struct Task {
     /// The delay line its clips are held back through so they line up with
     /// its inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) clip_delay: u32,
+    /// The delay its MIDI clips' notes are held back by, in `note_delays`,
+    /// for the same reason: the MIDI player writes notes, not audio.
+    pub(crate) note_delay: Option<u32>,
     /// The task's buffer in `tap_pool` for its signal before its devices,
     /// if a route reads it.
     pub(crate) pre_fx: Option<u32>,
@@ -1082,6 +1154,28 @@ impl EngineProgram {
             debug_assert_eq!(new.key, old.key, "a migration joins different nodes");
             std::mem::swap(&mut new.node, &mut old.node);
         }
+        // The audio and notes the delays hold go on where they were.
+        let channels = self.channels;
+        for &Migration { from, to } in &self.delay_migrations {
+            let (Some(new), Some(was)) = (
+                self.delay_lines.get_mut(to as usize),
+                old.delay_lines.get(from as usize),
+            ) else {
+                continue;
+            };
+            new.write = was.write;
+            let size = channels * was.len as usize;
+            let (to, from) = (new.at as usize, was.at as usize);
+            self.delay_pool[to..to + size].copy_from_slice(&old.delay_pool[from..from + size]);
+        }
+        for &Migration { from, to } in &self.note_migrations {
+            if let (Some(new), Some(was)) = (
+                self.note_delays.get_mut(to as usize),
+                old.note_delays.get_mut(from as usize),
+            ) {
+                new.adopt(was);
+            }
+        }
         self.midi.inherit(&mut old.midi);
         // Note-offs the last swap held that no block has run yet carry over.
         for &(task, at, note) in &old.releases.pending {
@@ -1353,6 +1447,12 @@ impl EngineProgram {
                     rows: None,
                 });
             }
+        }
+
+        // Spec: delay-compensation R3. A MIDI track's clips are notes, held
+        // back to line up with its inputs.
+        if let Some(delay) = task.note_delay {
+            turn.note_delay(delay).run(turn.notes(notes), frames as u32);
         }
 
         // Spec: midi-io R12. What the track's input played merges with
@@ -2056,6 +2156,12 @@ impl<'p> Turn<'p> {
             let len = self.program.channels * line.len as usize;
             (line, self.program.delay_pool.elements(start..start + len))
         }
+    }
+
+    /// Note delay `index`, which belongs to the task.
+    fn note_delay(&self, index: u32) -> &'p mut NoteDelay {
+        // SAFETY: each note delay belongs to one task's clips.
+        unsafe { self.program.note_delays.element(index as usize) }
     }
 
     /// The selector's values for rack `rack` (in `racks`), to write.

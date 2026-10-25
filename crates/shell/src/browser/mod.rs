@@ -2515,9 +2515,13 @@ impl BrowserView {
         let kind = listing::path_kind(path);
         // A Session clip of an opened set previews as a clip file does.
         let row = set_exchange::parse_key(&path.to_string_lossy()).is_some();
-        if !matches!(kind, Some(ItemKind::Audio | ItemKind::Clip)) || !(row || path.is_file()) {
+        if !matches!(
+            kind,
+            Some(ItemKind::Audio | ItemKind::Clip | ItemKind::Preset)
+        ) || !(row || path.is_file())
+        {
             return Err(BrowserError::InvalidArgs(format!(
-                "{} isn't an audio file or clip file Beatlayer opens",
+                "{} isn't an audio file, clip file or preset Beatlayer opens",
                 path.to_string_lossy()
             )));
         }
@@ -2530,7 +2534,8 @@ impl BrowserView {
         self.playing = None;
         self.pending_warp = None;
         self.preview_note = None;
-        let id = if kind == Some(ItemKind::Clip) {
+        // A preset is rendered like a MIDI clip file (browser R27).
+        let id = if kind != Some(ItemKind::Audio) {
             self.loader.request_clip(path, rate, search.to_vec(), bpm)
         } else {
             self.loader.request(path, rate)
@@ -2642,10 +2647,19 @@ impl BrowserView {
 
     /// The selected clip files, in the content pane's order.
     pub(crate) fn selected_clip_files(&self) -> Vec<PathBuf> {
+        self.selected_of(ItemKind::Clip)
+    }
+
+    /// The selected presets, in the content pane's order.
+    fn selected_presets(&self) -> Vec<PathBuf> {
+        self.selected_of(ItemKind::Preset)
+    }
+
+    fn selected_of(&self, kind: ItemKind) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
             .selected
             .iter()
-            .filter(|p| listing::path_kind(p) == Some(ItemKind::Clip))
+            .filter(|p| listing::path_kind(p) == Some(kind))
             .map(|p| (self.position_of(p), p.clone()))
             .collect();
         files.sort_by_key(|(position, _)| *position);
@@ -2677,6 +2691,7 @@ impl BrowserView {
                 args.get("path").is_some()
                     || self.selected_audio().len() == 1
                     || self.selected_clip_files().len() == 1
+                    || self.selected_presets().len() == 1
             }
             ids::RENAME_LABEL => {
                 let label = args
@@ -2893,13 +2908,15 @@ impl BrowserView {
                     }
                 }
                 self.cursor = self.selected.last().and_then(|path| self.position_of(path));
-                // Spec: browser R11. One audio file previews while the switch
-                // is on; anything else stops the preview.
+                // Spec: browser R11, R27. One audio file, clip file or preset
+                // previews while the switch is on; anything else stops the
+                // preview.
                 let audio_files = self.selected_audio();
                 let clip_files = self.selected_clip_files();
+                let presets = self.selected_presets();
                 if self.preview_on
                     && self.selected.len() == 1
-                    && (audio_files.len() == 1 || clip_files.len() == 1)
+                    && (audio_files.len() == 1 || clip_files.len() == 1 || presets.len() == 1)
                 {
                     // Without a running device there's nothing to hear; the
                     // selection stands either way.
@@ -2908,6 +2925,7 @@ impl BrowserView {
                             audio_files
                                 .first()
                                 .or(clip_files.first())
+                                .or(presets.first())
                                 .expect("one file"),
                             ctx.audio,
                             ctx.search,
@@ -3005,11 +3023,12 @@ impl BrowserView {
                     None => {
                         let files = self.selected_audio();
                         let clips = self.selected_clip_files();
-                        match (files.as_slice(), clips.as_slice()) {
-                            ([one], []) | ([], [one]) => one.clone(),
+                        let presets = self.selected_presets();
+                        match (files.as_slice(), clips.as_slice(), presets.as_slice()) {
+                            ([one], [], []) | ([], [one], []) | ([], [], [one]) => one.clone(),
                             _ => {
                                 return Err(BrowserError::Unavailable(
-                                    "select one audio file or clip file to preview".to_owned(),
+                                    "select one audio file, clip file or preset to preview".to_owned(),
                                 ));
                             }
                         }

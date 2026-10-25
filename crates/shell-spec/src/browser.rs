@@ -544,8 +544,9 @@ pub struct PreviewState {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub playing: Option<String>,
     /// Why the file selected last doesn't preview, if it doesn't: a MIDI clip
-    /// file whose chain has no instrument, or a clip file whose audio is
-    /// missing. The preview strip shows it.
+    /// file whose chain has no instrument, a clip file whose audio is
+    /// missing, or a preset that is an effect's or needs a plug-in this
+    /// machine lacks. The preview strip shows it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// How far it has played, in seconds.
@@ -1286,7 +1287,8 @@ pub struct FolderArgs {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewArgs {
-    /// The audio file to preview. Left out, the selected file.
+    /// The audio file, clip file or instrument preset to preview. Left out,
+    /// the selected file.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
 }
@@ -1576,8 +1578,11 @@ fn specs() -> Vec<CommandSpec> {
                  start through the main output, at the preview volume, on a voice of its own, \
                  replacing any preview, whether or not the Preview switch is on, as Shift-Enter \
                  and Right do. The file is decoded in the background, so it starts a moment \
-                 later; `browser.state` reports it loading, then playing. Never changes the set. \
-                 Plays through the audio device.",
+                 later; `browser.state` reports it loading, then playing. An instrument, \
+                 Instrument Rack or Drum Rack preset is rendered offline playing a short phrase \
+                 instead, and plays once whatever the Raw switch says; any other preset plays \
+                 nothing, and `note` says why. Never changes the set. Plays through the audio \
+                 device.",
             )
             .permission(Permission::External)
             .context(Browser)

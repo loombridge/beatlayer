@@ -2004,6 +2004,7 @@ impl Host {
             | Effect::RenameClip(_)
             | Effect::RenameScene(_)
             | Effect::RenameLocator(_)
+            | Effect::EditTimeSignature(_)
             | Effect::RenameTakeLane(_) => {
                 // The renaming happens in the window in front.
                 let (surface, ui) = if self.shell.acting_window() == WindowKind::Second {

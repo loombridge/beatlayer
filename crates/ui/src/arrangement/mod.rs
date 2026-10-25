@@ -25,6 +25,7 @@ pub mod headers;
 pub mod peaks;
 pub mod rulers;
 pub mod scene;
+pub mod signatures;
 pub mod take_lanes;
 
 use std::sync::Arc;
@@ -218,6 +219,8 @@ pub struct ArrangementUi {
     /// The locator being dragged in the scrub area, if a drag is under way
     /// (WP-6.24).
     locator_drag: Option<bl_model::LocatorId>,
+    /// The time-signature lane's gestures (WP-6.61).
+    signature_lane: signatures::SignatureLane,
     /// The point a held press in the scrub area or the beat-time ruler is
     /// looping, until the button is released (WP-6.59; time-editing R25).
     scrub_hold: Option<Ticks>,
@@ -392,6 +395,7 @@ impl ArrangementUi {
             playhead: None,
             snap_line: None,
             locator_drag: None,
+            signature_lane: signatures::SignatureLane::default(),
             scrub_hold: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -552,6 +556,12 @@ impl ArrangementUi {
             )
         } else {
             ArrangementLayout::compute(rect, view.overview(), pinned.len())
+        };
+        // Spec: time-editing R29. The lane shows while the set has changes.
+        let layout = if doc.settings().time_signatures.has_changes() {
+            layout.with_signature_lane()
+        } else {
+            layout
         };
         self.mixer = layout.mixer;
         let lanes = layout.lanes;
@@ -774,6 +784,16 @@ impl ArrangementUi {
             &view.transport(),
             theme,
         );
+        if let Some(lane) = layout.signature_lane {
+            rulers::signature_lane(
+                &ui.painter_at(lane),
+                lane,
+                &doc.settings().time_signatures,
+                view.selected_signature(),
+                horizontal,
+                theme,
+            );
+        }
         rulers::scrub_area(
             &ui.painter_at(layout.scrub),
             layout.scrub,
@@ -791,6 +811,17 @@ impl ArrangementUi {
             theme,
         );
         self.ruler_input(ui, shell, doc, view, &layout, horizontal, theme, events);
+        if let Some(lane) = layout.signature_lane {
+            self.signature_lane.show(
+                ui,
+                shell,
+                theme,
+                lane,
+                &mut self.menus,
+                &mut self.snap_line,
+                events,
+            );
+        }
 
         // The playhead, over the rulers and the lanes.
         let transport = view.transport();
@@ -2595,6 +2626,13 @@ impl ArrangementUi {
                         || shell
                             .editor()
                             .document()
+                            .settings()
+                            .time_signatures
+                            .changes()
+                            .any(|change| signatures::signature_id(change.at) == id)
+                        || shell
+                            .editor()
+                            .document()
                             .locators()
                             .iter()
                             .any(|locator| locator_id(locator.id) == id)
@@ -2899,6 +2937,34 @@ impl ArrangementUi {
         if (taller || shorter) && !view.selected_tracks().is_empty() {
             let delta = if taller { HEIGHT_STEP } else { -HEIGHT_STEP };
             invoke(events, ids::SET_TRACK_HEIGHT, json!({ "delta": delta }));
+        }
+        // Spec: time-editing R31, R32. With a time-signature marker
+        // selected, Cmd-R types its signature and Delete deletes it.
+        if let Some(at) = view.selected_signature() {
+            let pressed = |wanted: Key, command: bool| {
+                ui.input(|i| {
+                    i.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Key { key, pressed: true, modifiers, .. }
+                                if *key == wanted
+                                    && modifiers.command == command
+                                    && !modifiers.shift
+                                    && !modifiers.alt
+                        )
+                    })
+                })
+            };
+            if pressed(Key::R, true) {
+                invoke(events, locator_ids::EDIT_SIGNATURE, json!({}));
+            }
+            if pressed(Key::Delete, false) {
+                invoke(
+                    events,
+                    "song.delete_time_signature_change",
+                    json!({ "at": at }),
+                );
+            }
         }
         // Spec: time-editing R8. Cmd-R renames the selected locators.
         if !view.selected_locators().is_empty()

@@ -12,7 +12,9 @@ use bl_model::{
     AutomationTarget, Breakpoint, Clip, Command, Document, Editor, Locator, TakeLaneId, TrackId,
 };
 use bl_shell_spec::arrangement::Lane;
-use bl_shell_spec::editing::{self as ids, PasteTimeArgs, TimeClipboardState, TimeSpanArgs};
+use bl_shell_spec::editing::{
+    self as ids, FragmentaryBarArgs, PasteTimeArgs, TimeClipboardState, TimeSpanArgs,
+};
 use serde_json::Value;
 
 use super::editing::{
@@ -405,6 +407,54 @@ pub fn run(
                 _ => return Err(unavailable("there's nothing on the clipboard to paste")),
             };
             select_time(view, at, at + length);
+            Ok(to_value(&result(doc, editor, view, recorded)))
+        }
+        ids::DELETE_FRAGMENTARY_BAR_TIME | ids::COMPLETE_FRAGMENTARY_BAR => {
+            let FragmentaryBarArgs { at } = parse(args)?;
+            let signatures = &doc.settings().time_signatures;
+            let at = at.resolve(signatures).map_err(invalid)?;
+            let bar = signatures
+                .fragmentary_bars()
+                .find(|bar| (bar.start..bar.end).contains(&at))
+                .ok_or_else(|| invalid("no time-signature change cuts a bar short there"))?;
+            let (_, recorded) = settled(editor, label, (doc, edge_fades), |editor| {
+                if id == ids::DELETE_FRAGMENTARY_BAR_TIME {
+                    return apply(
+                        editor,
+                        Command::DeleteTime {
+                            start: bar.start,
+                            end: bar.end,
+                            clips: Vec::new(),
+                        },
+                    );
+                }
+                let length = bar.missing();
+                apply(
+                    editor,
+                    Command::InsertTime {
+                        at: bar.start,
+                        length,
+                        clips: Vec::new(),
+                    },
+                )?;
+                // Opening time at a marker pushes the marker later too; the
+                // marker that starts the short bar stays where it is.
+                if bar.start > Ticks::ZERO
+                    && signatures.changes().any(|change| change.at == bar.start)
+                {
+                    apply(
+                        editor,
+                        Command::MoveTimeSignatureChange {
+                            at: bar.start + length,
+                            to: bar.start,
+                        },
+                    )?;
+                }
+                Ok(())
+            })?;
+            if id == ids::DELETE_FRAGMENTARY_BAR_TIME {
+                leave_marker(view, bar.start);
+            }
             Ok(to_value(&result(doc, editor, view, recorded)))
         }
         other => Err(refused(format!("`{other}` isn't a time command"))),

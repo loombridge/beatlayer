@@ -763,7 +763,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.64 | done | 22 October 2026 | [#306](https://github.com/loombridge/beatlayer/pull/306); View ▸ Arrangement Track Controls' In/Out, Volume and Return Tracks hide their parts of every track header, and the mixers' own sections stay as they are ([arrangement view](specs/arrangement-view.md) R20 to R24) |
 | 6.65 | done | 25 October 2026 | [#461](https://github.com/loombridge/beatlayer/pull/461); the mixer strip section drags taller with extended meters from 200 points, columns resize from 40 to 400 points and are saved with the set, and each view's mixer keeps its own sections ([mixer view](specs/mixer-view.md) R32 to R39) |
 | 6.66 | todo |  |  |
-| 6.67 | todo |  |  |
+| 6.67 | done | 25 October 2026 | [#465](https://github.com/loombridge/beatlayer/pull/465); an instrument, Instrument Rack or Drum Rack preset in the browser previews as an offline render of the preview phrase through its own devices, played once and cached per file, and an effect or chain preset, or one whose plug-in is missing or fails, previews nothing and says why; a plain plug-in device preset previews once 6.66 lists it |
 | 6.68 | done | 25 October 2026 | [#464](https://github.com/loombridge/beatlayer/pull/464); the Arpeggiator's Groove chooser offers None and the ten bundled swing grooves, and with Sync on every second step moves as a grooved clip note would, scaled by the Global Amount; older sets load with None ([arpeggiator](specs/arpeggiator.md) R18 to R20) |
 | 6.69 | todo |  |  |
 | 6.70 | todo |  |  |

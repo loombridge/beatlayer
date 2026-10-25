@@ -67,6 +67,7 @@ pub mod input;
 pub mod keymap;
 pub mod launch_panel;
 pub mod layout;
+pub mod main_panel;
 pub mod main_window;
 pub mod mapping;
 pub mod menus;

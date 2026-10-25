@@ -1030,9 +1030,10 @@ pub enum Command {
         #[serde(default)]
         end: Option<Ticks>,
     },
-    /// Sets a MIDI clip's time signature, the Clip View's Signature fields.
-    SetMidiClipSignature {
-        /// The MIDI clip.
+    /// Sets a MIDI clip's or a warped audio clip's time signature, the Clip
+    /// View's Signature fields.
+    SetClipSignature {
+        /// The MIDI or warped audio clip.
         clip: ClipId,
         /// The clip's signature; `null` (or nothing) follows the song's at
         /// the clip's position.
@@ -2789,7 +2790,7 @@ impl Command {
             Self::SetClipLoop { .. } => "Change clip loop",
             Self::SetMidiClipRegion { .. } => "Change clip region",
             Self::SetMidiClipLoop { .. } => "Change clip loop",
-            Self::SetMidiClipSignature { .. } => "Change clip signature",
+            Self::SetClipSignature { .. } => "Change clip signature",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change Fade",
@@ -3993,9 +3994,15 @@ impl Document {
                     midi.loop_end = *end;
                 })
             }
-            Command::SetMidiClipSignature { clip, signature } => {
-                self.edit_midi(*clip, |midi| midi.signature = *signature)
-            }
+            // Spec: clip-properties R10. An unwarped audio clip's positions
+            // read in time, so it has no signature to set.
+            Command::SetClipSignature { clip, signature } => match &self.clip_ref(*clip)?.data {
+                ClipData::Audio(audio) if !audio.warp => Err(ModelError::InvalidInput(
+                    "only a warped audio clip has a time signature: switch Warp on first",
+                )),
+                ClipData::Audio(_) => self.edit_audio(*clip, |audio| audio.signature = *signature),
+                ClipData::Midi(_) => self.edit_midi(*clip, |midi| midi.signature = *signature),
+            },
             Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
                 // Spec: warping R14. Only a warped audio clip can switch its
                 // loop on; an older set's looped unwarped clip can switch it
@@ -10382,6 +10389,45 @@ mod tests {
             }),
             ModelError::AudioClipOffset(Ticks::QUARTER)
         );
+    }
+
+    // Spec: clip-properties R10. A warped audio clip has a signature of its
+    // own that sets and clears; an unwarped clip has none to set.
+    #[test]
+    fn a_warped_audio_clips_signature_sets_and_clears_and_an_unwarped_clip_has_none() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.fresh();
+        let data = AudioData::new(ContentHash([7; 32]));
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+        })
+        .unwrap();
+        let signature = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.signature,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let seven_eight = TimeSignature::new(7, 8).ok();
+        let _ = song.reject(Command::SetClipSignature {
+            clip,
+            signature: seven_eight,
+        });
+        assert_eq!(signature(&song), None);
+        song.apply(Command::SetClipWarp { clip, warp: true })
+            .unwrap();
+        song.apply(Command::SetClipSignature {
+            clip,
+            signature: seven_eight,
+        })
+        .unwrap();
+        assert_eq!(signature(&song), seven_eight);
+        song.apply(Command::SetClipSignature {
+            clip,
+            signature: None,
+        })
+        .unwrap();
+        assert_eq!(signature(&song), None);
     }
 
     // Spec: warping R5. A warped clip's markers are ticks of its contents,

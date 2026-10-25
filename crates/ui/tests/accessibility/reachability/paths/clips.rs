@@ -68,6 +68,27 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("clip.set_midi_region", Exception(CLIP_VIEW)),
+        // The Main Properties panel (WP-6.55).
+        (
+            "clip_view.show_marker",
+            main(midi_tools_shown, detail_area, "Show Start", Key::Enter),
+        ),
+        (
+            "clip_view.show_properties",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Launch Properties",
+                Key::Enter,
+            ),
+        ),
+        (
+            "clip.set_marker_at_playhead",
+            Exception(Equivalent(
+                "the Set buttons in the Main Properties panel, which Tab reaches and Return \
+                 presses while the clip plays (clip properties R5, R8)",
+            )),
+        ),
         ("clip.set_data", Exception(CLIP_VIEW)),
         // The crop's document-level commands (WP-4.13): `clip.crop` is the
         // one a person and an agent run, from the menus and Cmd-Shift-J, and

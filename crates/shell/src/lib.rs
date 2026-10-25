@@ -133,6 +133,7 @@ pub use bl_shell_spec::autosampler as autosampler_commands;
 pub use bl_shell_spec::browser as browser_commands;
 /// Capture MIDI's command ID and its result types (WP-3.14).
 pub use bl_shell_spec::capture_midi as capture_midi_commands;
+pub use bl_shell_spec::clip_properties as clip_properties_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;

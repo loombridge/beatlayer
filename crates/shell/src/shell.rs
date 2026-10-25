@@ -93,6 +93,7 @@ mod audio_panel;
 pub mod autosample;
 mod bounce;
 mod capture;
+mod clip_properties;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
@@ -297,6 +298,9 @@ pub enum Effect {
     /// Move the keyboard focus to an area of the second window, and bring
     /// it to the front.
     FocusSecondArea(Area),
+    /// Move the keyboard focus to the first control of the Clip View's
+    /// panels (Navigate ▸ Clip Panels).
+    FocusClipPanels,
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -1911,6 +1915,9 @@ impl Shell {
         }
         if bl_shell_spec::audio_panel::handles(id) {
             return self.run_audio_panel(id, args);
+        }
+        if bl_shell_spec::clip_properties::handles(id) {
+            return self.run_clip_properties(id, args);
         }
         if bl_shell_spec::modulation::handles(id) {
             let bl_shell_spec::modulation::StateArgs { track } = Self::args(id, args)?;

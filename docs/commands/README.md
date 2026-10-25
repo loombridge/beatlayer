@@ -16356,6 +16356,90 @@ One slot's mapping as its panel names it.
 
 </details>
 
+### `Marker`
+
+The four markers the panel's Show and Set buttons name.
+
+One of:
+
+- `"start"`: The Start marker.
+- `"end"`: The End marker.
+- `"loop_position"`: The loop brace's start: the Position field.
+- `"loop_length"`: The loop brace's end: the Length field's marker.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The four markers the panel's Show and Set buttons name.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "The Start marker.",
+      "type": "string"
+    },
+    {
+      "const": "end",
+      "description": "The End marker.",
+      "type": "string"
+    },
+    {
+      "const": "loop_position",
+      "description": "The loop brace's start: the Position field.",
+      "type": "string"
+    },
+    {
+      "const": "loop_length",
+      "description": "The loop brace's end: the Length field's marker.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `MarkerAt`
+
+What `clip_view.show_marker` and `clip.set_marker_at_playhead` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `marker` | [`Marker`](#marker) | yes | The marker. |
+| `position` | number | yes | Where the marker is now: ticks of the clip's contents for a MIDI or warped audio clip, seconds into the file for an unwarped one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.show_marker` and `clip.set_marker_at_playhead` return.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "marker": {
+      "$ref": "#/$defs/Marker",
+      "description": "The marker."
+    },
+    "position": {
+      "description": "Where the marker is now: ticks of the clip's contents for a MIDI or warped audio clip, seconds into the file for an unwarped one.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "marker",
+    "position"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MarkerStep`
 
 How far `envelope.move_marker` moves the insert marker.
@@ -21122,6 +21206,65 @@ The preview: the switch, the volume, and what plays.
     "volume",
     "position_seconds",
     "length_seconds"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Properties`
+
+The panels of the Clip View's left group (Spec: clip-properties R1).
+
+One of:
+
+- `"main"`: Main Properties.
+- `"launch"`: Launch Properties, a Session clip's.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The panels of the Clip View's left group (Spec: clip-properties R1).",
+  "oneOf": [
+    {
+      "const": "main",
+      "description": "Main Properties.",
+      "type": "string"
+    },
+    {
+      "const": "launch",
+      "description": "Launch Properties, a Session clip's.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PropertiesShown`
+
+What `clip_view.show_properties` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `panel` | [`Properties`](#properties) | yes | The panel the left group shows now: Main Properties for an Arrangement clip, whatever was asked. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.show_properties` returns.",
+  "properties": {
+    "panel": {
+      "$ref": "#/$defs/Properties",
+      "description": "The panel the left group shows now: Main Properties for an Arrangement clip, whatever was asked."
+    }
+  },
+  "required": [
+    "panel"
   ],
   "type": "object"
 }

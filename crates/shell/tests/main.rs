@@ -29,6 +29,7 @@ mod browser_filters;
 mod browser_tags;
 mod capture_midi;
 mod clip_files;
+mod clip_properties;
 mod clip_streaming;
 mod clip_view;
 mod clip_view_tabs;

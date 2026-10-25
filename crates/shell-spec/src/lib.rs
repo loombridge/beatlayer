@@ -76,6 +76,9 @@
 //!   (`clip.crop`, `arrangement.consolidate*`, WP-4.13).
 //! - [`audio_panel`]: the Audio Utilities panel's own commands
 //!   (`clip.edit_sample`, `clip.replace_sample`, WP-4.10b).
+//! - [`clip_properties`]: the Clip View's Main Properties panel
+//!   (`clip_view.show_properties`, `clip_view.show_marker`,
+//!   `clip.set_marker_at_playhead`, WP-6.55).
 //! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
@@ -96,6 +99,7 @@ pub mod autosampler;
 pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
+pub mod clip_properties;
 pub mod commands;
 pub mod comping;
 pub mod context_menus;
@@ -180,6 +184,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;
+    clip_properties::register(registry)?;
     freeze::register(registry)?;
     bounce::register(registry)?;
     comping::register(registry)?;

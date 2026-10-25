@@ -41,6 +41,7 @@ mod launch_panel;
 mod layout;
 mod locator;
 mod macros;
+mod main_properties;
 mod main_window;
 mod midi_input;
 mod midi_tools;

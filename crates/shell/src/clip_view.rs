@@ -24,6 +24,7 @@ use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, Expression,
     GroupKind, MidiData, MpeView, Note, NoteGroup,
 };
+use bl_shell_spec::clip_properties::Properties;
 use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::note_filters::{
     InvertSelectionArgs, NoteFilter, NoteFilters, NoteFiltersArgs, NoteFiltersResult,
@@ -615,6 +616,9 @@ pub struct ClipView {
     /// The MIDI Tools' panel, choices, settings and open application
     /// (WP-6.11).
     pub(crate) tools: crate::midi_tools::MidiTools,
+    /// The panel the left group shows (Spec: clip-properties R1). View state:
+    /// Main Properties when the app starts, never saved.
+    properties: Properties,
     /// Whether the Preview switch is on (Spec: step-recording R1): the
     /// shell keeps it as a preference.
     preview: bool,
@@ -659,6 +663,23 @@ impl ClipView {
     #[must_use]
     pub fn midi_tools(&self) -> &crate::midi_tools::MidiTools {
         &self.tools
+    }
+
+    /// The panel the left group shows for the clip the Clip View shows: the
+    /// one chosen, but Main Properties for a clip not in a Session slot
+    /// (Spec: clip-properties R1).
+    #[must_use]
+    pub fn shown_properties(&self, doc: &Document, arrangement: &ArrangementView) -> Properties {
+        if self.shown_session_clip(doc, arrangement).is_some() {
+            self.properties
+        } else {
+            Properties::Main
+        }
+    }
+
+    /// Chooses the panel the left group shows.
+    pub fn show_properties(&mut self, panel: Properties) {
+        self.properties = panel;
     }
 
     /// Whether the Clip View shows.

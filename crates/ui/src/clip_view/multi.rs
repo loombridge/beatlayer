@@ -404,6 +404,7 @@ impl ClipViewUi {
             hovered: None,
             step: arrangement.grid_ticks(doc),
             snap: arrangement.grid().snap,
+            tuning: super::tuning_of_clip(shell, fg.clip),
         };
         self.lanes.paint(ui, shell, theme, &frame);
         self.input_multi(
@@ -540,7 +541,7 @@ impl ClipViewUi {
         paint_key_track(ui, theme, grid, keys, &style);
         paint_scale_rows(ui, theme, grid, keys, &style);
         paint_grid_lines(ui, shell, theme, grid, axis.0, axis.1);
-        paint_row_lines(ui, theme, grid, keys);
+        paint_row_lines(ui, theme, grid, keys, style.limit());
         let corner = theme.sizes.corner.min(2.0);
         for note in drawn {
             painter.rect_filled(

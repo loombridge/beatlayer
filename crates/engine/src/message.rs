@@ -128,6 +128,9 @@ pub enum TransportCommand {
     /// Sets the set's current scale, which the devices of a track with no
     /// clip playing read (the scales spec, R9 and R15).
     SetScale(bl_model::Scale),
+    /// Sets whether the set's tuning hides the scales, so a scale-aware
+    /// device's Use Current Scale acts as off (the tunings spec, R16).
+    SetScalesHidden(bool),
     /// Sets whether the transport is recording.
     SetRecording(bool),
     /// Sets where recording punches in and out (WP-2.13).

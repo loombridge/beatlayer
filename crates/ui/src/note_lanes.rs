@@ -29,8 +29,8 @@ use egui::{
 use serde_json::{Value, json};
 
 use crate::clip_view::{
-    KEY_HEIGHT, KEY_WIDTH, LANE_HEIGHT, STEM_WIDTH, STRIP_HEIGHT, TOOLBAR_HEIGHT, key_name,
-    lane_labels, lane_value, stem_x, y_of_value,
+    KEY_HEIGHT, KEY_WIDTH, LANE_HEIGHT, STEM_WIDTH, STRIP_HEIGHT, TOOLBAR_HEIGHT, lane_labels,
+    lane_value, stem_x, y_of_value,
 };
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
@@ -408,6 +408,9 @@ pub struct Frame<'a> {
     /// The editing grid's step in ticks, and whether it snaps.
     pub step: Ticks,
     pub snap: bool,
+    /// The tuning the clip's track plays, which names the notes (the tunings
+    /// spec, R29).
+    pub tuning: Option<&'a bl_model::Tuning>,
 }
 
 /// The values of the selected notes' `field`, for the footer.
@@ -1041,7 +1044,7 @@ impl LaneUi {
                 let rect = Rect::from_min_max(pos2(x, top), pos2(x + STEM_WIDTH, lane.bottom()));
                 let item = ui.interact(rect, id.with(("marker", place)), Sense::hover());
                 let value = value_text(field, note_value(note, field));
-                let name = key_name(note.key);
+                let name = crate::clip_view::key_label(frame.tuning, note.key);
                 ui.ctx().accesskit_node_builder(item.id, |node| {
                     node.set_role(Role::ListItem);
                     node.set_label(name);

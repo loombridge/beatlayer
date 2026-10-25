@@ -236,6 +236,16 @@ impl Progress {
         }
     }
 
+    /// Where the work package `id` (such as `6.70`, as the build plan writes it) stands, or
+    /// `None` when the build plan has no such package.
+    pub fn package_status(&self, id: &str) -> Option<Status> {
+        self.phases
+            .iter()
+            .flat_map(|phase| &phase.packages)
+            .find(|package| package.id.text() == id)
+            .map(|package| package.status)
+    }
+
     /// The model as JSON, for the dashboard and for agents.
     pub fn to_json(&self) -> Value {
         let mut package_counts: BTreeMap<&str, usize> = BTreeMap::new();

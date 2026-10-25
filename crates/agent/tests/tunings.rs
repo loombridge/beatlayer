@@ -171,3 +171,43 @@ fn a_bad_file_is_refused_through_the_agent_api() {
         Value::Null
     );
 }
+
+// Spec: tunings R25, R27, R28, R32. The Tuning section's commands and the
+// Tunings label's rows run by ID, and loading from the browser reads back
+// through `tuning.state`.
+#[test]
+fn the_browsers_tuning_commands_run_by_id_and_read_back() {
+    let mut client = client();
+    assert_eq!(
+        run(&mut client, "view.state", json!({}))["window"]["tuning_section"],
+        json!(false),
+        "hidden in a new set"
+    );
+    let shown = run(&mut client, "view.tuning_section", json!({}));
+    assert_eq!(shown["tuning_section"], json!(true));
+    let hidden = run(&mut client, "view.tuning_section", json!({}));
+    assert_eq!(hidden["tuning_section"], json!(false));
+    let focused = run(&mut client, "focus.tuning", json!({}));
+    assert_eq!(focused["tuning_section"], json!(true));
+    assert_eq!(focused["browser"], json!(true));
+
+    // The Tunings label lists Beatlayer's own tunings, and a search finds one.
+    run(
+        &mut client,
+        "browser.open_place",
+        json!({ "label": "tunings" }),
+    );
+    let found = run(
+        &mut client,
+        "browser.search",
+        json!({ "query": "vallotti", "label": "tunings" }),
+    );
+    assert_eq!(found["rows"][0]["name"], "Vallotti");
+    assert_eq!(found["rows"][0]["kind"], "tuning");
+    let path = found["rows"][0]["path"].clone();
+    run(&mut client, "browser.select", json!({ "paths": [path] }));
+    run(&mut client, "browser.load_selected", json!({}));
+    let tuning = run(&mut client, "tuning.state", json!({}))["tuning"].clone();
+    assert_eq!(tuning["name"], "Vallotti");
+    assert_eq!(tuning["notes_per_octave"], 12);
+}

@@ -145,15 +145,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
         (
-            "scene.move",
-            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
-        ),
-        (
             "scene.duplicate",
-            Exception(LaterView("the Session grid and its menus (WP-3.7)")),
-        ),
-        (
-            "scene.rename",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),
         (

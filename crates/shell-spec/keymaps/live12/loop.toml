@@ -86,11 +86,11 @@ action = "Nudge the loop brace left or right by the grid"
 context = "loop-brace"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.73"
 
 [[shortcut]]
 id = "S-LOOP-008"
@@ -98,11 +98,11 @@ action = "Move the loop by its own length"
 context = "loop-brace"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Down", "Up"]
 win = ["Down", "Up"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.73"
 
 [[shortcut]]
 id = "S-LOOP-009"
@@ -110,11 +110,11 @@ action = "Halve or double the loop length"
 context = "loop-brace"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Cmd+Down", "Cmd+Up"]
 win = ["Ctrl+Down", "Ctrl+Up"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.73"
 
 [[shortcut]]
 id = "S-LOOP-010"
@@ -122,11 +122,11 @@ action = "Shorten or lengthen the loop by the grid"
 context = "loop-brace"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.73"
 
 [[shortcut]]
 id = "S-LOOP-011"

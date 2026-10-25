@@ -732,14 +732,23 @@ pub fn is_renaming(ctx: &Egui) -> bool {
     false
 }
 
+/// The scene Tab moves on to while `scene`'s name is being typed (S-EDIT-012).
+#[must_use]
+pub fn next_scene(doc: &bl_model::Document, scene: SceneId) -> Option<Rename> {
+    let mut scenes = doc.scenes().map(|s| s.id).skip_while(|s| *s != scene);
+    scenes.nth(1).map(Rename::Scene)
+}
+
 /// Draws the name being typed over `rect` if it's for `target`, and says so;
-/// Return runs its command, Esc leaves the name as it was.
+/// Return runs its command, Esc leaves the name as it was. Tab keeps the
+/// name and moves on to `next`'s (S-EDIT-012; I-FOCUS-011).
 pub fn rename_edit(
     ui: &mut Ui,
     theme: &Theme,
     rect: Rect,
     target: &Rename,
     name: &str,
+    next: Option<Rename>,
     events: &mut Vec<UiEvent>,
 ) -> bool {
     let Some(mut renaming) = renaming(ui.ctx()).filter(|r| &r.target == target) else {
@@ -758,13 +767,22 @@ pub fn rename_edit(
         edit.request_focus();
         renaming.focused = true;
     }
-    let (enter, escape) = ui.input(|i| (i.key_pressed(Key::Enter), i.key_pressed(Key::Escape)));
+    let (enter, escape, tab) = ui.input(|i| {
+        (
+            i.key_pressed(Key::Enter),
+            i.key_pressed(Key::Escape),
+            i.key_pressed(Key::Tab),
+        )
+    });
     if edit.lost_focus() || enter || escape {
         if enter || (edit.lost_focus() && !escape) {
             events.push(UiEvent::Invoke(target.invocation(text)));
         }
         ui.ctx()
             .data_mut(|d| d.insert_temp(renaming_id(), None::<Renaming>));
+        if let Some(next) = next.filter(|_| tab && edit.lost_focus()) {
+            start_rename(ui.ctx(), next);
+        }
     } else {
         ui.ctx()
             .data_mut(|d| d.insert_temp(renaming_id(), Some(renaming)));

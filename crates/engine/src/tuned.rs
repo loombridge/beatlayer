@@ -98,6 +98,22 @@ impl KeyPitches {
         Some(lower + (upper - lower) * (position - below))
     }
 
+    /// The key whose pitch is nearest `pitch` (in the same semitones), the
+    /// lower on a tie, and how far above that key's pitch `pitch` is, in
+    /// cents (the tunings spec, R33). None if no key plays.
+    #[must_use]
+    pub fn nearest(&self, pitch: f64) -> Option<(u8, f64)> {
+        let mut best: Option<(usize, f64)> = None;
+        for (key, own) in self.pitches[..self.keys].iter().enumerate() {
+            let distance = (pitch - own).abs();
+            if best.is_none_or(|(_, least)| distance < least) {
+                best = Some((key, distance));
+            }
+        }
+        let (key, _) = best?;
+        Some((key as u8, (pitch - self.pitches[key]) * 100.0))
+    }
+
     /// How far the key's tuned pitch is from its twelve-step pitch, in
     /// semitones: what an instrument adds to a voice's key-based pitch.
     /// None if the key plays nothing.

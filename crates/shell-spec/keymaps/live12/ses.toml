@@ -49,7 +49,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Option+drag"]
 win = ["Ctrl+drag"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Option-dragging (Ctrl on Windows) a clip to another slot copies it (`session.copy_clip_to_slot`)"
 
 [[shortcut]]
 id = "S-SES-005"
@@ -196,7 +197,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Cmd-Left and Cmd-Right (Ctrl) move the selected tracks a place, keeping the gaps between them (`track.move`)"
 
 [[shortcut]]
 id = "S-SES-016"
@@ -207,7 +209,8 @@ trigger = "press"
 milestone = "M3"
 mac = ["Cmd+Up", "Cmd+Down"]
 win = ["Ctrl+Up", "Ctrl+Down"]
-status = "pending"
+status = "widget"
+handler = "the Session View: Cmd-Up and Cmd-Down (Ctrl) move the selected scenes a place, keeping the gaps between them (`scene.move`)"
 
 [[shortcut]]
 id = "S-SES-017"
@@ -218,7 +221,8 @@ trigger = "held"
 milestone = "M3"
 mac = ["Cmd (hold while dropping)"]
 win = ["Ctrl (hold while dropping)"]
-status = "pending"
+status = "widget"
+handler = "the Session View: clip files from the browser dropped with Cmd (Ctrl) held go in as a scene (`session.drop_files`, clip files R7)"
 
 [[shortcut]]
 id = "S-SES-018"

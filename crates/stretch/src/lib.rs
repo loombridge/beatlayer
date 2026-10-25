@@ -2,6 +2,7 @@
 
 pub mod beats;
 pub mod complex;
+mod formants;
 pub mod granular;
 mod interp;
 pub mod map;

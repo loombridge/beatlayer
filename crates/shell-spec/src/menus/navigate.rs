@@ -1,11 +1,11 @@
 //! The Navigate menu.
 
-use super::Action::{Command as Cmd, Pending, Shortcut as Key};
+use super::Action::{Command as Cmd, Shortcut as Key};
 use super::{IMP_18, Row, SEPARATOR};
 use crate::commands::{
     FOCUS_ARRANGEMENT, FOCUS_CLIP_VIEW, FOCUS_CONTROL_BAR, FOCUS_DEVICE_VIEW, FOCUS_NEXT,
     FOCUS_NEXT_NEIGHBOR, FOCUS_PREVIOUS, FOCUS_PREVIOUS_NEIGHBOR, FOCUS_TOGGLE_TAB_NAVIGATION,
-    FOCUS_TOGGLE_WRAP_NAVIGATION,
+    FOCUS_TOGGLE_WRAP_NAVIGATION, FOCUS_TUNING,
 };
 use crate::groove::FOCUS_GROOVE_POOL;
 use crate::mixer_view::FOCUS as MIXER_FOCUS;
@@ -19,7 +19,7 @@ pub(super) const NAVIGATE: &[Row] = &[
     ("M-NAV-006", "Browser", Key(&["S-FOCUS-006"])),
     ("M-NAV-007", "Groove Pool", Cmd(FOCUS_GROOVE_POOL)),
     ("M-NAV-008", "Learn View", Key(&["S-FOCUS-008"])),
-    ("M-NAV-009", "Tuning", Pending(None)),
+    ("M-NAV-009", "Tuning", Cmd(FOCUS_TUNING)),
     SEPARATOR,
     ("M-NAV-010", "Mixer", Cmd(MIXER_FOCUS)),
     ("M-NAV-011", "Clip Panels", Key(&["S-FOCUS-010"])),

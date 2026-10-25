@@ -230,15 +230,11 @@ fn vowel() -> Vec<f32> {
     out.iter().map(|s| (s / peak * 0.5) as f32).collect()
 }
 
-// Spec: warp-modes R22, R35. The vowel's first two formants stay where they
-// were in Complex Pro at Formants 100 %, and move with the pitch in Complex.
-// At ±7 semitones both stay within 10 % of the source's. At ±12 the library's
-// formant correction reaches only 40 % on the first formant (1050 Hz against
-// 750) and 12.5 % on the second: R35 records those as the tolerance there, a
-// known gap (R35's Complex Pro row). Complex, which corrects nothing, still
-// moves them within 10 % of the source's times the ratio.
+// Spec: warp-modes R22, R35. Complex, which corrects nothing, moves the
+// vowel's first two formants with the pitch, within 10 % of the source's times
+// the ratio.
 #[test]
-fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
+fn complex_moves_the_vowels_formants_with_the_pitch() {
     let file = vowel();
     let source = play(
         &mut Complex::new(1, RATE, false),
@@ -263,18 +259,8 @@ fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
             (centre * 0.9, centre * 1.5)
         }
     };
-    // The tolerance the library's formant correction reaches at each
-    // transposition, for the first and the second formant (R35): the first
-    // formant at ±12 is the library's own limit, a known gap.
-    for (semitones, keep) in [(7.0, [0.10, 0.10]), (12.0, [0.40, 0.15])] {
+    for semitones in [7.0, 12.0] {
         let ratio = 2.0_f64.powf(semitones / 12.0);
-        let mut pro = Complex::new(1, RATE, true);
-        pro.set_formants(100.0);
-        // Envelope places the fundamental the formant analysis assumes, and
-        // this vowel's is 150 Hz: 44,100 / 294 (R23). The manual's own advice
-        // is a higher Envelope for low-pitched audio.
-        pro.set_envelope(294);
-        let kept = play(&mut pro, &file, 1.0, ratio, 48_000, 512);
         let moved = play(
             &mut Complex::new(1, RATE, false),
             &file,
@@ -284,35 +270,48 @@ fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
             512,
         );
         for (formant, &source) in source.iter().enumerate() {
-            let measured = formant_in(&kept, band(source, formant == 0));
-            let error = (measured - source).abs() / source;
-            eprintln!(
-                "{semitones} semitones, formant {}: Complex Pro keeps {source:.0} Hz at \
-                 {measured:.0} Hz, {:.0} %",
-                formant + 1,
-                error * 100.0
-            );
-            assert!(
-                error <= keep[formant],
-                "{semitones} semitones, formant {}: Complex Pro's formant {measured:.0} Hz is \
-                 {:.0} % from {source:.0} Hz, past the {:.0} % it reaches",
-                formant + 1,
-                error * 100.0,
-                keep[formant] * 100.0
-            );
             let target = source * ratio;
             let measured = formant_in(&moved, band(target, formant == 0));
             let error = (measured - target).abs() / target;
-            eprintln!(
-                "{semitones} semitones, formant {}: Complex moves {target:.0} Hz to {measured:.0} \
-                 Hz, {:.0} %",
-                formant + 1,
-                error * 100.0
-            );
             assert!(
                 error <= 0.10,
                 "{semitones} semitones, formant {}: Complex's formant {measured:.0} Hz is {:.0} % \
                  from {target:.0} Hz, where the pitch moved it",
+                formant + 1,
+                error * 100.0
+            );
+        }
+    }
+}
+
+/// The vowel's first two formants as R35 reads them: the first two peaks of
+/// the all-pole fit to the spectrum of the audio from 1 s on.
+fn vowel_formants(samples: &[f32]) -> [f64; 2] {
+    let audio = bl_analysis::Audio::new(&samples[48_000..], 1, 48_000).unwrap();
+    bl_analysis::measure::formants(&audio).unwrap()
+}
+
+// Spec: warp-modes R22, R23, R35. At Formants 100 % Complex Pro keeps the
+// vowel's first two formants within 10 % of the source's at +7, -7, +12 and
+// -12 semitones, with Envelope at the vowel's fundamental (R23: 44,100 / 294
+// is 150 Hz), where the stretcher's own correction alone leaves the first
+// formant a quarter or a third out on an octave.
+#[test]
+fn complex_pro_keeps_the_vowels_formants_where_complex_moves_them() {
+    let file = vowel();
+    let source = vowel_formants(&file);
+    for semitones in [7.0, -7.0, 12.0, -12.0] {
+        let ratio = 2.0_f64.powf(semitones / 12.0);
+        let mut pro = Complex::new(1, RATE, true);
+        pro.set_formants(100.0);
+        pro.set_envelope(294);
+        let kept = vowel_formants(&play(&mut pro, &file, 1.0, ratio, 192_000, 512));
+        for (formant, (&kept, &source)) in kept.iter().zip(&source).enumerate() {
+            let error = (kept - source).abs() / source;
+            assert!(
+                error <= 0.10,
+                "{semitones:+} semitones, formant {}: Complex Pro's {kept:.0} Hz is {:.0} % from \
+                 the source's {source:.0} Hz",
                 formant + 1,
                 error * 100.0
             );
@@ -402,6 +401,23 @@ fn any_block_size_gives_the_same_samples() {
             );
             assert_eq!(got, reference, "Complex Pro {pro} at blocks of {block}");
         }
+    }
+}
+
+// Spec: warp-modes R6, R22. The formant correction renders the same at any
+// block size: its hops run on the frames it has seen, not on the blocks.
+#[test]
+fn the_formant_correction_gives_the_same_samples_at_any_block_size() {
+    let file = vowel();
+    let ratio = 2.0_f64.powf(7.0 / 12.0);
+    let render = |block| {
+        let mut mode = Complex::new(1, RATE, true);
+        mode.set_envelope(294);
+        play(&mut mode, &file, 1.5, ratio, 48_000, block)
+    };
+    let reference = render(512);
+    for block in [1, 61, 4_096] {
+        assert_eq!(render(block), reference, "blocks of {block}");
     }
 }
 

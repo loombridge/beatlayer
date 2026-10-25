@@ -196,8 +196,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Tab"]
 win = ["Tab"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the name being typed in a track's title bar or a scene's name field: Tab keeps the name and starts the next track's or scene's (`track.rename`, `scene.rename`)"
 
 [[shortcut]]
 id = "S-EDIT-013"

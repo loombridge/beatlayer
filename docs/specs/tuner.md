@@ -9,7 +9,7 @@
 
 Tuner analyses incoming monophonic audio to detect its fundamental pitch and distance in cents from the nearest semitone. It is a measurement tool and passes audio through unaltered with zero latency.
 
-The device provides two main views: Classic View (showing a tuner needle curve with Target Mode and Strobe Mode) and Histogram View (displaying pitch history over time with zoom and Auto centring). The readout toggles between frequency in Hertz and deviation in cents. The reference concert pitch defaults to 440 Hz and adjusts from 410 to 480 Hz. Note spelling preferences (Sharps, Flats, or Sharps and Flats) are provided as context menu options in the device's Show Options menu. Tuning systems support waits for Phase 6; until then equal temperament relative to the Reference pitch is used.
+The device provides two main views: Classic View (showing a tuner needle curve with Target Mode and Strobe Mode) and Histogram View (displaying pitch history over time with zoom and Auto centring). The readout toggles between frequency in Hertz and deviation in cents. The reference concert pitch defaults to 440 Hz and adjusts from 410 to 480 Hz. Note spelling preferences (Sharps, Flats, or Sharps and Flats) are provided as context menu options in the device's Show Options menu. With a tuning in the set, the Tuner names the nearest note of the tuning and its distance in cents, and its Reference is set aside (R10); without one it uses equal temperament relative to the Reference pitch.
 
 ## Sources
 
@@ -31,6 +31,7 @@ The device provides two main views: Classic View (showing a tuner needle curve w
 - **R7.** Tuner publishes its detected pitch, nearest note, cents deviation, strobe phase, and pitch history lock-free after every block, readable headless by `device.display`. (S2)
 - **R8.** The display cell expands in a floating window according to IMP-14. (S2)
 - **R9.** Every parameter can be automated and modulated; no memory allocation, lock, or blocking operation occurs on the audio thread. (S2)
+- **R10.** While the set has a tuning, the Tuner, on any track but a MIDI track that bypasses it, names the note of the tuning nearest the pitch it hears, as the note editor names it, and shows its distance in cents; its Reference is set aside. It reads the tuning as node data, as the instruments do. The rule is [the tunings spec](tunings.md) R33. (S1)
 
 ## Tests
 
@@ -45,6 +46,7 @@ The device provides two main views: Classic View (showing a tuner needle curve w
 | R7 | `crates/shell/tests/device_displays.rs`, `the_tuners_display_publishes_and_reads_headless` | unit |
 | R8 | `crates/ui/tests/device_panel.rs`, `the_tuners_cell_draws_in_docked_and_floating_windows` | UI script |
 | R9 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`; `rtsan/tests/devices.rs`, `tuner_passes_under_rtsan` | unit, RTSan |
+| R10 | the tunings spec's R33 tests: `crates/devices/tests/tuner_tuning.rs` | unit, real-time |
 
 ## Defaults, ranges and details
 
@@ -57,4 +59,4 @@ The device provides two main views: Classic View (showing a tuner needle curve w
   - `Flats (D♭)`: Toggle (menu option), default false.
   - `Sharps and Flats (C#/D♭)`: Toggle (menu option), default false.
 - Views: `Classic` and `Histogram`.
-- Beatlayer's own choices: YIN-based monophonic time-domain pitch detector with parabolic interpolation over a 2048-sample analysis window, measured once per 2,048 samples (Beatlayer's own response time); Phase 6 tuning systems integration.
+- Beatlayer's own choices: YIN-based monophonic time-domain pitch detector with parabolic interpolation over a 2048-sample analysis window, measured once per 2,048 samples (Beatlayer's own response time); tuning systems follow the set's tuning (R10).

@@ -222,6 +222,7 @@ impl Shell {
             browser: self.browser_of(window),
             // Spec: browser R26. The second window's browser keeps its height.
             full_height_browser: window == WindowKind::Main && self.browser_view.full_height(),
+            tuning_section: self.tuning_section,
             browser_width: self.browser_view.width(),
             info_view: self.info_view_of(window),
             full_screen: self.full_screen_of(window),

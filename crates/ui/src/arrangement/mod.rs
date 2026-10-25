@@ -2755,7 +2755,16 @@ impl ArrangementUi {
             )
         });
         if cmd_up || cmd_down {
-            if view.selected_take_lanes().is_empty() {
+            if view.selected_take_lanes().is_empty() && view.title_bars_selected() {
+                // Spec: track-context-menu R18. With title bars selected the
+                // same keys move the tracks (S-TRACK-012).
+                crate::track_menu::move_tracks(
+                    events,
+                    shell.editor().document(),
+                    view.selected_tracks(),
+                    cmd_down,
+                );
+            } else if view.selected_take_lanes().is_empty() {
                 let args = json!({ "direction": if cmd_down { "next" } else { "previous" } });
                 if shell.can_invoke("take_lane.replace_with_take", &args) {
                     invoke(events, "take_lane.replace_with_take", args);

@@ -34,11 +34,11 @@ action = "Play and stop at the end of the selection"
 context = "global"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Option+Space"]
 win = ["Ctrl+Space"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.74"
 
 [[shortcut]]
 id = "S-TRANS-004"
@@ -46,11 +46,11 @@ action = "Play the Arrangement selection"
 context = "global"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Space"]
 win = ["Space"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.74"
 
 [[shortcut]]
 id = "S-TRANS-005"
@@ -75,7 +75,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["F9"]
 win = ["F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "transport.set_recording", contexts = ["global"], toggles = "recording" },
+]
 
 [[shortcut]]
 id = "S-TRANS-007"
@@ -86,7 +89,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+F9"]
 win = ["Shift+F9"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "mixer.set_arm", contexts = ["track-headers", "session", "arrangement"], toggles = "arm" },
+]
 
 [[shortcut]]
 id = "S-TRANS-008"

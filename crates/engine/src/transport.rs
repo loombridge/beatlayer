@@ -219,6 +219,11 @@ impl Entry {
             Action::Scrub => spec.args::<ScrubArgs>(),
             Action::SetRecording => spec.args::<SetRecordingArgs>(),
         };
+        if self.id == "transport.set_recording" {
+            for &(shortcut, argument) in TOGGLES {
+                spec = spec.binding(Binding::new(shortcut).toggles(argument));
+            }
+        }
         for &(shortcut, position) in self.keys {
             let binding = Binding::new(shortcut);
             spec = spec.binding(match position {
@@ -229,6 +234,10 @@ impl Entry {
         spec
     }
 }
+
+/// The shortcuts that switch a boolean argument of `transport.set_recording`
+/// to the other state: F9, Record to Arrangement (the transport spec, R30).
+const TOGGLES: &[(&str, &str)] = &[("S-TRANS-006", "recording")];
 
 /// Every transport command this crate registers. The rules behind them,
 /// and behind their bindings, are in the transport spec.

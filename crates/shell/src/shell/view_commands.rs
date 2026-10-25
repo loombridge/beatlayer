@@ -179,6 +179,12 @@ impl Shell {
         }
     }
 
+    /// Whether the browser's Tuning section shows (the tunings spec, R28).
+    #[must_use]
+    pub fn tuning_section_shown(&self) -> bool {
+        self.tuning_section
+    }
+
     pub(super) fn view_window(&self) -> ViewResult {
         self.view_result_of(WindowKind::Main)
     }
@@ -601,6 +607,13 @@ impl Shell {
             ids::VIEW_TOGGLE_INFO_VIEW => {
                 Self::args::<NoArgs>(id, args)?;
                 self.info_view = !self.info_view;
+                Ok(self.view_result())
+            }
+            ids::VIEW_TUNING_SECTION => {
+                // Spec: tunings R28. View state: not saved with the set and
+                // no undo step.
+                Self::args::<NoArgs>(id, args)?;
+                self.tuning_section = !self.tuning_section;
                 Ok(self.view_result())
             }
             // Spec: interface-zoom R3, R5, R6.

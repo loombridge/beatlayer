@@ -6,12 +6,13 @@
 //! Beatlayer. A shortcut is `bound` when a registered command binds it, and
 //! the entry lists each command with the contexts it runs in. Otherwise it's
 //! `system` or `widget` (the platform or the focused control handles it), or
-//! `pending` with the milestone that binds it; an M1 shortcut that's pending
-//! also names the package that binds it, from [`OWNERS`].
+//! `pending` with the milestone that binds it; a pending shortcut also names
+//! the package that binds it, from [`OWNERS`].
 //!
 //! `cargo xtask check` fails if the file is out of date, and generation
-//! fails if an M1 shortcut is neither bound nor owned by a package, so the
-//! keymap test in `bl-ui` (`tests/keymap/`) holds by construction.
+//! fails if a shortcut of M1, M2 or M3 is neither bound nor owned by a
+//! package that isn't done, so the keymap test in `bl-ui` (`tests/keymap/`)
+//! holds by construction.
 //!
 //! The keymap is one file per run of shortcuts of the same area (the part of
 //! an ID between `S-` and its number), in the reference's order, so a change to
@@ -27,6 +28,7 @@ use bl_commands::{Context, Registry};
 use serde_json::Value;
 
 use crate::commands;
+use crate::progress::{Docs, Progress, Status};
 use crate::ui_parity::{self, KeySource};
 
 /// The generated keymap's folder, relative to the workspace root.
@@ -262,6 +264,69 @@ const WIDGET: &[(&str, &str)] = &[
         "S-A11Y-030",
         "the automation lane and the Envelope Editor: Left and Right move the selected \
          breakpoint one grid step in time (`envelope.move_selected`)",
+    ),
+    // WP-6.70: gestures and keys the views read themselves that earlier
+    // packages built and left marked pending.
+    (
+        "S-CTX-001",
+        "every view's items open their context menu on a right-click, or a Ctrl-click on macOS \
+         (the Arrangement's, the track headers', the Session View's, the browser's and the \
+         Device View's menus)",
+    ),
+    (
+        "S-DEV-005",
+        "the Device View selector: a right-click lists the selected track's devices as a \
+         hierarchy to choose from (`device.select`, racks R25)",
+    ),
+    (
+        "S-ENV-003",
+        "the automation lane: Option-dragging (Alt) a segment curves it, and Option-double-click \
+         straightens it (`automation.set_curve`, automation R13)",
+    ),
+    (
+        "S-ARR-036",
+        "the Arrangement View: Cmd-Shift-Option-dragging (Ctrl-Shift-Alt) a warped clip's \
+         contents slides them without snapping (`clip.slide_contents`, warping R54)",
+    ),
+    (
+        "S-SES-004",
+        "the Session View: Option-dragging (Ctrl on Windows) a clip to another slot copies it \
+         (`session.copy_clip_to_slot`)",
+    ),
+    (
+        "S-SES-017",
+        "the Session View: clip files from the browser dropped with Cmd (Ctrl) held go in as a \
+         scene (`session.drop_files`, clip files R7)",
+    ),
+    (
+        "S-A11Y-014",
+        "the Device View: Left and Right select the device before or after the selected one \
+         (`device.select`, device chains R43)",
+    ),
+    (
+        "S-EDIT-012",
+        "the name being typed in a track's title bar or a scene's name field: Tab keeps the name \
+         and starts the next track's or scene's (`track.rename`, `scene.rename`)",
+    ),
+    (
+        "S-TRACK-005",
+        "the name being typed in a track's title bar: Tab keeps the name and starts the next \
+         track's (`track.rename`)",
+    ),
+    (
+        "S-TRACK-012",
+        "the Arrangement View, with title bars selected: Cmd-Up and Cmd-Down (Ctrl) move the \
+         selected tracks a place, keeping the gaps between them (`track.move`)",
+    ),
+    (
+        "S-SES-015",
+        "the Session View: Cmd-Left and Cmd-Right (Ctrl) move the selected tracks a place, \
+         keeping the gaps between them (`track.move`)",
+    ),
+    (
+        "S-SES-016",
+        "the Session View: Cmd-Up and Cmd-Down (Ctrl) move the selected scenes a place, keeping \
+         the gaps between them (`scene.move`)",
     ),
     // WP-1.8b: keys with two directions, and modifiers a drag reads as it
     // goes, each running a registered command.
@@ -616,60 +681,31 @@ const WIDGET: &[(&str, &str)] = &[
     ),
 ];
 
-/// The package that binds each M1 shortcut the shell doesn't: exact IDs
-/// first, then ID prefixes. The keymap test fails if an M1 shortcut has
-/// no command and no package here, or if this names WP-1.7 itself.
+/// The package that binds each shortcut the shell doesn't yet, or that a
+/// shortcut moved to a later milestone waits for. A pending shortcut of M1,
+/// M2 or M3 must name a package that isn't done (the build plan's status
+/// table says which are), so a package that lands without binding its shortcut
+/// fails the check; a pending shortcut of a later milestone may name one.
 const OWNERS: &[(&str, &str)] = &[
-    ("S-VIEW-011", "WP-1.8a"),
-    ("S-EDIT-012", "WP-1.8b"),
-    ("S-ZOOM-003", "WP-1.8a"),
-    ("S-ZOOM-004", "WP-1.8a"),
-    ("S-ZOOM-005", "WP-1.8a"),
-    ("S-ZOOM-006", "WP-1.8a"),
-    ("S-ZOOM-007", "WP-1.8a"),
-    ("S-GRID-007", "WP-1.8b"),
-    ("S-ARR-020", "WP-1.8a"),
-    ("S-ARR-021", "WP-1.8a"),
-    ("S-ARR-022", "WP-1.8a"),
-    ("S-ARR-023", "WP-1.8a"),
-    ("S-ARR-024", "WP-1.8a"),
-    ("S-ARR-025", "WP-1.8a"),
-    ("S-ARR-026", "WP-1.8a"),
-    ("S-ARR-030", "WP-1.8a"),
-    ("S-ARR-031", "WP-1.8a"),
-    ("S-ARR-032", "WP-1.5"),
-    ("S-ARR-033", "WP-1.5"),
-    ("S-ARR-034", "WP-1.8a"),
-    ("S-TRACK-005", "WP-1.8b"),
-    ("S-TRACK-008", "WP-1.8a"),
-    ("S-TRACK-009", "WP-1.8a"),
-    ("S-TRACK-010", "WP-1.8a"),
-    ("S-A11Y-003", "WP-1.8a"),
-    // Playing a time selection needs WP-1.8b's selections (transport.md).
-    ("S-TRANS-003", "WP-1.8b"),
-    ("S-TRANS-004", "WP-1.8b"),
-    // Prefixes.
-    ("S-EDIT-", "WP-1.8b"),
-    ("S-LOOP-", "WP-1.8b"),
-    ("S-ZOOM-", "WP-1.8b"),
-    ("S-GRID-", "WP-1.8a"),
-    ("S-ARR-", "WP-1.8b"),
-    ("S-TRACK-", "WP-1.8b"),
-    ("S-TRANS-", "WP-1.5"),
-    ("S-CTX-", "WP-1.8b"),
-    ("S-A11Y-", "WP-1.8b"),
+    // Bound by the package that builds the thing the key acts on.
+    ("S-FOCUS-009", "WP-6.72"),
+    // Moved to M6 by WP-6.70, which gives the reason in the reference's notes.
+    ("S-ARR-012", "WP-6.73"),
+    ("S-LOOP-007", "WP-6.73"),
+    ("S-LOOP-008", "WP-6.73"),
+    ("S-LOOP-009", "WP-6.73"),
+    ("S-LOOP-010", "WP-6.73"),
+    ("S-TRANS-003", "WP-6.74"),
+    ("S-TRANS-004", "WP-6.74"),
+    ("S-DEV-010", "WP-6.75"),
+    ("S-DEV-004", "WP-6.76"),
 ];
 
-/// The package that binds an M1 shortcut, from [`OWNERS`].
-fn owner(id: &str) -> Option<&'static str> {
-    OWNERS
+/// The package that binds a pending shortcut, from `owners`.
+fn owner<'a>(owners: &[(&str, &'a str)], id: &str) -> Option<&'a str> {
+    owners
         .iter()
         .find(|(key, _)| *key == id)
-        .or_else(|| {
-            OWNERS
-                .iter()
-                .find(|(key, _)| key.ends_with('-') && id.starts_with(key))
-        })
         .map(|(_, package)| *package)
 }
 
@@ -751,7 +787,18 @@ fn on_disk(dir: &Path) -> Result<Vec<String>, String> {
 fn build(root: &Path) -> Result<(Vec<(String, String)>, String), String> {
     let (live_version, sources) = ui_parity::key_sources(root)?;
     let registry = commands::catalogue()?;
-    render(&live_version, &sources, &registry)
+    let docs = Docs::read(|path| match std::fs::read_to_string(root.join(path)) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("couldn't read {path}: {e}")),
+    })?;
+    render(
+        &live_version,
+        &sources,
+        &registry,
+        &Progress::parse(&docs),
+        OWNERS,
+    )
 }
 
 /// A shortcut ID's area: `S-ARR-007` is `arr`.
@@ -799,6 +846,8 @@ fn render(
     live_version: &str,
     sources: &[KeySource],
     registry: &Registry,
+    progress: &Progress,
+    owners: &[(&str, &str)],
 ) -> Result<(Vec<(String, String)>, String), String> {
     let mut header = String::new();
     header.push_str(
@@ -809,7 +858,7 @@ fn render(
          # differs from what they generate. Each shortcut's `status` says what it does:\n\
          # `bound` (the commands it runs, each in the contexts listed), `system` (the\n\
          # platform handles it), `widget` (the focused control does), or `pending`\n\
-         # (nothing yet; the milestone binds it, and `package` names the package for M1).\n\n",
+         # (nothing yet; the milestone binds it, and `package` names the package).\n\n",
     );
     let _ = writeln!(header, "schema = 1\nlive_version = {}", quote(live_version));
 
@@ -903,16 +952,33 @@ fn render(
         } else {
             pending += 1;
             out.push_str("status = \"pending\"\n");
-            if source.milestone == "M1" {
-                match owner(&source.id) {
-                    Some(package) => {
-                        let _ = writeln!(out, "package = {}", quote(package));
-                    }
+            let package = owner(owners, &source.id);
+            if let Some(package) = package {
+                let _ = writeln!(out, "package = {}", quote(package));
+            }
+            if matches!(source.milestone.as_str(), "M1" | "M2" | "M3") {
+                match package {
                     None => problems.push(format!(
-                        "{} is an M1 shortcut that no command binds and no package owns; bind it \
-                         or add it to OWNERS in xtask/src/keymap.rs",
-                        source.id
+                        "{} is a {} shortcut that no command binds and no package owns; bind it, \
+                         or name its package in OWNERS in xtask/src/keymap.rs",
+                        source.id, source.milestone
                     )),
+                    Some(package) => {
+                        match progress
+                            .package_status(package.strip_prefix("WP-").unwrap_or(package))
+                        {
+                            None => problems.push(format!(
+                                "{} names {package}, which the build plan doesn't have",
+                                source.id
+                            )),
+                            Some(Status::Done) => problems.push(format!(
+                                "{} names {package}, which is done and left it unbound; bind it, \
+                                 or name the package that will",
+                                source.id
+                            )),
+                            Some(_) => {}
+                        }
+                    }
                 }
             }
         }
@@ -937,12 +1003,78 @@ mod tests {
     use super::*;
 
     #[test]
-    fn owners_resolve_exact_ids_before_prefixes() {
-        assert_eq!(owner("S-ARR-030"), Some("WP-1.8a"));
-        assert_eq!(owner("S-ARR-001"), Some("WP-1.8b"));
-        assert_eq!(owner("S-TRANS-001"), Some("WP-1.5"));
-        assert_eq!(owner("S-NOPE-001"), None);
-        assert!(OWNERS.iter().all(|(_, package)| *package != "WP-1.7"));
+    fn owners_are_exact_ids_and_never_the_keymap_package() {
+        assert_eq!(owner(OWNERS, "S-NOPE-001"), None);
+        assert!(
+            OWNERS
+                .iter()
+                .all(|(id, package)| id.starts_with("S-") && *package != "WP-1.7")
+        );
+        let mut ids: Vec<&str> = OWNERS.iter().map(|(id, _)| *id).collect();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), OWNERS.len(), "a shortcut has one owner");
+    }
+
+    /// The real planning documents' progress, or `None` in a checkout without
+    /// them.
+    fn real_progress() -> Option<Progress> {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("xtask sits in the workspace root");
+        if !ui_parity::reference_present(root) {
+            eprintln!("{}", ui_parity::ABSENT);
+            return None;
+        }
+        let docs = Docs::read(|path| match std::fs::read_to_string(root.join(path)) {
+            Ok(text) => Ok(Some(text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
+        })
+        .expect("the planning documents are readable");
+        Some(Progress::parse(&docs))
+    }
+
+    fn pending(id: &str, milestone: &str) -> KeySource {
+        KeySource {
+            id: id.to_owned(),
+            action: "Do it".to_owned(),
+            context: "global".to_owned(),
+            kind: "key".to_owned(),
+            trigger: "press".to_owned(),
+            milestone: milestone.to_owned(),
+            mac: vec!["F20".to_owned()],
+            win: vec!["F20".to_owned()],
+        }
+    }
+
+    #[test]
+    fn a_pending_shortcut_of_m1_to_m3_names_a_package_that_is_not_done() {
+        // Spec: ui-parity README, "How UI packages use it".
+        let Some(progress) = real_progress() else {
+            return;
+        };
+        let run = |milestone: &str, owners: &[(&str, &str)]| {
+            render(
+                "12",
+                &[pending("S-NOPE-001", milestone)],
+                &Registry::new(),
+                &progress,
+                owners,
+            )
+            .map(|_| ())
+        };
+        for milestone in ["M1", "M2", "M3"] {
+            let none = run(milestone, &[]).unwrap_err();
+            assert!(none.contains("no package owns"), "{milestone}: {none}");
+            let done = run(milestone, &[("S-NOPE-001", "WP-1.8b")]).unwrap_err();
+            assert!(done.contains("which is done"), "{milestone}: {done}");
+            let unknown = run(milestone, &[("S-NOPE-001", "WP-99.9")]).unwrap_err();
+            assert!(unknown.contains("doesn't have"), "{milestone}: {unknown}");
+            run(milestone, &[("S-NOPE-001", "WP-6.72")]).expect("a package still to do");
+        }
+        // A later milestone needs none.
+        run("M6", &[]).expect("M6 may wait without a package");
     }
 
     #[test]

@@ -214,6 +214,13 @@ impl<'a> Audio<'_, 'a> {
         self.block.scale_at(self.range.start + offset as usize)
     }
 
+    /// Whether the set's tuning hides the scales (the tunings spec, R16): a
+    /// device's Use Current Scale switch then acts as off.
+    #[must_use]
+    pub fn scales_hidden(&self) -> bool {
+        self.block.scales_hidden()
+    }
+
     /// The set's Global Amount of groove (the grooves spec, R21): 1 at
     /// 100 %, 0 at 0 % and up to 1.3.
     #[must_use]

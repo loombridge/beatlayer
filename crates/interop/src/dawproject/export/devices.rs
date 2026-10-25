@@ -145,6 +145,14 @@ impl Exporter<'_> {
                 .add("a plug-in whose ID doesn't read", place, "not written");
             return None;
         };
+        // On Windows the scanner spells a VST3 class ID as a COM GUID, with
+        // its first three fields byte-swapped; the file holds the canonical
+        // spelling every platform's SDK prints (R48, R77).
+        let id = if cfg!(windows) && format == PluginFormat::Vst3 {
+            plugins::swapped_class_id(&id).unwrap_or(id)
+        } else {
+            id
+        };
         let installed = self
             .context
             .plugins
@@ -305,6 +313,15 @@ impl Exporter<'_> {
             );
             DeviceBody::Builtin
         };
+        // A device preset holds no samples, so a sample the device plays
+        // doesn't come back (R80).
+        if !device.media_used().is_empty() {
+            self.report.add(
+                &format!("the sample {} plays", device.own_name()),
+                place,
+                "left out of its preset",
+            );
+        }
         let mut written = Self::base(device, device_type.to_owned(), body);
         written.device_vendor = Some(VENDOR.to_owned());
         written.state = Some(self.state("blpreset", Preset::of(device).encode()));

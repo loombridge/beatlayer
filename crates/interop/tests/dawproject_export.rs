@@ -1723,7 +1723,17 @@ fn plug_ins_and_devices_are_written_as_the_spec_says() {
     // The VST3 state is a `.vstpreset` with its component and controller.
     let preset =
         bl_model::vst3_state::VstPreset::read(&container.files["plugins/2.vstpreset"]).unwrap();
-    assert!(bl_model::vst3_state::same_class_id(&preset.class_id, VST3));
+    // The file holds the canonical class ID; on Windows the scanner's
+    // spelling has its first three fields byte-swapped.
+    let canonical = if cfg!(windows) {
+        bl_interop::dawproject::plugins::swapped_class_id(VST3).unwrap()
+    } else {
+        VST3.to_owned()
+    };
+    assert!(bl_model::vst3_state::same_class_id(
+        &preset.class_id,
+        &canonical
+    ));
     assert_eq!(preset.component, b"component");
     assert_eq!(preset.controller, b"controller");
     // The Audio Unit's state is its property list.

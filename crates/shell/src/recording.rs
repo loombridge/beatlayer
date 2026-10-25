@@ -337,6 +337,9 @@ pub fn start(
             launches,
             events: Vec::new(),
             take: None,
+            engines_closed: 0,
+            stale: None,
+            fresh: false,
             delay: 0,
         },
     ))
@@ -370,6 +373,16 @@ pub struct Recording {
     launches: Consumer<SessionEvent>,
     events: Vec<SessionEvent>,
     take: Option<TakeBounds>,
+    /// The audio host's [`engines_closed`](crate::audio::AudioHost::engines_closed)
+    /// when the recording began: another count means the engine that took
+    /// it was closed, and no take will ever be published.
+    engines_closed: u64,
+    /// The take the engine still published when the recording began, which
+    /// is the last recording's until the engine drains this one's plan.
+    stale: Option<TakeBounds>,
+    /// Whether the engine has shown a take other than the stale one: it
+    /// cleared the old take, or is running a new one.
+    fresh: bool,
     /// Frames the audio is moved earlier (WP-2.13): the plan's `delay`,
     /// which the shell sets once it knows the device.
     pub delay: i64,
@@ -455,9 +468,31 @@ impl Recording {
             .map_or(&[], |reading| &reading.messages)
     }
 
-    /// Notes the take the engine published, from its state.
-    pub fn note_take(&mut self, take: TakeBounds) {
-        self.take = Some(take);
+    /// Notes the engine's state when the recording begins, for
+    /// [`Recording::following`] and [`Recording::engine_closed`].
+    pub fn began_on(&mut self, audio: &mut crate::audio::AudioHost) {
+        self.engines_closed = audio.engines_closed();
+        self.stale = audio.transport_state().take;
+    }
+
+    /// Whether the engine this recording began on was closed since, so no
+    /// take will be published for it.
+    #[must_use]
+    pub fn engine_closed(&self, audio: &crate::audio::AudioHost) -> bool {
+        self.engines_closed != audio.engines_closed()
+    }
+
+    /// Notes the take the engine published, from its state: `take` is the
+    /// take that last ended and `running` whether one runs now. The take
+    /// that ended before this recording began is not this recording's, and
+    /// is still published until the engine has the new plan.
+    pub fn follow(&mut self, take: Option<TakeBounds>, running: bool) {
+        self.fresh |= take.is_none() || running;
+        if let Some(take) = take
+            && (self.fresh || self.stale != Some(take))
+        {
+            self.take = Some(take);
+        }
     }
 
     /// What the recording came to, once it has: the writer has reported and
@@ -1304,6 +1339,69 @@ mod tests {
                 (64, 60, 600, 1_000),
             ]
         );
+    }
+
+    // Spec: recording R12. A note held across the loop's wrap ends at the end
+    // of the pass it started in, not as a one-tick note: the take's messages
+    // carry the frames the take has run, which the wrap does not set back.
+    #[test]
+    fn a_note_held_across_the_loops_wrap_runs_to_the_end_of_its_pass() {
+        let tempo = TempoMap::default();
+        let track = TrackId(bl_core::id::Id::new(1).unwrap());
+        // A loop of frames 100 to 200, recorded from its start: key 60 goes
+        // on 90 frames into the first pass and off 20 frames into the second.
+        let bounds = TakeBounds {
+            start: Frames(100),
+            end: Frames(120),
+            wrap: Some((Frames(100), Frames(200))),
+            frames: 120,
+        };
+        let held = played(
+            track,
+            &[
+                (190, MidiMessage::note_on(0, 60, 90)),
+                (220, MidiMessage::note_off(0, 60)),
+            ],
+        );
+        let (_, found) = passes(bounds, 120);
+        let first = midi_in_pass(&held, bounds, &found[0]);
+        let pass = notes(&first[0].messages, Frames(200), &tempo, RATE);
+        let [note] = pass.as_slice() else {
+            panic!("one note in the first pass: {pass:?}");
+        };
+        let length = tempo.ticks_to_frames(note.start + note.length, RATE).get()
+            - tempo.ticks_to_frames(note.start, RATE).get();
+        assert!(
+            (9..=11).contains(&length),
+            "ten frames to the loop end, not a tick: {length}"
+        );
+    }
+
+    // The engine still publishes the last recording's take until it has the
+    // next one's plan: a recording follows only a take that is not that one,
+    // unless the engine has shown the take cleared or running since.
+    #[test]
+    fn a_recording_ignores_the_take_that_ended_before_it_began() {
+        let take = |start: i64, end: i64| TakeBounds {
+            start: Frames(start),
+            end: Frames(end),
+            wrap: None,
+            frames: (end - start) as u64,
+        };
+        let (_plan, mut recording) = start(None, RATE, &[], &[], Vec::new()).unwrap();
+        recording.stale = Some(take(0, 100));
+        recording.follow(Some(take(0, 100)), false);
+        assert_eq!(recording.take, None, "the previous take is not this one's");
+        recording.follow(None, false);
+        recording.follow(Some(take(50, 80)), false);
+        assert_eq!(recording.take, Some(take(50, 80)));
+        // A new take that happens to cover the same frames is followed once
+        // the engine has been seen to clear the old one.
+        let (_plan, mut again) = start(None, RATE, &[], &[], Vec::new()).unwrap();
+        again.stale = Some(take(0, 100));
+        again.follow(None, true);
+        again.follow(Some(take(0, 100)), false);
+        assert_eq!(again.take, Some(take(0, 100)));
     }
 
     // Spec: WP-2.14. Without overdub a take makes one clip over it on each

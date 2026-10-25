@@ -1057,9 +1057,13 @@ impl ArrangementUi {
                         // I-DRAG-010: time across the tracks dragged over.
                         let to = view.snap(doc, at(pos));
                         let here = self.row_at(lanes, scroll_y, pos).or(row);
-                        let (tracks, lanes) = match (row, here) {
-                            (Some(a), Some(b)) => {
-                                let (a, b) = (a.min(b), a.max(b));
+                        // The rows are rebuilt every frame and a track can go
+                        // mid-drag (an agent deletes it, a group folds), so a
+                        // row index from the press may be past the end.
+                        let last = self.rows.len().checked_sub(1);
+                        let (tracks, lanes) = match (row, here, last) {
+                            (Some(a), Some(b), Some(last)) => {
+                                let (a, b) = (a.min(b).min(last), a.max(b).min(last));
                                 (
                                     self.rows[a..=b].iter().map(|r| r.track).collect(),
                                     // Spec: automation-editing R1. The

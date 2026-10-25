@@ -1101,17 +1101,19 @@ fn track_paths(base_path: &Path, ext: &str, tracks: &[&bl_model::Track]) -> Vec<
         .filter(|s| !s.is_empty())
         .unwrap_or("Export");
 
+    // Compared in lower case: APFS and NTFS treat names that differ only in
+    // case as one file.
     let mut used = std::collections::HashSet::new();
     let mut paths = Vec::with_capacity(tracks.len());
     for track in tracks {
         let name = sanitize_name(track.name());
         let mut candidate = parent.join(format!("{base_stem} - {name}.{ext}"));
         let mut count = 2;
-        while used.contains(&candidate) {
+        while used.contains(&candidate.to_string_lossy().to_lowercase()) {
             candidate = parent.join(format!("{base_stem} - {name} ({count}).{ext}"));
             count += 1;
         }
-        used.insert(candidate.clone());
+        used.insert(candidate.to_string_lossy().to_lowercase());
         paths.push(candidate);
     }
     paths
@@ -1228,7 +1230,15 @@ pub(crate) fn prepare_document_for_track(
         .map_err(|e| e.to_string())?;
     }
 
-    // Set Main's fader to unity (volume = 1.0, pan = 0.0).
+    // Set Main's fader to unity (volume = 1.0, pan = 0.0). Setting the value
+    // turns an envelope off only if the value changes, so drop the envelopes.
+    for param in [bl_model::MixerParam::Volume, bl_model::MixerParam::Pan] {
+        doc.apply(&bl_model::Command::DeleteAutomation {
+            track: main_id,
+            target: bl_model::AutomationTarget::Mixer { param },
+        })
+        .map_err(|e| e.to_string())?;
+    }
     doc.apply(&bl_model::Command::SetVolume {
         track: main_id,
         volume: 1.0,
@@ -1782,6 +1792,105 @@ mod tests {
             hidden_beside(Path::new("Mix.flac"), "render"),
             Path::new(".Mix.flac.render")
         );
+    }
+
+    /// An editor holding two audio tracks named `first` and `second`.
+    fn editor_with_tracks(first: &str, second: &str) -> (bl_model::Editor, TrackId, TrackId) {
+        let mut editor = bl_model::Editor::new();
+        let mut ids = Vec::new();
+        for (index, name) in [first, second].into_iter().enumerate() {
+            let id = editor.new_id();
+            editor
+                .apply(bl_model::Command::CreateTrack {
+                    id,
+                    kind: bl_model::TrackKind::Audio,
+                    name: name.to_owned(),
+                    parent: None,
+                    index,
+                })
+                .unwrap();
+            ids.push(id);
+        }
+        (editor, ids[0], ids[1])
+    }
+
+    // WP-2.26. A stem carries Main's fader at unity, though Main's
+    // volume or pan is automated and its value is already unity or centre.
+    #[test]
+    fn stems_drop_main_s_volume_and_pan_automation() {
+        let (mut editor, track, _) = editor_with_tracks("Kick", "Snare");
+        let main = editor.document().main_id();
+        let points = vec![
+            bl_model::Breakpoint {
+                at: Ticks::ZERO,
+                value: 1.0,
+                bend: 0.0,
+            },
+            bl_model::Breakpoint {
+                at: Ticks::WHOLE,
+                value: 0.0,
+                bend: 0.0,
+            },
+        ];
+        let targets = [bl_model::MixerParam::Volume, bl_model::MixerParam::Pan]
+            .map(|param| bl_model::AutomationTarget::Mixer { param });
+        for target in targets {
+            editor
+                .apply(bl_model::Command::SetAutomationEnvelope {
+                    track: main,
+                    target,
+                    points: points.clone(),
+                })
+                .unwrap();
+        }
+        let document = editor.document();
+        let main_track = document.track(main).unwrap();
+        assert_eq!(
+            main_track.mixer().volume,
+            1.0,
+            "the static values are unity"
+        );
+        assert_eq!(main_track.mixer().pan, 0.0);
+        assert!(
+            targets
+                .iter()
+                .all(|t| main_track.automation_for(t).is_some())
+        );
+
+        let stem = prepare_document_for_track(document, track, false).unwrap();
+        let main_track = stem.track(main).unwrap();
+        assert!(
+            targets
+                .iter()
+                .all(|t| main_track.automation_for(t).is_none())
+        );
+        // Rendering it with the Return and Main effects leaves Main alone.
+        let with_effects = prepare_document_for_track(document, track, true).unwrap();
+        let main_track = with_effects.track(main).unwrap();
+        assert!(
+            targets
+                .iter()
+                .all(|t| main_track.automation_for(t).is_some())
+        );
+    }
+
+    // WP-2.26. Two tracks whose names differ only in case get two
+    // files, as a case-insensitive file system keeps them apart.
+    #[test]
+    fn track_names_that_differ_only_in_case_get_distinct_paths() {
+        let (editor, first, second) = editor_with_tracks("Kick", "kick");
+        let document = editor.document();
+        let tracks = [
+            document.track(first).unwrap(),
+            document.track(second).unwrap(),
+        ];
+        let paths = track_paths(Path::new("out/Mix.wav"), "wav", &tracks);
+        let lower: std::collections::HashSet<_> = paths
+            .iter()
+            .map(|path| path.to_string_lossy().to_lowercase())
+            .collect();
+        assert_eq!(lower.len(), 2, "{paths:?}");
+        assert_eq!(paths[0], Path::new("out/Mix - Kick.wav"));
     }
 
     #[test]

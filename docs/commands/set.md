@@ -499,6 +499,7 @@ Result: [`SaveHistory`](README.md#savehistory).
 | [`set.cancel_pack`](#setcancel_pack) | `set.pack_status` | `job` |
 | [`set.collect_all_and_save`](#setcollect_all_and_save) | the query tool's `song` | `set.unsaved_changes` |
 | [`set.discard_changes`](#setdiscard_changes) | the query tool's `song` | `set.unsaved_changes` |
+| [`set.discard_recovery`](#setdiscard_recovery) | `set.list_recoverable` | `sets` |
 | [`set.import`](#setimport) | the query tool's `song` | `tracks` |
 | [`set.import_dawproject`](#setimport_dawproject) | the query tool's `song` | `set.name` |
 | [`set.new`](#setnew) | the query tool's `song` | `set.name` |
@@ -514,7 +515,6 @@ Result: [`SaveHistory`](README.md#savehistory).
 | Command | Why |
 |---|---|
 | [`set.create_pack`](#setcreate_pack) | writes a file outside the set; the set doesn't change |
-| [`set.discard_recovery`](#setdiscard_recovery) | deletes a recovery file outside the set |
 | [`set.export_clips`](#setexport_clips) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |
 | [`set.export_dawproject`](#setexport_dawproject) | writes a file outside the set; the set doesn't change |
 | [`set.export_tracks`](#setexport_tracks) | the Browser's state is read with `browser.state`, which is `external` because it lists files outside the project |

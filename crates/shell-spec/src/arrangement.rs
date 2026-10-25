@@ -922,7 +922,8 @@ fn specs() -> Vec<CommandSpec> {
              ruler, pauses it until playback starts or stops, or a click lands in the track \
              lanes or the scrub area; `paused` does the same directly. The Sample Editor \
              follows playback on the same switch (Option-Shift-F there too), and so does the \
-             MIDI Note Editor. With no arguments it toggles Follow, which also resumes it. Changes only the view.",
+             MIDI Note Editor. With no arguments it toggles Follow, which also resumes it. \
+             Changes only the view.",
         )
         .contexts([Global, Arrangement, SampleEditor, NoteEditor])
         .binding("S-ZOOM-005")

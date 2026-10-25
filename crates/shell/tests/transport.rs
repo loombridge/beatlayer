@@ -100,6 +100,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
         "transport.set_punch_in",
         "transport.set_punch_out",
         "transport.state",
+        "transport.tap_tempo",
     ]);
     expected.sort_unstable();
     assert_eq!(registered, expected);

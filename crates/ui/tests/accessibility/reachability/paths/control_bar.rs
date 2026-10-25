@@ -17,6 +17,10 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, control_bar, "Stop", Key::Enter),
         ),
         (
+            "transport.tap_tempo",
+            main(nothing, control_bar, "Tap Tempo", Key::Enter),
+        ),
+        (
             "transport.set_loop_enabled",
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),

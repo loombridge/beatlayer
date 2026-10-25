@@ -79,6 +79,29 @@ pub fn plugin_id(format: PluginFormat, device_id: &str) -> Option<String> {
     }
 }
 
+/// A VST3 class ID in 8-4-4-4-12 form with its first three fields
+/// byte-swapped: how the same class prints on Windows, where class IDs are
+/// COM GUIDs (R48).
+#[must_use]
+pub fn swapped_class_id(id: &str) -> Option<String> {
+    let fields: Vec<&str> = id.split('-').collect();
+    let [a, b, c, d, e] = fields[..] else {
+        return None;
+    };
+    if !id.is_ascii() || [a.len(), b.len(), c.len()] != [8, 4, 4] {
+        return None;
+    }
+    let flip = |field: &str| -> String {
+        field
+            .as_bytes()
+            .chunks(2)
+            .rev()
+            .map(|pair| String::from_utf8_lossy(pair).into_owned())
+            .collect()
+    };
+    Some(format!("{}-{}-{}-{d}-{e}", flip(a), flip(b), flip(c)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -95,6 +118,10 @@ mod tests {
             Some("01234567-89AB-CDEF-0123-456789ABCDEF")
         );
         assert_eq!(plugin_id(PluginFormat::Vst3, "nope"), None);
+        assert_eq!(
+            swapped_class_id("01234567-89AB-CDEF-0123-456789ABCDEF").as_deref(),
+            Some("67452301-AB89-EFCD-0123-456789ABCDEF")
+        );
         assert_eq!(
             plugin_id(PluginFormat::AudioUnit, "aufx:dely:appl").as_deref(),
             Some("aufx/dely/appl")

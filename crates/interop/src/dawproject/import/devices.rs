@@ -198,7 +198,12 @@ impl Importer<'_, '_> {
             .plugins
             .installed()
             .iter()
-            .find(|plugin| plugin.format == format && plugin.plugin_id == id)
+            .find(|plugin| {
+                plugin.format == format
+                    && (plugin.plugin_id == id
+                        || format == bl_model::PluginFormat::Vst3
+                            && plugins::swapped_class_id(&id).as_ref() == Some(&plugin.plugin_id))
+            })
             .cloned();
         let state = self.plugin_state(device, format, &id, word, place);
         let file_role = device.role.map(role_of);
@@ -220,7 +225,10 @@ impl Importer<'_, '_> {
                 .map_or(name.clone(), |plugin| plugin.name.clone()),
             DeviceKind::Plugin {
                 format,
-                plugin_id: id,
+                // The scanner's spelling, which its host loads (R48).
+                plugin_id: installed
+                    .as_ref()
+                    .map_or(id, |plugin| plugin.plugin_id.clone()),
             },
         )
         .with_role(role);

@@ -333,11 +333,18 @@ impl Delay {
             let tap_right = has_second
                 .then(|| self.lines[1].tap(base_right, modulation, settings.mode, settings.glide));
             let dry_left = f64::from(first[i]);
+            let dry_right = second.as_deref().map_or(0.0, |right| f64::from(right[i]));
+            let ping_pong = settings.ping_pong && has_second;
             // Freeze stops new input entering the lines; the dry path stays untouched (R7).
-            let input_left = if settings.freeze { 0.0 } else { dry_left };
+            // Ping Pong sums both channels into the left line (R4).
+            let input_left = match (settings.freeze, ping_pong) {
+                (true, _) => 0.0,
+                (false, true) => dry_left + dry_right,
+                (false, false) => dry_left,
+            };
             let output_left = tap_left;
             first[i] = (dry_left * (1.0 - dry_wet) + dry_wet * output_left) as f32;
-            let write_left = if settings.ping_pong && has_second {
+            let write_left = if ping_pong {
                 input_left + feedback * tap_right.unwrap_or(0.0)
             } else {
                 input_left + feedback * tap_left
@@ -350,15 +357,16 @@ impl Delay {
                 settings.rate,
             );
             if let Some(right) = second.as_deref_mut() {
-                let dry = f64::from(right[i]);
-                let input = if settings.freeze { 0.0 } else { dry };
+                let input = if settings.freeze { 0.0 } else { dry_right };
                 let output = tap_right.unwrap_or(0.0);
-                let write = if settings.ping_pong {
-                    input + feedback * tap_left
+                // The left line's repeat crosses at full level; the Feedback is
+                // applied where the right line returns to the left.
+                let write = if ping_pong {
+                    tap_left
                 } else {
                     input + feedback * output
                 };
-                right[i] = (dry * (1.0 - dry_wet) + dry_wet * output) as f32;
+                right[i] = (dry_right * (1.0 - dry_wet) + dry_wet * output) as f32;
                 self.lines[1].push(
                     write,
                     settings.filter_on,

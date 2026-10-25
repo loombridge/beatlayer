@@ -438,29 +438,21 @@ pub(super) fn run(
             Ok(to_value(&view.state(doc, arrangement)))
         }
         ids::MPE_ZOOM => {
+            // Spec: mpe R31, piano-roll R32. Z in the MPE tab: the time
+            // selection and the rows its Pitch values reach.
             let (clip, midi) = clip_and_data(doc, view, arrangement, None)?;
-            let ordered = notes_in_order(&midi);
             let window = view.time_selection(doc, arrangement);
-            let selected = view.selection_of(clip);
-            let reached: Vec<(f64, f64)> = ordered
-                .iter()
-                .enumerate()
-                .filter(|(place, _)| selected.is_empty() || selected.contains(&(*place as u32)))
-                .filter_map(|(_, note)| pitch_rows(note, window))
-                .collect();
-            let low = reached
-                .iter()
-                .map(|rows| rows.0)
-                .fold(f64::INFINITY, f64::min);
-            let high = reached
-                .iter()
-                .map(|rows| rows.1)
-                .fold(f64::NEG_INFINITY, f64::max);
-            if !low.is_finite() {
-                return Err(unavailable("no note lies in the time selection"));
-            }
+            let (low, high) = pitch_reach(&midi, window, view.selection_of(clip))
+                .ok_or_else(|| unavailable("no note lies in the time selection"))?;
             view.zoom_mpe(clip, low, high);
-            Ok(to_value(&view.state(doc, arrangement)))
+            super::note_view::run(
+                ids::NOTE_VIEW,
+                serde_json::json!({ "show": "selection" }),
+                doc,
+                editor,
+                view,
+                arrangement,
+            )
         }
         other => Err(invalid(format!("`{other}` isn't an MPE tab command"))),
     }
@@ -475,6 +467,32 @@ fn view_envelope(view: &ClipView, clip: bl_model::ClipId) -> Expression {
 /// A velocity multiplied by `factor`, held from 1 to 127.
 fn scaled(velocity: u8, factor: f64) -> u8 {
     (f64::from(velocity) * factor).round().clamp(1.0, 127.0) as u8
+}
+
+/// The key rows the Pitch envelopes of the `selected` notes (or all of them
+/// with none selected) reach inside `window`, as semitones above key 0.
+/// `None` when no note lies in the window.
+pub(super) fn pitch_reach(
+    midi: &bl_model::MidiData,
+    window: Option<(Ticks, Ticks)>,
+    selected: &[u32],
+) -> Option<(f64, f64)> {
+    let ordered = notes_in_order(midi);
+    let reached: Vec<(f64, f64)> = ordered
+        .iter()
+        .enumerate()
+        .filter(|(place, _)| selected.is_empty() || selected.contains(&(*place as u32)))
+        .filter_map(|(_, note)| pitch_rows(note, window))
+        .collect();
+    let low = reached
+        .iter()
+        .map(|rows| rows.0)
+        .fold(f64::INFINITY, f64::min);
+    let high = reached
+        .iter()
+        .map(|rows| rows.1)
+        .fold(f64::NEG_INFINITY, f64::max);
+    low.is_finite().then_some((low, high))
 }
 
 /// The key rows a note's Pitch envelope reaches inside `window` (or the whole

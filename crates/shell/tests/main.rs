@@ -79,6 +79,7 @@ mod multi_output;
 mod multiband_dynamics;
 mod multisampler;
 mod note_filters;
+mod note_view;
 mod offline_plugins;
 mod offline_vst3_au;
 mod packs;

@@ -111,7 +111,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["W"]
 win = ["W"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.note_view", contexts = ["note-editor"], args = { show = "whole" } },
+]
 
 [[shortcut]]
 id = "S-NOTE-010"
@@ -122,7 +125,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["H"]
 win = ["H"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.note_view", contexts = ["note-editor"], args = { show = "height" } },
+]
 
 [[shortcut]]
 id = "S-NOTE-011"
@@ -161,7 +167,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["PageUp", "PageDown"]
 win = ["PageUp", "PageDown"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Page Up and Page Down scroll the key rows by an octave (`clip_view.note_view`)"
 
 [[shortcut]]
 id = "S-NOTE-014"
@@ -172,7 +179,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+PageUp", "Shift+PageDown"]
 win = ["Shift+PageUp", "Shift+PageDown"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Shift-Page Up and Shift-Page Down scroll the key rows by one row (`clip_view.note_view`)"
 
 [[shortcut]]
 id = "S-NOTE-015"
@@ -183,7 +191,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+PageUp", "Cmd+PageDown"]
 win = ["Ctrl+PageUp", "Ctrl+PageDown"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Cmd-Page Up and Cmd-Page Down scroll time by the note area's width (`clip_view.note_view`)"
 
 [[shortcut]]
 id = "S-NOTE-016"
@@ -254,7 +263,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+Shift+F"]
 win = ["Alt+Shift+F"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.follow", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-022"
@@ -265,7 +277,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Shift+Left", "Shift+Right"]
 win = ["Shift+Left", "Shift+Right"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: with the Start or End marker selected, Shift-Left and Shift-Right move the clip's region by one step of the editing grid (`clip.set_midi_region`)"
 
 [[shortcut]]
 id = "S-NOTE-023"
@@ -278,7 +291,7 @@ mac = ["Z"]
 win = ["Z"]
 status = "bound"
 commands = [
-  { id = "clip_view.mpe_zoom", contexts = ["note-editor"] },
+  { id = "clip_view.note_view", contexts = ["note-editor"], args = { show = "selection" } },
 ]
 
 [[shortcut]]
@@ -290,7 +303,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["X"]
 win = ["X"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "clip_view.note_view", contexts = ["note-editor"], args = { show = "back" } },
+]
 
 [[shortcut]]
 id = "S-NOTE-025"
@@ -301,7 +317,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Plus", "Minus"]
 win = ["Plus", "Minus"]
-status = "pending"
+status = "widget"
+handler = "the Clip View's note editor: Plus and Minus zoom time in and out about the time selection or the insert marker (`clip_view.note_view`)"
 
 [[shortcut]]
 id = "S-NOTE-026"

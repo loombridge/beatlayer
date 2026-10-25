@@ -588,6 +588,23 @@ impl Shell {
                     .shown_clip(self.editor.document(), &self.arrangement)
                     .is_some();
             }
+            // Spec: piano-roll R37. The clip markers are the MIDI Note
+            // Editor's; the Sample Editor's shortcuts share their keys.
+            note_ids::SET_MARKER => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some();
+            }
+            // Spec: piano-roll R39. The …Time commands need a span: a time
+            // selection, or the call's own.
+            note_ids::DUPLICATE_TIME | note_ids::INSERT_TIME | note_ids::DELETE_TIME => {
+                return args.get("start").is_some_and(|start| !start.is_null())
+                    || self
+                        .clip_view
+                        .time_selection(self.editor.document(), &self.arrangement)
+                        .is_some();
+            }
             // Spec: mpe R27, R29, R31. The tab's own keys work in the tab.
             // Cmd-A takes the breakpoints only while an envelope has the
             // keyboard, and selects the notes otherwise.

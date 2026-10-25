@@ -987,24 +987,6 @@ pub fn pan_text(pan: f64) -> String {
     }
 }
 
-/// The colour of swatch `index` of a chain's palette: the theme's track
-/// colours across, each row lighter or darker than the last (racks spec,
-/// R26).
-#[must_use]
-pub fn swatch(theme: &Theme, index: u8) -> Color32 {
-    let palette = &theme.colors.track_palette;
-    let column = usize::from(index) % PALETTE_COLUMNS;
-    let row = usize::from(index) / PALETTE_COLUMNS;
-    let base = palette[column % palette.len()].0;
-    let mix: f32 = [0.0, 0.3, 0.6, -0.3, -0.5][row.min(4)];
-    let towards = if mix < 0.0 {
-        Color32::BLACK
-    } else {
-        Color32::WHITE
-    };
-    base.lerp_to_gamma(towards, mix.abs())
-}
-
 fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(Invocation::new(id, args)));
 }
@@ -1808,7 +1790,7 @@ impl DeviceViewUi {
             f32::from(zone.high) + 1.0 - f32::from(zone.fade_high),
         );
         let (top, bottom) = (row.top() + 2.0, row.bottom() - 1.0);
-        let colour = chain.colour.map_or(c.control_hover.0, |n| swatch(theme, n));
+        let colour = chain.colour.map_or(c.control_hover.0, |n| theme.swatch(n));
         painter.add(Shape::convex_polygon(
             vec![
                 pos2(left, bottom),
@@ -2114,7 +2096,7 @@ impl DeviceViewUi {
         let steps = info.map_or(bl_model::MACRO_STEPS_DEFAULT, |m| m.steps);
         let colour = info
             .and_then(|m| m.colour)
-            .map_or(c.accent.0, |index| swatch(theme, index));
+            .map_or(c.accent.0, |index| theme.swatch(index));
         let response = if style == bl_model::MacroStyle::RadioButtons {
             // Spec: macros R23. A radio-button macro draws its steps as
             // buttons in the knob's place.
@@ -2218,23 +2200,27 @@ impl DeviceViewUi {
                 });
             });
             ui.menu_button("Colour", |ui| {
-                for index in 0..PALETTE_COLUMNS as u8 {
-                    let at = Rect::from_min_size(ui.cursor().min, vec2(14.0, 14.0));
-                    let response = ui.allocate_rect(at, Sense::click());
-                    ui.painter()
-                        .rect_filled(at.shrink(1.0), 0.0, swatch(theme, index));
-                    if response.clicked() {
-                        invoke(
-                            events,
-                            "rack.set_macro_colour",
-                            json!({
-                                "rack": frame.id,
-                                "macro_number": item.number,
-                                "colour": index,
-                            }),
-                        );
-                        ui.close();
-                    }
+                let current = shell
+                    .editor()
+                    .document()
+                    .device(frame.id)
+                    .and_then(|rack| rack.macros.setting(item.number).colour);
+                if let Some(colour) = crate::palette::show(
+                    ui,
+                    theme,
+                    ("macro-colour", frame.id, item.number),
+                    current,
+                ) {
+                    invoke(
+                        events,
+                        "rack.set_macro_colour",
+                        json!({
+                            "rack": frame.id,
+                            "macro_number": item.number,
+                            "colour": colour,
+                        }),
+                    );
+                    ui.close();
                 }
             });
             if ui.button("None").clicked() {
@@ -2752,7 +2738,7 @@ impl DeviceViewUi {
         painter.rect_filled(rects.row, theme.sizes.corner, face);
         if let Some(colour) = row.colour {
             let stripe = Rect::from_min_size(rects.row.min, vec2(3.0, rects.row.height()));
-            painter.rect_filled(stripe, 0.0, swatch(theme, colour));
+            painter.rect_filled(stripe, 0.0, theme.swatch(colour));
         }
         let entered = response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         if response.clicked() || response.secondary_clicked() || entered {
@@ -3365,47 +3351,14 @@ impl DeviceViewUi {
 
     /// The colour palette: 5 rows of 14 swatches, the chain's ticked.
     fn chain_palette(&self, ui: &mut Ui, theme: &Theme, row: &ChainRow, events: &mut Vec<UiEvent>) {
-        let size = 12.0;
-        let (area, _) = ui.allocate_exact_size(
-            vec2(PALETTE_COLUMNS as f32 * (size + 2.0), 5.0 * (size + 2.0)),
-            Sense::hover(),
-        );
-        for index in 0..bl_model::CHAIN_COLOURS {
-            let (column, line) = (
-                usize::from(index) % PALETTE_COLUMNS,
-                usize::from(index) / PALETTE_COLUMNS,
+        if let Some(colour) = crate::palette::show(ui, theme, ("chain-colour", row.id), row.colour)
+        {
+            invoke(
+                events,
+                "chain.set_colour",
+                json!({ "chain": row.id, "colour": colour }),
             );
-            let at = Rect::from_min_size(
-                area.min + vec2(column as f32 * (size + 2.0), line as f32 * (size + 2.0)),
-                vec2(size, size),
-            );
-            let id = Id::new(("chain-colour", row.id, index));
-            let response = ui.interact(at, id, Sense::click());
-            ui.painter().rect_filled(at, 2.0, swatch(theme, index));
-            if row.colour == Some(index) {
-                ui.painter().rect_stroke(
-                    at,
-                    2.0,
-                    Stroke::new(1.5, theme.colors.text.0),
-                    StrokeKind::Inside,
-                );
-            }
-            response.widget_info(|| {
-                WidgetInfo::selected(
-                    WidgetType::Button,
-                    true,
-                    row.colour == Some(index),
-                    format!("Colour {}", index + 1),
-                )
-            });
-            if response.clicked() {
-                invoke(
-                    events,
-                    "chain.set_colour",
-                    json!({ "chain": row.id, "colour": index }),
-                );
-                ui.close();
-            }
+            ui.close();
         }
     }
 }

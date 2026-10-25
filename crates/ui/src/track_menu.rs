@@ -13,16 +13,12 @@ use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::context_menus::{self, TrackMenu};
 use bl_shell::menus::shown;
 use bl_shell::{Invocation, MainView, Shell};
-use egui::accesskit::Role;
-use egui::{Color32, Context, Id, Key, Pos2, Rect, Response, Sense, Ui, WidgetInfo, WidgetType};
+use egui::{Context, Id, Key, Pos2, Rect, Response, Ui};
 use serde_json::json;
 
 use crate::keymap::{Keymap, Platform};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-
-/// The colour palette's swatches: 5 rows of 14 (C-TRACK-015).
-const PALETTE: (usize, usize) = (5, 14);
 
 /// The keymap the track menus' keys come from.
 #[derive(Debug)]
@@ -124,16 +120,28 @@ impl TrackMenus {
                 continue;
             }
             let package = context_menus::pending_package(item.row);
+            // Spec: themes R16, R26. The palette colours the selected tracks.
             if item.row == "C-TRACK-015" {
-                palette(ui, theme, package.unwrap_or_default());
+                let current = doc.track(track).map(bl_model::Track::colour);
+                if let Some(colour) = crate::palette::show(ui, theme, "track-colour", current) {
+                    events.push(UiEvent::Invoke(Invocation::new(
+                        "track.set_colour",
+                        json!({ "tracks": view.selected_tracks(), "colour": colour }),
+                    )));
+                    ui.close();
+                }
                 continue;
             }
+            // Spec: themes R17, R26. The assign items act on the selection.
+            let selection = matches!(item.row, "C-TRACK-016" | "C-TRACK-017b")
+                .then(|| json!({ "tracks": view.selected_tracks() }));
             // Spec: linked-track editing R3. Cmd (Ctrl) held on Link Tracks in
             // a linked track's menu adds the selection to its group.
             let into = (item.row == "C-TRACK-018a"
                 && ui.input(|i| i.modifiers.command)
                 && doc.track(track).is_some_and(|t| t.link().is_some()))
-            .then(|| json!({ "into": track }));
+            .then(|| json!({ "into": track }))
+            .or(selection);
             let response = crate::menus::item_in_with_args(
                 ui,
                 item,
@@ -183,41 +191,6 @@ pub fn open_device_view(shell: &Shell, track: TrackId, events: &mut Vec<UiEvent>
             .into_iter()
             .map(UiEvent::Invoke),
     );
-}
-
-/// The colour palette (C-TRACK-015), drawn in place and disabled until
-/// tracks have colours: its swatches dimmed, as one control that names the
-/// package.
-fn palette(ui: &mut Ui, theme: &Theme, package: &str) {
-    let (rows, columns) = PALETTE;
-    let size = egui::vec2(14.0 * columns as f32, 14.0 * rows as f32);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
-    let painter = ui.painter_at(rect);
-    for row in 0..rows {
-        for column in 0..columns {
-            let hue = column as f32 / columns as f32;
-            let value = 1.0 - row as f32 * 0.12;
-            let swatch = Rect::from_min_size(
-                rect.min + egui::vec2(column as f32, row as f32) * 14.0,
-                egui::vec2(14.0, 14.0),
-            );
-            let colour = Color32::from(egui::ecolor::Hsva::new(hue, 0.5, value, 1.0));
-            painter.rect_filled(swatch.shrink(1.0), 0.0, colour.gamma_multiply(0.4));
-        }
-    }
-    painter.rect_stroke(
-        rect,
-        0.0,
-        egui::Stroke::new(1.0, theme.colors.separator.0),
-        egui::StrokeKind::Inside,
-    );
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, false, "Colour palette"));
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_role(Role::Group);
-        node.set_label("Colour palette".to_owned());
-        node.set_disabled();
-        node.set_description(format!("Not built yet: arrives with {package}."));
-    });
 }
 
 /// A name being typed in a track's title bar.

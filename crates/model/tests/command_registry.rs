@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        256,
+        261,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -95,7 +95,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour"
     );
 
     for op in &ops {
@@ -203,6 +203,12 @@ fn every_command_runs_by_id() {
         json!({ "track": bass, "parent": group, "index": 0 }),
     );
     agent.run("track.rename", json!({ "track": drums, "name": "Break" }));
+    // Spec: themes R25.
+    agent.run(
+        "track.set_colour",
+        json!({ "tracks": [drums], "colour": 16 }),
+    );
+    assert_eq!(agent.editor.document().track(drums).unwrap().colour(), 16);
     agent.run(
         "track.set_frozen",
         json!({ "frozen": [[drums, { "clips": [], "tails": [], "output": null }]] }),
@@ -638,6 +644,32 @@ fn every_command_runs_by_id() {
         json!({ "clip": riff, "length": bar * 2 }),
     );
     agent.run("clip.rename", json!({ "clip": riff, "name": "Riff" }));
+    // Spec: themes R25. The clip took its track's colour as it went in.
+    let own = agent.editor.document().track(bass).unwrap().colour();
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(own)
+    );
+    agent.run("clip.set_colour", json!({ "clips": [riff], "colour": 40 }));
+    assert_eq!(agent.editor.document().clip(riff).unwrap().colour, Some(40));
+    agent.run("track.assign_colour_to_clips", json!({ "tracks": [bass] }));
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(own)
+    );
+    agent.run(
+        "track.assign_colour_to_grouped",
+        json!({ "tracks": [group] }),
+    );
+    let inside = agent.editor.document().track(group).unwrap().colour();
+    assert_eq!(
+        agent.editor.document().track(bass).unwrap().colour(),
+        inside
+    );
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().colour,
+        Some(inside)
+    );
     agent.run("clip.set_mute", json!({ "clip": riff, "mute": true }));
     agent.run(
         "clip.set_data",
@@ -1170,6 +1202,14 @@ fn every_command_runs_by_id() {
 
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
+    agent.run(
+        "scene.set_colour",
+        json!({ "scenes": [first], "colour": 55 }),
+    );
+    assert_eq!(
+        agent.editor.document().scene(first).unwrap().colour,
+        Some(55)
+    );
     agent.run("scene.set_tempo", json!({ "scene": first, "tempo": 96.5 }));
     agent.run(
         "scene.set_follow_actions",
@@ -3846,6 +3886,39 @@ fn schemas_match_what_commands_serialise() {
             "chain.set_colour",
             Command::SetChainColour {
                 chain: ChainId(fresh_id),
+                colour: Some(3),
+            },
+        ),
+        (
+            "track.set_colour",
+            Command::SetTrackColour {
+                tracks: vec![track],
+                colour: 3,
+            },
+        ),
+        (
+            "track.assign_colour_to_clips",
+            Command::AssignColourToClips {
+                tracks: vec![track],
+            },
+        ),
+        (
+            "track.assign_colour_to_grouped",
+            Command::AssignColourToGrouped {
+                tracks: vec![track],
+            },
+        ),
+        (
+            "clip.set_colour",
+            Command::SetClipColour {
+                clips: vec![clip],
+                colour: 3,
+            },
+        ),
+        (
+            "scene.set_colour",
+            Command::SetSceneColour {
+                scenes: vec![scene],
                 colour: Some(3),
             },
         ),

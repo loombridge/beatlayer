@@ -79,6 +79,7 @@ pub mod clip_drag;
 pub mod clip_envelope_edit;
 pub mod clip_files;
 pub mod clip_view;
+pub mod colours;
 pub mod dawproject;
 pub mod detail;
 pub mod devices;

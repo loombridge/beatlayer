@@ -477,6 +477,7 @@ impl Shell {
         let Some(job) = self.autosample.take() else {
             return Ok(());
         };
+        let look = &self.prefs.look;
         let (device, track) = self
             .editor
             .transact(ids::STEP, |editor| {
@@ -501,6 +502,7 @@ impl Shell {
                     parent,
                     index: below,
                 })?;
+                crate::colours::colour_new(editor, look, &[track], &[])?;
                 let device: DeviceId = editor.new_id();
                 let index = crate::devices::default_index(
                     editor.document(),

@@ -193,6 +193,7 @@ impl Shell {
             id: source,
             kind: from.kind(),
             name: name.clone(),
+            colour: from.colour(),
             mixer: *from.mixer(),
             sends: Vec::new(),
             routing: from.routing().clone(),
@@ -228,6 +229,7 @@ impl Shell {
                         parent: None,
                         index: top,
                     })?;
+                    crate::colours::colour_new(editor, &self.prefs.look, &[track], &[])?;
                 }
                 for device in &chain {
                     // New IDs for the device and everything in its racks; its

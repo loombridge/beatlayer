@@ -51,6 +51,24 @@ impl Shell {
                 ),
             });
         }
+        // Spec: themes R19, R23. A track made new takes the colour the
+        // settings give, in the step that makes it.
+        if let Some(created @ bl_model::Command::CreateTrack { id: track, .. }) = &command {
+            let look = &self.prefs.look;
+            return self
+                .editor
+                .transact(created.label(), |editor| {
+                    let changes =
+                        model::run(editor, id, args).map_err(|error| error.to_string())?;
+                    crate::colours::colour_new(editor, look, &[*track], &[])
+                        .map_err(|error| error.to_string())?;
+                    Ok::<_, String>(changes)
+                })
+                .map_err(|message| ShellError::Failed {
+                    command: id.to_owned(),
+                    message,
+                });
+        }
         let edit = command
             .as_ref()
             .and_then(|command| self.macro_edit(command));

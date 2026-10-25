@@ -864,6 +864,77 @@ fn context_menus_reach_the_edits_and_the_grid() {
     assert!(!s.state().grid.fixed);
 }
 
+// Spec: themes R16, R18, R22. A clip's menu ends with the colour palette:
+// the clip's own swatch is selected, choosing one colours the selected clips
+// in one step, and the clip is drawn in the colour it has.
+#[test]
+fn the_clip_menu_ends_with_the_palette_and_a_clip_is_drawn_in_its_colour() {
+    let mut s = set();
+    let a = s.a;
+    let own =
+        s.h.shell
+            .editor()
+            .document()
+            .clip(a)
+            .unwrap()
+            .colour
+            .unwrap();
+    let output = s.right_click(pos2(x(3.0), AUDIO_3.1));
+    let nodes = Harness::nodes(&output);
+    let swatches: Vec<_> = nodes
+        .iter()
+        .filter(|n| n.label.starts_with("Row "))
+        .collect();
+    assert_eq!(swatches.len(), 70);
+    let ticked: Vec<_> = swatches
+        .iter()
+        .filter(|n| n.selected == Some(true) || n.toggled == Some(true))
+        .collect();
+    assert_eq!(ticked.len(), 1);
+    assert_eq!(
+        ticked[0].label,
+        format!("Row {}, colour {}", own / 14 + 1, own % 14 + 1)
+    );
+    // The palette is the last thing in the menu, under the grid choices.
+    let place = |label: &str| nodes.iter().position(|n| names(&n.label, label)).unwrap();
+    assert!(place("Triplet Grid") < place("Row 1, colour 1"));
+
+    let b = Harness::node(&nodes, "Row 4, colour 6").bounds.unwrap();
+    s.click(
+        pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+        Modifiers::NONE,
+    );
+    assert_eq!(
+        s.h.shell.editor().document().clip(a).unwrap().colour,
+        Some(3 * 14 + 5)
+    );
+    assert_eq!(s.undo_label().as_deref(), Some("Change Clip Color"));
+    // The other clip keeps its colour, and the lanes draw the new one.
+    let other = s.h.shell.editor().document().clip(s.b).unwrap().colour;
+    assert_eq!(
+        other,
+        Some(
+            s.h.shell
+                .editor()
+                .document()
+                .track(s.tracks[3])
+                .unwrap()
+                .colour()
+        )
+    );
+    s.h.settle();
+    let wanted = s.h.theme.swatch(3 * 14 + 5).to_array();
+    let shared = s.h.main.arrangement().shared();
+    let frame = lock(&shared);
+    assert!(
+        frame.slots[Slot::Lanes as usize]
+            .rects
+            .iter()
+            .any(|r| r.color == wanted),
+        "the clip's body is its colour"
+    );
+}
+
 /// The state of the menu item `row`.
 fn menu_item(s: &Set, row: &str) -> bl_ui::menus::ItemState {
     let menus = bl_shell::menus::menu_bar(bl_shell::menus::MenuPlatform::current());

@@ -149,6 +149,219 @@ fn last_step(h: &Harness) -> String {
         .to_owned()
 }
 
+/// The palette's swatch buttons in the menu, by their names.
+fn swatches(nodes: &[Node]) -> Vec<Node> {
+    nodes
+        .iter()
+        .filter(|n| n.role == Role::Button && n.label.starts_with("Row "))
+        .cloned()
+        .collect()
+}
+
+fn swatch_named(nodes: &[Node], row: usize, column: usize) -> Node {
+    let name = format!("Row {row}, colour {column}");
+    swatches(nodes)
+        .into_iter()
+        .find(|n| n.label == name)
+        .unwrap_or_else(|| panic!("no swatch {name:?}"))
+}
+
+fn click_node(h: &mut Harness, node: &Node) {
+    let b = node.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+}
+
+// Spec: themes R15, R16, R22, R26. The track menu ends with the colour
+// palette: one grid of 70 named swatches with the track's own selected,
+// which colours the selected tracks as one undo step.
+#[test]
+fn the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks() {
+    let mut h = arrangement();
+    let all = tracks(&h);
+    let audio = all[2];
+    let own = h.shell.editor().document().track(audio).unwrap().colour();
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+
+    let grid = nodes
+        .iter()
+        .find(|n| n.role == Role::Grid && n.label == "Colour palette")
+        .expect("the palette is one control in the tree");
+    assert_eq!(grid.children.len(), 70, "a grid of 70 buttons");
+    let buttons = swatches(&nodes);
+    assert_eq!(buttons.len(), 70);
+    let ticked: Vec<_> = buttons
+        .iter()
+        .filter(|n| n.selected == Some(true) || n.toggled == Some(true))
+        .collect();
+    assert_eq!(ticked.len(), 1, "one swatch is selected");
+    let (row, column) = (usize::from(own) / 14 + 1, usize::from(own) % 14 + 1);
+    assert_eq!(ticked[0].label, format!("Row {row}, colour {column}"));
+
+    h.take_events();
+    click_node(&mut h, &swatch_named(&nodes, 3, 4));
+    assert!(invoked(&mut h, "track.set_colour"));
+    assert_eq!(
+        h.shell.editor().document().track(audio).unwrap().colour(),
+        2 * 14 + 3
+    );
+    assert_eq!(last_step(&h), "Change Track Color");
+    assert!(
+        !egui::Popup::is_any_open(&h.ctx),
+        "choosing closes the menu"
+    );
+
+    // Several selected tracks take it together, in one step.
+    h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [all[0], all[2]], "title_bars": true }),
+        )
+        .unwrap();
+    h.settle();
+    let steps = h.shell.editor().undo_history().len();
+    let at = header_title(&mut h, "3 Audio");
+    let nodes = Harness::nodes(&right_click(&mut h, at));
+    click_node(&mut h, &swatch_named(&nodes, 5, 14));
+    let doc = h.shell.editor().document();
+    assert_eq!(doc.track(all[0]).unwrap().colour(), 69);
+    assert_eq!(doc.track(all[2]).unwrap().colour(), 69);
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+}
+
+/// The label of the node that has the keyboard in `output`.
+fn focused_label(output: &FullOutput) -> String {
+    let focus = output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .unwrap()
+        .focus;
+    Harness::nodes(output)
+        .into_iter()
+        .find(|n| n.id == focus)
+        .map(|n| n.label)
+        .unwrap_or_default()
+}
+
+// Spec: themes R22. From a menu the keys opened, Tab reaches the palette, the
+// arrow keys move between its swatches and Enter chooses one.
+#[test]
+fn the_palette_is_reached_from_the_keyboard() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    let at = header_title(&mut h, "3 Audio");
+    h.click(at);
+    h.settle();
+    h.ctx.memory_mut(|m| m.request_focus(main_view_id()));
+    h.settle();
+    if cfg!(target_os = "macos") {
+        h.key(Key::M, Modifiers::CTRL | Modifiers::ALT | Modifiers::SHIFT);
+    } else {
+        h.key(Key::F10, Modifiers::SHIFT);
+    }
+    let mut output = h.settle();
+    assert!(egui::Popup::is_any_open(&h.ctx));
+    for _ in 0..80 {
+        if focused_label(&output).starts_with("Row ") {
+            break;
+        }
+        h.key(Key::Tab, Modifiers::NONE);
+        output = h.settle();
+    }
+    let first = focused_label(&output);
+    assert!(
+        first.starts_with("Row "),
+        "Tab reaches the palette: {first}"
+    );
+    assert_eq!(first, "Row 1, colour 1");
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    let output = h.settle();
+    assert_eq!(focused_label(&output), "Row 1, colour 2");
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    let output = h.settle();
+    assert_eq!(focused_label(&output), "Row 2, colour 2");
+    // Up and Down leave the palette by its first and last rows, to the
+    // menu's items around it.
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 1, colour 2");
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    let above = focused_label(&h.settle());
+    assert!(!above.is_empty() && !above.starts_with("Row "), "{above}");
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 1, colour 1");
+    for _ in 0..4 {
+        h.key(Key::ArrowDown, Modifiers::NONE);
+    }
+    assert_eq!(focused_label(&h.settle()), "Row 5, colour 1");
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert!(focused_label(&h.settle()).starts_with("Assign Track Color to Clips"));
+    // Back in, then to the swatch the test chooses.
+    h.key(Key::ArrowUp, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 1, colour 1");
+    h.key(Key::ArrowRight, Modifiers::NONE);
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    assert_eq!(focused_label(&h.settle()), "Row 2, colour 2");
+    h.take_events();
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert!(invoked(&mut h, "track.set_colour"));
+    assert_eq!(
+        h.shell.editor().document().track(audio).unwrap().colour(),
+        14 + 1
+    );
+}
+
+// Spec: themes R17, R26. Assign Track Color to Clips gives each clip of the
+// selected tracks the track's colour, in one undo step.
+#[test]
+fn assign_track_color_to_clips_gives_the_clips_the_tracks_colour() {
+    let mut h = arrangement();
+    let audio = tracks(&h)[2];
+    let clip: bl_model::ClipId = h.shell.new_id();
+    h.shell
+        .run(
+            "clip.create",
+            json!({
+                "track": audio,
+                "clip": bl_model::Clip::new(
+                    clip,
+                    bl_core::time::Ticks::ZERO,
+                    bl_core::time::Ticks::WHOLE,
+                    bl_model::ClipData::Audio(bl_model::AudioData::new(
+                        bl_model::ContentHash([5; 32]),
+                    )),
+                ),
+            }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "track.set_colour",
+            json!({ "tracks": [audio], "colour": 44 }),
+        )
+        .unwrap();
+    assert_ne!(
+        h.shell.editor().document().clip(clip).unwrap().colour,
+        Some(44)
+    );
+    h.settle();
+    let at = header_title(&mut h, "3 Audio");
+    right_click(&mut h, at);
+    h.take_events();
+    choose(&mut h, "Assign Track Color to Clips");
+    assert!(invoked(&mut h, "track.assign_colour_to_clips"));
+    assert_eq!(
+        h.shell.editor().document().clip(clip).unwrap().colour,
+        Some(44)
+    );
+    assert_eq!(last_step(&h), "Assign Track Color to Clips");
+}
+
 // Spec: track-context-menu R1, R6, R10 (C-TRACK-001 to C-TRACK-016)
 #[test]
 fn the_menu_lists_lives_items_and_names_later_packages() {
@@ -195,8 +408,6 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
         ("Edit Info Text", "WP-2.24"),
         ("Select Track Content", "not planned"),
         ("Save as Default MIDI Track", "not planned"),
-        ("Assign Track Color to Clips", "track colours"),
-        ("Colour palette", "track colours"),
     ] {
         let node = item(&nodes, label);
         assert!(node.disabled, "{label} waits");
@@ -525,12 +736,10 @@ fn a_group_and_a_time_selection_add_their_items() {
     let at = header_title(&mut h, "Group");
     let nodes = Harness::nodes(&right_click(&mut h, at));
     assert!(!item(&nodes, "Ungroup Tracks").disabled);
-    for label in [
-        "Bounce Group to New Track",
-        "Assign Track Color to Grouped Tracks and Clips",
-    ] {
-        assert!(item(&nodes, label).disabled, "{label}");
-    }
+    // Spec: themes R17, R26. A group's Assign Track Color to Grouped Tracks
+    // and Clips works; Bounce Group waits for a clip.
+    assert!(item(&nodes, "Bounce Group to New Track").disabled);
+    assert!(!item(&nodes, "Assign Track Color to Grouped Tracks and Clips").disabled);
     choose(&mut h, "Ungroup Tracks");
     assert!(
         tracks(&h)

@@ -9,6 +9,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
+        // The scene's colour palette comes with the Session View's context
+        // menus (the themes spec, R16).
+        (
+            "scene.set_colour",
+            Exception(LaterView(
+                "the scene's context menu and its colour palette, which come with the Session \
+                 View's context menus (WP-6.56)",
+            )),
+        ),
         (
             "session.scroll",
             Exception(Equivalent(

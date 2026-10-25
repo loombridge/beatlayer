@@ -35,10 +35,10 @@ use bl_commands::Context;
 use bl_core::time::Ticks;
 use bl_model::MpeLane;
 use bl_model::registry::{SET_MIDI_LOOP, SET_MIDI_REGION};
-use bl_model::{ClipData, ClipId, Document, MidiData, Note};
+use bl_model::{ClipData, ClipId, Document, MidiData, Note, NoteSpelling, Scale};
 use bl_shell::arrangement::ArrangementView;
 use bl_shell::arrangement_commands::{AdaptiveGrid, FixedGrid};
-use bl_shell::clip_view::{move_limits, notes_in_order, resize_limit, span};
+use bl_shell::clip_view::{Fold, move_limits, notes_in_order, resize_limit, span};
 use bl_shell::context_menus;
 use bl_shell::menus::{Action, MenuItem, shown};
 use bl_shell::note_commands as ids;
@@ -369,14 +369,11 @@ pub(crate) fn paint_grid_lines(
 /// rows that hold notes while it's folded (F).
 #[must_use]
 pub fn shown_keys(folded: bool, notes: &[Note]) -> Vec<u8> {
-    if !folded {
-        return (0..=127u8).rev().collect();
+    Fold {
+        notes: folded,
+        scale: None,
     }
-    let mut keys: Vec<u8> = notes.iter().map(|note| note.key).collect();
-    keys.sort_unstable();
-    keys.dedup();
-    keys.reverse();
-    keys
+    .keys(notes.iter().map(|note| note.key))
 }
 
 /// Where a key's row starts in `grid`, with `top` the key at the grid's
@@ -405,10 +402,11 @@ struct KeyRows {
 }
 
 impl KeyRows {
-    fn of(folded: bool, notes: &[Note], top: f32, first: f32) -> Self {
+    /// The rows `fold` leaves, the notes being the ones held.
+    fn of(fold: Fold, notes: &[Note], top: f32, first: f32) -> Self {
         Self {
-            keys: shown_keys(folded, notes),
-            folded,
+            keys: fold.keys(notes.iter().map(|note| note.key)),
+            folded: fold.on(),
             top,
             first,
             height: KEY_HEIGHT,
@@ -844,10 +842,52 @@ impl NoteMenus {
     }
 }
 
+/// What the key track and the note area show of the shown clip's scale, and
+/// how they spell keys (the scales spec, R21, R22, R24).
+#[derive(Clone, Copy, Debug)]
+struct KeyStyle {
+    scale: Scale,
+    highlight: bool,
+    spelling: NoteSpelling,
+}
+
+impl KeyStyle {
+    fn of(shell: &Shell, clip: ClipId) -> Self {
+        let view = shell.clip_view();
+        Self {
+            scale: shell
+                .editor()
+                .document()
+                .clip(clip)
+                .map_or_else(Scale::default, |clip| clip.scale),
+            highlight: view.highlight_scales(),
+            spelling: view.note_spelling(),
+        }
+    }
+
+    /// Whether `key` is a key of the clip's scale; none is while Scale Mode
+    /// is off.
+    fn in_scale(&self, key: u8) -> bool {
+        self.scale.enabled && self.scale.holds(key)
+    }
+
+    fn is_root(&self, key: u8) -> bool {
+        self.in_scale(key) && key % 12 == self.scale.root
+    }
+
+    fn name(&self, key: u8) -> String {
+        self.spelling.key_name(key, &self.scale)
+    }
+}
+
 /// Paints the key track left of `grid`: white and black keys, each named when
 /// its row has the room, the C rows otherwise. Folded, only the rows that
-/// hold notes show, one under the next (F).
-fn paint_key_track(painter: &egui::Painter, theme: &Theme, grid: Rect, rows: &KeyRows) {
+/// hold notes show, one under the next (F). The keys of the clip's scale are
+/// marked, and with Highlight Scales on the root more strongly (the scales
+/// spec, R21, R22); each key is named for assistive technology with whether
+/// it is in the scale and the root (R25).
+fn paint_key_track(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &KeyStyle) {
+    let painter = ui.painter();
     let colours = &theme.colors;
     let named = |key: u8| rows.height >= 7.0 || key.is_multiple_of(12);
     for (row, key) in rows.keys.iter().enumerate() {
@@ -870,6 +910,18 @@ fn paint_key_track(painter: &egui::Painter, theme: &Theme, grid: Rect, rows: &Ke
                 colours.control.0
             },
         );
+        if style.in_scale(key) {
+            // The root is filled when Highlight Scales is on; every scale
+            // key has a stripe along its left edge.
+            if style.highlight && style.is_root(key) {
+                painter.rect_filled(rect, 0.0, colours.scale.0.gamma_multiply(0.6));
+            }
+            painter.rect_filled(
+                Rect::from_min_size(rect.min, vec2(3.0, rect.height())),
+                0.0,
+                colours.scale.0,
+            );
+        }
         painter.line_segment(
             [rect.left_bottom(), rect.right_bottom()],
             Stroke::new(1.0, colours.lane_line.0),
@@ -878,11 +930,45 @@ fn paint_key_track(painter: &egui::Painter, theme: &Theme, grid: Rect, rows: &Ke
             painter.text(
                 pos2(rect.right() - 2.0, rect.center().y),
                 Align2::RIGHT_CENTER,
-                key_name(key),
+                style.name(key),
                 theme.small_font(),
                 colours.text_dim.0,
             );
         }
+        let item = ui.interact(rect, Id::new(("piano-ruler-key", key)), Sense::hover());
+        ui.ctx().accesskit_node_builder(item.id, |node| {
+            node.set_role(egui::accesskit::Role::ListItem);
+            node.set_label(style.name(key));
+            // With Scale Mode off there is no scale to be in.
+            if style.scale.enabled {
+                let state = match (style.in_scale(key), style.is_root(key)) {
+                    (true, true) => "in the scale, the root",
+                    (true, false) => "in the scale",
+                    _ => "not in the scale",
+                };
+                node.set_value(state.to_owned());
+            }
+        });
+    }
+}
+
+/// Shades the rows of the clip's scale across `grid` while Highlight Scales
+/// is on (the scales spec, R22).
+fn paint_scale_rows(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows, style: &KeyStyle) {
+    if !style.highlight || !style.scale.enabled {
+        return;
+    }
+    for (row, key) in rows.keys.iter().enumerate() {
+        let y0 = rows.y_of_row(grid, row);
+        if !style.in_scale(*key) || y0 + rows.height < grid.top() || y0 > grid.bottom() {
+            continue;
+        }
+        ui.painter().rect_filled(
+            Rect::from_min_max(pos2(grid.left(), y0), pos2(grid.right(), y0 + rows.height))
+                .intersect(grid),
+            0.0,
+            theme.colors.scale.0.gamma_multiply(0.14),
+        );
     }
 }
 
@@ -909,6 +995,17 @@ fn paint_row_lines(ui: &Ui, theme: &Theme, grid: Rect, rows: &KeyRows) {
 fn default_top(midi: &MidiData) -> f32 {
     let highest = midi.notes.iter().map(|note| note.key).max();
     highest.map_or(DEFAULT_TOP, |key| (f32::from(key) + 2.0).min(127.0))
+}
+
+/// The row a folded editor starts at: the highest note's, two rows from the
+/// top of the editor, and the first while it isn't folded.
+fn first_row(midi: &MidiData, fold: &Fold) -> f32 {
+    let highest = midi.notes.iter().map(|note| note.key).max();
+    let keys = fold.keys(midi.notes.iter().map(|note| note.key));
+    highest
+        .and_then(|key| keys.iter().position(|shown| *shown == key))
+        .filter(|_| fold.on())
+        .map_or(0.0, |row| row.saturating_sub(2) as f32)
 }
 
 /// The note edges in the clip's span: every note's start and end, in order
@@ -1201,6 +1298,69 @@ pub(crate) fn gesture(events: &mut Vec<UiEvent>, phase: GesturePhase, id: &str, 
     });
 }
 
+/// Draws the Scale (Fold to Scale) and Highlight Scale buttons after the
+/// magnifier, while the clip the editor shows has Scale Mode on (L-CLIP-010;
+/// the scales spec, R20). The slot between is Fold's.
+fn scale_buttons(ui: &mut Ui, shell: &Shell, theme: &Theme, view: Rect, events: &mut Vec<UiEvent>) {
+    let doc = shell.editor().document();
+    let Some(clip) = shell.clip_view().shown_clip(doc, shell.arrangement()) else {
+        return;
+    };
+    if !doc.clip(clip).is_some_and(|clip| clip.scale.enabled) {
+        return;
+    }
+    let colours = &theme.colors;
+    let magnifier = note_filters::magnifier_rect(view);
+    let step = magnifier.width() + 3.0;
+    let buttons = [
+        (
+            "Fold to Scale",
+            bl_shell::commands::VIEW_FOLD_SCALE,
+            shell.clip_view().fold(doc, clip).scale.is_some(),
+        ),
+        (
+            "Highlight Scale",
+            bl_shell::commands::VIEW_HIGHLIGHT_SCALES,
+            shell.clip_view().highlight_scales(),
+        ),
+    ];
+    for (index, (name, command, on)) in buttons.into_iter().enumerate() {
+        let rect = magnifier.translate(vec2(step * (index + 2) as f32, 0.0));
+        let id = Id::new(("clip-view-scale-button", command));
+        let response = ui.interact(rect, id, Sense::click());
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        let face = if on {
+            colours.control_pressed.0
+        } else if response.hovered() {
+            colours.control_hover.0
+        } else {
+            colours.control.0
+        };
+        ui.painter().rect_filled(rect, theme.sizes.corner, face);
+        // Three rows of a keyboard, the middle one the scale's: shaded for
+        // Highlight Scale, and the only one kept for Fold to Scale.
+        for row in 0..3 {
+            let y = rect.center().y + (row as f32 - 1.0) * 3.5;
+            let bar = Rect::from_center_size(pos2(rect.center().x, y), vec2(9.0, 2.0));
+            let lit = row == 1;
+            let ink = if lit {
+                colours.scale.0
+            } else {
+                colours.text_dim.0
+            };
+            if command == bl_shell::commands::VIEW_FOLD_SCALE && !lit {
+                ui.painter().rect_filled(bar, 0.0, ink.gamma_multiply(0.35));
+            } else {
+                ui.painter().rect_filled(bar, 0.0, ink);
+            }
+        }
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, name));
+        if response.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(command, json!({}))));
+        }
+    }
+}
+
 /// The grid chooser's choices: the zoom-adaptive settings, then the fixed
 /// spacings, as the Arrangement's context menus list them (C-CLIP-ARR-020,
 /// C-CLIP-ARR-021).
@@ -1233,6 +1393,7 @@ fn toolbar(
     // (L-CLIP-010).
     if !audio && shown == ClipTab::Notes {
         note_filters::magnifier(ui, shell, theme, view, events);
+        scale_buttons(ui, shell, theme, view, events);
     }
     for (index, (tab, name)) in TABS.iter().enumerate() {
         // An audio clip has the Sample and Envelopes tabs (sample editor R1).
@@ -1344,9 +1505,8 @@ pub use multi::{BAR_HEIGHT, Geometry, geometry};
 pub struct ClipViewUi {
     /// The clip the editor was last laid out for.
     shown: Option<ClipId>,
-    /// Whether the editor was folded when it was last laid out for that
-    /// clip.
-    folded: bool,
+    /// How the editor was folded when it was last laid out for that clip.
+    fold: Fold,
     /// The key at the note area's top edge, continuous, while unfolded.
     top: f32,
     /// The row at the note area's top edge, continuous, while folded.
@@ -1411,7 +1571,7 @@ impl Default for ClipViewUi {
     fn default() -> Self {
         Self {
             shown: None,
-            folded: false,
+            fold: Fold::default(),
             top: DEFAULT_TOP,
             first: 0.0,
             drag: None,
@@ -1556,14 +1716,14 @@ impl ClipViewUi {
         );
         crate::tool_panel::show(ui, shell, theme, right, clip, events);
         let rect = Rect::from_min_max(pos2(right.right(), rect.top()), rect.max);
-        let folded = shell.clip_view().is_folded(clip);
-        if self.shown != Some(clip) || self.folded != folded {
+        let fold = shell.clip_view().fold(doc, clip);
+        if self.shown != Some(clip) || self.fold != fold {
             // Another clip shows, or the editor was folded or unfolded:
             // scroll to its notes.
             self.shown = Some(clip);
-            self.folded = folded;
+            self.fold = fold;
             self.top = default_top(&midi);
-            self.first = 0.0;
+            self.first = first_row(&midi, &fold);
             self.drag = None;
             self.strip_drag = None;
             self.lanes.reset();
@@ -1675,7 +1835,7 @@ impl ClipViewUi {
             self.first = 0.0;
         }
         self.rows_chosen = chosen_rows.is_some();
-        let rows = KeyRows::of(folded, &notes, self.top, self.first);
+        let rows = KeyRows::of(fold, &notes, self.top, self.first);
         // Spec: piano-roll R32, R34, mpe R31. The key rows the view shows:
         // the shell holds them, and the editor lays out its own until a
         // zoom or a scroll chooses some. The MPE tab's Pitch plots count
@@ -1765,7 +1925,7 @@ impl ClipViewUi {
                     .collect()
             })
             .unwrap_or_default();
-        let pitch_rows: Vec<(u32, f32)> = if mpe_tab && !folded && !drum {
+        let pitch_rows: Vec<(u32, f32)> = if mpe_tab && !fold.on() && !drum {
             notes
                 .iter()
                 .enumerate()
@@ -2105,9 +2265,12 @@ impl ClipViewUi {
             self.paint_stretch_markers(ui, theme, strip, grid, axis, length, range);
         }
 
-        paint_key_track(painter, theme, grid, rows);
+        let style = KeyStyle::of(shell, frame.clip);
+        paint_key_track(ui, theme, grid, rows, &style);
 
-        // The clip's contents: the grid lines, then the notes over them.
+        // The clip's contents: the shaded rows, the grid lines, then the
+        // notes over them.
+        paint_scale_rows(ui, theme, grid, rows, &style);
         paint_grid_lines(ui, shell, theme, grid, start, length);
         paint_row_lines(ui, theme, grid, rows);
         let face = frame.face;
@@ -2840,8 +3003,11 @@ impl ClipViewUi {
                 json!({ "clip": clip, "notes": before, "mode": "replace" }),
             )));
             if let (Some(low), Some(high)) = (chosen.iter().min(), chosen.iter().max()) {
-                let (top, bottom) =
-                    bl_shell::clip_view::fit_key_rows(midi, rows.folded, *low, *high);
+                let (top, bottom) = bl_shell::clip_view::fit_key_rows(
+                    rows.folded.then_some(rows.keys.as_slice()),
+                    *low,
+                    *high,
+                );
                 // With the notes out of view, it zooms out until they show.
                 let (first, last) = rows.visible(grid);
                 let (top, bottom) = if top >= first && bottom <= last {
@@ -3829,7 +3995,7 @@ mod tests {
         // the key's place among the rows that show.
         let notes = [note(60, 0), note(64, 40)];
         for top in [60.0f32, 127.0, 0.0, 62.5] {
-            let rows = KeyRows::of(false, &notes, top, 0.0);
+            let rows = KeyRows::of(Fold::default(), &notes, top, 0.0);
             for key in [0u8, 40, 60, 64, 127] {
                 let row = rows.keys.iter().position(|shown| *shown == key).unwrap();
                 assert_eq!(
@@ -3839,7 +4005,15 @@ mod tests {
                 );
             }
         }
-        let rows = KeyRows::of(true, &notes, 60.0, 0.0);
+        let rows = KeyRows::of(
+            Fold {
+                notes: true,
+                scale: None,
+            },
+            &notes,
+            60.0,
+            0.0,
+        );
         assert_eq!(rows.keys, vec![64u8, 60]);
         assert_eq!(rows.y_of_row(grid(), 0), grid().top());
         assert_eq!(rows.y_of_row(grid(), 1), grid().top() + KEY_HEIGHT);

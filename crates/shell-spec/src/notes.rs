@@ -1418,6 +1418,15 @@ pub struct ClipViewState {
     /// Whether the note editor shows only the rows that hold notes (Fold,
     /// F).
     pub folded: bool,
+    /// The clips whose note editor is folded to their scale (G), in the
+    /// order of their IDs.
+    pub scale_folds: Vec<ClipId>,
+    /// Whether Highlight Scales is on (K): one switch for every clip's
+    /// editor, kept between launches.
+    pub highlight_scales: bool,
+    /// How the note editor spells keys: one choice for every editor, kept
+    /// between launches.
+    pub note_spelling: bl_model::NoteSpelling,
     /// The tab the Clip View shows.
     pub tab: ClipTab,
     /// Whether the Preview switch is on (Spec: step-recording R1): one

@@ -300,7 +300,7 @@ impl ClipViewUi {
         toolbar(ui, shell, theme, rect, false, events);
 
         // The key rows hold every shown clip's notes (R9).
-        let folded = state.is_folded(clips[foreground].clip);
+        let fold = state.fold(doc, clips[foreground].clip);
         let keys_held: Vec<Note> = {
             let mut keys: Vec<u8> = clips
                 .iter()
@@ -312,7 +312,7 @@ impl ClipViewUi {
                 .map(|key| Note::new(key, Ticks::ZERO, Ticks(1), 1))
                 .collect()
         };
-        let rows_of_keys = KeyRows::of(folded, &keys_held, self.top, self.first);
+        let rows_of_keys = KeyRows::of(fold, &keys_held, self.top, self.first);
 
         // Where each note is drawn, the foreground clip's last so it wins.
         let hovered_bar = ui
@@ -536,7 +536,9 @@ impl ClipViewUi {
             }
         }
 
-        paint_key_track(painter, theme, grid, keys);
+        let style = KeyStyle::of(shell, clips[foreground].clip);
+        paint_key_track(ui, theme, grid, keys, &style);
+        paint_scale_rows(ui, theme, grid, keys, &style);
         paint_grid_lines(ui, shell, theme, grid, axis.0, axis.1);
         paint_row_lines(ui, theme, grid, keys);
         let corner = theme.sizes.corner.min(2.0);

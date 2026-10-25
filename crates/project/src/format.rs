@@ -12,6 +12,7 @@
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
 //!      "rack_views": { "14": { "macros": false, "chain_list": true, "devices": true } },
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
+//!      "scale_folds": [ 12 ],   the clips whose note editors are folded to their scale
 //!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
 //!      "mpe_view": { … },       the MPE tab's lanes, their heights and the clips with its grid on
 //!      "lane_views": { "3": { … } }, each track's automation lanes (R24 to R26)
@@ -84,6 +85,9 @@ pub struct Project {
     /// (WP-2.3): saved with the set, but not part of the document, so
     /// folding is no undo step.
     pub folds: ClipFolds,
+    /// Which clips' MIDI Note Editors are folded to their scale (the scales
+    /// spec, R23): saved with the set like `folds`, and no undo step.
+    pub scale_folds: ClipFolds,
     /// The tools each track's MIDI Tool panels show and each tool's settings
     /// (WP-6.11): saved with the set, but not part of the document, so
     /// changing them is no undo step (the MIDI Tools spec, R4, R5).
@@ -129,6 +133,7 @@ impl Project {
             windows: DeviceWindows::new(),
             rack_views: RackViewMap::new(),
             folds: ClipFolds::new(),
+            scale_folds: ClipFolds::new(),
             midi_tools: MidiToolSettings::default(),
             launch: LaunchSettings::default(),
             multisamplers: MultisamplerViews::new(),
@@ -185,6 +190,18 @@ impl Project {
     #[must_use]
     pub fn with_folds(mut self, folds: &ClipFolds) -> Self {
         self.folds = folds
+            .iter()
+            .filter(|clip| self.document.clip(**clip).is_some())
+            .copied()
+            .collect();
+        self
+    }
+
+    /// The same project with these clips folded to their scale, keeping
+    /// only those its document has.
+    #[must_use]
+    pub fn with_scale_folds(mut self, folds: &ClipFolds) -> Self {
+        self.scale_folds = folds
             .iter()
             .filter(|clip| self.document.clip(**clip).is_some())
             .copied()
@@ -325,6 +342,8 @@ struct Saving<'a> {
     rack_views: &'a RackViewMap,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
     folds: &'a ClipFolds,
+    #[serde(skip_serializing_if = "ClipFolds::is_empty")]
+    scale_folds: &'a ClipFolds,
     #[serde(skip_serializing_if = "MidiToolSettings::is_empty")]
     midi_tools: &'a MidiToolSettings,
     /// The global launch quantisation and its switch (WP-3.2).
@@ -352,6 +371,7 @@ impl<'a> Saving<'a> {
             windows: &project.windows,
             rack_views: &project.rack_views,
             folds: &project.folds,
+            scale_folds: &project.scale_folds,
             midi_tools: &project.midi_tools,
             launch: project.launch,
             multisamplers: &project.multisamplers,
@@ -382,6 +402,10 @@ struct Saved {
     rack_views: RackViewMap,
     #[serde(default)]
     folds: ClipFolds,
+    /// The clips folded to their scale (WP-6.7b). Sets saved before it open
+    /// with none.
+    #[serde(default)]
+    scale_folds: ClipFolds,
     /// The MIDI Tools' chosen tools and settings (WP-6.11). Sets saved
     /// before it open with every track on the default tools.
     #[serde(default)]
@@ -508,6 +532,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows,
         rack_views,
         folds,
+        scale_folds,
         midi_tools,
         launch,
         multisamplers,
@@ -539,6 +564,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows: DeviceWindows::new(),
         rack_views: RackViewMap::new(),
         folds: ClipFolds::new(),
+        scale_folds: ClipFolds::new(),
         midi_tools: MidiToolSettings::default(),
         launch,
         multisamplers: MultisamplerViews::new(),
@@ -549,6 +575,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
     .with_windows(&windows)
     .with_rack_views(&rack_views)
     .with_folds(&folds)
+    .with_scale_folds(&scale_folds)
     .with_mpe_view(&mpe_view)
     .with_lane_views(&lane_views)
     .with_midi_tools(&midi_tools)

@@ -197,6 +197,19 @@ pub trait SetStore {
         ClipFolds::new()
     }
 
+    /// Gives the store which clips' MIDI Note Editors are folded to their
+    /// scale (WP-6.7b), for the next save to write beside the document. A
+    /// store that keeps none ignores it.
+    fn set_scale_folds(&mut self, folds: ClipFolds) {
+        let _ = folds;
+    }
+
+    /// Which of the open set's clips are folded to their scale, as it was
+    /// saved.
+    fn scale_folds(&self) -> ClipFolds {
+        ClipFolds::new()
+    }
+
     /// Gives the store the MIDI Tools' chosen tools and settings (WP-6.11),
     /// for the next save to write beside the document. A store that keeps
     /// no MIDI Tool settings ignores it.
@@ -345,6 +358,9 @@ pub struct ProjectFiles {
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
+    /// Clips folded to their scale (WP-6.7b): the open set's, then the
+    /// shell's for the next save.
+    scale_folds: ClipFolds,
     /// The MIDI Tools' chosen tools and settings (WP-6.11): the open set's,
     /// then the shell's for the next save.
     midi_tools: MidiToolSettings,
@@ -384,6 +400,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.scale_folds = project.scale_folds;
         self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
@@ -457,6 +474,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = RackViewMap::new();
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
+        self.scale_folds = ClipFolds::new();
         self.midi_tools = MidiToolSettings::default();
         self.launch = LaunchSettings::default();
         self.window_views = WindowViews::default();
@@ -479,6 +497,7 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_scale_folds(&self.scale_folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
@@ -493,6 +512,7 @@ impl SetStore for ProjectFiles {
         self.rack_views = project.rack_views;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
+        self.scale_folds = project.scale_folds;
         self.midi_tools = project.midi_tools;
         self.launch = project.launch;
         self.window_views = project.window_views;
@@ -539,6 +559,14 @@ impl SetStore for ProjectFiles {
 
     fn folds(&self) -> ClipFolds {
         self.folds.clone()
+    }
+
+    fn set_scale_folds(&mut self, folds: ClipFolds) {
+        self.scale_folds = folds;
+    }
+
+    fn scale_folds(&self) -> ClipFolds {
+        self.scale_folds.clone()
     }
 
     fn set_midi_tools(&mut self, settings: MidiToolSettings) {
@@ -644,6 +672,7 @@ impl SetStore for ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_scale_folds(&self.scale_folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
@@ -845,6 +874,7 @@ impl ProjectFiles {
             .with_rack_views(&self.rack_views)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
+            .with_scale_folds(&self.scale_folds)
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)

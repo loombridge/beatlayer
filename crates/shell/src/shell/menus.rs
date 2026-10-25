@@ -167,6 +167,10 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            ids::VIEW_NOTE_SPELLING => Some(
+                self.clip_view.note_spelling()
+                    == serde_json::from_value(args["spelling"].clone()).ok()?,
+            ),
             // Spec: time-editing R10. The loop brace's menu item is ticked
             // while the song starts at the brace's start.
             locator_ids::SET_START_TIME if args["loop_brace"].as_bool() == Some(true) => Some(
@@ -208,6 +212,17 @@ impl Shell {
                     .shown_clip(self.editor.document(), &self.arrangement)
                     .is_some_and(|clip| self.clip_view.is_folded(clip)),
             ),
+            ids::VIEW_FOLD_SCALE => Some(
+                self.clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .is_some_and(|clip| {
+                        self.clip_view
+                            .fold(self.editor.document(), clip)
+                            .scale
+                            .is_some()
+                    }),
+            ),
+            ids::VIEW_HIGHLIGHT_SCALES => Some(self.clip_view.highlight_scales()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
@@ -529,6 +544,15 @@ impl Shell {
             // R8).
             REDUCED_LATENCY_MONITORING => {
                 return self.editor.document().settings().delay_compensation;
+            }
+            // Spec: scales R23. View ▸ Fold to Scale is enabled while the
+            // editor shows a MIDI clip whose Scale Mode is on.
+            ids::VIEW_FOLD_SCALE => {
+                return self
+                    .clip_view
+                    .shown_clip(self.editor.document(), &self.arrangement)
+                    .and_then(|clip| self.editor.document().clip(clip))
+                    .is_some_and(|clip| clip.scale.enabled);
             }
             // Spec: find-and-select-notes R13. Edit ▸ Invert Selection is
             // enabled while the editor shows a clip that holds notes.

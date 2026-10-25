@@ -1154,12 +1154,10 @@ fn the_context_menu_lists_the_items_in_order() {
     for label in ["Group Notes", "Ungroup Notes"] {
         assert!(menu_item(&nodes, label).disabled, "{label} has no use here");
     }
-    let node = menu_item(&nodes, "Highlight Scales");
-    assert!(node.disabled, "Highlight Scales waits");
+    // Spec: scales R22. Highlight Scales runs its command.
     assert!(
-        node.description.contains("WP-6.7b"),
-        "Highlight Scales names WP-6.7b: {:?}",
-        node.description
+        !menu_item(&nodes, "Highlight Scales").disabled,
+        "Highlight Scales works"
     );
     // Spec: note-editing R35, R39, R40, R41. WP-6.3's items run their
     // commands; Split Note(s) shows only while a note would be split.
@@ -1244,19 +1242,15 @@ fn the_clipboard_keys_act_on_the_notes() {
 #[test]
 fn the_piano_rulers_menu_lists_its_items_and_their_packages() {
     // Spec: piano-roll R30. Right-clicking a key in the piano ruler opens
-    // C-KEYS: Deactivate Note(s), which works, and the note spelling, which
-    // waits for its package, drawn disabled and naming it.
+    // C-KEYS: Deactivate Note(s), and the note spelling submenu (scales R24).
     let step = n_step();
     let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
     let at = n.key_at(60);
     let nodes = right_click(&mut n, at);
     assert!(!menu_item(&nodes, "Deactivate Note(s)").disabled);
-    let node = menu_item(&nodes, "Note spelling");
-    assert!(node.disabled, "Note spelling waits");
     assert!(
-        node.description.contains("WP-6.7b"),
-        "Note spelling names WP-6.7b: {:?}",
-        node.description
+        !menu_item(&nodes, "Note spelling").disabled,
+        "Note spelling works"
     );
 }
 
@@ -3711,5 +3705,269 @@ fn double_clicking_the_piano_ruler_fits_the_selected_notes_or_all_of_them() {
         n.state().rows,
         Some((first, 127.0 - 48.0 + 2.0)),
         "the lowest note to the highest, zoomed out to show both"
+    );
+}
+
+// The scales in the Clip View (WP-6.7b; the scales spec, R19 to R25).
+
+/// Switches the clip's Scale Mode on at `root` in `name`.
+fn scale_on(n: &mut Notes, root: u8, name: &str) {
+    n.h.shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [n.clip], "enabled": true, "root": root, "name": name }),
+        )
+        .unwrap();
+    n.h.settle();
+}
+
+/// The piano ruler's keys named `name`, by what they read for assistive
+/// technology: `None` while the key isn't in the ruler.
+fn ruler_key(n: &mut Notes, name: &str) -> Option<String> {
+    let output = n.h.settle();
+    Harness::nodes(&output)
+        .into_iter()
+        .find(|node| {
+            node.label == name
+                && node.role == egui::accesskit::Role::ListItem
+                && node.value.contains("scale")
+        })
+        .map(|node| node.value)
+}
+
+/// The accessible button labelled `label`, if the toolbar shows it.
+fn toolbar_button(n: &mut Notes, label: &str) -> Option<Pos2> {
+    let output = n.h.settle();
+    Harness::nodes(&output)
+        .into_iter()
+        .find(|node| node.label == label && node.role == egui::accesskit::Role::CheckBox)
+        .and_then(|node| node.bounds)
+        .map(|b| pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32))
+}
+
+// Spec: scales R20, R22, R23. The toolbar's Scale and Highlight Scale buttons
+// show while the clip's Scale Mode is on, and run the commands the keys do.
+#[test]
+fn the_toolbar_buttons_show_with_scale_mode_and_run_their_commands() {
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    assert!(toolbar_button(&mut n, "Fold to Scale").is_none());
+    assert!(toolbar_button(&mut n, "Highlight Scale").is_none());
+    scale_on(&mut n, 0, "major");
+    let fold = toolbar_button(&mut n, "Fold to Scale").expect("shown with Scale Mode on");
+    let highlight = toolbar_button(&mut n, "Highlight Scale").expect("shown with Scale Mode on");
+    n.h.click(fold);
+    assert!(n.h.shell.clip_view().is_scale_folded(n.clip));
+    n.h.click(highlight);
+    assert!(n.h.shell.clip_view().highlight_scales());
+    n.h.shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [n.clip], "enabled": false }),
+        )
+        .unwrap();
+    assert!(
+        toolbar_button(&mut n, "Fold to Scale").is_none(),
+        "and go with it"
+    );
+    assert!(toolbar_button(&mut n, "Highlight Scale").is_none());
+}
+
+// Spec: scales R21, R22, R25. The ruler marks the scale's keys and says so
+// for assistive technology; Highlight Scales shades the scale's rows across
+// the note area and fills the root's key.
+#[test]
+fn the_ruler_marks_the_scale_and_highlight_scales_shades_its_rows() {
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    assert_eq!(
+        ruler_key(&mut n, "C3"),
+        None,
+        "no key is marked, Scale Mode being off"
+    );
+    scale_on(&mut n, 0, "major");
+    assert_eq!(
+        ruler_key(&mut n, "C3").as_deref(),
+        Some("in the scale, the root")
+    );
+    assert_eq!(ruler_key(&mut n, "D3").as_deref(), Some("in the scale"));
+    assert_eq!(
+        ruler_key(&mut n, "C#3").as_deref(),
+        Some("not in the scale")
+    );
+
+    let scale = n.h.theme.colors.scale.0;
+    let row = scale.gamma_multiply(0.14);
+    let root_key = scale.gamma_multiply(0.6);
+    let grid = n.grid();
+    let shaded = |n: &mut Notes, key: u8, fill: egui::Color32| {
+        let y = n.at(key, Ticks::ZERO).y;
+        let output = n.h.settle();
+        common::painted_rects(&output)
+            .into_iter()
+            .any(|(rect, colour)| {
+                colour == fill
+                    && rect.contains(pos2(grid.center().x, y))
+                    && rect.width() > grid.width() / 2.0
+            })
+    };
+    assert!(!shaded(&mut n, 62, row), "not without Highlight Scales");
+    n.h.shell.run("view.highlight_scales", json!({})).unwrap();
+    assert!(shaded(&mut n, 62, row), "D3 is in the scale");
+    assert!(shaded(&mut n, 60, row), "and so is the root");
+    assert!(!shaded(&mut n, 61, row), "C#3 is not");
+    let at = n.key_at(60);
+    let output = n.h.settle();
+    let filled = |output: &egui::FullOutput, at: Pos2| {
+        common::painted_rects(output)
+            .into_iter()
+            .any(|(rect, colour)| colour == root_key && rect.contains(at))
+    };
+    assert!(filled(&output, at), "the root's key is filled");
+    let other = n.key_at(62);
+    assert!(!filled(&output, other), "the scale's other keys are not");
+}
+
+// Spec: scales R23. Fold to Scale (G) shows the scale's rows and those with
+// notes; a drag moves a note row by row, a click in Draw Mode lands on a row
+// that shows, and it combines with Fold to Notes.
+#[test]
+fn fold_to_scale_shows_the_scales_rows_and_combines_with_fold_to_notes() {
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(60, Ticks::ZERO, step, 100),
+        Note::new(61, 4 * step, step, 100),
+    ]);
+    scale_on(&mut n, 0, "major");
+    let steps = n.steps();
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    n.h.key(egui::Key::G, Modifiers::NONE);
+    n.h.settle();
+    assert!(
+        n.h.shell.clip_view().is_scale_folded(n.clip),
+        "G folds to the scale"
+    );
+    assert_eq!(n.steps(), steps, "and is no undo step");
+    let keys = |n: &Notes| {
+        n.h.shell
+            .clip_view()
+            .fold(n.doc(), n.clip)
+            .keys(n.notes().iter().map(|note| note.key))
+    };
+    // C#3 holds a note, so it shows between C3 and D3.
+    assert!(keys(&n).windows(3).any(|w| w == [62, 61, 60]));
+    // A drag from C3 one row up reaches D3, two semitones, not C#3.
+    let row = |n: &mut Notes, key: u8, tick: Ticks| {
+        let at = keys(n)
+            .iter()
+            .position(|shown| *shown == key)
+            .expect("a shown row");
+        let grid = n.grid();
+        let first = n.h.main.clip_view().first_row();
+        pos2(
+            x_of_tick(grid, n.marker(), n.length(), tick),
+            grid.top() + (at as f32 - first) * KEY_HEIGHT + KEY_HEIGHT / 2.0,
+        )
+    };
+    // Dragging C#3's note up one row reaches D3.
+    let from = row(&mut n, 61, 4 * step + step / 2);
+    let to = row(&mut n, 62, 4 * step + step / 2);
+    n.drag(from, to, Modifiers::NONE);
+    assert!(n.notes().iter().any(|note| note.key == 62), "one row up");
+    // Draw Mode: a click on the empty row of E3 adds a note there.
+    n.h.shell.run("view.draw_mode", json!({})).unwrap();
+    let at = row(&mut n, 64, 8 * step + step / 2);
+    n.h.click(at);
+    n.h.settle();
+    assert!(
+        n.notes().iter().any(|note| note.key == 64),
+        "a click lands on a shown row"
+    );
+    // With Fold to Notes on too, only the rows that hold notes show.
+    n.h.shell.run("view.fold_notes", json!({})).unwrap();
+    let mut held: Vec<u8> = n.notes().iter().map(|note| note.key).collect();
+    held.sort_unstable_by(|a, b| b.cmp(a));
+    held.dedup();
+    assert_eq!(keys(&n), held);
+}
+
+// Spec: scales R24. The piano ruler's menu chooses the spelling: F Major reads
+// B♭ whatever the choice, and the keys outside the scale follow it.
+#[test]
+fn the_spelling_menu_changes_the_rows_names() {
+    let step = n_step();
+    let mut n = set(vec![Note::new(70, Ticks::ZERO, step, 100)]);
+    scale_on(&mut n, 5, "major");
+    assert_eq!(ruler_key(&mut n, "B♭3").as_deref(), Some("in the scale"));
+    assert_eq!(
+        ruler_key(&mut n, "C#3").as_deref(),
+        Some("not in the scale")
+    );
+    // The menu on the ruler lists the choices.
+    let at = n.key_at(70);
+    let nodes = right_click(&mut n, at);
+    assert!(
+        !menu_item(&nodes, "Note spelling").disabled,
+        "the menu opens"
+    );
+    n.h.shell
+        .run("view.note_spelling", json!({ "spelling": "flats" }))
+        .unwrap();
+    n.h.settle();
+    assert_eq!(ruler_key(&mut n, "B♭3").as_deref(), Some("in the scale"));
+    assert_eq!(
+        ruler_key(&mut n, "D♭3").as_deref(),
+        Some("not in the scale")
+    );
+    assert_eq!(ruler_key(&mut n, "C#3"), None);
+    n.h.shell
+        .run("view.note_spelling", json!({ "spelling": "note_numbers" }))
+        .unwrap();
+    assert_eq!(ruler_key(&mut n, "61").as_deref(), Some("not in the scale"));
+}
+
+// Spec: scales R22, R23, R25. View ▸ Fold to Scale (M-VIEW-040) is enabled
+// only with Scale Mode on and ticked while folded; Options ▸ Highlight Scales
+// (M-OPT-019) is ticked while on.
+#[test]
+fn the_menus_run_fold_to_scale_and_highlight_scales() {
+    use bl_shell::menus::{MenuPlatform, menu_bar};
+    use bl_ui::keymap::{Keymap, Platform};
+    let step = n_step();
+    let mut n = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    let keymap = Keymap::live12();
+    let bar = menu_bar(MenuPlatform::current());
+    let item = |row: &str| {
+        bar.iter()
+            .flat_map(|menu| menu.walk())
+            .find(|item| item.row == row)
+            .cloned()
+            .unwrap_or_else(|| panic!("no menu row {row}"))
+    };
+    let state = |n: &Notes, row: &str| {
+        bl_ui::menus::item_state(&item(row), &n.h.shell, &keymap, Platform::current())
+    };
+    assert!(!state(&n, "M-VIEW-040").enabled, "Scale Mode is off");
+    assert!(state(&n, "M-OPT-019").enabled);
+    assert_eq!(state(&n, "M-OPT-019").checked, Some(false));
+    scale_on(&mut n, 0, "major");
+    let fold = state(&n, "M-VIEW-040");
+    assert!(fold.enabled, "enabled with Scale Mode on");
+    let invocation = fold.invocation.unwrap();
+    assert_eq!(invocation.id, "view.fold_scale");
+    n.h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert_eq!(
+        state(&n, "M-VIEW-040").checked,
+        Some(true),
+        "ticked while folded"
+    );
+    let highlight = state(&n, "M-OPT-019").invocation.unwrap();
+    assert_eq!(highlight.id, "view.highlight_scales");
+    n.h.shell.invoke(&highlight.id, highlight.args).unwrap();
+    assert_eq!(
+        state(&n, "M-OPT-019").checked,
+        Some(true),
+        "ticked while on"
     );
 }

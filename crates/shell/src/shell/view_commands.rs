@@ -611,19 +611,33 @@ impl Shell {
                 AutomationTarget::Device { device, param } => Some((device, param)),
                 _ => None,
             });
-        let result = self
-            .arrangement
-            .run(id, args, self.editor.document())
-            .map_err(|error| match error {
-                ViewError::InvalidArgs(message) => ShellError::InvalidArgs {
-                    command: id.to_owned(),
-                    message,
-                },
-                ViewError::Unavailable(reason) => ShellError::Unavailable {
-                    command: id.to_owned(),
-                    reason,
-                },
-            });
+        let to_error = |error: ViewError| match error {
+            ViewError::InvalidArgs(message) => ShellError::InvalidArgs {
+                command: id.to_owned(),
+                message,
+            },
+            ViewError::Unavailable(reason) => ShellError::Unavailable {
+                command: id.to_owned(),
+                reason,
+            },
+        };
+        // Spec: automation R25. Adding a lane needs the choosers' order,
+        // which the devices give.
+        let result = if id == view_ids::ADD_AUTOMATION_LANE {
+            Self::args::<view_ids::AddAutomationLaneArgs>(id, args).and_then(|args| {
+                let doc = self.editor.document();
+                let order =
+                    crate::arrangement::lanes::chooser_order(doc, &self.devices, args.track);
+                self.arrangement
+                    .add_lane(doc, &order, args)
+                    .map_err(to_error)?;
+                Ok(self.arrangement.state(doc))
+            })
+        } else {
+            self.arrangement
+                .run(id, args, self.editor.document())
+                .map_err(to_error)
+        };
         if id != view_ids::STATE {
             // A query changes nothing a window shows.
             self.touch();

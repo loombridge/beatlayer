@@ -25,7 +25,7 @@ fn element_id(element: Element) -> egui::Id {
 }
 
 /// A right-click at `at`, which opens a context menu.
-fn right_click(h: &mut Harness, at: Pos2) -> egui::FullOutput {
+pub(crate) fn right_click(h: &mut Harness, at: Pos2) -> egui::FullOutput {
     h.frame(vec![Event::PointerMoved(at)]);
     h.frame(vec![Event::PointerButton {
         pos: at,
@@ -43,7 +43,7 @@ fn right_click(h: &mut Harness, at: Pos2) -> egui::FullOutput {
 }
 
 /// The middle of the node labelled `label`.
-fn centre_of(nodes: &[common::Node], label: &str) -> Pos2 {
+pub(crate) fn centre_of(nodes: &[common::Node], label: &str) -> Pos2 {
     let node = nodes
         .iter()
         .rfind(|n| n.label == label && n.bounds.is_some())
@@ -164,7 +164,7 @@ fn the_automation_arm_button_has_a_menu_of_the_recording_modes() {
     assert!(nodes.iter().any(|n| n.label == "✔ Latch"));
 }
 
-const BAR: i64 = Ticks::WHOLE.get();
+pub(crate) const BAR: i64 = Ticks::WHOLE.get();
 
 /// A track with a pan envelope from −0.8 at 1.1.1 to 0.8 at bar 3, showing
 /// in Automation Mode with snapping off, headless.
@@ -287,7 +287,7 @@ impl Set {
 }
 
 /// A click with modifiers held.
-fn click(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
+pub(crate) fn click(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
     let held = Event::ModifiersChanged(modifiers);
     h.frame(vec![held.clone(), Event::PointerMoved(at)]);
     for pressed in [true, false] {
@@ -306,7 +306,7 @@ fn click(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
 }
 
 /// Two clicks in quick succession, as a double-click.
-fn double_click(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
+pub(crate) fn double_click(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
     let held = Event::ModifiersChanged(modifiers);
     h.frame(vec![held.clone(), Event::PointerMoved(at)]);
     for _ in 0..2 {
@@ -328,7 +328,7 @@ fn double_click(h: &mut Harness, at: Pos2, modifiers: Modifiers) {
 
 /// A press, a drag over eight frames, and a release, with modifiers held
 /// throughout.
-fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
+pub(crate) fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
     let held = Event::ModifiersChanged(modifiers);
     h.frame(vec![held.clone(), Event::PointerMoved(from)]);
     h.frame(vec![
@@ -1170,4 +1170,757 @@ fn option_mirrors_a_handle_drag_on_the_opposite_handle() {
         .map(|point| point.value)
         .collect();
     assert_eq!(ends, [-0.8], "outside the span nothing moved");
+}
+
+// ---------------------------------------------------------------------------
+// Several lanes per track (WP-6.57; the automation spec, R24 to R33).
+
+use bl_model::{ClipId, LaneChoice};
+use bl_shell::arrangement_commands::{AutomationLane, Lane};
+use egui::{Id, vec2};
+
+/// Alt on Windows and Linux, Cmd on macOS: what makes the lane and hide
+/// buttons act on every lane (R25, R26) and bypasses snapping (R31).
+fn all_key() -> Modifiers {
+    if cfg!(target_os = "macos") {
+        Modifiers::MAC_CMD
+    } else {
+        Modifiers::ALT
+    }
+}
+
+fn volume() -> AutomationTarget {
+    AutomationTarget::Mixer {
+        param: MixerParam::Volume,
+    }
+}
+
+fn mute() -> AutomationTarget {
+    AutomationTarget::Mixer {
+        param: MixerParam::Mute,
+    }
+}
+
+impl Set {
+    /// A MIDI clip on the track, from bar `from` for `bars` bars.
+    fn put_clip(&mut self, from: i64, bars: i64) -> ClipId {
+        let clip: ClipId = self.h.shell.new_id();
+        self.h
+            .shell
+            .run(
+                "clip.create",
+                json!({
+                    "track": self.track,
+                    "clip": {
+                        "id": clip,
+                        "name": "",
+                        "start": from * BAR,
+                        "length": bars * BAR,
+                        "offset": 0,
+                        "mute": false,
+                        "data": { "midi": { "notes": [] } },
+                    },
+                }),
+            )
+            .unwrap();
+        self.h.settle();
+        clip
+    }
+
+    /// An envelope of two breakpoints on `target`, from `a` at 1.1.1 to `b`
+    /// at bar 5.
+    fn envelope(&mut self, target: AutomationTarget, a: f64, b: f64) {
+        for (at, value) in [(0, a), (BAR * 4, b)] {
+            self.h
+                .shell
+                .run(
+                    "automation.set_breakpoint",
+                    json!({ "track": self.track, "target": target, "at": at, "value": value }),
+                )
+                .unwrap();
+        }
+        self.h.settle();
+    }
+
+    /// The track's lanes as `arrangement.state` reports them.
+    fn lanes(&mut self) -> AutomationLane {
+        let state: bl_shell::arrangement_commands::ArrangementState =
+            serde_json::from_value(self.h.shell.run("arrangement.state", json!({})).unwrap())
+                .unwrap();
+        state
+            .automation_lanes
+            .into_iter()
+            .find(|lane| lane.track == self.track)
+            .expect("the track's lanes are reported")
+    }
+
+    /// The parameters the lanes of its own show, top to bottom.
+    fn own_targets(&mut self) -> Vec<Option<AutomationTarget>> {
+        self.lanes().lanes.iter().map(|lane| lane.target).collect()
+    }
+
+    fn row(&self) -> bl_shell::arrangement::rows::Row {
+        self.h.shell.arrangement().rows(self.doc())[0]
+    }
+
+    /// Lane `number`'s rectangle on screen.
+    fn lane_of(&self, number: usize) -> Rect {
+        self.h
+            .main
+            .arrangement()
+            .automation_lane_rect_of(self.h.shell.arrangement(), self.doc(), self.track, number)
+            .expect("the lane shows")
+    }
+
+    /// The middle of the first node labelled `label`, top to bottom.
+    fn button(&mut self, label: &str) -> Pos2 {
+        let nodes = Harness::nodes(&self.h.settle());
+        first_centre(&nodes, label)
+    }
+}
+
+/// The middle of the topmost node labelled `label`.
+fn first_centre(nodes: &[common::Node], label: &str) -> Pos2 {
+    nodes_labelled(nodes, label)
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| panic!("no node labelled {label:?}"))
+}
+
+/// The middles of the nodes labelled `label`, top to bottom.
+fn nodes_labelled(nodes: &[common::Node], label: &str) -> Vec<Pos2> {
+    let mut found: Vec<Pos2> = nodes
+        .iter()
+        .filter(|n| n.label == label)
+        .filter_map(|n| n.bounds)
+        .map(|b| pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32))
+        .collect();
+    found.sort_by(|a, b| a.y.total_cmp(&b.y));
+    found
+}
+
+// Spec: automation R24. The track's own lane is its main automation lane: it
+// draws the envelope over the clips, and no lane is added under the track.
+// The envelope is edited in the clips' bodies, and a clip's title bar keeps
+// the clip's gestures.
+#[test]
+fn the_main_lane_draws_over_the_clips_and_the_title_bar_keeps_the_clips_gestures() {
+    let mut s = set();
+    let clip = s.put_clip(0, 4);
+    s.envelope(pan(), -0.8, 0.8);
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR, "value": 0.0 }),
+        )
+        .unwrap();
+    s.h.settle();
+    let row = s.row();
+    assert_eq!(row.automation, 0.0, "no lane under the track");
+    let lane = s.lane();
+    assert_eq!(lane.height(), row.height, "the lane is the track's own");
+
+    // A breakpoint in a clip's body drags, and the clip stays where it is.
+    s.commands();
+    let from = pos2(s.x(Ticks(BAR)), s.y(0.0));
+    drag(&mut s.h, from, from + vec2(0.0, -12.0), Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.move_breakpoints".to_owned()),
+        "{commands:?}"
+    );
+    assert!(!commands.iter().any(|c| c.starts_with("arrangement.")));
+    assert_eq!(s.doc().clip(clip).unwrap().start, Ticks::ZERO);
+    let moved = s.value_at(Ticks(BAR));
+    assert!(moved > 0.05, "the breakpoint went up: {moved}");
+
+    // The title bar moves the clip, and with Lock Envelopes on the envelope
+    // stays.
+    s.h.shell
+        .run("song.set_lock_envelopes", json!({ "enabled": true }))
+        .unwrap();
+    let before = s.points();
+    let grab = pos2(s.x(Ticks(BAR * 3)), lane.top() + 5.0);
+    drag(&mut s.h, grab, grab + vec2(60.0, 0.0), Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"arrangement.move_clips".to_owned()),
+        "{commands:?}"
+    );
+    assert_ne!(s.doc().clip(clip).unwrap().start, Ticks::ZERO);
+    assert_eq!(s.points(), before, "the envelope didn't move");
+}
+
+// Spec: automation R24, R15. A double-click in a clip's body adds a
+// breakpoint rather than opening the clip, and a click there selects the
+// lane.
+#[test]
+fn a_double_click_in_a_clips_body_adds_a_breakpoint_and_a_click_selects_the_lane() {
+    let mut s = set();
+    s.put_clip(0, 6);
+    let at = pos2(s.x(Ticks(BAR * 3)), s.y(0.3));
+    double_click(&mut s.h, at, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.set_breakpoint".to_owned()),
+        "{commands:?}"
+    );
+    assert!(!commands.contains(&"arrangement.select_clips".to_owned()));
+    assert_eq!(s.points().len(), 3);
+
+    let empty = pos2(s.x(Ticks(BAR * 5)), s.y(-0.5));
+    click(&mut s.h, empty, Modifiers::NONE);
+    assert_eq!(
+        s.h.shell.arrangement().keyboard_lane(),
+        Some((s.track, pan())),
+        "the main lane has the keyboard"
+    );
+}
+
+// Spec: automation R25. The lane button moves the envelope the choosers show
+// into a lane of its own; the main lane then shows None, there being no other
+// automated parameter.
+#[test]
+fn the_lane_button_moves_the_envelope_into_a_lane_of_its_own() {
+    let mut s = set();
+    let buttons = nodes_labelled(
+        &Harness::nodes(&s.h.settle()),
+        "Show Automation in New Lane",
+    )
+    .len();
+    let at = s.button("Show Automation in New Lane");
+    click(&mut s.h, at, Modifiers::NONE);
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"arrangement.add_automation_lane".to_owned()),
+        "{commands:?}"
+    );
+    let lanes = s.lanes();
+    assert_eq!(lanes.target, None, "the main lane shows None");
+    assert_eq!(lanes.lanes, [LaneChoice::showing(Some(pan()))]);
+    assert_eq!(s.row().automation, 43.0, "a lane of its own is 43 points");
+    assert_eq!(s.lane_of(1).height(), 43.0);
+    // The envelope drives the parameter as before, and it draws in the new
+    // lane.
+    assert_eq!(s.points().len(), 2);
+    // The button hides while the choosers show None: the other tracks keep
+    // theirs.
+    let after = Harness::nodes(&s.h.settle());
+    assert_eq!(
+        nodes_labelled(&after, "Show Automation in New Lane").len() + 1,
+        buttons
+    );
+}
+
+// Spec: automation R25. With Alt (Windows) or Cmd (Mac) held, the button gives
+// every automated parameter of the track a lane of its own, in the choosers'
+// order.
+#[test]
+fn the_lane_button_with_the_key_gives_every_automated_parameter_a_lane() {
+    let mut s = set();
+    s.envelope(volume(), 1.0, 0.5);
+    s.envelope(mute(), 0.0, 1.0);
+    let at = s.button("Show Automation in New Lane");
+    click(&mut s.h, at, all_key());
+    assert_eq!(
+        s.own_targets(),
+        [Some(volume()), Some(pan()), Some(mute())],
+        "the choosers' order: Volume, Pan, Track Activator"
+    );
+    assert_eq!(s.lanes().target, None);
+    assert_eq!(s.row().automation, 43.0 * 3.0);
+}
+
+// Spec: automation R26. A lane's hide button removes the lane from view, its
+// envelope still driving its parameter; with the key held, that lane and the
+// lanes after it.
+#[test]
+fn the_hide_button_removes_a_lane_and_with_the_key_the_lanes_after_it() {
+    let mut s = set();
+    s.envelope(volume(), 1.0, 0.5);
+    s.envelope(mute(), 0.0, 1.0);
+    s.h.shell
+        .run(
+            "arrangement.add_automation_lane",
+            json!({ "track": s.track, "all": true }),
+        )
+        .unwrap();
+    assert_eq!(s.own_targets().len(), 3);
+    let nodes = Harness::nodes(&s.h.settle());
+    let hide = nodes_labelled(&nodes, "Hide Automation Lane");
+    assert_eq!(hide.len(), 3, "one hide button for each lane");
+
+    // The second lane's button removes only that lane.
+    click(&mut s.h, hide[1], Modifiers::NONE);
+    assert_eq!(s.own_targets(), [Some(volume()), Some(mute())]);
+    assert!(
+        s.doc()
+            .track(s.track)
+            .unwrap()
+            .automation_for(&pan())
+            .is_some(),
+        "its envelope still drives pan"
+    );
+
+    // With the key held on the first, the lanes after it go too.
+    let nodes = Harness::nodes(&s.h.settle());
+    let hide = nodes_labelled(&nodes, "Hide Automation Lane");
+    click(&mut s.h, hide[0], all_key());
+    assert!(s.own_targets().is_empty());
+    assert_eq!(s.row().automation, 0.0);
+}
+
+// Spec: automation R26. Once a track has lanes of its own, a toggle in its
+// header shows or hides them all; Left and Right on its title bar do the same.
+#[test]
+fn the_header_toggle_and_the_title_bar_keys_show_and_hide_the_lanes() {
+    let mut s = set();
+    let nodes = Harness::nodes(&s.h.settle());
+    assert!(
+        nodes_labelled(&nodes, "Hide Automation Lanes").is_empty(),
+        "no toggle while the track has no lanes of its own"
+    );
+    s.envelope(volume(), 1.0, 0.5);
+    s.h.shell
+        .run(
+            "arrangement.add_automation_lane",
+            json!({ "track": s.track, "target": volume() }),
+        )
+        .unwrap();
+    assert_eq!(s.row().automation, 43.0);
+
+    let at = s.button("Hide Automation Lanes");
+    click(&mut s.h, at, Modifiers::NONE);
+    assert!(s.lanes().lanes_hidden);
+    assert_eq!(s.row().automation, 0.0);
+    assert_eq!(s.lanes().lanes.len(), 1, "the lane is kept, folded away");
+    let at = s.button("Show Automation Lanes");
+    click(&mut s.h, at, Modifiers::NONE);
+    assert!(!s.lanes().lanes_hidden);
+    assert_eq!(s.row().automation, 43.0);
+
+    // With the title bar selected, Left hides them and Right shows them.
+    s.h.shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [s.track], "title_bars": true }),
+        )
+        .unwrap();
+    s.h.settle();
+    s.h.key(Key::ArrowLeft, Modifiers::NONE);
+    s.h.settle();
+    assert!(s.lanes().lanes_hidden);
+    assert!(
+        !s.h.shell.arrangement().is_folded(s.track),
+        "it didn't fold"
+    );
+    s.h.key(Key::ArrowRight, Modifiers::NONE);
+    s.h.settle();
+    assert!(!s.lanes().lanes_hidden);
+}
+
+// Spec: automation R27. The device chooser's last entry, and the lane
+// header's menu, switch the lane's choosers to list only automated
+// parameters.
+#[test]
+fn show_automated_parameters_only_filters_the_choosers() {
+    let mut s = set();
+    let nodes = Harness::nodes(&s.h.settle());
+    // The control chooser lists the mixer's controls.
+    let control = Id::new((
+        "chooser",
+        format!("arrangement-automation-control-{}", s.track.0),
+    ));
+    s.h.accesskit(control, Action::Click);
+    for _ in 0..12 {
+        s.h.frame(vec![]);
+    }
+    let open = Harness::nodes(&s.h.frame(vec![]));
+    assert!(
+        open.iter().any(|n| n.label == "Volume"),
+        "all controls list"
+    );
+    s.h.key(Key::Escape, Modifiers::NONE);
+    s.h.settle();
+
+    // The lane header's menu has the filter first, ticked once on.
+    let at = first_centre(&nodes, "Automation Device");
+    let output = right_click(&mut s.h, at);
+    let menu = Harness::nodes(&output);
+    click(
+        &mut s.h,
+        first_centre(&menu, "Show Automated Parameters Only"),
+        Modifiers::NONE,
+    );
+    assert!(s.lanes().only_automated);
+
+    s.h.accesskit(control, Action::Click);
+    for _ in 0..12 {
+        s.h.frame(vec![]);
+    }
+    let open = Harness::nodes(&s.h.frame(vec![]));
+    assert!(open.iter().any(|n| n.label == "Pan"), "pan has an envelope");
+    assert!(
+        !open.iter().any(|n| n.label == "Volume"),
+        "volume has none, so it isn't listed"
+    );
+}
+
+// Spec: automation R28. Right-clicking a lane's header opens its menu; Clear
+// All Envelopes deletes every envelope of the track as one undo step.
+#[test]
+fn the_lane_header_menu_clears_envelopes_in_one_undo_step() {
+    let mut s = set();
+    s.envelope(volume(), 1.0, 0.5);
+    let at = s.button("Automation Device");
+    let output = right_click(&mut s.h, at);
+    let menu = Harness::nodes(&output);
+    for label in [
+        "Show Automated Parameters Only",
+        "Show All Lanes",
+        "Hide All Lanes",
+        "Clear All Envelopes",
+        "Clear Envelopes of Track Mixer",
+    ] {
+        assert!(menu.iter().any(|n| n.label == label), "no {label:?}");
+    }
+    let steps = s.steps();
+    click(
+        &mut s.h,
+        first_centre(&menu, "Clear All Envelopes"),
+        Modifiers::NONE,
+    );
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.clear_track".to_owned()),
+        "{commands:?}"
+    );
+    assert!(
+        s.doc()
+            .track(s.track)
+            .unwrap()
+            .automation()
+            .next()
+            .is_none()
+    );
+    assert_eq!(s.steps(), steps + 1);
+    // One undo brings them all back.
+    s.h.shell.run("edit.undo", json!({})).unwrap();
+    assert!(s.doc().track(s.track).unwrap().automation().count() >= 2);
+}
+
+// Spec: automation R28. Clear Envelopes of the device the lane shows clears
+// that device's, here the mixer's, and leaves a device's.
+#[test]
+fn clear_envelopes_clears_the_device_the_lane_shows() {
+    let mut s = set();
+    s.envelope(volume(), 1.0, 0.5);
+    let at = s.button("Automation Device");
+    let output = right_click(&mut s.h, at);
+    let menu = Harness::nodes(&output);
+    click(
+        &mut s.h,
+        first_centre(&menu, "Clear Envelopes of Track Mixer"),
+        Modifiers::NONE,
+    );
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.clear_device".to_owned()),
+        "{commands:?}"
+    );
+    assert!(
+        s.doc()
+            .track(s.track)
+            .unwrap()
+            .automation()
+            .next()
+            .is_none()
+    );
+}
+
+// Spec: automation R29. A mixer control's context menu holds the automation
+// items after its own; Show Automation In New Lane gives the parameter a
+// lane, Delete Automation deletes its envelope.
+#[test]
+fn a_mixer_controls_menu_has_the_automation_items() {
+    let mut s = set();
+    let pan_control = s.button("Track Pan");
+    let output = right_click(&mut s.h, pan_control);
+    let menu = Harness::nodes(&output);
+    for label in [
+        "Stereo Pan Mode",
+        "Split Stereo Pan Mode",
+        "Delete Automation",
+        "Re-Enable Automation",
+        "Show Automation",
+        "Show Automation In New Lane",
+    ] {
+        assert!(menu.iter().any(|n| n.label == label), "no {label:?}");
+    }
+    assert!(
+        !Harness::node(&menu, "Delete Automation").disabled,
+        "pan has an envelope"
+    );
+    assert!(
+        Harness::node(&menu, "Re-Enable Automation").disabled,
+        "it isn't overridden"
+    );
+    click(
+        &mut s.h,
+        first_centre(&menu, "Show Automation In New Lane"),
+        Modifiers::NONE,
+    );
+    assert_eq!(s.own_targets(), [Some(pan())]);
+    assert!(s.h.shell.arrangement().automation_mode());
+
+    // Delete Automation runs `automation.delete`.
+    let pan_control = s.button("Track Pan");
+    let menu = Harness::nodes(&right_click(&mut s.h, pan_control));
+    click(
+        &mut s.h,
+        first_centre(&menu, "Delete Automation"),
+        Modifiers::NONE,
+    );
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.delete".to_owned()),
+        "{commands:?}"
+    );
+    assert!(
+        s.doc()
+            .track(s.track)
+            .unwrap()
+            .automation_for(&pan())
+            .is_none()
+    );
+}
+
+// Spec: automation R29. Show Automation turns Automation Mode on and shows
+// the parameter in the main lane.
+#[test]
+fn show_automation_turns_automation_mode_on_and_shows_the_parameter() {
+    let mut s = set();
+    s.h.shell
+        .run("arrangement.automation_mode", json!({ "on": false }))
+        .unwrap();
+    s.h.settle();
+    let pan_control = s.button("Track Pan");
+    let menu = Harness::nodes(&right_click(&mut s.h, pan_control));
+    click(
+        &mut s.h,
+        first_centre(&menu, "Show Automation"),
+        Modifiers::NONE,
+    );
+    assert!(s.h.shell.arrangement().automation_mode());
+    assert_eq!(
+        s.h.shell.arrangement().automation_lane(s.track),
+        Some(pan())
+    );
+}
+
+// Spec: automation R29. A click on a control while Automation Mode is on
+// shows its envelope in the main lane.
+#[test]
+fn clicking_a_control_shows_its_envelope_while_automation_mode_is_on() {
+    let mut s = set();
+    s.h.shell
+        .run(
+            "arrangement.show_automation",
+            json!({ "track": s.track, "target": volume() }),
+        )
+        .unwrap();
+    s.h.settle();
+    assert_eq!(
+        s.h.shell.arrangement().automation_lane(s.track),
+        Some(volume())
+    );
+    let pan_control = s.button("Track Pan");
+    click(&mut s.h, pan_control, Modifiers::NONE);
+    assert_eq!(
+        s.h.shell.arrangement().automation_lane(s.track),
+        Some(pan())
+    );
+    // With the mode off a click shows nothing.
+    s.h.shell
+        .run("arrangement.automation_mode", json!({ "on": false }))
+        .unwrap();
+    s.h.shell
+        .run(
+            "arrangement.show_automation",
+            json!({ "track": s.track, "target": volume() }),
+        )
+        .unwrap();
+    s.h.settle();
+    let pan_control = s.button("Track Pan");
+    click(&mut s.h, pan_control, Modifiers::NONE);
+    assert_eq!(
+        s.h.shell.arrangement().automation_lane(s.track),
+        Some(volume())
+    );
+}
+
+// Spec: automation R30, automation-editing R20. A time selection dragged
+// across several lanes covers them all, Delete acts on every envelope it
+// covers as one undo step, and Down moves through the lanes in the order
+// they're drawn.
+#[test]
+fn a_selection_across_lanes_edits_every_envelope_and_down_moves_through_them() {
+    let mut s = set();
+    s.envelope(pan(), -0.8, 0.8);
+    s.envelope(volume(), 1.0, 0.5);
+    s.h.shell
+        .run(
+            "arrangement.add_automation_lane",
+            json!({ "track": s.track, "target": volume() }),
+        )
+        .unwrap();
+    s.h.settle();
+    // From the main lane down into the lane of its own.
+    let from = pos2(s.x(Ticks(BAR)), s.lane_of(0).top() + 30.0);
+    let to = pos2(s.x(Ticks(BAR * 2)), s.lane_of(1).center().y);
+    drag(&mut s.h, from, to, Modifiers::NONE);
+    let state: bl_shell::arrangement_commands::ArrangementState =
+        serde_json::from_value(s.h.shell.run("arrangement.state", json!({})).unwrap()).unwrap();
+    let covered: Vec<Option<AutomationTarget>> = state
+        .time_selection_lanes
+        .iter()
+        .filter(|lane| lane.track() == s.track)
+        .map(Lane::target)
+        .collect();
+    assert_eq!(covered, [Some(pan()), Some(volume())]);
+
+    let steps = s.steps();
+    s.h.key(Key::Delete, Modifiers::ALT);
+    s.h.settle();
+    let commands = s.commands();
+    assert!(
+        commands.contains(&"automation.delete_range".to_owned()),
+        "{commands:?}"
+    );
+    assert_eq!(s.steps(), steps + 1, "one undo step for both envelopes");
+    for target in [pan(), volume()] {
+        let points: Vec<Ticks> = s
+            .doc()
+            .track(s.track)
+            .unwrap()
+            .automation_for(&target)
+            .unwrap()
+            .envelope
+            .points()
+            .map(|p| p.at)
+            .collect();
+        assert!(points.contains(&Ticks(BAR)), "{target:?}: {points:?}");
+        assert!(points.contains(&Ticks(BAR * 2)), "{target:?}: {points:?}");
+    }
+
+    // Down: the track, its main lane, then its lane of its own.
+    s.h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [s.track] }))
+        .unwrap();
+    s.h.settle();
+    let mut seen = Vec::new();
+    for _ in 0..2 {
+        s.h.key(Key::ArrowDown, Modifiers::NONE);
+        s.h.settle();
+        seen.push(s.h.shell.arrangement().keyboard_lane_number());
+    }
+    assert_eq!(seen, [Some((s.track, 0)), Some((s.track, 1))]);
+}
+
+// Spec: automation R31 (M-OPT-015). With Snap Automation to Grid on, a
+// breakpoint dragged with the mouse lands on the grid; off, where the pointer
+// is, and Cmd (Alt on Windows) makes that drag snap.
+#[test]
+fn a_breakpoint_drag_snaps_to_the_grid_only_with_snap_automation_to_grid_on() {
+    let mut s = set();
+    s.h.shell
+        .run("arrangement.snap_to_grid", json!({ "on": true }))
+        .unwrap();
+    s.h.shell
+        .run(
+            "automation.set_breakpoint",
+            json!({ "track": s.track, "target": pan_json(), "at": BAR, "value": 0.0 }),
+        )
+        .unwrap();
+    s.h.settle();
+    let step = s.h.shell.arrangement().grid_ticks(s.doc());
+    let tpp = s.h.shell.arrangement().horizontal(s.doc()).ticks_per_point;
+    // A drag that ends a bit past a grid line.
+    let by = (step.get() as f64 * 2.37 / tpp) as f32;
+    let landed = |s: &mut Set, modifiers: Modifiers| -> Ticks {
+        let from = pos2(s.x(Ticks(BAR)), s.y(0.0));
+        drag(&mut s.h, from, from + vec2(by, 0.0), modifiers);
+        let at = s
+            .points()
+            .into_iter()
+            .map(|p| p.at)
+            .find(|at| *at != Ticks::ZERO && *at != Ticks(BAR * 2))
+            .expect("the dragged breakpoint");
+        // Put it back for the next drag.
+        s.h.shell.run("edit.undo", json!({})).unwrap();
+        s.h.settle();
+        at
+    };
+    let on_grid = |at: Ticks| at.get() % step.get() == 0;
+
+    // On, as a new install has it: on the grid; the key does the opposite.
+    assert!(s.h.shell.snap_automation_to_grid());
+    assert!(on_grid(landed(&mut s, Modifiers::NONE)));
+    assert!(!on_grid(landed(&mut s, all_key())), "the key bypasses it");
+
+    // Off: where the pointer is; the key snaps that drag.
+    s.h.shell
+        .run(
+            "settings.set_snap_automation_to_grid",
+            json!({ "on": false }),
+        )
+        .unwrap();
+    assert!(!on_grid(landed(&mut s, Modifiers::NONE)));
+    assert!(on_grid(landed(&mut s, all_key())), "the key snaps it");
+
+    // The editing grid's own Snap to Grid still turns all snapping off.
+    s.h.shell
+        .run("arrangement.snap_to_grid", json!({ "on": false }))
+        .unwrap();
+    assert!(!on_grid(landed(&mut s, all_key())));
+}
+
+/// Whether a breakpoint made with a double-click, aimed a little past a grid
+/// line, lands on the grid, with Snap Automation to Grid `snap` and the
+/// editing grid's snapping on.
+fn double_click_lands_on_the_grid(snap: bool) -> bool {
+    let mut s = set();
+    s.h.shell
+        .run("arrangement.snap_to_grid", json!({ "on": true }))
+        .unwrap();
+    s.h.shell
+        .run(
+            "settings.set_snap_automation_to_grid",
+            json!({ "on": snap }),
+        )
+        .unwrap();
+    let step = s.h.shell.arrangement().grid_ticks(s.doc());
+    let aim = Ticks(BAR * 3) + Ticks((step.get() as f64 * 0.37) as i64);
+    let at = pos2(s.x(aim), s.y(0.3));
+    double_click(&mut s.h, at, Modifiers::NONE);
+    let made = s
+        .points()
+        .into_iter()
+        .map(|p| p.at)
+        .find(|at| *at > Ticks(BAR * 2))
+        .expect("a breakpoint after the envelope");
+    made.get() % step.get() == 0
+}
+
+// Spec: automation R31. A breakpoint made with a double-click lands on the
+// grid while Snap Automation to Grid is on, and where the pointer is while
+// it's off.
+#[test]
+fn a_double_click_makes_a_breakpoint_on_the_grid_with_snap_automation_to_grid_on() {
+    assert!(double_click_lands_on_the_grid(true));
+}
+
+#[test]
+fn a_double_click_makes_a_breakpoint_where_the_pointer_is_with_it_off() {
+    assert!(!double_click_lands_on_the_grid(false));
 }

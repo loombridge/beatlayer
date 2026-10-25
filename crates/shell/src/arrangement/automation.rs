@@ -272,14 +272,16 @@ fn has_automation_lane(view: &ArrangementView) -> bool {
         .any(|lane| lane.target().is_some())
 }
 
-/// The automation lanes the selected tracks show.
+/// The automation lanes the selected tracks show: the main lane and the
+/// lanes of their own (the automation spec, R30).
 fn shown_lanes(view: &ArrangementView) -> Vec<(TrackId, AutomationTarget)> {
-    if !view.automation_mode() {
-        return Vec::new();
-    }
     view.selected_tracks()
         .iter()
-        .filter_map(|track| Some((*track, view.automation_lane(*track)?)))
+        .flat_map(|track| {
+            view.shown_lane_targets(*track)
+                .into_iter()
+                .map(|(_, target)| (*track, target))
+        })
         .collect()
 }
 

@@ -1078,7 +1078,9 @@ impl ArrangementView {
     /// spec, R1, R20), and takes it from the lane otherwise.
     pub(crate) fn select_lane_of_selection(&mut self) {
         let lane = match self.time_selection_lanes.as_slice() {
-            [Lane::Automation { track, .. }] => Some(*track),
+            [Lane::Automation { track, target }] => self
+                .shown_lane_of(*track, *target)
+                .map(|lane| (*track, lane)),
             _ => None,
         };
         self.select_lane(lane);

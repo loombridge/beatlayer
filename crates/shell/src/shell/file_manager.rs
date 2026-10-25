@@ -716,6 +716,7 @@ impl Shell {
         self.dirty = true;
         self.message = None;
         self.arrangement.reset();
+        self.arrangement.restore_lanes(self.store.lane_views());
         self.clip_view.forget_selection();
         self.mixer.reset();
         self.session.reset();

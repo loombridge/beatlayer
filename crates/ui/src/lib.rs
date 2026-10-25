@@ -80,6 +80,7 @@ pub mod multisampler;
 pub mod note_filters;
 pub mod note_lanes;
 pub mod palette;
+pub mod param_menu;
 pub mod plugin_list;
 pub mod rack_view;
 pub mod realtime_dialog;

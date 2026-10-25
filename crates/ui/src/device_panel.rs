@@ -35,8 +35,17 @@ use egui::{
 use serde_json::json;
 
 use crate::main_window::UiEvent;
+use crate::param_menu::ParamMenu;
 use crate::theme::Theme;
 use crate::widgets::{modulated_text, paint_ring_segment, ring_segment};
+
+/// What the panel asks of the device view for each parameter: its base and
+/// played value while a clip modulates it, and its context menu's automation
+/// items (the automation spec, R29).
+pub type ParamLookups<'a> = (
+    &'a dyn Fn(ParamId) -> Option<(f64, f64)>,
+    &'a dyn Fn(ParamId) -> Option<ParamMenu>,
+);
 
 /// Points of vertical drag that move a control from one end of its range to
 /// the other (observed in Live 12.4.6 on Dry/Wet: 0.8% of the range per
@@ -143,7 +152,8 @@ struct Drag {
 /// Draws a device's panel in `body`, and turns what the person does into
 /// `device.set_param` invocations. `display` is what the device's display
 /// shows now, if its type draws one. `played` gives the base and the played
-/// value of a parameter while a clip modulates it.
+/// value of a parameter while a clip modulates it, and `menu` the automation
+/// items of its context menu (the automation spec, R29).
 #[expect(clippy::too_many_arguments, reason = "the panel's inputs")]
 pub fn show(
     ui: &mut Ui,
@@ -151,7 +161,7 @@ pub fn show(
     frame: &DeviceFrame,
     display: Option<&DeviceDisplay>,
     body: Rect,
-    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
+    (played, menu): ParamLookups<'_>,
     renaming: &mut Option<crate::articulation_map::Renaming>,
     events: &mut Vec<UiEvent>,
 ) {
@@ -301,6 +311,7 @@ pub fn show(
                     .map(|reading| reading.text.clone())
             })
             .flatten(),
+            automation: menu(param),
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
@@ -320,6 +331,16 @@ pub fn show(
             );
         } else {
             draw(ui);
+        }
+        // Spec: automation R29. A click shows the parameter's envelope while
+        // Automation Mode is on, and its context menu holds the automation
+        // items: after the control's own where it has some.
+        if let Some(menu) = &control.automation {
+            if control.stops.is_empty() && control.knob.is_none() {
+                menu.overlay(ui, rect, control.id(), events);
+            } else {
+                menu.click(ui, rect, events);
+            }
         }
         // Spec: modulation R15. While a Map button is lit, every parameter
         // but the modulator's own is a target.
@@ -497,6 +518,8 @@ struct Control<'a> {
     /// number (the Articulation Map's Articulation control reads the
     /// articulation's name).
     text: Option<String>,
+    /// The automation items of its context menu (the automation spec, R29).
+    automation: Option<ParamMenu>,
 }
 
 impl Control<'_> {
@@ -723,6 +746,9 @@ impl Control<'_> {
                         ui.close();
                     }
                 }
+                if let Some(menu) = &self.automation {
+                    menu.items(ui, true, events);
+                }
             });
         }
         if let Some(knob) = self.knob {
@@ -752,6 +778,9 @@ impl Control<'_> {
                         )));
                         ui.close();
                     }
+                }
+                if let Some(menu) = &self.automation {
+                    menu.items(ui, true, events);
                 }
             });
         }

@@ -67,6 +67,7 @@ use bl_shell_spec::freeze as freeze_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
+use bl_shell_spec::sync as sync_ids;
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
@@ -581,6 +582,11 @@ pub struct Shell {
     /// while the indicator still lit (external-devices R7).
     midi_seen: (u64, u64),
     midi_lit: [Option<std::time::Instant>; 2],
+    /// The quarter notes of MIDI clock the engine had sent when
+    /// [`Shell::poll`] last looked, and since when the lower sync lamp has
+    /// been lit (the MIDI clock spec, R12).
+    sync_seen: u64,
+    sync_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     /// The keys held on the MIDI input and the previews sounding, for the
@@ -1083,6 +1089,10 @@ const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
 /// How long a MIDI indicator stays lit after a message.
 const MIDI_LAMP: std::time::Duration = std::time::Duration::from_millis(120);
 
+/// How long the lower sync lamp stays lit after a quarter note of MIDI clock
+/// (the MIDI clock spec, R12).
+const SYNC_LAMP: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// The macro edit a document command makes, so the shell writes the values
 /// its law gives each mapped parameter in the same undo step (macros spec,
 /// R13).
@@ -1248,6 +1258,8 @@ impl Shell {
             midi_listed: std::time::Instant::now(),
             midi_seen: (0, 0),
             midi_lit: [None; 2],
+            sync_seen: 0,
+            sync_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),
             step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
@@ -2093,6 +2105,9 @@ impl Shell {
         }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
+        }
+        if sync_ids::handles(id) {
+            return self.run_sync(id, args);
         }
         if file_manager_ids::handles(id) {
             // Spec: file-management R10 to R17. The File Manager's own

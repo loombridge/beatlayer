@@ -16,6 +16,9 @@ use serde::{Deserialize, Serialize};
 pub const PORTS: &str = "midi.ports";
 /// `midi.set_port`: change a port's Track, Sync, Remote and MPE switches.
 pub const SET_PORT: &str = "midi.set_port";
+/// `midi.set_show_resync_button`: Show Resync Button in Settings ▸ Tempo &
+/// MIDI (the MIDI clock spec, R10).
+pub const SET_SHOW_RESYNC_BUTTON: &str = "midi.set_show_resync_button";
 /// `midi.toggle_computer_keyboard`: switch the computer MIDI keyboard.
 pub const TOGGLE_COMPUTER_KEYBOARD: &str = "midi.toggle_computer_keyboard";
 /// `midi.computer_keyboard_octave`: move the computer keyboard's octave.
@@ -30,6 +33,7 @@ pub const COMPUTER_KEYBOARD_KEY: &str = "midi.computer_keyboard_key";
 pub const IDS: &[&str] = &[
     PORTS,
     SET_PORT,
+    SET_SHOW_RESYNC_BUTTON,
     TOGGLE_COMPUTER_KEYBOARD,
     COMPUTER_KEYBOARD_OCTAVE,
     COMPUTER_KEYBOARD_VELOCITY,
@@ -63,6 +67,102 @@ impl PortDirection {
     }
 }
 
+/// An output's MIDI Clock Type (the MIDI clock spec, R1, R5, R6).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClockTypeChoice {
+    /// Song Position Pointer and Continue each time the play position
+    /// changes.
+    #[default]
+    Song,
+    /// Only Start, at the start of the next bar.
+    Pattern,
+}
+
+impl ClockTypeChoice {
+    /// Every choice, in the order the chooser lists them.
+    pub const ALL: [Self; 2] = [Self::Song, Self::Pattern];
+
+    /// The chooser's text.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Song => "Song",
+            Self::Pattern => "Pattern",
+        }
+    }
+}
+
+impl From<ClockTypeChoice> for bl_core::midi::ClockType {
+    fn from(choice: ClockTypeChoice) -> Self {
+        match choice {
+            ClockTypeChoice::Song => Self::Song,
+            ClockTypeChoice::Pattern => Self::Pattern,
+        }
+    }
+}
+
+impl From<bl_core::midi::ClockType> for ClockTypeChoice {
+    fn from(clock_type: bl_core::midi::ClockType) -> Self {
+        match clock_type {
+            bl_core::midi::ClockType::Song => Self::Song,
+            bl_core::midi::ClockType::Pattern => Self::Pattern,
+        }
+    }
+}
+
+/// An output's Hardware Resync (the MIDI clock spec, R1, R11).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum HardwareResyncChoice {
+    /// Stop, then Start.
+    #[default]
+    StopAndStart,
+    /// Start.
+    StartOnly,
+    /// Nothing.
+    DontResync,
+}
+
+impl HardwareResyncChoice {
+    /// Every choice, in the order the chooser lists them.
+    pub const ALL: [Self; 3] = [Self::StopAndStart, Self::StartOnly, Self::DontResync];
+
+    /// The chooser's text.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::StopAndStart => "Stop and Start",
+            Self::StartOnly => "Start Only",
+            Self::DontResync => "Don't Resync",
+        }
+    }
+}
+
+impl From<HardwareResyncChoice> for bl_core::midi::HardwareResync {
+    fn from(choice: HardwareResyncChoice) -> Self {
+        match choice {
+            HardwareResyncChoice::StopAndStart => Self::StopAndStart,
+            HardwareResyncChoice::StartOnly => Self::StartOnly,
+            HardwareResyncChoice::DontResync => Self::Off,
+        }
+    }
+}
+
+impl From<bl_core::midi::HardwareResync> for HardwareResyncChoice {
+    fn from(resync: bl_core::midi::HardwareResync) -> Self {
+        match resync {
+            bl_core::midi::HardwareResync::StopAndStart => Self::StopAndStart,
+            bl_core::midi::HardwareResync::StartOnly => Self::StartOnly,
+            bl_core::midi::HardwareResync::Off => Self::DontResync,
+        }
+    }
+}
+
+/// The range of a port's MIDI Clock Sync Delay in milliseconds (the MIDI
+/// clock spec, R2).
+pub const SYNC_DELAY_RANGE: core::ops::RangeInclusive<i16> = -100..=100;
+
 /// One MIDI port as the Settings window's table shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PortInfo {
@@ -83,6 +183,16 @@ pub struct PortInfo {
     /// its own; an output has no MPE switch, and reads false.
     #[serde(default)]
     pub mpe: bool,
+    /// MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to
+    /// the clock an output sends; kept while Sync is off.
+    #[serde(default)]
+    pub sync_delay_ms: i16,
+    /// An output's MIDI Clock Type: Song or Pattern.
+    #[serde(default)]
+    pub clock_type: ClockTypeChoice,
+    /// An output's Hardware Resync: what Resync External Hardware sends it.
+    #[serde(default)]
+    pub hardware_resync: HardwareResyncChoice,
     /// Whether the MIDI system offers the port now.
     pub present: bool,
     /// Whether it is open: any of its switches is on.
@@ -117,6 +227,10 @@ pub struct MidiPortsResult {
     pub ports: Vec<PortInfo>,
     /// The computer MIDI keyboard.
     pub keyboard: KeyboardInfo,
+    /// Whether Show Resync Button is on, so the Control Bar shows the
+    /// Resync External Hardware button.
+    #[serde(default)]
+    pub show_resync_button: bool,
 }
 
 /// Arguments of `midi.set_port`.
@@ -139,6 +253,33 @@ pub struct SetPortArgs {
     /// MPE on or off, for an input. Left out, it stays as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mpe: Option<bool>,
+    /// MIDI Clock Sync Delay in milliseconds, from -100 to 100. Left out, it
+    /// stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(range(min = -100, max = 100))]
+    pub sync_delay_ms: Option<i16>,
+    /// An output's MIDI Clock Type. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_type: Option<ClockTypeChoice>,
+    /// An output's Hardware Resync. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hardware_resync: Option<HardwareResyncChoice>,
+}
+
+/// What `midi.set_show_resync_button` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SetShowResyncButtonResult {
+    /// Whether Show Resync Button is on now.
+    pub on: bool,
+}
+
+/// Arguments of `midi.set_show_resync_button`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetShowResyncButtonArgs {
+    /// Show the button or hide it. Left out, it switches to the other state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
 }
 
 /// Arguments of `midi.toggle_computer_keyboard`.
@@ -195,7 +336,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .description(
                 "Lists every MIDI input and output port the computer offers, each with its \
                  Track, Sync, Remote and MPE switches as the Settings window's Tempo & MIDI page \
-                 shows them, and the computer MIDI keyboard's state. Changes nothing.",
+                 shows them, with each port's MIDI Clock Sync Delay, MIDI Clock Type and \
+                 Hardware Resync, the computer MIDI keyboard's state, and whether Show Resync \
+                 Button is on. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -211,8 +354,16 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  are off; MPE opens nothing by itself. An input's notes and controllers reach \
                  tracks only while its Track switch is on, and as MPE, each note on a channel \
                  of its own with its own pitch, slide and pressure, while its MPE switch is on \
-                 too; Sync and Remote are kept and act when sync and MIDI mapping are built. \
-                 Output ports have no MPE switch, and `mpe` on one is refused. The port's \
+                 too. An output with Sync on gets MIDI clock, Start, Continue, Stop and Song \
+                 Position Pointer while the song plays, whatever its Track switch, stamped for \
+                 the moment each is heard: `sync_delay_ms` (-100 to 100) moves them earlier or \
+                 later, `clock_type` is Song (Song Position Pointer and Continue whenever the \
+                 play position changes) or Pattern (only Start, at the next bar line), and \
+                 `hardware_resync` is what Resync External Hardware sends it: Stop and Start, \
+                 Start Only or Don't Resync. Those three are kept while Sync is off; \
+                 `clock_type` and `hardware_resync` are refused on an input. Remote is kept and \
+                 acts when MIDI mapping is built. Output ports have no MPE switch, and `mpe` on \
+                 one is refused. The port's \
                  switches are kept for the next start, and aren't part of the set or an undo \
                  step. Opens or closes a device outside Beatlayer. Fails if the computer \
                  doesn't offer the port now.",
@@ -221,6 +372,19 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<SetPortArgs>()
             .result::<PortInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SHOW_RESYNC_BUTTON, "Show Resync Button")
+            .description(
+                "Sets Show Resync Button, the switch on the second section of Settings ▸ Tempo & \
+                 MIDI, to `on`, or to the other state if it's left out. While it's on, the \
+                 Control Bar shows the Resync External Hardware button. It starts off, is kept \
+                 for the next start, and isn't part of the set or an undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<SetShowResyncButtonArgs>()
+            .result::<SetShowResyncButtonResult>(),
     )?;
     registry.register(
         CommandSpec::new(TOGGLE_COMPUTER_KEYBOARD, "Computer MIDI Keyboard")

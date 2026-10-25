@@ -580,7 +580,8 @@ impl MainWindowUi {
                 .then_some(crate::layout::UNDO_HISTORY_WIDTH);
             let detail = crate::layout::DetailViews::of(shell.detail_of(self.window))
                 .with_browser_width(shell.browser_view().width())
-                .with_global_amount(shell.global_amount_shown());
+                .with_global_amount(shell.global_amount_shown())
+                .with_sync(shell.sync_lamps_shown(), shell.resync_button_shown());
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
                 // or Undo History; the Control Bar is cut off.
@@ -1197,6 +1198,13 @@ impl MainWindowUi {
             // Spec: grooves R30. The Global Amount shows while the pool holds
             // a groove, and the layout has room for it.
             if *el == Element::GlobalAmount && rect.width() <= 0.0 {
+                continue;
+            }
+            // Spec: midi-clock R10, R15. The sync lamps show while an input
+            // has Sync on, the Resync button while Show Resync Button is on.
+            if matches!(el, Element::SyncLamps | Element::ResyncExternalHardware)
+                && rect.width() <= 0.0
+            {
                 continue;
             }
             let mut look = self
@@ -2154,6 +2162,22 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 ..Look::default()
             }
         }
+        Element::SyncLamps => {
+            // Spec: midi-clock R12, R15. The number holds the two lamps: 1
+            // for the upper (sync received), 2 for the lower (sync sent).
+            let sending = shell.sync_output_lit();
+            Look {
+                number: Some(f64::from(u8::from(sending) << 1)),
+                value: Some(if sending { "sending" } else { "" }.to_owned()),
+                description: Some(
+                    "The upper light flashes when MIDI clock arrives at an input with Sync \
+                     on, the lower when Beatlayer sends MIDI clock to an output."
+                        .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
+        Element::ResyncExternalHardware => text("RESYNC"),
         Element::Message => match (shell.message(), shell.hint()) {
             (Some(message), _) => Look {
                 text: Some(message.text.clone()),
@@ -2212,6 +2236,7 @@ fn command_of(element: Element) -> Option<&'static str> {
         Element::DeviceViewToggle => Some(ids::VIEW_TOGGLE_DEVICE_VIEW),
         Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::ComputerKeyboard => Some(midi_ids::TOGGLE_COMPUTER_KEYBOARD),
+        Element::ResyncExternalHardware => Some("transport.resync_external_hardware"),
         Element::SessionView | Element::ArrangementView => {
             Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)
         }
@@ -2298,6 +2323,10 @@ fn click(element: Element, shell: &Shell, window: WindowKind) -> Option<Invocati
         Element::DrawMode => Some(Invocation::new(ids::VIEW_DRAW_MODE, json!({}))),
         Element::ComputerKeyboard => Some(Invocation::new(
             midi_ids::TOGGLE_COMPUTER_KEYBOARD,
+            json!({}),
+        )),
+        Element::ResyncExternalHardware => Some(Invocation::new(
+            "transport.resync_external_hardware",
             json!({}),
         )),
         Element::Follow => Some(Invocation::new(

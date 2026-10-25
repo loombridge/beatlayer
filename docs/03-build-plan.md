@@ -772,7 +772,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.69 | done | 25 October 2026 | [#468](https://github.com/loombridge/beatlayer/pull/468); a MIDI track without an instrument shows a MIDI meter in its strip and header, the Device View draws a meter at every device boundary, racks included, MIDI before the instrument and level after, with per-note expression lit blue, and agents read them in `mixer_view.state` and `device_view.state` ([MIDI meters](specs/midi-meters.md), [MPE](specs/mpe.md) R33) |
 | 6.70 | done | 25 October 2026 | [#474](https://github.com/loombridge/beatlayer/pull/474); the keymap test fails any M1 to M3 shortcut still pending without a package that isn't done, 15 of the 25 unplanned shortcuts are bound and pressed in a test, and the other 10 move to new packages WP-6.73 to WP-6.76 with their reasons |
 | 6.71 | done | 22 October 2026 | [#320](https://github.com/loombridge/beatlayer/pull/320); the Export Audio/Video dialog on ⇧⌘R and the File menu, with a progress window and Cancel, exports on a worker thread, and Convert to Mono, Encode MP3 beside a PCM file and Create Analysis File ([export](specs/export.md) R28 to R45) |
-| 6.72 | todo |  |  |
+| 6.72 | done | 25 October 2026 | [#475](https://github.com/loombridge/beatlayer/pull/475); the Clip View's panels arrange horizontally, vertically or automatically from the View menu, the title bar's menu and an edge drag, fold on a double-click of the title bar, and Option+8 reaches the selected panel |
 | 6.73 | todo |  |  |
 | 6.74 | todo |  |  |
 | 6.75 | todo |  |  |

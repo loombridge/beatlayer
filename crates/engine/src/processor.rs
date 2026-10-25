@@ -798,10 +798,10 @@ impl Processor {
         let rate = self.config.sample_rate;
         // Keep the playhead on the same beat.
         self.position = same_beat(before, after, rate, self.position);
-        // The take being captured keeps its beats: it goes on from the
-        // playhead, and its bounds are read through the new map.
+        // The take being captured goes on from the playhead. Its start stays:
+        // its MIDI is stamped `start + written` and the shell takes `start`
+        // off again, so moving it would drop or shift what came before.
         if let Some(take) = &mut self.take {
-            take.start = same_beat(before, after, rate, take.start);
             take.next = same_beat(before, after, rate, take.next);
         }
         self.session

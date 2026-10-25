@@ -272,6 +272,10 @@ impl View<'_> {
             "frozen": track.frozen(),
             "tracks_inside": track.children().len(),
         });
+        // Spec: tunings R24. A MIDI track's MIDI Controller Layout.
+        if track.kind() == bl_model::TrackKind::Midi {
+            value["tuning_layout"] = json!(track.tuning_layout());
+        }
         with_info_text(&mut value, track.info_text());
         value
     }
@@ -402,6 +406,10 @@ impl View<'_> {
             "params_set": device.params.len(),
         });
         with_info_text(&mut value, &device.info_text);
+        // Spec: tunings R24. A plug-in's tuning switch.
+        if matches!(device.kind, bl_model::DeviceKind::Plugin { .. }) {
+            value["tuning"] = json!(device.mpe.tuning);
+        }
         // A rack's chains, each with its mixer and its devices, racks inside
         // included (the racks spec, R17).
         if device.rack_kind().is_some() {

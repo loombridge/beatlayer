@@ -2,6 +2,8 @@
 //! that need the shell, `tuning.load`, which reads a tuning file, and
 //! `tuning.state`, which reads the set's tuning back.
 //!
+//! `tuning.show_layout` opens the Configure MIDI Layout dialog (WP-6.9b, R23).
+//!
 //! The commands that change the tuning inside the set, `tuning.set`,
 //! `tuning.remove`, `tuning.set_reference` and `tuning.set_range`, and
 //! `track.set_tuning_bypass`, are `bl-model`'s; Retune Set On Loading Tuning
@@ -9,7 +11,7 @@
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
-use bl_model::TuningReadout;
+use bl_model::{TrackId, TuningLayout, TuningReadout};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -18,11 +20,15 @@ pub const LOAD: &str = "tuning.load";
 /// `tuning.state`: the set's tuning (R19).
 pub const STATE: &str = "tuning.state";
 
+/// `tuning.show_layout`: open or close the Configure MIDI Layout dialog
+/// (R23).
+pub const SHOW_LAYOUT: &str = "tuning.show_layout";
+
 /// `tuning.remove` (`bl-model`): the set's tuning goes (R9).
 pub const REMOVE: &str = "tuning.remove";
 
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[LOAD, STATE];
+pub const IDS: &[&str] = &[LOAD, STATE, SHOW_LAYOUT];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -53,6 +59,35 @@ pub struct TuningState {
     pub tuning: Option<TuningReadout>,
 }
 
+/// Arguments of `tuning.show_layout`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ShowLayoutArgs {
+    /// The MIDI track whose custom layout the dialog edits.
+    pub track: TrackId,
+    /// Open (true) or close (false) the dialog; opens if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shown: Option<bool>,
+}
+
+/// What `tuning.show_layout` returns: whether the dialog is open and what
+/// it edits.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LayoutDialog {
+    /// Whether the dialog is open.
+    pub open: bool,
+    /// The MIDI track it edits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The track's layout and custom table, while it is open.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout: Option<TuningLayout>,
+    /// How many keys the set's tuning holds, from key 0: a value of the
+    /// table from this up is unavailable and plays nothing (R23).
+    #[serde(default)]
+    pub tuning_keys: usize,
+}
+
 /// Adds the tuning commands to a registry.
 ///
 /// # Errors
@@ -79,6 +114,21 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<LoadArgs>()
             .result::<TuningState>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SHOW_LAYOUT, "Configure MIDI Layout…")
+            .description(
+                "Opens or closes the Configure MIDI Layout dialog, which Custom Controller \
+                 Layout's \"…\" button in a MIDI track's In/Out section opens: give the MIDI \
+                 `track`. Opens unless `shown` says which, and only while the set has a \
+                 tuning. The dialog's controls run `track.set_tuning_layout`. It changes only \
+                 the view: it isn't an undo step. Returns the dialog's state: the track's \
+                 layout and custom table, and `tuning_keys`, how many keys the tuning holds.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<ShowLayoutArgs>()
+            .result::<LayoutDialog>(),
     )?;
     registry.register(
         CommandSpec::new(STATE, "Tuning State")
@@ -109,6 +159,6 @@ mod tests {
         register(&mut registry).unwrap();
         assert_eq!(registry.len(), IDS.len());
         assert!(registry.problems().is_empty(), "{:?}", registry.problems());
-        assert!(handles(LOAD) && handles(STATE) && !handles(REMOVE));
+        assert!(handles(LOAD) && handles(STATE) && handles(SHOW_LAYOUT) && !handles(REMOVE));
     }
 }

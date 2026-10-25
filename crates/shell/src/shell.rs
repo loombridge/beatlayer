@@ -708,6 +708,9 @@ pub struct Shell {
     /// What the MPE/Multi-channel Settings dialog edits, while it is open
     /// (the MPE spec, R18): never part of the set.
     mpe_dialog: Option<MpeDialogTarget>,
+    /// The MIDI track whose Configure MIDI Layout dialog is open (the
+    /// tunings spec, R23).
+    layout_dialog: Option<TrackId>,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -1214,6 +1217,7 @@ impl Shell {
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
+            layout_dialog: None,
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,

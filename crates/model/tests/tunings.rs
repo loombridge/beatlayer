@@ -579,3 +579,157 @@ fn a_note_on_a_key_that_played_nothing_stays_put() {
         .unwrap();
     assert_eq!(notes_of(&editor, clip), vec![(100, 0, 100)]);
 }
+
+// Spec: tunings R22, R23. The MIDI Controller Layout and its custom table
+// are one undo step each, and save and reopen.
+#[test]
+fn the_controller_layout_is_one_undo_step_and_survives_save_and_reopen() {
+    let mut editor = Editor::new();
+    let track = midi_track(&mut editor);
+    let saved = serde_json::to_string(editor.document()).unwrap();
+    assert!(!saved.contains("tuning_layout"));
+    editor
+        .apply(Command::SetTuningLayout {
+            track,
+            layout: Some(bl_model::LayoutKind::ClosestInPitch),
+            keys: None,
+        })
+        .unwrap();
+    assert_eq!(
+        editor.undo_history().next(),
+        Some("Change MIDI Controller Layout")
+    );
+    let mut keys: Vec<Option<u8>> = (0..128).map(Some).collect();
+    keys[61] = Some(70);
+    keys[62] = None;
+    editor
+        .apply(Command::SetTuningLayout {
+            track,
+            layout: Some(bl_model::LayoutKind::Custom),
+            keys: Some(keys.clone()),
+        })
+        .unwrap();
+    let saved = serde_json::to_value(editor.document()).unwrap();
+    let back: bl_model::Document = serde_json::from_value(saved).unwrap();
+    let layout = back.track(track).unwrap().tuning_layout();
+    assert_eq!(layout.layout, bl_model::LayoutKind::Custom);
+    assert_eq!(layout.keys, keys);
+    // The table is kept while another layout is chosen.
+    editor
+        .apply(Command::SetTuningLayout {
+            track,
+            layout: Some(bl_model::LayoutKind::AllKeys),
+            keys: None,
+        })
+        .unwrap();
+    assert_eq!(
+        editor.document().track(track).unwrap().tuning_layout().keys,
+        keys
+    );
+    editor.undo().unwrap();
+    assert_eq!(
+        editor
+            .document()
+            .track(track)
+            .unwrap()
+            .tuning_layout()
+            .layout,
+        bl_model::LayoutKind::Custom
+    );
+    // A table with the wrong size, or a key past 127, is refused.
+    for bad in [vec![None; 5], vec![Some(200); 128]] {
+        assert!(
+            editor
+                .apply(Command::SetTuningLayout {
+                    track,
+                    layout: None,
+                    keys: Some(bad),
+                })
+                .is_err()
+        );
+    }
+    // Only a MIDI track has a layout.
+    let audio: TrackId = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: audio,
+            kind: TrackKind::Audio,
+            name: "Audio".to_owned(),
+            parent: None,
+            index: 1,
+        })
+        .unwrap();
+    assert!(
+        editor
+            .apply(Command::SetTuningLayout {
+                track: audio,
+                layout: Some(bl_model::LayoutKind::AllKeys),
+                keys: None,
+            })
+            .is_err()
+    );
+}
+
+// Spec: tunings R20. A plug-in's tuning switch is on in a new device, saved
+// only where off, and one undo step.
+#[test]
+fn a_plugins_tuning_switch_is_on_in_a_new_device_and_saved_only_where_off() {
+    let mut editor = Editor::new();
+    let track = midi_track(&mut editor);
+    let device: bl_model::DeviceId = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                device,
+                "Synth",
+                bl_model::DeviceKind::Plugin {
+                    format: bl_model::PluginFormat::Clap,
+                    plugin_id: "com.example.synth".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    assert!(editor.document().device(device).unwrap().mpe.tuning);
+    assert!(
+        !serde_json::to_string(editor.document())
+            .unwrap()
+            .contains("\"tuning\"")
+    );
+    editor
+        .apply(Command::SetPluginTuning { device, on: false })
+        .unwrap();
+    assert_eq!(
+        editor.undo_history().next(),
+        Some("Apply Tuning to Per-Note Pitch Bend")
+    );
+    let saved = serde_json::to_value(editor.document()).unwrap();
+    let back: bl_model::Document = serde_json::from_value(saved).unwrap();
+    assert!(!back.device(device).unwrap().mpe.tuning);
+    editor.undo().unwrap();
+    assert!(editor.document().device(device).unwrap().mpe.tuning);
+    // A device that isn't a plug-in has no such switch.
+    let native: bl_model::DeviceId = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 1,
+            device: Device::new(
+                native,
+                "Gate",
+                bl_model::DeviceKind::Native {
+                    device_type: "gate".to_owned(),
+                },
+            ),
+        })
+        .unwrap();
+    assert!(
+        editor
+            .apply(Command::SetPluginTuning {
+                device: native,
+                on: false
+            })
+            .is_err()
+    );
+}

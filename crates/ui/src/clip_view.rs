@@ -981,8 +981,8 @@ fn tuning_of_clip(shell: &Shell, clip: ClipId) -> Option<&bl_model::Tuning> {
 /// What the Status Bar shows while the pointer is over a note or a row of
 /// the editor of a clip on a track that plays a tuning (the tunings spec,
 /// R30): its name, its frequency in Hz, and the key of an incoming keyboard
-/// that plays it. Every key plays itself until the MIDI Controller Layouts
-/// are built (R22), so that is the twelve-step key of the same number.
+/// that plays it under the track's MIDI Controller Layout (R22), left out
+/// where none does.
 fn tuning_readout(
     ui: &Ui,
     shell: &Shell,
@@ -1016,14 +1016,21 @@ fn tuning_readout(
     let (Some(note), Some(frequency)) = (tuning.key_note(key), tuning.key_frequency(key)) else {
         return;
     };
-    crate::mixer::show_readout(
-        ui.ctx(),
-        format!(
-            "{}, {frequency:.2} Hz, key {}",
-            tuning.note_name(note),
-            key_name(key)
-        ),
-    );
+    let doc = shell.editor().document();
+    let layout = doc
+        .clip_track(clip)
+        .and_then(|track| doc.track(track))
+        .map(bl_model::Track::tuning_layout);
+    let incoming = match layout.and_then(|l| bl_engine::KeyPitches::of(Some(tuning)).layout_map(l))
+    {
+        Some(map) => (0..128u8).find(|&k| map[usize::from(k)] == Some(key)),
+        None => Some(key),
+    };
+    let mut text = format!("{}, {frequency:.2} Hz", tuning.note_name(note));
+    if let Some(incoming) = incoming {
+        text.push_str(&format!(", key {}", key_name(incoming)));
+    }
+    crate::mixer::show_readout(ui.ctx(), text);
 }
 
 /// The highest key a tuning's rows reach (R29).

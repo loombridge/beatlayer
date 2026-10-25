@@ -19,7 +19,7 @@ use bl_engine::mpe::MpeInput;
 use bl_engine::mpe_layout::MpeLayout;
 use bl_engine::{
     AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteKind, ParamValue,
-    PluginMpeData,
+    PluginMpeData, PluginTuningData, TunedNotes,
 };
 use bl_model::{ParamId, PluginMpe};
 use clack_host::events::EventFlags;
@@ -114,6 +114,9 @@ pub struct ClapNode {
     /// MPE MIDI laid out for a note port that takes MIDI (R17), made with
     /// the node.
     layout: MpeLayout,
+    /// Retunes the block's notes into nearest keys and per-note bends while
+    /// the plug-in plays the set's tuning (the tunings spec, R20).
+    tuned: TunedNotes,
     /// Reads the MPE MIDI the plug-in sends out (R20).
     reader: MpeInput,
     /// The gain adjustment, in dB, the plug-in reported for the last block
@@ -163,6 +166,7 @@ impl ClapNode {
             mpe: PluginMpe::default(),
             pending_mpe: None,
             layout: MpeLayout::new(PluginMpe::default().settings),
+            tuned: TunedNotes::new(),
             reader: MpeInput::new(),
             reduction: 0.0,
         };
@@ -437,18 +441,21 @@ impl Node for ClapNode {
             &mut self.input,
             midi_notes,
         );
+        // Spec: tunings R20. With the tuning switch on, each note goes on
+        // the nearest twelve-step key with a per-note bend.
+        let notes = self.tuned.retune(block.notes());
         if self.mpe.on && midi_notes {
             let input = &mut self.input;
             let mut sink = |offset, message| input.midi(offset, message);
             self.layout.open(&mut sink);
-            self.layout.lay_out(block.notes(), &mut sink);
+            self.layout.lay_out(notes, &mut sink);
         } else {
             let expressions = if self.mpe.on {
                 Expressions::Clap
             } else {
                 Expressions::PolyPressure
             };
-            for note in block.notes() {
+            for note in notes {
                 self.input.note(note, expressions);
             }
         }
@@ -579,6 +586,8 @@ impl Node for ClapNode {
             self.automation = Some(data);
         } else if let Some(PluginMpeData(mpe)) = data.downcast_ref() {
             self.pending_mpe = Some(*mpe);
+        } else if let Some(PluginTuningData(keys)) = data.downcast_ref() {
+            self.tuned.set(*keys);
         }
     }
 

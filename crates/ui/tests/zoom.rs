@@ -40,7 +40,17 @@ fn every_step() -> impl Iterator<Item = f32> {
 /// controls, then the Arrangement View's parts in the main view (with the
 /// Overview and the factory default set's two returns and Main pinned).
 fn main_window_rows(size: Vec2, browser: bool) -> Vec<Row> {
-    let shell = ShellLayout::compute(size, browser, true);
+    rows_of(ShellLayout::compute(size, browser, true))
+}
+
+/// As [`main_window_rows`], for a set like the harness's, whose pool holds the
+/// factory default groove, so the Control Bar shows the Global Amount where
+/// it has room (the grooves spec R30).
+fn drawn_window_rows(size: Vec2, browser: bool) -> Vec<Row> {
+    rows_of(common::layout(size, browser, true))
+}
+
+fn rows_of(shell: ShellLayout) -> Vec<Row> {
     let arrangement = ArrangementLayout::compute(shell.main_view, true, 3);
     let mut rows = shell.rows();
     rows.extend(arrangement.rows());
@@ -224,7 +234,10 @@ fn controls_keep_their_live_size_times_the_zoom() {
             if placement.strip == Strip::ControlBar {
                 assert!((rect.height() - 18.0 * zoom).abs() < EPS * 10.0);
             }
-            if placement.element != bl_ui::layout::Element::Message {
+            // The Global Amount is hidden unless the pool holds a groove.
+            if placement.element != bl_ui::layout::Element::Message
+                && placement.element != bl_ui::layout::Element::GlobalAmount
+            {
                 assert!(
                     (rect.width() - placement.width * zoom).abs() < EPS * 10.0,
                     "{} at {zoom}",
@@ -405,7 +418,7 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
 
                 let top = if title_bar { TITLE_BAR / zoom } else { 0.0 };
                 let content = (window - vec2(0.0, if title_bar { TITLE_BAR } else { 0.0 })) / zoom;
-                let expected: Vec<Row> = main_window_rows(content, true)
+                let expected: Vec<Row> = drawn_window_rows(content, true)
                     .into_iter()
                     .map(|row| Row {
                         rect: row.rect.translate(vec2(0.0, top)),
@@ -426,8 +439,10 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
                     assert_rect_near(rect, row.rect, 0.1, &format!("{what}: {}", row.name));
                     checked += 1;
                 }
+                // Every row but the Global Amount, which the Control Bar hides
+                // where it has no room for it.
                 assert!(
-                    checked >= ELEMENTS.len() + 17,
+                    checked >= ELEMENTS.len() + 16,
                     "{what}: only {checked} rows drawn"
                 );
 

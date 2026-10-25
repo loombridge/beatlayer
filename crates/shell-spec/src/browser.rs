@@ -333,7 +333,6 @@ impl Label {
                 "Instrument presets appear here once Beatlayer has instruments (milestone M2); \
                  its own sound library comes in milestone M9.",
             ),
-            Self::Grooves => Some("Grooves arrive with the Groove Pool in milestone M6."),
             Self::Tunings => Some("Tunings arrive in milestone M6."),
             _ => None,
         }
@@ -427,6 +426,10 @@ pub enum ItemKind {
     Preset,
     /// A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
     ChordBank,
+    /// A groove file (`.blgroove`), which loads into the Groove Pool, or
+    /// replaces the groove being hot-swapped (WP-6.20; the grooves spec R32,
+    /// R33).
+    Groove,
     /// A plug-in the scanner found (WP-2.9).
     Plugin,
     /// One of Beatlayer's own devices, listed under a device label (the
@@ -1179,16 +1182,21 @@ pub enum Part {
     Content,
     /// The search field.
     Search,
+    /// The Groove Pool under the list (the grooves spec R24): its keys are its
+    /// own, so no browser key applies.
+    GroovePool,
 }
 
 impl Part {
-    /// The shortcut context this part gives key presses.
+    /// The shortcut context this part gives key presses: the global one for
+    /// the Groove Pool, whose keys the pool handles itself.
     #[must_use]
     pub const fn context(self) -> bl_commands::Context {
         match self {
             Self::Sidebar => BrowserSidebar,
             Self::Content => Browser,
             Self::Search => BrowserSearch,
+            Self::GroovePool => Global,
         }
     }
 }
@@ -1197,8 +1205,8 @@ impl Part {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FocusArgs {
-    /// The part to focus: `sidebar`, `content` (the list), or `search`.
-    /// Left out, the list.
+    /// The part to focus: `sidebar`, `content` (the list), `search`, or
+    /// `groove_pool`. Left out, the list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub part: Option<Part>,
 }

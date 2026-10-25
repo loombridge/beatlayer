@@ -226,8 +226,8 @@ fn the_panel_shows_its_controls_in_order_and_the_selector_switches() {
         );
     }
     // The Show buttons and the Set buttons sit beside Start, End, Position
-    // and Length; Groove waits for its package, and the scale controls are
-    // live (the scales spec, R19).
+    // and Length; Groove (the grooves spec R29) and the scale controls (the
+    // scales spec, R19) are live.
     for marker in ["Start", "End", "Position", "Length"] {
         Harness::node(&all, &format!("Show {marker}"));
         assert!(
@@ -235,12 +235,7 @@ fn the_panel_shows_its_controls_in_order_and_the_selector_switches() {
             "Set waits for playback"
         );
     }
-    assert!(Harness::node(&all, "Groove").disabled);
-    assert!(
-        Harness::node(&all, "Groove")
-            .description
-            .starts_with("Not built yet")
-    );
+    assert!(!Harness::node(&all, "Groove").disabled);
     for name in ["Clip Scale Mode", "Clip Root Note", "Clip Scale Name"] {
         assert!(!Harness::node(&all, name).disabled, "{name} is live");
     }

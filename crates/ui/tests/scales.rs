@@ -5,7 +5,7 @@
 
 use crate::common;
 use bl_model::{ClipId, Scale, ScaleName, TrackId};
-use bl_ui::layout::{Element, REFERENCE, ShellLayout};
+use bl_ui::layout::{Element, REFERENCE};
 use bl_ui::main_window::element_id;
 use common::{Harness, Node, Window};
 use egui::{FullOutput, pos2};
@@ -13,7 +13,7 @@ use serde_json::json;
 
 /// Where an element is drawn, in a harness without a drawn title bar.
 fn rect(element: Element) -> egui::Rect {
-    ShellLayout::compute(REFERENCE, true, true).rect(element)
+    common::layout(REFERENCE, true, true).rect(element)
 }
 
 /// A harness with a MIDI track and two clips on it, the first selected.

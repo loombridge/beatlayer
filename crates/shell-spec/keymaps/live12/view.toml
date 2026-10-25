@@ -230,7 +230,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["Cmd+Option+6"]
 win = ["Ctrl+Alt+6"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.toggle_groove_pool", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-VIEW-018"

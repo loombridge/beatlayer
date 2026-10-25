@@ -100,9 +100,11 @@ fn set(h: &mut Harness, patch: Value) {
 }
 
 fn labelled<'a>(nodes: &'a [Node], label: &str) -> &'a Node {
+    // The dialog sits under the Control Bar, which has controls of its own
+    // with some of the same names, such as Sample Rate.
     nodes
         .iter()
-        .find(|n| n.label == label && n.bounds.is_some())
+        .find(|n| n.label == label && n.bounds.is_some_and(|b| b.y0 >= 61.0))
         .unwrap_or_else(|| {
             let labels: Vec<_> = nodes.iter().map(|n| n.label.clone()).collect();
             panic!("no {label:?} in {labels:?}")

@@ -33,6 +33,8 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
         Some(ItemKind::Clip)
     } else if extension == bl_midi_tools::BANK_EXTENSION {
         Some(ItemKind::ChordBank)
+    } else if extension == bl_project::groove_file::GROOVE_EXTENSION {
+        Some(ItemKind::Groove)
     } else {
         None
     }
@@ -208,6 +210,8 @@ mod tests {
         assert_eq!(file_kind("Warm.blpreset"), Some(ItemKind::Preset));
         assert_eq!(file_kind("Bank.SFZ"), Some(ItemKind::Sfz));
         assert_eq!(file_kind("Jazz.blstacks"), Some(ItemKind::ChordBank));
+        // Spec: grooves R33.
+        assert_eq!(file_kind("Swing 16ths 60.blgroove"), Some(ItemKind::Groove));
         assert_eq!(file_kind("Idea.blclip"), Some(ItemKind::Clip));
         assert_eq!(file_kind("notes.txt"), None);
         assert_eq!(file_kind("README"), None);

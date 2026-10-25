@@ -26,7 +26,8 @@ use crate::points::MeterPoint;
 use crate::program::{
     ChainSendRef, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
     Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT, NO_OUTPUT_BUFFER,
-    NO_SLOT, NO_TASK, NodeSlot, Rack, RackChain, RackMode, Span, Step, Task, delay_storage,
+    NO_SLOT, NO_TASK, NodeSlot, NoteDelay, Rack, RackChain, RackMode, Span, Step, Task,
+    delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -184,6 +185,11 @@ pub struct Compiler {
     /// holds even when the scene's own fields change or the scene goes.
     scene_override: SceneOverride,
     layout: BTreeMap<NodeKey, Placed>,
+    /// What each delay line of the last program holds back: its place in
+    /// the program and its length in frames.
+    delay_layout: BTreeMap<DelayKey, (u32, u32)>,
+    /// The place of each MIDI track's note delay in the last program.
+    note_layout: BTreeMap<TrackId, u32>,
     sources: ClipSources,
     /// The stretcher pool each track's player holds, by track (WP-4.6, R5,
     /// R21): what the last list it was sent left it with, so a list that
@@ -262,6 +268,8 @@ impl Compiler {
             original: None,
             scene_override: SceneOverride::default(),
             layout: BTreeMap::new(),
+            delay_layout: BTreeMap::new(),
+            note_layout: BTreeMap::new(),
             sources: ClipSources::default(),
             pool_specs: BTreeMap::new(),
             progressive: BTreeMap::new(),
@@ -476,7 +484,6 @@ impl Compiler {
                 update
                     .transport
                     .push(TransportCommand::SetLoop(loop_region(document)));
-                self.sources.cue_loop(self.loop_start_frame(document));
             }
             // Spec: transport R21. The song's start time follows its
             // locator or the loop brace as they move.
@@ -518,6 +525,11 @@ impl Compiler {
             }
             update
         };
+        // The players' sources preload the loop's new start, whether or not
+        // a new program was made.
+        if old.settings().arrangement_loop != document.settings().arrangement_loop {
+            self.sources.cue_loop(self.loop_start_frame(document));
+        }
         // A multisampler whose layers changed gets them again as node data:
         // a zone or layer edit never recompiles (WP-5.13, R31).
         for (&id, &change) in &changes.devices {
@@ -926,10 +938,17 @@ impl Compiler {
         // they feed, their place among its inputs, and the output, whose
         // device is found once the tasks have added their chains.
         let mut output_taps: Vec<(TrackId, usize, DeviceOutput)> = Vec::new();
+        let mut midi_waits: Vec<(u32, u32)> = Vec::new();
         for edge in &graph.edges {
             let (Some(&from), Some(to)) = (task_of.get(&edge.from), document.track(edge.to)) else {
                 continue;
             };
+            // Spec: routing R21. A MIDI track's MIDI From another track
+            // carries no audio, though the source still runs first.
+            if edge.via == Via::Input && to.kind() == TrackKind::Midi {
+                midi_waits.extend(task_of.get(&edge.to).map(|&to| (from, to)));
+                continue;
+            }
             let route = self.route(&mut build, document, &solo, edge, to);
             // A route that takes a device's extra output carries it whatever
             // tap it names, so its tap needs no copy of the track's own
@@ -1137,6 +1156,7 @@ impl Compiler {
         let wait_tasks: Vec<(u32, u32)> = waits
             .iter()
             .filter_map(|(from, to)| Some((*task_of.get(from)?, *task_of.get(to)?)))
+            .chain(midi_waits)
             .collect();
         for &(_, to) in &wait_tasks {
             build.tasks[to as usize].dependencies += 1;
@@ -1161,6 +1181,40 @@ impl Compiler {
             }
         }
         let (delay_lines, delay_pool) = delay_storage(&build.delays, self.config.channels);
+        // A delay line that holds the same signal back by as many frames as
+        // in the last program takes the audio it holds over, so a recompile
+        // that didn't change it doesn't empty it.
+        let delay_migrations: Vec<Migration> = build
+            .delay_keys
+            .iter()
+            .zip(&build.delays)
+            .enumerate()
+            .filter_map(|(to, (key, &len))| {
+                let &(from, was) = self.delay_layout.get(key)?;
+                (was == len).then_some(Migration {
+                    from,
+                    to: to as u32,
+                })
+            })
+            .collect();
+        let note_migrations: Vec<Migration> = build
+            .note_delays
+            .iter()
+            .enumerate()
+            .filter_map(|(to, (track, _))| {
+                Some(Migration {
+                    from: *self.note_layout.get(track)?,
+                    to: to as u32,
+                })
+            })
+            .collect();
+        let note_delays = Shared::new(
+            build
+                .note_delays
+                .iter()
+                .map(|&(_, len)| NoteDelay::new(len))
+                .collect(),
+        );
         // Spec: session-view R23. The set's own maps, the scenes' and the
         // launched override's (made here so the audio thread allocates
         // nothing to switch to them), and the ones the program plays under
@@ -1249,6 +1303,9 @@ impl Compiler {
             tap_pool: Shared::new(vec![0.0; kept as usize * size]),
             delay_lines,
             delay_pool,
+            note_delays,
+            delay_migrations,
+            note_migrations,
             device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
             device_input_channels: self.config.input_channels,
             channels: self.config.channels,
@@ -1295,6 +1352,19 @@ impl Compiler {
         self.modulator_rows = mod_rows;
         self.generation = generation;
         self.layout = build.layout;
+        self.delay_layout = build
+            .delay_keys
+            .into_iter()
+            .zip(build.delays)
+            .enumerate()
+            .map(|(at, (key, len))| (key, (at as u32, len)))
+            .collect();
+        self.note_layout = build
+            .note_delays
+            .iter()
+            .enumerate()
+            .map(|(at, &(track, _))| (track, at as u32))
+            .collect();
         self.displays
             .retain(|device| self.layout.contains_key(&NodeKey::Device(device)));
         self.hits
@@ -1524,6 +1594,8 @@ impl Compiler {
         self.synced = None;
         self.original = None;
         self.layout.clear();
+        self.delay_layout.clear();
+        self.note_layout.clear();
         self.sources.reset();
         self.pool_specs.clear();
     }
@@ -1621,6 +1693,7 @@ impl Compiler {
             midi_sidechains: Span::default(),
             mixer,
             clip_delay: NO_DELAY,
+            note_delay: None,
             pre_fx: None,
             post_fx: None,
             midi_keep: None,
@@ -1767,6 +1840,14 @@ impl Compiler {
                 )))
             },
         );
+        // A MIDI track's player writes notes, which a note delay holds back
+        // to line up with the track's inputs (delay-compensation R3). It is
+        // there even with nothing to hold, so the notes it is holding when a
+        // recompile replaces it carry over.
+        let note_delay = (track.kind() == TrackKind::Midi && !track.is_frozen()).then(|| {
+            build.note_delays.push((track.id(), 0));
+            build.note_delays.len() as u32 - 1
+        });
         build.tasks.push(Task {
             track: track.id(),
             inputs,
@@ -1779,6 +1860,7 @@ impl Compiler {
             midi_keep: None,
             mixer,
             clip_delay: NO_DELAY,
+            note_delay,
             pre_fx: None,
             post_fx: None,
             dependents: Span::default(),
@@ -2220,6 +2302,22 @@ impl std::fmt::Debug for Compiler {
     }
 }
 
+/// What a delay line holds back, which a recompile finds it by: the line
+/// keeps its audio across the swap when the same thing is held back by as
+/// many frames (WP-2.11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum DelayKey {
+    /// A track's clips.
+    Clips(TrackId),
+    /// The signal of a track into a route, which holds the node's key.
+    Input(NodeKey, TrackId),
+    /// A rack chain's output, held to the rack's slowest chain, given by the
+    /// key of the chain's mixer.
+    Chain(NodeKey),
+    /// A drum rack's chain, held to the rack's sum.
+    ChainSum(NodeKey),
+}
+
 /// A program under construction.
 #[derive(Default)]
 struct Build {
@@ -2270,6 +2368,11 @@ struct Build {
     /// The length in frames of each delay line the program needs, in the
     /// order the inputs and players name them (WP-2.11).
     delays: Vec<u32>,
+    /// What each of `delays` holds back, which the next compile finds it by.
+    delay_keys: Vec<DelayKey>,
+    /// The note delay of each MIDI track that plays clips, with its length
+    /// in frames (WP-2.11).
+    note_delays: Vec<(TrackId, u32)>,
     /// The external effects in the program, with their slots and the
     /// interface's outputs they send to (WP-5.35).
     external_effects: Vec<(u32, bl_model::Channel)>,
@@ -2455,7 +2558,8 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
         let slowest = latencies.iter().copied().max().unwrap_or(0);
         for (i, latency) in rack.chains.range().zip(latencies) {
             if slowest > latency {
-                let index = line(build, slowest - latency);
+                let key = DelayKey::Chain(build.slots[build.rack_chains[i].mixer as usize].key);
+                let index = line(build, slowest - latency, key);
                 build.rack_chains[i].delay = index;
             }
         }
@@ -2472,13 +2576,15 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
         build.racks[r].latency = total;
         if total > slowest {
             for i in rack.chains.range() {
-                let index = line(build, total - slowest);
+                let key = DelayKey::ChainSum(build.slots[build.rack_chains[i].mixer as usize].key);
+                let index = line(build, total - slowest, key);
                 build.rack_chains[i].sum_delay = index;
             }
         }
         for (i, latency) in returned {
             if total > slowest + latency {
-                let index = line(build, total - slowest - latency);
+                let key = DelayKey::Chain(build.slots[build.rack_chains[i].mixer as usize].key);
+                let index = line(build, total - slowest - latency, key);
                 build.rack_chains[i].delay = index;
             }
         }
@@ -2552,12 +2658,18 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
         let a = (i64::from(arrival[t]) + if task.track == main { main_delay } else { 0 }).max(0);
         for i in task.inputs.range() {
             let input = build.inputs[i];
-            if low_latency[input.from as usize] {
+            // Spec: delay-compensation R5. A route scales the signal after
+            // its delay line, which is `a` frames behind song time whatever
+            // the line's own length, so its send level's changes wait `a`.
+            let low = low_latency[input.from as usize];
+            build.slots[input.route as usize].delay = if low { 0 } else { a as u32 };
+            if low {
                 continue;
             }
             let delay = a - input_arrival(&arrival, &chain, &rack_at, &input);
             if delay > 0 {
-                let index = line(build, delay as u32);
+                let key = input_key(build, &input);
+                let index = line(build, delay as u32, key);
                 build.inputs[i].delay = index;
             }
         }
@@ -2571,13 +2683,18 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                 let delay =
                     (a + i64::from(sc.before)) - input_arrival(&arrival, &chain, &rack_at, &input);
                 if delay > 0 {
-                    let index = line(build, delay as u32);
+                    let key = input_key(build, &input);
+                    let index = line(build, delay as u32, key);
                     build.sidechain_inputs[i].delay = index;
                 }
             }
         }
-        if build.tasks[t].player.is_some() && a > 0 {
-            let index = line(build, a as u32);
+        // A MIDI track's player writes notes, so the notes are held back,
+        // not the buffer, which stays silent until its devices play them.
+        if let Some(delay) = task.note_delay {
+            build.note_delays[delay as usize].1 = a as u32;
+        } else if task.player.is_some() && a > 0 {
+            let index = line(build, a as u32, DelayKey::Clips(task.track));
             build.tasks[t].clip_delay = index;
         }
         if let Some(slot) = task.player {
@@ -2745,10 +2862,20 @@ fn drum_settings(chain: &Chain) -> [(ParamId, f64); 3] {
 }
 
 /// A new delay line of `len` frames, returning its index in the program.
-fn line(build: &mut Build, len: u32) -> u32 {
+fn line(build: &mut Build, len: u32, key: DelayKey) -> u32 {
     let index = build.delays.len() as u32;
     build.delays.push(len);
+    build.delay_keys.push(key);
     index
+}
+
+/// The signal of the track of task `from` into `input`'s route, which a
+/// delay line holds back.
+fn input_key(build: &Build, input: &Input) -> DelayKey {
+    DelayKey::Input(
+        build.slots[input.route as usize].key,
+        build.tasks[input.from as usize].track,
+    )
 }
 
 /// Fills in each task's span of the flattened dependents lists.
@@ -4104,5 +4231,94 @@ mod tests {
         let (_, _) = new_clip(&mut f, 1);
         f.compiler.reset();
         assert!(f.compiler.loaded(wait()).is_empty());
+    }
+
+    /// A library whose files play from memory but stream as far as the
+    /// compiler can tell, and which notes the points it is asked to preload.
+    struct Cueing {
+        files: crate::MediaMap,
+        cued: std::sync::Arc<std::sync::Mutex<Vec<(usize, u64)>>>,
+    }
+
+    struct Cues(std::sync::Arc<std::sync::Mutex<Vec<(usize, u64)>>>);
+
+    impl crate::SourceCues for Cues {
+        fn cue(&self, slot: usize, frame: u64) {
+            self.0.lock().unwrap().push((slot, frame));
+        }
+    }
+
+    impl crate::MediaLibrary for Cueing {
+        fn open(
+            &self,
+            media: bl_model::ContentHash,
+            rate: SampleRate,
+            start: u64,
+        ) -> Option<crate::OpenedSource> {
+            let mut opened = crate::MediaLibrary::open(&self.files, media, rate, start)?;
+            opened.cues = Some(std::sync::Arc::new(Cues(std::sync::Arc::clone(&self.cued))));
+            Some(opened)
+        }
+    }
+
+    // Spec: disk-streaming R2. A sync that moves the Arrangement loop and
+    // also needs a program cues the sources the untouched players hold, as
+    // one that needs none does.
+    #[test]
+    fn a_recompile_that_moves_the_loop_cues_the_new_start() {
+        use std::sync::Arc;
+
+        use bl_core::time::Ticks;
+        use bl_model::{AudioData, Clip, ClipData, ContentHash};
+
+        let mut f = Fixture::new();
+        let audio = track(&mut f.editor, TrackKind::Audio, None);
+        let mut files = crate::MediaMap::new();
+        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 100_000]]).unwrap();
+        files.insert(ContentHash([1; 32]), Arc::new(file));
+        let cued = Arc::default();
+        f.compiler.registry.set_media(Arc::new(Cueing {
+            files,
+            cued: Arc::clone(&cued),
+        }));
+        let id = f.editor.new_id();
+        f.editor
+            .apply(Command::CreateClip {
+                track: audio,
+                clip: Clip::new(
+                    id,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Audio(AudioData::new(ContentHash([1; 32]))),
+                ),
+            })
+            .unwrap();
+        f.sync();
+        let loop_cue = || cued.lock().unwrap().iter().rfind(|cue| cue.0 == 2).copied();
+        assert_eq!(loop_cue(), None);
+
+        // A loop from the second beat, needing no program.
+        f.editor
+            .apply(Command::SetLoop {
+                start: Ticks::QUARTER,
+                length: Ticks::QUARTER,
+            })
+            .unwrap();
+        f.editor
+            .apply(Command::SetLoopEnabled { enabled: true })
+            .unwrap();
+        assert!(f.sync().program.is_none());
+        assert_eq!(loop_cue(), Some((2, 24_000)));
+
+        // The loop moves to the third beat in a sync that adds a device.
+        f.editor
+            .apply(Command::SetLoop {
+                start: Ticks::QUARTER * 2,
+                length: Ticks::QUARTER,
+            })
+            .unwrap();
+        tone(&mut f.editor, f.inner);
+        assert!(f.sync().program.is_some());
+        assert_eq!(loop_cue(), Some((2, 48_000)));
     }
 }

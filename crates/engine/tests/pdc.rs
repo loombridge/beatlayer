@@ -14,12 +14,12 @@ use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 use bl_commands::Registry as Commands;
 use bl_core::time::Ticks;
-use bl_engine::testing::{DELAY, DELAY_FRAMES, KEY, MULTI, VALUE};
+use bl_engine::testing::{DELAY, DELAY_FRAMES, INSTRUMENT, KEY, MULTI, THROUGH, VALUE};
 use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
     AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
-    DeviceRole, Editor, RackKind, TrackDelay, TrackId, TrackKind, registry,
+    DeviceRole, Editor, MidiData, Note, RackKind, TrackDelay, TrackId, TrackKind, registry,
 };
 use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
@@ -1156,4 +1156,168 @@ fn an_instrument_output_behind_a_latency_device_lines_up() {
         2_048 + LATENCY,
         "the impulse lands where the instrument's output is, not at the chain's start"
     );
+}
+
+// Delay-compensation R5. A send's level is automated on the audio it scales,
+// which reaches the return as late as the sending track's chain makes it.
+#[test]
+fn send_automation_lands_on_the_compensated_sample() {
+    let mut rig = Rig::new(64);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    common::dc(ed, a, 1.0);
+    delay_device(ed, a);
+    let r = track(ed, TrackKind::Return, None);
+    // A reaches Main only through its send, which rests closed.
+    run(
+        ed,
+        "routing.set_output",
+        json!({ "track": a, "output": { "type": "sends_only" } }),
+    );
+    rig.sync();
+    let at = 1_000u64;
+    rig.sender.send_param(bl_engine::ParamEvent::at_frame(
+        bl_engine::NodeKey::Send { track: a, to: r },
+        bl_engine::mixer::route::LEVEL,
+        1.0,
+        at,
+    ));
+    let out = rig.render(at as usize + LATENCY + 2_000, 64);
+    // The send opens when the delayed audio gets there, then glides for 20 ms.
+    let onset = at as usize + LATENCY;
+    assert!(out[..onset].iter().all(|&s| s == 0.0), "silent before");
+    assert!(
+        out[onset + 960 + 64..].iter().all(|&s| near(s, 1.0)),
+        "up after"
+    );
+}
+
+/// A clip of one quarter-note C4 at the start of `track`.
+fn note_clip(editor: &mut Editor, track: TrackId) {
+    let id = editor.new_id();
+    let notes = vec![Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100)];
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                id,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+}
+
+/// A rig playing a MIDI track whose instrument is followed by a device keyed
+/// from an audio track with `LATENCY` frames of latency, so the MIDI track
+/// waits that long for its sidechain, and an empty track to edit.
+fn keyed_midi_track() -> (Rig, TrackId) {
+    let mut media = MediaMap::new();
+    media.insert(hash(1), impulse(1.0));
+    let mut rig = playing(media);
+    let ed = &mut rig.editor;
+    let s = track(ed, TrackKind::Audio, None);
+    clip(ed, s, hash(1));
+    delay_device(ed, s);
+    let m = track(ed, TrackKind::Midi, None);
+    device(ed, m, INSTRUMENT, &[]);
+    let key = key_device(ed, m);
+    note_clip(ed, m);
+    run(
+        ed,
+        "device.set_sidechain_input",
+        json!({ "device": key, "input": { "type": "track", "track": s, "tap": "post_fx" } }),
+    );
+    let unrelated = track(ed, TrackKind::Midi, None);
+    rig.sync();
+    (rig, unrelated)
+}
+
+/// The frames the instruments played note-ons on.
+fn note_ons(rig: &Rig) -> Vec<i64> {
+    rig.probe
+        .recorded_notes()
+        .into_iter()
+        .filter(|note| note.event.kind == bl_engine::NoteKind::On)
+        .map(|note| note.frame)
+        .collect()
+}
+
+// Delay-compensation R3. A MIDI track's clips are notes, not audio: they are
+// held back to line up with the sidechain the track waits for.
+#[test]
+fn a_midi_tracks_notes_are_held_back_to_line_up_with_its_sidechain() {
+    let (mut rig, _) = keyed_midi_track();
+    rig.render(2 * LATENCY + 512, 64);
+    assert_eq!(note_ons(&rig), vec![LATENCY as i64]);
+}
+
+// Delay-compensation R6. A recompile that leaves a MIDI track's delay alone
+// keeps the notes it holds back.
+#[test]
+fn a_recompile_keeps_the_notes_a_midi_track_holds_back() {
+    let (mut rig, unrelated) = keyed_midi_track();
+    // The note is on its way, 400 frames from sounding.
+    rig.render(100, 64);
+    assert!(note_ons(&rig).is_empty());
+    device(&mut rig.editor, unrelated, THROUGH, &[]);
+    assert!(rig.sync().program);
+    rig.render(LATENCY + 512, 64);
+    assert_eq!(note_ons(&rig), vec![LATENCY as i64]);
+}
+
+/// Renders `frames` frames and asserts all of them are `value`.
+fn assert_steady(rig: &mut Rig, frames: usize, value: f32, what: &str) {
+    let out = rig.render(frames, 64);
+    assert!(out.iter().all(|&s| near(s, value)), "{what}");
+}
+
+// Delay-compensation R6. A recompile that leaves a route's delay alone keeps
+// the audio in its line.
+#[test]
+fn a_recompile_keeps_the_audio_in_a_routes_delay() {
+    let mut rig = Rig::new(64);
+    let ed = &mut rig.editor;
+    // A reaches Main 500 frames before B does, so its route holds it back.
+    let a = track(ed, TrackKind::Midi, None);
+    common::dc(ed, a, 1.0);
+    let b = track(ed, TrackKind::Midi, None);
+    delay_device(ed, b);
+    let unrelated = track(ed, TrackKind::Midi, None);
+    rig.sync();
+    rig.render(2 * LATENCY, 64);
+    assert_steady(&mut rig, 512, 1.0, "A is heard in full");
+    device(&mut rig.editor, unrelated, THROUGH, &[]);
+    assert!(rig.sync().program);
+    assert_steady(&mut rig, 2 * LATENCY + 512, 1.0, "A goes on in full");
+}
+
+// The same for a track's clips, held back through a line of their own.
+#[test]
+fn a_recompile_keeps_the_clips_in_a_tracks_delay() {
+    let mut media = MediaMap::new();
+    media.insert(
+        hash(1),
+        Arc::new(SampleData::new(48_000, vec![vec![0.5; 48_000]; 2]).unwrap()),
+    );
+    let mut rig = playing(media);
+    let ed = &mut rig.editor;
+    // X takes its input from B, which has latency, and so waits for it.
+    let b = track(ed, TrackKind::Audio, None);
+    delay_device(ed, b);
+    let x = track(ed, TrackKind::Audio, None);
+    clip(ed, x, hash(1));
+    run(
+        ed,
+        "routing.set_input",
+        json!({ "track": x, "input": { "type": "track", "track": b } }),
+    );
+    let unrelated = track(ed, TrackKind::Midi, None);
+    rig.sync();
+    rig.render(2 * LATENCY, 64);
+    assert_steady(&mut rig, 512, 0.5, "X is heard in full");
+    device(&mut rig.editor, unrelated, THROUGH, &[]);
+    assert!(rig.sync().program);
+    assert_steady(&mut rig, 2 * LATENCY + 512, 0.5, "X goes on in full");
 }

@@ -277,7 +277,7 @@ struct Restart {
 type Detached = Vec<Held>;
 
 /// A request held while no processor runs.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Held {
     /// A transport command for when it was sent: a locate, a stop, a loop
     /// change from a request or from a document, at once or on its frame of
@@ -895,6 +895,7 @@ fn compile_loop(
                         carry,
                         reply,
                     } = *restart;
+                    let held = detached.clone();
                     let (next, processor, monitor) = restart_with(
                         &mut compiler,
                         config,
@@ -907,7 +908,10 @@ fn compile_loop(
                     if reply.send(processor).is_ok() {
                         sender = Some(next);
                     } else {
-                        // Nobody waits for it any more, so nothing runs it.
+                        // Nobody waits for it any more, so nothing runs it,
+                        // and what it was given is still owed to the next
+                        // processor.
+                        detached = held;
                         sender = None;
                     }
                 }
@@ -989,5 +993,67 @@ fn deliver(sender: &mut Sender, processor: &mut Processor) {
         if sent {
             break;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bl_core::time::{SampleRate, Ticks};
+    use bl_model::{Command, Editor};
+
+    use super::*;
+    use crate::message::LoopRegion;
+
+    // Spec: device-changes R7. A restart whose caller has given up leaves
+    // what was held while detached for the restart that follows.
+    #[test]
+    fn a_restart_nobody_waits_for_leaves_what_was_held_for_the_next_one() {
+        let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+        let engine = Engine::start_detached(config, Registry::new()).unwrap();
+        let mut editor = Editor::new();
+        engine.sync(editor.document());
+        let restarter = engine.restarter();
+        let mut first = restarter
+            .restart(config, None, Duration::from_secs(5))
+            .unwrap();
+        let carry = first.park();
+        restarter.detach();
+
+        // The set's loop switches on while no processor runs.
+        editor
+            .apply(Command::SetLoop {
+                start: Ticks::QUARTER,
+                length: Ticks::QUARTER,
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetLoopEnabled { enabled: true })
+            .unwrap();
+        engine.sync(editor.document());
+
+        // The restart's caller timed out and dropped its end of the reply.
+        let (reply, gone) = mpsc::channel();
+        drop(gone);
+        let restart = Restart {
+            config,
+            carry: Some(carry.clone()),
+            reply,
+        };
+        restarter
+            .requests
+            .send(Request::Restart(Box::new(restart)))
+            .unwrap();
+
+        // The retry hands on the old carry, which has no loop.
+        let retried = restarter
+            .restart(config, Some(carry), Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(
+            retried.loop_region(),
+            Some(LoopRegion {
+                start: Ticks::QUARTER,
+                end: Ticks::QUARTER * 2,
+            })
+        );
     }
 }

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use bl_commands::Permission;
 use bl_core::time::Ticks;
 use bl_model::{
-    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, TrackId,
+    AudioData, Clip, ClipData, ClipId, Command, ContentHash, Document, Editor, MidiData, TrackId,
 };
 use bl_shell::arrangement_commands::{self as view_ids, ArrangementState};
 use bl_shell::audio::AudioHost;
@@ -71,6 +71,36 @@ fn song(clips: &[(usize, i64, i64)]) -> Song {
             .unwrap();
         ids.push(id);
     }
+    open_song(editor, ids, tracks)
+}
+
+/// The factory default set with MIDI clips on its first track: `(start bar
+/// from 0, bars, bars into its contents it starts)`.
+fn midi_song(clips: &[(i64, i64, i64)]) -> Song {
+    let mut editor = factory_default_set();
+    let tracks: Vec<TrackId> = editor.document().top_level().collect();
+    let mut ids = Vec::new();
+    for (start, bars, offset) in clips {
+        let id: ClipId = editor.new_id();
+        let mut clip = Clip::new(
+            id,
+            Ticks(start * BAR),
+            Ticks(bars * BAR),
+            ClipData::Midi(MidiData::default()),
+        );
+        clip.offset = Ticks(offset * BAR);
+        editor
+            .apply(Command::CreateClip {
+                track: tracks[0],
+                clip,
+            })
+            .unwrap();
+        ids.push(id);
+    }
+    open_song(editor, ids, tracks)
+}
+
+fn open_song(mut editor: Editor, clips: Vec<ClipId>, tracks: Vec<TrackId>) -> Song {
     // The set as it opens: no history.
     editor.clear_history().unwrap();
     let mut shell = Shell::new(
@@ -84,7 +114,7 @@ fn song(clips: &[(usize, i64, i64)]) -> Song {
         .unwrap();
     Song {
         shell,
-        clips: ids,
+        clips,
         tracks,
     }
 }
@@ -428,6 +458,39 @@ fn resizing_moves_edges_and_keeps_contents_in_place() {
             )
             .is_err()
     );
+}
+
+// Spec: arrangement-editing R7. Two selected neighbours resized together
+// never overlap: the edge that grows over the other clears it.
+#[test]
+fn resizing_selected_neighbours_together_never_overlaps_them() {
+    let mut s = midi_song(&[(1, 2, 0), (3, 2, 0)]);
+    let [a, b] = s.clips[..] else { panic!() };
+    s.one_step(
+        ids::RESIZE_CLIPS,
+        json!({ "clips": [a, b], "edge": "end", "by": BAR }),
+    );
+    assert_eq!(s.lane(0), [(1.0, 4.0, 0.0), (4.0, 6.0, 1.0)]);
+
+    // The start edge, earlier, with contents to show before each start.
+    let mut s = midi_song(&[(2, 2, 1), (4, 2, 1)]);
+    let [a, b] = s.clips[..] else { panic!() };
+    s.one_step(
+        ids::RESIZE_CLIPS,
+        json!({ "clips": [a, b], "edge": "start", "by": -BAR }),
+    );
+    assert_eq!(s.lane(0), [(1.0, 3.0, 0.0), (3.0, 6.0, 0.0)]);
+
+    // A clip the growing edge covers entirely is gone, and not selected.
+    let mut s = midi_song(&[(1, 2, 0), (3, 1, 0)]);
+    let [a, b] = s.clips[..] else { panic!() };
+    let result = s.edit(
+        ids::RESIZE_CLIPS,
+        json!({ "clips": [a, b], "edge": "end", "by": 2 * BAR }),
+    );
+    assert!(s.doc().clip(b).is_none());
+    assert_eq!(s.lane(0), [(1.0, 5.0, 0.0)]);
+    assert_eq!(result.selected_clips, [a]);
 }
 
 #[test]

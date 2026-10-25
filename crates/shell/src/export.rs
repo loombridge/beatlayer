@@ -1845,17 +1845,33 @@ mod tests {
         }
         let document = editor.document();
         let main_track = document.track(main).unwrap();
-        assert_eq!(main_track.mixer().volume, 1.0, "the static values are unity");
+        assert_eq!(
+            main_track.mixer().volume,
+            1.0,
+            "the static values are unity"
+        );
         assert_eq!(main_track.mixer().pan, 0.0);
-        assert!(targets.iter().all(|t| main_track.automation_for(t).is_some()));
+        assert!(
+            targets
+                .iter()
+                .all(|t| main_track.automation_for(t).is_some())
+        );
 
         let stem = prepare_document_for_track(document, track, false).unwrap();
         let main_track = stem.track(main).unwrap();
-        assert!(targets.iter().all(|t| main_track.automation_for(t).is_none()));
+        assert!(
+            targets
+                .iter()
+                .all(|t| main_track.automation_for(t).is_none())
+        );
         // Rendering it with the Return and Main effects leaves Main alone.
         let with_effects = prepare_document_for_track(document, track, true).unwrap();
         let main_track = with_effects.track(main).unwrap();
-        assert!(targets.iter().all(|t| main_track.automation_for(t).is_some()));
+        assert!(
+            targets
+                .iter()
+                .all(|t| main_track.automation_for(t).is_some())
+        );
     }
 
     // WP-2.26. Two tracks whose names differ only in case get two
@@ -1864,7 +1880,10 @@ mod tests {
     fn track_names_that_differ_only_in_case_get_distinct_paths() {
         let (editor, first, second) = editor_with_tracks("Kick", "kick");
         let document = editor.document();
-        let tracks = [document.track(first).unwrap(), document.track(second).unwrap()];
+        let tracks = [
+            document.track(first).unwrap(),
+            document.track(second).unwrap(),
+        ];
         let paths = track_paths(Path::new("out/Mix.wav"), "wav", &tracks);
         let lower: std::collections::HashSet<_> = paths
             .iter()

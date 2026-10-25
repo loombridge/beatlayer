@@ -1371,7 +1371,10 @@ mod tests {
         };
         let length = tempo.ticks_to_frames(note.start + note.length, RATE).get()
             - tempo.ticks_to_frames(note.start, RATE).get();
-        assert!((9..=11).contains(&length), "ten frames to the loop end, not a tick: {length}");
+        assert!(
+            (9..=11).contains(&length),
+            "ten frames to the loop end, not a tick: {length}"
+        );
     }
 
     // The engine still publishes the last recording's take until it has the

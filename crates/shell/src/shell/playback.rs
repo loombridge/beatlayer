@@ -422,7 +422,9 @@ impl Shell {
             // clips mid-take. The engine ignores record-on while it records.
             if self.recording.is_some() {
                 if !self.audio.transport_state().recording {
-                    return Err("a recording is already under way or still being finished".to_owned());
+                    return Err(
+                        "a recording is already under way or still being finished".to_owned()
+                    );
                 }
             } else if let Err(reason) = self.begin_recording() {
                 self.set_message(reason, true);

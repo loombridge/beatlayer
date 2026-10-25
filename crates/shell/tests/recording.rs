@@ -1369,7 +1369,11 @@ fn recording_on_during_a_take_leaves_the_take_alone() {
     let report = transport_state(&mut shell)["last_recording"].clone();
     let frames = report["files"][0]["frames"].as_u64().unwrap();
     assert_eq!(clip.start, Ticks::ZERO, "where the take began");
-    let rate = shell.audio().sample_rate().and_then(SampleRate::new).unwrap();
+    let rate = shell
+        .audio()
+        .sample_rate()
+        .and_then(SampleRate::new)
+        .unwrap();
     let tempo = shell.editor().document().settings().tempo.clone();
     let filled = tempo.frames_to_ticks(Frames(frames as i64), rate);
     assert!(
@@ -1441,9 +1445,11 @@ fn a_new_set_gets_neither_the_recording_nor_the_automation_take_of_the_old_one()
     assert_eq!(state["last_recording"], Value::Null);
     assert!(!shell.is_dirty(), "nothing was added to the new set");
     assert!(
-        shell.editor().document().tracks().all(|track| {
-            track.clips().next().is_none() && track.take_lanes().len() == 0
-        }),
+        shell
+            .editor()
+            .document()
+            .tracks()
+            .all(|track| { track.clips().next().is_none() && track.take_lanes().len() == 0 }),
         "no clips in the new set"
     );
     assert!(

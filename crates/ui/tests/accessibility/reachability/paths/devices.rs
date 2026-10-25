@@ -159,8 +159,9 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "chain.set_info",
-            Exception(LaterView(
-                "the chain's Edit Info Text, which waits for the Info View (WP-2.24)",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a chain is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
             )),
         ),
         (
@@ -243,9 +244,16 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "rack.set_macro_info_text",
-            Exception(Gap(
-                "a macro's info text has no UI yet; M-EDIT-025 (Edit Info Text) adds the menu \
-                 item",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a macro is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
+        (
+            "device.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a device is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
             )),
         ),
         (

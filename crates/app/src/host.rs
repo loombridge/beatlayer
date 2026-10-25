@@ -1959,6 +1959,14 @@ impl Host {
                     surface.window.request_redraw();
                 }
             }
+            Effect::EditInfoText(_) => {
+                // Spec: info-view R10. The Info View is the main window's.
+                if let Some(main) = &self.main {
+                    main.window.focus_window();
+                    self.main_ui.apply_effect(&main.ctx, &effect);
+                    main.window.request_redraw();
+                }
+            }
             Effect::FocusSecondArea(area) => {
                 if let Some(second) = &self.second {
                     second.window.focus_window();

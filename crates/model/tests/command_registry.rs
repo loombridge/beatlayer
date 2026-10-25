@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        261,
+        265,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -95,7 +95,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text"
     );
 
     for op in &ops {
@@ -203,6 +203,15 @@ fn every_command_runs_by_id() {
         json!({ "track": bass, "parent": group, "index": 0 }),
     );
     agent.run("track.rename", json!({ "track": drums, "name": "Break" }));
+    // Spec: info-view R12.
+    agent.run(
+        "track.set_info_text",
+        json!({ "track": drums, "info_text": "Chopped break" }),
+    );
+    assert_eq!(
+        agent.editor.document().track(drums).unwrap().info_text(),
+        "Chopped break"
+    );
     // Spec: themes R25.
     agent.run(
         "track.set_colour",
@@ -644,6 +653,14 @@ fn every_command_runs_by_id() {
         json!({ "clip": riff, "length": bar * 2 }),
     );
     agent.run("clip.rename", json!({ "clip": riff, "name": "Riff" }));
+    agent.run(
+        "clip.set_info_text",
+        json!({ "clip": riff, "info_text": "The hook" }),
+    );
+    assert_eq!(
+        agent.editor.document().clip(riff).unwrap().info_text,
+        "The hook"
+    );
     // Spec: themes R25. The clip took its track's colour as it went in.
     let own = agent.editor.document().track(bass).unwrap().colour();
     assert_eq!(
@@ -1203,6 +1220,14 @@ fn every_command_runs_by_id() {
     // The scene commands: rename, move, duplicate, insert, delete.
     agent.run("scene.rename", json!({ "scene": first, "name": "Verse" }));
     agent.run(
+        "scene.set_info_text",
+        json!({ "scene": first, "info_text": "Quiet start" }),
+    );
+    assert_eq!(
+        agent.editor.document().scene(first).unwrap().info_text,
+        "Quiet start"
+    );
+    agent.run(
         "scene.set_colour",
         json!({ "scenes": [first], "colour": 55 }),
     );
@@ -1268,6 +1293,14 @@ fn every_command_runs_by_id() {
         json!({ "device": eq, "track": reverb, "index": 1 }),
     );
     agent.run("device.rename", json!({ "device": eq, "name": "Tone" }));
+    agent.run(
+        "device.set_info_text",
+        json!({ "device": eq, "info_text": "Tames the highs" }),
+    );
+    assert_eq!(
+        agent.editor.document().device(eq).unwrap().info_text,
+        "Tames the highs"
+    );
     agent.run(
         "device.set_show_preset_name",
         json!({ "device": eq, "shown": false }),
@@ -2637,6 +2670,13 @@ fn schemas_match_what_commands_serialise() {
             },
         ),
         (
+            "track.set_info_text",
+            Command::SetTrackInfoText {
+                track,
+                info_text: "Played live".to_owned(),
+            },
+        ),
+        (
             "track.set_frozen",
             Command::FreezeTracks {
                 frozen: vec![(track, bl_model::FrozenTrack::default())],
@@ -3079,6 +3119,13 @@ fn schemas_match_what_commands_serialise() {
         ),
         ("clip.set_mute", Command::SetClipMute { clip, mute: true }),
         (
+            "clip.set_info_text",
+            Command::SetClipInfoText {
+                clip,
+                info_text: "Hook".to_owned(),
+            },
+        ),
+        (
             "clip.set_launch_mode",
             Command::SetClipLaunchMode {
                 clip,
@@ -3417,6 +3464,13 @@ fn schemas_match_what_commands_serialise() {
             Command::RenameDevice {
                 device,
                 name: "Pad".to_owned(),
+            },
+        ),
+        (
+            "device.set_info_text",
+            Command::SetDeviceInfoText {
+                device,
+                info_text: "Warm".to_owned(),
             },
         ),
         (
@@ -4093,6 +4147,13 @@ fn schemas_match_what_commands_serialise() {
             Command::RenameScene {
                 scene,
                 name: "Verse".to_owned(),
+            },
+        ),
+        (
+            "scene.set_info_text",
+            Command::SetSceneInfoText {
+                scene,
+                info_text: "Verse".to_owned(),
             },
         ),
         (

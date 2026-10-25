@@ -9,6 +9,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Reason::{AgentOnly, Equivalent, Gap, LaterView, Live, Query, Unobserved};
     vec![
         (
+            "clip.set_info_text",
+            Exception(Equivalent(
+                "Edit ▸ Edit Info Text (M-EDIT-025) while a clip is selected: it opens the Info \
+                 View's field for it (the Info View spec, R10)",
+            )),
+        ),
+        (
             "clip.set_colour",
             Exception(Equivalent(
                 "the clip's context menu, opened with the Context Menu key or Shift-F10 \

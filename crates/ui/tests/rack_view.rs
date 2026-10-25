@@ -774,7 +774,8 @@ fn a_chains_menu_renames_and_colours() {
     let name = row(&layout_of(&mut h, rack), 0).name.center();
     let nodes = Harness::nodes(&right_click(&mut h, name));
     assert!(!item(&nodes, "Rename").disabled);
-    assert!(item(&nodes, "Edit Info Text").disabled);
+    // Spec: info-view R10. Edit Info Text works since WP-6.58.
+    assert!(!item(&nodes, "Edit Info Text").disabled);
     assert!(
         nodes.iter().any(|n| n.label == "Row 5, colour 14"),
         "the palette's 5 rows of 14"
@@ -1244,4 +1245,26 @@ fn auto_select_follows_the_notes() {
         "neither the switch nor the selections are undo steps"
     );
     h.shell.run("transport.stop", json!({})).unwrap();
+}
+
+// Spec: info-view R10, R11 (the chain's menu, R26).
+#[test]
+fn a_chains_menu_edit_info_text_types_the_text_in_the_info_view() {
+    let mut h = harness();
+    let (rack, chains) = rack(&mut h, &["Pad", "Lead"]);
+    let name = row(&layout_of(&mut h, rack), 0).name.center();
+    let nodes = Harness::nodes(&right_click(&mut h, name));
+    let b = item(&nodes, "Edit Info Text").bounds.unwrap();
+    click(
+        &mut h,
+        pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+    );
+    assert!(h.main.is_typing(), "the Info View is a text field");
+    h.frame(vec![Event::Text("Soft strings".to_owned())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert!(!h.main.is_typing());
+    let doc = h.shell.editor().document();
+    assert_eq!(doc.chain(chains[0]).unwrap().info, "Soft strings");
+    assert_eq!(last_step(&h), "Change Chain Info Text");
 }

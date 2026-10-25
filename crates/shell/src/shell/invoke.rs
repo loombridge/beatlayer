@@ -1,5 +1,6 @@
 //! Invoking a command as a person does: keys, menus and the arguments they imply.
 
+use super::info_text;
 use super::{
     DELAY_COMPENSATION, Effect, Invocation, LOCK_ENVELOPES, REDUCED_LATENCY_MONITORING,
     SOLO_IN_PLACE, Shell, ShellError,
@@ -374,6 +375,29 @@ impl Shell {
                     })?;
                 self.effects.push(Effect::RenameTrack(track));
                 self.touch();
+                Ok(Value::Null)
+            }
+            // Spec: info-view R10, R12. An item's info text command with no
+            // text opens the Info View's field for the item; Edit ▸ Edit
+            // Info Text does for the selection.
+            id if info_text::is_info_command(id) && !Self::has_info_text(id, &args) => {
+                let target =
+                    self.info_target_of(id, &args)
+                        .ok_or_else(|| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "select an item first".to_owned(),
+                        })?;
+                self.edit_info(target);
+                Ok(Value::Null)
+            }
+            ids::EDIT_INFO_TEXT => {
+                let target =
+                    self.info_target_selected()
+                        .ok_or_else(|| ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "select an item that carries info text first".to_owned(),
+                        })?;
+                self.edit_info(target);
                 Ok(Value::Null)
             }
             "take_lane.rename" if !has("name") => {

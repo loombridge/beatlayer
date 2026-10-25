@@ -162,7 +162,7 @@ Result: [`ArrangementState`](README.md#arrangementstate).
 
 **Set Locator Info Text**. Permission: `edit`. Contexts: `arrangement`.
 
-Sets the info text of a locator (`locator`, or the selected one), which the Info View shows while the pointer is over it. The person's own way of typing it comes later.
+Sets the info text of a locator (`locator`, or the selected one), which the Info View shows while the pointer is over it. Without `info_text`, the Info View becomes a text field for it, as Edit Info Text does.
 
 Default keys: none.
 
@@ -170,7 +170,7 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `info_text` | string | yes | The info text, which the Info View shows while the pointer is over the locator. |
+| `info_text` | string or null | no | The info text, which the Info View shows while the pointer is over the locator. Left out, the Info View takes the text, as Edit Info Text does. |
 | `locator` | [`LocatorId`](README.md#locatorid) or null | no | The locator. Left out, the selected one. |
 
 Result: [`LocatorResult`](README.md#locatorresult).

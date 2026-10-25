@@ -1024,3 +1024,27 @@ fn the_edit_and_create_menus_enable_the_time_items_as_the_selection_gives_a_span
     // The items show their keys.
     assert!(menu_item(&s, "M-EDIT-022").chord.is_some());
 }
+
+// Spec: info-view R10, R11 (C-CLIP-ARR-008). A clip's menu opens the Info
+// View's field for the clip, and hovering the clip then shows its text.
+#[test]
+fn a_clips_menu_edit_info_text_types_the_text_in_the_info_view() {
+    let mut s = set();
+    let a = s.a;
+    let output = s.right_click(pos2(x(3.0), AUDIO_3.1));
+    assert!(s.choose(&output, "Edit Info Text"), "it works now");
+    assert!(s.h.main.is_typing(), "the Info View is a text field");
+    s.h.frame(vec![Event::Text("Verse bass".to_owned())]);
+    s.h.key(Key::Enter, Modifiers::NONE);
+    s.h.settle();
+    assert_eq!(s.clip(a).info_text, "Verse bass");
+    assert_eq!(s.undo_label().as_deref(), Some("Change Info Text"));
+    // Hovering the clip shows the text; the other clip shows nothing.
+    s.h.frame(vec![Event::PointerMoved(pos2(x(3.0), AUDIO_3.1))]);
+    s.h.settle();
+    let content = s.h.main.info_view_content();
+    assert_eq!(content.body, "Verse bass");
+    s.h.frame(vec![Event::PointerMoved(pos2(x(9.0), AUDIO_4.1))]);
+    s.h.settle();
+    assert_ne!(s.h.main.info_view_content().body, "Verse bass");
+}

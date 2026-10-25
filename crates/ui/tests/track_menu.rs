@@ -405,7 +405,6 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
         "Bounce Track in Place waits for a track with clips"
     );
     for (label, package) in [
-        ("Edit Info Text", "WP-2.24"),
         ("Select Track Content", "not planned"),
         ("Save as Default MIDI Track", "not planned"),
     ] {
@@ -417,6 +416,8 @@ fn the_menu_lists_lives_items_and_names_later_packages() {
             node.description
         );
     }
+    // WP-6.58: Edit Info Text works (info-view R10).
+    assert!(!item(&nodes, "Edit Info Text").disabled);
     // WP-6.22: the take-lane items work (track-context-menu R10): Show Take
     // Lanes and Insert Take Lane on an audio track, the deletes waiting for
     // a take lane.

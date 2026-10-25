@@ -2610,9 +2610,16 @@ impl BrowserUi {
             .and_then(|p| Path::new(p).file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // A file that doesn't preview says why in place of its name.
+        let note = preview
+            .note
+            .as_ref()
+            .filter(|_| preview.playing.is_none() && preview.loading.is_none());
+        let name = note.cloned().unwrap_or(name);
         if let Some((path, overview)) = view.preview_overview()
             && shown.as_deref() == Some(&*path.to_string_lossy())
             && !overview.is_empty()
+            && note.is_none()
         {
             let middle = wave.center().y;
             // Scaled to the file's peak, so a quiet file still shows its
@@ -2664,6 +2671,8 @@ impl BrowserUi {
                     "{name}, {:.1} of {:.1} seconds",
                     preview.position_seconds, preview.length_seconds
                 )
+            } else if note.is_some() {
+                name.clone()
             } else if name.is_empty() {
                 "nothing previewed".to_owned()
             } else {

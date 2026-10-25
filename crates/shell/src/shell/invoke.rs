@@ -12,6 +12,7 @@ use bl_model::TrackId;
 use bl_model::TrackKind;
 use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::locator as locator_ids;
@@ -245,6 +246,36 @@ impl Shell {
                     then: Invocation::new(id, args),
                 });
                 Ok(Value::Null)
+            }
+            // Spec: dawproject R83 to R87. A person's import asks about unsaved
+            // changes as an open does; an export asks where first; both show
+            // their report.
+            dawproject_ids::IMPORT_DAWPROJECT if self.unsaved_changes() => {
+                self.effects.push(Effect::ConfirmDiscard {
+                    then: Invocation::new(id, args),
+                });
+                Ok(Value::Null)
+            }
+            dawproject_ids::EXPORT_DAWPROJECT if !has("path") => {
+                self.effects.push(Effect::PickDawProjectPath {
+                    file_name: self.dawproject_file_name(),
+                    folder: self.save_dialog_folder(),
+                });
+                Ok(Value::Null)
+            }
+            dawproject_ids::IMPORT_DAWPROJECT | dawproject_ids::EXPORT_DAWPROJECT => {
+                self.run_dawproject_for_person(id, args)
+            }
+            // Spec: dawproject R84. Enter or a double-click on a set opens it
+            // and on a DAWproject file imports it.
+            browser_ids::LOAD_SELECTED if self.browser_view.selected_openable().is_some() => {
+                let path = self
+                    .browser_view
+                    .selected_openable()
+                    .expect("just checked")
+                    .to_owned();
+                let open = Self::open_invocation(&path);
+                self.invoke_inner(&open.id, open.args)
             }
             ids::SET_SAVE if self.set_path.is_none() => {
                 self.effects.push(Effect::PickSavePath { then: None });

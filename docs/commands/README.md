@@ -14235,6 +14235,7 @@ One of:
 - `"audio"`: An audio file Beatlayer can open.
 - `"sfz"`: An SFZ multisample instrument, which imports as a multisampler (WP-5.14).
 - `"set"`: A Beatlayer set.
+- `"daw_project"`: A DAWproject file (`.dawproject`), which imports as a new set (WP-6.37b; the DAWproject spec, R84).
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
 - `"groove"`: A groove file (`.blgroove`), which loads into the Groove Pool, or replaces the groove being hot-swapped (WP-6.20; the grooves spec R32, R33).
@@ -14273,6 +14274,11 @@ One of:
     {
       "const": "set",
       "description": "A Beatlayer set.",
+      "type": "string"
+    },
+    {
+      "const": "daw_project",
+      "description": "A DAWproject file (`.dawproject`), which imports as a new set (WP-6.37b; the DAWproject spec, R84).",
       "type": "string"
     },
     {
@@ -23780,6 +23786,34 @@ What `clip.replace_sample` returns.
     "clip",
     "file",
     "media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ReportWindowState`
+
+What `set.close_dawproject_report` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the report window is open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.close_dawproject_report` returns.",
+  "properties": {
+    "open": {
+      "description": "Whether the report window is open.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "open"
   ],
   "type": "object"
 }

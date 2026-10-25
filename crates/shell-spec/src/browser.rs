@@ -421,6 +421,9 @@ pub enum ItemKind {
     Sfz,
     /// A Beatlayer set.
     Set,
+    /// A DAWproject file (`.dawproject`), which imports as a new set
+    /// (WP-6.37b; the DAWproject spec, R84).
+    DawProject,
     /// A Beatlayer device preset, which loads into the device being
     /// hot-swapped (WP-2.4).
     Preset,

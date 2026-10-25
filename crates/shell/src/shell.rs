@@ -267,6 +267,16 @@ pub enum Effect {
         /// opens. Cancelling the dialog keeps them.
         discard_changes: bool,
     },
+    /// Ask where to write a DAWproject file, in a save dialog that suggests
+    /// `file_name` in `folder`, then run `set.export_dawproject` with the path,
+    /// with `replace` when the dialog asked about a file already there (the
+    /// DAWproject spec, R86).
+    PickDawProjectPath {
+        /// The suggested name: the set's, with `.dawproject`.
+        file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
+    },
     /// Ask where to save the set, run `set.save_as` there, then run `then`
     /// if the save worked.
     PickSavePath {
@@ -527,6 +537,9 @@ pub struct Shell {
     /// The report of the last DAWproject import, while the set the import
     /// made is open (R12).
     import_report: Option<bl_shell_spec::dawproject::ImportReport>,
+    /// The window that lists the report of a person's import or export, while
+    /// it is open (R87).
+    dawproject_report_window: Option<dawproject_ids::ReportWindow>,
     /// The 14 track colours of the theme in use, from which a DAWproject
     /// import draws the palette it places colours on (R23). The bundled
     /// theme's until a window tells the shell its theme's.
@@ -1210,6 +1223,7 @@ impl Shell {
             set_path: None,
             pending_name: None,
             import_report: None,
+            dawproject_report_window: None,
             track_palette: bl_model::DEFAULT_TRACK_PALETTE.to_vec(),
             dirty: false,
             autosave: None,

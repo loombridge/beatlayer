@@ -283,3 +283,28 @@ fn the_file_menus_export_item_opens_the_dialog() {
         .unwrap();
     assert!(shell.export_dialog().is_some());
 }
+
+// Spec: dawproject R86, R88.
+#[test]
+fn export_dawproject_follows_export_midi_clip_with_no_key() {
+    let mut shell = bl_shell::Shell::headless();
+    for platform in [MenuPlatform::Mac, MenuPlatform::Other] {
+        let file = menu_bar(platform)
+            .into_iter()
+            .find(|menu| menu.title == "File")
+            .expect("the File menu");
+        let rows: Vec<&str> = file.items.iter().map(|item| item.row).collect();
+        let midi = rows.iter().position(|row| *row == "M-FILE-016").unwrap();
+        let item = &file.items[midi + 1];
+        assert_eq!(item.label, "Export DAWproject...");
+        assert_eq!(item.action, Action::Command("set.export_dawproject"));
+    }
+    assert!(shell.can_invoke("set.export_dawproject", &serde_json::json!({})));
+    shell
+        .invoke("set.export_dawproject", serde_json::json!({}))
+        .unwrap();
+    assert!(shell.take_effects().iter().any(|effect| matches!(
+        effect,
+        bl_shell::Effect::PickDawProjectPath { file_name, .. } if file_name == "Untitled.dawproject"
+    )));
+}

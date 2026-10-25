@@ -1722,19 +1722,38 @@ impl Host {
             Effect::PickOpenPath { discard_changes } => {
                 let mut dialog = rfd::FileDialog::new()
                     .set_title("Open Beatlayer Set")
-                    .add_filter("Beatlayer Set", &["blset"]);
+                    // Spec: dawproject R83. A DAWproject file imports.
+                    .add_filter("Beatlayer Set", &["blset", "dawproject"]);
                 if let Some(main) = &self.main {
                     dialog = dialog.set_parent(main.window.as_ref());
                 }
                 if let Some(path) = dialog.pick_file() {
-                    let open =
-                        Invocation::new(ids::SET_OPEN, json!({ "path": path.to_string_lossy() }));
+                    let open = Shell::open_invocation(&path);
                     if discard_changes {
                         // The person chose Don't Save before picking it.
                         let _ = self.shell.discard_and_invoke(&open);
                     } else {
                         self.invoke(&open);
                     }
+                }
+            }
+            Effect::PickDawProjectPath { file_name, folder } => {
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Export DAWproject")
+                    .add_filter("DAWproject", &["dawproject"])
+                    .set_file_name(file_name);
+                if let Some(folder) = folder {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    // The save dialog asked about the file itself.
+                    self.invoke(&Invocation::new(
+                        bl_shell::dawproject_commands::EXPORT_DAWPROJECT,
+                        json!({ "path": path.to_string_lossy(), "replace": path.exists() }),
+                    ));
                 }
             }
             Effect::PickSavePath { then } => {
@@ -2370,7 +2389,9 @@ impl Host {
     fn confirm_discard(&mut self, then: &Invocation) {
         let verb = match then.id.as_str() {
             ids::APP_QUIT => "quitting",
-            ids::SET_OPEN => "opening another set",
+            ids::SET_OPEN | bl_shell::dawproject_commands::IMPORT_DAWPROJECT => {
+                "opening another set"
+            }
             _ => "starting a new set",
         };
         let answer = rfd::MessageDialog::new()

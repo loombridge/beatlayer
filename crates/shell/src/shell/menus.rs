@@ -555,7 +555,11 @@ impl Shell {
                     .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)));
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
-            ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
+            ids::SET_OPEN
+            | ids::SET_SAVE
+            | ids::SET_SAVE_AS
+            | ids::APP_SETTINGS
+            | bl_shell_spec::dawproject::EXPORT_DAWPROJECT => return true,
             ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
             // Options ▸ Reduced Latency When Monitoring is available only
             // while Delay Compensation is on (the delay-compensation spec,

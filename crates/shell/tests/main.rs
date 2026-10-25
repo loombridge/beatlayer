@@ -39,6 +39,7 @@ mod clip_view_tabs;
 mod colours;
 mod comping;
 mod dawproject;
+mod dawproject_app;
 mod dawproject_export;
 mod dawproject_plugins;
 mod detail_views;

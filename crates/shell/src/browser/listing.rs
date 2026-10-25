@@ -15,7 +15,7 @@ pub const AUDIO_EXTENSIONS: &[&str] = &[
 ];
 
 /// What a file is, by its name: an audio file, an SFZ instrument, a
-/// Beatlayer set, a device preset, a clip file, a chord bank, or none of these
+/// Beatlayer set, a DAWproject file, a device preset, a clip file, a chord bank, or none of these
 /// (`None`), which the browser leaves out.
 #[must_use]
 pub fn file_kind(name: &str) -> Option<ItemKind> {
@@ -27,6 +27,8 @@ pub fn file_kind(name: &str) -> Option<ItemKind> {
         Some(ItemKind::Sfz)
     } else if extension == bl_project::SET_EXTENSION {
         Some(ItemKind::Set)
+    } else if extension == "dawproject" {
+        Some(ItemKind::DawProject)
     } else if extension == bl_project::preset::PRESET_EXTENSION {
         Some(ItemKind::Preset)
     } else if extension == bl_project::clip_file::CLIP_EXTENSION {
@@ -207,6 +209,7 @@ mod tests {
         assert_eq!(file_kind("Kick.WAV"), Some(ItemKind::Audio));
         assert_eq!(file_kind("pad.aif"), Some(ItemKind::Audio));
         assert_eq!(file_kind("Song.blset"), Some(ItemKind::Set));
+        assert_eq!(file_kind("Song.DAWproject"), Some(ItemKind::DawProject));
         assert_eq!(file_kind("Warm.blpreset"), Some(ItemKind::Preset));
         assert_eq!(file_kind("Bank.SFZ"), Some(ItemKind::Sfz));
         assert_eq!(file_kind("Jazz.blstacks"), Some(ItemKind::ChordBank));

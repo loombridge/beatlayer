@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, LaterView, Query};
+    use Reason::{Equivalent, Query};
     vec![
         ("set.list_recoverable", Exception(Query)),
         ("set.backups", Exception(Query)),
@@ -27,22 +27,19 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  it also runs by itself when a set with missing files is opened",
             )),
         ),
-        // DAWproject import (WP-6.36): the Open dialog, the browser, a drop
-        // on the window and the report window are WP-6.37b's.
+        // DAWproject in the app (WP-6.37b).
         (
             "set.import_dawproject",
-            Exception(LaterView(
-                "the Open dialog, the browser and a drop on the window (WP-6.37b)",
+            Exception(Equivalent(
+                "File ▸ Open Beatlayer Set... (a .dawproject file chosen there), the browser's \
+                 Enter, and a file dropped on the window",
             )),
         ),
+        ("set.import_report", Exception(Query)),
         (
-            "set.import_report",
-            Exception(LaterView("the DAWproject Import window (WP-6.37b)")),
-        ),
-        (
-            "set.export_dawproject",
-            Exception(LaterView(
-                "File ▸ Export DAWproject... and the DAWproject Export window (WP-6.37b)",
+            "set.close_dawproject_report",
+            Exception(Equivalent(
+                "the DAWproject Import and Export window's Close, which Tab reaches, or Esc",
             )),
         ),
         // Separate Stems' dialog (IMP-11).

@@ -1,12 +1,13 @@
 //! The File menu.
 
 use super::Action::{Command as Cmd, Pending, Submenu};
-use super::{IMP_05, IMP_29, Row, SEPARATOR};
+use super::{DAWPROJECT_EXPORT, IMP_05, IMP_29, Row, SEPARATOR};
 use crate::browser::ADD_FOLDER as BROWSER_ADD_FOLDER;
 use crate::commands::{
     SET_COLLECT_ALL, SET_NEW, SET_OPEN, SET_SAVE, SET_SAVE_AS, SET_SAVE_AS_DEFAULT,
     SET_SAVE_AS_TEMPLATE, VIEW_TOGGLE_PLUGIN_LIST, VIEW_TOGGLE_SAVE_HISTORY, WINDOW_CLOSE,
 };
+use crate::dawproject::EXPORT_DAWPROJECT;
 use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
 use crate::set_exchange::INSTALL_PACK;
@@ -53,5 +54,10 @@ pub(super) const FILE: &[Row] = &[
         "M-FILE-016",
         "Export MIDI Clip...",
         Pending(Some("S-FILE-008")),
+    ),
+    (
+        DAWPROJECT_EXPORT,
+        "Export DAWproject...",
+        Cmd(EXPORT_DAWPROJECT),
     ),
 ];

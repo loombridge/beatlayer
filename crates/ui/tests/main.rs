@@ -24,6 +24,7 @@ mod clip_files;
 mod clip_view;
 mod clips_between_views;
 mod common;
+mod dawproject_window;
 mod detail_views;
 mod device_panel;
 mod device_view;

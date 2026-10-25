@@ -10,7 +10,9 @@
 
 use std::sync::Mutex;
 use std::sync::PoisonError;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Acquire, Ordering::Relaxed, Ordering::Release};
+use std::sync::atomic::{
+    AtomicBool, AtomicU64, Ordering::Acquire, Ordering::Relaxed, Ordering::Release,
+};
 
 use bl_core::midi::{MidiInputEvent, MidiMessage};
 use rtrb::{Consumer, Producer, RingBuffer};

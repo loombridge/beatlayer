@@ -127,8 +127,16 @@ fn a_mapped_controller_moves_the_volume_and_stays_away_from_tracks() {
 
     rig.send("Pads", &[0xB0, 20, 127]);
     let top = bl_model::fader::fader_gain(1.0);
-    assert!((rig.volume(track) - top).abs() < 1e-9, "{}", rig.volume(track));
-    assert_eq!(stats.snapshot().to_tracks, 0, "the mapped controller stayed back");
+    assert!(
+        (rig.volume(track) - top).abs() < 1e-9,
+        "{}",
+        rig.volume(track)
+    );
+    assert_eq!(
+        stats.snapshot().to_tracks,
+        0,
+        "the mapped controller stayed back"
+    );
 
     rig.send("Pads", &[0xB0, 21, 127]);
     assert_eq!(stats.snapshot().to_tracks, 1, "an unmapped one goes on");
@@ -261,7 +269,15 @@ fn a_mapped_key_toggles_a_switch_and_no_mapping_acts_in_a_map_mode() {
         json!({ "type": "key", "key": "S" }),
         json!({ "type": "solo", "track": track }),
     );
-    let solo = |rig: &Rig| rig.shell.editor().document().track(track).unwrap().mixer().solo;
+    let solo = |rig: &Rig| {
+        rig.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .solo
+    };
     assert!(rig.shell.key_is_mapped("S") && !rig.shell.key_is_mapped("A"));
     rig.run("remote.input", json!({ "key": "S" }));
     assert!(solo(&rig), "pressed and released once: on");
@@ -281,7 +297,13 @@ fn a_mapped_key_toggles_a_switch_and_no_mapping_acts_in_a_map_mode() {
     let learned = rig.shell.take_learned_messages();
     assert_eq!(learned.len(), 1, "the message crossed for learning");
     assert!(
-        !rig.shell.editor().document().track(track).unwrap().mixer().arm,
+        !rig.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .arm,
         "and armed nothing"
     );
 }
@@ -332,31 +354,56 @@ fn the_mapping_commands_read_back_through_remote_mappings() {
     assert_eq!(rig.steps(), before + 1, "making a mapping is one step");
 
     // A source maps one control: mapping CC 20 to pan moves it.
-    rig.map(cc(20), json!({ "type": "mixer", "track": track, "param": "pan" }));
+    rig.map(
+        cc(20),
+        json!({ "type": "mixer", "track": track, "param": "pan" }),
+    );
     let listed = rig.mappings();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0]["target"]["param"], "pan");
     assert_eq!(listed[0]["min"], -1.0);
     assert_eq!(listed[0]["name"], "Pan");
 
-    rig.run("remote.set_range", json!({ "source": cc(20), "min": -0.5, "max": 0.5 }));
+    rig.run(
+        "remote.set_range",
+        json!({ "source": cc(20), "min": -0.5, "max": 0.5 }),
+    );
     rig.run("remote.invert_range", json!({ "source": cc(20) }));
     rig.run(
         "remote.set_mode",
         json!({ "source": cc(20), "mode": { "type": "relative", "encoding": "bin_offset", "accelerated": false } }),
     );
     let listed = rig.mappings();
-    assert_eq!((listed[0]["min"].as_f64(), listed[0]["max"].as_f64()), (Some(0.5), Some(-0.5)));
+    assert_eq!(
+        (listed[0]["min"].as_f64(), listed[0]["max"].as_f64()),
+        (Some(0.5), Some(-0.5))
+    );
     assert_eq!(listed[0]["mode"]["encoding"], "bin_offset");
 
     // The agent can try it without a controller.
-    rig.run("remote.set_mode", json!({ "source": cc(20), "mode": { "type": "absolute" } }));
+    rig.run(
+        "remote.set_mode",
+        json!({ "source": cc(20), "mode": { "type": "absolute" } }),
+    );
     let taken = rig.run("remote.input", json!({ "bytes": [0xB0, 20, 127] }));
     assert_eq!(taken["taken"], true);
-    let pan = rig.shell.editor().document().track(track).unwrap().mixer().pan;
-    assert!((pan - -0.5).abs() < 1e-9, "Min above Max turns it round: {pan}");
+    let pan = rig
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .mixer()
+        .pan;
+    assert!(
+        (pan - -0.5).abs() < 1e-9,
+        "Min above Max turns it round: {pan}"
+    );
 
-    let removed = rig.run("remote.unmap", json!({ "target": { "type": "mixer", "track": track, "param": "pan" } }));
+    let removed = rig.run(
+        "remote.unmap",
+        json!({ "target": { "type": "mixer", "track": track, "param": "pan" } }),
+    );
     assert_eq!(removed["removed"], 1);
     assert!(rig.mappings().is_empty());
     assert_eq!(
@@ -366,6 +413,20 @@ fn the_mapping_commands_read_back_through_remote_mappings() {
 
     // A control the set lacks, and a mapping that breaks a rule, are refused.
     let missing = json!({ "type": "solo", "track": 987_654 });
-    assert!(rig.shell.run("remote.map", json!({ "source": note(1), "target": missing })).is_err());
-    assert!(rig.shell.run("remote.set_range", json!({ "source": cc(99), "min": 0, "max": 1 })).is_err());
+    assert!(
+        rig.shell
+            .run(
+                "remote.map",
+                json!({ "source": note(1), "target": missing })
+            )
+            .is_err()
+    );
+    assert!(
+        rig.shell
+            .run(
+                "remote.set_range",
+                json!({ "source": cc(99), "min": 0, "max": 1 })
+            )
+            .is_err()
+    );
 }

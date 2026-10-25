@@ -193,9 +193,20 @@ fn a_mapped_message_never_reaches_an_armed_tracks_input_and_an_unmapped_one_does
             "target": { "type": "mixer", "track": track, "param": "volume" },
         }),
     );
-    assert_eq!(rig.play("Keys A", [0xB0, 20, 127]), 0, "the mapped controller");
+    assert_eq!(
+        rig.play("Keys A", [0xB0, 20, 127]),
+        0,
+        "the mapped controller"
+    );
     rig.shell.poll();
-    let volume = rig.shell.editor().document().track(track).unwrap().mixer().volume;
+    let volume = rig
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .mixer()
+        .volume;
     assert!(volume > 1.9, "it moved the volume: {volume}");
     assert_eq!(rig.play("Keys A", [0xB0, 21, 127]), 1, "an unmapped one");
     assert_eq!(rig.play("Keys A", [0x90, 60, 100]), 1, "and a note");

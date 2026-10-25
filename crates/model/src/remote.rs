@@ -90,7 +90,9 @@ impl RemoteSource {
         use RemoteSource::{Cc, Cc14, Key, Note, NoteRange, PitchBend};
         let keys = |s: &Self| match *s {
             Note { channel, key } => Some((channel, key, key)),
-            NoteRange { channel, low, high, .. } => Some((channel, low, high)),
+            NoteRange {
+                channel, low, high, ..
+            } => Some((channel, low, high)),
             _ => None,
         };
         if let (Some((c, low, high)), Some((d, other_low, other_high))) = (keys(self), keys(other))
@@ -98,8 +100,14 @@ impl RemoteSource {
             return c == d && low <= other_high && other_low <= high;
         }
         let controllers = |s: &Self| match *s {
-            Cc { channel, controller } => Some((channel, controller, controller)),
-            Cc14 { channel, controller } => Some((channel, controller, controller + 32)),
+            Cc {
+                channel,
+                controller,
+            } => Some((channel, controller, controller)),
+            Cc14 {
+                channel,
+                controller,
+            } => Some((channel, controller, controller + 32)),
             _ => None,
         };
         if let (Some((c, a, b)), Some((d, x, y))) = (controllers(self), controllers(other)) {
@@ -129,7 +137,12 @@ impl RemoteSource {
         };
         match self {
             Self::Note { channel: c, key } => channel(*c).and(data(*key)),
-            Self::NoteRange { channel: c, low, high, root } => {
+            Self::NoteRange {
+                channel: c,
+                low,
+                high,
+                root,
+            } => {
                 channel(*c).and(data(*high))?;
                 if low > high || root.is_some_and(|r| r < *low || r > *high) {
                     return Err(ModelError::InvalidInput(
@@ -139,8 +152,14 @@ impl RemoteSource {
                 }
                 Ok(())
             }
-            Self::Cc { channel: c, controller } => channel(*c).and(data(*controller)),
-            Self::Cc14 { channel: c, controller } => {
+            Self::Cc {
+                channel: c,
+                controller,
+            } => channel(*c).and(data(*controller)),
+            Self::Cc14 {
+                channel: c,
+                controller,
+            } => {
                 channel(*c)?;
                 if *controller < 32 {
                     Ok(())
@@ -318,14 +337,21 @@ impl RemoteTarget {
     pub const fn natural_kind(&self) -> Option<ControlKind> {
         Some(match self {
             Self::Slot { .. } => ControlKind::Slot,
-            Self::SceneLaunch { .. } | Self::TrackStop { .. } | Self::StopAll => ControlKind::Button,
-            Self::Mixer { param: MixerParam::Mute, .. }
-            | Self::Chain { param: MixerParam::Mute, .. }
+            Self::SceneLaunch { .. } | Self::TrackStop { .. } | Self::StopAll => {
+                ControlKind::Button
+            }
+            Self::Mixer {
+                param: MixerParam::Mute,
+                ..
+            }
+            | Self::Chain {
+                param: MixerParam::Mute,
+                ..
+            }
             | Self::DeviceOn { .. } => ControlKind::RangedSwitch,
-            Self::Mixer { .. }
-            | Self::Chain { .. }
-            | Self::Send { .. }
-            | Self::Crossfader => ControlKind::Continuous,
+            Self::Mixer { .. } | Self::Chain { .. } | Self::Send { .. } | Self::Crossfader => {
+                ControlKind::Continuous
+            }
             Self::Solo { .. } | Self::Arm { .. } => ControlKind::Switch,
             Self::CrossfadeAssign { .. } => ControlKind::Radio {
                 options: CROSSFADE_OPTIONS,
@@ -437,7 +463,10 @@ impl RemoteMapping {
         let whole = |v: f64, top: f64| v.fract() == 0.0 && (0.0..=top).contains(&v);
         match self.kind {
             ControlKind::Radio { options } => {
-                if options < 2 || !whole(self.min, f64::from(options - 1)) || !whole(self.max, f64::from(options - 1)) {
+                if options < 2
+                    || !whole(self.min, f64::from(options - 1))
+                    || !whole(self.max, f64::from(options - 1))
+                {
                     return Err(ModelError::InvalidInput(
                         "a radio button's Min and Max are options of its own",
                     ));
@@ -559,7 +588,12 @@ impl Document {
 
     /// Takes the mappings whose control the set no longer has out of it.
     pub(crate) fn prune_remote(&mut self) {
-        if self.settings.remote.iter().any(|m| !self.has_remote_target(&m.target)) {
+        if self
+            .settings
+            .remote
+            .iter()
+            .any(|m| !self.has_remote_target(&m.target))
+        {
             let kept = self
                 .settings
                 .remote
@@ -581,7 +615,9 @@ mod tests {
     }
 
     fn solo(track: u64) -> RemoteTarget {
-        RemoteTarget::Solo { track: TrackId(bl_core::id::Id::new(track).unwrap()) }
+        RemoteTarget::Solo {
+            track: TrackId(bl_core::id::Id::new(track).unwrap()),
+        }
     }
 
     fn map(source: RemoteSource, target: RemoteTarget) -> RemoteMapping {
@@ -592,19 +628,41 @@ mod tests {
     // Spec: remote-mapping R5
     #[test]
     fn a_note_range_counts_as_each_of_its_keys_and_a_pair_as_both_controllers() {
-        let range = RemoteSource::NoteRange { channel: 1, low: 48, high: 60, root: Some(55) };
+        let range = RemoteSource::NoteRange {
+            channel: 1,
+            low: 48,
+            high: 60,
+            root: Some(55),
+        };
         assert!(range.collides(&note(1, 50)) && !range.collides(&note(2, 50)));
-        let pair = RemoteSource::Cc14 { channel: 1, controller: 7 };
-        let low = RemoteSource::Cc { channel: 1, controller: 39 };
-        assert!(pair.collides(&low) && !pair.collides(&RemoteSource::Cc { channel: 1, controller: 8 }));
+        let pair = RemoteSource::Cc14 {
+            channel: 1,
+            controller: 7,
+        };
+        let low = RemoteSource::Cc {
+            channel: 1,
+            controller: 39,
+        };
+        assert!(
+            pair.collides(&low)
+                && !pair.collides(&RemoteSource::Cc {
+                    channel: 1,
+                    controller: 8
+                })
+        );
     }
 
     // Spec: remote-mapping R5
     #[test]
     fn mapping_a_source_again_moves_it_and_mapping_a_control_again_replaces_its_mapping() {
         let a = map(note(1, 60), solo(2));
-        let b = map(note(1, 60), RemoteTarget::Arm { track: TrackId(bl_core::id::Id::new(3).unwrap()) });
-        let moved = with_mapping(&[a.clone()], b.clone());
+        let b = map(
+            note(1, 60),
+            RemoteTarget::Arm {
+                track: TrackId(bl_core::id::Id::new(3).unwrap()),
+            },
+        );
+        let moved = with_mapping(std::slice::from_ref(&a), b.clone());
         assert_eq!(moved, vec![b]);
         let c = map(note(1, 61), solo(2));
         assert_eq!(with_mapping(&[a], c.clone()), vec![c]);
@@ -614,7 +672,10 @@ mod tests {
     #[test]
     fn a_new_mappings_range_and_mode_come_from_its_kind_and_source() {
         let m = RemoteMapping::new(
-            RemoteSource::Cc14 { channel: 1, controller: 7 },
+            RemoteSource::Cc14 {
+                channel: 1,
+                controller: 7,
+            },
             RemoteTarget::Mixer {
                 track: TrackId(bl_core::id::Id::new(2).unwrap()),
                 param: MixerParam::Volume,
@@ -633,6 +694,15 @@ mod tests {
             },
         );
         assert_eq!((activator.min, activator.max), RANGED_SWITCH_DEFAULT);
-        assert!(RemoteMapping::new(note(1, 1), RemoteTarget::Crossfader, ControlKind::Continuous, None, None).is_err());
+        assert!(
+            RemoteMapping::new(
+                note(1, 1),
+                RemoteTarget::Crossfader,
+                ControlKind::Continuous,
+                None,
+                None
+            )
+            .is_err()
+        );
     }
 }

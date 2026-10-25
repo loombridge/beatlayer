@@ -3774,7 +3774,9 @@ impl Document {
             Command::SetRemoteMappings { mappings } => {
                 crate::remote::check_all(mappings)?;
                 if mappings.iter().any(|m| !self.has_remote_target(&m.target)) {
-                    return Err(ModelError::InvalidInput("a mapped control isn't in the set"));
+                    return Err(ModelError::InvalidInput(
+                        "a mapped control isn't in the set",
+                    ));
                 }
                 self.settings.remote.clone_from(mappings);
                 Ok(())

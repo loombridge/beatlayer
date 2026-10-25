@@ -3,8 +3,8 @@
 //! it in the same undo step.
 
 use bl_model::{
-    ControlKind, Command, Device, DeviceKind, DeviceRole, Document, Editor, MixerParam,
-    ParamId, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget, SceneId, TrackId, TrackKind,
+    Command, ControlKind, Device, DeviceKind, DeviceRole, Document, Editor, MixerParam, ParamId,
+    RemoteMapping, RemoteMode, RemoteSource, RemoteTarget, SceneId, TrackId, TrackKind,
 };
 use serde_json::json;
 
@@ -73,27 +73,56 @@ fn every_source_and_every_kind_of_control_round_trips_through_a_saved_set() {
         accelerated: true,
     };
     let list = vec![
-        map(note(36), RemoteTarget::Slot { track: audio, scene }, None),
+        map(
+            note(36),
+            RemoteTarget::Slot {
+                track: audio,
+                scene,
+            },
+            None,
+        ),
         map(note(37), RemoteTarget::SceneLaunch { scene }, None),
         map(note(38), RemoteTarget::Solo { track: audio }, None),
         map(
-            RemoteSource::Key { key: "A".to_owned() },
+            RemoteSource::Key {
+                key: "A".to_owned(),
+            },
             RemoteTarget::Arm { track: audio },
             None,
         ),
-        map(note(39), RemoteTarget::DeviceOn { device }, Some((20.0, 100.0))),
-        map(note(40), RemoteTarget::CrossfadeAssign { track: audio }, None),
+        map(
+            note(39),
+            RemoteTarget::DeviceOn { device },
+            Some((20.0, 100.0)),
+        ),
+        map(
+            note(40),
+            RemoteTarget::CrossfadeAssign { track: audio },
+            None,
+        ),
         RemoteMapping::new(
-            RemoteSource::Cc { channel: 2, controller: 7 },
-            RemoteTarget::Mixer { track: audio, param: MixerParam::Volume },
+            RemoteSource::Cc {
+                channel: 2,
+                controller: 7,
+            },
+            RemoteTarget::Mixer {
+                track: audio,
+                param: MixerParam::Volume,
+            },
             ControlKind::Continuous,
             Some((0.0, 1.0)),
             Some(relative),
         )
         .unwrap(),
         RemoteMapping::new(
-            RemoteSource::Cc14 { channel: 1, controller: 10 },
-            RemoteTarget::Send { track: audio, to: ret },
+            RemoteSource::Cc14 {
+                channel: 1,
+                controller: 10,
+            },
+            RemoteTarget::Send {
+                track: audio,
+                to: ret,
+            },
             ControlKind::Continuous,
             Some((0.0, 1.0)),
             None,
@@ -105,8 +134,16 @@ fn every_source_and_every_kind_of_control_round_trips_through_a_saved_set() {
             Some((0.0, 1.0)),
         ),
         RemoteMapping::new(
-            RemoteSource::NoteRange { channel: 1, low: 48, high: 60, root: Some(55) },
-            RemoteTarget::Device { device, param: ParamId(2) },
+            RemoteSource::NoteRange {
+                channel: 1,
+                low: 48,
+                high: 60,
+                root: Some(55),
+            },
+            RemoteTarget::Device {
+                device,
+                param: ParamId(2),
+            },
             ControlKind::Radio { options: 4 },
             None,
             None,
@@ -174,16 +211,32 @@ fn two_mappings_of_one_source_or_one_control_are_refused() {
         map(note(36), RemoteTarget::Solo { track: a }, None),
         map(note(36), RemoteTarget::Solo { track: b }, None),
     ];
-    assert!(editor.apply(Command::SetRemoteMappings { mappings: twice }).is_err());
+    assert!(
+        editor
+            .apply(Command::SetRemoteMappings { mappings: twice })
+            .is_err()
+    );
     let one_control = vec![
         map(note(36), RemoteTarget::Solo { track: a }, None),
         map(note(37), RemoteTarget::Solo { track: a }, None),
     ];
-    assert!(editor.apply(Command::SetRemoteMappings { mappings: one_control }).is_err());
+    assert!(
+        editor
+            .apply(Command::SetRemoteMappings {
+                mappings: one_control
+            })
+            .is_err()
+    );
     // A key and a note may map the same control.
     let both = vec![
         map(note(36), RemoteTarget::Solo { track: a }, None),
-        map(RemoteSource::Key { key: "S".to_owned() }, RemoteTarget::Solo { track: a }, None),
+        map(
+            RemoteSource::Key {
+                key: "S".to_owned(),
+            },
+            RemoteTarget::Solo { track: a },
+            None,
+        ),
     ];
     set(&mut editor, both);
     assert_eq!(mappings(&editor).len(), 2);
@@ -221,16 +274,31 @@ fn deleting_a_track_a_scene_or_a_device_takes_its_mappings_and_undo_brings_them_
     set(&mut editor, list.clone());
 
     editor.apply(Command::DeleteTrack { track: gone }).unwrap();
-    assert_eq!(mappings(&editor), &list[0..1].iter().chain(&list[2..]).cloned().collect::<Vec<_>>()[..]);
+    assert_eq!(
+        mappings(&editor),
+        &list[0..1]
+            .iter()
+            .chain(&list[2..])
+            .cloned()
+            .collect::<Vec<_>>()[..]
+    );
     editor.undo().unwrap();
-    assert_eq!(mappings(&editor), &list[..], "one undo step brings the mapping back");
+    assert_eq!(
+        mappings(&editor),
+        &list[..],
+        "one undo step brings the mapping back"
+    );
 
     editor.apply(Command::RemoveDevice { device }).unwrap();
     assert_eq!(mappings(&editor).len(), 3);
     editor.undo().unwrap();
 
     editor.apply(Command::DeleteScene { scene }).unwrap();
-    assert!(!mappings(&editor).iter().any(|m| matches!(m.target, RemoteTarget::Slot { .. })));
+    assert!(
+        !mappings(&editor)
+            .iter()
+            .any(|m| matches!(m.target, RemoteTarget::Slot { .. }))
+    );
     editor.undo().unwrap();
     assert_eq!(mappings(&editor), &list[..]);
 }
@@ -241,7 +309,10 @@ fn changing_the_mappings_is_one_undo_step() {
     let mut editor = Editor::new();
     let a = track(&mut editor, TrackKind::Audio);
     let steps = editor.undo_history().count();
-    set(&mut editor, vec![map(note(36), RemoteTarget::Solo { track: a }, None)]);
+    set(
+        &mut editor,
+        vec![map(note(36), RemoteTarget::Solo { track: a }, None)],
+    );
     assert_eq!(editor.undo_history().count(), steps + 1);
     editor.undo().unwrap();
     assert!(mappings(&editor).is_empty());

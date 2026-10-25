@@ -170,7 +170,6 @@ pub use bl_shell_spec::midi_files as midi_file_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;
-pub use bl_shell_spec::remote as remote_commands;
 /// The MIDI Tools' command IDs and their argument and result types
 /// (WP-6.11).
 pub use bl_shell_spec::midi_tools as midi_tool_commands;
@@ -192,6 +191,7 @@ pub use bl_shell_spec::pads as pad_commands;
 pub use bl_shell_spec::perception as perception_commands;
 /// The plug-in command IDs and their argument and result types (WP-2.6).
 pub use bl_shell_spec::plugins as plugin_commands;
+pub use bl_shell_spec::remote as remote_commands;
 /// The Sample Editor's view command IDs and their argument and result types
 /// (WP-4.10).
 pub use bl_shell_spec::sample_editor as sample_editor_commands;

@@ -103,7 +103,15 @@ fn a_mapped_key_wins_over_its_shortcut_and_yields_to_the_computer_keyboard() {
         .invoke("track.create", json!({ "kind": "audio", "name": "T" }))
         .unwrap();
     let track = h.shell.editor().document().top_level().last().unwrap();
-    let solo = |h: &Harness| h.shell.editor().document().track(track).unwrap().mixer().solo;
+    let solo = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .solo
+    };
     let map = |h: &mut Harness, key: &str| {
         h.shell
             .run(
@@ -119,7 +127,11 @@ fn a_mapped_key_wins_over_its_shortcut_and_yields_to_the_computer_keyboard() {
     let drawing = h.shell.clip_view().draw_mode();
     h.key(Key::B, Modifiers::NONE);
     assert!(solo(&h), "the mapping ran");
-    assert_eq!(h.shell.clip_view().draw_mode(), drawing, "and B's shortcut didn't");
+    assert_eq!(
+        h.shell.clip_view().draw_mode(),
+        drawing,
+        "and B's shortcut didn't"
+    );
     h.key(Key::B, Modifiers::NONE);
     assert!(!solo(&h), "each press toggles");
 

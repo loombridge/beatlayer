@@ -131,7 +131,9 @@ impl Shell {
             .publish(&bl_control::bits(mappings));
         self.remote.published.clone_from(mappings);
         let held: Vec<&RemoteSource> = mappings.iter().map(|m| &m.source).collect();
-        self.remote.memory.retain(|source, _| held.contains(&source));
+        self.remote
+            .memory
+            .retain(|source, _| held.contains(&source));
     }
 
     /// Applies the messages mappings took since the last poll, in the order
@@ -182,7 +184,11 @@ impl Shell {
         }
         let mut taken = false;
         for mapping in self.editor.document().settings().remote.clone() {
-            let memory = self.remote.memory.entry(mapping.source.clone()).or_default();
+            let memory = self
+                .remote
+                .memory
+                .entry(mapping.source.clone())
+                .or_default();
             if let Some(hit) = bl_control::hit(&mapping, message, memory) {
                 taken = true;
                 self.apply_hit(&mapping, hit);
@@ -211,12 +217,14 @@ impl Shell {
         let (min, max) = self.law_range(mapping);
         let law = Law::of(mapping, min, max);
         let key = match (&mapping.source, hit) {
-            (RemoteSource::NoteRange { low, .. }, Hit::NoteOn { key, .. }) => {
-                u32::from(key - low)
-            }
+            (RemoteSource::NoteRange { low, .. }, Hit::NoteOn { key, .. }) => u32::from(key - low),
             _ => 0,
         };
-        let memory = self.remote.memory.entry(mapping.source.clone()).or_default();
+        let memory = self
+            .remote
+            .memory
+            .entry(mapping.source.clone())
+            .or_default();
         let Some(action) = bl_control::act(&law, hit, key, memory) else {
             return;
         };
@@ -313,13 +321,11 @@ impl Shell {
                     _ => mixer.split_right,
                 }
             }
-            RemoteTarget::CrossfadeAssign { track } => {
-                match doc.track(track)?.mixer().crossfade {
-                    CrossfadeAssign::A => 0.0,
-                    CrossfadeAssign::None => 1.0,
-                    CrossfadeAssign::B => 2.0,
-                }
-            }
+            RemoteTarget::CrossfadeAssign { track } => match doc.track(track)?.mixer().crossfade {
+                CrossfadeAssign::A => 0.0,
+                CrossfadeAssign::None => 1.0,
+                CrossfadeAssign::B => 2.0,
+            },
             RemoteTarget::Crossfader => doc.settings().crossfader,
             RemoteTarget::DeviceOn { device } => flag(doc.device(device)?.enabled),
             RemoteTarget::Device { device, param } => {
@@ -354,12 +360,14 @@ impl Shell {
                 cmd("session.stop_track", json!({ "track": track }))
             }
             (RemoteTarget::StopAll, Action::Press(_)) => cmd("session.stop_all", json!({})),
-            (RemoteTarget::Solo { track }, _) => {
-                cmd("mixer.set_solo", json!({ "track": track, "solo": on(current)? }))
-            }
-            (RemoteTarget::Arm { track }, _) => {
-                cmd("mixer.set_arm", json!({ "track": track, "arm": on(current)? }))
-            }
+            (RemoteTarget::Solo { track }, _) => cmd(
+                "mixer.set_solo",
+                json!({ "track": track, "solo": on(current)? }),
+            ),
+            (RemoteTarget::Arm { track }, _) => cmd(
+                "mixer.set_arm",
+                json!({ "track": track, "arm": on(current)? }),
+            ),
             // The activator is on while the track isn't muted.
             (
                 RemoteTarget::Mixer {
@@ -384,7 +392,10 @@ impl Shell {
                     _ => (current? as u32 + 1) % 3,
                 };
                 let assign = ["a", "none", "b"][option as usize % 3];
-                cmd("mixer.set_crossfade_assign", json!({ "track": track, "assign": assign }))
+                cmd(
+                    "mixer.set_crossfade_assign",
+                    json!({ "track": track, "assign": assign }),
+                )
             }
             (_, Action::Position(position)) => self.drag_to(&target, position),
             (_, Action::MaxOrMin) => {
@@ -403,7 +414,10 @@ impl Shell {
                     }
                     _ => f64::from(u8::from(on(current)?)),
                 };
-                cmd("device.set_param", json!({ "device": device, "param": param, "value": value }))
+                cmd(
+                    "device.set_param",
+                    json!({ "device": device, "param": param, "value": value }),
+                )
             }
             _ => None,
         }
@@ -472,11 +486,18 @@ impl Shell {
     /// The path to a control and its name, for `remote.mappings` (R14).
     fn describe(&self, target: &RemoteTarget) -> (String, String) {
         let doc = self.editor.document();
-        let track = |id| doc.track(id).map_or_else(String::new, |t| t.name().to_owned());
+        let track = |id| {
+            doc.track(id)
+                .map_or_else(String::new, |t| t.name().to_owned())
+        };
         let scene = |id| doc.scene_position(id).map_or(0, |at| at + 1);
         let device = |id| {
             doc.device(id).map_or_else(String::new, |d| {
-                format!("{} / {}", track(doc.device_track(id).unwrap_or(doc.main_id())), d.name)
+                format!(
+                    "{} / {}",
+                    track(doc.device_track(id).unwrap_or(doc.main_id())),
+                    d.name
+                )
             })
         };
         let mixer = |param| match param {
@@ -487,8 +508,12 @@ impl Shell {
             MixerParam::SplitRight => "Split Pan Right",
         };
         match *target {
-            RemoteTarget::Slot { track: t, scene: s } => (track(t), format!("Clip Slot {}", scene(s))),
-            RemoteTarget::SceneLaunch { scene: s } => ("Session".to_owned(), format!("Scene {} Launch", scene(s))),
+            RemoteTarget::Slot { track: t, scene: s } => {
+                (track(t), format!("Clip Slot {}", scene(s)))
+            }
+            RemoteTarget::SceneLaunch { scene: s } => {
+                ("Session".to_owned(), format!("Scene {} Launch", scene(s)))
+            }
             RemoteTarget::TrackStop { track: t } => (track(t), "Stop".to_owned()),
             RemoteTarget::StopAll => ("Session".to_owned(), "Stop All Clips".to_owned()),
             RemoteTarget::Mixer { track: t, param } => (track(t), mixer(param).to_owned()),
@@ -507,7 +532,8 @@ impl Shell {
                 (device(d), name)
             }
             RemoteTarget::Chain { chain, param } => (
-                doc.chain(chain).map_or_else(String::new, |c| c.name.clone()),
+                doc.chain(chain)
+                    .map_or_else(String::new, |c| c.name.clone()),
                 mixer(param).to_owned(),
             ),
         }
@@ -563,7 +589,9 @@ impl Shell {
         self.end_remote_run();
         self.edit(|editor| {
             editor.transact(label, |editor| {
-                editor.apply(Command::SetRemoteMappings { mappings }).map(drop)
+                editor
+                    .apply(Command::SetRemoteMappings { mappings })
+                    .map(drop)
             })
         })
         .map_err(|error| ShellError::Failed {
@@ -609,7 +637,13 @@ impl Shell {
             .settings()
             .remote
             .iter()
-            .map(|m| if &m.source == source { mapping.clone() } else { m.clone() })
+            .map(|m| {
+                if &m.source == source {
+                    mapping.clone()
+                } else {
+                    m.clone()
+                }
+            })
             .collect();
         self.set_mappings(id, label, mappings)?;
         Ok(to_value(&self.mapping_info(&mapping)))
@@ -667,7 +701,9 @@ impl Shell {
                 let key = args.via == ids::Via::Key;
                 let (source, target) = (args.source, args.target);
                 if source.is_some() == target.is_some() {
-                    return Err(failed("name the mapping by `source` or by `target`".to_owned()));
+                    return Err(failed(
+                        "name the mapping by `source` or by `target`".to_owned(),
+                    ));
                 }
                 let all = self.editor.document().settings().remote.clone();
                 let kept: Vec<RemoteMapping> = all
@@ -708,8 +744,9 @@ impl Shell {
                 let args = Self::args::<ids::InputArgs>(id, args)?;
                 let taken = match (args.bytes, args.key) {
                     (Some(bytes), None) => {
-                        let message = MidiMessage::from_bytes(&bytes)
-                            .ok_or_else(|| failed("those bytes aren't one short MIDI message".to_owned()))?;
+                        let message = MidiMessage::from_bytes(&bytes).ok_or_else(|| {
+                            failed("those bytes aren't one short MIDI message".to_owned())
+                        })?;
                         self.apply_message(&message)
                     }
                     (None, Some(key)) => match args.pressed {

@@ -697,7 +697,10 @@ mod tests {
         let now = Instant::now();
         assert!(test.send("Pads", now, &[0x90, 60, 100]));
         assert_eq!(took(&ports).len(), 1);
-        assert!(engine.pop().is_ok(), "an unmapped note still reaches tracks");
+        assert!(
+            engine.pop().is_ok(),
+            "an unmapped note still reaches tracks"
+        );
 
         for _ in 0..1100 {
             assert!(test.send("Pads", now, &[0xB0, 1, 1]));

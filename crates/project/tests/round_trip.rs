@@ -157,7 +157,10 @@ fn midi_and_key_mappings_survive_a_save_and_a_load() {
     let kind = target.natural_kind().unwrap();
     let mappings = vec![
         RemoteMapping::new(
-            RemoteSource::Note { channel: 1, key: 36 },
+            RemoteSource::Note {
+                channel: 1,
+                key: 36,
+            },
             target,
             kind,
             None,
@@ -165,7 +168,9 @@ fn midi_and_key_mappings_survive_a_save_and_a_load() {
         )
         .unwrap(),
         RemoteMapping::new(
-            RemoteSource::Key { key: "S".to_owned() },
+            RemoteSource::Key {
+                key: "S".to_owned(),
+            },
             target,
             kind,
             None,

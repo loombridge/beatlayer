@@ -25,11 +25,19 @@ pub fn bits(mappings: &[RemoteMapping]) -> RemoteBits {
     for mapping in mappings {
         match mapping.source {
             RemoteSource::Note { channel, key } => bits.note(channel - 1, key),
-            RemoteSource::NoteRange { channel, low, high, .. } => {
+            RemoteSource::NoteRange {
+                channel, low, high, ..
+            } => {
                 (low..=high).for_each(|key| bits.note(channel - 1, key));
             }
-            RemoteSource::Cc { channel, controller } => bits.controller(channel - 1, controller),
-            RemoteSource::Cc14 { channel, controller } => {
+            RemoteSource::Cc {
+                channel,
+                controller,
+            } => bits.controller(channel - 1, controller),
+            RemoteSource::Cc14 {
+                channel,
+                controller,
+            } => {
                 bits.controller(channel - 1, controller);
                 bits.controller(channel - 1, controller + 32);
             }
@@ -81,15 +89,32 @@ pub fn hit(mapping: &RemoteMapping, message: &MidiMessage, memory: &mut Memory) 
         (RemoteSource::Note { channel: c, key }, 0x80 | 0x90) if c == channel && key == a => {
             Some(note(message.is_note_on(), a))
         }
-        (RemoteSource::NoteRange { channel: c, low, high, .. }, 0x80 | 0x90)
-            if c == channel && (low..=high).contains(&a) =>
-        {
-            Some(note(message.is_note_on(), a))
-        }
-        (RemoteSource::Cc { channel: c, controller }, 0xB0) if c == channel && controller == a => {
-            Some(Hit::Value { value: u16::from(b), full: 127 })
-        }
-        (RemoteSource::Cc14 { channel: c, controller }, 0xB0) if c == channel => {
+        (
+            RemoteSource::NoteRange {
+                channel: c,
+                low,
+                high,
+                ..
+            },
+            0x80 | 0x90,
+        ) if c == channel && (low..=high).contains(&a) => Some(note(message.is_note_on(), a)),
+        (
+            RemoteSource::Cc {
+                channel: c,
+                controller,
+            },
+            0xB0,
+        ) if c == channel && controller == a => Some(Hit::Value {
+            value: u16::from(b),
+            full: 127,
+        }),
+        (
+            RemoteSource::Cc14 {
+                channel: c,
+                controller,
+            },
+            0xB0,
+        ) if c == channel => {
             // Spec: remote-mapping R22. The high part applies at once with
             // the low part taken as 0; its partner applies again with the
             // low part it carries.
@@ -101,11 +126,15 @@ pub fn hit(mapping: &RemoteMapping, message: &MidiMessage, memory: &mut Memory) 
             } else {
                 return None;
             };
-            Some(Hit::Value { value: u16::from(high) << 7 | u16::from(low), full: 16_383 })
+            Some(Hit::Value {
+                value: u16::from(high) << 7 | u16::from(low),
+                full: 16_383,
+            })
         }
-        (RemoteSource::PitchBend { channel: c }, 0xE0) if c == channel => {
-            Some(Hit::Value { value: u16::from(b) << 7 | u16::from(a), full: 16_383 })
-        }
+        (RemoteSource::PitchBend { channel: c }, 0xE0) if c == channel => Some(Hit::Value {
+            value: u16::from(b) << 7 | u16::from(a),
+            full: 16_383,
+        }),
         _ => None,
     }
 }
@@ -158,7 +187,13 @@ impl Law {
             RemoteSource::NoteRange { low, high, .. } => u32::from(high - low) + 1,
             _ => 1,
         };
-        Self { kind: mapping.kind, min, max, mode: mapping.mode, keys }
+        Self {
+            kind: mapping.kind,
+            min,
+            max,
+            mode: mapping.mode,
+            keys,
+        }
     }
 }
 
@@ -190,9 +225,9 @@ pub fn act(law: &Law, hit: Hit, key: u32, memory: &mut Memory) -> Option<Action>
             Some(Action::Option(nearest(range(share), options)))
         }
         (Hit::NoteOn { .. }, ControlKind::Continuous) if law.keys == 1 => Some(Action::MaxOrMin),
-        (Hit::NoteOn { .. }, ControlKind::Continuous) => {
-            Some(Action::Position(range(f64::from(key) / f64::from(law.keys - 1))))
-        }
+        (Hit::NoteOn { .. }, ControlKind::Continuous) => Some(Action::Position(range(
+            f64::from(key) / f64::from(law.keys - 1),
+        ))),
         (Hit::Value { value, full }, kind)
             if matches!(law.mode, RemoteMode::Absolute | RemoteMode::Absolute14) =>
         {
@@ -242,7 +277,11 @@ mod tests {
         TrackId(Id::new(2).unwrap())
     }
 
-    fn mapping(source: RemoteSource, target: RemoteTarget, range: Option<(f64, f64)>) -> RemoteMapping {
+    fn mapping(
+        source: RemoteSource,
+        target: RemoteTarget,
+        range: Option<(f64, f64)>,
+    ) -> RemoteMapping {
         let kind = target.natural_kind().unwrap();
         RemoteMapping::new(source, target, kind, range, None).unwrap()
     }
@@ -258,7 +297,10 @@ mod tests {
         values
             .iter()
             .map(|&v| {
-                let hit = Hit::Value { value: u16::from(v), full: 127 };
+                let hit = Hit::Value {
+                    value: u16::from(v),
+                    full: 127,
+                };
                 act(&law, hit, 0, &mut memory)
             })
             .collect()
@@ -269,13 +311,24 @@ mod tests {
     fn the_table_takes_what_the_mappings_name_by_zero_based_channel() {
         let list = [
             mapping(
-                RemoteSource::NoteRange { channel: 2, low: 10, high: 12, root: None },
+                RemoteSource::NoteRange {
+                    channel: 2,
+                    low: 10,
+                    high: 12,
+                    root: None,
+                },
                 RemoteTarget::Crossfader,
                 Some((0.0, 1.0)),
             ),
             mapping(
-                RemoteSource::Cc14 { channel: 1, controller: 7 },
-                RemoteTarget::Mixer { track: track(), param: MixerParam::Volume },
+                RemoteSource::Cc14 {
+                    channel: 1,
+                    controller: 7,
+                },
+                RemoteTarget::Mixer {
+                    track: track(),
+                    param: MixerParam::Volume,
+                },
                 Some((0.0, 2.0)),
             ),
         ];
@@ -291,7 +344,10 @@ mod tests {
     #[test]
     fn a_14_bit_pair_applies_the_high_part_at_once_and_again_with_the_low_part() {
         let m = RemoteMapping::new(
-            RemoteSource::Cc14 { channel: 1, controller: 7 },
+            RemoteSource::Cc14 {
+                channel: 1,
+                controller: 7,
+            },
             RemoteTarget::Crossfader,
             ControlKind::Continuous,
             Some((0.0, 1.0)),
@@ -305,14 +361,21 @@ mod tests {
         };
         assert_eq!(value(&[0xB0, 7, 64], &mut memory), (8192, 16_383));
         assert_eq!(value(&[0xB0, 39, 5], &mut memory), (8197, 16_383));
-        assert_eq!(hit(&m, &message(&[0xB1, 7, 64]), &mut memory), None, "another channel");
+        assert_eq!(
+            hit(&m, &message(&[0xB1, 7, 64]), &mut memory),
+            None,
+            "another channel"
+        );
     }
 
     // Spec: remote-mapping R20
     #[test]
     fn an_absolute_controller_presses_a_slot_on_the_way_up_and_releases_on_the_way_down() {
         let slot = mapping(
-            RemoteSource::Cc { channel: 1, controller: 20 },
+            RemoteSource::Cc {
+                channel: 1,
+                controller: 20,
+            },
             RemoteTarget::Slot {
                 track: track(),
                 scene: bl_model::SceneId(Id::new(3).unwrap()),
@@ -333,34 +396,62 @@ mod tests {
 
     // Spec: remote-mapping R20
     #[test]
-    fn a_ranged_switch_is_on_inside_min_to_max_and_off_outside_and_the_other_way_round_when_inverted() {
+    fn a_ranged_switch_is_on_inside_min_to_max_and_off_outside_and_the_other_way_round_when_inverted()
+     {
         let activator = mapping(
-            RemoteSource::Cc { channel: 1, controller: 23 },
-            RemoteTarget::Mixer { track: track(), param: MixerParam::Mute },
+            RemoteSource::Cc {
+                channel: 1,
+                controller: 23,
+            },
+            RemoteTarget::Mixer {
+                track: track(),
+                param: MixerParam::Mute,
+            },
             Some((64.0, 127.0)),
         );
         let on = |set: bool| Some(Action::Set(set));
-        assert_eq!(values(&activator, 64.0, 127.0, &[0, 63, 64, 127]), [on(false), on(false), on(true), on(true)]);
-        assert_eq!(values(&activator, 100.0, 20.0, &[0, 20, 60, 100, 127]), [on(true), on(false), on(false), on(false), on(true)]);
+        assert_eq!(
+            values(&activator, 64.0, 127.0, &[0, 63, 64, 127]),
+            [on(false), on(false), on(true), on(true)]
+        );
+        assert_eq!(
+            values(&activator, 100.0, 20.0, &[0, 20, 60, 100, 127]),
+            [on(true), on(false), on(false), on(false), on(true)]
+        );
     }
 
     // Spec: remote-mapping R17 to R19, R21
     #[test]
     fn notes_toggle_step_and_spread_and_a_controller_sets_a_position_in_the_range() {
-        let note = RemoteSource::Note { channel: 1, key: 36 };
+        let note = RemoteSource::Note {
+            channel: 1,
+            key: 36,
+        };
         let solo = mapping(note.clone(), RemoteTarget::Solo { track: track() }, None);
         let law = Law::of(&solo, 0.0, 1.0);
         let mut memory = Memory::default();
-        let on = Hit::NoteOn { key: 36, velocity: 90 };
+        let on = Hit::NoteOn {
+            key: 36,
+            velocity: 90,
+        };
         assert_eq!(act(&law, on, 0, &mut memory), Some(Action::Toggle));
         assert_eq!(act(&law, Hit::NoteOff { key: 36 }, 0, &mut memory), None);
 
-        let assign = mapping(note.clone(), RemoteTarget::CrossfadeAssign { track: track() }, None);
+        let assign = mapping(
+            note.clone(),
+            RemoteTarget::CrossfadeAssign { track: track() },
+            None,
+        );
         let law = Law::of(&assign, 0.0, 2.0);
         assert_eq!(act(&law, on, 0, &mut memory), Some(Action::Next));
 
         let fader = mapping(
-            RemoteSource::NoteRange { channel: 1, low: 36, high: 40, root: None },
+            RemoteSource::NoteRange {
+                channel: 1,
+                low: 36,
+                high: 40,
+                root: None,
+            },
             RemoteTarget::Crossfader,
             Some((0.0, 1.0)),
         );
@@ -368,11 +459,18 @@ mod tests {
         assert_eq!(act(&law, on, 0, &mut memory), Some(Action::Position(0.2)));
         assert_eq!(act(&law, on, 4, &mut memory), Some(Action::Position(0.8)));
 
-        let single = Law::of(&mapping(note, RemoteTarget::Crossfader, Some((0.0, 1.0))), 0.0, 1.0);
+        let single = Law::of(
+            &mapping(note, RemoteTarget::Crossfader, Some((0.0, 1.0))),
+            0.0,
+            1.0,
+        );
         assert_eq!(act(&single, on, 0, &mut memory), Some(Action::MaxOrMin));
 
         let fader = mapping(
-            RemoteSource::Cc { channel: 1, controller: 1 },
+            RemoteSource::Cc {
+                channel: 1,
+                controller: 1,
+            },
             RemoteTarget::Crossfader,
             Some((0.0, 1.0)),
         );
@@ -380,6 +478,10 @@ mod tests {
             values(&fader, 0.0, 1.0, &[0, 127]),
             [Some(Action::Position(0.0)), Some(Action::Position(1.0))]
         );
-        assert_eq!(values(&fader, 1.0, 0.0, &[127]), [Some(Action::Position(0.0))], "Min above Max turns it round");
+        assert_eq!(
+            values(&fader, 1.0, 0.0, &[127]),
+            [Some(Action::Position(0.0))],
+            "Min above Max turns it round"
+        );
     }
 }

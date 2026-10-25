@@ -783,6 +783,23 @@ impl AudioHost {
         Ok(())
     }
 
+    /// Sends a device's node data of its own (the CV tools spec, R14): the
+    /// node takes it at the start of its next block.
+    ///
+    /// # Errors
+    ///
+    /// Why nothing can play, while no engine runs, as
+    /// [`AudioHost::send_transport`] says.
+    pub fn send_node_data<T: std::any::Any + Send + Sync>(
+        &mut self,
+        key: bl_engine::NodeKey,
+        value: T,
+    ) -> Result<(), String> {
+        let engine = self.running_engine()?;
+        engine.send_data(key, engine.data(value));
+        Ok(())
+    }
+
     /// Sends a Session View command (WP-3.2): a slot or a scene launch, or
     /// a stop, which the engine runs at the start of its next block and
     /// lands on the launch quantisation grid.

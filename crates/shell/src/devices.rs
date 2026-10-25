@@ -3475,6 +3475,11 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     if known.is_some_and(|t| t.external_output) {
         device = device.with_external_output();
     }
+    // Spec: cv-tools R3. A CV device starts with its outputs and inputs set
+    // to none.
+    if let Some(t) = known.filter(|t| !t.cv_outputs.is_empty() || !t.cv_inputs.is_empty()) {
+        device = device.with_cv(&t.cv_outputs, &t.cv_inputs);
+    }
     if args.device.midi_sidechain {
         device = device.with_midi_sidechain();
     }

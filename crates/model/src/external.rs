@@ -349,6 +349,20 @@ impl External {
     pub fn is_cv(&self) -> bool {
         !self.cv_outputs.is_empty() || !self.cv_inputs.is_empty()
     }
+
+    /// Whether a CV device reaches the interface: a CV output or input is set
+    /// to a channel, or its Audio From to an input (`docs/specs/cv-tools.md`,
+    /// R7).
+    #[must_use]
+    pub fn cv_routed(&self) -> bool {
+        self.is_cv()
+            && (self
+                .cv_outputs
+                .iter()
+                .chain(&self.cv_inputs)
+                .any(|port| port.channel.is_some())
+                || self.audio_from != Self::NO_INPUT)
+    }
 }
 
 fn first_channel() -> u8 {

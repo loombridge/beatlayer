@@ -228,7 +228,7 @@ impl Tuner {
     /// heard; with more than one interval in `samples`, the last. For the CV
     /// Instrument's calibration, which listens with the same detector
     /// (`docs/specs/cv-tools.md`, R14).
-    pub(crate) fn listen(&mut self, samples: &[f32]) -> Option<Option<f64>> {
+    pub fn listen(&mut self, samples: &[f32]) -> Option<Option<f64>> {
         let mut heard = None;
         for &sample in samples {
             self.ring_buffer[self.ring_pos] = sample;

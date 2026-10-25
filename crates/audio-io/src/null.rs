@@ -39,6 +39,28 @@ const MAX_BUFFER: u32 = 8192;
 /// How often a stream that isn't calling back looks again.
 const IDLE_PERIOD: Duration = Duration::from_millis(1);
 
+/// A cable between the interface's outputs and inputs that works out what
+/// comes back from what was played: given every output channel's block, it
+/// fills every input channel's next block, one block later (WP-7.17). A test
+/// patches a simulated oscillator or any other hardware with it.
+#[derive(Clone)]
+pub struct Cable(Arc<Mutex<dyn FnMut(&[Vec<f32>], &mut [Vec<f32>]) + Send>>);
+
+impl Cable {
+    /// A cable that runs `patch` after each block with the block the outputs
+    /// played and the block the inputs will hear next, both one `Vec` of
+    /// frames per channel.
+    pub fn new(patch: impl FnMut(&[Vec<f32>], &mut [Vec<f32>]) + Send + 'static) -> Self {
+        Self(Arc::new(Mutex::new(patch)))
+    }
+}
+
+impl std::fmt::Debug for Cable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Cable")
+    }
+}
+
 /// How the null device paces its blocks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Pacing {
@@ -331,6 +353,9 @@ pub struct NullBackend {
     /// than a block, because a block's input is read before its output is
     /// made; a stream with a bigger buffer is refused.
     loopback_delay: Option<u32>,
+    /// If set, each input channel carries what the cable works out from the
+    /// outputs a block before (WP-7.17).
+    cable: Option<Cable>,
 }
 
 impl Default for NullBackend {
@@ -361,6 +386,14 @@ impl NullBackend {
         self
     }
 
+    /// This backend with the inputs carrying what `cable` works out from the
+    /// outputs a block before, in place of the test tones (WP-7.17).
+    #[must_use]
+    pub fn with_cable(mut self, cable: Cable) -> Self {
+        self.cable = Some(cable);
+        self
+    }
+
     /// A null backend with these settings.
     pub fn with_options(options: NullOptions) -> Self {
         Self::with_devices(options, &[(LOCAL, NAME)]).0
@@ -388,6 +421,7 @@ impl NullBackend {
                 world,
                 latency: (0, 0),
                 loopback_delay: None,
+                cable: None,
             },
             control,
         )
@@ -571,6 +605,9 @@ impl Backend for NullBackend {
                     .map(|_| VecDeque::from(vec![0.0; delay as usize]))
                     .collect()
             }),
+            cable: self.cable.clone(),
+            cable_input: vec![vec![0.0; frames as usize]; usize::from(input_channels)],
+            cable_output: vec![vec![0.0; frames as usize]; usize::from(output_channels)],
             frames: frames as usize,
             sample_rate,
             options: self.options,
@@ -817,6 +854,11 @@ struct NullEngine {
     /// With a loopback, the last `delay` frames each output channel played,
     /// oldest first, which the same input channel reads.
     loopback: Option<Vec<VecDeque<f32>>>,
+    /// With a cable, what it worked out for the inputs' next block, and the
+    /// block the outputs played.
+    cable: Option<Cable>,
+    cable_input: Vec<Vec<f32>>,
+    cable_output: Vec<Vec<f32>>,
     frames: usize,
     sample_rate: u32,
     options: NullOptions,
@@ -917,6 +959,17 @@ impl NullEngine {
                     line.extend(played);
                 }
             }
+            if let Some(cable) = &self.cable {
+                for (to, played) in self.cable_output.iter_mut().zip(output.as_buffer().iter()) {
+                    to.clear();
+                    to.extend(played);
+                }
+                for input in &mut self.cable_input {
+                    input.resize(self.frames, 0.0);
+                }
+                let mut patch = cable.0.lock().unwrap_or_else(PoisonError::into_inner);
+                patch(&self.cable_output, &mut self.cable_input);
+            }
             if let Some(interval) = &self.interval {
                 let _ = interval.finish();
             }
@@ -938,6 +991,12 @@ impl NullEngine {
         let rate = f64::from(self.sample_rate.max(1));
         let frames = self.frames;
         let mut view = self.input.view_mut(frames);
+        if self.cable.is_some() {
+            for (channel, next) in view.iter_mut().zip(&self.cable_input) {
+                channel.copy_from_slice(&next[..frames]);
+            }
+            return;
+        }
         if let Some(lines) = &mut self.loopback {
             for (index, channel) in view.iter_mut().enumerate() {
                 match lines.get_mut(index) {

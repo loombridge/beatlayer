@@ -99,6 +99,7 @@ pub mod audio_editing;
 pub mod audio_panel;
 pub mod automation;
 pub mod autosampler;
+pub mod cv;
 pub mod bounce;
 pub mod browser;
 pub mod capture_midi;
@@ -176,6 +177,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     devices::register(registry)?;
     multisampler::register(registry)?;
     autosampler::register(registry)?;
+    cv::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;

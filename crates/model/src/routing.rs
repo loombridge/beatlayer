@@ -21,7 +21,15 @@ impl Document {
     pub fn external_devices(&self) -> Vec<String> {
         self.tracks()
             .flat_map(|track| track.devices_deep())
-            .filter(|device| device.external.is_some() && device.enabled)
+            // Spec: cv-tools R7. A CV device is named once it reaches the
+            // interface.
+            .filter(|device| {
+                device.enabled
+                    && device
+                        .external
+                        .as_ref()
+                        .is_some_and(|external| !external.is_cv() || external.cv_routed())
+            })
             .map(|device| format!("{} ({})", device.title(), device.id))
             .collect()
     }

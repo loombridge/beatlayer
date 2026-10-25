@@ -825,7 +825,7 @@ impl MainWindowUi {
         let metering = shell.meters().iter().any(|m| {
             m.peak.iter().chain(&m.rms).any(|level| *level > 0.0) || m.gain_reduction < 0.0
         });
-        if shell.playing() || metering {
+        if shell.playing() || metering || shell.chain_meters_lit() {
             // The playhead and the Arrangement Position fields move with
             // the engine every frame (control-bar-transport R14), and the
             // meters and the gain-reduction bars until they're silent

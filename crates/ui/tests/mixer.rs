@@ -294,7 +294,7 @@ fn every_strip_has_its_controls_where_live_has_them() {
     assert!(rows.windows(2).all(|w| w[0] < w[1]), "{rows:?}");
     // A MIDI track without an instrument: a MIDI meter and the switches,
     // no volume or pan.
-    assert!(inside(&nodes, "1 MIDI", "MIDI Meter").is_some());
+    assert!(inside(&nodes, "1 MIDI", "MIDI Activity").is_some());
     assert!(inside(&nodes, "1 MIDI", "Track Volume").is_none());
     assert!(inside(&nodes, "1 MIDI", "Track Pan").is_none());
     assert!(inside(&nodes, "1 MIDI", "Arm Recording").is_some());
@@ -596,7 +596,12 @@ fn the_arrangement_headers_mixer_controls_are_live_and_take_typed_values() {
     assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) + 12.0).abs() < 1e-9);
     assert!(!h.main.is_typing());
     let nodes = tree(&mut h);
-    let meters = nodes.iter().filter(|n| n.label == "Track Meter").count();
+    // A MIDI track without an instrument shows a MIDI meter in its place
+    // (midi-meters R1).
+    let meters = nodes
+        .iter()
+        .filter(|n| n.label == "Track Meter" || n.label == "MIDI Activity")
+        .count();
     assert!(meters >= 7, "a meter in every header: {meters}");
 }
 

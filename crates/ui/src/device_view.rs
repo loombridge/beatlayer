@@ -423,6 +423,18 @@ impl DeviceViewUi {
                     debug_assert_eq!(frame.id, *id);
                     self.device(ui, shell, theme, frame, *at, false, events);
                 }
+                // Spec: midi-meters R2. A meter in each gap, before the first
+                // device and after the last.
+                if let Some(track) = state.track {
+                    crate::meters::in_gaps(
+                        ui,
+                        shell,
+                        theme,
+                        bl_engine::MeterOwner::Track(track),
+                        &placed,
+                        DEVICE_GAP,
+                    );
+                }
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);

@@ -275,6 +275,10 @@ impl Shell {
                 let on = !self.prefs.retune_on_tuning_load;
                 self.run(id, json!({ "on": on }))
             }
+            ids::SETTINGS_SET_SNAP_AUTOMATION_TO_GRID if !has("on") => {
+                let on = !self.prefs.snap_automation_to_grid.0;
+                self.run(id, json!({ "on": on }))
+            }
             ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)

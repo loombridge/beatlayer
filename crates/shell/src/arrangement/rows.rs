@@ -22,9 +22,9 @@ pub const MAX_TRACK_HEIGHT: f32 = 800.0;
 /// list still draws.
 pub const MIN_OPTIMIZED_HEIGHT: f32 = 0.5;
 
-/// How tall a track's automation lane is, added under its lane while
-/// Automation Mode is on (WP-2.12). Live's own height hasn't been measured
-/// (arrangement-view, "To observe in Live").
+/// How tall a lane of a track's own is, added under its lane while
+/// Automation Mode is on (the automation spec, R25): Beatlayer's own, as
+/// Live's hasn't been measured (arrangement-view, "To observe in Live").
 pub const AUTOMATION_LANE_HEIGHT: f32 = 43.0;
 
 /// How tall a take lane is when it's first shown, in points (the comping spec,
@@ -48,9 +48,9 @@ pub struct Row {
     pub top: f32,
     /// The height of its own lane, in points (the clips' area).
     pub height: f32,
-    /// The height of its automation lane, added under its lane, in points:
-    /// 0 while Automation Mode is off, the track is folded, or its lane is
-    /// hidden (WP-2.12).
+    /// The height of its lanes of its own, added under its lane, in points:
+    /// 0 while Automation Mode is off, the track is folded, or it has none
+    /// showing (WP-6.57).
     pub automation: f32,
     /// The height of its take lanes together, added under its lane, in
     /// points: 0 while they're hidden, the track is folded or Automation
@@ -62,6 +62,19 @@ pub struct Row {
 }
 
 impl Row {
+    /// The top and bottom of lane `lane` of the track, in points from the top
+    /// of the first row: 0 is the main lane, which draws over the track's
+    /// clips, and 1 and up are the lanes of its own under it (the automation
+    /// spec, R24, R25).
+    #[must_use]
+    pub fn lane_span(&self, lane: usize) -> (f32, f32) {
+        if lane == 0 {
+            return (self.top, self.top + self.height);
+        }
+        let top = self.top + self.height + (lane - 1) as f32 * AUTOMATION_LANE_HEIGHT;
+        (top, top + AUTOMATION_LANE_HEIGHT)
+    }
+
     /// Its bottom, in points from the top of the first row: its lane, its
     /// automation lane and its take lanes.
     #[must_use]

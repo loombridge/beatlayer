@@ -215,6 +215,7 @@ impl Shell {
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => Some(self.prefs.retune_on_tuning_load),
+            ids::SETTINGS_SET_SNAP_AUTOMATION_TO_GRID => Some(self.prefs.snap_automation_to_grid.0),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),

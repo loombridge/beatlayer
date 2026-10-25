@@ -194,6 +194,9 @@ pub const SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES: &str = "settings.set_create_f
 /// `settings.set_retune_on_tuning_load`: switch Retune Set On Loading Tuning
 /// Systems (WP-6.9; the tunings spec, R15).
 pub const SETTINGS_SET_RETUNE_ON_TUNING_LOAD: &str = "settings.set_retune_on_tuning_load";
+/// `settings.set_snap_automation_to_grid`: switch Snap Automation to Grid
+/// (WP-6.57; the automation spec, R31).
+pub const SETTINGS_SET_SNAP_AUTOMATION_TO_GRID: &str = "settings.set_snap_automation_to_grid";
 /// `settings.set_temporary_folder`: choose the Temporary Folder on the File &
 /// Folder page (WP-4.20).
 pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
@@ -338,6 +341,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_CLIP_COLOUR,
     SETTINGS_SET_CREATE_FADES_ON_CLIP_EDGES,
     SETTINGS_SET_RETUNE_ON_TUNING_LOAD,
+    SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
@@ -2101,6 +2105,24 @@ fn specs() -> Vec<CommandSpec> {
              a tuning is asked first (Retune, or Cancel to change nothing). The setting is kept \
              for the next start, and isn't part of the set or an undo step. The result's `on` \
              is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .context(Settings)
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
+        // Spec: automation R31 (M-OPT-015): an edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_SNAP_AUTOMATION_TO_GRID,
+            "Snap Automation to Grid",
+        )
+        .description(
+            "Switches Snap Automation to Grid, the Options menu's item; it's on in a new \
+             install. With it on, breakpoints made or moved with the mouse on an automation \
+             lane snap to the editing grid. With it off they land where the pointer is, \
+             snapping only to their neighbours' positions, and holding Cmd (Alt on Windows) \
+             snaps that drag to the grid. The editing grid's own Snap to Grid still turns all \
+             snapping off. The setting is kept for the next start, and isn't part of the set \
+             or an undo step. The result's `on` is the setting afterwards.",
         )
         .permission(Permission::Edit)
         .context(Settings)

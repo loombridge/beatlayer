@@ -14,6 +14,7 @@
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
 //!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
 //!      "mpe_view": { … },       the MPE tab's lanes, their heights and the clips with its grid on
+//!      "lane_views": { "3": { … } }, each track's automation lanes (R24 to R26)
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
@@ -40,8 +41,8 @@ use std::io::Read;
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, DeviceWindows, Document, Editor, LaunchSettings, MpeView, MultisamplerViews,
-    RackViewMap, WindowViews,
+    ClipFolds, DeviceWindows, Document, Editor, LaneViews, LaunchSettings, MpeView,
+    MultisamplerViews, RackViewMap, WindowViews,
 };
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
@@ -104,6 +105,10 @@ pub struct Project {
     /// R27): saved with the set, but not part of the document, so changing
     /// them is no undo step.
     pub mpe_view: MpeView,
+    /// What each track's automation lanes show, and the lanes of its own
+    /// (the automation spec, R24 to R26): saved with the set, but not part of
+    /// the document, so changing them is no undo step.
+    pub lane_views: LaneViews,
 }
 
 impl Project {
@@ -129,6 +134,7 @@ impl Project {
             multisamplers: MultisamplerViews::new(),
             window_views: WindowViews::default(),
             mpe_view: MpeView::default(),
+            lane_views: LaneViews::new(),
         }
     }
 
@@ -194,6 +200,18 @@ impl Project {
         self.mpe_view
             .grid
             .retain(|clip| self.document.clip(*clip).is_some());
+        self
+    }
+
+    /// The same project with these automation lanes, keeping only the
+    /// tracks its document has.
+    #[must_use]
+    pub fn with_lane_views(mut self, views: &LaneViews) -> Self {
+        self.lane_views = views
+            .iter()
+            .filter(|(track, _)| self.document.track(**track).is_some())
+            .map(|(track, lanes)| (*track, lanes.clone()))
+            .collect();
         self
     }
 
@@ -317,6 +335,8 @@ struct Saving<'a> {
     window_views: WindowViews,
     #[serde(skip_serializing_if = "MpeView::is_default")]
     mpe_view: &'a MpeView,
+    #[serde(skip_serializing_if = "LaneViews::is_empty")]
+    lane_views: &'a LaneViews,
     document: &'a Document,
 }
 
@@ -337,6 +357,7 @@ impl<'a> Saving<'a> {
             multisamplers: &project.multisamplers,
             window_views: project.window_views,
             mpe_view: &project.mpe_view,
+            lane_views: &project.lane_views,
             document: &project.document,
         }
     }
@@ -381,6 +402,10 @@ struct Saved {
     /// with a new set's.
     #[serde(default)]
     mpe_view: MpeView,
+    /// The automation lanes (WP-6.57). Sets saved before it open with every
+    /// track showing its main lane only (R33).
+    #[serde(default)]
+    lane_views: LaneViews,
     document: Document,
 }
 
@@ -488,6 +513,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         multisamplers,
         window_views,
         mpe_view,
+        lane_views,
         document,
         ..
     } = saved;
@@ -518,11 +544,13 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         multisamplers: MultisamplerViews::new(),
         window_views,
         mpe_view: MpeView::default(),
+        lane_views: LaneViews::new(),
     }
     .with_windows(&windows)
     .with_rack_views(&rack_views)
     .with_folds(&folds)
     .with_mpe_view(&mpe_view)
+    .with_lane_views(&lane_views)
     .with_midi_tools(&midi_tools)
     .with_multisamplers(&multisamplers);
     let info = SetInfo {

@@ -191,6 +191,14 @@ pub(crate) const HANDLES: Reason = Live(
 // The automation lane that has the keyboard (WP-6.26): Enter makes and
 // selects a breakpoint at the insert marker, and the arrows, a typed
 // number, Delete and Cmd-Delete edit it.
+/// An automation lane's header menu (the automation spec, R27, R28): the menu
+/// key on a lane's choosers opens it, and its items run these commands; the
+/// device chooser's last entry switches the filter with the arrow keys.
+pub(crate) const LANE_MENU: Reason = Equivalent(
+    "the lane header's context menu, opened with the menu key on one of the lane's choosers \
+         (S-CTX-002, automation R28); the filter is also the device chooser's last entry",
+);
+
 pub(crate) const LANE_KEYS: Reason = Equivalent(
     "the automation lane's keys (automation-editing R22 to R26): Enter makes and selects a \
          breakpoint (S-A11Y-019), Left, Right, Up, Down and a typed number move it and change \

@@ -33,6 +33,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_loop_warp_short_samples", read("settings.state", "warp.loop_warp_short_samples")),
     ("settings.set_create_fades_on_clip_edges", read("settings.state", "create_fades_on_clip_edges")),
     ("settings.set_retune_on_tuning_load", read("settings.state", "retune_on_tuning_load")),
+    ("settings.set_snap_automation_to_grid", read("settings.state", "snap_automation_to_grid")),
     ("settings.set_sample_editor", read("settings.state", "file_folder.sample_editor")),
     ("settings.set_collect_files_on_export", read("settings.state", "library.collect_files_on_export")),
     ("settings.set_user_library", read("settings.state", "library.user_library")),

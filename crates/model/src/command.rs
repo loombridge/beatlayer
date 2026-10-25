@@ -610,6 +610,23 @@ pub enum Command {
         /// The parameter.
         target: AutomationTarget,
     },
+    /// Deletes every envelope of a track, as Clear All Envelopes on an
+    /// automation lane's header does (the automation spec, R28). The
+    /// controls stay where they are.
+    ClearTrackAutomation {
+        /// The track.
+        track: TrackId,
+    },
+    /// Deletes every envelope of one device of a track, or of its mixer
+    /// (its volume, pan, Track Activator and sends), as Clear Envelopes of the
+    /// device an automation lane shows does (the automation spec, R28).
+    ClearDeviceAutomation {
+        /// The track.
+        track: TrackId,
+        /// The device, or `null` (or nothing) for the track's mixer.
+        #[serde(default)]
+        device: Option<DeviceId>,
+    },
     /// Replaces one of a track's parameter's envelope with the breakpoints
     /// given, as the automation editing commands do when they write a shape
     /// over a span (the automation editing spec, R5). The envelope keeps
@@ -2807,6 +2824,8 @@ impl Command {
             Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
             Self::SetAutomationEnvelope { .. } => "Set Automation Envelope",
             Self::DeleteAutomation { .. } => "Delete Automation",
+            Self::ClearTrackAutomation { .. } => "Clear All Envelopes",
+            Self::ClearDeviceAutomation { .. } => "Clear Envelopes",
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
             }
@@ -3610,6 +3629,38 @@ impl Document {
             Command::DeleteAutomation { track, target } => {
                 self.check_automation_target(*track, *target)?;
                 self.track_mut(*track)?.automation.remove(target);
+                Ok(())
+            }
+            Command::ClearTrackAutomation { track } => {
+                self.track_mut(*track)?.automation.clear();
+                Ok(())
+            }
+            Command::ClearDeviceAutomation { track, device } => {
+                let owner = self.track_mut(*track)?;
+                if let Some(device) = device
+                    && owner.find_device(*device).is_none()
+                {
+                    return Err(ModelError::DeviceNotInTrack {
+                        device: *device,
+                        track: *track,
+                    });
+                }
+                // Spec: automation R28. A device's envelopes name it; the
+                // mixer's are the track's own controls, its sends and its
+                // rack chains' controls.
+                let cleared: Vec<AutomationTarget> = owner
+                    .automation
+                    .keys()
+                    .copied()
+                    .filter(|target| match (target, device) {
+                        (AutomationTarget::Device { device: of, .. }, Some(device)) => of == device,
+                        (AutomationTarget::Device { .. }, None) | (_, Some(_)) => false,
+                        (_, None) => true,
+                    })
+                    .collect();
+                for target in cleared {
+                    owner.automation.remove(&target);
+                }
                 Ok(())
             }
             Command::SetAutomationEnvelope {
@@ -11192,6 +11243,83 @@ mod tests {
         .unwrap();
         assert_eq!(song.doc.settings().tempo, tempo);
         assert_eq!(song.doc.settings().time_signatures, signatures);
+    }
+
+    // Spec: automation R28
+    #[test]
+    fn clearing_a_tracks_or_a_devices_envelopes_leaves_the_rest() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let ret = song.track(TrackKind::Return, None);
+        let device = song.device(track);
+        let other_device = song.device(track);
+        let targets = [
+            AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+            AutomationTarget::Send { to: ret },
+            AutomationTarget::Device {
+                device,
+                param: ParamId(2),
+            },
+            AutomationTarget::Device {
+                device: other_device,
+                param: ParamId(2),
+            },
+        ];
+        let has = |song: &Song, target: &AutomationTarget| {
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(target)
+                .is_some()
+        };
+        let draw = |song: &mut Song| {
+            for target in targets {
+                song.apply(Command::SetAutomationBreakpoint {
+                    track,
+                    target,
+                    at: Ticks::ZERO,
+                    value: 0.5,
+                })
+                .unwrap();
+            }
+        };
+        draw(&mut song);
+
+        // A device's envelopes go; the other device's and the mixer's stay.
+        song.apply(Command::ClearDeviceAutomation {
+            track,
+            device: Some(device),
+        })
+        .unwrap();
+        assert_eq!(targets.map(|t| has(&song, &t)), [true, true, false, true]);
+        // The mixer's go: the volume and the send.
+        song.apply(Command::ClearDeviceAutomation {
+            track,
+            device: None,
+        })
+        .unwrap();
+        assert_eq!(targets.map(|t| has(&song, &t)), [false, false, false, true]);
+        // A device the track doesn't have is refused.
+        let elsewhere = song.track(TrackKind::Audio, None);
+        let stranger = song.device(elsewhere);
+        assert_eq!(
+            song.reject(Command::ClearDeviceAutomation {
+                track,
+                device: Some(stranger),
+            }),
+            ModelError::DeviceNotInTrack {
+                device: stranger,
+                track,
+            }
+        );
+        // Every envelope of the track.
+        draw(&mut song);
+        song.apply(Command::ClearTrackAutomation { track }).unwrap();
+        assert_eq!(targets.map(|t| has(&song, &t)), [false; 4]);
+        // Clearing again changes nothing.
+        song.apply(Command::ClearTrackAutomation { track }).unwrap();
     }
 
     // Spec: automation R1 to R6

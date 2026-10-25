@@ -490,6 +490,7 @@ impl Shell {
                 self.dirty = false;
                 self.message = None;
                 self.arrangement.reset();
+                self.arrangement.restore_lanes(self.store.lane_views());
                 self.clip_view.forget_selection();
                 self.mixer.reset();
                 self.session.reset();
@@ -544,6 +545,8 @@ impl Shell {
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
+                    .set_lane_views(self.arrangement.lane_views().clone());
+                self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
                 self.saved_as(path, &warnings);
@@ -567,6 +570,8 @@ impl Shell {
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
+                self.store
+                    .set_lane_views(self.arrangement.lane_views().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 self.store.set_temporary_folder(self.temporary_folder());
@@ -727,6 +732,8 @@ impl Shell {
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
+                self.store
+                    .set_lane_views(self.arrangement.lane_views().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 let files = self

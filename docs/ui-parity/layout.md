@@ -122,7 +122,7 @@ Nine groups, left to right (man 3.1). x positions are the left edges of each con
 | L-ARR-008 | In/Out column: input type, input channel, monitoring (In, Auto, Off), output type, output channel | Second column, one row each | M-VIEW-033a | obs |
 | L-ARR-009 | Mixer column: row 1 track activator (number), Solo, Arm; row 2 volume, pan; row 3 sends A, B | Third column | M-VIEW-033b, 033c | obs |
 | L-ARR-010 | Controls above the headers: Set Locator, Automation Mode, Lock Envelopes; Previous and Next Locator under Set | y 82 (row 1) and 100 (row 2), from x 1299 | Always present | obs, man 6.1 |
-| L-ARR-011 | Automation lanes | Under each track's main lane | Automation Mode (S-ENV-001, M-VIEW-036) | man 26.5.2 |
+| L-ARR-011 | Automation lanes | A track's main automation lane draws over its clips; its other lanes go under its own lane, 43 points each ([automation](../specs/automation.md) R24, R25) | Automation Mode (S-ENV-001, M-VIEW-036) | man 26.5.2 |
 | L-ARR-012 | Take lanes | Under the main lane; hidden while Automation Mode is on | S-COMP-001, track context menu, L-ARR-021 | man 21.1 |
 | L-ARR-013 | Drop area ("Drop Files and Devices Here") | Under the last track | Always present | obs, man 6.1 |
 | L-ARR-014 | Return tracks and Main track | Pinned to the bottom of the lanes, one 18 pt row each (A at 688, B at 706, Main at 725), with the same header columns. With Beatlayer's Return Tracks Scroll with Tracks on, the returns' rows come after the drop area under the last track and scroll with the tracks, and only Main stays pinned (IMP-01; [arrangement view](../specs/arrangement-view.md) R18) | Returns: M-VIEW-033d, S-TRACK-011 | obs |

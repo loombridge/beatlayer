@@ -502,7 +502,10 @@ impl MultisamplerUi {
         (frame, state): (&DeviceFrame, &MultisamplerState),
         display: Option<&bl_model::DeviceDisplay>,
         body: Rect,
-        played: &dyn Fn(bl_model::ParamId) -> Option<(f64, f64)>,
+        played: (
+            &dyn Fn(bl_model::ParamId) -> Option<(f64, f64)>,
+            &dyn Fn(bl_model::ParamId) -> Option<crate::param_menu::ParamMenu>,
+        ),
         events: &mut Vec<UiEvent>,
     ) {
         let Some(panel) = frame.panel.as_ref() else {

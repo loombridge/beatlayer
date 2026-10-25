@@ -15,8 +15,9 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaunchSettings,
-    MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind, WindowViews, registry,
+    ClipFolds, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor, LaneViews,
+    LaunchSettings, MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId, TrackKind,
+    WindowViews, registry,
 };
 use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
@@ -245,6 +246,18 @@ pub trait SetStore {
         MpeView::default()
     }
 
+    /// Gives the store the Arrangement's automation lanes (WP-6.57), for the
+    /// next save to write beside the document. A store that keeps none
+    /// ignores them.
+    fn set_lane_views(&mut self, views: LaneViews) {
+        let _ = views;
+    }
+
+    /// The open set's automation lanes, as it was saved.
+    fn lane_views(&self) -> LaneViews {
+        LaneViews::new()
+    }
+
     /// Writes `editor` to `path` as a copy without making it the open set:
     /// the default set and templates (WP-2.25). Returns warnings about
     /// things that went wrong without stopping the write. A store that
@@ -344,6 +357,9 @@ pub struct ProjectFiles {
     /// The MPE tab's lanes and grids (WP-6.18): the open set's, then the
     /// shell's for the next save.
     mpe_view: MpeView,
+    /// The Arrangement's automation lanes (WP-6.57): the open set's, then
+    /// the shell's for the next save.
+    lane_views: LaneViews,
 }
 
 impl ProjectFiles {
@@ -372,6 +388,7 @@ impl SetStore for ProjectFiles {
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.mpe_view = project.mpe_view;
+        self.lane_views = project.lane_views;
         self.added.clear();
         Ok((editor, opened))
     }
@@ -444,6 +461,7 @@ impl SetStore for ProjectFiles {
         self.launch = LaunchSettings::default();
         self.window_views = WindowViews::default();
         self.mpe_view = MpeView::default();
+        self.lane_views = LaneViews::new();
         self.added.clear();
     }
 
@@ -465,6 +483,7 @@ impl SetStore for ProjectFiles {
             .with_launch(self.launch)
             .with_window_views(self.window_views)
             .with_mpe_view(&self.mpe_view)
+            .with_lane_views(&self.lane_views)
     }
 
     fn adopt(&mut self, set: Option<SetFile>, project: Project) {
@@ -478,6 +497,7 @@ impl SetStore for ProjectFiles {
         self.launch = project.launch;
         self.window_views = project.window_views;
         self.mpe_view = project.mpe_view;
+        self.lane_views = project.lane_views;
         self.added.clear();
     }
 
@@ -547,6 +567,14 @@ impl SetStore for ProjectFiles {
 
     fn mpe_view(&self) -> MpeView {
         self.mpe_view.clone()
+    }
+
+    fn set_lane_views(&mut self, views: LaneViews) {
+        self.lane_views = views;
+    }
+
+    fn lane_views(&self) -> LaneViews {
+        self.lane_views.clone()
     }
 
     fn launch(&self) -> LaunchSettings {
@@ -619,7 +647,8 @@ impl SetStore for ProjectFiles {
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
-            .with_mpe_view(&self.mpe_view);
+            .with_mpe_view(&self.mpe_view)
+            .with_lane_views(&self.lane_views);
         let mut set = SetFile::open(path)
             .map(|(set, _)| set)
             .unwrap_or_else(|_| SetFile::new(path.to_owned()));
@@ -819,7 +848,8 @@ impl ProjectFiles {
             .with_midi_tools(&self.midi_tools)
             .with_launch(self.launch)
             .with_window_views(self.window_views)
-            .with_mpe_view(&self.mpe_view);
+            .with_mpe_view(&self.mpe_view)
+            .with_lane_views(&self.lane_views);
         let mut set = self
             .set
             .clone()

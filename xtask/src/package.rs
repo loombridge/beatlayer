@@ -522,8 +522,11 @@ fn binaries(table: &Value) -> Result<Vec<String>, String> {
     }
 }
 
-/// The files listed in `resources`, which the tarball carries too.
-fn resources(table: &Value, manifest_dir: &Path) -> Result<Vec<PathBuf>, String> {
+/// The files and folders listed in `resources`, which the tarball carries
+/// too: each as where it is and where it goes in the tarball's folder. A plain
+/// path goes in by its file's name; `{ src, target }` puts a file or a folder
+/// at `target`.
+fn resources(table: &Value, manifest_dir: &Path) -> Result<Vec<(PathBuf, PathBuf)>, String> {
     let Some(entries) = lookup(table, &["resources"]) else {
         return Ok(Vec::new());
     };
@@ -532,10 +535,15 @@ fn resources(table: &Value, manifest_dir: &Path) -> Result<Vec<PathBuf>, String>
         .ok_or("`resources` must be a list")?
         .iter()
         .map(|entry| {
-            entry
-                .as_str()
-                .map(|path| manifest_dir.join(path))
-                .ok_or_else(|| "the tarball supports only plain paths in `resources`".to_owned())
+            if let Some(path) = entry.as_str() {
+                let source = manifest_dir.join(path);
+                let name = PathBuf::from(source.file_name().unwrap_or_default());
+                return Ok((source, name));
+            }
+            match (entry["src"].as_str(), entry["target"].as_str()) {
+                (Some(src), Some(target)) => Ok((manifest_dir.join(src), PathBuf::from(target))),
+                _ => Err("`resources` takes plain paths and `{ src, target }` entries".to_owned()),
+            }
         })
         .collect()
 }
@@ -707,6 +715,7 @@ fn smoke_test_dmg(
     let info = plist_json(&app.join("Contents/Info.plist"))?;
     report_problems("Info.plist", check_info_plist(&info, table, executable))?;
 
+    check_grooves(&app.join("Contents/Resources"))?;
     let binary = app.join("Contents/MacOS").join(executable);
     let archs = Command::new("lipo")
         .arg("-archs")
@@ -795,6 +804,7 @@ fn smoke_test_msi(
 
     let name = format!("{executable}{}", std::env::consts::EXE_SUFFIX);
     let binary = find_file(&target, &name).ok_or_else(|| format!("the MSI has no {name}"))?;
+    check_grooves(&target)?;
     check_binary(|| Command::new(&binary), expected_version)
 }
 
@@ -968,7 +978,7 @@ fn make_tarball(
     out_dir: &Path,
     binaries_dir: &Path,
     binaries: &[String],
-    resources: &[PathBuf],
+    resources: &[(PathBuf, PathBuf)],
     version: &str,
 ) -> Result<PathBuf, String> {
     let name = format!("{}_{version}_{}", binaries[0], std::env::consts::ARCH);
@@ -977,12 +987,12 @@ fn make_tarball(
     fs::create_dir_all(&folder)
         .map_err(|e| format!("couldn't create {}: {e}", folder.display()))?;
 
-    let binaries = binaries.iter().map(|b| binaries_dir.join(b));
-    for source in binaries.chain(resources.iter().cloned()) {
-        let destination = folder.join(source.file_name().unwrap_or_default());
-        // fs::copy keeps the permission bits, so binaries stay executable.
-        fs::copy(&source, &destination)
-            .map_err(|e| format!("couldn't copy {}: {e}", source.display()))?;
+    let binaries = binaries.iter().map(|b| {
+        let name = PathBuf::from(b);
+        (binaries_dir.join(b), name)
+    });
+    for (source, target) in binaries.chain(resources.iter().cloned()) {
+        copy_into(&source, &folder.join(target))?;
     }
 
     let tarball = out_dir.join(format!("{name}.tar.gz"));
@@ -999,6 +1009,34 @@ fn make_tarball(
     )?;
     remove_dir_if_present(&staging)?;
     Ok(tarball)
+}
+
+/// Copies a file, or a folder and everything in it, to `destination`.
+fn copy_into(source: &Path, destination: &Path) -> Result<(), String> {
+    let fail = |e: std::io::Error| format!("couldn't copy {}: {e}", source.display());
+    if source.is_dir() {
+        fs::create_dir_all(destination).map_err(fail)?;
+        for entry in fs::read_dir(source).map_err(fail)?.filter_map(Result::ok) {
+            copy_into(&entry.path(), &destination.join(entry.file_name()))?;
+        }
+        return Ok(());
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(fail)?;
+    }
+    // fs::copy keeps the permission bits, so binaries stay executable.
+    fs::copy(source, destination).map(drop).map_err(fail)
+}
+
+/// Checks that a package carries the bundled grooves where the app looks for
+/// them: a folder called `Grooves` somewhere in `package`, holding the script's
+/// files (the grooves spec R37).
+fn check_grooves(package: &Path) -> Result<(), String> {
+    let found = find_dir(package, "Grooves")
+        .ok_or_else(|| format!("{} has no Grooves folder", package.display()))?;
+    crate::grooves::shipped(&found)?;
+    eprintln!("bundled grooves: {}", found.display());
+    Ok(())
 }
 
 fn smoke_test_tarball(
@@ -1021,6 +1059,7 @@ fn smoke_test_tarball(
     )?;
     let binary =
         find_file(&target, executable).ok_or_else(|| format!("the tarball has no {executable}"))?;
+    check_grooves(&target)?;
     check_binary(|| Command::new(&binary), expected_version)
 }
 
@@ -1120,6 +1159,22 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Searches `dir` and its subfolders for a folder called `name`.
+fn find_dir(dir: &Path, name: &str) -> Option<PathBuf> {
+    for entry in fs::read_dir(dir).ok()?.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_dir() {
+            if file_name(&path) == name {
+                return Some(path);
+            }
+            if let Some(found) = find_dir(&path, name) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
 fn file_name(path: &Path) -> String {
     path.file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -1155,6 +1210,49 @@ mod tests {
         for tag in ["v0.0.9", "0.1.0", "v0.1", "v0.1.0-rc1", "vv0.1.0", ""] {
             assert!(check_tag(tag, "0.1.0").is_err(), "{tag} passed");
         }
+    }
+
+    // Spec: grooves R37.
+    #[test]
+    fn resources_take_plain_paths_and_folders_with_a_target() {
+        let table = json!({ "resources": [
+            "../../LICENSE",
+            { "src": "resources/Grooves", "target": "Grooves" },
+        ] });
+        let found = resources(&table, Path::new("/m")).unwrap();
+        assert_eq!(
+            found,
+            [
+                (PathBuf::from("/m/../../LICENSE"), PathBuf::from("LICENSE")),
+                (
+                    PathBuf::from("/m/resources/Grooves"),
+                    PathBuf::from("Grooves")
+                ),
+            ]
+        );
+        assert!(resources(&json!({ "resources": [{ "src": "x" }] }), Path::new("/m")).is_err());
+        assert!(resources(&json!({}), Path::new("/m")).unwrap().is_empty());
+    }
+
+    // Spec: grooves R37. A package that carries the script's grooves where the
+    // app looks passes the check, and one that carries a changed file, or
+    // lacks the folder, fails it.
+    #[test]
+    fn a_package_must_carry_the_bundled_grooves_the_script_makes() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let package =
+            std::env::temp_dir().join(format!("bl-package-grooves-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&package);
+        let carried = package.join("Contents/Resources/Grooves");
+        copy_into(&root.join(crate::grooves::DIR), &carried).unwrap();
+        assert_eq!(check_grooves(&package), Ok(()));
+        let file = carried.join("Straight 8ths.blgroove");
+        fs::write(&file, "{}").unwrap();
+        assert!(check_grooves(&package).is_err());
+        fs::remove_file(&file).unwrap();
+        assert!(check_grooves(&package).is_err());
+        assert!(check_grooves(&package.join("Contents/MacOS")).is_err());
+        let _ = fs::remove_dir_all(&package);
     }
 
     fn table() -> Value {

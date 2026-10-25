@@ -131,11 +131,14 @@ icons = [
     "packaging/icons/icon.ico",
     "packaging/icons/*.png",
 ]
-# The GPL travels with the binaries, and the OFL with the bundled typeface.
+# The GPL travels with the binaries, and the OFL with the bundled typeface; the
+# bundled grooves go in a Grooves folder of the resources (the grooves spec
+# R37), which `cargo xtask grooves` writes and the package check reads.
 resources = [
     "../../LICENSE",
     "../../README.md",
     "../ui/fonts/inter/Inter-OFL.txt",
+    { src = "resources/Grooves", target = "Grooves" },
 ]
 
 [package.metadata.packager.macos]

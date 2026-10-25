@@ -1,7 +1,9 @@
 //! Grooves in the app shell (WP-6.19): the commands that load, save,
 //! extract, commit and make clips of grooves, the pool query, and a new
 //! MIDI clip taking the auto-load groove. Spec: grooves R3, R5, R16 to R20
-//! and R23.
+//! and R23. WP-6.20: the pool's view, hot-swapping, the browser's Grooves
+//! label, the bundled grooves and the factory default set (R24, R31 to R33,
+//! R36 to R38).
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -13,10 +15,11 @@ use bl_model::{
     ClipData, ClipId, Device, DeviceKind, Document, GrooveId, MidiData, Note, TrackId, TrackKind,
     clip_seed,
 };
-use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
+use bl_shell::browser_commands::{self as browser_ids, BrowserState, ItemKind};
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
+use bl_shell::{Area, Effect, Shell};
 use serde_json::{Value, json};
 
 const BAR: i64 = TICKS_PER_QUARTER * 4;
@@ -41,10 +44,28 @@ impl Drop for Scratch {
     }
 }
 
+/// Takes the factory default set's groove out of the shell's set, and puts the
+/// pool's other settings back as a set made before grooves has them: an empty
+/// pool, Auto Load Groove off, a Global Amount of 100 %. These tests build the
+/// pool they use.
+fn plain_pool(shell: &mut Shell) {
+    let first = shell.editor().document().settings().grooves.pool[0].id;
+    shell
+        .run("groove.set_auto_load", json!({ "enabled": false }))
+        .unwrap();
+    shell
+        .run("groove.delete", json!({ "groove": first }))
+        .unwrap();
+    shell
+        .run("groove.set_global_amount", json!({ "amount": 100.0 }))
+        .unwrap();
+}
+
 /// A shell with a MIDI track holding the test instrument and a clip of
 /// `notes`, looping over the bar when `looped`.
 fn midi_shell(notes: &[Note], looped: bool) -> (Shell, TrackId, ClipId) {
     let mut shell = Shell::headless();
+    plain_pool(&mut shell);
     let track: TrackId = shell.new_id();
     shell
         .run(
@@ -131,7 +152,12 @@ fn every_groove_command_runs_by_id_and_the_pool_reads_back() {
     shell.set_user_library(Some(scratch.0.join("Library")));
     assert_eq!(
         pool(&mut shell),
-        json!({ "grooves": [], "global_amount": 100.0, "auto_load": false })
+        json!({
+            "view": { "shown": false },
+            "grooves": [],
+            "global_amount": 100.0,
+            "auto_load": false
+        })
     );
     let swing = add_swing(&mut shell);
     shell
@@ -682,6 +708,7 @@ fn drum_clip(scratch: &Scratch) -> (Shell, ClipId) {
         AudioHost::null(Default::default()),
         Box::new(ProjectFiles::new()),
     );
+    plain_pool(&mut shell);
     let track = shell
         .editor()
         .document()
@@ -906,4 +933,569 @@ fn committing_an_audio_clip_writes_warp_markers_and_a_volume_envelope() {
         .run("groove.commit", json!({ "clips": [clip_id] }))
         .unwrap();
     assert_eq!(clip(&shell, clip_id).groove, None);
+}
+
+// WP-6.20.
+
+/// Gives `shell` a User Library made in `scratch`.
+fn make_library(shell: &mut Shell, scratch: &Scratch) -> PathBuf {
+    let library = scratch.0.join("User Library");
+    bl_shell::browser::places::create_user_library(&library).unwrap();
+    shell.set_user_library(Some(library.clone()));
+    library
+}
+
+fn browser(shell: &mut Shell) -> BrowserState {
+    serde_json::from_value(
+        shell
+            .run(browser_ids::STATE, json!({ "limit": 1000 }))
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+fn text(path: &std::path::Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+// Spec: grooves R24. The pool shows and hides as view state (no undo step),
+// showing it shows the browser, and Navigate's focus shows it and gives it
+// the keyboard; the three commands are `read` class and have their keys.
+#[test]
+fn the_pool_shows_hides_and_takes_the_focus_as_view_state() {
+    let mut shell = Shell::headless();
+    let before = steps(&shell);
+    assert_eq!(pool(&mut shell)["view"], json!({ "shown": false }));
+    assert_eq!(
+        shell.run("view.toggle_groove_pool", json!({})).unwrap(),
+        json!({ "shown": true })
+    );
+    assert_eq!(shell.switch_state("view.toggle_groove_pool"), Some(true));
+    assert_eq!(pool(&mut shell)["view"], json!({ "shown": true }));
+    shell
+        .run("view.toggle_groove_pool", json!({ "shown": false }))
+        .unwrap();
+    assert_eq!(shell.switch_state("view.toggle_groove_pool"), Some(false));
+    // Focusing it shows it, and the browser as well.
+    shell.run("view.toggle_browser", json!({})).unwrap();
+    assert!(!shell.browser_visible());
+    shell.take_effects();
+    assert_eq!(
+        shell.run("focus.groove_pool", json!({})).unwrap(),
+        json!({ "shown": true })
+    );
+    assert!(shell.browser_visible());
+    assert_eq!(shell.focused_area(), Area::Browser);
+    assert!(
+        shell
+            .take_effects()
+            .contains(&Effect::FocusArea(Area::Browser))
+    );
+    assert_eq!(
+        shell.browser_view().focus(),
+        bl_shell::browser::Part::GroovePool
+    );
+    // Only the global keys apply while the pool has the keyboard.
+    assert_eq!(
+        shell.active_contexts(),
+        [bl_commands::Context::Global],
+        "the browser's keys give way"
+    );
+    assert_eq!(steps(&shell), before, "view state is no undo step");
+    let class = |id: &str| shell.registry().get(id).unwrap().permission.unwrap();
+    for id in [
+        "view.toggle_groove_pool",
+        "focus.groove_pool",
+        "groove.hot_swap",
+    ] {
+        assert_eq!(class(id), bl_commands::Permission::Read, "{id}");
+    }
+    let bound = |id: &str| -> Vec<String> {
+        shell
+            .registry()
+            .get(id)
+            .unwrap()
+            .bindings
+            .iter()
+            .map(|b| b.shortcut.to_string())
+            .collect()
+    };
+    assert_eq!(bound("view.toggle_groove_pool"), ["S-VIEW-017"]);
+    assert_eq!(bound("focus.groove_pool"), ["S-FOCUS-007"]);
+}
+
+// Spec: grooves R34. Extract Groove(s) is disabled while no clip is selected.
+#[test]
+fn extract_groove_is_disabled_without_a_selected_clip() {
+    let (mut shell, _track, clip_id) = midi_shell(&sixteenths(100), true);
+    assert!(!shell.can_invoke("groove.extract", &json!({})));
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip_id] }))
+        .unwrap();
+    assert!(shell.can_invoke("groove.extract", &json!({})));
+    let extracted = shell.run("groove.extract", json!({})).unwrap();
+    assert_eq!(extracted["grooves"].as_array().unwrap().len(), 1);
+}
+
+/// Saves `groove` into the User Library's Grooves folder, and returns the
+/// file.
+fn saved(shell: &mut Shell, library: &std::path::Path, groove: GrooveId, name: &str) -> PathBuf {
+    shell
+        .run("groove.rename", json!({ "groove": groove, "name": name }))
+        .unwrap();
+    shell
+        .run("groove.save", json!({ "groove": groove }))
+        .unwrap();
+    let file = library.join("Grooves").join(format!("{name}.blgroove"));
+    assert!(file.is_file());
+    file
+}
+
+// Spec: grooves R32, R33. A groove hot-swapped is replaced by the one the
+// browser loads: every clip that used it, and the auto-load setting, take
+// the new one, in one undo step, and the hot-swap stays on, aimed at the new
+// groove, until it is ended.
+#[test]
+fn loading_while_a_groove_is_hot_swapped_replaces_it_for_every_clip_in_one_step() {
+    let scratch = Scratch::new("hot-swap");
+    let (mut shell, _track, first) = midi_shell(&sixteenths(100), true);
+    let library = make_library(&mut shell, &scratch);
+    let old = add_swing(&mut shell);
+    let shuffle = {
+        // A second groove, saved to a file the browser will list.
+        let id = add_swing(&mut shell);
+        saved(&mut shell, &library, id, "Shuffle")
+    };
+    shell
+        .run(
+            "clip.set_groove",
+            json!({ "clips": [first], "groove": old }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "groove.set_auto_load",
+            json!({ "enabled": true, "groove": old }),
+        )
+        .unwrap();
+    let before = steps(&shell);
+    // The pool row's button arms it, and the browser shows the Grooves label.
+    let view = shell
+        .run("groove.hot_swap", json!({ "groove": old }))
+        .unwrap();
+    assert_eq!(view["hot_swap"], json!({ "groove": old }));
+    assert_eq!(
+        shell.browser_view().label(),
+        &bl_shell::browser_commands::Label::Grooves
+    );
+    let listed = browser(&mut shell);
+    assert!(
+        listed
+            .rows
+            .iter()
+            .any(|row| row.name == "Shuffle.blgroove" && row.kind == ItemKind::Groove),
+        "{:?}",
+        listed.rows.iter().map(|r| &r.name).collect::<Vec<_>>()
+    );
+    assert_eq!(steps(&shell), before, "arming is view state");
+    // Enter on the file in the browser loads it in the old groove's place.
+    shell.set_focused_area(Area::Browser);
+    shell
+        .run(browser_ids::SELECT, json!({ "paths": [text(&shuffle)] }))
+        .unwrap();
+    assert!(shell.can_invoke(browser_ids::LOAD_SELECTED, &json!({})));
+    shell.run(browser_ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_eq!(steps(&shell), before + 1, "one undo step");
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Hot-Swap Groove")
+    );
+    let state = pool(&mut shell);
+    let entries = state["grooves"].as_array().unwrap();
+    let new: GrooveId = serde_json::from_value(entries.last().unwrap()["id"].clone()).unwrap();
+    assert_ne!(new, old);
+    assert!(
+        entries.iter().all(|g| g["id"] != json!(old)),
+        "the old groove left the pool"
+    );
+    assert_eq!(clip(&shell, first).groove, Some(new));
+    assert_eq!(state["auto_load_groove"], json!(new));
+    assert_eq!(state["view"]["hot_swap"], json!({ "groove": new }));
+    // Undo puts everything back in one step.
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(clip(&shell, first).groove, Some(old));
+    assert_eq!(pool(&mut shell)["auto_load_groove"], json!(old));
+    assert_eq!(
+        pool(&mut shell)["view"].get("hot_swap"),
+        None,
+        "a hot-swap aimed at a groove that left the pool is over"
+    );
+    shell
+        .run("groove.hot_swap", json!({ "groove": old }))
+        .unwrap();
+    // The button again ends it, and loading then only adds.
+    shell
+        .run("groove.hot_swap", json!({ "groove": old }))
+        .unwrap();
+    assert_eq!(pool(&mut shell)["view"].get("hot_swap"), None);
+    let count = pool(&mut shell)["grooves"].as_array().unwrap().len();
+    shell.run(browser_ids::LOAD_SELECTED, json!({})).unwrap();
+    assert_eq!(
+        pool(&mut shell)["grooves"].as_array().unwrap().len(),
+        count + 1
+    );
+    assert_eq!(clip(&shell, first).groove, Some(old));
+}
+
+// Spec: grooves R31, R32. The footer's button aims the hot-swap at the
+// auto-load groove: loading replaces it, the clips that used it follow, and
+// with none the loaded groove becomes it.
+#[test]
+fn the_auto_load_groove_is_hot_swapped_and_one_loaded_into_none_becomes_it() {
+    let scratch = Scratch::new("hot-swap-auto");
+    let (mut shell, _, _) = midi_shell(&sixteenths(100), true);
+    let library = make_library(&mut shell, &scratch);
+    let file = {
+        let id = add_swing(&mut shell);
+        saved(&mut shell, &library, id, "Shuffle")
+    };
+    let added = pool(&mut shell)["grooves"][0]["id"].clone();
+    shell
+        .run("groove.delete", json!({ "groove": added }))
+        .unwrap();
+    assert_eq!(pool(&mut shell)["grooves"], json!([]));
+    let view = shell
+        .run("groove.hot_swap", json!({ "auto_load": true }))
+        .unwrap();
+    assert_eq!(view["hot_swap"], json!("auto_load"));
+    shell
+        .run(browser_ids::SELECT, json!({ "paths": [text(&file)] }))
+        .unwrap();
+    shell.run(browser_ids::LOAD_SELECTED, json!({})).unwrap();
+    let state = pool(&mut shell);
+    let loaded = state["grooves"][0]["id"].clone();
+    assert_eq!(state["auto_load_groove"], loaded, "the new one is it");
+    // Again: it replaces the auto-load groove.
+    shell.run(browser_ids::LOAD_SELECTED, json!({})).unwrap();
+    let state = pool(&mut shell);
+    assert_eq!(state["grooves"].as_array().unwrap().len(), 1);
+    assert_ne!(state["grooves"][0]["id"], loaded);
+    assert_eq!(state["auto_load_groove"], state["grooves"][0]["id"]);
+    assert_eq!(state["view"]["hot_swap"], json!("auto_load"));
+    // Esc, the bar's close button and the button again end it.
+    shell
+        .run("groove.hot_swap", json!({ "on": false }))
+        .unwrap();
+    assert_eq!(pool(&mut shell)["view"].get("hot_swap"), None);
+    // A groove that left the pool, by deleting it, ends a hot-swap aimed at it.
+    let id: GrooveId =
+        serde_json::from_value(pool(&mut shell)["grooves"][0]["id"].clone()).unwrap();
+    shell
+        .run("groove.hot_swap", json!({ "groove": id }))
+        .unwrap();
+    shell.run("groove.delete", json!({ "groove": id })).unwrap();
+    assert_eq!(pool(&mut shell)["view"].get("hot_swap"), None);
+    let wrong = shell.run("groove.hot_swap", json!({ "groove": id }));
+    assert!(wrong.is_err(), "a groove that isn't in the pool");
+    // A new set ends a hot-swap aimed at the old set's auto-load groove.
+    shell
+        .run("groove.hot_swap", json!({ "auto_load": true }))
+        .unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    assert_eq!(pool(&mut shell)["view"].get("hot_swap"), None);
+}
+
+// Spec: grooves R33. The Grooves label lists Beatlayer's bundled grooves and
+// the User Library's Grooves folder by name; search filters them by every
+// word typed; Enter loads a groove into the pool without applying it.
+#[test]
+fn the_grooves_label_lists_the_bundled_grooves_and_the_users_and_enter_loads_one() {
+    let scratch = Scratch::new("label");
+    let (mut shell, _, clip_id) = midi_shell(&sixteenths(100), true);
+    let library = make_library(&mut shell, &scratch);
+    let id = add_swing(&mut shell);
+    let mine = saved(&mut shell, &library, id, "My Shuffle");
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "grooves" }))
+        .unwrap();
+    let listed = browser(&mut shell);
+    let names: Vec<&str> = listed.rows.iter().map(|row| row.name.as_str()).collect();
+    for name in [
+        "Swing 8ths 55.blgroove",
+        "Swing 16ths 75.blgroove",
+        "Straight 8ths.blgroove",
+        "Straight 16ths.blgroove",
+        "My Shuffle.blgroove",
+    ] {
+        assert!(names.contains(&name), "{name} in {names:?}");
+    }
+    assert_eq!(names.len(), 13, "twelve bundled and one of the person's");
+    assert!(listed.rows.iter().all(|row| row.kind == ItemKind::Groove));
+    // The label's note is gone, and search filters by every word typed.
+    let found: BrowserState = serde_json::from_value(
+        shell
+            .run(browser_ids::SEARCH, json!({ "query": "16ths swing 60" }))
+            .unwrap(),
+    )
+    .unwrap();
+    let names: Vec<&str> = found.rows.iter().map(|row| row.name.as_str()).collect();
+    assert_eq!(names, ["Swing 16ths 60.blgroove"]);
+    shell
+        .run(browser_ids::SEARCH, json!({ "query": "shuffle" }))
+        .unwrap();
+    // Enter on the file loads it into the pool, applying it to nothing.
+    shell.set_focused_area(Area::Browser);
+    shell
+        .run(browser_ids::SELECT, json!({ "paths": [text(&mine)] }))
+        .unwrap();
+    let before = pool(&mut shell)["grooves"].as_array().unwrap().len();
+    shell.run(browser_ids::LOAD_SELECTED, json!({})).unwrap();
+    let state = pool(&mut shell);
+    assert_eq!(state["grooves"].as_array().unwrap().len(), before + 1);
+    assert_eq!(state["grooves"][before]["name"], json!("My Shuffle"));
+    assert_eq!(state["grooves"][before]["active"], json!(false));
+    assert_eq!(clip(&shell, clip_id).groove, None);
+    // A groove file shows in the places as every file does.
+    shell
+        .run(browser_ids::OPEN_PLACE, json!({ "label": "user_library" }))
+        .unwrap();
+    shell
+        .run(
+            browser_ids::OPEN_FOLDER,
+            json!({ "path": text(&library.join("Grooves")), "open": true }),
+        )
+        .unwrap();
+    let listed = browser(&mut shell);
+    assert!(
+        listed
+            .rows
+            .iter()
+            .any(|row| row.name == "My Shuffle.blgroove" && row.kind == ItemKind::Groove)
+    );
+}
+
+// Spec: grooves R36, R37. The grooves the app carries are the twelve the spec
+// lists, found where the Grooves label looks, and every file loads as the
+// groove the script makes.
+#[test]
+fn the_bundled_grooves_ship_as_files_that_load() {
+    use bl_project::groove_file::{GROOVE_EXTENSION, GrooveFile, bundled};
+    let folder = bl_shell::resources::grooves().expect("the app has its grooves");
+    let mut found: Vec<GrooveFile> = Vec::new();
+    for entry in std::fs::read_dir(&folder).unwrap() {
+        let path = entry.unwrap().path();
+        assert_eq!(
+            path.extension().and_then(|e| e.to_str()),
+            Some(GROOVE_EXTENSION)
+        );
+        found.push(GrooveFile::load(&path).unwrap());
+    }
+    let mut made = bundled();
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    made.sort_by(|a, b| a.name.cmp(&b.name));
+    assert_eq!(found, made);
+    assert_eq!(found.len(), 12);
+}
+
+// Spec: grooves R38. The factory default set has Swing 16ths 60 in its pool
+// as the auto-load groove, Auto Load Groove on and the Global Amount at 0 %,
+// so a new MIDI clip takes it and plays straight.
+#[test]
+fn the_factory_default_set_carries_swing_16ths_60_as_its_auto_load_groove() {
+    let editor = bl_shell::files::factory_default_set();
+    let pool = &editor.document().settings().grooves;
+    assert_eq!(pool.pool.len(), 1);
+    assert_eq!(pool.pool[0].name, "Swing 16ths 60");
+    assert_eq!(pool.auto_load_groove, Some(pool.pool[0].id));
+    assert!(pool.auto_load);
+    assert_eq!(pool.global_amount, 0.0);
+    assert!(!editor.can_undo(), "no history");
+    // A new MIDI clip carries it.
+    let mut shell = Shell::headless();
+    shell.run("set.new", json!({})).unwrap();
+    let track = shell.editor().document().top_level().next().unwrap();
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let made = shell.editor().document().slot(track, scene).unwrap();
+    assert_eq!(made.groove, Some(pool.pool[0].id));
+}
+
+// Spec: grooves R30. The Control Bar's Global Amount field shows while the
+// pool holds a groove and hides while it is empty; it steps, resets and takes
+// a typed value as the other fields do, each change `groove.set_global_amount`,
+// a drag one undo step, brought within 0 to 130 %.
+#[test]
+fn the_global_amount_field_shows_with_a_groove_and_edits_the_amount() {
+    use bl_shell::transport::{self, Field, Group};
+    let (mut shell, _, _) = midi_shell(&sixteenths(100), true);
+    let field = Field::new(Group::GlobalAmount, 0);
+    assert!(!shell.global_amount_shown(), "an empty pool hides it");
+    let swing = add_swing(&mut shell);
+    assert!(shell.global_amount_shown());
+    assert_eq!(transport::text(&shell, field), "100 %");
+    let run = |shell: &mut Shell, invocation: Option<bl_shell::Invocation>| {
+        let invocation = invocation.expect("a change");
+        assert_eq!(invocation.id, "groove.set_global_amount");
+        shell.run(&invocation.id, invocation.args).unwrap();
+    };
+    let before = steps(&shell);
+    let change = transport::step(&shell, field, 5, false);
+    run(&mut shell, change);
+    assert_eq!(transport::text(&shell, field), "105 %");
+    let change = transport::step(&shell, field, -3, true);
+    run(&mut shell, change);
+    assert_eq!(transport::text(&shell, field), "104.7 %");
+    assert_eq!(steps(&shell), before + 2, "each change is one undo step");
+    // Brought within 0 to 130 %.
+    let change = transport::step(&shell, field, 99, false);
+    run(&mut shell, change);
+    assert_eq!(transport::number(&shell, field), 130.0);
+    assert_eq!(transport::step(&shell, field, 1, false), None, "at the top");
+    // Typed, and Delete returns it to 100 %.
+    let change = transport::typed(
+        &shell,
+        Group::GlobalAmount,
+        &[Some("62.5".into()), None, None],
+    );
+    run(&mut shell, change);
+    assert_eq!(transport::text(&shell, field), "62.5 %");
+    let change = transport::typed(
+        &shell,
+        Group::GlobalAmount,
+        &[Some("500".into()), None, None],
+    );
+    run(&mut shell, change);
+    assert_eq!(transport::number(&shell, field), 130.0);
+    let change = transport::reset(&shell, field);
+    run(&mut shell, change);
+    assert_eq!(transport::text(&shell, field), "100 %");
+    assert_eq!(transport::reset(&shell, field), None, "already there");
+    // A drag is one undo step, however far it goes.
+    let before = steps(&shell);
+    shell.begin_gesture(Group::GlobalAmount.gesture_label().unwrap());
+    for _ in 0..5 {
+        let change = transport::step(&shell, field, -2, false);
+        run(&mut shell, change);
+    }
+    shell.end_gesture();
+    assert_eq!(steps(&shell), before + 1);
+    assert_eq!(transport::text(&shell, field), "90 %");
+    assert_eq!(
+        shell.editor().undo_history().next(),
+        Some("Change Global Amount")
+    );
+    // Taking the last groove out hides it again.
+    shell
+        .run("groove.delete", json!({ "groove": swing }))
+        .unwrap();
+    assert!(!shell.global_amount_shown());
+}
+
+// Spec: grooves R3, R22. A groove ID names a groove of the set's pool: tracks
+// copied and pasted in the set keep their clips' grooves, a groove deleted
+// since the copy is none, and tracks saved as a set, whose pool is empty,
+// leave them behind.
+#[test]
+fn a_copied_track_keeps_its_clips_groove_only_while_the_pool_holds_it() {
+    let scratch = Scratch::new("copy-track");
+    let (mut shell, track, clip_id) = midi_shell(&sixteenths(100), true);
+    let swing = add_swing(&mut shell);
+    shell
+        .run(
+            "clip.set_groove",
+            json!({ "clips": [clip_id], "groove": swing }),
+        )
+        .unwrap();
+    let grooves_of = |shell: &Shell, of: TrackId| -> Vec<Option<GrooveId>> {
+        shell
+            .editor()
+            .document()
+            .track(of)
+            .unwrap()
+            .clips()
+            .map(|clip| clip.groove)
+            .collect()
+    };
+    let others = |shell: &Shell| -> Vec<TrackId> {
+        let doc = shell.editor().document();
+        doc.top_level()
+            .filter(|t| {
+                *t != track
+                    && doc.track(*t).unwrap().kind() == TrackKind::Midi
+                    && doc.track(*t).unwrap().clips().count() > 0
+            })
+            .collect()
+    };
+
+    // Saved as a set: the export works, and the new set's clip has no groove.
+    let folder = scratch.0.join("Songs");
+    std::fs::create_dir_all(&folder).unwrap();
+    let saved = shell
+        .run(
+            "set.export_tracks",
+            json!({ "tracks": [track], "folder": folder, "name": "Keys" }),
+        )
+        .unwrap();
+    let file = saved["path"].as_str().unwrap().to_owned();
+    let (set, project) = bl_project::SetFile::open(std::path::Path::new(&file)).unwrap();
+    let _ = set;
+    let exported = project.document;
+    assert!(exported.settings().grooves.pool.is_empty());
+    assert!(
+        exported
+            .tracks()
+            .flat_map(|t| t.clips().map(|c| c.groove).collect::<Vec<_>>())
+            .all(|g| g.is_none())
+    );
+
+    // Copy and paste in the set keep it.
+    shell
+        .run("track.copy", json!({ "tracks": [track] }))
+        .unwrap();
+    shell.run("track.paste", json!({})).unwrap();
+    let pasted = others(&shell);
+    assert_eq!(pasted.len(), 1);
+    assert_eq!(grooves_of(&shell, pasted[0]), [Some(swing)]);
+
+    // A groove deleted before the paste is none.
+    shell
+        .run("track.copy", json!({ "tracks": [track] }))
+        .unwrap();
+    shell
+        .run("groove.delete", json!({ "groove": swing }))
+        .unwrap();
+    shell.run("track.paste", json!({})).unwrap();
+    for pasted in others(&shell) {
+        assert_eq!(grooves_of(&shell, pasted), [None]);
+    }
+}
+
+// Spec: grooves R34 (M-EDIT-037). Edit > Extract Groove(s) runs
+// `groove.extract` for the selected clips, and is disabled while none is.
+#[test]
+fn the_edit_menus_extract_groove_item_follows_the_selection() {
+    use bl_shell::menus::{Action, MenuPlatform, menu_bar};
+    let menus = menu_bar(MenuPlatform::Mac);
+    let item = menus
+        .iter()
+        .flat_map(bl_shell::menus::Menu::walk)
+        .find(|item| item.row == "M-EDIT-037")
+        .expect("the Edit menu's item");
+    assert_eq!(item.label, "Extract Groove(s)");
+    assert!(matches!(item.action, Action::Command("groove.extract")));
+    let (mut shell, _track, clip_id) = midi_shell(&sixteenths(100), true);
+    assert!(!shell.can_invoke("groove.extract", &json!({})));
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip_id] }))
+        .unwrap();
+    assert!(shell.can_invoke("groove.extract", &json!({})));
+    let before = steps(&shell);
+    shell.invoke("groove.extract", json!({})).unwrap();
+    assert_eq!(steps(&shell), before + 1);
+    assert_eq!(pool(&mut shell)["grooves"].as_array().unwrap().len(), 1);
 }

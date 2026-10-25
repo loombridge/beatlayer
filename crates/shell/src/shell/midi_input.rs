@@ -311,14 +311,25 @@ impl Shell {
                 let args = Self::args::<midi_ids::MidiImportArgs>(id, args)?;
                 let at = args.at.unwrap_or_else(|| self.arrangement.insert_marker());
                 let path = PathBuf::from(&args.path);
-                let result = crate::midi_files::import(
-                    &mut self.editor,
-                    &path,
-                    args.track,
-                    at,
-                    args.import_tempo,
-                )
-                .map_err(|error| midi_file_error(id, error))?;
+                let look = &self.prefs.look;
+                let result = self
+                    .editor
+                    .transact(crate::midi_files::UNDO_LABEL, |editor| {
+                        let result = crate::midi_files::import(
+                            editor,
+                            &path,
+                            args.track,
+                            at,
+                            args.import_tempo,
+                        )?;
+                        let clips: Vec<_> = result.clips.iter().map(|clip| clip.clip).collect();
+                        crate::colours::colour_new(editor, look, &result.created_tracks, &clips)
+                            .map_err(|error| {
+                                crate::midi_files::MidiFileError::Failed(error.to_string())
+                            })?;
+                        Ok(result)
+                    })
+                    .map_err(|error| midi_file_error(id, error))?;
                 self.dirty = true;
                 self.document_changed();
                 self.touch();

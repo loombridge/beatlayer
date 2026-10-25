@@ -13,6 +13,7 @@ status = "bound"
 commands = [
   { id = "arrangement.cut", contexts = ["arrangement"] },
   { id = "chain.cut", contexts = ["rack-chains"] },
+  { id = "clip.cut_envelope", contexts = ["envelope"], declines = true },
   { id = "device.cut", contexts = ["device-view"] },
   { id = "note.cut", contexts = ["note-editor", "note-selection"] },
   { id = "session.cut", contexts = ["session"] },
@@ -32,6 +33,7 @@ status = "bound"
 commands = [
   { id = "arrangement.copy", contexts = ["arrangement"] },
   { id = "chain.copy", contexts = ["rack-chains"] },
+  { id = "clip.copy_envelope", contexts = ["envelope"], declines = true },
   { id = "device.copy", contexts = ["device-view"] },
   { id = "note.copy", contexts = ["note-editor", "note-selection"] },
   { id = "session.copy", contexts = ["session"] },
@@ -51,6 +53,7 @@ status = "bound"
 commands = [
   { id = "arrangement.paste", contexts = ["arrangement"] },
   { id = "chain.paste", contexts = ["rack-chains"] },
+  { id = "clip.paste_envelope", contexts = ["envelope"], declines = true },
   { id = "device.paste", contexts = ["device-view"] },
   { id = "note.paste", contexts = ["note-editor", "note-selection"] },
   { id = "session.paste", contexts = ["session"] },
@@ -70,6 +73,7 @@ status = "bound"
 commands = [
   { id = "arrangement.duplicate", contexts = ["arrangement", "take-lanes"] },
   { id = "chain.duplicate", contexts = ["rack-chains"] },
+  { id = "clip.duplicate_envelope", contexts = ["envelope"], declines = true },
   { id = "device.duplicate", contexts = ["device-view"] },
   { id = "note.duplicate", contexts = ["note-editor", "note-selection"] },
   { id = "session.duplicate", contexts = ["session"] },

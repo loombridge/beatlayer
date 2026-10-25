@@ -1,6 +1,6 @@
 //! The Browser's view, index and commands.
 
-use super::{Area, Shell, ShellError};
+use super::{Area, Effect, Shell, ShellError};
 use crate::auto_warp;
 use crate::browser;
 use crate::browser::BrowserError;
@@ -57,6 +57,13 @@ impl Shell {
     pub(super) fn run_browser(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.analysis_cache();
         let search = self.browser_view.search_folders();
+        let set_bpm = self
+            .editor
+            .document()
+            .settings()
+            .tempo
+            .bpm_at(self.arrangement.transport().position)
+            .get();
         let context = browser::Context {
             insert_marker: self.arrangement.insert_marker(),
             selected_track: self.arrangement.selected_tracks().first().copied(),
@@ -70,6 +77,8 @@ impl Shell {
             },
             collect_files: self.prefs.collect_files_on_export,
             search: &search,
+            set_bpm,
+            look: &self.prefs.look,
         };
         let outcome = self
             .browser_view
@@ -113,6 +122,10 @@ impl Shell {
         }
         if outcome.show_browser {
             self.show_browser_in(self.acting_window());
+        }
+        if !outcome.file_manager.is_empty() {
+            self.effects
+                .push(Effect::ShowInFileManager(outcome.file_manager));
         }
         if let Some(message) = outcome.message {
             self.set_message(message, false);

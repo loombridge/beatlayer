@@ -341,11 +341,11 @@ fn in_focus_mode_a_clicked_bar_becomes_active_and_hovering_reveals_a_clip() {
         let track = |clip| m.doc().clip_track(clip).unwrap();
         (
             bl_ui::theme::note_colour(
-                bl_ui::arrangement::scene::track_colour(theme, track(a)),
+                bl_ui::arrangement::scene::track_colour(theme, m.doc(), track(a)),
                 100,
             ),
             bl_ui::theme::note_colour(
-                bl_ui::arrangement::scene::track_colour(theme, track(b)),
+                bl_ui::arrangement::scene::track_colour(theme, m.doc(), track(b)),
                 100,
             ),
         )

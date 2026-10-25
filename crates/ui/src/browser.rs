@@ -32,13 +32,14 @@ use serde_json::{Value, json};
 
 mod columns;
 mod filter_view;
+mod item_menu;
 mod labels;
 
 pub use columns::{column_id, content_options_id};
 pub use filter_view::{
     add_label_id, clear_filters_id, filter_group_id, filter_tag_id, filter_view_id, results_bar_id,
 };
-pub use labels::{label_check_id, label_rename_id, labels_edit_id};
+pub use labels::{collections_edit_id, label_check_id, label_rename_id, labels_edit_id};
 
 use crate::layout::{ArrangementLayout, BROWSER_ROW, BrowserLayout, BrowserParts};
 use crate::main_window::UiEvent;
@@ -509,26 +510,38 @@ pub struct BrowserStats {
 #[derive(Clone, Debug, PartialEq)]
 enum SideRow {
     Heading(&'static str),
+    /// The Collections heading, which has Edit and Done at its right
+    /// (spec: browser-tags R39).
+    CollectionsHeading,
     /// The Library heading, which has Edit and Done at its right.
     LibraryHeading,
-    /// A collection label (M6): its name and colour's palette index, or
-    /// `None` for Favorites.
-    Collection(&'static str, Option<usize>),
     Label(LabelInfo),
     AddFolder,
 }
 
-/// The collection labels, in Live's order (L-BRW-003), with Beatlayer's own
-/// colours from the track palette.
-const COLLECTIONS: [(&str, Option<usize>); 7] = [
-    ("Favorites", None),
-    ("Orange", Some(1)),
-    ("Yellow", Some(2)),
-    ("Green", Some(4)),
-    ("Blue", Some(7)),
-    ("Purple", Some(9)),
-    ("Gray", Some(12)),
-];
+/// The seven collections' colours, in the sidebar's order (spec:
+/// browser-tags R34): Beatlayer's own, from the track palette, and the
+/// accent for Favorites.
+const COLLECTION_COLOURS: [Option<usize>; 7] =
+    [None, Some(1), Some(2), Some(4), Some(7), Some(9), Some(12)];
+
+/// The most squares a row shows, one for each collection the item is in
+/// (spec: browser-tags R37).
+const MAX_SQUARES: usize = 3;
+/// A collection square's side and the gap between two, in points.
+const SQUARE: f32 = 7.0;
+const SQUARE_GAP: f32 = 2.0;
+
+/// The colour of collection `number` (1 is Favorites, 7 Gray).
+#[must_use]
+pub fn collection_colour(theme: &Theme, number: u8) -> Color32 {
+    let palette = &theme.colors.track_palette;
+    COLLECTION_COLOURS
+        .get(usize::from(number).wrapping_sub(1))
+        .copied()
+        .flatten()
+        .map_or(theme.colors.accent.0, |i| palette[i % palette.len()].0)
+}
 
 /// What a drag in the Tag Editor carries: a tag or a group, by its name
 /// (spec: browser-tags R12).
@@ -605,6 +618,9 @@ pub struct BrowserUi {
     /// Whether the Library section is in Edit mode (spec: browser-tags
     /// R26).
     editing_labels: bool,
+    /// Whether the Collections section is in Edit mode (spec: browser-tags
+    /// R39).
+    editing_collections: bool,
     /// The text of the label name being edited, and the label it is for.
     label_text: String,
     label_text_for: Option<Label>,
@@ -2158,7 +2174,28 @@ impl BrowserUi {
                 |stem| stem.to_string_lossy().into_owned(),
             )
         };
-        let name_area = Rect::from_min_max(rect.min, pos2(self.name_right, rect.bottom()));
+        // Spec: browser-tags R37. A small square in the colour of each
+        // collection the item is in, three at most, in the collections'
+        // order, at the right end of the Name column.
+        let squares = &item.collections[..item.collections.len().min(MAX_SQUARES)];
+        let squares_width = if squares.is_empty() {
+            0.0
+        } else {
+            squares.len() as f32 * (SQUARE + SQUARE_GAP) + 4.0
+        };
+        let name_right = self.name_right - squares_width;
+        for (n, number) in squares.iter().enumerate() {
+            let left = name_right + 4.0 + n as f32 * (SQUARE + SQUARE_GAP);
+            painter.rect_filled(
+                Rect::from_min_size(
+                    pos2(left, rect.center().y - SQUARE / 2.0),
+                    vec2(SQUARE, SQUARE),
+                ),
+                1.0,
+                collection_colour(theme, *number),
+            );
+        }
+        let name_area = Rect::from_min_max(rect.min, pos2(name_right, rect.bottom()));
         let name = if renaming {
             self.rename_field(ui, theme, rect, name_left, item, events)
         } else {
@@ -2175,11 +2212,11 @@ impl BrowserUi {
             // the name leaves, showing the folder's end when it's long.
             let room = Rect::from_min_max(
                 pos2(name.right() + 8.0, rect.top()),
-                pos2(self.name_right, rect.bottom()),
+                pos2(name_right, rect.bottom()),
             );
             if room.width() > 12.0 {
                 painter.with_clip_rect(room).text(
-                    pos2(self.name_right - 4.0, rect.center().y),
+                    pos2(name_right - 4.0, rect.center().y),
                     Align2::RIGHT_CENTER,
                     folder,
                     theme.small_font(),
@@ -2211,27 +2248,25 @@ impl BrowserUi {
             drop_chains(ui, theme, rect, &item.path, events);
             drop_tracks(ui, shell, theme, rect, &item.path, events);
             note_clip_target(ui, theme, rect, ClipDropTarget::Folder(item.path.clone()));
-            // Spec: file-management R10, C-BROWSER-014. A project folder's
-            // context menu has Manage Project, which shows the File
-            // Manager at that project.
-            if shell.is_project_folder(Path::new(&item.path)) {
-                response.context_menu(|ui| {
-                    let button = ui.button("Manage Project");
-                    crate::menus::register_item(ui.ctx(), &button);
-                    if button.clicked() {
-                        invoke(
-                            events,
-                            "view.toggle_file_manager",
-                            json!({
-                                "view": "project",
-                                "project": item.path,
-                                "open": true,
-                            }),
-                        );
-                        ui.close();
-                    }
-                });
+        }
+        // Spec: browser R25, C-BROWSER-001 to 011. The item's context menu,
+        // from a right-click or the keyboard's context-menu key.
+        if item_menu::has_menu(item.kind) {
+            if response.secondary_clicked() && !selected {
+                invoke(events, ids::SELECT, json!({ "paths": [item.path] }));
             }
+            let menu = |ui: &mut Ui, events: &mut Vec<UiEvent>| {
+                item_menu::show(ui, shell, item, events);
+            };
+            response.context_menu(|ui| menu(ui, events));
+            if selected
+                && view.cursor() == Some(index)
+                && ui.memory(|m| m.has_focus(list_id()))
+                && crate::menus::context_menu_keys(ui)
+            {
+                crate::menus::open_keyboard_context_menu(ui.ctx(), id, rect.left_bottom());
+            }
+            crate::menus::keyboard_context_menu(&response, |ui| menu(ui, events));
         }
         if response.double_clicked() {
             match item.kind {
@@ -2451,8 +2486,28 @@ impl BrowserUi {
             node.set_label(item.name.clone());
             node.set_value(kind.to_owned());
             node.set_selected(selected);
-            if let Some(folder) = &item.folder {
-                node.set_description(format!("in {folder}"));
+            let mut description = item
+                .folder
+                .as_ref()
+                .map_or_else(String::new, |folder| format!("in {folder}"));
+            // Spec: browser-tags R37. The squares' colours, in words, and
+            // all of them: the row draws three at most.
+            if !item.collections.is_empty() {
+                let names: Vec<String> = view
+                    .labels()
+                    .into_iter()
+                    .filter_map(|l| match l.label {
+                        Label::Collection(n) if item.collections.contains(&n) => Some(l.name),
+                        _ => None,
+                    })
+                    .collect();
+                if !description.is_empty() {
+                    description.push_str("; ");
+                }
+                description.push_str(&format!("in collections {}", names.join(", ")));
+            }
+            if !description.is_empty() {
+                node.set_description(description);
             }
         });
     }
@@ -2555,9 +2610,16 @@ impl BrowserUi {
             .and_then(|p| Path::new(p).file_name())
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // A file that doesn't preview says why in place of its name.
+        let note = preview
+            .note
+            .as_ref()
+            .filter(|_| preview.playing.is_none() && preview.loading.is_none());
+        let name = note.cloned().unwrap_or(name);
         if let Some((path, overview)) = view.preview_overview()
             && shown.as_deref() == Some(&*path.to_string_lossy())
             && !overview.is_empty()
+            && note.is_none()
         {
             let middle = wave.center().y;
             // Scaled to the file's peak, so a quiet file still shows its
@@ -2609,6 +2671,8 @@ impl BrowserUi {
                     "{name}, {:.1} of {:.1} seconds",
                     preview.position_seconds, preview.length_seconds
                 )
+            } else if note.is_some() {
+                name.clone()
             } else if name.is_empty() {
                 "nothing previewed".to_owned()
             } else {
@@ -2741,6 +2805,30 @@ impl BrowserUi {
                 self.list_keys(shell, up, down, left, right, shift, cmd, events);
                 if shift_enter && view.can_run(ids::PREVIEW, &json!({})) {
                     invoke(events, ids::PREVIEW, json!({}));
+                }
+                // S-BRW-008, S-BRW-009: 1 to 7 put the selected items in the
+                // collection of that number, or take them out; 0 takes them
+                // out of every one (spec: browser-tags R35).
+                for (key, modifiers) in &presses {
+                    if !modifiers.is_none() {
+                        continue;
+                    }
+                    let number = match key {
+                        Key::Num0 => 0,
+                        Key::Num1 => 1,
+                        Key::Num2 => 2,
+                        Key::Num3 => 3,
+                        Key::Num4 => 4,
+                        Key::Num5 => 5,
+                        Key::Num6 => 6,
+                        Key::Num7 => 7,
+                        _ => continue,
+                    };
+                    if number == 0 && view.can_run(ids::CLEAR_COLLECTIONS, &json!({})) {
+                        invoke(events, ids::CLEAR_COLLECTIONS, json!({}));
+                    } else if number > 0 && view.can_run(ids::SET_COLLECTION, &json!({})) {
+                        invoke(events, ids::SET_COLLECTION, json!({ "collection": number }));
+                    }
                 }
                 // Enter on a folder (no file to load) opens or closes it.
                 if enter

@@ -4532,7 +4532,7 @@ One of:
 
 ### `ChangeSet`
 
-What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.
+What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, whether a colour changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -4542,12 +4542,13 @@ What a command changed: whether the song settings (the tempo map, the time-signa
 | `scenes` | object of [`Change`](#change) by integer key | yes | Scenes that were added, removed, renamed, or moved. A scene whose clips changed only is listed under `clips`, not here. |
 | `clips` | object of [`Change`](#change) by integer key | yes | Clips that changed, including clips moved to another track or between the Arrangement and a Session slot. |
 | `devices` | object of [`Change`](#change) by integer key | yes | Devices whose settings changed, including devices moved to another track. |
+| `colours` | boolean | no | The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.",
+  "description": "What a command changed: whether the song settings (the tempo map, the time-signature map, the crossfader, the Arrangement loop, or Solo in Place) changed, whether the track list changed, whether a colour changed, and which tracks, scenes, clips, and devices were added, removed, or modified, keyed by ID. Every field is empty or false if nothing changed.",
   "properties": {
     "clips": {
       "additionalProperties": false,
@@ -4558,6 +4559,10 @@ What a command changed: whether the song settings (the tempo map, the time-signa
         }
       },
       "type": "object"
+    },
+    "colours": {
+      "description": "The colour of a track, a clip, or a scene changed. The engine never hears a colour, so nothing else is listed for it (the themes spec, R27), but the set did change.",
+      "type": "boolean"
     },
     "devices": {
       "additionalProperties": false,
@@ -4867,6 +4872,7 @@ A clip on a track's arrangement lane.
 | `length` | [`Ticks`](#ticks) | yes | How long the clip is. Always positive. |
 | `mute` | boolean | yes | Whether the clip is switched off, so it stays in place but doesn't play. |
 | `data` | [`ClipData`](#clipdata) | yes | What the clip plays. |
+| `colour` | integer or null | no | The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one. |
 | `envelopes` | array of [`ClipEnvelope`](#clipenvelope) | no | The clip's envelopes (WP-3.15): one per parameter of its track it modulates, in target order. Empty for a clip with none, which is what a set saved before this package holds. |
 | `groove` | [`GrooveId`](#grooveid) or null | no | The clip's groove (WP-6.19): one of the set's Groove Pool, or none. It changes when the clip's notes play, or where its audio plays, and nothing in the clip itself until it is committed. |
 | `launch` | [`ClipLaunch`](#cliplaunch) | no | The clip's launch settings (WP-3.4), which only a Session clip's launching reads. The defaults for a clip saved without them. |
@@ -4879,6 +4885,16 @@ A clip on a track's arrangement lane.
 {
   "description": "A clip on a track's arrangement lane.",
   "properties": {
+    "colour": {
+      "description": "The clip's colour, a swatch from 0 to 69 (the themes spec, R14). A clip handed to a command without one takes its track's colour as it goes in, and a set saved before colours gives each clip its track's on loading, so a clip in a document always has one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "data": {
       "$ref": "#/$defs/ClipData",
       "description": "What the clip plays."
@@ -4943,6 +4959,37 @@ A clip on a track's arrangement lane.
     "data"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ClipColour`
+
+What Clip Color gives a new clip (themes R23).
+
+One of:
+
+- `"track-color"`: The clip takes its track's colour, as it does in Live.
+- `"random"`: The clip takes swatch `h mod 70`, `h` being a hash of its ID.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Color gives a new clip (themes R23).",
+  "oneOf": [
+    {
+      "const": "track-color",
+      "description": "The clip takes its track's colour, as it does in Live.",
+      "type": "string"
+    },
+    {
+      "const": "random",
+      "description": "The clip takes swatch `h mod 70`, `h` being a hash of its ID.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -5184,6 +5231,53 @@ An envelope a clip carries for a parameter of its track: the parameter it modula
   "required": [
     "target",
     "envelope"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ClipEnvelopeResult`
+
+What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `changes` | [`ChangeSet`](#changeset) | yes | What the edit changed in the set. |
+| `time_selection` | [`TimeRange`](#timerange) or null | yes | The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an Envelope Editor editing command reports: what it changed in the set, and the selection afterwards.",
+  "properties": {
+    "changes": {
+      "$ref": "#/$defs/ChangeSet",
+      "description": "What the edit changed in the set."
+    },
+    "time_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the editor afterwards, in ticks from the beginning of the clip's contents, if any."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "changes",
+    "time_selection",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -5601,6 +5695,8 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `mpe` | [`MpeTabState`](#mpetabstate) | yes | The MPE tab's lanes, grid and selected breakpoints (WP-6.18). |
 | `envelope_breakpoint` | [`Ticks`](#ticks) or null | no | The breakpoint selected in the Envelope Editor (WP-6.26), if any: `clip.select_envelope_breakpoint` sets it. |
 | `envelope_marker` | [`Ticks`](#ticks) or null | no | The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved. |
+| `envelope_segment` | [`Ticks`](#ticks) or null | no | The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it. |
+| `envelope_selection` | [`TimeRange`](#timerange) or null | no | The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it. |
 
 <details><summary>JSON Schema</summary>
 
@@ -5669,6 +5765,28 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         }
       ],
       "description": "The Envelope Editor's insert marker, in ticks from the beginning of the clip's contents (WP-6.26), which Left and Right move along the envelope; `null` until it has been moved."
+    },
+    "envelope_segment": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The segment selected in the Envelope Editor, as the breakpoint it starts at: `clip.select_envelope_segment` sets it."
+    },
+    "envelope_selection": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimeRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The time selected in the Envelope Editor (WP-6.25c), in ticks from the beginning of the clip's contents: `clip.select_envelope_time` sets it."
     },
     "filters": {
       "$ref": "#/$defs/NoteFilters",
@@ -13392,6 +13510,7 @@ One row of the content pane.
 | `depth` | integer from 0 to 65535 | yes | How deep it's indented: 0 at the top of the list. |
 | `open` | boolean | yes | For a folder, whether it's open. |
 | `clip_kind` | [`ClipFileKind`](#clipfilekind) or null | no | For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6). |
+| `collections` | array of integer from 0 to 255 | no | The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40). |
 | `details` | [`ItemDetails`](#itemdetails) or null | no | What the optional columns show for it, left out while none shows (spec: browser-tags R27). |
 | `folder` | string or null | no | In search results, the folder it's in, relative to its place. |
 | `format` | [`PluginFormat`](#pluginformat) or null | no | For a plug-in, its format, which the row's badge shows (the plug-in scanning spec, R11). |
@@ -13412,6 +13531,16 @@ One row of the content pane.
         }
       ],
       "description": "For a clip file, what it holds; `null` when its first bytes don't say (a damaged file), which placing refuses (clip files R6)."
+    },
+    "collections": {
+      "description": "The collections it is in, by their numbers (1 is Favorites), in order; left out while it is in none (spec: browser-tags R35, R40).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
     },
     "depth": {
       "description": "How deep it's indented: 0 at the top of the list.",
@@ -14080,7 +14209,7 @@ One of:
 
 ### `Label`
 
-A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`.
+A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{"folder": "/its/path"}`, or a saved label, as `{"saved": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{"collection": 3}`.
 
 One of:
 
@@ -14101,12 +14230,13 @@ One of:
 - `"current_project"`: The open set's project folder.
 - an object with `folder` (string): A folder the person added to Places, by its path.
 - an object with `saved` (integer): A saved label, by its ID (spec: browser-tags R24).
+- an object with `collection` (integer from 0 to 255): A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`.",
+  "description": "A label in the browser's sidebar: `all`, a Library category (`sounds`, `drums`, `instruments`, `audio_effects`, `midi_effects`, `modulators`, `plug_ins`, `clips`, `samples`, `grooves`, `tunings`, `templates`), a place (`user_library`, `current_project`), or a folder added to Places, as `{\"folder\": \"/its/path\"}`, or a saved label, as `{\"saved\": 3}`, or a collection, 1 (Favorites) to 7 (Gray), as `{\"collection\": 3}`.",
   "oneOf": [
     {
       "const": "all",
@@ -14207,6 +14337,22 @@ One of:
       },
       "required": [
         "saved"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "A collection, by its number: 1 is Favorites, 7 Gray (spec: browser-tags R34).",
+      "properties": {
+        "collection": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "collection"
       ],
       "type": "object"
     }
@@ -21154,6 +21300,7 @@ The preview: the switch, the volume, and what plays.
 | `position_seconds` | number | yes | How far it has played, in seconds. |
 | `length_seconds` | number | yes | How long it is, in seconds. |
 | `loading` | string or null | no | The file being decoded for a preview, if any. |
+| `note` | string or null | no | Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it. |
 | `playing` | string or null | no | The file playing, if any. |
 
 <details><summary>JSON Schema</summary>
@@ -21169,6 +21316,13 @@ The preview: the switch, the volume, and what plays.
     },
     "loading": {
       "description": "The file being decoded for a preview, if any.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "note": {
+      "description": "Why the file selected last doesn't preview, if it doesn't: a MIDI clip file whose chain has no instrument, or a clip file whose audio is missing. The preview strip shows it.",
       "type": [
         "string",
         "null"
@@ -24617,7 +24771,7 @@ A sidebar section.
 
 One of:
 
-- `"collections"`: Collections (M6).
+- `"collections"`: The seven collections (spec: browser-tags R34).
 - `"library"`: The Library labels.
 - `"places"`: Places: folders on disk.
 
@@ -24629,7 +24783,7 @@ One of:
   "oneOf": [
     {
       "const": "collections",
-      "description": "Collections (M6).",
+      "description": "The seven collections (spec: browser-tags R34).",
       "type": "string"
     },
     {
@@ -27446,6 +27600,10 @@ Theme & Colors in `settings.state` (themes R12).
 | `brightness` | integer from -32768 to 32767 | yes | Brightness. |
 | `color_intensity` | integer from -32768 to 32767 | yes | Color Intensity, in percent. |
 | `color_hue` | integer from -32768 to 32767 | yes | Color Hue, in degrees. |
+| `auto_assign_track_colours` | boolean | yes | Auto-Assign Track Colors (themes R23). |
+| `default_track_colour` | integer from 0 to 255 | yes | Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off. |
+| `reduced_automatic_colours` | boolean | yes | Reduced Automatic Colors. |
+| `clip_colour` | [`ClipColour`](#clipcolour) | yes | Clip Color. |
 | `appearance` | [`Appearance`](#appearance) | yes | The Appearance chosen. |
 | `drawn_appearance` | [`Appearance`](#appearance) | yes | The appearance drawn now, `light` or `dark`: Follow System resolved. |
 | `themes` | array of string | yes | The themes the Theme chooser offers, in its order. |
@@ -27460,6 +27618,11 @@ Theme & Colors in `settings.state` (themes R12).
       "$ref": "#/$defs/Appearance",
       "description": "The Appearance chosen."
     },
+    "auto_assign_track_colours": {
+      "default": true,
+      "description": "Auto-Assign Track Colors (themes R23).",
+      "type": "boolean"
+    },
     "brightness": {
       "default": 0,
       "description": "Brightness.",
@@ -27467,6 +27630,11 @@ Theme & Colors in `settings.state` (themes R12).
       "maximum": 32767,
       "minimum": -32768,
       "type": "integer"
+    },
+    "clip_colour": {
+      "$ref": "#/$defs/ClipColour",
+      "default": "track-color",
+      "description": "Clip Color."
     },
     "color_hue": {
       "default": 0,
@@ -27484,6 +27652,14 @@ Theme & Colors in `settings.state` (themes R12).
       "minimum": -32768,
       "type": "integer"
     },
+    "default_track_colour": {
+      "default": 12,
+      "description": "Default Track Color, a swatch from 0 to 69, which new tracks take while Auto-Assign Track Colors is off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
     "drawn_appearance": {
       "$ref": "#/$defs/Appearance",
       "description": "The appearance drawn now, `light` or `dark`: Follow System resolved."
@@ -27499,6 +27675,11 @@ Theme & Colors in `settings.state` (themes R12).
     "high_contrast": {
       "default": false,
       "description": "High Contrast.",
+      "type": "boolean"
+    },
+    "reduced_automatic_colours": {
+      "default": false,
+      "description": "Reduced Automatic Colors.",
       "type": "boolean"
     },
     "theme": {
@@ -27527,6 +27708,10 @@ Theme & Colors in `settings.state` (themes R12).
     "brightness",
     "color_intensity",
     "color_hue",
+    "auto_assign_track_colours",
+    "default_track_colour",
+    "reduced_automatic_colours",
+    "clip_colour",
     "appearance",
     "drawn_appearance",
     "themes"

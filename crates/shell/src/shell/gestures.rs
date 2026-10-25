@@ -24,6 +24,7 @@ use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::automation as automation_ids;
 use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
+use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
 use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -193,6 +194,7 @@ impl Shell {
                 && !tool_ids::handles(&invocation.id)
                 && !is_automation_edit(&invocation.id)
                 && !automation_ids::handles(&invocation.id)
+                && !clip_envelope_ids::handles(&invocation.id)
                 && !clip_marker_command(&invocation.id)
                 && !arrangement_clip_command(&invocation.id)
                 && !comping_drag(&invocation.id)
@@ -226,6 +228,8 @@ impl Shell {
             clip_view::label(&invocation.id)
         } else if automation_ids::handles(&invocation.id) {
             automation::label(&invocation.id)
+        } else if clip_envelope_ids::handles(&invocation.id) {
+            crate::clip_envelope_edit::label(&invocation.id)
         } else if locator_ids::handles(&invocation.id) {
             crate::arrangement::locator::label(&invocation.id)
         } else if is_automation_edit(&invocation.id) {
@@ -326,6 +330,19 @@ impl Shell {
                     &invocation.id,
                     invocation.args.clone(),
                     editor,
+                    arrangement,
+                    envelope_clipboard,
+                    devices,
+                )
+            } else if clip_envelope_ids::handles(&invocation.id) {
+                // Spec: clip-envelopes R12, R13. A drag in the Envelope
+                // Editor moves breakpoints, or a handle of its time
+                // selection stretches or skews them.
+                crate::clip_envelope_edit::run(
+                    &invocation.id,
+                    invocation.args.clone(),
+                    editor,
+                    clip_view,
                     arrangement,
                     envelope_clipboard,
                     devices,
@@ -455,6 +472,17 @@ impl Shell {
                     &mut self.editor,
                     &mut self.clip_view,
                     &self.arrangement,
+                )
+                .map(|_| ())
+            } else if clip_envelope_ids::handles(&step.id) {
+                crate::clip_envelope_edit::run(
+                    &step.id,
+                    step.args.clone(),
+                    &mut self.editor,
+                    &mut self.clip_view,
+                    &self.arrangement,
+                    &mut self.envelope_clipboard,
+                    &self.devices,
                 )
                 .map(|_| ())
             } else if is_automation_edit(&step.id) {

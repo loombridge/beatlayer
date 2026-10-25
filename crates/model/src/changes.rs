@@ -36,9 +36,9 @@ pub enum Change {
 #[schemars(
     description = "What a command changed: whether the song settings (the tempo map, the \
                    time-signature map, the crossfader, the Arrangement loop, or Solo in Place) \
-                   changed, whether the track list changed, and which tracks, scenes, clips, and \
-                   devices were added, removed, or modified, keyed by ID. Every field is empty or \
-                   false if nothing changed."
+                   changed, whether the track list changed, whether a colour changed, and which \
+                   tracks, scenes, clips, and devices were added, removed, or modified, keyed by \
+                   ID. Every field is empty or false if nothing changed."
 )]
 pub struct ChangeSet {
     /// The song settings changed: the tempo map, the time-signature map, the
@@ -47,6 +47,11 @@ pub struct ChangeSet {
     /// The track tree changed: a track was added, removed, or moved, so
     /// routing may have changed.
     pub layout: bool,
+    /// The colour of a track, a clip, or a scene changed. The engine never
+    /// hears a colour, so nothing else is listed for it (the themes spec,
+    /// R27), but the set did change.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub colours: bool,
     /// Tracks whose own settings changed: name, mixer, sends, the tracks
     /// inside a group, or the order of the device chain. Changes to a track's
     /// clips or to its devices' settings are listed under `clips` and
@@ -99,6 +104,7 @@ impl ChangeSet {
     pub fn is_empty(&self) -> bool {
         !self.settings
             && !self.layout
+            && !self.colours
             && self.tracks.is_empty()
             && self.scenes.is_empty()
             && self.clips.is_empty()
@@ -125,6 +131,7 @@ impl ChangeSet {
         if old.own_settings_differ(new) {
             record(&mut self.tracks, id, Change::Modified);
         }
+        self.colours |= old.colour != new.colour;
         if !(old.children.ptr_eq(&new.children) || old.children == new.children) {
             self.layout = true;
         }
@@ -132,8 +139,15 @@ impl ChangeSet {
             match item {
                 DiffItem::Add(clip, _) => record(&mut self.clips, *clip, Change::Added),
                 DiffItem::Remove(clip, _) => record(&mut self.clips, *clip, Change::Removed),
-                DiffItem::Update { old: (clip, _), .. } => {
-                    record(&mut self.clips, *clip, Change::Modified);
+                DiffItem::Update {
+                    old: (clip, before),
+                    new: (_, after),
+                } => {
+                    if before.differs_only_in_colour(after) {
+                        self.colours = true;
+                    } else {
+                        record(&mut self.clips, *clip, Change::Modified);
+                    }
                 }
             }
         }
@@ -145,7 +159,9 @@ impl ChangeSet {
                     old: (_, before),
                     new: (_, after),
                 } => {
-                    if before != after {
+                    if before.differs_only_in_colour(after) {
+                        self.colours = true;
+                    } else if before != after {
                         record(&mut self.clips, before.id, Change::Modified);
                     }
                 }
@@ -163,6 +179,7 @@ impl ChangeSet {
             for (id, clip) in &before {
                 match after.get(id) {
                     None => record(&mut self.clips, *id, Change::Removed),
+                    Some(now) if clip.differs_only_in_colour(now) => self.colours = true,
                     Some(now) if now != clip => record(&mut self.clips, *id, Change::Modified),
                     Some(_) => {}
                 }
@@ -212,10 +229,13 @@ fn scene_changes(old: &Document, new: &Document, changes: &mut ChangeSet) {
     for (position, scene) in new.scenes().enumerate() {
         match old.scene(scene.id) {
             None => record(&mut changes.scenes, scene.id, Change::Added),
-            Some(before) if before != scene || old.scene_position(scene.id) != Some(position) => {
+            Some(before)
+                if before.without_colour() != scene.without_colour()
+                    || old.scene_position(scene.id) != Some(position) =>
+            {
                 record(&mut changes.scenes, scene.id, Change::Modified);
             }
-            Some(_) => {}
+            Some(before) => changes.colours |= before.colour != scene.colour,
         }
     }
     for scene in old.scenes() {

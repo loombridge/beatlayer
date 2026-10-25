@@ -226,9 +226,10 @@ impl Shell {
                 },
             ));
         }
+        let look = &self.prefs.look;
         let made = self
             .editor
-            .transact(UNDO_LABEL, |editor| apply(editor, work, fit.set))
+            .transact(UNDO_LABEL, |editor| apply(editor, look, work, fit.set))
             .map_err(|error| unavailable(&error.to_string()))?;
         // The engine hears of the new clips before the launch asks for them.
         self.dirty = true;
@@ -328,6 +329,7 @@ fn launch_moves(
 /// scene a track needs at the end, the new clips and the merged ones.
 fn apply(
     editor: &mut Editor,
+    look: &bl_shell_spec::settings::ThemeLook,
     work: Vec<(TrackId, Work)>,
     tempo: Option<Bpm>,
 ) -> Result<Vec<CapturedClip>, bl_model::EditError> {
@@ -412,7 +414,8 @@ fn apply(
                     // Spec: grooves R20. A clip made by recording takes the
                     // set's auto-load groove.
                     clip: Clip::new(clip, Ticks::ZERO, length, ClipData::Midi(data))
-                        .with_groove(editor.document().settings().grooves.auto_loaded()),
+                        .with_groove(editor.document().settings().grooves.auto_loaded())
+                        .with_colour(look.new_clip_colour(clip)),
                 })?;
                 write_moves(editor, clip, &moves, None)?;
                 made.push(CapturedClip {

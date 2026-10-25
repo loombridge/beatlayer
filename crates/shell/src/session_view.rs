@@ -25,6 +25,7 @@ use bl_shell_spec::session_view::{
     ScrollArgs, SelectArgs, SelectEdge, SelectEdgeArgs, SessionSelectMode, SessionViewState,
     SlotRef,
 };
+use bl_shell_spec::settings::ThemeLook;
 use serde_json::Value;
 
 use crate::browser::arrange::MediaFile;
@@ -71,6 +72,9 @@ pub struct Context<'a> {
     /// Folders to search for the audio a dropped clip file names when it
     /// isn't where the file says (clip files R12).
     pub search: &'a [PathBuf],
+    /// Clip Color and the other colour settings, for what a command makes
+    /// new (the themes spec, R20).
+    pub look: &'a ThemeLook,
 }
 
 /// What the engine knows that Capture and Insert Scene captures (WP-3.5).
@@ -382,6 +386,7 @@ impl SessionView {
                 // Spec: grooves R20. A new MIDI clip takes the set's
                 // auto-load groove.
                 clip.groove = ctx.editor.document().settings().grooves.auto_loaded();
+                clip.colour = ctx.look.new_clip_colour(clip.id);
                 let changes = self.edit(ctx.editor, "Insert Empty MIDI Clip", |editor| {
                     model(
                         editor,
@@ -877,6 +882,7 @@ impl SessionView {
                 clip.name.clone_from(name);
                 clip.launch.mode = ctx.launch_mode;
                 clip.launch.quantization = ctx.launch_quantization;
+                clip.colour = ctx.look.new_clip_colour(clip.id);
                 model(
                     editor,
                     "clip.create_in_slot",
@@ -977,9 +983,11 @@ impl SessionView {
                             index: editor.document().top_level().len(),
                         },
                     };
-                    previous = Some(
-                        clip_files::place(editor, file, lane, Spot::Slot(*scene), &nothing)?.track,
-                    );
+                    let placed =
+                        clip_files::place(editor, file, lane, Spot::Slot(*scene), &nothing)?;
+                    let new_track: &[TrackId] = if placed.created { &[placed.track] } else { &[] };
+                    crate::colours::colour_new(editor, ctx.look, new_track, &[placed.clip])?;
+                    previous = Some(placed.track);
                 }
                 Ok::<_, bl_model::EditError>(())
             })

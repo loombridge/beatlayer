@@ -605,6 +605,12 @@ pub struct ClipView {
     /// The breakpoint selected in the Envelope Editor: the clip and the
     /// parameter its envelope is for, and its position.
     envelope_breakpoint: Option<(ClipId, AutomationTarget, Ticks)>,
+    /// The time selected in the Envelope Editor (WP-6.25c): the clip and the
+    /// span, in ticks from the beginning of the clip's contents.
+    envelope_time: Option<(ClipId, Ticks, Ticks)>,
+    /// The segment selected in the Envelope Editor: the clip, the parameter
+    /// and the position of the breakpoint it starts at.
+    envelope_segment: Option<(ClipId, AutomationTarget, Ticks)>,
     /// The clips of the Session slots selected, in track then scene order,
     /// which the Clip View shows until an Arrangement selection replaces
     /// them, and the one selected last.
@@ -957,6 +963,7 @@ impl ClipView {
     pub fn set_envelope(&mut self, target: Option<AutomationTarget>) {
         if self.envelope != target {
             self.envelope_breakpoint = None;
+            self.envelope_segment = None;
         }
         self.envelope = target;
     }
@@ -999,6 +1006,48 @@ impl ClipView {
         self.envelope_breakpoint = at.map(|at| (clip, target, at));
         if let Some(at) = at {
             self.envelope_marker = Some((clip, at));
+        }
+    }
+
+    /// The time selected in the Envelope Editor for `clip`, in ticks from
+    /// the beginning of its contents (WP-6.25c).
+    #[must_use]
+    pub fn envelope_time(&self, clip: ClipId) -> Option<(Ticks, Ticks)> {
+        self.envelope_time
+            .filter(|(selected, _, _)| *selected == clip)
+            .map(|(_, start, end)| (start, end))
+    }
+
+    /// Selects `start` up to `end` of `clip`'s contents in the Envelope
+    /// Editor, or lets the selection go with `None`. A selected segment goes
+    /// with it.
+    pub fn select_envelope_time(&mut self, clip: ClipId, span: Option<(Ticks, Ticks)>) {
+        self.envelope_time = span.map(|(start, end)| (clip, start, end));
+        self.envelope_segment = None;
+    }
+
+    /// The segment selected in the Envelope Editor for `clip`'s envelope for
+    /// `target`, as the position of the breakpoint it starts at.
+    #[must_use]
+    pub fn envelope_segment(&self, clip: ClipId, target: AutomationTarget) -> Option<Ticks> {
+        self.envelope_segment
+            .filter(|(selected, selected_target, _)| {
+                *selected == clip && *selected_target == target
+            })
+            .map(|(_, _, at)| at)
+    }
+
+    /// Selects the segment of `clip`'s envelope for `target` that starts at
+    /// `at`, or none with `None`. The time selection goes with it.
+    pub fn select_envelope_segment(
+        &mut self,
+        clip: ClipId,
+        target: AutomationTarget,
+        at: Option<Ticks>,
+    ) {
+        self.envelope_segment = at.map(|at| (clip, target, at));
+        if at.is_some() {
+            self.envelope_time = None;
         }
     }
 
@@ -1516,6 +1565,12 @@ impl ClipView {
                     Some(*selected) == any_shown && Some(*target) == self.envelope
                 })
                 .map(|(_, _, at)| at),
+            envelope_selection: any_shown
+                .and_then(|clip| self.envelope_time(clip))
+                .map(|(start, end)| bl_shell_spec::arrangement::TimeRange { start, end }),
+            envelope_segment: any_shown
+                .zip(self.envelope)
+                .and_then(|(clip, target)| self.envelope_segment(clip, target)),
         }
     }
 
@@ -1562,6 +1617,8 @@ impl ClipView {
         self.switch_filters_off();
         self.envelope_marker = None;
         self.envelope_breakpoint = None;
+        self.envelope_time = None;
+        self.envelope_segment = None;
         self.breakpoints = None;
         self.mpe_zoom = None;
         self.stepped.clear();

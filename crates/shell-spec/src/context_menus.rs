@@ -29,6 +29,10 @@ use Action::{Choice, Command as Cmd, Pending, Shortcut as Key, Submenu};
 /// The model's command that colours a chain.
 const SET_CHAIN_COLOUR: &str = "chain.set_colour";
 
+/// The model's command that colours the selected tracks, which the palette
+/// at the end of a track's menu runs.
+const SET_TRACK_COLOUR: &str = "track.set_colour";
+
 /// The rows that hold the zoom-adaptive grid's settings.
 pub const ADAPTIVE_GRID_ROWS: [&str; 2] = ["C-CLIP-ARR-020", "C-TIME-013"];
 
@@ -313,9 +317,13 @@ const TRACK: &[Row] = &[
     SEPARATOR,
     ("C-TRACK-014", "Save as Default MIDI Track", Pending(None)),
     SEPARATOR,
-    ("C-TRACK-015", "Colour palette", Pending(None)),
+    ("C-TRACK-015", "Colour palette", Cmd(SET_TRACK_COLOUR)),
     SEPARATOR,
-    ("C-TRACK-016", "Assign Track Color to Clips", Pending(None)),
+    (
+        "C-TRACK-016",
+        "Assign Track Color to Clips",
+        Cmd("track.assign_colour_to_clips"),
+    ),
 ];
 
 /// What makes a track's menu differ from the base one, C-TRACK-001 to
@@ -380,7 +388,7 @@ fn track_extras(after: &str, state: TrackMenu) -> Vec<Row> {
         "C-TRACK-016" if state.group => rows.push((
             "C-TRACK-017b",
             "Assign Track Color to Grouped Tracks and Clips",
-            Pending(None),
+            Cmd("track.assign_colour_to_grouped"),
         )),
         _ => {}
     }
@@ -485,9 +493,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
-        }
-        "C-TRACK-015" | "C-TRACK-016" | "C-TRACK-017b" => {
-            Some("a package not planned yet (track colours)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
@@ -613,16 +618,34 @@ pub fn arrangement_clip() -> Vec<MenuItem> {
 /// The menu a clip in the Arrangement opens, with the rows `state` adds.
 #[must_use]
 pub fn arrangement_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
-    items(&with_take_lane(
-        with_selection(CLIP, CLIP_SELECTION, "C-CLIP-ARR-004", state),
-        "C-CLIP-ARR-016",
-        (
-            R29_COPY_CLIP,
-            "Copy Selection to Main Lane",
-            Cmd(COPY_TO_MAIN_LANE),
+    items(&with_clip_colours(
+        with_take_lane(
+            with_selection(CLIP, CLIP_SELECTION, "C-CLIP-ARR-004", state),
+            "C-CLIP-ARR-016",
+            (
+                R29_COPY_CLIP,
+                "Copy Selection to Main Lane",
+                Cmd(COPY_TO_MAIN_LANE),
+            ),
+            state,
         ),
         state,
     ))
+}
+
+/// The row of an Arrangement clip's menu that holds the colour palette,
+/// last in the menu after a separator (C-CLIP-ARR-028; the themes spec,
+/// R16), drawn by the UI.
+pub const CLIP_COLOUR_ROW: &str = "C-CLIP-ARR-028";
+
+/// `rows` with the clip colours after them (C-CLIP-ARR-028) when the menu
+/// acts on clips, as a clip's menu does once the clip is selected.
+fn with_clip_colours(mut rows: Vec<Row>, state: SelectionMenu) -> Vec<Row> {
+    if state.clips {
+        rows.push(SEPARATOR);
+        rows.push((CLIP_COLOUR_ROW, "Colour palette", Cmd("clip.set_colour")));
+    }
+    rows
 }
 
 /// The rows an audio clip's menu adds after Reverse Clip(s) (C-CLIP-ARR-027):
@@ -686,7 +709,7 @@ pub fn arrangement_audio_clip_in(state: SelectionMenu) -> Vec<MenuItem> {
             rows.extend_from_slice(AUDIO_CLIP);
         }
     }
-    items(&rows)
+    items(&with_clip_colours(rows, state))
 }
 
 /// The menu a time selection in the Arrangement opens (C-TIME), without the

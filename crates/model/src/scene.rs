@@ -40,6 +40,10 @@ pub struct Scene {
     /// (WP-3.10): on a scene, Linked is the Longest button.
     #[serde(default, skip_serializing_if = "FollowActions::is_default")]
     pub follow: FollowActions,
+    /// The scene's colour, a swatch from 0 to 69, or none (the themes spec,
+    /// R14): a new scene has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub colour: Option<u8>,
 }
 
 /// The lowest tempo a scene can set (Live's scene tempo range).
@@ -48,6 +52,15 @@ pub const SCENE_TEMPO_MIN: f64 = 20.0;
 pub const SCENE_TEMPO_MAX: f64 = 999.0;
 
 impl Scene {
+    /// The scene as the engine hears it: its colour is never heard (the
+    /// themes spec, R27), so a change set leaves it out.
+    pub(crate) fn without_colour(&self) -> Self {
+        Self {
+            colour: None,
+            ..self.clone()
+        }
+    }
+
     /// An unnamed scene.
     #[must_use]
     pub fn new(id: SceneId) -> Self {
@@ -57,6 +70,7 @@ impl Scene {
             tempo: None,
             signature: None,
             follow: FollowActions::default(),
+            colour: None,
         }
     }
 }

@@ -1,6 +1,6 @@
 # Themes and colours: the Theme & Colors settings, theme files, and the colours of tracks, clips and scenes
 
-- **Status:** partial (R1 to R13 each have a passing test; R14 to R32 come with WP-6.30b and WP-6.50)
+- **Status:** partial (R1 to R27 each have a passing test; R28 to R32 come with WP-6.50)
 - **Work packages:** WP-6.30 (the Theme and Customization sections and theme files: R1 to R13), WP-6.30b (the colours of tracks, clips and scenes, their palettes, and the Track and Clip Colors section: R14 to R27; R16's palettes in the Session clip's, the scene's and the Clip View title bar's context menus come with those menus in WP-6.56, [session-context-menus.md](session-context-menus.md)), WP-6.50 (a row of custom colours, and new tracks taking their group's colour, IMP-37: R28 to R32). The interface zoom on the Display & Input page is [interface-zoom.md](interface-zoom.md)'s; the colours of rack chains and macros are [racks.md](racks.md)'s and [macros.md](macros.md)'s, which take their swatches from R15
 - **Parity-matrix row:** Views and workflow: Themes, light and dark, follow the OS, tone and contrast controls; [the improvements](../05-improvements.md), IMP-37 (a larger colour palette, and new tracks taking their group's colour)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.4.3; the UI parity reference's rows L-SET-002, L-SET-003, L-SET-011, C-TRACK-015 to C-TRACK-017, C-SCENE-014, C-CLIP-SES-018 and the Arrangement clip menu's colours, L-CLIP-002, L-MIX-009, recorded from Live 12.4.3 and 12.4.6 on macOS
@@ -105,20 +105,20 @@ This spec covers the Theme & Colors page, the theme files and how their colours 
 | R11 | `shell_commands::preferences_saved_before_the_page_keep_their_look` | shell |
 | R12 | `shell_commands::the_theme_and_customization_commands_set_and_read_back_and_touch_no_set`; `readback_runtime::each_settings_command_reads_back_from_settings_state`; `accessibility` (each command reachable from the keyboard) | shell, agent |
 | R13 | `theme_page::the_rows_are_in_l_set_011_s_order_at_l_set_003_s_places` | UI script |
-| R14 | to be written in WP-6.30b | |
-| R15 | to be written in WP-6.30b | |
-| R16 | to be written in WP-6.30b | |
-| R17 | to be written in WP-6.30b | |
-| R18 | to be written in WP-6.30b | |
-| R19 | to be written in WP-6.30b | |
-| R20 | to be written in WP-6.30b | |
-| R21 | to be written in WP-6.30b | |
-| R22 | to be written in WP-6.30b | |
-| R23 | to be written in WP-6.30b | |
-| R24 | to be written in WP-6.30b | |
-| R25 | to be written in WP-6.30b | |
-| R26 | to be written in WP-6.30b | |
-| R27 | to be written in WP-6.30b | |
+| R14 | `crates/model/tests/colours.rs`, `a_new_track_takes_swatch_id_mod_14_and_a_new_scene_none`, `a_new_clip_takes_its_tracks_colour_unless_it_brings_its_own`, `the_colours_save_and_load`, `a_swatch_outside_the_palette_is_refused` | unit |
+| R15 | `crates/ui/tests/track_colours.rs`, `the_palette_s_rows_are_the_tracks_colours_lightened_and_darkened` | UI script |
+| R16 | `crates/model/tests/colours.rs`, `the_colour_commands_are_one_undo_step_each`; `crates/ui/tests/track_menu.rs`, `the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks`; `crates/ui/tests/editing.rs`, `the_clip_menu_ends_with_the_palette_and_a_clip_is_drawn_in_its_colour` | unit, UI script |
+| R17 | `crates/model/tests/colours.rs`, `assign_track_color_to_clips_reaches_every_view`, `assign_to_a_group_reaches_nested_tracks_and_their_clips`; `crates/ui/tests/track_menu.rs`, `assign_track_color_to_clips_gives_the_clips_the_tracks_colour`, `a_group_and_a_time_selection_add_their_items` | unit, UI script |
+| R18 | `crates/ui/tests/track_colours.rs`, `a_track_s_header_is_drawn_in_its_colour`, `the_session_view_draws_titles_strips_slots_and_scene_names_in_colours`, `the_clip_view_s_title_bar_is_striped_with_several_clips_selected`; `crates/ui/tests/editing.rs`, `the_clip_menu_ends_with_the_palette_and_a_clip_is_drawn_in_its_colour` | UI script |
+| R19 | `crates/shell/tests/colours.rs`, `new_tracks_take_swatch_id_mod_14_in_a_new_install`, `the_settings_choose_what_new_tracks_take`, `an_agent_made_track_is_coloured_too`, `a_new_group_is_coloured_and_its_tracks_keep_their_colours`, `an_imported_midi_file_is_coloured`, `copies_keep_their_colours` | headless |
+| R20 | `crates/shell/tests/colours.rs`, `a_new_clip_takes_the_colour_clip_color_gives`, `an_imported_midi_file_is_coloured`, `copies_keep_their_colours` | headless |
+| R21 | `crates/model/tests/colours.rs`, `a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in`; `crates/cli/tests/older_sets.rs`, `a_set_from_before_colours_loads_in_the_colours_it_was_drawn_in` | unit, headless |
+| R22 | `crates/ui/tests/track_menu.rs`, `the_palette_ticks_the_tracks_swatch_and_colours_the_selected_tracks`, `the_palette_is_reached_from_the_keyboard` | UI script |
+| R23 | `crates/shell/tests/colours.rs`, `the_settings_choose_what_new_tracks_take`; `crates/ui/tests/theme_page.rs`, `the_track_and_clip_colors_rows_follow_customization_in_order`, `the_track_and_clip_colors_rows_run_their_commands` | headless, UI script |
+| R24 | `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state`; `crates/ui/tests/theme_page.rs`, `the_track_and_clip_colors_rows_run_their_commands` | agent API, UI script |
+| R25 | `crates/agent/tests/readback.rs`, `the_colour_commands_run_by_id_and_read_back`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `cargo xtask commands` | agent API |
+| R26 | `crates/ui/tests/track_menu.rs`, `the_menu_lists_lives_items_and_names_later_packages`, `assign_track_color_to_clips_gives_the_clips_the_tracks_colour` | UI script |
+| R27 | `crates/model/tests/colours.rs`, `a_colour_edit_changes_nothing_the_engine_hears`; `crates/engine/src/compiler.rs`, `a_colour_edit_sends_the_engine_nothing` | unit |
 | R28 | to be written in WP-6.50 | |
 | R29 | to be written in WP-6.50 | |
 | R30 | to be written in WP-6.50 | |

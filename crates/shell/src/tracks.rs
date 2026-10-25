@@ -61,6 +61,8 @@ pub struct TrackData {
     pub kind: TrackKind,
     /// Its name.
     pub name: String,
+    /// Its colour, a swatch (the themes spec, R19).
+    pub colour: u8,
     /// Its mixer settings.
     pub mixer: Mixer,
     /// Its sends.
@@ -137,6 +139,7 @@ pub fn snapshot(doc: &Document, id: TrackId) -> Option<TrackData> {
         id: track.id(),
         kind: track.kind(),
         name: track.name().to_owned(),
+        colour: track.colour(),
         mixer: *track.mixer(),
         sends: track
             .sends()
@@ -387,6 +390,10 @@ fn create(
         index,
     })?;
     copies.tracks.push((data.id, id));
+    editor.apply(Command::SetTrackColour {
+        tracks: vec![id],
+        colour: data.colour,
+    })?;
     for (index, device) in data.devices.iter().enumerate() {
         // New IDs for the device and everything inside its racks.
         let mut copy = device.clone();
@@ -938,6 +945,10 @@ fn copy_track(
         index,
     })?;
     renames.push((id, original));
+    editor.apply(Command::SetTrackColour {
+        tracks: vec![id],
+        colour: source.colour(),
+    })?;
     let mixer = *source.mixer();
     editor.apply(Command::SetVolume {
         track: id,

@@ -986,6 +986,8 @@ pub fn place_midi(
                 .collect::<Vec<_>>();
             let clip = Clip::new(id, start, end - start, ClipData::Midi(MidiData::new(notes)));
             put_on_lane(editor, recorded.track, clip)?;
+            // Spec: themes R20. The caller colours what `placed` holds.
+            placed.insert(id);
             let steps: Vec<_> = moved.iter().map(|&(at, m)| (at - start, m)).collect();
             write_moves(editor, id, &steps, None)?;
         }

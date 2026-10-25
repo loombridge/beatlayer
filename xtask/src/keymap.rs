@@ -65,6 +65,17 @@ const SYSTEM: &[(&str, &str)] = &[
 /// keyboard, and the notes otherwise (mpe R29).
 const DECLINES: &[&str] = &["S-A11Y-022", "S-A11Y-024", "S-A11Y-025", "S-NOTE-053"];
 
+/// Commands that let the key they share fall through when they can't run,
+/// though the shortcut's other commands don't: the Edit keys in the Clip
+/// View's Envelope Editor act only on its time selection, and otherwise the
+/// note editor's or the Arrangement's act (clip-envelopes R12).
+const DECLINING_COMMANDS: &[&str] = &[
+    "clip.copy_envelope",
+    "clip.cut_envelope",
+    "clip.duplicate_envelope",
+    "clip.paste_envelope",
+];
+
 /// Shortcuts the focused control handles, with which control. The
 /// Arrangement View reads three itself because each has keys that act
 /// differently, and the keymap gives a shortcut one command with one set of
@@ -147,6 +158,16 @@ const WIDGET: &[(&str, &str)] = &[
         "S-BRW-007",
         "the browser's search field: Down and Enter move to the first result \
          (`focus.browser`, `browser.select`)",
+    ),
+    (
+        "S-BRW-008",
+        "the browser's list: 1 to 7 put the selected items in the collection of that number, \
+         or take them out (`browser.set_collection`)",
+    ),
+    (
+        "S-BRW-009",
+        "the browser's list: 0 takes the selected items out of every collection \
+         (`browser.clear_collections`)",
     ),
     (
         "S-BRW-015",
@@ -818,7 +839,8 @@ fn render(
                 if let Some(toggles) = &binding.toggles {
                     let _ = write!(line, ", toggles = {}", quote(toggles));
                 }
-                if DECLINES.contains(&source.id.as_str()) {
+                if DECLINES.contains(&source.id.as_str()) || DECLINING_COMMANDS.contains(&&*spec.id)
+                {
                     line.push_str(", declines = true");
                 }
                 line.push_str(" }");

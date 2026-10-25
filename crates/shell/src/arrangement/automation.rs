@@ -899,6 +899,27 @@ fn move_breakpoints(
         ));
     };
     let travel = travel(editor.document(), devices, target);
+    let points = moved_points(&envelope, &travel, at, by, share)?;
+    apply(
+        editor,
+        Command::SetAutomationEnvelope {
+            track,
+            target,
+            points,
+        },
+    )
+}
+
+/// The breakpoints of `envelope` once those at `at` have moved `by` ticks in
+/// time and `share` of the travel in value (the automation editing spec, R2,
+/// R4); a clip's envelope moves its breakpoints the same way.
+pub(crate) fn moved_points(
+    envelope: &Envelope,
+    travel: &impl ParamScale,
+    at: &[Ticks],
+    by: Ticks,
+    share: f64,
+) -> Result<Vec<Breakpoint>, EditFailure> {
     let mut points: Vec<Breakpoint> = envelope.points().collect();
     // A position with no breakpoint gets one at the envelope's value there:
     // the edges of a time selection, when a stretch inside it moves (the
@@ -951,11 +972,11 @@ fn move_breakpoints(
     });
     // The moved breakpoints go out first, so that one of them landing where
     // another was doesn't lose either.
-    let mut moved_points: Vec<Breakpoint> = Vec::new();
+    let mut landed: Vec<Breakpoint> = Vec::new();
     points.retain(
         |point| match moves.iter().find(|(from, _, _)| *from == point.at) {
             Some((_, to, value)) => {
-                moved_points.push(Breakpoint {
+                landed.push(Breakpoint {
                     at: *to,
                     value: *value,
                     bend: point.bend,
@@ -965,7 +986,7 @@ fn move_breakpoints(
             None => true,
         },
     );
-    for point in moved_points {
+    for point in landed {
         let at = points.partition_point(|other| other.at < point.at);
         // Two moved breakpoints can land on one position when a drag snaps
         // them together: the one moved last keeps the position.
@@ -975,14 +996,7 @@ fn move_breakpoints(
             points.insert(at, point);
         }
     }
-    apply(
-        editor,
-        Command::SetAutomationEnvelope {
-            track,
-            target,
-            points,
-        },
-    )
+    Ok(points)
 }
 
 fn to_value<T: Serialize>(value: &T) -> Value {

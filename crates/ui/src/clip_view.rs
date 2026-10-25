@@ -224,7 +224,27 @@ fn title_bar(
         return;
     };
     let c = &theme.colors;
+    // Spec: themes R18. The name stands on the clip's colour; with several
+    // clips selected, on stripes of theirs.
+    let selected = shell.arrangement().selected_clips();
+    let swatches: Vec<u8> = if selected.len() > 1 && selected.contains(&clip) {
+        selected
+            .iter()
+            .filter_map(|id| doc.clip(*id).and_then(|held| held.colour))
+            .collect()
+    } else {
+        value.colour.into_iter().collect()
+    };
     ui.painter().rect_filled(rect, 0.0, c.panel.0);
+    for (at, swatch) in swatches.iter().enumerate() {
+        let stripe = rect.width() / swatches.len() as f32;
+        let x = rect.left() + stripe * at as f32;
+        ui.painter().rect_filled(
+            Rect::from_min_max(pos2(x, rect.top()), pos2(x + stripe, rect.bottom())),
+            0.0,
+            theme.swatch(*swatch),
+        );
+    }
     ui.painter().text(
         pos2(rect.left() + 6.0, rect.center().y),
         Align2::LEFT_CENTER,
@@ -1555,9 +1575,10 @@ impl ClipViewUi {
             Some(drag) if drag.part == StripPart::Start => drag.start,
             _ => midi.start,
         };
-        let face = doc.clip_track(clip).map_or(theme.colors.accent.0, |track| {
-            crate::arrangement::scene::track_colour(theme, track)
-        });
+        let face = doc
+            .clip(clip)
+            .and_then(|held| held.colour)
+            .map_or(theme.colors.accent.0, |swatch| theme.swatch(swatch));
         let hovered = Self::hovered_note(ui, &layout, &rows, &notes, axis, length);
         let frame = note_lanes::Frame {
             clip,

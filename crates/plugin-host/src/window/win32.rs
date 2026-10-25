@@ -20,10 +20,10 @@ use windows_sys::Win32::Graphics::Gdi::COLOR_WINDOW;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GetClientRect, IsWindow,
-    RegisterClassExW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetWindowPos,
-    ShowWindow, WINDOW_STYLE, WM_DPICHANGED, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW,
-    WS_THICKFRAME,
+    CW_USEDEFAULT, CreateWindowExW, DefWindowProcW, DestroyWindow, GWLP_USERDATA, GetClientRect,
+    GetWindowLongPtrW, IsWindow, RegisterClassExW, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE,
+    SWP_NOZORDER, SendMessageW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WINDOW_STYLE,
+    WM_CLOSE, WM_DPICHANGED, WNDCLASSEXW, WS_MAXIMIZEBOX, WS_OVERLAPPEDWINDOW, WS_THICKFRAME,
 };
 
 use super::WindowEvent;
@@ -152,6 +152,11 @@ impl Window {
         if unsafe { IsWindow(self.hwnd) } == 0 {
             return Some(WindowEvent::Closed);
         }
+        // SAFETY: as above; the window procedure marks a close in the user
+        // data.
+        if unsafe { GetWindowLongPtrW(self.hwnd, GWLP_USERDATA) } != 0 {
+            return Some(WindowEvent::Closed);
+        }
         let scale = dpi_scale(self.hwnd);
         if (scale - self.scale.get()).abs() > 1e-6 {
             self.scale.set(scale);
@@ -184,9 +189,9 @@ impl Window {
     /// Windows' close button does.
     #[cfg(test)]
     pub fn pretend_closed(&self) {
-        // SAFETY: `hwnd` is this window, used on its own thread; destroying
-        // it here is what a close does.
-        unsafe { DestroyWindow(self.hwnd) };
+        // SAFETY: `hwnd` is this window, used on its own thread; the
+        // message goes through the window procedure.
+        unsafe { SendMessageW(self.hwnd, WM_CLOSE, 0, 0) };
     }
 }
 
@@ -224,8 +229,10 @@ fn register_class(hinstance: HINSTANCE) {
 }
 
 /// The window procedure: a window moved to a monitor of another DPI is
-/// resized to the rect Windows suggests for it. Everything else is the
-/// default procedure's, the close button included.
+/// resized to the rect Windows suggests for it. The close button hides the
+/// window and marks it closed for `poll`; the window is destroyed only when
+/// it drops, after the plug-in's view in it is. Everything else is the
+/// default procedure's.
 ///
 /// # Safety
 ///
@@ -236,6 +243,16 @@ unsafe extern "system" fn window_proc(
     _wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    if message == WM_CLOSE {
+        // SAFETY: `hwnd` is the window this message is for, used on its own
+        // thread. The default procedure would destroy it, and with it the
+        // plug-in's child window, before the plug-in's GUI is destroyed.
+        unsafe {
+            ShowWindow(hwnd, SW_HIDE);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, 1);
+        }
+        return 0;
+    }
     if message == WM_DPICHANGED {
         // SAFETY: with WM_DPICHANGED, `lparam` points to the suggested
         // window rect, in physical pixels, live for the call.
@@ -273,4 +290,29 @@ fn wide(text: &str) -> Vec<u16> {
         .encode_wide()
         .chain(std::iter::once(0))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Spec: clap-hosting R13. The close button doesn't destroy the window
+    /// under the plug-in's GUI: the host reports the close, and the window
+    /// is destroyed once, when the host drops it.
+    #[test]
+    fn the_close_button_leaves_the_window_alive_for_the_plugin_to_go_first() {
+        let window = Window::open(
+            "Test Gain Echo/1-Audio",
+            GuiSize {
+                width: 240,
+                height: 120,
+            },
+            true,
+        )
+        .expect("a window");
+        window.pretend_closed();
+        assert_eq!(window.poll(), Some(WindowEvent::Closed));
+        // SAFETY: `hwnd` is this window.
+        assert_ne!(unsafe { IsWindow(window.hwnd) }, 0, "still a window");
+    }
 }

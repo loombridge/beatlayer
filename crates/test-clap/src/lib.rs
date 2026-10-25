@@ -63,8 +63,8 @@ use clack_extensions::note_ports::{
     PluginNotePortsImpl,
 };
 use clack_extensions::params::{
-    ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter, PluginAudioProcessorParams,
-    PluginMainThreadParams, PluginParams,
+    HostParams, ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter,
+    PluginAudioProcessorParams, PluginMainThreadParams, PluginParams,
 };
 use clack_extensions::state::{PluginState, PluginStateImpl};
 use clack_plugin::events::Match;
@@ -120,6 +120,11 @@ pub const FAIL_GUI: &[u8] = b"FAIL:GUI";
 /// A state that asks the host to resize this plug-in's editor window, as
 /// a plug-in resizing its own view does (`request_resize`; WP-2.10).
 pub const ASK_RESIZE: &[u8] = b"ASK:RESIZE";
+/// A state that makes the next activation fail, as [`FAIL_ACTIVATE`] does,
+/// and queues an edit of [`GAIN`] to 0.25 as its editor would, asking the
+/// host to flush it (`request_flush`): only a flush while the plug-in is
+/// inactive collects it.
+pub const QUEUE_EDIT: &[u8] = b"QUEUE:EDIT";
 /// A state that makes the plug-in report every parameter value it is given
 /// back to the host as its own change, as some plug-ins do.
 pub const ECHO_PARAMS: &[u8] = b"ECHO:PARAMS";
@@ -132,8 +137,10 @@ pub const ASK_RESIZE_WIDTH: u32 = 500;
 /// The height [`ASK_RESIZE`] asks for, in physical pixels.
 pub const ASK_RESIZE_HEIGHT: u32 = 400;
 
-/// The environment variable a test sets so a scan crashes (`crash`) or hangs
-/// (`hang`) on purpose. Only the scanner's tests set it.
+/// The environment variable a test sets so a scan crashes (`crash`), hangs
+/// (`hang`), prints a banner to standard output (`banner`) or describes
+/// itself with a name too long for one pipe buffer (`big`) on purpose. Only
+/// the scanner's tests set it.
 pub const TEST_SCAN_VAR: &str = "BL_TEST_CLAP_SCAN";
 
 /// The environment variable a test sets to the number of extra stereo output
@@ -224,6 +231,8 @@ pub struct Shared<'a> {
     echo: AtomicBool,
     /// Its editor embeds only ([`EMBED_ONLY`]).
     embed_only: AtomicBool,
+    /// [`QUEUE_EDIT`] was loaded and the edit isn't flushed yet.
+    queued: AtomicBool,
 }
 
 impl Shared<'_> {
@@ -361,14 +370,21 @@ impl DefaultPluginFactory for GainEcho {
         // purpose, so the scanner's child process isolation and timeout are
         // tested with a real plug-in: the test sets `BL_TEST_CLAP_SCAN`.
         // Only the tests ever set it, and the test plug-in is never shipped.
+        let mut name = PLUGIN_NAME.to_owned();
         match std::env::var(TEST_SCAN_VAR).as_deref() {
             Ok("crash") => std::process::abort(),
             Ok("hang") => loop {
                 std::thread::sleep(std::time::Duration::from_secs(3600));
             },
+            // No newline, as a plug-in's careless printf would leave it.
+            Ok("banner") => {
+                print!("Loading the test plug-in...");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+            Ok("big") => name = "x".repeat(200_000),
             _ => {}
         }
-        PluginDescriptor::new(PLUGIN_ID, PLUGIN_NAME)
+        PluginDescriptor::new(PLUGIN_ID, &name)
             .with_vendor("Beatlayer tests")
             .with_version("1.0.0")
             .with_features(features())
@@ -390,6 +406,7 @@ impl DefaultPluginFactory for GainEcho {
             failure: AtomicU8::new(NO_FAILURE),
             echo: AtomicBool::new(false),
             embed_only: AtomicBool::new(false),
+            queued: AtomicBool::new(false),
         })
     }
 
@@ -831,8 +848,15 @@ impl PluginMainThreadParams for MainThread<'_> {
         text.to_str().ok()?.trim().parse().ok()
     }
 
-    fn flush(&self, input: &InputEvents<'_>, _output: &mut OutputEvents<'_>) {
+    fn flush(&self, input: &InputEvents<'_>, output: &mut OutputEvents<'_>) {
         self.shared.apply(input);
+        if self.shared.queued.swap(false, Relaxed) {
+            let id = ClapId::new(GAIN);
+            self.shared.set(GAIN, 0.25);
+            let _ = output.try_push(ParamGestureBeginEvent::new(0, id));
+            let _ = output.try_push(ParamValueEvent::new(0, id, Pckn::match_all(), 0.25));
+            let _ = output.try_push(ParamGestureEndEvent::new(0, id));
+        }
     }
 }
 
@@ -864,6 +888,14 @@ impl PluginStateImpl for MainThread<'_> {
         }
         if bytes == FAIL_ACTIVATE {
             shared.failure.store(ACTIVATE_FAILS, Relaxed);
+            return Ok(());
+        }
+        if bytes == QUEUE_EDIT {
+            shared.failure.store(ACTIVATE_FAILS, Relaxed);
+            shared.queued.store(true, Relaxed);
+            if let Some(params) = shared.host.get_extension::<HostParams>() {
+                params.request_flush(&shared.host);
+            }
             return Ok(());
         }
         if bytes == FAIL_GUI {

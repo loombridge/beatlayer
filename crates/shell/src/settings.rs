@@ -92,6 +92,13 @@ pub struct Preferences {
     /// Preview; WP-6.5, the step recording spec, R1): one switch for every
     /// MIDI clip, off in a new install.
     pub note_preview: bool,
+    /// Highlight Scales (Options, M-OPT-019; the scales spec, R22): one
+    /// switch for every clip, off in a new install.
+    pub highlight_scales: bool,
+    /// How the note editor spells keys (the piano ruler's menu, C-KEYS-002;
+    /// the scales spec, R24): one choice for every editor, Sharps in a new
+    /// install.
+    pub note_spelling: bl_model::NoteSpelling,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on

@@ -1,8 +1,8 @@
 //! The Clip View's Main Properties panel (WP-6.55; layout.md L-CLIP-004): the
 //! left group's first panel, for MIDI and audio clips alike. Start and End
 //! with Show and Set, Duplicate, the Loop switch, Position and Length with
-//! Show and Set, and the Signature, in that order; the Groove and Scale rows
-//! are drawn pending until their packages land.
+//! Show and Set, and the Signature, then the Scale controls; the Groove row
+//! is drawn pending until its package lands.
 //!
 //! Every control runs a registered command an agent runs too: the marker and
 //! loop commands of the clips, `clip.set_signature`, `clip.duplicate_loop`,
@@ -25,7 +25,7 @@ use serde_json::{Value, json};
 use crate::launch_panel::{self, pending};
 use crate::main_window::UiEvent;
 use crate::theme::Theme;
-use crate::widgets;
+use crate::widgets::{self, Choice};
 
 /// A field's, a Show button's and a Set button's sizes, and the step between
 /// rows.
@@ -806,15 +806,119 @@ pub fn show(
         "None",
         "Not built yet: the Groove controls come with the Groove Pool.",
     );
+    scale_rows(ui, shell, theme, &ids, &row, events);
+}
+
+/// The Scale Mode switch, Root Note chooser and Scale Name chooser, at the
+/// panel's end (the scales spec, R19): they show the scale of the clips the
+/// panel acts on, `*` where they differ, and run `clip.set_scale` on them.
+fn scale_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    ids: &[ClipId],
+    row: &dyn Fn(&str) -> egui::Pos2,
+    events: &mut Vec<UiEvent>,
+) {
+    let shown = bl_shell::scales::display(shell.editor().document(), ids);
+    let set = |events: &mut Vec<UiEvent>, change: Value| {
+        let mut args = serde_json::Map::new();
+        args.insert("clips".to_owned(), json!(ids));
+        if let Value::Object(change) = change {
+            args.extend(change);
+        }
+        invoke(
+            events,
+            bl_shell::scales_commands::SET_CLIP_SCALE,
+            Value::Object(args),
+        );
+    };
     let at = row("Scale");
-    pending(
+    let switch = Rect::from_min_size(at, FIELD);
+    match shown.enabled {
+        Some(on) => {
+            crate::focus::register(
+                ui.ctx(),
+                Id::new(("switch", "Clip Scale Mode")),
+                Area::Detail,
+                None,
+            );
+            if let Some(on) =
+                widgets::switch(ui, theme, "Clip Scale Mode", "Clip Scale Mode", switch, on)
+            {
+                set(events, json!({ "enabled": on }));
+            }
+        }
+        // The clips differ: the switch reads `*`, and a click turns them all on.
+        None => {
+            if button(ui, theme, "Clip Scale Mode", "*", switch) {
+                set(events, json!({ "enabled": true }));
+            }
+        }
+    }
+    fn mixed<T>() -> Choice<Option<T>> {
+        Choice {
+            label: "*".to_owned(),
+            value: None,
+            leds: widgets::NO_LEDS,
+        }
+    }
+    let roots: Vec<Choice<Option<u8>>> = (0..12u8)
+        .map(|root| Choice {
+            label: shell.root_name(root),
+            value: Some(root),
+            leds: widgets::NO_LEDS,
+        })
+        .chain(shown.root.is_none().then(mixed))
+        .collect();
+    crate::focus::register(
+        ui.ctx(),
+        Id::new(("chooser", "Clip Root Note")),
+        Area::Detail,
+        None,
+    );
+    let root = Rect::from_min_size(at + vec2(FIELD.x + GAP, 0.0), vec2(40.0, FIELD.y));
+    if let Some(Some(root_note)) = widgets::chooser(
         ui,
         theme,
-        "Scale",
-        Rect::from_min_size(at, vec2(FIELD.x + GAP + SHOW.x, FIELD.y)),
-        "Off",
-        "Not built yet: the Scale controls come with the scales in the Clip View.",
+        "Clip Root Note",
+        "Clip Root Note",
+        root,
+        &roots,
+        Some(&shown.root),
+        true,
+    ) {
+        set(events, json!({ "root": root_note }));
+    }
+    let names: Vec<Choice<Option<bl_model::ScaleName>>> = bl_model::ScaleName::ALL
+        .into_iter()
+        .map(|name| Choice {
+            label: name.label().to_owned(),
+            value: Some(name),
+            leds: widgets::NO_LEDS,
+        })
+        .chain(shown.name.is_none().then(mixed))
+        .collect();
+    let at = row("Name");
+    crate::focus::register(
+        ui.ctx(),
+        Id::new(("chooser", "Clip Scale Name")),
+        Area::Detail,
+        None,
     );
+    let name = Rect::from_min_size(at, vec2(FIELD.x + GAP + 40.0, FIELD.y));
+    if let Some(Some(chosen)) = widgets::chooser(
+        ui,
+        theme,
+        "Clip Scale Name",
+        "Clip Scale Name",
+        name,
+        &names,
+        Some(&shown.name),
+        true,
+    ) {
+        set(events, json!({ "name": chosen.id() }));
+    }
 }
 
 #[cfg(test)]

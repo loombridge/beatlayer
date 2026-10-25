@@ -105,6 +105,7 @@ mod sample_edits;
 mod sampler;
 mod save_history;
 mod scales;
+mod scales_clip_view;
 mod scene_tempo;
 mod search;
 mod second_window;

@@ -5754,6 +5754,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `lanes_hidden` | boolean | yes | Whether the Show/Hide All Expression Editors switch has hidden every lane. |
 | `randomize` | [`RandomizeAmounts`](#randomizeamounts) | yes | The Randomize amounts of the three lanes. |
 | `folded` | boolean | yes | Whether the note editor shows only the rows that hold notes (Fold, F). |
+| `scale_folds` | array of [`ClipId`](#clipid) | yes | The clips whose note editor is folded to their scale (G), in the order of their IDs. |
+| `highlight_scales` | boolean | yes | Whether Highlight Scales is on (K): one switch for every clip's editor, kept between launches. |
+| `note_spelling` | [`NoteSpelling`](#notespelling) | yes | How the note editor spells keys: one choice for every editor, kept between launches. |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
@@ -5873,6 +5876,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "description": "Whether the note area has stopped following playback until the song starts or stops (Spec: piano-roll R35).",
       "type": "boolean"
     },
+    "highlight_scales": {
+      "description": "Whether Highlight Scales is on (K): one switch for every clip's editor, kept between launches.",
+      "type": "boolean"
+    },
     "insert_marker": {
       "anyOf": [
         {
@@ -5917,6 +5924,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       },
       "description": "The MPE tab's lanes, grid and selected breakpoints (WP-6.18)."
     },
+    "note_spelling": {
+      "$ref": "#/$defs/NoteSpelling",
+      "description": "How the note editor spells keys: one choice for every editor, kept between launches."
+    },
     "preview": {
       "description": "Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches.",
       "type": "boolean"
@@ -5943,6 +5954,13 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
         "array",
         "null"
       ]
+    },
+    "scale_folds": {
+      "description": "The clips whose note editor is folded to their scale (G), in the order of their IDs.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
     },
     "selected": {
       "description": "The selected notes of the foreground clip, by their place in its notes in order (by start, then pitch).",
@@ -6012,6 +6030,9 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "lanes_hidden",
     "randomize",
     "folded",
+    "scale_folds",
+    "highlight_scales",
+    "note_spelling",
     "tab",
     "preview",
     "envelope",
@@ -19499,6 +19520,55 @@ One of:
         "key"
       ],
       "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NoteSpelling`
+
+How the keys are spelled (the scales spec, R24). The labels are Beatlayer's own.
+
+One of:
+
+- `"sharps"`: C#, as the rows read today.
+- `"flats"`: D♭.
+- `"sharps_and_flats"`: Both: C#/D♭.
+- `"auto"`: Flats when the clip's scale has a root of F, B♭, E♭, A♭, D♭ or G♭, and sharps otherwise.
+- `"note_numbers"`: The key's MIDI note number.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the keys are spelled (the scales spec, R24). The labels are Beatlayer's own.",
+  "oneOf": [
+    {
+      "const": "sharps",
+      "description": "C#, as the rows read today.",
+      "type": "string"
+    },
+    {
+      "const": "flats",
+      "description": "D♭.",
+      "type": "string"
+    },
+    {
+      "const": "sharps_and_flats",
+      "description": "Both: C#/D♭.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "Flats when the clip's scale has a root of F, B♭, E♭, A♭, D♭ or G♭, and sharps otherwise.",
+      "type": "string"
+    },
+    {
+      "const": "note_numbers",
+      "description": "The key's MIDI note number.",
+      "type": "string"
     }
   ]
 }

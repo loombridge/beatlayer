@@ -16,6 +16,7 @@
 use crate::arrangement::{SET_GRID, SHOW_TAKE_LANES};
 use crate::audio_editing::CONSOLIDATE_TO_SCENE;
 use crate::automation::{INSERT_SHAPE, SIMPLIFY};
+use crate::commands::{VIEW_HIGHLIGHT_SCALES, VIEW_NOTE_SPELLING};
 use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
@@ -834,17 +835,38 @@ const NOTE: &[Row] = &[
     ("C-NOTE-014c", "Set Loop End", Key(&["S-LOOP-003"])),
     ("C-NOTE-014d", "Set End Marker", Key(&["S-LOOP-004"])),
     ("C-NOTE-015", "Split Clip", Key(&["S-NOTE-036"])),
-    (
-        "C-NOTE-016",
-        "Highlight Scales",
-        Pending(Some("S-NOTE-035")),
-    ),
+    ("C-NOTE-016", "Highlight Scales", Cmd(VIEW_HIGHLIGHT_SCALES)),
 ];
 
 /// The menu a key in the MIDI Note Editor's piano ruler opens (C-KEYS).
 const KEYS: &[Row] = &[
     ("C-KEYS-001", "Deactivate Note(s)", Key(&["S-NOTE-041"])),
-    ("C-KEYS-002", "Note spelling", Pending(None)),
+    ("C-KEYS-002", "Note spelling", Submenu),
+    (
+        "C-KEYS-002a",
+        "Sharps",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"sharps"}"#),
+    ),
+    (
+        "C-KEYS-002b",
+        "Flats",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"flats"}"#),
+    ),
+    (
+        "C-KEYS-002c",
+        "Sharps and Flats",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"sharps_and_flats"}"#),
+    ),
+    (
+        "C-KEYS-002d",
+        "Auto",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"auto"}"#),
+    ),
+    (
+        "C-KEYS-002e",
+        "MIDI Note Numbers",
+        Choice(VIEW_NOTE_SPELLING, r#"{"spelling":"note_numbers"}"#),
+    ),
 ];
 
 /// The menu a loop bar above the note editor opens while it shows several
@@ -890,7 +912,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-NOTE-014" | "C-NOTE-014a" | "C-NOTE-014b" | "C-NOTE-014c" | "C-NOTE-014d" => {
             Some("WP-6.54 (the clip markers from the keys)")
         }
-        "C-NOTE-016" | "C-KEYS-002" => Some("WP-6.7b (the scales in the Clip View)"),
         _ => None,
     }
 }

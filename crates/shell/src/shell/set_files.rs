@@ -515,6 +515,7 @@ impl Shell {
                 self.devices
                     .set_multisampler_views(bl_model::MultisamplerViews::new());
                 self.clip_view.set_folds(bl_model::ClipFolds::new());
+                self.clip_view.set_scale_folds(bl_model::ClipFolds::new());
                 self.clip_view.restore_mpe(bl_model::MpeView::default());
                 self.clip_view
                     .restore_midi_tools(&bl_project::midi_tools::MidiToolSettings::default());
@@ -552,6 +553,7 @@ impl Shell {
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
                 self.clip_view.set_folds(self.store.folds());
+                self.clip_view.set_scale_folds(self.store.scale_folds());
                 self.clip_view.restore_mpe(self.store.mpe_view());
                 self.clip_view.restore_midi_tools(&self.store.midi_tools());
                 self.saved = snapshot(&editor);
@@ -617,6 +619,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_scale_folds(self.clip_view.scale_folds().clone());
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_lane_views(self.arrangement.lane_views().clone());
@@ -643,6 +647,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_scale_folds(self.clip_view.scale_folds().clone());
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_lane_views(self.arrangement.lane_views().clone());
@@ -805,6 +811,8 @@ impl Shell {
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
+                self.store
+                    .set_scale_folds(self.clip_view.scale_folds().clone());
                 self.store.set_mpe_view(self.clip_view.mpe().clone());
                 self.store
                     .set_lane_views(self.arrangement.lane_views().clone());

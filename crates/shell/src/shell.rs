@@ -1176,6 +1176,7 @@ impl Shell {
         let saved = snapshot(&editor);
         let plugin_panels = prefs.plugin_panels.clone();
         let note_preview = prefs.note_preview;
+        let (highlight_scales, note_spelling) = (prefs.highlight_scales, prefs.note_spelling);
         let mut shell = Self {
             browser_view,
             media,
@@ -1259,6 +1260,8 @@ impl Shell {
             clip_view: {
                 let mut view = ClipView::default();
                 view.set_preview(note_preview);
+                view.set_highlight_scales(highlight_scales);
+                view.set_note_spelling(note_spelling);
                 view
             },
             detail: DetailArea::default(),

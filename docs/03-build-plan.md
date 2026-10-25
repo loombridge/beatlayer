@@ -728,7 +728,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.34 | done | 23 October 2026 | [#326](https://github.com/loombridge/beatlayer/pull/326); `.blclip` clip files saved from the Session View or the Arrangement into the browser, listed under the Clips label, placed with their track's devices on an empty or new track, and previewed through their own warp settings, with Collect Files on Export and the User Library's location on the Library settings page ([clip files](specs/clip-files.md) R1 to R15, [file management](specs/file-management.md) R7 to R9) |
 | 6.34b | done | 25 October 2026 | [#435](https://github.com/loombridge/beatlayer/pull/435); a MIDI clip file in the browser previews as an offline render of one loop through its own chain at the set's tempo, cached until the file or tempo changes, and a chain with no instrument previews nothing and says why ([clip files](specs/clip-files.md) R16) |
 | 6.35 | done | 24 October 2026 | [#366](https://github.com/loombridge/beatlayer/pull/366); a set opens in the browser to list its tracks, groups, returns, Main, Session clips and devices, and merges whole (without its returns and Main), by track or by chain, as one undo step with sends mapped by position; tracks and Session clips save as a new set, by command or by dragging onto a place ([set exchange](specs/set-exchange.md)) |
-| 6.35b | todo |  |  |
+| 6.35b | done | 25 October 2026 | [#437](https://github.com/loombridge/beatlayer/pull/437); Create Pack writes a project into one `.blpack` file without its Backup folder or journals, and Install Pack... unpacks it after checking every name, with progress and cancel. |
 | 6.36 | todo |  |  |
 | 6.36b | todo |  |  |
 | 6.37 | todo |  |  |

@@ -35,6 +35,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("locator.set_info_text", query(Song, "settings.locators")),
     ("automation.cut", query(Track, "automation")),
     ("automation.delete", query(Track, "automation")),
+    ("automation.clear_track", query(Track, "automation")),
+    ("automation.clear_device", query(Track, "automation")),
     ("automation.delete_range", query(Track, "automation")),
     ("automation.duplicate", query(Track, "automation")),
     ("automation.move_breakpoints", query(Track, "automation")),

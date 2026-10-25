@@ -21,15 +21,41 @@ use crate::main_window::UiEvent;
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
 
-/// A chooser's size, and the step between rows.
-const CHOOSER: Vec2 = vec2(120.0, 17.0);
 const ROW: f32 = 19.0;
-/// A chance's or a switch's size, a jump target's, and the follow time's.
-const SMALL: Vec2 = vec2(54.0, 17.0);
-const JUMP: Vec2 = vec2(34.0, 17.0);
-const TIME: Vec2 = vec2(70.0, 17.0);
-/// Where the controls start, from the labels' left edge.
-const CONTROLS_AT: f32 = 92.0;
+
+/// The sizes of the controls: a chooser's, a chance's or a switch's, a jump
+/// target's, the follow time's, and where the controls start from the
+/// labels' left edge.
+struct Metrics {
+    chooser: Vec2,
+    small: Vec2,
+    jump: Vec2,
+    time: Vec2,
+    controls_at: f32,
+    /// Whether a Jump action's target gets a row of its own, for a panel too
+    /// narrow to hold it beside the chooser and the chance.
+    jump_row: bool,
+}
+
+/// The Scene View's.
+const WIDE: Metrics = Metrics {
+    chooser: vec2(120.0, 17.0),
+    small: vec2(54.0, 17.0),
+    jump: vec2(34.0, 17.0),
+    time: vec2(70.0, 17.0),
+    controls_at: 92.0,
+    jump_row: false,
+};
+
+/// The Clip View's left group, which is 166 points wide (L-CLIP-004).
+const NARROW: Metrics = Metrics {
+    chooser: vec2(62.0, 17.0),
+    small: vec2(38.0, 17.0),
+    jump: vec2(38.0, 17.0),
+    time: vec2(56.0, 17.0),
+    controls_at: 50.0,
+    jump_row: true,
+};
 
 /// Whose follow actions the controls edit.
 #[derive(Clone, Copy)]
@@ -68,17 +94,21 @@ pub fn show(
     events: &mut Vec<UiEvent>,
 ) -> f32 {
     let c = &theme.colors;
+    let m = match owner {
+        Owner::Clip(..) => NARROW,
+        Owner::Scene(_) => WIDE,
+    };
     let painter = ui.painter().clone();
     let mut y = at.y;
     let mut row = |label: &str| {
         painter.text(
-            pos2(at.x, y + CHOOSER.y / 2.0),
+            pos2(at.x, y + m.chooser.y / 2.0),
             Align2::LEFT_CENTER,
             label,
             theme.small_font(),
             c.text_dim.0,
         );
-        let start = pos2(at.x + CONTROLS_AT, y);
+        let start = pos2(at.x + m.controls_at, y);
         y += ROW;
         start
     };
@@ -108,7 +138,7 @@ pub fn show(
         theme,
         &salt,
         &name("Follow Action"),
-        Rect::from_min_size(start, SMALL),
+        Rect::from_min_size(start, m.small),
         follow.enabled,
     ) {
         events.push(change("enabled", json!(on)));
@@ -149,23 +179,29 @@ pub fn show(
             theme,
             &salt,
             &name(&format!("Follow Action {side}")),
-            Rect::from_min_size(start, CHOOSER),
+            Rect::from_min_size(start, m.chooser),
             &actions,
             Some(&action),
             true,
         ) {
             events.push(change(field, json!(chosen)));
         }
-        let mut next = start.x + CHOOSER.x + 6.0;
+        let mut next = start.x + m.chooser.x + if m.jump_row { 3.0 } else { 6.0 };
         if action == FollowAction::Jump {
             let salt = name(&format!("follow-jump-{side}"));
             focus(ui, "number-box", &salt);
+            // Beside the chooser, or on a row of its own under it.
+            let at = if m.jump_row {
+                row(&format!("Jump {side}"))
+            } else {
+                pos2(next, start.y)
+            };
             if let Some(target) = widgets::number_box(
                 ui,
                 theme,
                 &salt,
                 &name(&format!("Jump {side}")),
-                Rect::from_min_size(pos2(next, start.y), JUMP),
+                Rect::from_min_size(at, m.jump),
                 f64::from(jump),
                 (0.0, scenes as f64),
                 &|value, steps| value + f64::from(steps),
@@ -177,7 +213,9 @@ pub fn show(
             ) {
                 events.push(change(jump_field, json!(target.round() as u32)));
             }
-            next += JUMP.x + 6.0;
+            if !m.jump_row {
+                next += m.jump.x + 6.0;
+            }
         }
         let salt = name(&format!("follow-chance-{side}"));
         focus(ui, "number-box", &salt);
@@ -186,7 +224,7 @@ pub fn show(
             theme,
             &salt,
             &name(&format!("Chance {side}")),
-            Rect::from_min_size(pos2(next, start.y), SMALL),
+            Rect::from_min_size(pos2(next, start.y), m.small),
             f64::from(chance),
             (0.0, 100.0),
             &|value, steps| value + f64::from(steps),
@@ -216,15 +254,15 @@ pub fn show(
         theme,
         &salt,
         &name(switch_name),
-        Rect::from_min_size(start, SMALL),
+        Rect::from_min_size(start, m.small),
         follow.linked,
     ) {
         events.push(change("linked", json!(linked)));
     }
-    let beside = pos2(start.x + SMALL.x + 6.0, start.y);
+    let beside = pos2(start.x + m.small.x + 3.0, start.y);
     if follow.linked {
         if matches!(owner, Owner::Clip(_, true)) {
-            painter_text(ui, theme, beside + vec2(0.0, CHOOSER.y / 2.0), "Clip End");
+            painter_text(ui, theme, beside + vec2(0.0, m.chooser.y / 2.0), "Clip End");
         } else {
             let salt = name("follow-multiplier");
             focus(ui, "number-box", &salt);
@@ -233,7 +271,7 @@ pub fn show(
                 theme,
                 &salt,
                 &name("Follow Time Multiplier"),
-                Rect::from_min_size(beside, SMALL),
+                Rect::from_min_size(beside, m.small),
                 f64::from(follow.multiplier),
                 (1.0, f64::from(FOLLOW_MULTIPLIER_MAX)),
                 &|value, steps| value + f64::from(steps),
@@ -251,7 +289,7 @@ pub fn show(
             theme,
             &salt,
             &name("Follow Time"),
-            Rect::from_min_size(beside, TIME),
+            Rect::from_min_size(beside, m.time),
             follow.time.get() as f64,
             (FOLLOW_TIME_MIN.get() as f64, FOLLOW_TIME_MAX.get() as f64),
             &|value, steps| value + f64::from(steps) * step,

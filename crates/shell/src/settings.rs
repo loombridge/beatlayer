@@ -100,6 +100,10 @@ pub struct Preferences {
     /// Retune Set On Loading Tuning Systems (Options, M-OPT-022; the
     /// tunings spec, R15). Off in a new install.
     pub retune_on_tuning_load: bool,
+    /// Snap Automation to Grid (Options, M-OPT-015; the automation spec,
+    /// R31). On in a new install, and on for preferences saved before it
+    /// existed.
+    pub snap_automation_to_grid: OnByDefault,
     /// Warp recorded audio (Record, Warp & Launch, Warp/Fades; IMP-02, the
     /// recording spec, R13): whether a recorded clip will be warped, once
     /// warping arrives; clips have no warp fields until then. On by default,

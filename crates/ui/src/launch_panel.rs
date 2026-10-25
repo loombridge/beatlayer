@@ -1,6 +1,7 @@
 //! The Clip View's Launch Properties panel (WP-3.9; layout.md L-CLIP-003
 //! and L-CLIP-005): the left group's second panel, shown for a Session clip
-//! only, to the left of the editor.
+//! only, in the place of Main Properties (WP-6.55), to the left of the
+//! editor.
 //!
 //! Launch mode, Legato, Quantize and Velocity edit the clip through
 //! `clip.set_launch_mode`, `clip.set_legato`, `clip.set_launch_quantization`
@@ -13,6 +14,7 @@
 //! reading, not pixel parity.
 
 use bl_model::{ClipData, ClipId, LaunchMode, LaunchQuantization};
+use bl_shell::clip_properties_commands::Properties;
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::{self, Role};
 use egui::{Align2, Id, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
@@ -22,10 +24,11 @@ use crate::main_window::UiEvent;
 use crate::theme::Theme;
 use crate::widgets::{self, Choice, NO_LEDS};
 
-/// How wide the left group of panels is (L-CLIP-003: x 249 to 591).
-pub const WIDTH: f32 = 342.0;
+/// How wide the left group of panels is: L-CLIP-003 puts both groups across
+/// x 249 to 591, and the right group takes x 424 to 588.
+pub const WIDTH: f32 = 174.0;
 /// The panel selector row's height (L-CLIP-003).
-const SELECTOR: f32 = 16.0;
+pub(crate) const SELECTOR: f32 = 16.0;
 
 /// How wide the left group of panels is in a view of this width.
 #[must_use]
@@ -33,10 +36,12 @@ pub fn panel_width(view: Rect) -> f32 {
     WIDTH.min(view.width() / 2.0)
 }
 /// A control's size, and the step between rows.
-const CONTROL: Vec2 = vec2(120.0, 17.0);
+const CONTROL: Vec2 = vec2(100.0, 17.0);
 const ROW: f32 = 19.0;
 /// Where the controls start, from the panel's left edge.
-const CONTROLS_AT: f32 = 100.0;
+const CONTROLS_AT: f32 = 62.0;
+/// Where the labels start, from the panel's left edge.
+const LABELS_AT: f32 = 4.0;
 /// A chance's or a nudge button's size.
 const SMALL: Vec2 = vec2(54.0, 17.0);
 
@@ -54,7 +59,14 @@ pub fn panel_rect(view: Rect) -> Rect {
 
 /// A control drawn in place that does nothing yet, announced as disabled
 /// with the reason.
-fn pending(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, reason: &str) {
+pub(crate) fn pending(
+    ui: &mut Ui,
+    theme: &Theme,
+    salt: &str,
+    rect: Rect,
+    text: &str,
+    reason: &str,
+) {
     let id = Id::new(("launch-pending", salt));
     let response = ui.interact(rect, id, Sense::hover());
     let c = &theme.colors;
@@ -74,30 +86,65 @@ fn pending(ui: &mut Ui, theme: &Theme, salt: &str, rect: Rect, text: &str, reaso
     });
 }
 
-/// Draws the left group of an Arrangement clip in `rect`: the panel selector
-/// row with Main Properties alone (L-CLIP-003), disabled until its package
-/// arrives, over an empty panel.
-pub fn show_main_only(ui: &mut Ui, theme: &Theme, rect: Rect) {
+/// Draws the panel selector row of the left group in `rect` (L-CLIP-003):
+/// Main Properties, and for a Session clip Launch Properties beside it. The
+/// one `shown` is lit; the other runs `clip_view.show_properties`.
+pub fn selector(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    shown: Properties,
+    session: bool,
+    events: &mut Vec<UiEvent>,
+) {
     let c = &theme.colors;
-    ui.painter().rect_filled(rect, 0.0, c.panel.0);
-    let button = Rect::from_min_size(rect.min, vec2(rect.width() / 2.0 - 2.0, SELECTOR));
-    let id = Id::new(("launch-panel-selector", "main-only"));
-    let response = ui.interact(button, id, Sense::hover());
-    ui.painter()
-        .rect_filled(button, theme.sizes.corner, c.control.0);
-    ui.painter().text(
-        button.center(),
-        Align2::CENTER_CENTER,
-        "Main Properties",
-        theme.small_font(),
-        c.pending.0,
-    );
-    response.widget_info(|| {
-        WidgetInfo::selected(WidgetType::RadioButton, false, false, "Main Properties")
-    });
+    let half = rect.width() / 2.0;
+    let panels = [
+        (Properties::Main, "Main Properties"),
+        (Properties::Launch, "Launch Properties"),
+    ];
+    for (index, (panel, name)) in panels.into_iter().enumerate() {
+        if panel == Properties::Launch && !session {
+            continue;
+        }
+        let button = Rect::from_min_size(
+            rect.min + vec2(half * index as f32, 0.0),
+            vec2(half - 2.0, SELECTOR),
+        );
+        let id = Id::new(("launch-panel-selector", index));
+        let response = ui.interact(button, id, Sense::click());
+        let lit = panel == shown;
+        ui.painter().rect_filled(
+            button,
+            theme.sizes.corner,
+            if lit {
+                c.control_pressed.0
+            } else if response.hovered() {
+                c.control_hover.0
+            } else {
+                c.control.0
+            },
+        );
+        ui.painter().text(
+            button.center(),
+            Align2::CENTER_CENTER,
+            name,
+            theme.small_font(),
+            if lit { c.text.0 } else { c.text_dim.0 },
+        );
+        response.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, lit, name));
+        crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        if response.clicked() && !lit {
+            events.push(UiEvent::Invoke(Invocation::new(
+                bl_shell::clip_properties_commands::SHOW_PROPERTIES,
+                json!({ "panel": panel }),
+            )));
+        }
+    }
 }
 
-/// Draws the Launch Properties panel for the Session clip `clip` in `rect`.
+/// Draws the Launch Properties panel for the Session clip `clip` in `rect`,
+/// under the selector row.
 pub fn show(
     ui: &mut Ui,
     shell: &Shell,
@@ -121,42 +168,10 @@ pub fn show(
             y1: rect.max.y.into(),
         });
     });
-    ui.painter().rect_filled(rect, 0.0, c.panel.0);
-
-    // The panel selector row (L-CLIP-003): Main Properties comes with its
-    // own package, so it shows disabled; Launch Properties is the one shown.
-    let half = rect.width() / 2.0;
-    for (index, (name, enabled)) in [("Main Properties", false), ("Launch Properties", true)]
-        .into_iter()
-        .enumerate()
-    {
-        let button = Rect::from_min_size(
-            rect.min + vec2(half * index as f32, 0.0),
-            vec2(half - 2.0, SELECTOR),
-        );
-        let id = Id::new(("launch-panel-selector", index));
-        let response = ui.interact(button, id, Sense::hover());
-        ui.painter().rect_filled(
-            button,
-            theme.sizes.corner,
-            if enabled {
-                c.control_pressed.0
-            } else {
-                c.control.0
-            },
-        );
-        ui.painter().text(
-            button.center(),
-            Align2::CENTER_CENTER,
-            name,
-            theme.small_font(),
-            if enabled { c.text.0 } else { c.pending.0 },
-        );
-        response
-            .widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, enabled, enabled, name));
+    let left = rect.left() + LABELS_AT;
+    if crate::main_panel::take_focus_request(ui.ctx()) {
+        ui.memory_mut(|m| m.request_focus(Id::new(("switch", "follow-enabled"))));
     }
-
-    let left = rect.left() + 8.0;
     // Spec: follow-actions R13. Follow Action, its actions A and B with
     // their chances, and the follow time, from the first row down.
     let document = shell.editor().document();

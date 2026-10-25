@@ -618,6 +618,23 @@ pub enum Command {
         /// The parameter.
         target: AutomationTarget,
     },
+    /// Deletes every envelope of a track, as Clear All Envelopes on an
+    /// automation lane's header does (the automation spec, R28). The
+    /// controls stay where they are.
+    ClearTrackAutomation {
+        /// The track.
+        track: TrackId,
+    },
+    /// Deletes every envelope of one device of a track, or of its mixer
+    /// (its volume, pan, Track Activator and sends), as Clear Envelopes of the
+    /// device an automation lane shows does (the automation spec, R28).
+    ClearDeviceAutomation {
+        /// The track.
+        track: TrackId,
+        /// The device, or `null` (or nothing) for the track's mixer.
+        #[serde(default)]
+        device: Option<DeviceId>,
+    },
     /// Replaces one of a track's parameter's envelope with the breakpoints
     /// given, as the automation editing commands do when they write a shape
     /// over a span (the automation editing spec, R5). The envelope keeps
@@ -1075,9 +1092,10 @@ pub enum Command {
         #[serde(default)]
         end: Option<Ticks>,
     },
-    /// Sets a MIDI clip's time signature, the Clip View's Signature fields.
-    SetMidiClipSignature {
-        /// The MIDI clip.
+    /// Sets a MIDI clip's or a warped audio clip's time signature, the Clip
+    /// View's Signature fields.
+    SetClipSignature {
+        /// The MIDI or warped audio clip.
         clip: ClipId,
         /// The clip's signature; `null` (or nothing) follows the song's at
         /// the clip's position.
@@ -2842,6 +2860,8 @@ impl Command {
             Self::DeleteAutomationBreakpoint { .. } => "Delete Automation Breakpoint",
             Self::SetAutomationEnvelope { .. } => "Set Automation Envelope",
             Self::DeleteAutomation { .. } => "Delete Automation",
+            Self::ClearTrackAutomation { .. } => "Clear All Envelopes",
+            Self::ClearDeviceAutomation { .. } => "Clear Envelopes",
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
             }
@@ -2887,7 +2907,7 @@ impl Command {
             Self::SetClipLoop { .. } => "Change clip loop",
             Self::SetMidiClipRegion { .. } => "Change clip region",
             Self::SetMidiClipLoop { .. } => "Change clip loop",
-            Self::SetMidiClipSignature { .. } => "Change clip signature",
+            Self::SetClipSignature { .. } => "Change clip signature",
             Self::SetClipLoopEnabled { .. } => "Switch clip loop",
             Self::SetClipGain { .. } => "Change clip gain",
             Self::SetClipFades { .. } => "Change Fade",
@@ -3653,6 +3673,38 @@ impl Document {
                 self.track_mut(*track)?.automation.remove(target);
                 Ok(())
             }
+            Command::ClearTrackAutomation { track } => {
+                self.track_mut(*track)?.automation.clear();
+                Ok(())
+            }
+            Command::ClearDeviceAutomation { track, device } => {
+                let owner = self.track_mut(*track)?;
+                if let Some(device) = device
+                    && owner.find_device(*device).is_none()
+                {
+                    return Err(ModelError::DeviceNotInTrack {
+                        device: *device,
+                        track: *track,
+                    });
+                }
+                // Spec: automation R28. A device's envelopes name it; the
+                // mixer's are the track's own controls, its sends and its
+                // rack chains' controls.
+                let cleared: Vec<AutomationTarget> = owner
+                    .automation
+                    .keys()
+                    .copied()
+                    .filter(|target| match (target, device) {
+                        (AutomationTarget::Device { device: of, .. }, Some(device)) => of == device,
+                        (AutomationTarget::Device { .. }, None) | (_, Some(_)) => false,
+                        (_, None) => true,
+                    })
+                    .collect();
+                for target in cleared {
+                    owner.automation.remove(&target);
+                }
+                Ok(())
+            }
             Command::SetAutomationEnvelope {
                 track,
                 target,
@@ -4142,9 +4194,15 @@ impl Document {
                     midi.loop_end = *end;
                 })
             }
-            Command::SetMidiClipSignature { clip, signature } => {
-                self.edit_midi(*clip, |midi| midi.signature = *signature)
-            }
+            // Spec: clip-properties R10. An unwarped audio clip's positions
+            // read in time, so it has no signature to set.
+            Command::SetClipSignature { clip, signature } => match &self.clip_ref(*clip)?.data {
+                ClipData::Audio(audio) if !audio.warp => Err(ModelError::InvalidInput(
+                    "only a warped audio clip has a time signature: switch Warp on first",
+                )),
+                ClipData::Audio(_) => self.edit_audio(*clip, |audio| audio.signature = *signature),
+                ClipData::Midi(_) => self.edit_midi(*clip, |midi| midi.signature = *signature),
+            },
             Command::SetClipLoopEnabled { clip, enabled } => match &self.clip_ref(*clip)?.data {
                 // Spec: warping R14. Only a warped audio clip can switch its
                 // loop on; an older set's looped unwarped clip can switch it
@@ -10650,6 +10708,45 @@ mod tests {
         );
     }
 
+    // Spec: clip-properties R10. A warped audio clip has a signature of its
+    // own that sets and clears; an unwarped clip has none to set.
+    #[test]
+    fn a_warped_audio_clips_signature_sets_and_clears_and_an_unwarped_clip_has_none() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let clip = song.fresh();
+        let data = AudioData::new(ContentHash([7; 32]));
+        song.apply(Command::CreateClip {
+            track,
+            clip: Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, ClipData::Audio(data)),
+        })
+        .unwrap();
+        let signature = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.signature,
+            ClipData::Midi(_) => unreachable!("an audio clip"),
+        };
+        let seven_eight = TimeSignature::new(7, 8).ok();
+        let _ = song.reject(Command::SetClipSignature {
+            clip,
+            signature: seven_eight,
+        });
+        assert_eq!(signature(&song), None);
+        song.apply(Command::SetClipWarp { clip, warp: true })
+            .unwrap();
+        song.apply(Command::SetClipSignature {
+            clip,
+            signature: seven_eight,
+        })
+        .unwrap();
+        assert_eq!(signature(&song), seven_eight);
+        song.apply(Command::SetClipSignature {
+            clip,
+            signature: None,
+        })
+        .unwrap();
+        assert_eq!(signature(&song), None);
+    }
+
     // Spec: warping R5. A warped clip's markers are ticks of its contents,
     // so a trim or a split moves the Start marker by the ticks the edge
     // moved and a loop wraps it exactly.
@@ -11258,6 +11355,83 @@ mod tests {
         .unwrap();
         assert_eq!(song.doc.settings().tempo, tempo);
         assert_eq!(song.doc.settings().time_signatures, signatures);
+    }
+
+    // Spec: automation R28
+    #[test]
+    fn clearing_a_tracks_or_a_devices_envelopes_leaves_the_rest() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let ret = song.track(TrackKind::Return, None);
+        let device = song.device(track);
+        let other_device = song.device(track);
+        let targets = [
+            AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+            AutomationTarget::Send { to: ret },
+            AutomationTarget::Device {
+                device,
+                param: ParamId(2),
+            },
+            AutomationTarget::Device {
+                device: other_device,
+                param: ParamId(2),
+            },
+        ];
+        let has = |song: &Song, target: &AutomationTarget| {
+            song.doc
+                .track(track)
+                .unwrap()
+                .automation_for(target)
+                .is_some()
+        };
+        let draw = |song: &mut Song| {
+            for target in targets {
+                song.apply(Command::SetAutomationBreakpoint {
+                    track,
+                    target,
+                    at: Ticks::ZERO,
+                    value: 0.5,
+                })
+                .unwrap();
+            }
+        };
+        draw(&mut song);
+
+        // A device's envelopes go; the other device's and the mixer's stay.
+        song.apply(Command::ClearDeviceAutomation {
+            track,
+            device: Some(device),
+        })
+        .unwrap();
+        assert_eq!(targets.map(|t| has(&song, &t)), [true, true, false, true]);
+        // The mixer's go: the volume and the send.
+        song.apply(Command::ClearDeviceAutomation {
+            track,
+            device: None,
+        })
+        .unwrap();
+        assert_eq!(targets.map(|t| has(&song, &t)), [false, false, false, true]);
+        // A device the track doesn't have is refused.
+        let elsewhere = song.track(TrackKind::Audio, None);
+        let stranger = song.device(elsewhere);
+        assert_eq!(
+            song.reject(Command::ClearDeviceAutomation {
+                track,
+                device: Some(stranger),
+            }),
+            ModelError::DeviceNotInTrack {
+                device: stranger,
+                track,
+            }
+        );
+        // Every envelope of the track.
+        draw(&mut song);
+        song.apply(Command::ClearTrackAutomation { track }).unwrap();
+        assert_eq!(targets.map(|t| has(&song, &t)), [false; 4]);
+        // Clearing again changes nothing.
+        song.apply(Command::ClearTrackAutomation { track }).unwrap();
     }
 
     // Spec: automation R1 to R6

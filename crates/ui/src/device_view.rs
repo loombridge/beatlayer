@@ -602,6 +602,17 @@ impl DeviceViewUi {
                             shell.played(track, &AutomationTarget::Device { device, param })
                         })
                     };
+                    // Spec: automation R29. The parameters' context menus.
+                    let menu = |param| {
+                        let device = frame.id;
+                        track.map(|track| {
+                            crate::param_menu::ParamMenu::new(
+                                shell,
+                                track,
+                                AutomationTarget::Device { device, param },
+                            )
+                        })
+                    };
                     match &frame.multisampler {
                         // Spec: multisampler R1. The tab chosen in the title
                         // bar shows its controls.
@@ -612,7 +623,7 @@ impl DeviceViewUi {
                             (frame, state),
                             display.as_ref(),
                             body,
-                            &played,
+                            (&played, &menu),
                             events,
                         ),
                         None => {
@@ -622,7 +633,7 @@ impl DeviceViewUi {
                                 frame,
                                 display.as_ref(),
                                 body,
-                                &played,
+                                (&played, &menu),
                                 &mut self.renaming_articulation,
                                 events,
                             );

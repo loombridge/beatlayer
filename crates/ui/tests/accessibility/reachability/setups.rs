@@ -122,6 +122,27 @@ pub(crate) fn arrangement_track_1(h: &mut Harness) {
         .unwrap();
 }
 
+/// Automation Mode is on with the first track selected, so its header shows
+/// the main lane's choosers and lane button (the automation spec, R24, R25).
+pub(crate) fn automation_mode(h: &mut Harness) {
+    arrangement_track_1(h);
+    h.shell
+        .run("arrangement.automation_mode", json!({ "on": true }))
+        .unwrap();
+}
+
+/// As [`automation_mode`], with the first track's pan in a lane of its own.
+pub(crate) fn an_automation_lane(h: &mut Harness) {
+    automation_mode(h);
+    let track = h.shell.editor().document().top_level().next().unwrap();
+    h.shell
+        .run(
+            "arrangement.add_automation_lane",
+            json!({ "track": track, "target": { "type": "mixer", "param": "pan" } }),
+        )
+        .unwrap();
+}
+
 pub(crate) fn session_main(h: &mut Harness) {
     h.shell
         .run("view.toggle_session_arrangement", json!({}))

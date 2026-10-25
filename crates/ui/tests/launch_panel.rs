@@ -16,7 +16,7 @@ use egui::{Id, Key, Modifiers, Pos2, Rect};
 use serde_json::json;
 
 /// A Session clip on the first MIDI track, selected, with the Clip View
-/// open.
+/// open and Launch Properties chosen in the left group.
 fn session_clip() -> (Harness, ClipId) {
     let mut h = Harness::with_title_bar(Window::Main);
     let track = h.shell.editor().document().top_level().next().unwrap();
@@ -32,6 +32,9 @@ fn session_clip() -> (Harness, ClipId) {
         .unwrap();
     let clip = h.shell.editor().document().slot(track, scene).unwrap().id;
     h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.shell
+        .run("clip_view.show_properties", json!({ "panel": "launch" }))
+        .unwrap();
     h.settle();
     (h, clip)
 }
@@ -54,8 +57,8 @@ fn steps(h: &Harness) -> usize {
 }
 
 // A Session clip gets the panel, with the selector row naming Main
-// Properties (disabled, it comes with its own package) and Launch
-// Properties; a clip in the Arrangement gets neither.
+// Properties and Launch Properties; a clip in the Arrangement has Main
+// Properties alone.
 #[test]
 fn the_panel_shows_for_session_clips_only() {
     let (mut h, _) = session_clip();
@@ -69,7 +72,11 @@ fn the_panel_shows_for_session_clips_only() {
         .find(|n| n.label == "Launch Properties" && n.toggled == Some(true))
         .expect("the Launch Properties selector");
     assert!(!launch.disabled);
-    assert!(Harness::node(&all, "Main Properties").disabled);
+    let main = all
+        .iter()
+        .find(|n| n.label == "Main Properties" && n.toggled == Some(false))
+        .expect("the Main Properties selector");
+    assert!(!main.disabled);
 
     let mut editor = factory_default_set();
     let track = editor.document().top_level().next().unwrap();
@@ -95,8 +102,12 @@ fn the_panel_shows_for_session_clips_only() {
     assert!(Harness::node(&all, "Clip View").bounds.is_some());
     assert!(all.iter().all(|n| n.label != "Launch Properties"));
     // An Arrangement clip has Main Properties alone in the left group
-    // (L-CLIP-003), disabled until its package arrives.
-    assert!(Harness::node(&all, "Main Properties").disabled);
+    // (L-CLIP-003), lit.
+    let main = all
+        .iter()
+        .find(|n| n.label == "Main Properties" && n.toggled.is_some())
+        .expect("the Main Properties selector");
+    assert_eq!(main.toggled, Some(true));
 }
 
 // The recorded defaults: Trigger, Legato off, Global, 0.0 %; the follow

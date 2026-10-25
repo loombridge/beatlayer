@@ -138,6 +138,7 @@ pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// The Envelope Editor's editing command IDs and their argument and result
 /// types (WP-6.25c).
 pub use bl_shell_spec::clip_envelope_editing as clip_envelope_commands;
+pub use bl_shell_spec::clip_properties as clip_properties_commands;
 /// The Device View's command IDs and their argument and result types
 /// (WP-2.4).
 pub use bl_shell_spec::devices as device_commands;

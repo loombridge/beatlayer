@@ -277,13 +277,7 @@ fn the_right_group_holds_audio_utilities_and_a_transform_panel_of_quantize() {
     for control in ["Grid", "Triplets", "Amount", "Transform"] {
         Harness::node(&all, control);
     }
-    for gone in [
-        "Start",
-        "End",
-        "Quantize Auto",
-        "Reset",
-        "Transformation Selector",
-    ] {
+    for gone in ["Quantize Auto", "Reset", "Transformation Selector"] {
         assert!(all.iter().all(|n| n.label != gone), "{gone}");
     }
     assert!(

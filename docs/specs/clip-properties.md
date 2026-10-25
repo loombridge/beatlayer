@@ -1,6 +1,6 @@
 # The Clip View's Main Properties panel: Start and End, the loop, Duplicate and the clip's Signature
 
-- **Status:** draft
+- **Status:** partial (R1 to R12 are built and tested by WP-6.55, except the panel's Groove and Scale rows, which are drawn pending until WP-6.20 and WP-6.7b, Duplicate on an audio clip, which waits for Duplicate Loop to take audio clips, and Show on a MIDI clip, which waits for the note editor's horizontal scroll in WP-6.54)
 - **Work packages:** WP-6.55 (R1 to R12). The panel's Groove controls are [grooves.md](grooves.md) R29's (WP-6.20) and its scale controls [scales.md](scales.md) R19's (WP-6.7b); the Launch Properties panel beside it is [launch-quantisation.md](launch-quantisation.md)'s (WP-3.9); the panels' right group is the MIDI Tools' ([midi-tools.md](midi-tools.md) R1, WP-6.11) on a MIDI clip and the Audio Utilities panel's ([sample-editor.md](sample-editor.md) R14, WP-4.10b) on an audio clip; Duplicate Loop is [multi-clip-editing.md](multi-clip-editing.md) R11's, and editing several clips' properties at once that spec's R9; the markers and loop themselves are [midi-clips.md](midi-clips.md)'s, [audio-clips.md](audio-clips.md)'s and [warping.md](warping.md)'s
 - **Parity-matrix row:** Clips and launching: The Clip View's Main Properties panel: Start and End with Show and Set, Duplicate, Loop, Position and Length, Signature
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the UI parity reference rows L-CLIP-002 to L-CLIP-005, L-CLIP-008, L-CTRL-010, M-NAV-011 and S-FOCUS-010
@@ -56,15 +56,15 @@ Every control runs a registered command that an agent runs too; most of them exi
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-6.55 | |
-| R2 | to be written in WP-6.55 | |
-| R3 | to be written in WP-6.55 | |
-| R4 | to be written in WP-6.55 | |
-| R5 | to be written in WP-6.55 | |
-| R6 | to be written in WP-6.55 | |
-| R7 | to be written in WP-6.55 | |
-| R8 | to be written in WP-6.55 | |
-| R9 | to be written in WP-6.55 | |
-| R10 | to be written in WP-6.55 | |
-| R11 | to be written in WP-6.55 | |
-| R12 | to be written in WP-6.55 | |
+| R1 | `crates/ui/tests/main_properties.rs`, `the_panel_shows_its_controls_in_order_and_the_selector_switches`; `crates/shell/tests/clip_properties.rs`, `the_left_group_shows_main_properties_unless_a_session_clip_chooses_launch` | unit |
+| R2 | `crates/ui/tests/main_properties.rs`, `the_panel_shows_its_controls_in_order_and_the_selector_switches` | unit |
+| R3 | `crates/ui/tests/main_properties.rs`, `the_fields_read_the_markers_and_typing_runs_their_commands`, `audio_clips_read_in_time_or_bars_and_loop_only_when_warped`; `crates/ui/src/main_panel.rs`, `typing_bar_zero_reads_before_the_beginning` | unit |
+| R4 | `crates/shell/tests/clip_properties.rs`, `show_marker_reads_where_the_marker_is_and_changes_nothing_in_the_set` | unit |
+| R5 | `crates/shell/tests/clip_properties.rs`, `set_moves_start_and_end_of_a_playing_session_clip_to_where_it_has_reached`, `set_rounds_down_to_the_global_launch_quantisation`, `set_works_on_an_arrangement_clip_while_the_playhead_is_inside_it` | unit |
+| R6 | `crates/ui/tests/main_properties.rs`, `the_fields_read_the_markers_and_typing_runs_their_commands`, `audio_clips_read_in_time_or_bars_and_loop_only_when_warped` | unit |
+| R7 | `crates/ui/tests/main_properties.rs`, `the_fields_read_the_markers_and_typing_runs_their_commands` | unit |
+| R8 | `crates/shell/tests/clip_properties.rs`, `set_moves_the_loop_brace_and_switches_the_loop_on` | unit |
+| R9 | `crates/ui/tests/main_properties.rs`, `the_fields_read_the_markers_and_typing_runs_their_commands` | unit |
+| R10 | `crates/shell/tests/clip_properties.rs`, `set_signature_sets_and_clears_a_midi_clips_own_signature`; `crates/ui/tests/main_properties.rs`, `audio_clips_read_in_time_or_bars_and_loop_only_when_warped`; `crates/model/src/command.rs`, `a_warped_audio_clips_signature_sets_and_clears_and_an_unwarped_clip_has_none` | unit |
+| R11 | `crates/ui/tests/main_properties.rs`, `start_typed_with_two_clips_selected_sets_both_in_one_step`, `the_keymap_reaches_clip_panels_with_option_shift_p`, `clip_panels_focuses_the_first_control_of_the_panel` | unit |
+| R12 | `crates/shell/tests/clip_properties.rs`, every test there runs the commands by ID; `crates/agent/tests/readback.rs`, the readback table | unit |

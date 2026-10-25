@@ -75,7 +75,7 @@ fn song(clips: &[(usize, i64, i64)]) -> Song {
 }
 
 /// The factory default set with MIDI clips on its first track: `(start bar
-/// from 0, bars, bars into its contents it starts)`.
+/// from 0, bars, bars into its contents it starts)`, Start marker included.
 fn midi_song(clips: &[(i64, i64, i64)]) -> Song {
     let mut editor = factory_default_set();
     let tracks: Vec<TrackId> = editor.document().top_level().collect();
@@ -86,7 +86,10 @@ fn midi_song(clips: &[(i64, i64, i64)]) -> Song {
             id,
             Ticks(start * BAR),
             Ticks(bars * BAR),
-            ClipData::Midi(MidiData::default()),
+            ClipData::Midi(MidiData {
+                start: Ticks(offset * BAR),
+                ..MidiData::default()
+            }),
         );
         clip.offset = Ticks(offset * BAR);
         editor

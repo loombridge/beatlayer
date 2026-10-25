@@ -20,7 +20,6 @@ use crate::comping::COPY_TO_MAIN_LANE;
 use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
-use crate::groove::EXTRACT as EXTRACT_GROOVE;
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
 use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};

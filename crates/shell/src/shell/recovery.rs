@@ -72,6 +72,7 @@ impl Shell {
         self.devices
             .set_multisampler_views(self.store.multisampler_views());
         self.clip_view.set_folds(self.store.folds());
+        self.clip_view.set_scale_folds(self.store.scale_folds());
         self.clip_view.restore_mpe(self.store.mpe_view());
         self.clip_view.restore_midi_tools(&self.store.midi_tools());
         for (hash, path, size) in self.store.media_files() {
@@ -82,6 +83,7 @@ impl Shell {
         self.arrangement.restore_lanes(self.store.lane_views());
         self.clip_view.forget_selection();
         self.mixer.reset();
+        self.mixer.restore_widths(self.store.column_widths());
         self.session.reset();
         self.new_set_transport();
         self.document_changed();

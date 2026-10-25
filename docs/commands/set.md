@@ -184,7 +184,7 @@ Result: [`Imported`](README.md#imported).
 
 **Import DAWproject File**. Permission: `external`. Contexts: `global`.
 
-Reads the DAWproject file at `path` and opens what it holds as a new set, in place of the open one, as opening a set does: it is refused while the open set has unsaved changes. The new set starts empty and holds what the file carries: its tracks, groups, returns and their mixer and routing, its clips with their notes, media, warping and loops, its scenes and slots, its tempo and time signature. It is unsaved, and its name is the file's name without `.dawproject` until it is first saved. The result's `report` says what the import left out or changed, and `set.import_report` gives that report again while the set the import made is open. Reads a file outside the project.
+Reads the DAWproject file at `path` and opens what it holds as a new set, in place of the open one, as opening a set does: it is refused while the open set has unsaved changes. The new set starts empty and holds what the file carries: its tracks, groups, returns and their mixer and routing, its clips with their notes, media, warping and loops, its scenes and slots, its tempo and time signature, its colours, fades and crossfades, its devices and plug-ins with their saved states, its automation, MIDI controllers and note expressions, and its markers as locators. It is unsaved, and its name is the file's name without `.dawproject` until it is first saved. The result's `report` says what the import left out or changed, and `set.import_report` gives that report again while the set the import made is open. Reads a file outside the project.
 
 Default keys: none.
 

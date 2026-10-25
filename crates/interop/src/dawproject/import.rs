@@ -8,26 +8,34 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bl_core::time::{
     Bpm, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
 };
+use bl_engine::DeviceType;
 use bl_model::{
-    AudioData, Clip, ClipData, ContentHash, Editor, MidiData, Monitor, Note, Output, TrackId,
-    TrackKind, WarpMarker, WarpMode,
+    AudioData, Clip, ClipData, ContentHash, Editor, MidiData, Monitor, Note, Output,
+    ParamDescriptor, TrackId, TrackKind, WarpMarker, WarpMode,
 };
 use bl_project::{Media, MediaPath, MediaRef, Project};
 
 use super::container::{Container, Error};
 use super::model::{
-    self, Channel, Content, ContentKind, Device, DeviceRole, Interpolation, MediaFile, MixerRole,
+    self, Channel, Content, ContentKind, DeviceRole, Interpolation, MediaFile, MixerRole,
     PointValue, Project as DawProject, TimeUnit, Timeline, Unit,
 };
+use super::plugins::{NoPlugins, Plugins};
 use super::report::Report;
 
+mod automation;
 mod clips;
+mod colours;
+mod devices;
+mod markers;
 
-use clips::Lane;
+use automation::{Driven, Expressions, Pending, pan_from, volume_raw};
+use clips::{Lane, Piece};
 
 /// What an import needs beyond the file itself.
 pub struct Context<'a> {
@@ -39,16 +47,50 @@ pub struct Context<'a> {
     /// The warp mode a clip takes when the file names none Beatlayer has
     /// (R31): the Default Warp Mode setting.
     pub default_warp_mode: WarpMode,
+    /// The 14 track colours of the theme in use, from which the palette is
+    /// drawn (R23).
+    pub track_colours: &'a [[u8; 3]],
+    /// The colours a new track and a new clip take (R23).
+    pub new_colours: &'a dyn NewColours,
+    /// The plug-ins installed on this machine (R46).
+    pub plugins: &'a dyn Plugins,
+}
+
+/// The swatches a track and a clip made without a colour take (R23).
+pub trait NewColours: Sync {
+    /// The swatch a new track takes.
+    fn track(&self, id: TrackId) -> u8;
+
+    /// The swatch a new clip takes, or `None` for its track's.
+    fn clip(&self, id: bl_model::ClipId) -> Option<u8>;
+}
+
+/// The colours a new set gives: a track `id mod 14` in the top row, a clip
+/// its track's.
+pub struct DefaultColours;
+
+impl NewColours for DefaultColours {
+    fn track(&self, id: TrackId) -> u8 {
+        bl_model::id_swatch(id.0)
+    }
+
+    fn clip(&self, _id: bl_model::ClipId) -> Option<u8> {
+        None
+    }
 }
 
 impl<'a> Context<'a> {
-    /// A context that takes Beats for a clip's warp mode by default.
+    /// A context that takes Beats for a clip's warp mode by default, the
+    /// bundled theme's palette and a machine with no plug-ins.
     #[must_use]
     pub fn new(folder: &'a Path, extract_to: &'a Path) -> Self {
         Self {
             folder,
             extract_to,
             default_warp_mode: WarpMode::default(),
+            track_colours: &bl_model::DEFAULT_TRACK_PALETTE,
+            new_colours: &DefaultColours,
+            plugins: &NoPlugins,
         }
     }
 }
@@ -111,9 +153,20 @@ pub fn import(container: &Container, context: &Context<'_>) -> Result<Imported, 
         channels_seen: Vec::new(),
         received: Vec::new(),
         left_out: Vec::new(),
+        types: None,
+        targets: HashMap::new(),
+        described: HashMap::new(),
+        pending: Pending::new(),
+        held_ends: std::collections::BTreeSet::new(),
+        track_expressions: HashMap::new(),
+        controller_channels: HashMap::new(),
+        crossfades: Vec::new(),
     };
     importer.run()
 }
+
+/// What loading a plug-in gave: its parameters, or why it failed.
+type Described = Result<Arc<Vec<ParamDescriptor>>, String>;
 
 /// A time-signature point of the file: its time, its numerator and its
 /// denominator, and the unit its time is in.
@@ -181,6 +234,24 @@ struct Importer<'a, 'c> {
     /// The ids of tracks the import left out and listed, whose lanes it
     /// leaves out without listing them again.
     left_out: Vec<String>,
+    /// The device types Beatlayer ships, made when first needed (R51).
+    types: Option<Arc<Vec<DeviceType>>>,
+    /// What each DAWproject parameter drives in the set (R56).
+    targets: HashMap<String, Driven>,
+    /// The parameters of the plug-ins loaded for their automation (R57).
+    described: HashMap<(bl_model::PluginFormat, String), Described>,
+    /// The Arrangement's envelopes, written when the import is done (R58).
+    pending: Pending,
+    /// Where an Arrangement clip's automation ends, by track and parameter,
+    /// so its last value holds after the clip (R59).
+    held_ends: std::collections::BTreeSet<(TrackId, bl_model::AutomationTarget, Ticks)>,
+    /// The MIDI controllers outside clips, by the track they are for (R60).
+    track_expressions: HashMap<TrackId, Vec<Expressions>>,
+    /// The channel each controller of a clip was first given on (R60).
+    controller_channels: HashMap<(bl_model::ClipId, u16), i64>,
+    /// The crossfades the clips ask for: the track, where the later clip
+    /// starts and how long they last in seconds (R33).
+    crossfades: Vec<(TrackId, Ticks, f64)>,
 }
 
 impl Importer<'_, '_> {
@@ -200,15 +271,13 @@ impl Importer<'_, '_> {
             time_signatures: self.signatures.clone(),
         });
         self.build_tracks(&project);
+        self.collect_lane_points(&project);
         self.build_clips(&project);
         self.build_scenes(&project);
+        self.write_envelopes();
+        self.build_markers(&project);
         self.report_received();
-        self.report_automation(&project);
-        if self.container.metadata.is_some() {
-            // The metadata waits for WP-6.36b (R64).
-            self.report
-                .add("the file's metadata", "in the container", "left out");
-        }
+        self.report_metadata();
         if let Some(error) = self.failed.take() {
             return Err(error);
         }
@@ -219,50 +288,20 @@ impl Importer<'_, '_> {
             windows: bl_model::DeviceWindows::new(),
             rack_views: bl_model::RackViewMap::new(),
             folds: bl_model::ClipFolds::new(),
+            scale_folds: bl_model::ClipFolds::new(),
             midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
             launch: bl_model::LaunchSettings::default(),
             multisamplers: bl_model::MultisamplerViews::new(),
             window_views: bl_model::WindowViews::default(),
             mpe_view: bl_model::MpeView::default(),
             lane_views: bl_model::LaneViews::new(),
+            column_widths: bl_model::ColumnWidths::new(),
         };
         Ok(Imported {
             project,
             files: std::mem::take(&mut self.files),
             report: std::mem::take(&mut self.report),
         })
-    }
-
-    /// The automation of the Arrangement, which waits for WP-6.36b (R56 to
-    /// R62), except the tempo and the time signature (R13, R14).
-    fn report_automation(&mut self, project: &DawProject) {
-        let Some(arrangement) = &project.arrangement else {
-            return;
-        };
-        let transport = project.transport.as_ref();
-        let own = [
-            transport
-                .and_then(|transport| transport.tempo.as_ref())
-                .and_then(|tempo| tempo.id.clone()),
-            transport
-                .and_then(|transport| transport.time_signature.as_ref())
-                .and_then(|signature| signature.id.clone()),
-        ];
-        let mut found: Vec<(Option<String>, usize)> = Vec::new();
-        for lane in &arrangement.lanes {
-            count_automation(lane, None, &own, &mut found);
-        }
-        for (scope, count) in found {
-            let place = scope
-                .and_then(|id| self.tracks.get(&id).copied())
-                .and_then(|id| self.editor.document().track(id))
-                .map_or_else(
-                    || "the Arrangement".to_owned(),
-                    |track| format!("the track \"{}\"", track.name()),
-                );
-            self.report
-                .add_count("a timeline of automation", &place, "left out", count);
-        }
     }
 
     /// What the reader found it couldn't use, in the report (R4, R6, R7).
@@ -585,8 +624,8 @@ impl Importer<'_, '_> {
             .or_else(|| channel.as_ref().and_then(|c| c.info.name.clone()));
         let place = self.track_place(track, &name);
 
-        // A track of video or markers is no Beatlayer track (R36; the
-        // markers wait for WP-6.36b, R63).
+        // A track of video or markers is no Beatlayer track (R36); its
+        // markers are read as locators (R63).
         let types = &track.content_types;
         if !types.is_empty()
             && track.children.is_empty()
@@ -686,10 +725,12 @@ impl Importer<'_, '_> {
         };
         self.made.push(made.clone());
         self.register(track, channel.as_ref(), &made);
-        if track.info.color.is_some() {
-            // Colours wait for WP-6.36b (R23).
-            self.report.add("a colour", place, "left out");
-        }
+        let color = track
+            .info
+            .color
+            .as_deref()
+            .or(channel.as_ref().and_then(|c| c.info.color.as_deref()));
+        self.colour_track(id, color, place);
         if track.info.comment.is_some() {
             // Comments aren't kept, and are counted in the report (R20).
             self.report.add("a comment", place, "left out");
@@ -715,6 +756,7 @@ impl Importer<'_, '_> {
         {
             let audio_name = format!("{} Audio", made.name);
             let audio_id = self.create_track(TrackKind::Audio, audio_name.clone(), parent);
+            self.colour_track(audio_id, color, place);
             let audio = Made {
                 id: audio_id,
                 kind: TrackKind::Audio,
@@ -753,6 +795,9 @@ impl Importer<'_, '_> {
         };
         self.made.push(made.clone());
         self.register(track, channel.as_ref(), &made);
+        if let Some(color) = track.info.color.as_deref() {
+            self.colour_track(main, Some(color), "the track \"Main\"");
+        }
     }
 
     /// A channel that sits directly in the structure (R15).
@@ -806,6 +851,7 @@ impl Importer<'_, '_> {
         };
         self.made.push(made.clone());
         self.register_channel(channel, &made);
+        self.colour_track(id, channel.info.color.as_deref(), &place);
     }
 
     /// Records the file's ids against the tracks they name (R7, R19).
@@ -904,7 +950,8 @@ impl Importer<'_, '_> {
                 continue;
             };
             let place = format!("the track \"{}\"", track.name);
-            self.report_devices(channel, &place);
+            self.register_mixer(track.id, channel);
+            self.build_devices(track, channel, &place);
             if let Some(volume) = &channel.volume {
                 let gain = self.volume_gain(volume, &place);
                 self.apply(bl_model::Command::SetVolume {
@@ -956,23 +1003,41 @@ impl Importer<'_, '_> {
         self.apply_outputs(&made);
     }
 
-    /// The devices of a channel, which WP-6.36b reads (R44).
-    fn report_devices(&mut self, channel: &Channel, place: &str) {
-        for device in &channel.devices {
-            let what = match device {
-                Device::Plugin { format, .. } => match format {
-                    model::PluginFormat::Vst2 => "a VST2 plug-in",
-                    model::PluginFormat::Vst3 => "a VST3 plug-in",
-                    model::PluginFormat::Clap => "a CLAP plug-in",
-                    model::PluginFormat::Au => "an Audio Unit plug-in",
+    /// Records what the channel's controls and sends drive (R56).
+    fn register_mixer(&mut self, track: TrackId, channel: &Channel) {
+        let mut controls: Vec<(Option<String>, Driven)> = Vec::new();
+        let real = |parameter: &Option<model::RealParameter>, param| {
+            parameter.as_ref().map(|p| {
+                (
+                    p.id.clone(),
+                    Driven::Mixer {
+                        track,
+                        param,
+                        unit: p.unit,
+                        min: p.min,
+                        max: p.max,
+                    },
+                )
+            })
+        };
+        controls.extend(real(&channel.volume, bl_model::MixerParam::Volume));
+        controls.extend(real(&channel.pan, bl_model::MixerParam::Pan));
+        if let Some(mute) = &channel.mute {
+            controls.push((
+                mute.id.clone(),
+                Driven::Mixer {
+                    track,
+                    param: bl_model::MixerParam::Mute,
+                    unit: None,
+                    min: None,
+                    max: None,
                 },
-                Device::Builtin { .. } => "a built-in device",
-                Device::Equalizer { .. } => "a generic equaliser",
-                Device::Compressor { .. } => "a generic compressor",
-                Device::NoiseGate { .. } => "a generic gate",
-                Device::Limiter { .. } => "a generic limiter",
-            };
-            self.report.add(what, place, "left out");
+            ));
+        }
+        for (id, driven) in controls {
+            if let Some(id) = id {
+                self.targets.insert(id, driven);
+            }
         }
     }
 
@@ -981,28 +1046,13 @@ impl Importer<'_, '_> {
         let Some(value) = parameter.value else {
             return 1.0;
         };
-        let gain = match parameter.unit {
-            Some(Unit::Linear) => value,
-            Some(Unit::Decibel) => {
-                if value == f64::NEG_INFINITY {
-                    0.0
-                } else {
-                    10f64.powf(value / 20.0)
-                }
-            }
-            Some(Unit::Normalized) => {
-                let min = parameter.min.unwrap_or(0.0);
-                let max = parameter.max.unwrap_or(1.0);
-                min + value * (max - min)
-            }
-            _ => {
-                self.report.add(
-                    "a volume in a unit Beatlayer can't read",
-                    place,
-                    "left at its default",
-                );
-                return 1.0;
-            }
+        let Some(gain) = volume_raw(parameter.unit, value, parameter.min, parameter.max) else {
+            self.report.add(
+                "a volume in a unit Beatlayer can't read",
+                place,
+                "left at its default",
+            );
+            return 1.0;
         };
         if !gain.is_finite() || gain < 0.0 {
             return 1.0;
@@ -1021,24 +1071,7 @@ impl Importer<'_, '_> {
         let Some(value) = parameter.value else {
             return 0.0;
         };
-        let pan = match parameter.unit {
-            Some(Unit::Percent) => {
-                let min = parameter.min.unwrap_or(0.0);
-                let max = parameter.max.unwrap_or(100.0);
-                (value - min) / (max - min) * 2.0 - 1.0
-            }
-            Some(Unit::Normalized) | Some(Unit::Linear) | None => {
-                let min = parameter.min.unwrap_or(0.0);
-                let max = parameter.max.unwrap_or(1.0);
-                (value - min) / (max - min) * 2.0 - 1.0
-            }
-            Some(_) => return 0.0,
-        };
-        if pan.is_finite() {
-            pan.clamp(-1.0, 1.0)
-        } else {
-            0.0
-        }
+        pan_from(parameter.unit, value, parameter.min, parameter.max).unwrap_or(0.0)
     }
 
     /// The sends of every track (R22).
@@ -1101,6 +1134,31 @@ impl Importer<'_, '_> {
                 if level > 1.0 {
                     self.report
                         .add("a send above 0 dB", &place, "changed to 0 dB");
+                }
+                if let Some(volume) = &send.volume
+                    && let Some(id) = &volume.id
+                {
+                    self.targets.insert(
+                        id.clone(),
+                        Driven::Send {
+                            track: track.id,
+                            to: return_track,
+                            unit: volume.unit,
+                            min: volume.min,
+                            max: volume.max,
+                        },
+                    );
+                }
+                for (parameter, what) in [
+                    (send.pan.as_ref().and_then(|p| p.id.clone()), "a send's pan"),
+                    (
+                        send.enable.as_ref().and_then(|p| p.id.clone()),
+                        "a send's Enable",
+                    ),
+                ] {
+                    if let Some(parameter) = parameter {
+                        self.targets.insert(parameter, Driven::Unsupported(what));
+                    }
                 }
                 self.apply(bl_model::Command::SetSend {
                     track: track.id,
@@ -1435,10 +1493,11 @@ impl Importer<'_, '_> {
             let Some(scene_id) = self.editor.document().scenes().nth(index).map(|s| s.id) else {
                 break;
             };
-            if scene.info.color.is_some() {
-                self.report
-                    .add("a colour", &scene_place_of(scene, index), "left out");
-            }
+            self.colour_scene(
+                scene_id,
+                scene.info.color.as_deref(),
+                &scene_place_of(scene, index),
+            );
             if scene.info.comment.is_some() {
                 // Comments aren't kept, and are counted in the report (R20).
                 self.report
@@ -1530,17 +1589,39 @@ impl Importer<'_, '_> {
                 let piece = pieces.swap_remove(0);
                 let mut clip = piece.clip;
                 clip.start = Ticks::ZERO;
+                // The clip's automation envelopes are set once it is in
+                // its slot, where the document accepts them (R59).
+                let (automation, modulation): (Vec<_>, Vec<_>) = clip
+                    .envelopes
+                    .drain(..)
+                    .partition(|held| held.kind == bl_model::EnvelopeKind::Automation);
+                clip.envelopes = modulation;
+                let clip_id = clip.id;
                 let command = bl_model::Command::CreateSlotClip {
                     track: lane.id,
                     scene: scene_id,
                     clip,
                 };
-                if let Err(error) = self.editor.apply(command) {
-                    self.report.add(
+                match self.editor.apply(command) {
+                    Ok(_) => {
+                        for held in automation {
+                            self.try_apply(
+                                bl_model::Command::SetClipEnvelope {
+                                    clip: clip_id,
+                                    target: held.target,
+                                    kind: held.kind,
+                                    points: held.envelope.points().collect(),
+                                },
+                                "a clip's automation",
+                                &piece.place,
+                            );
+                        }
+                    }
+                    Err(error) => self.report.add(
                         "a clip Beatlayer can't hold",
                         &piece.place,
                         &format!("left out; {error}"),
-                    );
+                    ),
                 }
                 if slot.has_stop == Some(false) {
                     self.apply(bl_model::Command::SetSlotStopButton {
@@ -1580,6 +1661,14 @@ impl Importer<'_, '_> {
             .as_ref()
             .and_then(|content| content.timeline())
             .is_some_and(|timeline| timeline_is_audio(timeline, 0))
+    }
+
+    /// Applies a command the file may ask for something the set can't hold
+    /// in: a refusal is listed, and the import goes on.
+    fn try_apply(&mut self, command: bl_model::Command, what: &str, place: &str) {
+        if let Err(error) = self.editor.apply(command) {
+            self.report.add(what, place, &format!("left out; {error}"));
+        }
     }
 
     /// Applies a command, keeping the first failure.
@@ -1784,38 +1873,6 @@ fn scene_place_of(scene: &model::Scene, index: usize) -> String {
     match scene.info.name.as_deref() {
         Some(name) => format!("the scene \"{name}\""),
         None => format!("scene {}", index + 1),
-    }
-}
-
-/// Counts the automation timelines in a timeline, by the track they are
-/// local to, leaving out the ones that drive `own` parameters.
-fn count_automation(
-    timeline: &Timeline,
-    scope: Option<String>,
-    own: &[Option<String>],
-    found: &mut Vec<(Option<String>, usize)>,
-) {
-    let scope = timeline.info().track.clone().or(scope);
-    match timeline {
-        Timeline::Points(points) => {
-            let target = points.target.parameter.as_deref();
-            if own
-                .iter()
-                .any(|id| id.as_deref() == target && target.is_some())
-            {
-                return;
-            }
-            match found.iter_mut().find(|(known, _)| *known == scope) {
-                Some((_, count)) => *count += 1,
-                None => found.push((scope, 1)),
-            }
-        }
-        Timeline::Lanes(lanes) => {
-            for child in &lanes.children {
-                count_automation(child, scope.clone(), own, found);
-            }
-        }
-        _ => {}
     }
 }
 

@@ -386,7 +386,7 @@ fn the_crossfader_section_shows_the_assign_buttons_and_main_s_fader() {
     let nodes = tree(&mut h);
     assert!(nodes.iter().all(|n| n.label != "Crossfade A"));
     assert!(nodes.iter().all(|n| n.label != "Crossfader"));
-    assert!(!state(&mut h.shell).crossfader);
+    assert!(!state(&mut h.shell).session.crossfader);
 
     h.shell.run(ids::CROSSFADER, json!({})).unwrap();
     let nodes = tree(&mut h);
@@ -499,7 +499,7 @@ fn the_crossfader_section_shows_the_assign_buttons_and_main_s_fader() {
             .iter()
             .all(|n| n.label != "Crossfade A" && n.label != "Crossfader")
     );
-    assert!(!state(&mut h.shell).crossfader);
+    assert!(!state(&mut h.shell).session.crossfader);
 }
 
 // Spec: mixer-view R2.
@@ -1119,7 +1119,7 @@ fn the_status_bar_toggle_and_its_menu_show_and_hide_the_mixer() {
         .map(|n| rect_of(n).center())
         .unwrap();
     click(&mut h, at, Modifiers::NONE);
-    assert!(!state(&mut h.shell).sends);
+    assert!(!state(&mut h.shell).arrangement.sends);
 }
 
 // Spec: mixer-view R11, R12.
@@ -1192,6 +1192,7 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
     assert_eq!(menu_item(&h, "M-VIEW-032f").checked, Some(true));
     h.shell.run(ids::PERFORMANCE_IMPACT, json!({})).unwrap();
     let shown = state(&mut h.shell);
+    let shown = shown.arrangement;
     assert!(!shown.in_out && !shown.sends && !shown.return_tracks && shown.volume);
     key(&mut h, Key::M, both);
     assert!(!state(&mut h.shell).arrangement.shown);
@@ -1257,7 +1258,7 @@ fn the_view_menu_and_keys_show_and_hide_the_mixer_and_its_sections() {
 fn the_performance_impact_section_shows_under_the_strips_and_hides_by_its_menu_item() {
     let mut h = session();
     // Hidden in a new set (observed).
-    assert!(!state(&mut h.shell).performance_impact);
+    assert!(!state(&mut h.shell).session.performance_impact);
     let nodes = tree(&mut h);
     assert!(
         nodes.iter().all(|n| n.label != "Performance Impact"),
@@ -1265,7 +1266,7 @@ fn the_performance_impact_section_shows_under_the_strips_and_hides_by_its_menu_i
     );
 
     h.shell.run(ids::PERFORMANCE_IMPACT, json!({})).unwrap();
-    assert!(state(&mut h.shell).performance_impact);
+    assert!(state(&mut h.shell).session.performance_impact);
     let nodes = tree(&mut h);
     // The 12-point section under the strips, over the colour strip.
     let mixer_rect = rect_of(Harness::node(&nodes, "Session Mixer"));
@@ -2910,7 +2911,7 @@ fn titles(shell: &Shell, track: TrackId) -> Vec<(String, bool)> {
 #[test]
 fn a_tracks_devices_list_in_its_column_in_chain_order_in_both_mixers() {
     let (mut h, track, devices) = devices_session();
-    assert!(state(&mut h.shell).devices);
+    assert!(state(&mut h.shell).session.devices);
     // The instrument, an effect, the rack as one row, and an effect.
     let expected = titles(&h.shell, track);
     assert_eq!(expected.len(), 4);
@@ -2953,11 +2954,14 @@ fn a_tracks_devices_list_in_its_column_in_chain_order_in_both_mixers() {
         .unwrap();
     let rows = device_rows(&mut h, "Session Mixer", "1 MIDI");
     assert_eq!(rows.iter().filter(|(_, on)| !on).count(), 1);
-    // The Arrangement's mixer lists the same.
+    // The Arrangement's mixer lists the same, once it shows the section:
+    // each view's mixer keeps its own (R37).
     h.shell
         .run("view.toggle_session_arrangement", json!({}))
         .unwrap();
     h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    assert!(!state(&mut h.shell).arrangement.devices);
+    h.shell.run(ids::DEVICES, json!({})).unwrap();
     assert_eq!(
         device_rows(&mut h, "Arrangement Mixer", "1 MIDI"),
         titles(&h.shell, track)
@@ -3222,25 +3226,556 @@ fn the_devices_section_switches_by_menu_command_and_agent_and_is_not_saved() {
     let item = menu_item(&h, "IMP-25");
     assert_eq!(item.label, "Devices");
     assert!(item.enabled && item.checked == Some(false) && item.chord.is_none());
-    assert!(!state(&mut h.shell).devices);
+    assert!(!state(&mut h.shell).session.devices);
     let nodes = tree(&mut h);
     assert!(nodes.iter().all(|n| n.label != "Devices"));
     // By the menu's own item.
     let invocation = item.invocation.expect("the item runs a command");
     assert_eq!(invocation.id, ids::DEVICES);
     h.shell.invoke(&invocation.id, invocation.args).unwrap();
-    assert!(state(&mut h.shell).devices);
+    assert!(state(&mut h.shell).session.devices);
     assert_eq!(menu_item(&h, "IMP-25").checked, Some(true));
     assert_eq!(h.shell.switch_state(ids::DEVICES), Some(true));
     // By command ID, with and without `shown`.
     h.shell
         .run(ids::DEVICES, json!({ "shown": false }))
         .unwrap();
-    assert!(!state(&mut h.shell).devices);
+    assert!(!state(&mut h.shell).session.devices);
     let on = h.shell.run(ids::DEVICES, json!({})).unwrap();
-    assert_eq!(on["devices"], true);
+    assert_eq!(on["session"]["devices"], true);
     // View state: no undo step, and not saved with the set.
     assert_eq!(h.shell.editor().undo_history().count(), 0);
     h.shell.run("set.new", json!({})).unwrap();
-    assert!(!state(&mut h.shell).devices);
+    assert!(!state(&mut h.shell).session.devices);
+}
+
+/// The extended meters' volume field in a column: a spin button named
+/// `Track Volume`.
+fn volume_spin<'a>(nodes: &'a [Node], column: &str) -> Option<&'a Node> {
+    let parent = Harness::node(nodes, column).id;
+    nodes.iter().find(|n| {
+        n.role == Role::SpinButton
+            && n.label == "Track Volume"
+            && Harness::descends_from(nodes, n.id, parent)
+    })
+}
+
+/// A column's peak level readout when it is a button (the extended meters).
+fn peak_button<'a>(nodes: &'a [Node], column: &str) -> Option<&'a Node> {
+    let node = inside(nodes, column, "Peak Level")?;
+    (node.role == Role::Button).then_some(node)
+}
+
+/// The Session mixer's strip section top, from its sections.
+fn strip_top(h: &mut Harness) -> f32 {
+    let nodes = tree(h);
+    let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+    let strip = h.shell.mixer_view().of(MixerOf::Session).height;
+    mixer.bottom() - 6.5 - strip
+}
+
+// Spec: mixer-view R32 (I-DRAG-030).
+#[test]
+fn dragging_the_top_edge_or_the_strip_border_sets_only_that_views_height() {
+    let mut h = session();
+    let top = rect_of(Harness::node(&tree(&mut h), "Session Mixer")).top();
+    assert_eq!(top, 465.5);
+    // Up 80 points from the mixer's top edge: the strip is 80 points taller,
+    // the sections above it move with it.
+    let heights = drag(
+        &mut h,
+        pos2(500.0, top + 1.0),
+        &[vec2(0.0, -20.0); 4],
+        Modifiers::NONE,
+        |h| h.shell.mixer_view().of(MixerOf::Session).height,
+    );
+    assert_eq!(heights[0], 123.0, "a press changes nothing");
+    assert_eq!(*heights.last().unwrap(), 203.0);
+    let nodes = tree(&mut h);
+    let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+    assert_eq!(mixer.top(), top - 80.0);
+    assert_eq!(mixer.bottom(), 766.0);
+    // Only the Session View's mixer changed, and it is no undo step.
+    let now = state(&mut h.shell);
+    assert_eq!((now.session.height, now.arrangement.height), (203.0, 123.0));
+    assert_eq!(h.shell.editor().undo_history().len(), 0);
+    // The strip section's top border drags it too, down: 50 points shorter.
+    let border = strip_top(&mut h);
+    drag(
+        &mut h,
+        pos2(500.0, border),
+        &[vec2(0.0, 25.0); 2],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(h.shell.mixer_view().of(MixerOf::Session).height, 153.0);
+    // Down past the least: 64 points.
+    let border = strip_top(&mut h);
+    drag(
+        &mut h,
+        pos2(500.0, border),
+        &[vec2(0.0, 50.0); 4],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(h.shell.mixer_view().of(MixerOf::Session).height, 64.0);
+    // Up past the most: the clip slots keep a row.
+    let border = strip_top(&mut h);
+    drag(
+        &mut h,
+        pos2(500.0, border),
+        &[vec2(0.0, -200.0); 5],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let nodes = tree(&mut h);
+    let slot = nodes
+        .iter()
+        .find(|n| n.label.starts_with("1 MIDI: 1"))
+        .expect("the first clip slot is still drawn");
+    assert_eq!(rect_of(slot).height(), 18.0 - 2.0);
+    // The Arrangement's mixer is another height: dragging its edge leaves
+    // the Session's alone.
+    let session_height = h.shell.mixer_view().of(MixerOf::Session).height;
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    let mixer = rect_of(Harness::node(&nodes, "Arrangement Mixer"));
+    assert_eq!(mixer.height(), 17.0 + 6.5 + 115.0 + 56.0 + 123.0);
+    drag(
+        &mut h,
+        pos2(500.0, mixer.top() + 1.0),
+        &[vec2(0.0, -30.0); 2],
+        Modifiers::NONE,
+        |_| (),
+    );
+    let now = state(&mut h.shell);
+    assert_eq!(now.arrangement.height, 183.0);
+    assert_eq!(now.session.height, session_height);
+    let nodes = tree(&mut h);
+    assert_eq!(
+        rect_of(Harness::node(&nodes, "Arrangement Mixer")).height(),
+        17.0 + 6.5 + 115.0 + 56.0 + 183.0
+    );
+}
+
+// Spec: mixer-view R37.
+#[test]
+fn sends_unticked_in_the_session_view_stay_shown_in_the_arrangements_mixer() {
+    let mut h = session();
+    assert_eq!(menu_item(&h, "M-VIEW-032b").checked, Some(true));
+    let item = menu_item(&h, "M-VIEW-032b");
+    let invocation = item.invocation.expect("the item runs a command");
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    h.settle();
+    assert_eq!(menu_item(&h, "M-VIEW-032b").checked, Some(false));
+    let nodes = tree(&mut h);
+    let session_mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+    assert_eq!(session_mixer.height(), 6.5 + 115.0 + 123.0, "no Sends");
+    // The Arrangement's mixer, shown, still has them, and its menu item is
+    // ticked.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    h.settle();
+    assert_eq!(menu_item(&h, "M-VIEW-032b").checked, Some(true));
+    let nodes = tree(&mut h);
+    let arrangement = rect_of(Harness::node(&nodes, "Arrangement Mixer"));
+    assert_eq!(arrangement.height(), 17.0 + 6.5 + 115.0 + 56.0 + 123.0);
+    let now = state(&mut h.shell);
+    assert!(!now.session.sends && now.arrangement.sends);
+    // Back in the Session View the item is unticked again.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.settle();
+    assert_eq!(menu_item(&h, "M-VIEW-032b").checked, Some(false));
+}
+
+// Spec: mixer-view R33, R39.
+#[test]
+fn the_extended_meters_show_from_200_points_and_the_field_sets_the_volume() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    h.shell
+        .run(ids::SET_HEIGHT, json!({ "height": 199.0 }))
+        .unwrap();
+    let nodes = tree(&mut h);
+    assert!(volume_spin(&nodes, "3 Audio").is_none(), "not at 199");
+    assert!(peak_button(&nodes, "3 Audio").is_none());
+    h.shell
+        .run(ids::SET_HEIGHT, json!({ "height": 200.0 }))
+        .unwrap();
+    let nodes = tree(&mut h);
+    let field = volume_spin(&nodes, "3 Audio").expect("the volume field at 200");
+    assert_eq!(field.value, "0.0 dB");
+    // Under the fader and the meter.
+    let column = Harness::node(&nodes, "3 Audio").id;
+    let fader = nodes
+        .iter()
+        .find(|n| {
+            n.role == Role::Slider
+                && n.label == "Track Volume"
+                && Harness::descends_from(&nodes, n.id, column)
+        })
+        .unwrap();
+    let meter = rect_of(inside(&nodes, "3 Audio", "Track Meter").unwrap());
+    assert!(rect_of(field).top() >= rect_of(fader).bottom());
+    assert!(rect_of(field).top() >= meter.bottom());
+    // Typing −12 and Return sets the track to −12.0 dB, as one undo step.
+    let before = h.shell.editor().undo_history().len();
+    click(&mut h, rect_of(field).center(), Modifiers::NONE);
+    for k in [Key::Minus, Key::Num1, Key::Num2] {
+        key(&mut h, k, Modifiers::NONE);
+    }
+    assert!(h.main.is_typing());
+    key(&mut h, Key::Enter, Modifiers::NONE);
+    assert!((controls::gain_db(mixer(&h.shell, t[2]).volume) + 12.0).abs() < 1e-9);
+    assert_eq!(h.shell.editor().undo_history().len(), before + 1);
+    // Assistive technology reads the field with its value.
+    let nodes = tree(&mut h);
+    let field = volume_spin(&nodes, "3 Audio").unwrap();
+    assert_eq!(field.value, "-12.0 dB");
+    assert_eq!(field.role, Role::SpinButton);
+}
+
+// Spec: mixer-view R33, R39.
+#[test]
+fn a_click_on_the_peak_readout_sets_it_back_to_the_current_peak() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    h.shell
+        .run(ids::SET_HEIGHT, json!({ "height": 220.0 }))
+        .unwrap();
+    h.shell.run("audio.toggle_engine", json!({})).unwrap();
+    h.frame(vec![]);
+    let meter = |amplitude: f32| TrackMeter {
+        track: t[2],
+        peak: [amplitude; 2],
+        rms: [0.0; 2],
+        impact: 0.0,
+        gain_reduction: 0.0,
+    };
+    let half = controls::db_gain(-6.0) as f32;
+    h.shell.set_meters(&[meter(half)]);
+    let nodes = tree(&mut h);
+    let readout = peak_button(&nodes, "3 Audio").expect("a button at 220");
+    assert_eq!(readout.label, "Peak Level");
+    assert_eq!(readout.value, "-6.0 dB");
+    // The sound stops: the readout holds the highest peak.
+    h.shell.set_meters(&[meter(0.0)]);
+    let nodes = tree(&mut h);
+    assert_eq!(peak_button(&nodes, "3 Audio").unwrap().value, "-6.0 dB");
+    // A click sets it back to the current peak.
+    click(
+        &mut h,
+        rect_of(peak_button(&nodes, "3 Audio").unwrap()).center(),
+        Modifiers::NONE,
+    );
+    let nodes = tree(&mut h);
+    assert_eq!(
+        peak_button(&nodes, "3 Audio").unwrap().value,
+        controls::volume_spoken(0.0)
+    );
+    assert_eq!(h.shell.editor().undo_history().len(), 0, "no undo step");
+    // By command: one track's readout, or every track's.
+    h.shell.set_meters(&[meter(half)]);
+    h.shell.set_meters(&[meter(0.0)]);
+    h.shell
+        .run(ids::RESET_PEAK, json!({ "track": t[2] }))
+        .unwrap();
+    let nodes = tree(&mut h);
+    assert_eq!(
+        peak_button(&nodes, "3 Audio").unwrap().value,
+        controls::volume_spoken(0.0)
+    );
+    // Below 200 points the readout is a label that follows the meter.
+    h.shell
+        .run(ids::SET_HEIGHT, json!({ "height": 123.0 }))
+        .unwrap();
+    h.shell.set_meters(&[meter(half)]);
+    let nodes = tree(&mut h);
+    let label = inside(&nodes, "3 Audio", "Peak Level").unwrap();
+    assert_eq!((label.role, label.value.as_str()), (Role::Label, "-6.0 dB"));
+}
+
+// Spec: mixer-view R34.
+#[test]
+fn an_engine_fed_peak_line_holds_two_seconds_of_the_test_clock_at_every_height() {
+    use std::time::Duration;
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let clock = bl_core::clock::TestClock::new();
+    h.shell.use_test_clock(clock.clone());
+    let meter = |amplitude: f32| TrackMeter {
+        track: t[2],
+        peak: [amplitude; 2],
+        rms: [0.0; 2],
+        impact: 0.0,
+        gain_reduction: 0.0,
+    };
+    for height in [64.0, 123.0, 250.0] {
+        h.shell
+            .run(ids::SET_HEIGHT, json!({ "height": height }))
+            .unwrap();
+        h.shell.set_meters(&[meter(0.0)]);
+        clock.advance(Duration::from_secs(3));
+        h.shell.set_meters(&[meter(0.5)]);
+        h.frame(vec![]);
+        let line = |h: &mut Harness| {
+            state(&mut h.shell)
+                .peaks
+                .into_iter()
+                .find(|p| p.track == t[2])
+                .unwrap()
+                .hold
+        };
+        assert_eq!(line(&mut h), [0.5, 0.5], "{height}");
+        h.shell.set_meters(&[meter(0.0)]);
+        clock.advance(Duration::from_millis(1900));
+        h.shell.set_meters(&[meter(0.0)]);
+        h.frame(vec![]);
+        assert_eq!(line(&mut h), [0.5, 0.5], "{height}: held at 1.9 s");
+        clock.advance(Duration::from_millis(200));
+        h.shell.set_meters(&[meter(0.0)]);
+        h.frame(vec![]);
+        assert_eq!(line(&mut h), [0.0, 0.0], "{height}: fallen at 2.1 s");
+    }
+}
+
+// Spec: mixer-view R36 (I-DRAG-004).
+#[test]
+fn dragging_a_title_bars_edge_widens_its_column_in_the_grid_and_both_mixers() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let width_of = |h: &mut Harness, column: &str| {
+        let nodes = tree(h);
+        rect_of(Harness::node(&nodes, column)).width()
+    };
+    assert_eq!(width_of(&mut h, "1 MIDI"), 94.0);
+    // The right edge of track 1's title bar, 40 points right.
+    let edge = pos2(414.0, 69.0);
+    let widths = drag(&mut h, edge, &[vec2(10.0, 0.0); 4], Modifiers::NONE, |h| {
+        h.shell
+            .mixer_view()
+            .column_width(h.shell.editor().document(), t[0])
+    });
+    assert_eq!(*widths.last().unwrap(), 134.0);
+    assert_eq!(width_of(&mut h, "1 MIDI"), 134.0);
+    // Only that track's: the next column moved over, and kept its width.
+    assert_eq!(width_of(&mut h, "2 MIDI"), 94.0);
+    // The grid's slots follow (one point of margin each side).
+    let nodes = tree(&mut h);
+    let slot = nodes
+        .iter()
+        .find(|n| n.label.starts_with("1 MIDI: 1"))
+        .unwrap();
+    assert_eq!(rect_of(slot).width(), 132.0);
+    // The Arrangement's mixer has the same columns.
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.shell.run(ids::TOGGLE, json!({})).unwrap();
+    let nodes = tree(&mut h);
+    let arrangement = Harness::node(&nodes, "Arrangement Mixer").id;
+    let column = nodes
+        .iter()
+        .find(|n| {
+            n.label == "1 MIDI"
+                && n.role == Role::Group
+                && Harness::descends_from(&nodes, n.id, arrangement)
+        })
+        .unwrap();
+    assert_eq!(rect_of(column).width(), 134.0);
+    // No undo step, and the set isn't changed.
+    assert_eq!(h.shell.editor().undo_history().len(), 0);
+}
+
+// Spec: mixer-view R36 (I-DRAG-004).
+#[test]
+fn option_drags_every_tracks_edge_and_the_limits_hold() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    drag(
+        &mut h,
+        pos2(414.0, 69.0),
+        &[vec2(10.0, 0.0); 3],
+        Modifiers::ALT,
+        |_| (),
+    );
+    let doc_widths = |h: &Harness| -> Vec<f32> {
+        t.iter()
+            .map(|track| {
+                h.shell
+                    .mixer_view()
+                    .column_width(h.shell.editor().document(), *track)
+            })
+            .collect()
+    };
+    assert_eq!(doc_widths(&h), vec![124.0; t.len()]);
+    // The returns and Main keep theirs.
+    let main = h.shell.editor().document().main_id();
+    assert_eq!(
+        h.shell
+            .mixer_view()
+            .column_width(h.shell.editor().document(), main),
+        104.0
+    );
+    // Not narrower than 40 points, not wider than 400.
+    let edge = pos2(320.0 + 124.0, 69.0);
+    drag(
+        &mut h,
+        edge,
+        &[vec2(-100.0, 0.0); 3],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(doc_widths(&h)[0], 40.0);
+    let edge = pos2(320.0 + 40.0, 69.0);
+    drag(
+        &mut h,
+        edge,
+        &[vec2(150.0, 0.0); 4],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(doc_widths(&h)[0], 400.0);
+}
+
+// Spec: mixer-view R36 (I-DRAG-005), session-view R26.
+#[test]
+fn dragging_main_s_left_edge_widens_it_and_shows_the_scene_fields() {
+    let mut h = session();
+    let main = h.shell.editor().document().main_id();
+    assert!(!h.shell.mixer_view().scene_tempo());
+    drag(
+        &mut h,
+        pos2(1487.0, 69.0),
+        &[vec2(-20.0, 0.0); 3],
+        Modifiers::NONE,
+        |_| (),
+    );
+    assert_eq!(
+        h.shell
+            .mixer_view()
+            .column_width(h.shell.editor().document(), main),
+        164.0
+    );
+    assert!(h.shell.mixer_view().scene_tempo());
+    let nodes = tree(&mut h);
+    assert_eq!(rect_of(Harness::node(&nodes, "Main")).width(), 164.0);
+}
+
+// Spec: mixer-view R36.
+#[test]
+fn a_narrow_column_keeps_its_switches_fader_and_meter_and_hides_pan_peak_and_labels() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let nodes = tree(&mut h);
+    assert!(inside(&nodes, "3 Audio", "Track Pan").is_some());
+    assert!(inside(&nodes, "3 Audio", "Peak Level").is_some());
+    h.shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": t[2], "width": 60.0 }),
+        )
+        .unwrap();
+    let nodes = tree(&mut h);
+    for gone in ["Track Pan", "Peak Level"] {
+        assert!(inside(&nodes, "3 Audio", gone).is_none(), "{gone}");
+    }
+    for kept in [
+        "Track Activator",
+        "Solo",
+        "Arm Recording",
+        "Track Volume",
+        "Track Meter",
+    ] {
+        assert!(inside(&nodes, "3 Audio", kept).is_some(), "{kept}");
+    }
+    // The clip slot's launch button stays.
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.label.starts_with("3 Audio: 1") && rect_of(n).width() > 0.0)
+    );
+    // At 40 points too.
+    h.shell
+        .run(
+            ids::SET_COLUMN_WIDTH,
+            json!({ "track": t[2], "width": 40.0 }),
+        )
+        .unwrap();
+    let nodes = tree(&mut h);
+    let column = rect_of(Harness::node(&nodes, "3 Audio"));
+    for kept in [
+        "Track Activator",
+        "Solo",
+        "Arm Recording",
+        "Track Volume",
+        "Track Meter",
+    ] {
+        let rect = rect_of(inside(&nodes, "3 Audio", kept).unwrap());
+        assert!(
+            column.contains_rect(rect) && rect.width() > 0.0,
+            "{kept}: {rect:?} in {column:?}"
+        );
+    }
+}
+
+// Spec: mixer-view R19, R32, R36, R39.
+#[test]
+fn heights_and_widths_scale_with_the_zoom() {
+    for percent in ZOOM_STEPS {
+        let zoom = zoom_factor(percent);
+        let mut h = Harness::with_title_bar(Window::Main);
+        h.shell
+            .run("view.set_zoom", json!({ "percent": percent }))
+            .unwrap();
+        h.shell
+            .run("view.toggle_session_arrangement", json!({}))
+            .unwrap();
+        h.shell
+            .run(ids::SET_HEIGHT, json!({ "height": 210.0 }))
+            .unwrap();
+        let t = tracks(&h.shell);
+        h.shell
+            .run(
+                ids::SET_COLUMN_WIDTH,
+                json!({ "track": t[2], "width": 160.0 }),
+            )
+            .unwrap();
+        h.size = vec2(1600.0 * zoom, (1000.0 - TITLE_BAR) * zoom + TITLE_BAR);
+        let nodes = tree(&mut h);
+        let mixer = rect_of(Harness::node(&nodes, "Session Mixer"));
+        let column = rect_of(Harness::node(&nodes, "3 Audio"));
+        // The width and the strip's height are the 100% ones, whatever the
+        // zoom does to the window.
+        assert!(
+            (column.width() - 160.0).abs() < 0.1,
+            "{percent}%: {column:?}"
+        );
+        let strip = (mixer.bottom() - 6.5 - 210.0, mixer.bottom() - 6.5);
+        let expected = bl_ui::layout::mixer::StripLayout::compute(column, strip);
+        let peak = rect_of(peak_button(&nodes, "3 Audio").expect("extended at 210"));
+        assert!(
+            (peak.min - expected.peak_field.min).length() < 0.1,
+            "{percent}%"
+        );
+        let field = rect_of(volume_spin(&nodes, "3 Audio").unwrap());
+        let wanted = expected.volume_field.unwrap();
+        assert!(
+            (field.min - wanted.min).length() < 0.1 && (field.max - wanted.max).length() < 0.1,
+            "{percent}%: {field:?} {wanted:?}"
+        );
+        let meter = rect_of(inside(&nodes, "3 Audio", "Track Meter").unwrap());
+        assert!(
+            (meter.min - expected.meter.min).length() < 0.1
+                && (meter.max - expected.meter.max).length() < 0.1,
+            "{percent}%"
+        );
+    }
 }

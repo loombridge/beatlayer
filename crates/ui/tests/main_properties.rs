@@ -203,7 +203,8 @@ fn the_panel_shows_its_controls_in_order_and_the_selector_switches() {
         "Length",
         "Signature Numerator",
         "Groove",
-        "Scale",
+        "Clip Scale Mode",
+        "Clip Scale Name",
     ];
     let mut last = f64::MIN;
     for name in order {
@@ -225,8 +226,8 @@ fn the_panel_shows_its_controls_in_order_and_the_selector_switches() {
         );
     }
     // The Show buttons and the Set buttons sit beside Start, End, Position
-    // and Length; Scale waits for its package, and Groove is live (the
-    // grooves spec R29).
+    // and Length; Groove (the grooves spec R29) and the scale controls (the
+    // scales spec, R19) are live.
     for marker in ["Start", "End", "Position", "Length"] {
         Harness::node(&all, &format!("Show {marker}"));
         assert!(
@@ -234,13 +235,15 @@ fn the_panel_shows_its_controls_in_order_and_the_selector_switches() {
             "Set waits for playback"
         );
     }
-    assert!(Harness::node(&all, "Scale").disabled);
-    assert!(
-        Harness::node(&all, "Scale")
-            .description
-            .starts_with("Not built yet")
-    );
     assert!(!Harness::node(&all, "Groove").disabled);
+    for name in ["Clip Scale Mode", "Clip Root Note", "Clip Scale Name"] {
+        assert!(!Harness::node(&all, name).disabled, "{name} is live");
+    }
+    assert_eq!(
+        Harness::node(&all, "Clip Root Note").bounds.unwrap().y0,
+        Harness::node(&all, "Clip Scale Mode").bounds.unwrap().y0,
+        "the root chooser sits beside the switch"
+    );
 
     let before = steps(&h);
     let launch = all
@@ -492,5 +495,70 @@ fn clip_panels_focuses_the_first_control_of_the_panel() {
     assert_eq!(
         h.ctx.memory(|m| m.focused()),
         Some(egui::Id::new(("switch", "follow-enabled")))
+    );
+}
+
+/// Clicks the open chooser's item labelled `label`.
+fn choose(h: &mut Harness, label: &str) {
+    let all = nodes(h);
+    let item = all
+        .iter()
+        .rfind(|n| n.label == label && n.bounds.is_some())
+        .unwrap_or_else(|| panic!("no {label:?} in the open chooser"));
+    h.click(centre(item));
+    h.settle();
+}
+
+fn scale_of(h: &Harness, clip: ClipId) -> bl_model::Scale {
+    h.shell.editor().document().clip(clip).unwrap().scale
+}
+
+// Spec: scales R19. The panel ends with the Scale Mode switch, Root Note
+// chooser and Scale Name chooser, which run clip.set_scale on the clips the
+// Clip View shows and read `*` where their scales differ.
+#[test]
+fn the_scale_controls_run_clip_set_scale_and_show_a_mixed_selection() {
+    let (mut h, first, second) = arrangement_clips();
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Clip Scale Mode").toggled, Some(false));
+    assert_eq!(Harness::node(&all, "Clip Root Note").value, "C");
+    assert_eq!(Harness::node(&all, "Clip Scale Name").value, "Major");
+    let before = steps(&h);
+    h.click(centre(Harness::node(&all, "Clip Scale Mode")));
+    h.settle();
+    for clip in [first, second] {
+        assert!(scale_of(&h, clip).enabled, "the switch turns both clips on");
+    }
+    assert_eq!(steps(&h), before + 1, "one undo step");
+    // The clips' roots differ: the chooser reads `*`, and choosing one sets both.
+    h.shell
+        .run("clip.set_scale", json!({ "clips": [second], "root": 2 }))
+        .unwrap();
+    let all = nodes(&mut h);
+    assert_eq!(Harness::node(&all, "Clip Root Note").value, "*");
+    assert_eq!(Harness::node(&all, "Clip Scale Mode").toggled, Some(true));
+    h.click(centre(Harness::node(&all, "Clip Root Note")));
+    h.settle();
+    choose(&mut h, "F");
+    for clip in [first, second] {
+        assert_eq!(scale_of(&h, clip).root, 5, "F on both clips");
+    }
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Clip Scale Name")));
+    h.settle();
+    choose(&mut h, "Dorian");
+    for clip in [first, second] {
+        assert_eq!(scale_of(&h, clip).name, bl_model::ScaleName::Dorian);
+    }
+    // The root chooser's names follow the note spelling.
+    h.shell
+        .run("view.note_spelling", json!({ "spelling": "flats" }))
+        .unwrap();
+    let all = nodes(&mut h);
+    h.click(centre(Harness::node(&all, "Clip Root Note")));
+    let all = nodes(&mut h);
+    assert!(
+        all.iter().any(|n| n.label == "B♭"),
+        "A# reads B♭ with Flats"
     );
 }

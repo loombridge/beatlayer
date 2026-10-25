@@ -23,7 +23,10 @@ trigger = "press"
 milestone = "M6"
 mac = ["G"]
 win = ["G"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "view.fold_scale", contexts = ["note-editor"] },
+]
 
 [[shortcut]]
 id = "S-NOTE-040"

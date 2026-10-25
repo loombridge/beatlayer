@@ -117,6 +117,40 @@ fn the_note_filters_and_invert_selection_are_bound_in_the_note_editor() {
     }
 }
 
+// Spec: scales R22, R23, R25. K (S-NOTE-035) switches Highlight Scales and G
+// (S-NOTE-039) folds the editor to its scale, in the note editor and nowhere
+// else.
+#[test]
+fn k_and_g_reach_highlight_scales_and_fold_to_scale_in_the_note_editor() {
+    let keymap = Keymap::live12();
+    let contexts = [Context::NoteEditor, Context::Global];
+    for platform in [Platform::Mac, Platform::Other] {
+        for (key, id) in [
+            (Key::K, "view.highlight_scales"),
+            (Key::G, "view.fold_scale"),
+        ] {
+            let hit = keymap
+                .resolve(platform, key, mods(false, false, false, false), &contexts)
+                .unwrap_or_else(|| panic!("{key:?} is bound in the note editor"));
+            assert_eq!(hit.command.id, id, "{platform:?}");
+            assert!(
+                keymap
+                    .resolve(
+                        platform,
+                        key,
+                        mods(false, false, false, false),
+                        &[Context::Global]
+                    )
+                    .is_none_or(|hit| hit.command.id != id),
+                "{key:?} runs nothing outside the note editor"
+            );
+        }
+    }
+    for id in ["S-NOTE-035", "S-NOTE-039"] {
+        assert_eq!(keymap.entry_for(id).unwrap().status, Status::Bound, "{id}");
+    }
+}
+
 // Spec: piano-roll R23 to R31 (WP-6.53).
 #[test]
 fn the_note_editors_keys_are_all_handled() {

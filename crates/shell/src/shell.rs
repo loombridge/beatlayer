@@ -527,6 +527,10 @@ pub struct Shell {
     /// The report of the last DAWproject import, while the set the import
     /// made is open (R12).
     import_report: Option<bl_shell_spec::dawproject::ImportReport>,
+    /// The 14 track colours of the theme in use, from which a DAWproject
+    /// import draws the palette it places colours on (R23). The bundled
+    /// theme's until a window tells the shell its theme's.
+    track_palette: Vec<[u8; 3]>,
     dirty: bool,
     /// The crash-recovery service (WP-6.62, the crash-recovery spec R21):
     /// it journals the open set's edits, and holds the sets a crash left.
@@ -1176,6 +1180,7 @@ impl Shell {
         let saved = snapshot(&editor);
         let plugin_panels = prefs.plugin_panels.clone();
         let note_preview = prefs.note_preview;
+        let (highlight_scales, note_spelling) = (prefs.highlight_scales, prefs.note_spelling);
         let mut shell = Self {
             browser_view,
             media,
@@ -1203,6 +1208,7 @@ impl Shell {
             set_path: None,
             pending_name: None,
             import_report: None,
+            track_palette: bl_model::DEFAULT_TRACK_PALETTE.to_vec(),
             dirty: false,
             autosave: None,
             journal_label: String::new(),
@@ -1259,6 +1265,8 @@ impl Shell {
             clip_view: {
                 let mut view = ClipView::default();
                 view.set_preview(note_preview);
+                view.set_highlight_scales(highlight_scales);
+                view.set_note_spelling(note_spelling);
                 view
             },
             detail: DetailArea::default(),

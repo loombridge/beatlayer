@@ -12,9 +12,11 @@
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
 //!      "rack_views": { "14": { "macros": false, "chain_list": true, "devices": true } },
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
+//!      "scale_folds": [ 12 ],   the clips whose note editors are folded to their scale
 //!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
 //!      "mpe_view": { … },       the MPE tab's lanes, their heights and the clips with its grid on
 //!      "lane_views": { "3": { … } }, each track's automation lanes (R24 to R26)
+//!      "column_widths": { "3": 120.0 }, the columns resized from their default width
 //!      "document": { … }         the song, as bl-model serialises it
 //!    }
 //! ```
@@ -41,7 +43,7 @@ use std::io::Read;
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, DeviceWindows, Document, Editor, LaneViews, LaunchSettings, MpeView,
+    ClipFolds, ColumnWidths, DeviceWindows, Document, Editor, LaneViews, LaunchSettings, MpeView,
     MultisamplerViews, RackViewMap, WindowViews,
 };
 use ruzstd::decoding::StreamingDecoder;
@@ -84,6 +86,9 @@ pub struct Project {
     /// (WP-2.3): saved with the set, but not part of the document, so
     /// folding is no undo step.
     pub folds: ClipFolds,
+    /// Which clips' MIDI Note Editors are folded to their scale (the scales
+    /// spec, R23): saved with the set like `folds`, and no undo step.
+    pub scale_folds: ClipFolds,
     /// The tools each track's MIDI Tool panels show and each tool's settings
     /// (WP-6.11): saved with the set, but not part of the document, so
     /// changing them is no undo step (the MIDI Tools spec, R4, R5).
@@ -109,6 +114,10 @@ pub struct Project {
     /// (the automation spec, R24 to R26): saved with the set, but not part of
     /// the document, so changing them is no undo step.
     pub lane_views: LaneViews,
+    /// The width of each track's, return's and Main's column where it isn't
+    /// the default (the mixer view spec, R36): saved with the set, but not
+    /// part of the document, so resizing a column is no undo step.
+    pub column_widths: ColumnWidths,
 }
 
 impl Project {
@@ -129,12 +138,14 @@ impl Project {
             windows: DeviceWindows::new(),
             rack_views: RackViewMap::new(),
             folds: ClipFolds::new(),
+            scale_folds: ClipFolds::new(),
             midi_tools: MidiToolSettings::default(),
             launch: LaunchSettings::default(),
             multisamplers: MultisamplerViews::new(),
             window_views: WindowViews::default(),
             mpe_view: MpeView::default(),
             lane_views: LaneViews::new(),
+            column_widths: ColumnWidths::new(),
         }
     }
 
@@ -192,6 +203,18 @@ impl Project {
         self
     }
 
+    /// The same project with these clips folded to their scale, keeping
+    /// only those its document has.
+    #[must_use]
+    pub fn with_scale_folds(mut self, folds: &ClipFolds) -> Self {
+        self.scale_folds = folds
+            .iter()
+            .filter(|clip| self.document.clip(**clip).is_some())
+            .copied()
+            .collect();
+        self
+    }
+
     /// The same project with this MPE tab state, keeping the grids only of
     /// clips its document has.
     #[must_use]
@@ -211,6 +234,18 @@ impl Project {
             .iter()
             .filter(|(track, _)| self.document.track(**track).is_some())
             .map(|(track, lanes)| (*track, lanes.clone()))
+            .collect();
+        self
+    }
+
+    /// The same project with these column widths, keeping only the tracks
+    /// its document has and widths within the limits.
+    #[must_use]
+    pub fn with_column_widths(mut self, widths: &ColumnWidths) -> Self {
+        self.column_widths = widths
+            .iter()
+            .filter(|(track, width)| self.document.track(**track).is_some() && width.is_finite())
+            .map(|(track, width)| (*track, bl_model::clamp_column_width(*width)))
             .collect();
         self
     }
@@ -325,6 +360,8 @@ struct Saving<'a> {
     rack_views: &'a RackViewMap,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
     folds: &'a ClipFolds,
+    #[serde(skip_serializing_if = "ClipFolds::is_empty")]
+    scale_folds: &'a ClipFolds,
     #[serde(skip_serializing_if = "MidiToolSettings::is_empty")]
     midi_tools: &'a MidiToolSettings,
     /// The global launch quantisation and its switch (WP-3.2).
@@ -337,6 +374,8 @@ struct Saving<'a> {
     mpe_view: &'a MpeView,
     #[serde(skip_serializing_if = "LaneViews::is_empty")]
     lane_views: &'a LaneViews,
+    #[serde(skip_serializing_if = "ColumnWidths::is_empty")]
+    column_widths: &'a ColumnWidths,
     document: &'a Document,
 }
 
@@ -352,12 +391,14 @@ impl<'a> Saving<'a> {
             windows: &project.windows,
             rack_views: &project.rack_views,
             folds: &project.folds,
+            scale_folds: &project.scale_folds,
             midi_tools: &project.midi_tools,
             launch: project.launch,
             multisamplers: &project.multisamplers,
             window_views: project.window_views,
             mpe_view: &project.mpe_view,
             lane_views: &project.lane_views,
+            column_widths: &project.column_widths,
             document: &project.document,
         }
     }
@@ -382,6 +423,10 @@ struct Saved {
     rack_views: RackViewMap,
     #[serde(default)]
     folds: ClipFolds,
+    /// The clips folded to their scale (WP-6.7b). Sets saved before it open
+    /// with none.
+    #[serde(default)]
+    scale_folds: ClipFolds,
     /// The MIDI Tools' chosen tools and settings (WP-6.11). Sets saved
     /// before it open with every track on the default tools.
     #[serde(default)]
@@ -406,6 +451,10 @@ struct Saved {
     /// track showing its main lane only (R33).
     #[serde(default)]
     lane_views: LaneViews,
+    /// The columns' widths (WP-6.65). Sets saved before it open with every
+    /// column at its default width (the mixer view spec, R36).
+    #[serde(default)]
+    column_widths: ColumnWidths,
     document: Document,
 }
 
@@ -508,12 +557,14 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows,
         rack_views,
         folds,
+        scale_folds,
         midi_tools,
         launch,
         multisamplers,
         window_views,
         mpe_view,
         lane_views,
+        column_widths,
         document,
         ..
     } = saved;
@@ -539,18 +590,22 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         windows: DeviceWindows::new(),
         rack_views: RackViewMap::new(),
         folds: ClipFolds::new(),
+        scale_folds: ClipFolds::new(),
         midi_tools: MidiToolSettings::default(),
         launch,
         multisamplers: MultisamplerViews::new(),
         window_views,
         mpe_view: MpeView::default(),
         lane_views: LaneViews::new(),
+        column_widths: ColumnWidths::new(),
     }
     .with_windows(&windows)
     .with_rack_views(&rack_views)
     .with_folds(&folds)
+    .with_scale_folds(&scale_folds)
     .with_mpe_view(&mpe_view)
     .with_lane_views(&lane_views)
+    .with_column_widths(&column_widths)
     .with_midi_tools(&midi_tools)
     .with_multisamplers(&multisamplers);
     let info = SetInfo {

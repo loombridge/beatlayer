@@ -14,7 +14,9 @@
 use bl_model::{ChainId, DeviceId};
 use egui::{Rect, pos2};
 
-pub use bl_shell::mixer_view_commands::COLUMN_WIDTH;
+pub use bl_shell::mixer_view_commands::{
+    COLUMN_WIDTH, EXTENDED_METERS_HEIGHT, MIN_STRIP_HEIGHT, PAN_HIDES_BELOW, TICK_LABELS_WIDTH,
+};
 
 use super::Row;
 
@@ -142,8 +144,8 @@ pub const IN_OUT_HEIGHT: f32 = 115.0;
 /// The Sends section's height (L-MIX-002).
 pub const SENDS_HEIGHT: f32 = 56.0;
 
-/// The mixer strip's height (L-MIX-003).
-pub const STRIP_HEIGHT: f32 = 123.0;
+/// The mixer strip's height in a new set (L-MIX-003).
+pub const STRIP_HEIGHT: f32 = bl_shell::mixer_view_commands::STRIP_HEIGHT;
 
 /// The Crossfader section's height under the strip (L-MIX-006; its
 /// controls' sizes are [`unmeasured`]).
@@ -164,7 +166,7 @@ pub const DEVICE_ROW: f32 = 14.0;
 pub const PERFORMANCE_IMPACT_HEIGHT: f32 = 12.0;
 
 /// The Main track's column width (L-SES-006: 1487 to 1591).
-pub const MAIN_COLUMN: f32 = 104.0;
+pub const MAIN_COLUMN: f32 = bl_shell::mixer_view_commands::MAIN_COLUMN_WIDTH;
 
 /// The track colour strip along each column's bottom, under the strip
 /// section (L-MIX-009; observed: about 6.5 points).
@@ -198,7 +200,7 @@ pub const METER_WIDTH: f32 = 11.0;
 
 /// Which sections show (View ▸ Mixer Controls), and whether the return
 /// tracks scroll with the tracks.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sections {
     /// In/Out.
     pub in_out: bool,
@@ -206,6 +208,9 @@ pub struct Sections {
     pub sends: bool,
     /// The strips (Volume).
     pub volume: bool,
+    /// The strip section's height, 123 in a new set (the mixer view spec,
+    /// R32). The layout keeps it within what the area leaves.
+    pub strip: f32,
     /// The Crossfader section: the tracks' A/B assign buttons and Main's
     /// crossfader. Hidden by default (observed).
     pub crossfader: bool,
@@ -233,6 +238,7 @@ impl Sections {
         in_out: true,
         sends: true,
         volume: true,
+        strip: STRIP_HEIGHT,
         crossfader: false,
         returns: true,
         track_options: false,
@@ -240,6 +246,21 @@ impl Sections {
         devices: false,
         return_tracks_scroll: false,
     };
+
+    /// The same sections with the strip section raised above its default
+    /// height only as far as `room` points for the whole mixer allow (R32):
+    /// a strip at its default height or lower stays as it is.
+    #[must_use]
+    pub fn fitted(self, room: f32) -> Self {
+        if !self.volume || self.strip <= STRIP_HEIGHT {
+            return self;
+        }
+        let others = self.height() - self.strip;
+        Self {
+            strip: self.strip.min((room - others).max(STRIP_HEIGHT)),
+            ..self
+        }
+    }
 
     /// The height of the sections that show, stacked, with the colour strip
     /// under them.
@@ -256,7 +277,7 @@ impl Sections {
             height += SENDS_HEIGHT;
         }
         if self.volume {
-            height += STRIP_HEIGHT;
+            height += self.strip.max(MIN_STRIP_HEIGHT);
         }
         if self.track_options {
             height += TRACK_OPTIONS_HEIGHT;
@@ -297,23 +318,38 @@ pub struct ChainColumn {
 
 /// One column of a mixer's track area: a track's, or a chain's strip folded
 /// out after it (racks spec, R27).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TrackColumn {
     /// The chain the column shows, for a chain's column.
     pub chain: Option<ChainColumn>,
+    /// The column's width in points, 94 unless it was resized (R36).
+    pub width: f32,
 }
 
 impl TrackColumn {
-    /// A track's column.
+    /// A track's column, at the default width.
     #[must_use]
     pub const fn track() -> Self {
-        Self { chain: None }
+        Self {
+            chain: None,
+            width: COLUMN_WIDTH,
+        }
     }
 
     /// A chain's column, folded out after its track's.
     #[must_use]
     pub const fn chain(chain: ChainColumn) -> Self {
-        Self { chain: Some(chain) }
+        Self {
+            chain: Some(chain),
+            width: COLUMN_WIDTH,
+        }
+    }
+
+    /// The same column, `width` points wide.
+    #[must_use]
+    pub const fn wide(mut self, width: f32) -> Self {
+        self.width = width;
+        self
     }
 }
 
@@ -366,6 +402,9 @@ pub struct MixerLayout {
     pub colour: (f32, f32),
     /// How far the track columns are scrolled, within what the set allows.
     pub scroll: f32,
+    /// Where each track column starts among the scrolling columns, and
+    /// where the last ends: the sum of the widths before it.
+    offsets: Vec<f32>,
     /// Whether the return tracks scroll with the tracks (IMP-01, the mixer
     /// view spec R22).
     pub returns_scroll: bool,
@@ -373,16 +412,9 @@ pub struct MixerLayout {
 
 impl MixerLayout {
     /// Lays out a mixer in `area` with `tracks` track columns and `returns`
-    /// return columns, scrolled `scroll` points (kept within the tracks).
-    /// A track's column may be followed by the chain strips folded out of
-    /// its rack (racks spec, R27), which are columns of their own.
-    /// The sections stack up from the area's bottom: the colour strip, then
-    /// the strip, Sends, and In/Out above it; any that don't fit are cut at
-    /// the area's top.
-    ///
-    /// With the return tracks scrolling with the tracks (IMP-01, the mixer
-    /// view spec R22), the returns come after the drop area and scroll with
-    /// the track columns, and only Main stays pinned at the right.
+    /// return columns, all at the default width, scrolled `scroll` points
+    /// (kept within the tracks): [`Self::compute_with_widths`] with nothing
+    /// resized.
     #[must_use]
     pub fn compute(
         area: Rect,
@@ -391,13 +423,54 @@ impl MixerLayout {
         sections: Sections,
         scroll: f32,
     ) -> Self {
-        let main_rect = Rect::from_min_max(pos2(area.right() - MAIN_COLUMN, area.top()), area.max);
-        let shown_returns = if sections.returns { returns } else { 0 };
-        let tracks_width = COLUMN_WIDTH * tracks.len() as f32;
-        let returns_width = COLUMN_WIDTH * shown_returns as f32;
+        Self::compute_with_widths(
+            area,
+            tracks,
+            &vec![COLUMN_WIDTH; returns],
+            MAIN_COLUMN,
+            sections,
+            scroll,
+        )
+    }
+
+    /// Lays out a mixer in `area` with `tracks` track columns, each as wide
+    /// as it says (R36), and a return column of each width in `returns`,
+    /// scrolled `scroll` points (kept within the tracks), with Main
+    /// `main_width` points wide. A track's column may be followed by the
+    /// chain strips folded out of its rack (racks spec, R27), which are
+    /// columns of their own. The sections stack up from the area's bottom:
+    /// the colour strip, then the strip, Sends, and In/Out above it; any
+    /// that don't fit are cut at the area's top, except a strip raised
+    /// above its default height, which gives up the height that doesn't fit
+    /// (R32).
+    ///
+    /// With the return tracks scrolling with the tracks (IMP-01, the mixer
+    /// view spec R22), the returns come after the drop area and scroll with
+    /// the track columns, and only Main stays pinned at the right.
+    #[must_use]
+    pub fn compute_with_widths(
+        area: Rect,
+        tracks: &[TrackColumn],
+        returns: &[f32],
+        main_width: f32,
+        sections: Sections,
+        scroll: f32,
+    ) -> Self {
+        let main_rect = Rect::from_min_max(pos2(area.right() - main_width, area.top()), area.max);
+        let shown_returns: &[f32] = if sections.returns { returns } else { &[] };
+        // Where each track column starts among the scrolling columns, and
+        // where the last ends.
+        let mut offsets = Vec::with_capacity(tracks.len() + 1);
+        let mut tracks_width = 0.0;
+        for column in tracks {
+            offsets.push(tracks_width);
+            tracks_width += column.width;
+        }
+        offsets.push(tracks_width);
+        let returns_width: f32 = shown_returns.iter().sum();
         // With no return tracks showing, there is nothing to scroll with
         // them, and the layout is the one with the returns pinned.
-        let scrolling = sections.return_tracks_scroll && shown_returns > 0;
+        let scrolling = sections.return_tracks_scroll && !shown_returns.is_empty();
         // The columns scroll in the area from the mixer's left to Main
         // when the returns scroll with them, and to the first return when
         // they stay pinned at the right.
@@ -425,7 +498,8 @@ impl MixerLayout {
         };
         let max_scroll = (content - track_area.width()).max(0.0);
         let scroll = scroll.clamp(0.0, max_scroll);
-        let first = (scroll / COLUMN_WIDTH).floor() as usize;
+        // The first column with any of it left of the scroll still in view.
+        let first = offsets[1..].partition_point(|right| *right <= scroll);
         // The track each column shows: the track's own column, and the chain
         // strips folded out after it (racks spec, R27).
         let mut seen = 0usize;
@@ -434,11 +508,11 @@ impl MixerLayout {
             if column.chain.is_none() {
                 seen += 1;
             }
-            track_of.push(seen - 1);
+            track_of.push(seen.saturating_sub(1));
         }
         let columns: Vec<Column> = (first..tracks.len())
             .map(|index| {
-                let left = track_area.left() + COLUMN_WIDTH * index as f32 - scroll;
+                let left = track_area.left() + offsets[index] - scroll;
                 let kind = match tracks[index].chain {
                     Some(chain) => ColumnKind::Chain(chain),
                     None => ColumnKind::Track,
@@ -448,7 +522,7 @@ impl MixerLayout {
                     index: track_of[index],
                     rect: Rect::from_min_max(
                         pos2(left, area.top()),
-                        pos2(left + COLUMN_WIDTH, area.bottom()),
+                        pos2(left + tracks[index].width, area.bottom()),
                     ),
                 }
             })
@@ -461,17 +535,19 @@ impl MixerLayout {
         } else {
             main_rect.left() - returns_width
         };
-        let returns: Vec<Column> = (0..shown_returns)
-            .map(|index| Column {
-                kind: ColumnKind::Return,
-                index,
-                rect: Rect::from_min_max(
-                    pos2(returns_left + COLUMN_WIDTH * index as f32, area.top()),
-                    pos2(
-                        returns_left + COLUMN_WIDTH * (index + 1) as f32,
-                        area.bottom(),
-                    ),
-                ),
+        let mut left = returns_left;
+        let returns: Vec<Column> = shown_returns
+            .iter()
+            .enumerate()
+            .map(|(index, width)| {
+                let rect =
+                    Rect::from_min_max(pos2(left, area.top()), pos2(left + width, area.bottom()));
+                left += width;
+                Column {
+                    kind: ColumnKind::Return,
+                    index,
+                    rect,
+                }
             })
             .filter(|column| {
                 !scrolling
@@ -499,6 +575,17 @@ impl MixerLayout {
         };
 
         let colour = (area.bottom() - COLOUR_STRIP, area.bottom());
+        // A strip raised above its default height gives up what the area
+        // doesn't have for it (R32).
+        let strip_height = {
+            let strip = sections.strip.max(MIN_STRIP_HEIGHT);
+            if sections.volume && strip > STRIP_HEIGHT {
+                let others = sections.height() - strip;
+                strip.min((area.height() - others).max(STRIP_HEIGHT))
+            } else {
+                strip
+            }
+        };
         let mut bottom = colour.0;
         let mut stack = |shown: bool, height: f32| {
             shown.then(|| {
@@ -515,7 +602,7 @@ impl MixerLayout {
         let crossfader = stack(sections.crossfader, CROSSFADER_HEIGHT);
         let track_options = stack(sections.track_options, TRACK_OPTIONS_HEIGHT);
         let performance_impact = stack(sections.performance_impact, PERFORMANCE_IMPACT_HEIGHT);
-        let strip = stack(sections.volume, STRIP_HEIGHT);
+        let strip = stack(sections.volume, strip_height);
         let sends = stack(sections.sends, SENDS_HEIGHT);
         let devices = stack(sections.devices, DEVICES_HEIGHT);
         let in_out = stack(sections.in_out, IN_OUT_HEIGHT);
@@ -540,7 +627,22 @@ impl MixerLayout {
             colour,
             scroll,
             returns_scroll: scrolling,
+            offsets,
         }
+    }
+
+    /// Where track `index`'s own column starts and ends among the columns
+    /// that scroll, in points from the first column's left, wherever the
+    /// mixer is scrolled to.
+    #[must_use]
+    pub fn track_span(&self, columns: &[TrackColumn], index: usize) -> Option<(f32, f32)> {
+        let at = columns
+            .iter()
+            .enumerate()
+            .filter(|(_, column)| column.chain.is_none())
+            .nth(index)?
+            .0;
+        Some((self.offsets[at], self.offsets[at + 1]))
     }
 
     /// The part of a column that shows: its own rectangle, cut to the
@@ -648,7 +750,7 @@ impl SessionLayout {
     pub fn compute(view: Rect, mixer: Option<Sections>) -> Self {
         let title_bars =
             Rect::from_min_max(view.min, pos2(view.right(), view.top() + TITLE_BAR_HEIGHT));
-        let mixer_height = mixer.map_or(0.0, Sections::height);
+        let mixer_height = mixer.map_or(0.0, |sections| sections.fitted(Self::room(view)).height());
         let floor = title_bars.bottom() + STATUS_ROW;
         let mixer_top = (view.bottom() - mixer_height).max(floor);
         let mixer = mixer.map(|_| Rect::from_min_max(pos2(view.left(), mixer_top), view.max));
@@ -666,6 +768,13 @@ impl SessionLayout {
             status_row,
             mixer,
         }
+    }
+
+    /// The height a mixer in the main view `view` may take (R32): all but
+    /// the title bars, the status row and one clip-slot row.
+    #[must_use]
+    pub fn room(view: Rect) -> f32 {
+        view.height() - TITLE_BAR_HEIGHT - STATUS_ROW - SLOT_ROW
     }
 
     /// The rectangle of scene `index` (counting from 0) across the slots,
@@ -710,8 +819,21 @@ impl SessionLayout {
 /// Main, and the time ruler take the rest above it.
 #[must_use]
 pub fn arrangement_mixer(view: Rect, sections: Sections) -> Rect {
-    let top = (view.bottom() - sections.height() - ARRANGEMENT_TITLE_ROW).max(view.top());
+    let height = sections.fitted(arrangement_room(view)).height();
+    let top = (view.bottom() - height - ARRANGEMENT_TITLE_ROW).max(view.top());
     Rect::from_min_max(pos2(view.left(), top), view.max)
+}
+
+/// What the Arrangement View keeps above its mixer: its rulers with the
+/// Overview, one track row, a pinned row and the buttons under the lanes
+/// (R32; Beatlayer's own).
+pub const ARRANGEMENT_ABOVE_MIN: f32 = 118.0;
+
+/// The height a mixer in the Arrangement's main view `view` may take, its
+/// title row included (R32).
+#[must_use]
+pub fn arrangement_room(view: Rect) -> f32 {
+    view.height() - ARRANGEMENT_ABOVE_MIN - ARRANGEMENT_TITLE_ROW
 }
 
 /// A strip control's rectangle from Live's position relative to the strip
@@ -734,11 +856,39 @@ pub const SCALE_LABELS: [(&str, f32); 6] = [
     ("60", 111.0),
 ];
 
+/// The height of the volume field under the fader while the extended meters
+/// show (R33): Beatlayer's own.
+pub const VOLUME_FIELD_HEIGHT: f32 = 14.0;
+
+/// The top and bottom of the activator, Solo and Arm in a strip section
+/// `height` points tall (R32), in points from its top. At the default
+/// height they sit where Live has them (y 64 to 85, 91 to 102.5, and 106 to
+/// 119), the bottom of the last 4 points up; in a taller strip they keep
+/// their distance from the bottom, and in a shorter one they squeeze
+/// together between `top_free`, where the controls above them end, and that
+/// distance (Beatlayer's own).
+fn switch_rows(height: f32, top_free: f32) -> [(f32, f32); 3] {
+    // Measured up from the last one's bottom at the default height: 119 down
+    // to 64 is 55 points, holding 21, 11.5 and 13.
+    let bottom = height - 4.0;
+    let squeeze = ((bottom - top_free) / 55.0).clamp(0.0, 1.0);
+    [(34.0, 55.0), (16.5, 28.0), (0.0, 13.0)]
+        .map(|(near, far)| (bottom - far * squeeze, bottom - near * squeeze))
+}
+
 /// The controls inside one column's strip section, where Live 12.4.6 has
-/// them (observed on an audio track at the default mixer height, ±1
-/// point): the peak level readout at the top left, the pan knob with its
-/// reset triangle under it, the activator, Solo, and Arm in a column at the
-/// left, the fader's handle left of the meter, and the meter's scale.
+/// them (observed on an audio track at the default mixer height and column
+/// width, ±1 point): the peak level readout at the top left, the pan knob
+/// with its reset triangle under it, the activator, Solo, and Arm in a column
+/// at the left, the fader's handle left of the meter, and the meter's scale.
+///
+/// Taller, the meter, the fader and the scale stretch, and the switches keep
+/// their distance from the bottom; shorter than 100 points the pan knob
+/// hides and the switches squeeze together; from 200 points the extended
+/// meters show a volume field under the fader (R32, R33). A column narrower
+/// than 94 points hides the pan knob, the peak readout and the scale's
+/// labels and packs the switches, the fader and the meter into its width
+/// (R36). All of that is Beatlayer's own.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct StripLayout {
     /// The peak level readout (x 8 to 42, y 13 to 24).
@@ -765,6 +915,24 @@ pub struct StripLayout {
     pub labels: (f32, f32),
     /// The strip section's top, which [`SCALE_LABELS`] count from.
     pub top: f32,
+    /// How far the meter's scale is stretched from the default height's: 1
+    /// at 123 points.
+    pub stretch: f32,
+    /// Whether the pan knob, its triangle and the split controls show.
+    pub pan_shown: bool,
+    /// Whether the peak level readout shows.
+    pub peak_shown: bool,
+    /// Whether the scale's labels show.
+    pub labels_shown: bool,
+    /// Whether the extended meters show (R33): tick marks across the
+    /// meters, a volume field under the fader, and a readout that holds its
+    /// peak until it is clicked.
+    pub extended: bool,
+    /// The volume field under the fader, while the extended meters show in
+    /// a column at least 94 points wide (R33).
+    pub volume_field: Option<Rect>,
+    /// Whether each tick mark has its value in dB beside it (R35).
+    pub tick_labels: bool,
 }
 
 impl StripLayout {
@@ -772,23 +940,122 @@ impl StripLayout {
     #[must_use]
     pub fn compute(column: Rect, span: (f32, f32)) -> Self {
         let top = span.0;
+        let height = span.1 - span.0;
+        let narrow = column.width() < COLUMN_WIDTH;
+        let pan_shown = height >= PAN_HIDES_BELOW && !narrow;
+        let peak_shown = !narrow;
+        let extended = height >= EXTENDED_METERS_HEIGHT;
+        let field_shown = extended && !narrow;
+        // The meter runs from y 11 down to 4 points above the strip's
+        // bottom, or above the volume field under it.
+        let bottom = height
+            - 4.0
+            - if field_shown {
+                VOLUME_FIELD_HEIGHT + 2.0
+            } else {
+                0.0
+            };
+        let stretch = (bottom - 11.0) / 108.0;
+        let y = |y: f32| 11.0 + (y - 11.0) * stretch;
         let (travel_top, travel_bottom) = bl_shell::mixer_controls::FADER_TRAVEL;
+        // Across: Live's places, or packed into a narrow column.
+        let (switch_x, fader_x, meter_x, reduction_x) = if narrow {
+            let k = ((column.width() - 12.0) / 45.0).min(1.0);
+            let x0 = ((column.width() - 45.0 * k - 8.0) / 2.0).max(0.0);
+            let switch = (x0, x0 + 21.0 * k);
+            let fader = (switch.1 + 2.0, switch.1 + 2.0 + 13.0 * k);
+            let meter = (fader.1 + 2.0, fader.1 + 2.0 + 11.0 * k);
+            (switch, fader, meter, (meter.1 + 0.5, meter.1 + 2.5))
+        } else {
+            ((15.0, 36.0), (46.0, 59.0), (60.0, 71.0), (71.5, 73.5))
+        };
+        let top_free = if pan_shown {
+            64.0
+        } else if peak_shown {
+            27.0
+        } else {
+            13.0
+        };
+        let [activator, solo, arm] = switch_rows(height, top_free)
+            .map(|(y0, y1)| at(column, top, switch_x.0, y0, switch_x.1, y1));
         Self {
             peak_field: at(column, top, 8.0, 13.0, 42.0, 24.0),
             pan_triangle: at(column, top, 22.0, 27.5, 28.0, 32.5),
             pan: at(column, top, 12.5, 33.5, 37.5, 58.5),
-            activator: at(column, top, 15.0, 64.0, 36.0, 85.0),
-            solo: at(column, top, 15.0, 91.0, 36.0, 102.5),
-            arm: at(column, top, 15.0, 106.0, 36.0, 119.0),
-            fader: at(column, top, 46.0, travel_top, 59.0, travel_bottom),
-            meter: at(column, top, 60.0, 11.0, 71.0, 119.0),
-            gain_reduction: at(column, top, 71.5, 11.0, 73.5, 119.0),
+            activator,
+            solo,
+            arm,
+            fader: at(
+                column,
+                top,
+                fader_x.0,
+                y(travel_top),
+                fader_x.1,
+                y(travel_bottom),
+            ),
+            meter: at(column, top, meter_x.0, 11.0, meter_x.1, bottom),
+            gain_reduction: at(column, top, reduction_x.0, 11.0, reduction_x.1, bottom),
             labels: (column.left() + 74.0, column.left() + 86.0),
             top,
+            stretch,
+            pan_shown,
+            peak_shown,
+            labels_shown: !narrow,
+            extended,
+            volume_field: field_shown.then(|| {
+                at(
+                    column,
+                    top,
+                    42.0,
+                    height - 4.0 - VOLUME_FIELD_HEIGHT,
+                    86.0,
+                    height - 4.0,
+                )
+            }),
+            tick_labels: extended && column.width() >= TICK_LABELS_WIDTH,
         }
     }
 
-    /// Every control, for checks.
+    /// The height in the strip of a mark on the meter's scale that sits at
+    /// `y` points from the top of a strip at the default height: the scale
+    /// stretches with the strip.
+    #[must_use]
+    pub fn scale_y(&self, y: f32) -> f32 {
+        self.top + 11.0 + (y - 11.0) * self.stretch
+    }
+
+    /// Where the tick mark at `db` (0 or below) sits on the meter's scale,
+    /// the same as the fader's handle at that level (R33).
+    #[must_use]
+    pub fn tick_y(&self, db: f64) -> f32 {
+        let position =
+            bl_shell::mixer_controls::fader_position(bl_shell::mixer_controls::db_gain(db));
+        self.fader.bottom() - self.fader.height() * position as f32
+    }
+
+    /// Every control that shows, for checks.
+    #[must_use]
+    pub fn shown_parts(&self) -> Vec<Rect> {
+        let mut parts = vec![
+            self.activator,
+            self.solo,
+            self.arm,
+            self.fader,
+            self.meter,
+            self.gain_reduction,
+        ];
+        if self.peak_shown {
+            parts.push(self.peak_field);
+        }
+        if self.pan_shown {
+            parts.push(self.pan_triangle);
+            parts.push(self.pan);
+        }
+        parts.extend(self.volume_field);
+        parts
+    }
+
+    /// Every control at its default place, for checks.
     #[must_use]
     pub fn parts(&self) -> [Rect; 9] {
         [
@@ -820,6 +1087,9 @@ pub struct ChainStripLayout {
     pub volume: Rect,
     /// The Pan slider.
     pub pan: Rect,
+    /// Whether the Pan slider shows: not in a strip shorter than 100
+    /// points, as a track's pan knob hides (R32).
+    pub pan_shown: bool,
     /// The Chain Activator.
     pub activator: Rect,
     /// The Solo button.
@@ -831,13 +1101,18 @@ impl ChainStripLayout {
     #[must_use]
     pub fn compute(column: Rect, span: (f32, f32)) -> Self {
         let top = span.0;
+        let height = span.1 - span.0;
+        let pan_shown = height >= PAN_HIDES_BELOW;
+        let [activator, solo, _] = switch_rows(height, if pan_shown { 56.0 } else { 44.0 })
+            .map(|(y0, y1)| at(column, top, 15.0, y0, 36.0, y1));
         Self {
             name: at(column, top, 8.0, 13.0, 42.0, 24.0),
             fold: at(column, top, 78.0, 13.0, 90.0, 25.0),
             volume: at(column, top, 8.0, 33.0, 86.0, 42.0),
             pan: at(column, top, 8.0, 45.0, 86.0, 54.0),
-            activator: at(column, top, 15.0, 64.0, 36.0, 85.0),
-            solo: at(column, top, 15.0, 91.0, 36.0, 102.5),
+            pan_shown,
+            activator,
+            solo,
         }
     }
 }
@@ -1245,6 +1520,273 @@ mod tests {
         assert_eq!(
             arrangement_mixer(view, fewer).top(),
             mixer.top() + IN_OUT_HEIGHT
+        );
+    }
+
+    /// Whether no two of `rects` overlap.
+    fn apart(rects: &[Rect]) -> bool {
+        rects
+            .iter()
+            .enumerate()
+            .all(|(i, a)| rects[i + 1..].iter().all(|b| a.intersect(*b).area() < 1e-3))
+    }
+
+    // Spec: mixer-view R32, R33.
+    #[test]
+    fn each_height_stacks_the_sections_with_nothing_overlapping() {
+        let view = main_view();
+        let room = SessionLayout::room(view);
+        let others = Sections::DEFAULT.height() - STRIP_HEIGHT;
+        let most = room - others;
+        assert!(most > 200.0, "the extended meters fit at 1600 × 1000");
+        let mut height = MIN_STRIP_HEIGHT;
+        while height <= most {
+            let sections = Sections {
+                strip: height,
+                ..Sections::DEFAULT
+            };
+            let session = SessionLayout::compute(view, Some(sections));
+            let area = session.mixer.unwrap();
+            assert_eq!(area.bottom(), view.bottom(), "{height}");
+            let layout = MixerLayout::compute(area, &tracks(4), 2, sections, 0.0);
+            // The sections run bottom to top without a gap, and the strip is
+            // as tall as it was set.
+            let strip = layout.strip.unwrap();
+            assert_eq!(strip.1 - strip.0, height, "{height}");
+            assert_eq!(strip.1, layout.colour.0, "{height}");
+            assert_eq!(layout.sends.unwrap().1, strip.0, "{height}");
+            assert_eq!(
+                layout.in_out.unwrap().1,
+                layout.sends.unwrap().0,
+                "{height}"
+            );
+            assert_eq!(layout.in_out.unwrap().0, area.top(), "{height}");
+            // The slots give up what the mixer takes, and keep a row.
+            assert!(session.slots.height() >= SLOT_ROW, "{height}");
+            assert_eq!(session.status_row.bottom(), area.top(), "{height}");
+            // Every control that shows is inside the strip section and
+            // inside its column, and none overlaps another.
+            let column = layout.columns[0].rect;
+            let controls = StripLayout::compute(column, strip);
+            let parts = controls.shown_parts();
+            for part in &parts {
+                assert!(
+                    column.contains_rect(*part)
+                        && part.top() >= strip.0
+                        && part.bottom() <= strip.1,
+                    "{height}: {part:?}"
+                );
+            }
+            let switches = [controls.activator, controls.solo, controls.arm];
+            assert!(apart(&switches), "{height}: {switches:?}");
+            if controls.pan_shown {
+                assert!(
+                    controls.pan.bottom() <= controls.activator.top(),
+                    "{height}"
+                );
+            } else {
+                assert!(
+                    controls.peak_field.bottom() <= controls.activator.top(),
+                    "{height}"
+                );
+            }
+            // Pan hides below 100 points, the extended meters show from 200.
+            assert_eq!(controls.pan_shown, height >= PAN_HIDES_BELOW, "{height}");
+            assert_eq!(
+                controls.extended,
+                height >= EXTENDED_METERS_HEIGHT,
+                "{height}"
+            );
+            assert_eq!(
+                controls.volume_field.is_some(),
+                controls.extended,
+                "{height}"
+            );
+            if let Some(field) = controls.volume_field {
+                assert!(field.top() >= controls.meter.bottom(), "{height}");
+                assert!(field.top() >= controls.fader.bottom(), "{height}");
+            }
+            // The meter and the fader keep their ends on the same scale.
+            assert!(controls.fader.top() >= controls.meter.top(), "{height}");
+            assert!(
+                controls.fader.bottom() <= controls.meter.bottom() + 0.5,
+                "{height}"
+            );
+            height += 7.0;
+        }
+        // The default is Live's, whatever is taller or shorter.
+        assert_eq!(Sections::DEFAULT.strip, STRIP_HEIGHT);
+    }
+
+    // Spec: mixer-view R32 (racks spec, R27).
+    #[test]
+    fn a_chain_strip_squeezes_and_hides_its_pan_slider_like_a_track_strip() {
+        let column = Rect::from_min_max(pos2(0.0, 0.0), pos2(94.0, 400.0));
+        let default = ChainStripLayout::compute(column, (0.0, STRIP_HEIGHT));
+        assert!(default.pan_shown);
+        assert_eq!(default.activator.top(), 64.0);
+        assert_eq!(default.solo.bottom(), 102.5);
+        let mut height = MIN_STRIP_HEIGHT;
+        while height <= 260.0 {
+            let strip = ChainStripLayout::compute(column, (0.0, height));
+            assert_eq!(strip.pan_shown, height >= PAN_HIDES_BELOW, "{height}");
+            assert!(strip.activator.bottom() <= strip.solo.top(), "{height}");
+            let above = if strip.pan_shown {
+                strip.pan.bottom()
+            } else {
+                strip.volume.bottom()
+            };
+            assert!(above <= strip.activator.top(), "{height}");
+            assert!(strip.solo.bottom() <= height, "{height}");
+            height += 9.0;
+        }
+    }
+
+    // Spec: mixer-view R32.
+    #[test]
+    fn the_strip_gives_up_what_would_take_the_last_clip_slot_row() {
+        let view = main_view();
+        let huge = Sections {
+            strip: 5000.0,
+            ..Sections::DEFAULT
+        };
+        let session = SessionLayout::compute(view, Some(huge));
+        assert_eq!(session.slots.height(), SLOT_ROW);
+        let area = session.mixer.unwrap();
+        let layout = MixerLayout::compute(area, &tracks(4), 2, huge, 0.0);
+        let strip = layout.strip.unwrap();
+        assert_eq!(layout.in_out.unwrap().0, area.top());
+        assert_eq!(
+            strip.1 - strip.0,
+            huge.fitted(SessionLayout::room(view)).strip
+        );
+        // A strip below its default is never raised, and one that fits is
+        // never cut.
+        let lower = Sections {
+            strip: MIN_STRIP_HEIGHT,
+            ..Sections::DEFAULT
+        };
+        assert_eq!(lower.fitted(10.0).strip, MIN_STRIP_HEIGHT);
+        assert_eq!(Sections::DEFAULT.fitted(10.0).strip, STRIP_HEIGHT);
+        // The Arrangement keeps its rulers and a track row above its mixer.
+        let mixer = arrangement_mixer(view, huge);
+        assert_eq!(mixer.top(), view.top() + ARRANGEMENT_ABOVE_MIN);
+        let sections = Sections {
+            strip: 300.0,
+            ..Sections::DEFAULT
+        };
+        assert_eq!(
+            arrangement_mixer(view, sections).height(),
+            sections.height() + ARRANGEMENT_TITLE_ROW
+        );
+    }
+
+    // Spec: mixer-view R36.
+    #[test]
+    fn each_width_lays_out_the_strip_as_r36_says() {
+        let span = (636.5, 759.5);
+        let mut width = 40.0;
+        while width <= 400.0 {
+            let column = Rect::from_min_max(pos2(320.0, 465.5), pos2(320.0 + width, 766.0));
+            let controls = StripLayout::compute(column, span);
+            let narrow = width < COLUMN_WIDTH;
+            // Narrower than 94: no pan knob, no peak readout, no scale
+            // labels; the switches, the fader and the meter stay.
+            assert_eq!(controls.pan_shown, !narrow, "{width}");
+            assert_eq!(controls.peak_shown, !narrow, "{width}");
+            assert_eq!(controls.labels_shown, !narrow, "{width}");
+            let kept = [
+                controls.activator,
+                controls.solo,
+                controls.arm,
+                controls.fader,
+                controls.meter,
+            ];
+            for part in controls.shown_parts() {
+                assert!(column.contains_rect(part), "{width}: {part:?}");
+            }
+            assert!(apart(&kept), "{width}");
+            // Across: the switches, then the fader, then the meter.
+            assert!(
+                controls.activator.right() <= controls.fader.left(),
+                "{width}"
+            );
+            assert!(controls.fader.right() <= controls.meter.left(), "{width}");
+            assert!(
+                controls.meter.right() <= controls.gain_reduction.left(),
+                "{width}"
+            );
+            assert!(controls.gain_reduction.right() <= column.right(), "{width}");
+            // Live's places at the default width and wider.
+            if !narrow {
+                assert_eq!(controls.activator.left() - column.left(), 15.0, "{width}");
+                assert_eq!(controls.meter.left() - column.left(), 60.0, "{width}");
+            }
+            // The dB labels from 120 points, with the extended meters only.
+            assert!(!controls.tick_labels, "{width}: not extended at 123");
+            let tall = StripLayout::compute(column, (636.5, 636.5 + 240.0));
+            assert_eq!(tall.tick_labels, width >= TICK_LABELS_WIDTH, "{width}");
+            assert_eq!(tall.volume_field.is_some(), !narrow, "{width}");
+            width += 6.0;
+        }
+        // The widest and the narrowest.
+        for width in [bl_model::MIN_COLUMN_WIDTH, bl_model::MAX_COLUMN_WIDTH] {
+            let column = Rect::from_min_max(pos2(0.0, 0.0), pos2(width, 400.0));
+            let controls = StripLayout::compute(column, (200.0, 323.0));
+            assert!(column.contains_rect(controls.meter));
+        }
+    }
+
+    // Spec: mixer-view R36.
+    #[test]
+    fn the_columns_follow_their_own_widths_and_scroll_by_them() {
+        let area = SessionLayout::compute(main_view(), Some(Sections::DEFAULT))
+            .mixer
+            .unwrap();
+        let widths = [94.0, 200.0, 40.0, 400.0, 94.0, 120.0];
+        let columns: Vec<TrackColumn> = widths
+            .iter()
+            .map(|w| TrackColumn::track().wide(*w))
+            .collect();
+        let layout = MixerLayout::compute_with_widths(
+            area,
+            &columns,
+            &[150.0, 60.0],
+            200.0,
+            Sections::DEFAULT,
+            0.0,
+        );
+        let lefts: Vec<f32> = layout.columns.iter().map(|c| c.rect.left()).collect();
+        assert_eq!(lefts[..4], [320.0, 414.0, 614.0, 654.0]);
+        assert_eq!(layout.columns[3].rect.width(), 400.0);
+        // Main takes its own width at the right edge, the returns end where
+        // it starts.
+        assert_eq!(layout.main.rect.width(), 200.0);
+        assert_eq!(layout.main.rect.right(), area.right());
+        assert_eq!(layout.returns[1].rect.right(), layout.main.rect.left());
+        assert_eq!(layout.returns[0].rect.width(), 150.0);
+        assert_eq!(layout.returns[1].rect.width(), 60.0);
+        assert_eq!(
+            layout.returns[0].rect.right(),
+            layout.returns[1].rect.left()
+        );
+        // A column's span among the scrolling columns counts the widths
+        // before it.
+        assert_eq!(layout.track_span(&columns, 3), Some((334.0, 734.0)));
+        assert_eq!(layout.track_span(&columns, 9), None);
+        // The first column in view is the first with any of it right of the
+        // scroll.
+        let tight = Rect::from_min_max(area.min, pos2(area.left() + 900.0, area.bottom()));
+        let scrolled =
+            MixerLayout::compute_with_widths(tight, &columns, &[], 100.0, Sections::DEFAULT, 100.0);
+        assert_eq!(scrolled.columns[0].index, 1);
+        assert_eq!(scrolled.columns[0].rect.left(), area.left() - 6.0);
+        // The scroll stops where the last column ends at the edge.
+        let far =
+            MixerLayout::compute_with_widths(tight, &columns, &[], 100.0, Sections::DEFAULT, 1e9);
+        assert_eq!(
+            far.columns.last().unwrap().rect.right(),
+            tight.right() - 100.0
         );
     }
 

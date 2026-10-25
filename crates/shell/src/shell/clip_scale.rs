@@ -17,6 +17,9 @@ impl Shell {
     /// the selection changed or the clip's own scale did (the scales spec,
     /// R10). It is no undo step, though the set is marked as changed.
     pub(super) fn follow_shown_scale(&mut self, id: &str, shown: Option<bl_model::ClipId>) {
+        if id == scales_ids::SET_CLIP_SCALE {
+            self.clip_view.forget_scale_fold_rows();
+        }
         let now = self.shown_clip();
         let changed = now != shown;
         if !changed && id != scales_ids::SET_CLIP_SCALE {
@@ -97,6 +100,20 @@ impl Shell {
     pub fn scale_display(&self) -> crate::scales::Display {
         let targets = self.scale_targets();
         crate::scales::display(self.editor.document(), &targets)
+    }
+
+    /// The name of the pitch class `class` (0 is C) as the Root Note
+    /// choosers show it: spelled as the note spelling chooses, and for Auto
+    /// by the scale they show (the scales spec, R24).
+    #[must_use]
+    pub fn root_name(&self, class: u8) -> String {
+        let shown = self.scale_display();
+        let scale = bl_model::Scale {
+            enabled: shown.enabled == Some(true),
+            root: shown.root.unwrap_or(0),
+            name: shown.name.unwrap_or(bl_model::ScaleName::Major),
+        };
+        self.clip_view.note_spelling().class_name(class, &scale)
     }
 
     /// Points the Clip View at the clip most recently selected, in the

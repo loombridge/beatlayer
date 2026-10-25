@@ -12,7 +12,7 @@
 
 use bl_core::time::Ticks;
 use bl_model::registry::{SET_MIDI_LOOP, SET_MIDI_REGION};
-use bl_model::{Clip, ClipData, ClipId, Command, Document, Editor, MidiData};
+use bl_model::{Clip, ClipData, ClipId, Command, Document, Editor, MidiData, Scale};
 use bl_shell_spec::notes::{
     self as ids, ClipMarker, ClipTab, NoteViewArgs, NoteViewChange, SetMarkerArgs,
 };
@@ -141,48 +141,77 @@ fn fit_rows(rows: (f64, f64), count: f64) -> (f64, f64) {
     (top, top + height)
 }
 
-/// How many rows the editor has: every key, or the keys that hold notes
-/// while it is folded.
-fn row_count(midi: &MidiData, folded: bool) -> f64 {
-    if folded {
-        let mut keys: Vec<u8> = midi.notes.iter().map(|note| note.key).collect();
+/// How the note editor's rows are folded for a clip (the piano roll spec,
+/// R16; the scales spec, R23).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Fold {
+    /// Fold to Notes is on.
+    pub notes: bool,
+    /// The clip's scale, while Fold to Scale is on and the clip's Scale Mode
+    /// is too.
+    pub scale: Option<Scale>,
+}
+
+impl Fold {
+    /// Whether any fold hides rows.
+    #[must_use]
+    pub fn on(&self) -> bool {
+        self.notes || self.scale.is_some()
+    }
+
+    /// The keys the editor shows, top to bottom: every key; the keys that
+    /// hold notes; or the scale's keys and those that hold notes. A row
+    /// shows only if each fold that is on shows it, so with both on it is
+    /// the keys that hold notes.
+    #[must_use]
+    pub fn keys(&self, held: impl IntoIterator<Item = u8>) -> Vec<u8> {
+        if !self.on() {
+            return (0..=127u8).rev().collect();
+        }
+        let mut keys: Vec<u8> = held.into_iter().collect();
+        if let (false, Some(scale)) = (self.notes, &self.scale) {
+            keys.extend((0..=127u8).filter(|key| scale.holds(*key)));
+        }
         keys.sort_unstable();
         keys.dedup();
-        keys.len() as f64
-    } else {
-        KEYS
+        keys.reverse();
+        keys
     }
 }
 
+/// How many rows the editor has: every key (`None`), or the keys it shows
+/// while it is folded, top to bottom.
+fn row_count(keys: Option<&[u8]>) -> f64 {
+    keys.map_or(KEYS, |keys| keys.len() as f64)
+}
+
 /// The row of `key`: its distance from the top of the keyboard, or from the
-/// highest key that holds a note while the editor is folded.
-fn row_of(midi: &MidiData, folded: bool, key: u8) -> f64 {
-    if folded {
-        let mut keys: Vec<u8> = midi.notes.iter().map(|note| note.key).collect();
-        keys.sort_unstable_by(|a, b| b.cmp(a));
-        keys.dedup();
-        keys.iter()
+/// highest key shown while the editor is folded.
+fn row_of(keys: Option<&[u8]>, key: u8) -> f64 {
+    match keys {
+        Some(keys) => keys
+            .iter()
             .position(|shown| *shown == key)
-            .map_or(0.0, |row| row as f64)
-    } else {
-        127.0 - f64::from(key)
+            .map_or(0.0, |row| row as f64),
+        None => 127.0 - f64::from(key),
     }
 }
 
 /// The rows that show the keys from `low` to `high`, a row clear above and
 /// below.
-fn rows_for(midi: &MidiData, folded: bool, low: u8, high: u8) -> (f64, f64) {
-    let top = (row_of(midi, folded, high) - 1.0).max(0.0);
-    let bottom = row_of(midi, folded, low) + 2.0;
+fn rows_for(keys: Option<&[u8]>, low: u8, high: u8) -> (f64, f64) {
+    let top = (row_of(keys, high) - 1.0).max(0.0);
+    let bottom = row_of(keys, low) + 2.0;
     (top, bottom)
 }
 
-/// The key rows that show the keys from `low` to `high` of a clip's notes, a
-/// row clear above and below, as `clip_view.note_view` fits them (H, and
-/// double-clicking the piano ruler).
+/// The key rows that show the keys from `low` to `high`, a row clear above
+/// and below, as `clip_view.note_view` fits them (H, and double-clicking the
+/// piano ruler). `keys` are the keys shown top to bottom while the editor is
+/// folded.
 #[must_use]
-pub fn fit_key_rows(midi: &MidiData, folded: bool, low: u8, high: u8) -> (f64, f64) {
-    fit_rows(rows_for(midi, folded, low, high), row_count(midi, folded))
+pub fn fit_key_rows(keys: Option<&[u8]>, low: u8, high: u8) -> (f64, f64) {
+    fit_rows(rows_for(keys, low, high), row_count(keys))
 }
 
 impl ClipView {
@@ -307,8 +336,10 @@ fn note_view(
     let (clip, midi) = clip_and_data(doc, view, arrangement, clip)?;
     let length = doc.clip(clip).map_or(Ticks::ZERO, |value| value.length);
     let whole = span(&midi, length);
-    let folded = view.is_folded(clip);
-    let count = row_count(&midi, folded);
+    let fold = view.fold(doc, clip);
+    let shown_keys = fold.keys(midi.notes.iter().map(|note| note.key));
+    let keys = fold.on().then_some(shown_keys.as_slice());
+    let count = row_count(keys);
     let mpe = view.tab() == ClipTab::Mpe;
     let insert = view.insert_marker(doc, arrangement);
     let selection = view.time_selection(doc, arrangement);
@@ -356,8 +387,7 @@ fn note_view(
                 };
                 let low = inside.iter().map(|note| note.key).min();
                 let high = inside.iter().map(|note| note.key).max();
-                low.zip(high)
-                    .map(|(low, high)| rows_for(&midi, folded, low, high))
+                low.zip(high).map(|(low, high)| rows_for(keys, low, high))
             };
             let rows = rows.map(|rows| fit_rows(rows, count)).or(shown_rows);
             view.note_view.zoom_to(fit_span(window, whole), rows);
@@ -380,7 +410,7 @@ fn note_view(
             let (low, high) = low
                 .zip(high)
                 .ok_or_else(|| unavailable("the clip has no notes"))?;
-            let rows = fit_rows(rows_for(&midi, folded, low, high), count);
+            let rows = fit_rows(rows_for(keys, low, high), count);
             view.note_view.zoom_to(shown_span, Some(rows));
         }
         Some(change @ (NoteViewChange::In | NoteViewChange::Out)) => {

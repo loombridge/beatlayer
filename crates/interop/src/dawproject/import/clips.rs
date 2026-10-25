@@ -144,7 +144,10 @@ impl Importer<'_, '_> {
                     push_pieces(&mut made, lane.clone(), found);
                 }
             }
-            for (target, pieces) in made {
+            for (target, mut pieces) in made {
+                if target.kind == TrackKind::Midi {
+                    self.copy_expressions(&target, &mut pieces);
+                }
                 self.place_clips(&target, pieces);
             }
             for (name, pieces) in takes {
@@ -159,6 +162,7 @@ impl Importer<'_, '_> {
                 );
             }
         }
+        self.make_crossfades();
     }
 
     /// The track a clip belongs on: an audio clip on a MIDI track goes to the
@@ -334,10 +338,6 @@ impl Importer<'_, '_> {
                 .add("a clip nested too deeply", &place, "left out");
             return Vec::new();
         }
-        if source.info.color.is_some() {
-            // Colours wait for WP-6.36b (R23).
-            self.report.add("a colour", &place, "left out");
-        }
         if source.info.comment.is_some() {
             // Comments aren't kept, and are counted in the report (R20).
             self.report.add("a comment", &place, "left out");
@@ -447,6 +447,7 @@ impl Importer<'_, '_> {
                 // them (R36).
                 let mut made = Vec::new();
                 let mut found = false;
+                let mut points: Vec<&model::Points> = Vec::new();
                 for child in &lanes.children {
                     match child {
                         Timeline::Notes(_) | Timeline::Audio(_) | Timeline::Warps(_) => {
@@ -468,14 +469,11 @@ impl Importer<'_, '_> {
                         Timeline::Video(_) => {
                             self.report.add("a video timeline", place, "left out");
                         }
-                        Timeline::Points(_) => {
-                            // WP-6.36b reads the clip's automation (R59 to R62).
-                            self.report
-                                .add("automation in a clip's lanes", place, "left out");
-                        }
+                        Timeline::Points(set) => points.push(set),
                         _ => {}
                     }
                 }
+                self.lane_points(&points, &mut made, frame, lane, place);
                 made
             }
             Timeline::Video(_) => {
@@ -486,6 +484,46 @@ impl Importer<'_, '_> {
                 self.report
                     .add("a clip that plays no notes or audio", place, "left out");
                 Vec::new()
+            }
+        }
+    }
+
+    /// The automation and expressions in a clip's lanes (R59 to R62).
+    fn lane_points(
+        &mut self,
+        points: &[&model::Points],
+        made: &mut [Piece],
+        frame: Frame,
+        lane: &Lane,
+        place: &str,
+    ) {
+        if points.is_empty() || made.is_empty() {
+            return;
+        }
+        let (driving, expressions): (Vec<&model::Points>, Vec<&model::Points>) = points
+            .iter()
+            .copied()
+            .partition(|set| set.target.parameter.is_some());
+        if self.scene.is_some() {
+            self.session_automation(&driving, &mut made[0].clip, frame.unit, lane, place);
+        } else {
+            let span = Some((frame.start, frame.start + frame.length));
+            for set in &driving {
+                if let Some(parameter) = &set.target.parameter {
+                    self.add_envelope(parameter, set, frame.unit, frame.zero, span, place);
+                }
+            }
+        }
+        if lane.kind == TrackKind::Audio {
+            for piece in made.iter_mut() {
+                self.audio_expressions(&expressions, &mut piece.clip, place);
+            }
+            return;
+        }
+        for set in expressions {
+            let steps = self.steps(set, frame.unit, Ticks::ZERO);
+            for piece in made.iter_mut() {
+                self.expression_into(&mut piece.clip, set, &steps, place);
             }
         }
     }
@@ -538,6 +576,9 @@ impl Importer<'_, '_> {
                 .map_or(64, |rel| (rel * 127.0).round().clamp(1.0, 127.0) as u8);
             let mut built = Note::new(key as u8, at, long, velocity);
             built.release_velocity = release;
+            if let Some(content) = note.content.as_ref().and_then(|content| content.timeline()) {
+                self.note_expressions(&mut built, content, notes_unit, place);
+            }
             made.push(built);
             if let Some(channel) = note.channel
                 && !self.channels_seen.contains(&channel)
@@ -553,7 +594,7 @@ impl Importer<'_, '_> {
         self.midi_markers(source, &mut data, frame);
         let id = self.editor.new_id();
         let mut clip = Clip::new(id, frame.start, frame.length, ClipData::Midi(data));
-        finish_clip(&mut clip, source);
+        self.finish_clip(&mut clip, source, place);
         vec![Piece {
             clip,
             place: place.to_owned(),
@@ -597,10 +638,6 @@ impl Importer<'_, '_> {
         let Some(hash) = self.media_for(file, place) else {
             return Vec::new();
         };
-        if source.fade_in.is_some() || source.fade_out.is_some() {
-            // Fades wait for WP-6.51 (R33).
-            self.report.add("a clip's fades", place, "left out");
-        }
         let mut data = AudioData::new(hash);
         let mut warped = false;
         if let Some(warps) = warps {
@@ -618,15 +655,91 @@ impl Importer<'_, '_> {
         }
         let id = self.editor.new_id();
         let mut clip = Clip::new(id, frame.start, frame.length, ClipData::Audio(data));
-        finish_clip(&mut clip, source);
-        if warped {
-            return vec![Piece {
+        self.finish_clip(&mut clip, source, place);
+        let mut pieces = if warped {
+            vec![Piece {
                 clip,
                 place: place.to_owned(),
-            }];
+            }]
+        } else {
+            self.unwarped_data(&mut clip, source, frame);
+            self.unroll(clip, place)
+        };
+        self.apply_fades(&mut pieces, source, frame, lane);
+        pieces
+    }
+
+    /// The seconds `value` of `unit` lasts from `at`, forwards or backwards
+    /// (R33): a beat is a quarter note, and the tempo map says how long.
+    fn fade_seconds(&self, unit: TimeUnit, value: f64, at: Ticks, forwards: bool) -> f64 {
+        if !value.is_finite() {
+            return 0.0;
         }
-        self.unwarped_data(&mut clip, source, frame);
-        self.unroll(clip, place)
+        match unit {
+            TimeUnit::Seconds => value,
+            TimeUnit::Beats => {
+                let beats = beats_to_ticks(value);
+                if forwards {
+                    self.seconds_at(at + beats) - self.seconds_at(at)
+                } else {
+                    self.seconds_at(at) - self.seconds_at(at - beats)
+                }
+            }
+        }
+    }
+
+    /// The fades of a clip, in seconds, each limited to the clip's length: a
+    /// positive fade-in and a fade-out go to the pieces at the clip's edges,
+    /// and a negative fade-in is a crossfade with the clip before it
+    /// (R33).
+    fn apply_fades(
+        &mut self,
+        pieces: &mut [Piece],
+        source: &model::Clip,
+        frame: Frame,
+        lane: &Lane,
+    ) {
+        let unit = source.fade_time_unit.unwrap_or(frame.unit);
+        let end = frame.start + frame.length;
+        if let Some(value) = source.fade_in
+            && value < 0.0
+        {
+            let seconds = self.fade_seconds(unit, -value, frame.start, true);
+            if seconds > 0.0 && self.scene.is_none() {
+                self.crossfades.push((lane.id, frame.start, seconds));
+            }
+        }
+        for piece in pieces.iter_mut() {
+            let (start, stop) = (piece.clip.start, piece.clip.end());
+            let length = self.seconds_at(stop) - self.seconds_at(start);
+            let ClipData::Audio(data) = &mut piece.clip.data else {
+                continue;
+            };
+            let mut cut = false;
+            if start == frame.start
+                && let Some(value) = source.fade_in.filter(|value| *value > 0.0)
+            {
+                let seconds = self.fade_seconds(unit, value, start, true);
+                data.fade_in = seconds.min(length);
+                cut |= seconds > length;
+            }
+            if stop == end
+                && let Some(value) = source.fade_out.filter(|value| *value > 0.0)
+            {
+                let seconds = self.fade_seconds(unit, value, stop, false);
+                // A fade-out ends no earlier than the fade-in does (R25).
+                let room = (length - data.fade_in).max(0.0);
+                data.fade_out = seconds.min(room);
+                cut |= seconds > room;
+            }
+            if cut {
+                self.report.add(
+                    "a fade longer than its clip",
+                    &piece.place,
+                    "shortened to the clip",
+                );
+            }
+        }
     }
 
     /// The warp markers of a `Warps` timeline, when its events rise in both
@@ -837,10 +950,6 @@ impl Importer<'_, '_> {
         if lane.kind == TrackKind::Midi {
             return self.merge_notes(source, inner, frame, place);
         }
-        if source.fade_in.is_some() || source.fade_out.is_some() {
-            // Fades wait for WP-6.51 (R33).
-            self.report.add("a clip's fades", place, "left out");
-        }
         let Frame {
             unit,
             start,
@@ -893,6 +1002,8 @@ impl Importer<'_, '_> {
                 });
             }
         }
+        // The outer clip's fades go to the pieces at its edges (R33).
+        self.apply_fades(&mut made, source, frame, lane);
         made
     }
 
@@ -941,7 +1052,7 @@ impl Importer<'_, '_> {
         self.midi_markers(source, &mut data, frame);
         let id = self.editor.new_id();
         let mut clip = Clip::new(id, frame.start, frame.length, ClipData::Midi(data));
-        finish_clip(&mut clip, source);
+        self.finish_clip(&mut clip, source, place);
         vec![Piece {
             clip,
             place: place.to_owned(),
@@ -1046,6 +1157,64 @@ impl Importer<'_, '_> {
     }
 }
 
+impl Importer<'_, '_> {
+    /// Makes the crossfades the clips of a track asked for with a negative
+    /// fade-in (R33), as `arrangement.set_crossfade` does: the two clips
+    /// meet where the later starts, and the crossfade is as long as the
+    /// negative value, shared by the boundary and shortened to what the two
+    /// clips allow.
+    fn make_crossfades(&mut self) {
+        for (track, boundary, seconds) in std::mem::take(&mut self.crossfades) {
+            let place = self.editor.document().track(track).map_or_else(
+                || "a track".to_owned(),
+                |held| format!("the track \"{}\"", held.name()),
+            );
+            let document = self.editor.document();
+            let meets = document.track(track).is_some_and(|held| {
+                held.clips().any(|clip| clip.end() == boundary)
+                    && held.clips().any(|clip| clip.start == boundary)
+            });
+            if !meets {
+                self.report
+                    .add("a crossfade with no clip before it", &place, "left out");
+                continue;
+            }
+            // The whole crossfade, half of it either side, then all of it
+            // after the boundary, and then shorter ones, until the clips
+            // allow one.
+            let mut length = seconds;
+            let made = loop {
+                let tries = [(length / 2.0, length / 2.0), (0.0, length)];
+                let made = tries.iter().any(|&(before, after)| {
+                    self.editor
+                        .apply(bl_model::Command::SetCrossfade {
+                            track,
+                            boundary,
+                            before,
+                            after,
+                            curve: 0.0,
+                        })
+                        .is_ok()
+                });
+                if made || length < 0.001 {
+                    break made;
+                }
+                length /= 2.0;
+            };
+            if !made {
+                self.report
+                    .add("a crossfade the clips don't allow", &place, "left out");
+            } else if length < seconds {
+                self.report.add(
+                    "a crossfade longer than its clips allow",
+                    &place,
+                    "shortened",
+                );
+            }
+        }
+    }
+}
+
 /// Adds pieces to the track they land on, keeping the order tracks are first
 /// used.
 fn push_pieces(made: &mut Vec<(Lane, Vec<Piece>)>, lane: Lane, pieces: Vec<Piece>) {
@@ -1055,13 +1224,16 @@ fn push_pieces(made: &mut Vec<(Lane, Vec<Piece>)>, lane: Lane, pieces: Vec<Piece
     }
 }
 
-/// A clip's name and switch (R27).
-fn finish_clip(clip: &mut Clip, source: &model::Clip) {
-    if let Some(name) = &source.info.name {
-        clip.name = name.clone();
-    }
-    if source.enable == Some(false) {
-        clip.mute = true;
+impl Importer<'_, '_> {
+    /// A clip's name, switch and colour (R23, R27).
+    fn finish_clip(&mut self, clip: &mut Clip, source: &model::Clip, place: &str) {
+        if let Some(name) = &source.info.name {
+            clip.name = name.clone();
+        }
+        if source.enable == Some(false) {
+            clip.mute = true;
+        }
+        self.colour_clip(clip, source.info.color.as_deref(), place);
     }
 }
 

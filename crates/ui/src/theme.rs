@@ -99,6 +99,9 @@ pub struct Colours {
     /// The outline of the tracks the search field finds, in the Arrangement,
     /// the Session View and the mixers (WP-6.42).
     pub search: Colour,
+    /// The keys of a clip's scale on the piano ruler, and the rows Highlight
+    /// Scales shades (WP-6.7b).
+    pub scale: Colour,
     /// Track and clip colours, assigned to new tracks in turn.
     pub track_palette: Vec<Colour>,
 }

@@ -445,3 +445,18 @@ fn a_flac_that_counts_its_short_last_block_decodes_as_written() {
     assert_eq!(read.frames(), written.frames());
     assert!(read == written, "the samples match");
 }
+
+#[test]
+fn an_itunsmpb_tag_that_overflows_decodes_untrimmed_instead_of_panicking() {
+    // The valid-frames field is set so priming (0x840) plus valid wraps a u64.
+    let mut bytes =
+        std::fs::read(common::fixtures_dir().join("sine-44k1-s16-2ch.aac.m4a")).unwrap();
+    let tag = b"0000000000002B11";
+    let at = bytes.windows(tag.len()).position(|w| w == tag).unwrap();
+    bytes[at..at + tag.len()].copy_from_slice(b"FFFFFFFFFFFFFFF0");
+    let decoded = Decoder::from_reader(Cursor::new(bytes), Some("m4a"))
+        .unwrap()
+        .decode_to_end()
+        .unwrap();
+    assert!(decoded.frames() > 0);
+}

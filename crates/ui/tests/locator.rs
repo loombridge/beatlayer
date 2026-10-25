@@ -523,6 +523,24 @@ fn holding_the_scrub_area_loops_a_span_and_the_release_ends_it() {
 }
 
 #[test]
+fn a_hold_released_within_a_click_s_time_plays_on_without_jumping_back() {
+    // Spec: time-editing R25, R28. Half a second is a hold, yet short
+    // enough that egui would count its release as a click too.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.settle();
+    let (at, span) = bar_three(&h);
+    press_and_hold(&mut h, at, false, 30);
+    release(&mut h, at);
+    h.wait("the held loop to play", |h| h.engine.playing);
+    let mut last = h.engine.position;
+    h.wait("playback past the span", |h| {
+        assert!(h.engine.position >= last, "jumped back: {:?}", h.engine);
+        last = h.engine.position;
+        h.engine.position >= span.end
+    });
+}
+
+#[test]
 fn a_press_shorter_than_a_hold_is_a_click_that_plays_from_the_point() {
     // Spec: time-editing R11, R25.
     let mut h = Harness::manual_with_title_bar(Window::Main);

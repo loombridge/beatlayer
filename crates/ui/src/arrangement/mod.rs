@@ -1577,7 +1577,10 @@ impl ArrangementUi {
             .input(|i| i.pointer.press_origin())
             .filter(|pos| locator_at(*pos).is_none())
             .map(scrub_at);
-        let released = self.scrub_hold(ui, &scrub, press, shell.permanent_scrub_areas(), events);
+        // The ruler's call above may have taken this area's release: the
+        // hold is the view's, not the area's.
+        let released =
+            self.scrub_hold(ui, &scrub, press, shell.permanent_scrub_areas(), events) | released;
         // The locators in the scrub area are controls the keyboard reaches
         // (accessibility R10).
         for locator in doc.locators() {

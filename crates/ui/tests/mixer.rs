@@ -596,7 +596,12 @@ fn the_arrangement_headers_mixer_controls_are_live_and_take_typed_values() {
     assert!((controls::gain_db(mixer(&h.shell, t[0]).volume) + 12.0).abs() < 1e-9);
     assert!(!h.main.is_typing());
     let nodes = tree(&mut h);
-    let meters = nodes.iter().filter(|n| n.label == "Track Meter").count();
+    // A MIDI track without an instrument shows a MIDI meter in its place
+    // (midi-meters R1).
+    let meters = nodes
+        .iter()
+        .filter(|n| n.label == "Track Meter" || n.label == "MIDI Activity")
+        .count();
     assert!(meters >= 7, "a meter in every header: {meters}");
 }
 

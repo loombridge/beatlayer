@@ -8,6 +8,7 @@ use crate::common;
 
 use std::time::{Duration, Instant};
 
+use bl_core::clock::TestClock;
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_engine::testing::{self, SEMITONES, VALUE};
 use bl_engine::{ChainMeter, MeterOwner, MeterSite, NoInput, PointReading, TransportCommand};
@@ -39,7 +40,7 @@ impl Play {
         Self {
             rig,
             queue,
-            start: Instant::now(),
+            start: TestClock::new().now(),
             size,
             blocks: 0,
         }

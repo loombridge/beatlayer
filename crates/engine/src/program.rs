@@ -2120,7 +2120,10 @@ impl EngineProgram {
         let points = &self.meter_points[points.range()];
         // Spec: midi-meters R6. What reaches a device, measured in front of it.
         let measure = |at: usize, note_idx: usize| {
-            let point = &points[at];
+            // The cue task has no chain, and so no points.
+            let Some(point) = points.get(at) else {
+                return;
+            };
             if point.midi {
                 point.measure_notes(turn.notes(pair + note_idx).notes());
             } else {

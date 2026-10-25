@@ -464,6 +464,7 @@ impl<P: Plugin> Kind for KindOf<P> {
             events: Vec::with_capacity(self.device_type.description.params.len() + NOTES),
             instrument: P::INFO.audio.inputs == 0,
             outputs: usize::from(P::INFO.audio.outputs).min(MAX_CHANNELS),
+            following: vec![false; self.device_type.description.params.len()],
         };
         let node = NativeNode::new(kit, &self.device_type.description, device, config);
         let ends: Ends<P> = Ends {
@@ -764,26 +765,28 @@ struct KitDevice<P: Plugin> {
     events: Vec<Event>,
     instrument: bool,
     outputs: usize,
+    /// Per parameter, whether it is being driven or settling after it was.
+    following: Vec<bool>,
 }
 
 impl<P: Plugin> KitDevice<P> {
     /// Takes a processor the main thread sent, and gives it back when
     /// asked. Lock-free.
     fn exchange(&mut self) {
-        if self.hand_back.load(Relaxed) {
-            if let Some(running) = self.running.take()
-                && let Err(rtrb::PushError::Full(running)) = self.to_main.push(running)
-            {
-                self.running = Some(running);
-                return;
-            }
-            self.hand_back.store(false, Relaxed);
-            return;
-        }
         if self.running.is_none()
             && let Ok(running) = self.from_main.pop()
         {
             self.running = Some(running);
+        }
+        // The request stands until there is a processor to hand back: one
+        // still in the queue is taken and handed straight back.
+        if self.hand_back.load(Relaxed)
+            && let Some(running) = self.running.take()
+        {
+            match self.to_main.push(running) {
+                Ok(()) => self.hand_back.store(false, Relaxed),
+                Err(rtrb::PushError::Full(running)) => self.running = Some(running),
+            }
         }
     }
 
@@ -808,6 +811,40 @@ impl<P: Plugin> KitDevice<P> {
             }
         }
     }
+
+    /// The parameters an envelope or a clip's modulation drives, as the
+    /// processor's events at the stretch's first frame carrying their value
+    /// at its last, recorded in the values it reads. One that stopped being
+    /// driven is sent once more, until it has settled at its control's value.
+    fn push_automation(
+        events: &mut Vec<Event>,
+        following: &mut [bool],
+        values: &ParamValues,
+        params: &ParamBank,
+    ) {
+        for descriptor in values.descriptors() {
+            let Some(index) = params.index(descriptor.id) else {
+                continue;
+            };
+            let automated = params.automated(index);
+            if !(automated || following[index]) {
+                continue;
+            }
+            following[index] = automated || params.is_moving(index);
+            let Some(&value) = params.ramp(index).last() else {
+                continue;
+            };
+            let value = descriptor.clamp(f64::from(value));
+            values.set(descriptor.id, value);
+            if events.len() < events.capacity() {
+                events.push(Event::Param {
+                    time: 0,
+                    id: descriptor.id,
+                    value,
+                });
+            }
+        }
+    }
 }
 
 /// What a processor sends the host: its own parameter changes and the
@@ -821,7 +858,7 @@ impl EventSink for Unheard {
 }
 
 impl<P: Plugin> NativeDevice for KitDevice<P> {
-    fn process(&mut self, audio: &mut Audio<'_, '_>, _params: &ParamBank) {
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         self.exchange();
         let Some(running) = self.running.as_mut() else {
             if self.instrument {
@@ -831,6 +868,12 @@ impl<P: Plugin> NativeDevice for KitDevice<P> {
         };
         self.events.clear();
         Self::push_changes(&mut self.events, &running.values, audio.changes());
+        Self::push_automation(
+            &mut self.events,
+            &mut self.following,
+            &running.values,
+            params,
+        );
         for note in audio.notes() {
             if self.events.len() >= self.events.capacity() {
                 break;

@@ -369,6 +369,8 @@ struct Slot {
     /// Its base and the value it played at the stretch's last frame, while
     /// a clip's modulation acts on it.
     modulated: Option<(f64, f64)>,
+    /// An envelope or a clip's modulation acts on it in the current stretch.
+    automated: bool,
 }
 
 /// A device's parameters on the audio thread: each clamped to its range,
@@ -404,6 +406,7 @@ impl ParamBank {
                     smoother: LinearSmoother::new(value, frames),
                     ramp: vec![value as f32; config.max_frames.max(1)],
                     modulated: None,
+                    automated: false,
                 }
             })
             .collect();
@@ -489,6 +492,7 @@ impl ParamBank {
             let id = slot.descriptor.id;
             let descriptor = &slot.descriptor;
             slot.modulated = None;
+            slot.automated = false;
             let Some(list) = automation else {
                 Self::glide(slot, frames);
                 continue;
@@ -499,6 +503,7 @@ impl ParamBank {
                 Self::glide(slot, frames);
                 continue;
             }
+            slot.automated = true;
             let now = block.map_or(SessionNow::NONE, |block| block.session_now(list));
             // The base is a modulator's hold, else the value an envelope
             // sets on each frame, else the control's, which glides as it
@@ -570,6 +575,17 @@ impl ParamBank {
     #[must_use]
     pub fn ramp(&self, index: usize) -> &[f32] {
         &self.slots[index].ramp[..self.frames]
+    }
+
+    /// Whether an envelope or a clip's modulation set the parameter at
+    /// `index` in the stretch being processed.
+    ///
+    /// # Panics
+    ///
+    /// If there's no parameter at `index`.
+    #[must_use]
+    pub fn automated(&self, index: usize) -> bool {
+        self.slots[index].automated
     }
 
     /// The parameter at `index`'s value at the end of the stretch (or now,

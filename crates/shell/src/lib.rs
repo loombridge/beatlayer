@@ -170,6 +170,7 @@ pub use bl_shell_spec::midi_files as midi_file_commands;
 /// The MIDI ports' and the computer MIDI keyboard's command IDs and their
 /// argument and result types (WP-2.2).
 pub use bl_shell_spec::midi_io as midi_io_commands;
+pub use bl_shell_spec::remote as remote_commands;
 /// The MIDI Tools' command IDs and their argument and result types
 /// (WP-6.11).
 pub use bl_shell_spec::midi_tools as midi_tool_commands;

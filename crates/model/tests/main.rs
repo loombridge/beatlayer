@@ -14,6 +14,7 @@ mod macros;
 mod metronome;
 mod midi_controller_data;
 mod racks;
+mod remote_mappings;
 mod scales;
 mod take_lanes;
 mod tunings;

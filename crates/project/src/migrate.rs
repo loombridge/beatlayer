@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 11;
+pub const SCHEMA_VERSION: u32 = 12;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -112,6 +112,12 @@ pub const MIGRATIONS: &[Migration] = &[
                   track at swatch `id mod 14` of the palette's top row, each clip in its \
                   track's colour and every scene with none, as such sets were drawn (the themes \
                   spec, R21), so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 11,
+        summary: "the set may hold MIDI and key mappings (the remote mapping spec, R6); a set \
+                  saved before them opens with none, so the saved JSON itself needs nothing",
         apply: Ok,
     },
 ];

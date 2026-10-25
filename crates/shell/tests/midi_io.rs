@@ -1136,3 +1136,193 @@ fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
         > unrouted));
     assert_eq!(rig.test.sent("Synth").len(), 1);
 }
+
+/// A shell started on the preferences in `dir`, with an input and two
+/// outputs plugged in.
+fn start_with_outputs(dir: &std::path::Path) -> (Shell, TestBackend) {
+    let prefs = Preferences::load(dir).unwrap();
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Keys A");
+    test.add_port(Direction::Output, "Drum machine");
+    test.add_port(Direction::Output, "Drone");
+    let mut shell = Shell::new(
+        prefs.clone(),
+        Some(dir.to_owned()),
+        AudioHost::null(prefs.audio),
+        Box::new(ProjectFiles::new()),
+    );
+    shell.use_midi_backend(Box::new(test.clone()));
+    (shell, test)
+}
+
+fn port_named<'a>(ports: &'a Value, name: &str) -> &'a Value {
+    ports["ports"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|port| port["name"] == name)
+        .unwrap()
+}
+
+// Spec: midi-clock R1, R2, R10, R25. An output's sync options start at 0 ms,
+// Song and Stop and Start, are set by `midi.set_port`, read back by
+// `midi.ports`, and kept in the preferences across a restart, as Show Resync
+// Button is.
+#[test]
+fn the_sync_options_and_the_resync_button_persist_across_restarts() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-sync-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let (mut shell, _) = start_with_outputs(&dir);
+    let fresh = shell.run("midi.ports", json!({})).unwrap();
+    let drums = port_named(&fresh, "Drum machine");
+    assert_eq!(drums["sync_delay_ms"], 0);
+    assert_eq!(drums["clock_type"], "song");
+    assert_eq!(drums["hardware_resync"], "stop_and_start");
+    assert_eq!(fresh["show_resync_button"], false, "off at first");
+
+    shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Drum machine", "sync": true,
+                    "sync_delay_ms": -35, "clock_type": "pattern",
+                    "hardware_resync": "start_only" }),
+        )
+        .unwrap();
+    // The options are kept while Sync is off.
+    shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Drone", "sync_delay_ms": 12,
+                    "hardware_resync": "dont_resync" }),
+        )
+        .unwrap();
+    for (args, what) in [
+        (json!({ "sync_delay_ms": 101 }), "past 100 ms"),
+        (json!({ "sync_delay_ms": -101 }), "past -100 ms"),
+    ] {
+        let mut full = json!({ "direction": "output", "name": "Drone" });
+        full.as_object_mut()
+            .unwrap()
+            .extend(args.as_object().unwrap().clone());
+        assert!(shell.run("midi.set_port", full).is_err(), "{what}");
+    }
+    let input_type = shell.run(
+        "midi.set_port",
+        json!({ "direction": "input", "name": "Keys A", "clock_type": "pattern" }),
+    );
+    assert!(input_type.is_err(), "an input has no MIDI Clock Type");
+    let on = shell
+        .run("midi.set_show_resync_button", json!({ "on": true }))
+        .unwrap();
+    assert_eq!(on["on"], true);
+    let outputs = shell.midi().sync_outputs();
+    assert_eq!(outputs.len(), 1, "only an output with Sync on gets clock");
+    assert_eq!(outputs[0].delay_ms, -35);
+    drop(shell);
+
+    let (mut shell, _) = start_with_outputs(&dir);
+    let back = shell.run("midi.ports", json!({})).unwrap();
+    let drums = port_named(&back, "Drum machine");
+    assert_eq!(drums["sync"], true);
+    assert_eq!(drums["sync_delay_ms"], -35);
+    assert_eq!(drums["clock_type"], "pattern");
+    assert_eq!(drums["hardware_resync"], "start_only");
+    let drone = port_named(&back, "Drone");
+    assert_eq!(
+        (drone["sync"].clone(), drone["sync_delay_ms"].clone()),
+        (json!(false), json!(12))
+    );
+    assert_eq!(drone["hardware_resync"], "dont_resync");
+    assert_eq!(back["show_resync_button"], true);
+    assert_eq!(shell.midi().sync_outputs().len(), 1);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: midi-clock R11, R25. `transport.resync_external_hardware` sends each
+// port's own choice before the next bar line's clock while the song plays,
+// and nothing while it is stopped.
+#[test]
+fn resync_sends_each_ports_choice_before_the_next_bar_line_and_nothing_while_stopped() {
+    let mut rig = Rig::new();
+    rig.test.add_port(Direction::Output, "Drone");
+    rig.shell.refresh_midi();
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "sync": true,
+                "hardware_resync": "stop_and_start" }),
+    );
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Drone", "sync": true,
+                "hardware_resync": "dont_resync" }),
+    );
+    let (producer, mut sent) = rtrb::RingBuffer::new(4096);
+    rig.processor.set_midi_output(producer);
+    rig.engine.sync_outputs(&rig.shell.midi().sync_outputs());
+    assert!(rig.engine.flush(Duration::from_secs(5)));
+    // The ID is the engine's command.
+    let resync =
+        bl_engine::transport::command_from_args("transport.resync_external_hardware", json!({}))
+            .unwrap();
+    let sent_bytes = |sent: &mut Consumer<bl_core::midi::MidiOutputEvent>| {
+        std::iter::from_fn(|| sent.pop().ok()).collect::<Vec<_>>()
+    };
+
+    // Stopped: the button does nothing, and no clock goes.
+    rig.engine.transport(resync);
+    rig.blocks_run(4);
+    assert!(sent_bytes(&mut sent).is_empty());
+
+    rig.engine.transport(bl_engine::TransportCommand::Play);
+    rig.blocks_run(100);
+    sent_bytes(&mut sent);
+    rig.engine.transport(resync);
+    // 4/4 at 120 BPM: the bar line is 96,000 frames in, 375 blocks of 256.
+    rig.blocks_run(300);
+    let events = sent_bytes(&mut sent);
+    let synth = bl_core::midi::PortId::from_name("Synth");
+    let drone = bl_core::midi::PortId::from_name("Drone");
+    let stop = events
+        .iter()
+        .find(|e| e.message == MidiMessage::STOP)
+        .unwrap();
+    let at_bar: Vec<_> = events
+        .iter()
+        .filter(|e| e.time == stop.time && e.port == synth)
+        .map(|e| e.message.padded()[0])
+        .collect();
+    assert_eq!(
+        at_bar,
+        vec![0xFC, 0xFA, 0xF8],
+        "Stop, Start, then the bar's clock"
+    );
+    assert!(
+        events
+            .iter()
+            .filter(|e| e.port == drone)
+            .all(|e| e.message == MidiMessage::CLOCK),
+        "Don't Resync sends the clock alone"
+    );
+}
+
+// Spec: midi-clock R13. An export is rendered offline, and sends no clock.
+#[test]
+fn an_export_sends_no_clock() {
+    let mut rig = Rig::new();
+    rig.run(
+        "midi.set_port",
+        json!({ "direction": "output", "name": "Synth", "sync": true }),
+    );
+    let dir = std::env::temp_dir().join(format!("bl-shell-sync-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    rig.run(
+        "export.audio",
+        json!({ "path": dir.join("out.wav").to_string_lossy(), "start": 0,
+                "length": 705_600 * 4 }),
+    );
+    let stats = rig.shell.midi().output().stats().snapshot();
+    assert_eq!((stats.sent, stats.late, stats.unrouted), (0, 0, 0));
+    assert_eq!(rig.run("sync.state", json!({}))["clocks_sent"], 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}

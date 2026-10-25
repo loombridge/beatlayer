@@ -466,3 +466,18 @@ fn resync_sends_each_ports_choice_before_the_next_bar_lines_clock() {
         .collect();
     assert_eq!(order, vec![STOP_BYTES, START_BYTES, CLOCK_BYTES]);
 }
+
+// Spec: midi-clock R13. An engine with no queue to the ports, such as an
+// offline render's, sends no clock.
+#[test]
+fn an_engine_without_a_queue_to_the_ports_sends_no_clock() {
+    let mut rig = Rig::new(512);
+    rig.sender.sync_outputs(&[song()]);
+    assert!(rig.sender.flush());
+    rig.sender.transport(TransportCommand::Play);
+    assert!(rig.sender.flush());
+    rig.render(96_000, 512);
+    let state = rig.monitor.state();
+    assert!(state.playing);
+    assert_eq!(state.sync_out.clocks, 0);
+}

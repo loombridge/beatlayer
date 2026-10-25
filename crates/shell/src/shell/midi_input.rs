@@ -30,7 +30,9 @@ impl Shell {
             }
         }
         self.midi_seen = seen;
-        changed | self.track_sync_activity(now)
+        // The lamp follows the test clock when a test paces the engine by
+        // hand.
+        changed | self.track_sync_activity(self.midi.now())
     }
 
     /// Lights the lower sync lamp when the engine has sent a quarter note of
@@ -103,7 +105,11 @@ impl Shell {
     pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
         let sender = self.midi.sender().clone();
         let output = self.midi.output().clone();
+        let clock = self.midi.test_clock();
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
+        if let Some(clock) = clock {
+            self.midi.set_test_clock(clock);
+        }
         self.send_sync_outputs();
     }
 

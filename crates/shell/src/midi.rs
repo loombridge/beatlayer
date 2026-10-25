@@ -120,6 +120,12 @@ impl MidiHost {
         self.clock = Some(clock);
     }
 
+    /// The test clock that stamps the keyboard's notes, if one was given.
+    #[must_use]
+    pub fn test_clock(&self) -> Option<bl_core::clock::TestClock> {
+        self.clock.clone()
+    }
+
     /// Lists the system's ports again, opening and closing them as their
     /// switches say. A system that can't list its ports shows none.
     pub fn refresh(&mut self) {

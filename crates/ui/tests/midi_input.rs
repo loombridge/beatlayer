@@ -269,3 +269,158 @@ fn the_output_indicator_lights_when_a_message_leaves() {
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(indicators(&mut h), "");
 }
+
+fn labelled(nodes: &[Node], label: &str) -> bool {
+    nodes.iter().any(|node| node.label == label)
+}
+
+// Spec: midi-clock R1, R10
+#[test]
+fn an_outputs_triangle_opens_its_sync_options_and_show_resync_button_is_a_switch() {
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Keys A");
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    // With Sync off there is no triangle and no row, and Show Resync Button
+    // is off.
+    assert!(!labelled(&nodes, "Out: Synth Sync Options"));
+    assert_eq!(
+        Harness::node(&nodes, "Show Resync Button").toggled,
+        Some(false)
+    );
+    h.click(bounds(Harness::node(&nodes, "Show Resync Button")).center());
+    assert!(h.shell.resync_button_shown());
+
+    h.click(bounds(Harness::node(&nodes, "Out: Synth Sync")).center());
+    let nodes = Harness::nodes(&h.settle());
+    let triangle = Harness::node(&nodes, "Out: Synth Sync Options");
+    assert_eq!(triangle.role, egui::accesskit::Role::DisclosureTriangle);
+    assert!(
+        !labelled(&nodes, "Out: Synth MIDI Clock Type"),
+        "closed at first"
+    );
+    // An input with Sync on has no output options.
+    assert!(!labelled(&nodes, "In: Keys A Sync Options"));
+
+    h.click(bounds(triangle).center());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "Out: Synth MIDI Clock Sync Delay").value,
+        "0 ms"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "Out: Synth MIDI Clock Type").value,
+        "Song"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "Out: Synth Hardware Resync").value,
+        "Stop and Start"
+    );
+
+    // The rows follow what `midi.set_port` sets, and the values are kept
+    // while Sync is off (the triangle and rows are gone).
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Synth", "sync_delay_ms": 20,
+                    "clock_type": "pattern", "hardware_resync": "dont_resync" }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "Out: Synth MIDI Clock Sync Delay").value,
+        "20 ms"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "Out: Synth MIDI Clock Type").value,
+        "Pattern"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "Out: Synth Hardware Resync").value,
+        "Don't Resync"
+    );
+    h.click(bounds(Harness::node(&nodes, "Out: Synth Sync")).center());
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!labelled(&nodes, "Out: Synth Sync Options"));
+    assert!(!labelled(&nodes, "Out: Synth MIDI Clock Type"));
+    assert_eq!(h.shell.midi().ports()[1].sync_delay_ms, 20);
+}
+
+// Spec: midi-clock R10, R11, R27
+#[test]
+fn the_resync_button_shows_while_the_setting_is_on_and_leaves_room_in_the_tempo_group() {
+    let mut h = Harness::manual(Window::Main);
+    let nodes = Harness::nodes(&h.settle());
+    let tap_before = bounds(Harness::node(&nodes, "Tap Tempo")).left();
+    assert!(
+        !labelled(&nodes, "Resync External Hardware"),
+        "off at first"
+    );
+
+    h.shell
+        .run("midi.set_show_resync_button", json!({ "on": true }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let button = Harness::node(&nodes, "Resync External Hardware");
+    assert_eq!(button.role, egui::accesskit::Role::Button);
+    assert!(
+        bounds(button).right() <= bounds(Harness::node(&nodes, "Tap Tempo")).left(),
+        "before the tempo controls"
+    );
+    assert!(bounds(Harness::node(&nodes, "Tap Tempo")).left() > tap_before);
+    h.click(bounds(button).center());
+
+    h.shell
+        .run("midi.set_show_resync_button", json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!labelled(&nodes, "Resync External Hardware"));
+    assert_eq!(
+        bounds(Harness::node(&nodes, "Tap Tempo")).left(),
+        tap_before
+    );
+}
+
+// Spec: midi-clock R12, R15, R27
+#[test]
+fn the_lower_sync_lamp_lights_for_a_quarter_note_of_clock_sent() {
+    let mut h = Harness::manual(Window::Main);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Clock in");
+    test.add_port(Direction::Output, "Drum machine");
+    h.shell.use_midi_backend(Box::new(test));
+    let name = "Sync Input and Output Indicators";
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!labelled(&nodes, name), "hidden while no input has Sync on");
+
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Clock in", "sync": true }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "output", "name": "Drum machine", "sync": true }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, name).value, "", "dark while stopped");
+
+    h.shell.run("transport.play", json!({})).unwrap();
+    h.wait("the lower sync lamp to light", |h| {
+        h.shell.sync_output_lit()
+    });
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, name).value, "sending");
+    let state = h.shell.run("sync.state", json!({})).unwrap();
+    assert_eq!(state["sending"], true);
+    assert_eq!(state["output_ports"], 1);
+    assert!(state["clocks_sent"].as_u64().unwrap() >= 1);
+}

@@ -430,6 +430,70 @@ fn a_set_saved_before_use_current_scale_loads_its_devices_unchanged() {
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
 }
 
+// Spec: arpeggiator R18. An Arpeggiator saved with the placeholder's Swing
+// (the Groove chooser as it was before the grooves) loads with None, so it
+// plays as it did, and a groove chosen now is saved and loads again.
+#[test]
+fn an_arpeggiator_saved_with_the_placeholders_swing_loads_with_none() {
+    use bl_devices::arpeggiator;
+
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let id = editor.new_id();
+    let mut device = Device::new(
+        id,
+        "",
+        DeviceKind::Native {
+            device_type: arpeggiator::ARPEGGIATOR.to_owned(),
+        },
+    );
+    // The placeholder's chooser was parameter 17, and Swing its entry 1.
+    device.params.insert(ParamId(17), 1.0);
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let mut project = project_of(&editor);
+    let (loaded, _) =
+        decode_json(&encode_json(&project, 1).unwrap(), &LoadOptions::default()).unwrap();
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    let groove = |document: &Document| {
+        let device = document.device(id).unwrap();
+        registry
+            .device_type(&device.kind)
+            .expect("the device is registered")
+            .description
+            .value(&device.params, arpeggiator::GROOVE)
+            .unwrap()
+    };
+    assert_eq!(groove(&loaded.document), 0.0, "None");
+
+    editor
+        .apply(Command::SetDeviceParam {
+            device: id,
+            param: arpeggiator::GROOVE,
+            value: 7.0,
+        })
+        .unwrap();
+    project = project_of(&editor);
+    let (again, _) =
+        decode_json(&encode_json(&project, 1).unwrap(), &LoadOptions::default()).unwrap();
+    assert_eq!(groove(&again.document), 7.0, "Swing 16ths 60");
+}
+
 // Spec: note-editing R20. The lanes, the footer and the value keys save
 // nothing new: a set saved before them loads unchanged, and every note value
 // a lane edits is saved in the shape it always was and read back.

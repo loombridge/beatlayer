@@ -950,6 +950,10 @@ fn scale_rows(
     row: &dyn Fn(&str) -> egui::Pos2,
     events: &mut Vec<UiEvent>,
 ) {
+    // Spec: tunings R16. A tuning of other than twelve notes hides them.
+    if shell.scales_hidden() {
+        return;
+    }
     let shown = bl_shell::scales::display(shell.editor().document(), ids);
     let set = |events: &mut Vec<UiEvent>, change: Value| {
         let mut args = serde_json::Map::new();

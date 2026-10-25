@@ -331,6 +331,9 @@ pub enum Effect {
     /// Move the keyboard focus to the first control of the shown panel of
     /// the Clip View's group the focus was last in (Option+8).
     FocusSelectedClipPanel,
+    /// Move the keyboard focus to the name in the browser's Tuning section
+    /// (Navigate ▸ Tuning).
+    FocusTuning,
     /// Move the keyboard focus to the next or previous control, or to the
     /// same control on the next or previous track.
     MoveFocus {
@@ -585,6 +588,9 @@ pub struct Shell {
     /// Whether the Info View shows (L-INFO-001): view state, never part of
     /// the set, like the browser's.
     info_view: bool,
+    /// Whether the browser's Tuning section shows (the tunings spec, R28):
+    /// view state, hidden in a new set.
+    tuning_section: bool,
     /// The Groove Pool's view: whether it shows in the browser column and
     /// what the browser's hot-swap replaces (the grooves spec R24, R32).
     /// View state, never part of the set.
@@ -781,6 +787,8 @@ pub struct Shell {
     processing: Vec<bl_model::ChainId>,
     /// The meters the engine last published, one per track (WP-1.9).
     meters: Vec<bl_engine::TrackMeter>,
+    /// The meters between devices the engine last published (WP-6.69).
+    chain_meters: Vec<bl_engine::ChainMeter>,
     /// Whether the meters were the engine's when last polled.
     metering: bool,
     /// The agent API's last audio previews (WP-1.16).
@@ -1239,6 +1247,7 @@ impl Shell {
             main_view: MainView::Arrangement,
             browser: true,
             info_view: true,
+            tuning_section: false,
             groove_pool: bl_shell_spec::groove::GroovePoolView::default(),
             full_screen: false,
             focused_window: WindowKind::Main,
@@ -1300,6 +1309,7 @@ impl Shell {
             processing: Vec::new(),
             modulating: false,
             meters: Vec::new(),
+            chain_meters: Vec::new(),
             metering: false,
             previews: crate::perception::Previews::default(),
             recording: None,
@@ -1903,6 +1913,18 @@ impl Shell {
                 session_ids::DROP_FILES,
                 json!({ "paths": paths, "track": track, "scene": scene }),
             );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_tuning()
+        {
+            // Spec: tunings R27. A tuning chosen in the browser loads as
+            // `tuning.load` loads it, and the Tuning section shows.
+            Self::args::<NoArgs>(id, args)?;
+            let loaded = self.run(bl_shell_spec::tunings::LOAD, json!({ "path": path }));
+            if loaded.is_ok() {
+                self.tuning_section = true;
+            }
+            return loaded;
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.browser_view.selected_groove()

@@ -91,12 +91,16 @@ impl KeyDispatcher {
         let contexts = if text_focused {
             // While Tab moves the focus, it does from a field too: from the
             // browser's search field, or a header's volume field (the
-            // accessibility spec, R3).
-            let mut contexts = vec![Context::TextField];
+            // accessibility spec, R3). That comes before the text field's
+            // own keys, among them Tab in a name being typed, which goes on
+            // to the next track or scene (S-EDIT-012, S-TRACK-005): the
+            // keymap marks those as the field's, and that would stop the
+            // search short of Tab moving the focus.
             if shell.tab_navigation() {
-                contexts.push(Context::TabFocus);
+                vec![Context::TabFocus, Context::TextField]
+            } else {
+                vec![Context::TextField]
             }
-            contexts
         } else {
             shell.active_contexts()
         };

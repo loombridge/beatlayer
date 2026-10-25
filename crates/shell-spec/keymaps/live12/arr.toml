@@ -156,11 +156,11 @@ action = "Shorten or lengthen the loop brace"
 context = "loop-brace"
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
 status = "pending"
-package = "WP-1.8b"
+package = "WP-6.73"
 
 [[shortcut]]
 id = "S-ARR-013"

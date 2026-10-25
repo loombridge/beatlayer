@@ -732,6 +732,7 @@ impl DeviceView {
                     list
                 })
                 .unwrap_or_default(),
+            meters: Vec::new(),
             armed_map: self.armed.map(|(device, slot)| ArmedMap { device, slot }),
             map_mode: self.map_mode,
         }
@@ -1411,9 +1412,21 @@ impl DeviceView {
             selected: self.selected == Some(d.id),
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),
-            panel: self
-                .panel(d)
-                .map(|panel| follow_current_scale(panel, d, doc.settings().scale)),
+            panel: self.panel(d).map(|panel| {
+                set_aside_reference(
+                    follow_current_scale(
+                        panel,
+                        d,
+                        doc.settings().scale,
+                        doc.settings()
+                            .tuning
+                            .as_ref()
+                            .is_some_and(bl_model::Tuning::hides_scales),
+                    ),
+                    d,
+                    followed_tuning(doc, d.id).is_some(),
+                )
+            }),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
                 let (source, tap) = match &sidechain.input {
                     bl_model::Input::Track { track, tap, .. } => {
@@ -1482,7 +1495,11 @@ impl DeviceView {
     /// What `device`'s display shows now: its type's display from the
     /// device's values and the newest data its node published.
     #[must_use]
-    pub fn display(&self, device: &Device) -> bl_model::DeviceDisplay {
+    pub fn display(
+        &self,
+        device: &Device,
+        tuning: Option<&bl_model::Tuning>,
+    ) -> bl_model::DeviceDisplay {
         let DeviceKind::Native { device_type } = &device.kind else {
             return empty_display(device.id);
         };
@@ -1500,13 +1517,14 @@ impl DeviceView {
         } else {
             self.description(&device.kind)
                 .and_then(|description| {
-                    bl_devices::display_for_view(
+                    bl_devices::display_in(
                         device_type,
                         device.id,
                         description,
                         &device.params,
                         data,
                         view.as_deref(),
+                        tuning,
                     )
                 })
                 .unwrap_or_else(|| empty_display(device.id))
@@ -2345,7 +2363,8 @@ impl DeviceView {
                 let DeviceArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
                 let current = editor.document().device(device).expect("the target exists");
-                outcome.value = to_value(&self.display(current));
+                outcome.value =
+                    to_value(&self.display(current, followed_tuning(editor.document(), device)));
                 return Ok(outcome);
             }
             ids::SET_DISPLAY_VIEW => {
@@ -3560,19 +3579,59 @@ fn map_inner_copies(
     Ok(())
 }
 
+/// A Tuner that follows the set's tuning: its Reference is drawn disabled, as
+/// the tuning's own reference pitch places the notes (the tunings spec, R33).
+fn set_aside_reference(mut panel: DevicePanel, device: &Device, tuned: bool) -> DevicePanel {
+    if tuned
+        && matches!(&device.kind, DeviceKind::Native { device_type } if device_type == bl_devices::TUNER)
+    {
+        panel.locked.push(bl_devices::tuner::REFERENCE);
+    }
+    panel
+}
+
+/// The tuning the Tuner `device` names its notes by (the tunings spec, R33):
+/// the set's, on any track but a MIDI track that bypasses it.
+pub(crate) fn followed_tuning(doc: &Document, device: DeviceId) -> Option<&bl_model::Tuning> {
+    let track = doc.track(doc.device_track(device)?)?;
+    (track.kind() != bl_model::TrackKind::Midi || track.plays_tuning())
+        .then(|| doc.settings().tuning.as_ref())
+        .flatten()
+}
+
 /// Scale and Arpeggiator while Use Current Scale is on (the scales spec, R16;
 /// the scale-map spec, R12): the choosers that the current scale replaces are
 /// drawn disabled, and Scale's show the set's current scale, which follows
 /// the clip that plays.
+///
+/// While the set's tuning hides the scales (`scales_hidden`; the tunings spec,
+/// R16), every scale-aware device's switch is drawn off and disabled, as it
+/// acts.
 fn follow_current_scale(
     mut panel: DevicePanel,
     device: &Device,
     scale: bl_model::Scale,
+    scales_hidden: bool,
 ) -> DevicePanel {
-    use bl_devices::{arpeggiator, remap};
+    use bl_devices::{arpeggiator, dice, lift, remap, stack};
     let DeviceKind::Native { device_type } = &device.kind else {
         return panel;
     };
+    if scales_hidden {
+        let switch = match device_type.as_str() {
+            remap::REMAP => remap::USE_SCALE,
+            arpeggiator::ARPEGGIATOR => arpeggiator::USE_SCALE,
+            lift::LIFT => lift::USE_SCALE,
+            dice::DICE => dice::USE_SCALE,
+            stack::STACK => stack::USE_SCALE,
+            _ => return panel,
+        };
+        if let Some(at) = panel.description.params.iter().position(|p| p.id == switch) {
+            panel.values[at] = 0.0;
+            panel.locked.push(switch);
+        }
+        return panel;
+    }
     let (switch, locked) = match device_type.as_str() {
         remap::REMAP => (remap::USE_SCALE, [remap::BASE, remap::SCALE_NAME]),
         arpeggiator::ARPEGGIATOR => (

@@ -107,4 +107,7 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Shift+E"]
 win = ["Ctrl+Shift+E"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "midi.export_clip", contexts = ["global"] },
+]

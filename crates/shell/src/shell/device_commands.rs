@@ -190,6 +190,73 @@ impl Shell {
             .state(doc, devices::shown_track(&self.arrangement, doc))
     }
 
+    /// What `device_view.state` returns: [`Shell::device_view_state`] with
+    /// the meters between the devices of the chain, and of the chains of its
+    /// racks, as the engine last published them (the MIDI meters spec, R6).
+    fn device_view_report(&self) -> device_ids::DeviceViewState {
+        let doc = self.editor.document();
+        let mut state = self.device_view_state();
+        state.meters = state
+            .track
+            .and_then(|id| doc.track(id))
+            .map(|track| self.chain_meter_values(track))
+            .unwrap_or_default();
+        state
+    }
+
+    /// The meters in front of each device of `track`'s chain and after the
+    /// last, then those of the chains of its racks, in signal order.
+    fn chain_meter_values(&self, track: &bl_model::Track) -> Vec<device_ids::ChainMeterValue> {
+        fn chain<'a>(
+            shell: &Shell,
+            owner: bl_engine::MeterOwner,
+            devices: impl Iterator<Item = &'a bl_model::Device>,
+            out: &mut Vec<device_ids::ChainMeterValue>,
+        ) {
+            let mut racks = Vec::new();
+            let point = |before: Option<bl_model::DeviceId>, out: &mut Vec<_>| {
+                let at = before.map_or(bl_engine::MeterSite::End, bl_engine::MeterSite::Before);
+                if let Some(value) = shell.chain_meter(owner, at) {
+                    out.push(device_ids::ChainMeterValue {
+                        track: match owner {
+                            bl_engine::MeterOwner::Track(id) => Some(id),
+                            bl_engine::MeterOwner::Chain(_) => None,
+                        },
+                        chain: match owner {
+                            bl_engine::MeterOwner::Chain(id) => Some(id),
+                            bl_engine::MeterOwner::Track(_) => None,
+                        },
+                        before,
+                        value,
+                    });
+                }
+            };
+            for device in devices {
+                point(Some(device.id), out);
+                racks.push(device);
+            }
+            point(None, out);
+            for rack in racks {
+                for rack_chain in &rack.chains {
+                    chain(
+                        shell,
+                        bl_engine::MeterOwner::Chain(rack_chain.id),
+                        rack_chain.devices.iter(),
+                        out,
+                    );
+                }
+            }
+        }
+        let mut out = Vec::new();
+        chain(
+            self,
+            bl_engine::MeterOwner::Track(track.id()),
+            track.devices(),
+            &mut out,
+        );
+        out
+    }
+
     /// The modulator slot whose Map button is lit, if one is (WP-5.10): a
     /// click on any parameter's control maps it.
     #[must_use]
@@ -215,8 +282,12 @@ impl Shell {
     /// says it. `None` if the set has no such device.
     #[must_use]
     pub fn device_display(&self, device: bl_model::DeviceId) -> Option<bl_model::DeviceDisplay> {
-        let device = self.editor.document().device(device)?;
-        Some(self.devices.display(device))
+        let doc = self.editor.document();
+        let device = doc.device(device)?;
+        Some(
+            self.devices
+                .display(device, crate::devices::followed_tuning(doc, device.id)),
+        )
     }
 
     /// Runs a Device View command and carries out what it asks of the rest
@@ -280,7 +351,10 @@ impl Shell {
                 look: &self.prefs.look,
             },
         );
-        let outcome = result.map_err(|error| device_error(id, error))?;
+        let mut outcome = result.map_err(|error| device_error(id, error))?;
+        if id == device_ids::STATE {
+            outcome.value = to_value(&self.device_view_report());
+        }
         // Spec: browser-tags R31. Starting hot-swap clears the search words
         // and the selected tags as a new step.
         let now_swapping = self.devices.hot_swap_targets();

@@ -423,10 +423,47 @@ impl DeviceViewUi {
                     debug_assert_eq!(frame.id, *id);
                     self.device(ui, shell, theme, frame, *at, false, events);
                 }
+                // Spec: midi-meters R2. A meter in each gap, before the first
+                // device and after the last.
+                if let Some(track) = state.track {
+                    crate::meters::in_gaps(
+                        ui,
+                        shell,
+                        theme,
+                        bl_engine::MeterOwner::Track(track),
+                        &placed,
+                        DEVICE_GAP,
+                    );
+                }
             },
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
         sample_drop(ui, &state, &placed, rect, events);
+        // Spec: device-chains R43. With the Device View holding the keyboard,
+        // and no control in it using the arrow keys, Left and Right select the
+        // device before or after the selected one (S-A11Y-014).
+        if shell
+            .active_contexts()
+            .contains(&bl_commands::Context::DeviceView)
+        {
+            let step = ui.input_mut(|i| {
+                i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowRight))
+                    - i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowLeft))
+            });
+            let at = state.devices.iter().position(|d| d.selected);
+            let to = match at {
+                Some(at) => i64::try_from(at).ok().map(|at| at + i64::from(step)),
+                None if step > 0 => Some(0),
+                None => i64::try_from(state.devices.len()).ok().map(|n| n - 1),
+            };
+            if step != 0
+                && let Some(device) = to
+                    .and_then(|to| usize::try_from(to).ok())
+                    .and_then(|to| state.devices.get(to))
+            {
+                invoke(events, ids::SELECT, json!({ "device": device.id }));
+            }
+        }
     }
 
     /// Where the zone editor is, if the selected multisampler has it open:
@@ -955,9 +992,23 @@ impl DeviceViewUi {
         events: &mut Vec<UiEvent>,
     ) {
         let id = control_id(frame.id, "title_switch");
-        let response = ui.interact(rect, id, Sense::click());
-        crate::focus::register(ui.ctx(), id, Area::Detail, None);
-        if response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))) {
+        let enabled = !switch.disabled;
+        let response = ui.interact(
+            rect,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::hover()
+            },
+        );
+        if enabled {
+            crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        }
+        if enabled
+            && (response.clicked()
+                || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter))))
+        {
             let value = if switch.on { 0.0 } else { 1.0 };
             invoke(
                 events,
@@ -971,13 +1022,23 @@ impl DeviceViewUi {
         let r = rect.width() / 2.0;
         let face = if switch.on {
             c.accent.0
-        } else if response.hovered() {
+        } else if response.hovered() && enabled {
             c.control_hover.0
         } else {
             c.window.0
         };
-        painter.circle_filled(centre, r, face);
-        let ink = if switch.on {
+        painter.circle_filled(
+            centre,
+            r,
+            if enabled {
+                face
+            } else {
+                face.gamma_multiply(0.55)
+            },
+        );
+        let ink = if !enabled {
+            c.pending.0
+        } else if switch.on {
             c.accent_text.0
         } else {
             c.text_dim.0
@@ -997,7 +1058,7 @@ impl DeviceViewUi {
         focus_ring(ui, theme, rect, &response);
         let name = switch.name.to_owned();
         let on = switch.on;
-        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, true, on, &name));
+        response.widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, enabled, on, &name));
         ui.ctx().accesskit_node_builder(id, |node| {
             node.set_role(Role::Switch);
             node.set_label(switch.name.to_owned());

@@ -976,6 +976,18 @@ impl Track {
         &self.routing
     }
 
+    /// Whether the track's meter is a MIDI meter: a MIDI track whose chain
+    /// holds no instrument and no audio effect puts out MIDI, not audio (the
+    /// MIDI meters spec, R1). A frozen track plays its freeze file.
+    #[must_use]
+    pub fn shows_midi_meter(&self) -> bool {
+        self.kind == TrackKind::Midi
+            && !self.is_frozen()
+            && self
+                .devices()
+                .all(|device| device.role == crate::DeviceRole::MidiEffect)
+    }
+
     /// The devices in the track's chain, in signal order.
     pub fn devices(&self) -> impl ExactSizeIterator<Item = &Device> + DoubleEndedIterator {
         self.devices.iter().map(|device| &**device)

@@ -8,12 +8,12 @@ Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Sour
 
 | Milestone | Shortcuts |
 |---|---|
-| M1 | 137 |
-| M2 | 87 |
+| M1 | 130 |
+| M2 | 85 |
 | M3 | 43 |
 | M4 | 21 |
 | M5 | 10 |
-| M6 | 71 |
+| M6 | 80 |
 | M7 | 2 |
 | M9 | 8 |
 | M10 | 2 |
@@ -133,8 +133,8 @@ Anywhere in a main window, unless a narrower context binds the same keys.
 | S-TRACK-011 | Show or hide the return tracks | `Cmd+Option+R` | `Ctrl+Alt+R` | key | press | M2 | manual 42.19; observed in 12.4.6 (macOS), 11 October 2026: View menu, Mixer Controls |
 | S-TRANS-001 | Play from the start marker, or stop | `Space` | `Space` | key | press | M1 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
 | S-TRANS-002 | Continue playing from where playback stopped | `Shift+Space` | `Shift+Space` | key | press | M1 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
-| S-TRANS-003 | Play and stop at the end of the selection | `Option+Space` | `Ctrl+Space` | key | press | M1 | manual 42.20 |
-| S-TRANS-004 | Play the Arrangement selection | `Space` | `Space` | key | press | M1 | manual 42.20 |
+| S-TRANS-003 | Play and stop at the end of the selection | `Option+Space` | `Ctrl+Space` | key | press | M6 | manual 42.20 |
+| S-TRANS-004 | Play the Arrangement selection | `Space` | `Space` | key | press | M6 | manual 42.20 |
 | S-TRANS-005 | Move the insert marker to the start | `Home` or `Fn+Left` | `Home` | key | press | M1 | manual 42.20 |
 | S-TRANS-006 | Record | `F9` | `F9` | key | press | M2 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
 | S-TRANS-007 | Arm recording in the Arrangement | `Shift+F9` | `Shift+F9` | key | press | M2 | manual 42.20; observed in 12.4.3 (macOS), 10 October 2026: Playback menu |
@@ -350,14 +350,14 @@ A loop brace or a clip start or end marker is selected, or a multi-clip loop bar
 |---|---|---|---|---|---|---|---|
 | S-LOOP-005 | Move the start marker to the clicked position | Cmd+click | Ctrl+click | mouse | press | M2 | manual 42.8 |
 | S-LOOP-006 | Move the end marker to the clicked position | Cmd+Shift+click | Ctrl+Shift+click | mouse | press | M2 | manual 42.8 |
-| S-LOOP-007 | Nudge the loop brace left or right by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M1 | manual 42.8 |
-| S-LOOP-008 | Move the loop by its own length | `Down` or `Up` | `Down` or `Up` | key | press | M1 | manual 42.8 |
-| S-LOOP-009 | Halve or double the loop length | `Cmd+Down` or `Cmd+Up` | `Ctrl+Down` or `Ctrl+Up` | key | press | M1 | manual 42.8 |
-| S-LOOP-010 | Shorten or lengthen the loop by the grid | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M1 | manual 42.8 |
+| S-LOOP-007 | Nudge the loop brace left or right by the grid | `Left` or `Right` | `Left` or `Right` | key | press | M6 | manual 42.8 |
+| S-LOOP-008 | Move the loop by its own length | `Down` or `Up` | `Down` or `Up` | key | press | M6 | manual 42.8 |
+| S-LOOP-009 | Halve or double the loop length | `Cmd+Down` or `Cmd+Up` | `Ctrl+Down` or `Ctrl+Up` | key | press | M6 | manual 42.8 |
+| S-LOOP-010 | Shorten or lengthen the loop by the grid | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.8 |
 | S-LOOP-011 | Select the material inside the loop | `Cmd+Shift+L` | `Ctrl+Shift+L` | key | press | M1 | manual 42.8 |
 | S-SAMPLE-006 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.11 |
 | S-NOTE-022 | Move the clip region with the start marker | `Shift+Left` or `Shift+Right` | `Shift+Left` or `Shift+Right` | key | press | M2 | manual 42.12 |
-| S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M1 | manual 42.16 |
+| S-ARR-012 | Shorten or lengthen the loop brace | `Cmd+Left` or `Cmd+Right` | `Ctrl+Left` or `Ctrl+Right` | key | press | M6 | manual 42.16 |
 | S-LOOP-012 | Duplicate Loop: double the loop and copy its notes into the new half | `Cmd+D` | `Ctrl+D` | key | press | M6 | manual 10.7.3, 10.8 |
 
 ## envelope
@@ -504,9 +504,9 @@ The Device View has focus.
 | S-DEV-001 | Group the selected devices into a rack | `Cmd+G` | `Ctrl+G` | key | press | M5 | manual 42.4; observed in 12.4.3 (macOS), 10 October 2026: Edit menu and the device title bar's context menu |
 | S-DEV-002 | Ungroup the selected rack | `Cmd+Shift+G` | `Ctrl+Shift+G` | key | press | M5 | manual 42.4 |
 | S-DEV-003 | Turn every device in a rack on or off | Option+click a device activator | Alt+click a device activator | mouse | press | M5 | manual 42.4 |
-| S-DEV-004 | Add devices to the selection | Shift+click | Shift+click | mouse | press | M2 | manual 42.4 |
+| S-DEV-004 | Add devices to the selection | Shift+click | Shift+click | mouse | press | M6 | manual 42.4 |
 | S-DEV-008 | Hot-swap the selected device | `Q` | `Q` | key | press | M5 | manual 42.4 |
-| S-DEV-010 | Open another plug-in window without closing the others | Cmd+click a plug-in window button | Ctrl+click a plug-in window button | mouse | press | M2 | manual 42.4; observed in Live 12 (macOS), 12 October 2026: Info View text of the plug-in device's window button |
+| S-DEV-010 | Open another plug-in window without closing the others | Cmd+click a plug-in window button | Ctrl+click a plug-in window button | mouse | press | M6 | manual 42.4; observed in Live 12 (macOS), 12 October 2026: Info View text of the plug-in device's window button |
 | S-DEV-011 | Switch the device between its A and B states | `P` | `P` | key | press | M5 | manual 42.4; observed in 12.4.3 (macOS), 10 October 2026: Edit menu and the device title bar's context menu |
 | S-A11Y-014 | Move between devices | `Left` or `Right` | `Left` or `Right` | key | press | M2 | manual 41.4.1.5 |
 | S-DEV-012 | Show the selected rack's chain list | `Plus` | `Plus` | key | press | M5 | observed in 12.4.3 (macOS), 10 October 2026: View menu (Show Chains) |
@@ -610,9 +610,11 @@ The Settings window has focus.
 | S-FILE-006 | note | macOS only. |
 | S-FILE-007 | note | Manual 41.4.1.3 gives Cmd+R / Ctrl+R for this, which is Rename everywhere else; treated as an error in that section. |
 | S-FILE-008 | unconfirmed | Live 12.4.3 shows no key beside Export MIDI Clip... in the File menu or the clip context menus (observed 10 October 2026). |
+| S-DEV-004 | note | Moved to M6 by WP-6.70: The Device View selects one device at a time; selecting several changes what Cut, Copy, Duplicate, Delete and the other device commands act on. WP-6.76 builds it. |
 | S-DEV-006 | same command as S-VAL-004 | Double-clicking the control also resets it. |
 | S-DEV-007 | same command as S-BRW-004 |  |
 | S-DEV-008 | same command as S-VIEW-006 |  |
+| S-DEV-010 | note | Moved to M6 by WP-6.70: Plug-in windows do not yet close the others when one opens, which is what the key undoes, and the Multiple Plug-In Windows setting is not built. WP-6.75 builds it. |
 | S-EDIT-004 | note | Duplicating a track puts the copy straight after it and selects it; one undo step, Duplicate Track(s) (pressed in 12.4.6 (macOS), 12 October 2026). |
 | S-EDIT-007 | note | Windows uses Ctrl+Y, not Ctrl+Shift+Z. |
 | S-VAL-001 | note | On the volume field Up and Down step 1 dB; from 5.5 dB, Up gives 6.0 dB and stops at the top. |
@@ -625,6 +627,10 @@ The Settings window has focus.
 | S-LOOP-002 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-LOOP-003 | note | The 12.0 release notes say these set the markers to the time selection. |
 | S-LOOP-004 | note | The 12.0 release notes say these set the markers to the time selection. |
+| S-LOOP-007 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-LOOP-008 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-LOOP-009 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
+| S-LOOP-010 | note | Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
 | S-ZOOM-003 | note | Manual 41.4.1.3 describes the same keys as widening and narrowing the Arrangement grid; the adaptive grid follows the zoom. |
 | S-ZOOM-005 | unconfirmed | Sections 42.11, 42.12 and 42.16 give Ctrl+Shift+F on Windows for the same command. |
 | S-CLIPMODE-001 | unconfirmed | Manual 8.1.3 gives Alt+Tab on Windows. |
@@ -648,7 +654,7 @@ The Settings window has focus.
 | S-SES-022 | same command as S-SES-021 | The same key as the previous row: a second press moves from the last track to the scene. |
 | S-ARR-005 | unconfirmed | Manual 6.7 gives Ctrl+Shift on Windows. |
 | S-ARR-010 | same command as S-ENV-004 |  |
-| S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. |
+| S-ARR-012 | same command as S-LOOP-010 | Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it. |
 | S-ARR-020 | note | Live 12.4.3's View menu shows U beside Show Selected Grouped Track. |
 | S-ARR-021 | note | Live 12.4.3's View menu shows these keys beside Show Grouped Tracks. |
 | S-ARR-022 | note | It makes selected take lanes taller or shorter too (manual 21.2). |
@@ -668,8 +674,8 @@ The Settings window has focus.
 | S-TRACK-010 | same command as S-ARR-020 |  |
 | S-TRACK-015 | same command as S-BRW-004 |  |
 | S-TRACK-016 | note | Live 12.4.3's Edit menu reads Deactivate Track with this key while an empty slot of the track is selected. |
-| S-TRANS-003 | note | Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. |
-| S-TRANS-004 | same command as S-TRANS-001 | Same key as Play: with a time selection, playback starts from it. |
+| S-TRANS-003 | note | Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70: The manual gives Option+Space (Ctrl+Space) two actions, this one and Play From Insert Marker (S-ARR-032), without saying when each applies; it needs an observation of Live. WP-6.74 builds it. |
+| S-TRANS-004 | same command as S-TRANS-001 | Same key as Play: with a time selection, playback starts from it. Moved to M6 by WP-6.70: It is the same key as Play, and the manual does not say what Play does with a time selection beyond starting from it; it needs an observation of Live. WP-6.74 builds it. |
 | S-TRANS-005 | note | Live 12.4.3's Playback menu shows no key beside Return Play Position to 1.1.1 (M-PLAY-004). |
 | S-TRANS-010 | note | The keys count group tracks by their number: with a group at position 3, F3 turned the group's activator on or off (pressed in 12.4.6 (macOS), 11 October 2026). |
 | S-BRW-002 | same command as S-VIEW-010 |  |

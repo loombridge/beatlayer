@@ -3987,6 +3987,122 @@ Type: integer, at least 1.
 
 </details>
 
+### `ChainMeterValue`
+
+One meter between the devices of a chain, as `device_view.state` reports it (the MIDI meters spec, R2 and R6).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `before` | [`DeviceId`](#deviceid) or null | yes | The device the meter is in front of, or `null` for the meter after the chain's last device. |
+| `chain` | [`ChainId`](#chainid) or null | no | The rack chain the meter is in, if it is a rack chain's. |
+| `track` | [`TrackId`](#trackid) or null | no | The track whose chain the meter is in, if it is the track's own. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One meter between the devices of a chain, as `device_view.state` reports it (the MIDI meters spec, R2 and R6).",
+  "oneOf": [
+    {
+      "description": "A level meter.",
+      "properties": {
+        "kind": {
+          "const": "level",
+          "type": "string"
+        },
+        "peak": {
+          "description": "The peak level of the left and right channels, as linear amplitude.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "peak"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI meter. Each value falls from 1 to 0 over 300 ms after what lights it passes.",
+      "properties": {
+        "channel": {
+          "description": "Lit while a control change, pitch bend or channel pressure passed: the lowest dot.",
+          "format": "float",
+          "type": "number"
+        },
+        "expression": {
+          "description": "Lit while a per-note expression passed: the lowest dot, blue.",
+          "format": "float",
+          "type": "number"
+        },
+        "kind": {
+          "const": "midi",
+          "type": "string"
+        },
+        "velocity": {
+          "description": "The highest note-on velocity that passed, from 0 to 1: the meter's height.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "velocity",
+        "channel",
+        "expression"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "before": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device the meter is in front of, or `null` for the meter after the chain's last device."
+    },
+    "chain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChainId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The rack chain the meter is in, if it is a rack chain's."
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track whose chain the meter is in, if it is the track's own."
+    }
+  },
+  "required": [
+    "before"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ChainMixer`
 
 A chain's mixer: `volume` (linear gain, 1 is 0 dB, 0 is -inf), `pan` (-1 left to 1 right), `enabled` (the Chain Activator) and `solo`. A MIDI effect rack's chains have no volume or pan.
@@ -8889,6 +9005,7 @@ What `device_view.state` returns.
 | `can_paste` | boolean | yes | Whether the clipboard holds a device to paste. |
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
 | `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
+| `meters` | array of [`ChainMeterValue`](#chainmetervalue) | yes | The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters. |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 | `map_mode` | [`DeviceId`](#deviceid) or null | no | The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list. |
 
@@ -8955,6 +9072,14 @@ What `device_view.state` returns.
       ],
       "description": "The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list."
     },
+    "meters": {
+      "default": [],
+      "description": "The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/ChainMeterValue"
+      },
+      "type": "array"
+    },
     "selected": {
       "anyOf": [
         {
@@ -8997,7 +9122,8 @@ What `device_view.state` returns.
     "hot_swap",
     "can_paste",
     "can_paste_chain",
-    "device_list"
+    "device_list",
+    "meters"
   ],
   "type": "object"
 }
@@ -10508,6 +10634,40 @@ The Export Audio/Video dialog's controls, as the export spec's R29 to R37 list t
     "bit_depth",
     "dither",
     "encode_mp3"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExportDawProjectResult`
+
+What `set.export_dawproject` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | The file that was written, with `.dawproject` where it was added. |
+| `report` | [`ImportReport`](#importreport) | yes | What the format can't carry, which the file leaves out, in the form of the import report: each thing, where it was, how many there were and what the file holds in its place. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.export_dawproject` returns.",
+  "properties": {
+    "path": {
+      "description": "The file that was written, with `.dawproject` where it was added.",
+      "type": "string"
+    },
+    "report": {
+      "$ref": "#/$defs/ImportReport",
+      "description": "What the format can't carry, which the file leaves out, in the form of the import report: each thing, where it was, how many there were and what the file holds in its place."
+    }
+  },
+  "required": [
+    "path",
+    "report"
   ],
   "type": "object"
 }
@@ -14123,6 +14283,7 @@ One of:
 - `"set"`: A Beatlayer set.
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
+- `"tuning"`: A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).
 - `"groove"`: A groove file (`.blgroove`), which loads into the Groove Pool, or replaces the groove being hot-swapped (WP-6.20; the grooves spec R32, R33).
 - `"plugin"`: A plug-in the scanner found (WP-2.9).
 - `"device"`: One of Beatlayer's own devices, listed under a device label (the Modulators label, WP-5.10); its path is the device type's ID.
@@ -14169,6 +14330,11 @@ One of:
     {
       "const": "chord_bank",
       "description": "A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).",
+      "type": "string"
+    },
+    {
+      "const": "tuning",
+      "description": "A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).",
       "type": "string"
     },
     {
@@ -18038,6 +18204,7 @@ What `mixer_view.state` and the other view commands return.
 | `return_tracks_scroll` | boolean | yes | Whether the return tracks scroll with the tracks (IMP-01, the mixer view spec R21): they come after the drop area and only Main stays pinned. Off in a new install, so the returns stay pinned, as in Live. |
 | `performance_impact_values` | array of [`TrackImpact`](#trackimpact) | yes | Each track's Performance Impact, as the engine last published it: the track, how many of its six segments are lit, and its share of the set's processing time (the mixer spec, R31). |
 | `gain_reduction` | array of [`TrackGainReduction`](#trackgainreduction) | yes | Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters. |
+| `meters` | array of [`TrackMeterValue`](#trackmetervalue) | yes | Each track's meter, in the order the tracks run (the MIDI meters spec, R6); empty when no engine has published meters. |
 | `peaks` | array of [`TrackPeak`](#trackpeak) | yes | Each track's held peak and its meters' peak lines (R33, R34); empty when no engine has published meters. |
 | `column_widths` | array of [`ColumnWidth`](#columnwidth) | yes | Every column's width, in the order the columns run: the tracks, the return tracks, Main (R36, R38). |
 | `chains` | array of [`ChainStrip`](#chainstrip) | no | The chains folded out as strips, in the mixers' column order (racks spec, R27). |
@@ -18073,6 +18240,14 @@ What `mixer_view.state` and the other view commands return.
       "description": "Each track's gain reduction, in the order the tracks run (IMP-25, R40); empty when no engine has published meters.",
       "items": {
         "$ref": "#/$defs/TrackGainReduction"
+      },
+      "type": "array"
+    },
+    "meters": {
+      "default": [],
+      "description": "Each track's meter, in the order the tracks run (the MIDI meters spec, R6); empty when no engine has published meters.",
+      "items": {
+        "$ref": "#/$defs/TrackMeterValue"
       },
       "type": "array"
     },
@@ -18119,6 +18294,7 @@ What `mixer_view.state` and the other view commands return.
     "return_tracks_scroll",
     "performance_impact_values",
     "gain_reduction",
+    "meters",
     "peaks",
     "column_widths"
   ],
@@ -29476,6 +29652,91 @@ One of:
 
 </details>
 
+### `TrackMeterValue`
+
+One track's meter, as `mixer_view.state` reports it (the MIDI meters spec, R1 and R6): a MIDI meter for a MIDI track whose chain holds no instrument and no audio effect, a level meter for every other.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One track's meter, as `mixer_view.state` reports it (the MIDI meters spec, R1 and R6): a MIDI meter for a MIDI track whose chain holds no instrument and no audio effect, a level meter for every other.",
+  "oneOf": [
+    {
+      "description": "A level meter.",
+      "properties": {
+        "kind": {
+          "const": "level",
+          "type": "string"
+        },
+        "peak": {
+          "description": "The peak level of the left and right channels, as linear amplitude.",
+          "items": {
+            "format": "float",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "peak"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A MIDI meter. Each value falls from 1 to 0 over 300 ms after what lights it passes.",
+      "properties": {
+        "channel": {
+          "description": "Lit while a control change, pitch bend or channel pressure passed: the lowest dot.",
+          "format": "float",
+          "type": "number"
+        },
+        "expression": {
+          "description": "Lit while a per-note expression passed: the lowest dot, blue.",
+          "format": "float",
+          "type": "number"
+        },
+        "kind": {
+          "const": "midi",
+          "type": "string"
+        },
+        "velocity": {
+          "description": "The highest note-on velocity that passed, from 0 to 1: the meter's height.",
+          "format": "float",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "velocity",
+        "channel",
+        "expression"
+      ],
+      "type": "object"
+    }
+  ],
+  "properties": {
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TrackPeak`
 
 One track's held peak, as `mixer_view.state` reports it (R33, R34).
@@ -31077,6 +31338,7 @@ What the view commands return: the window's view state afterwards.
 | `main_view` | string | yes | The main view: `arrangement` or `session`. |
 | `browser` | boolean | yes | Whether the browser shows. |
 | `full_height_browser` | boolean | yes | Whether the browser runs down to the Status Bar (Full-Height Browser, spec: browser R26). |
+| `tuning_section` | boolean | yes | Whether the browser's Tuning section shows (the tunings spec, R28); hidden in a new set. |
 | `browser_width` | number | yes | The browser's width in points at 100%, as it was set; a window too narrow for it shows the browser narrower (browser R29). |
 | `info_view` | boolean | yes | Whether the Info View shows. |
 | `full_screen` | boolean | yes | Whether the main window is in full-screen mode. |
@@ -31115,6 +31377,11 @@ What the view commands return: the window's view state afterwards.
       "description": "The main view: `arrangement` or `session`.",
       "type": "string"
     },
+    "tuning_section": {
+      "default": false,
+      "description": "Whether the browser's Tuning section shows (the tunings spec, R28); hidden in a new set.",
+      "type": "boolean"
+    },
     "zoom": {
       "description": "The interface zoom, where 1 is 100%.",
       "format": "float",
@@ -31125,6 +31392,7 @@ What the view commands return: the window's view state afterwards.
     "main_view",
     "browser",
     "full_height_browser",
+    "tuning_section",
     "browser_width",
     "info_view",
     "full_screen",

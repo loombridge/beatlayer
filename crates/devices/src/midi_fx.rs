@@ -24,6 +24,17 @@ pub(crate) fn value(params: &ParamBank, id: ParamId) -> f64 {
     params.value(params.index(id).expect("the description holds it"))
 }
 
+/// Whether a scale-aware device's Use Current Scale switch `switch` is on and
+/// acts: it acts as off while the set's tuning hides the scales (the tunings
+/// spec, R16).
+pub(crate) fn use_current_scale(
+    audio: &Audio<'_, '_>,
+    params: &ParamBank,
+    switch: ParamId,
+) -> bool {
+    value(params, switch) >= 0.5 && !audio.scales_hidden()
+}
+
 /// The scale a scale-aware device counts degrees of, `offset` frames into
 /// its stretch (the scales spec, R15, R16): its current scale while its Use
 /// Current Scale switch `switch` is on, otherwise the chromatic one, whose
@@ -34,7 +45,7 @@ pub(crate) fn scale_in_use(
     switch: ParamId,
     offset: u32,
 ) -> Scale {
-    if value(params, switch) >= 0.5 {
+    if use_current_scale(audio, params, switch) {
         audio.scale_at(offset)
     } else {
         OFF

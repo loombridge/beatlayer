@@ -6,7 +6,6 @@
 //! the file, and the setting Retune Set On Loading Tuning Systems, which a
 //! command left without `retune` follows.
 
-use bl_interop::scala;
 use bl_model::Command;
 use bl_shell_spec::tunings::{self as ids, LoadArgs, TuningState};
 use serde_json::{Value, json};
@@ -19,10 +18,11 @@ impl Shell {
         match id {
             ids::LOAD => {
                 let LoadArgs { path, retune } = Self::args(id, args)?;
-                let tuning = scala::read(Path::new(&path)).map_err(|error| ShellError::Failed {
-                    command: id.to_owned(),
-                    message: format!("{path}: {error}"),
-                })?;
+                let tuning =
+                    crate::browser::tunings::read(&path).map_err(|error| ShellError::Failed {
+                        command: id.to_owned(),
+                        message: format!("{path}: {error}"),
+                    })?;
                 let retune = retune.unwrap_or(self.prefs.retune_on_tuning_load);
                 self.editor
                     .apply(Command::SetTuning { tuning, retune })
@@ -53,6 +53,20 @@ impl Shell {
                 .as_ref()
                 .map(bl_model::Tuning::readout),
         }
+    }
+
+    /// Whether the set's tuning hides the scales (the tunings spec, R16): it
+    /// holds other than twelve notes to its pseudo-octave. The scale
+    /// controls are then hidden, and a scale-aware device's Use Current Scale
+    /// is disabled and acts as off.
+    #[must_use]
+    pub fn scales_hidden(&self) -> bool {
+        self.editor
+            .document()
+            .settings()
+            .tuning
+            .as_ref()
+            .is_some_and(bl_model::Tuning::hides_scales)
     }
 
     /// Whether a person loading or removing a tuning is asked first: Retune

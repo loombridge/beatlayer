@@ -7,7 +7,7 @@
 //! blocking call occurs on the audio thread: all ring buffers and analysis
 //! tables are pre-allocated when the node is constructed.
 
-use bl_engine::{DeviceType, NodeConfig, Registry};
+use bl_engine::{DeviceType, KeyPitches, NodeConfig, NodeData, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
     DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
@@ -50,9 +50,13 @@ const WINDOW_LEN: usize = 2048;
 const ANALYSIS_INTERVAL: usize = 2048;
 /// Number of history samples for Histogram view.
 pub const HIST_LEN: usize = 32;
+/// Where the display data says the note is a key of the set's tuning, not a
+/// twelve-step note (the tunings spec, R33): 1 when it is.
+const TUNED_AT: usize = 6 + HIST_LEN;
 /// Display data length published to the triple buffer:
-/// [pitch_hz, midi_note, cents, in_tune, valid, strobe_phase, ..history].
-pub const TUNER_DISPLAY_LEN: usize = 6 + HIST_LEN;
+/// [pitch_hz, midi_note (or the tuning's key), cents, in_tune, valid,
+/// strobe_phase, ..history, tuned].
+pub const TUNER_DISPLAY_LEN: usize = 7 + HIST_LEN;
 
 /// Returns the descriptor and layout for Tuner.
 #[must_use]
@@ -118,6 +122,9 @@ pub struct Tuner {
     detected_pitch: Option<f64>,
     cents: Option<f64>,
     nearest_note_midi: Option<i32>,
+    /// The pitch of each key under the set's tuning, which the compiler sends
+    /// to a Tuner on a track that follows it (the tunings spec, R33).
+    keys: KeyPitches,
     spelling: Spelling,
     strobe_phase: f32,
     pitch_history: [f32; HIST_LEN],
@@ -163,6 +170,7 @@ impl Tuner {
             detected_pitch: None,
             cents: None,
             nearest_note_midi: None,
+            keys: KeyPitches::twelve(),
             spelling: Spelling::Sharps,
             strobe_phase: 0.0,
             pitch_history: [0.0; HIST_LEN],
@@ -187,6 +195,9 @@ impl Tuner {
     /// The nearest note name according to the active spelling (e.g. "A4", "C#4").
     #[must_use]
     pub fn note_name(&self) -> Option<String> {
+        if self.keys.is_tuned() {
+            return None;
+        }
         let midi = self.nearest_note_midi?;
         let pc = (midi.rem_euclid(12)) as usize;
         let octave = (midi / 12) - 1;
@@ -196,6 +207,19 @@ impl Tuner {
             Spelling::Both => BOTH_NAMES[pc],
         };
         Some(format!("{name}{octave}"))
+    }
+
+    /// The key of the set's tuning nearest the pitch heard, while the Tuner
+    /// follows a tuning (the tunings spec, R33).
+    #[must_use]
+    pub fn tuned_key(&self) -> Option<u8> {
+        self.keys
+            .is_tuned()
+            .then(|| {
+                self.nearest_note_midi
+                    .and_then(|key| u8::try_from(key).ok())
+            })
+            .flatten()
     }
 
     fn detect_pitch(&mut self, reference: f64) {
@@ -294,9 +318,24 @@ impl Tuner {
         let f = self.rate / period;
 
         self.detected_pitch = Some(f);
-        let p = 69.0 + 12.0 * (f / reference).log2();
-        let m = p.round() as i32;
-        let c = (p - m as f64) * 100.0;
+        // Spec: tunings R33. Under a tuning the notes are the tuning's, placed
+        // by its own reference pitch, so the Reference is set aside.
+        let (m, c) = if self.keys.is_tuned() {
+            match self.keys.nearest(bl_model::pitch_of(f)) {
+                Some((key, cents)) => (i32::from(key), cents),
+                None => {
+                    self.detected_pitch = None;
+                    self.cents = None;
+                    self.nearest_note_midi = None;
+                    self.update_display_data(None);
+                    return;
+                }
+            }
+        } else {
+            let p = 69.0 + 12.0 * (f / reference).log2();
+            let m = p.round() as i32;
+            (m, (p - m as f64) * 100.0)
+        };
         self.nearest_note_midi = Some(m);
         self.cents = Some(c);
 
@@ -322,6 +361,7 @@ impl Tuner {
             self.display_data[4] = 0.0;
         }
         self.display_data[5] = self.strobe_phase;
+        self.display_data[TUNED_AT] = if self.keys.is_tuned() { 1.0 } else { 0.0 };
         for i in 0..HIST_LEN {
             let idx = if self.history_count < HIST_LEN {
                 i
@@ -380,6 +420,12 @@ impl NativeDevice for Tuner {
         // Note: audio is unmodified! Bit-identical pass-through.
     }
 
+    fn receive_data(&mut self, data: NodeData) {
+        if let Some(keys) = data.downcast_ref::<KeyPitches>() {
+            self.keys = *keys;
+        }
+    }
+
     fn latency(&self) -> u32 {
         0
     }
@@ -401,6 +447,21 @@ pub fn display_for_view(
     values: &OrdMap<ParamId, f64>,
     data: Option<&[f32]>,
     view: Option<&str>,
+) -> DeviceDisplay {
+    display_in(device, description, values, data, view, None)
+}
+
+/// As [`display_for_view`], for a Tuner that follows `tuning`: it names the
+/// notes it hears as the note editor names them (the tunings spec, R29 and
+/// R33).
+#[must_use]
+pub fn display_in(
+    device: DeviceId,
+    description: &DeviceDescription,
+    values: &OrdMap<ParamId, f64>,
+    data: Option<&[f32]>,
+    view: Option<&str>,
+    tuning: Option<&bl_model::Tuning>,
 ) -> DeviceDisplay {
     let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
     let spelling_flats = value(SPELLING_FLATS) >= 0.5;
@@ -441,7 +502,18 @@ pub fn display_for_view(
                 Spelling::Flats => FLAT_NAMES[pc],
                 Spelling::Both => BOTH_NAMES[pc],
             };
-            let note_str = format!("{name}{octave}");
+            // Spec: tunings R33. A note of the set's tuning is named as the
+            // note editor names it.
+            let note_str = if d.get(TUNED_AT).copied().unwrap_or(0.0) >= 0.5 {
+                tuning
+                    .zip(u8::try_from(midi).ok())
+                    .and_then(|(tuning, key)| {
+                        tuning.key_note(key).map(|note| tuning.note_name(note))
+                    })
+                    .unwrap_or_else(|| format!("key {midi}"))
+            } else {
+                format!("{name}{octave}")
+            };
 
             readings.push(DisplayReading {
                 name: "Note".to_owned(),

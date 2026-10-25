@@ -10,8 +10,8 @@
 //!   any arguments it fixes;
 //! - `system`: the operating system handles it (menu navigation, Hide);
 //! - `widget`: the focused control handles it (changing a value);
-//! - `pending`: nothing yet; the milestone that binds it, and for M1 the
-//!   package.
+//! - `pending`: nothing yet; the milestone that binds it, and the package
+//!   (always for M1 to M3).
 //!
 //! The person's own shortcuts live in `keymap.toml`, beside the
 //! preferences, and layer over the generated keymap: the keymap in use is
@@ -149,11 +149,11 @@ pub enum Status {
     System(String),
     /// The focused control handles it; the text says which.
     Widget(String),
-    /// Nothing yet: the milestone that binds it, and for M1 the package.
+    /// Nothing yet: the milestone that binds it, and the package (always for M1 to M3).
     Pending {
         /// The milestone, such as `M3`.
         milestone: String,
-        /// The package, for an M1 shortcut, such as `WP-1.8b`.
+        /// The package that binds it, such as `WP-6.72`.
         package: Option<String>,
     },
 }

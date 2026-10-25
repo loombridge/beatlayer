@@ -1083,6 +1083,11 @@ pub const SIDEBAR_MIN_WIDTH: f32 = BROWSER_MIN_WIDTH - CONTENT_MIN_WIDTH - 1.0;
 /// isn't measured; this is Beatlayer's own.
 pub const QUICK_TAGS_HEIGHT: f32 = 62.0;
 
+/// A row of the Tuning section: its name row, each of its five controls
+/// and its buttons (L-BRW-014; the tunings spec, R28; the sizes are
+/// Beatlayer's own).
+pub const TUNING_ROW: f32 = 20.0;
+
 /// How wide the Tag Editor is, when it opens beside the content pane
 /// (L-BRW-013). Live's isn't measured; this is Beatlayer's own.
 pub const TAG_EDITOR_WIDTH: f32 = 190.0;
@@ -1110,6 +1115,10 @@ pub struct BrowserParts {
     /// The Results bar, under the Filter View, while a search or a filter is
     /// active (L-BRW-008).
     pub results_bar: bool,
+    /// The Tuning section, at the pane's bottom (L-BRW-014; the tunings
+    /// spec, R28), as many rows of [`TUNING_ROW`] points as it has; none
+    /// while it hides.
+    pub tuning_rows: u8,
 }
 
 /// The browser's parts inside its column (L-BRW rows), from layout.md's
@@ -1151,6 +1160,9 @@ pub struct BrowserLayout {
     /// The Quick Tags section, at the content pane's bottom, above the
     /// preview strip (L-BRW-012).
     pub quick_tags: Rect,
+    /// The Tuning section, above Quick Tags (L-BRW-014); no height while it
+    /// hides.
+    pub tuning: Rect,
     /// The preview strip at the content pane's bottom (L-BRW-011).
     pub strip: Rect,
     /// The Preview switch, at the strip's left (L-BRW-011).
@@ -1243,11 +1255,17 @@ impl BrowserLayout {
             pos2(content.left(), strip.top() - QUICK_TAGS_HEIGHT),
             pos2(right, strip.top()),
         );
-        let list_bottom = if quick_tags_shown {
+        let above_strip = if quick_tags_shown {
             quick_tags.top()
         } else {
             strip.top()
         };
+        let tuning_height = f32::from(parts.tuning_rows) * TUNING_ROW;
+        let tuning = Rect::from_min_max(
+            pos2(content.left(), above_strip - tuning_height),
+            pos2(right, above_strip),
+        );
+        let list_bottom = tuning.top();
         let list = Rect::from_min_max(
             pos2(content.left(), header.bottom()),
             pos2(right, list_bottom),
@@ -1279,6 +1297,7 @@ impl BrowserLayout {
             column_menu,
             list,
             quick_tags,
+            tuning,
             strip,
             preview_toggle,
             raw_toggle,

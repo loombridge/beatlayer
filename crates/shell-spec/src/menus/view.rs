@@ -1,6 +1,6 @@
 //! The View menu.
 
-use super::Action::{Choice, Command as Cmd, Omitted, Pending, Shortcut as Key, Submenu};
+use super::Action::{Choice, Command as Cmd, Omitted, Shortcut as Key, Submenu};
 use super::{Action, D24, IMP_01, IMP_25, IMP_25_CLOSE_WINDOWS, Row, SEPARATOR};
 use crate::arrangement::{SHOW_IN_OUT, SHOW_RETURN_TRACKS, SHOW_VOLUME};
 use crate::assistant::VIEW_TOGGLE_ASSISTANT;
@@ -10,7 +10,7 @@ use crate::commands::{
     VIEW_TOGGLE_BROWSER, VIEW_TOGGLE_CLIP_VIEW, VIEW_TOGGLE_DETAIL_AREA, VIEW_TOGGLE_DEVICE_VIEW,
     VIEW_TOGGLE_FULL_HEIGHT_BROWSER, VIEW_TOGGLE_INFO_VIEW, VIEW_TOGGLE_PLUG_IN_WINDOWS,
     VIEW_TOGGLE_SECOND_WINDOW, VIEW_TOGGLE_SESSION_ARRANGEMENT, VIEW_TOGGLE_UNDO_HISTORY,
-    VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET,
+    VIEW_TUNING_SECTION, VIEW_ZOOM_IN, VIEW_ZOOM_OUT, VIEW_ZOOM_RESET,
 };
 use crate::file_manager::VIEW_TOGGLE_FILE_MANAGER;
 use crate::groove::VIEW_TOGGLE_GROOVE_POOL;
@@ -87,7 +87,7 @@ pub(super) const VIEW: &[Row] = &[
     SEPARATOR,
     ("M-VIEW-021", "Browser", Cmd(VIEW_TOGGLE_BROWSER)),
     ("M-VIEW-022", "Groove Pool", Cmd(VIEW_TOGGLE_GROOVE_POOL)),
-    ("M-VIEW-023", "Tuning", Pending(None)),
+    ("M-VIEW-023", "Tuning", Cmd(VIEW_TUNING_SECTION)),
     (
         "M-VIEW-024",
         "Full-Height Browser",

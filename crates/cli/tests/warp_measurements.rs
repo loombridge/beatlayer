@@ -1381,9 +1381,8 @@ fn further(mode: WarpMode, table: &mut Table) {
 }
 
 /// R35's formants: the vowel's first two, moved with the pitch in Complex,
-/// held in Complex Pro at Formants 100 % within the library's reach (10 %
-/// at ±7 semitones; 40 % and 12.5 % at ±12), and moved with it again at
-/// Formants 0 %.
+/// held in Complex Pro at Formants 100 % (Envelope at the vowel's 150 Hz,
+/// R23), and moved with it again at Formants 0 %.
 fn vowel_formants(mode: WarpMode, media: &MediaMap, table: &mut Table) {
     let name = format!("{mode:?}");
     let source = Fixture::Vowel.samples();
@@ -1400,22 +1399,16 @@ fn vowel_formants(mode: WarpMode, media: &MediaMap, table: &mut Table) {
                 let song = target_song(tempo, Fixture::Vowel, mode, |audio| {
                     audio.transpose = semitones;
                     audio.warp_settings.complex_pro.formants = formants;
+                    // 44,100 / 294 is the vowel's 150 Hz (R23).
+                    audio.warp_settings.complex_pro.envelope = 294;
                 });
                 let out = render(&song, media, STEADY_FRAMES, 512);
                 let got = bl_analysis::measure::formants(&mono(steady(&out))).unwrap();
                 let held = mode == WarpMode::ComplexPro && formants == 100.0;
                 for (n, (found, original)) in got.iter().zip(source).enumerate() {
                     let want = if held { original } else { original * ratio };
-                    let limit = match (held, semitones.abs(), n) {
-                        (true, 12, 0) => 0.40,
-                        (true, 12, _) => 0.125,
-                        _ => 0.10,
-                    };
-                    // The library's own formant correction falls short of
-                    // R35's figures on this reading of the vowel (the
-                    // spectral envelope's all-pole fit): the pull request
-                    // gives the numbers to the target's owner.
-                    let bound = if held { 0.55 } else { limit };
+                    let limit = 0.10;
+                    let bound = limit;
                     table.within_judged(
                         format!(
                             "{name} vowel formant {} at Formants {formants}, speed {}, {semitones:+} st",

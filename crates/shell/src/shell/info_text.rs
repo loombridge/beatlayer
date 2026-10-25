@@ -106,7 +106,7 @@ impl Shell {
 
     /// The clip the main view has selected: the Arrangement's, or the first
     /// selected Session slot's.
-    fn selected_clip(&self) -> Option<ClipId> {
+    pub(super) fn selected_clip(&self) -> Option<ClipId> {
         let doc = self.editor.document();
         if self.main_view == MainView::Session {
             let slot = self.session.first_slot()?;

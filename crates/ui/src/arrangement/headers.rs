@@ -383,7 +383,8 @@ pub fn header(
         name_right = rect.left() - 2.0;
     }
     let name_rect = Rect::from_min_max(pos2(name_left, row_top), pos2(name_right, row_top + 15.0));
-    if !rename_edit(ui, theme, name_rect, id, name, events) {
+    let next = crate::track_menu::next_renamable(shell.editor().document(), id);
+    if !rename_edit(ui, theme, name_rect, id, name, next, events) {
         painter.with_clip_rect(title.shrink(1.0)).text(
             pos2(name_left, row_top + 7.5),
             Align2::LEFT_CENTER,
@@ -489,7 +490,7 @@ pub fn header(
         } else {
             parts.pan(ui, right_half, None, events);
         }
-        let midi_only = track.kind() == TrackKind::Midi && track.devices().len() == 0;
+        let midi_only = track.shows_midi_meter();
         if height >= 52.0 && track.kind().has_sends() && !midi_only {
             // The sends, one per return, side by side (L-ARR-009; with more
             // returns than fit, the first that do).

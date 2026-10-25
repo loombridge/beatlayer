@@ -48,10 +48,11 @@ action = "Add devices to the selection"
 context = "device-view"
 kind = "mouse"
 trigger = "press"
-milestone = "M2"
+milestone = "M6"
 mac = ["Shift+click"]
 win = ["Shift+click"]
 status = "pending"
+package = "WP-6.76"
 
 [[shortcut]]
 id = "S-DEV-005"
@@ -62,7 +63,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Right-click the Device View selector"]
 win = ["Right-click the Device View selector"]
-status = "pending"
+status = "widget"
+handler = "the Device View selector: a right-click lists the selected track's devices as a hierarchy to choose from (`device.select`, racks R25)"
 
 [[shortcut]]
 id = "S-DEV-006"
@@ -85,7 +87,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.load_selected", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-DEV-008"
@@ -121,10 +126,11 @@ action = "Open another plug-in window without closing the others"
 context = "device-view"
 kind = "mouse"
 trigger = "press"
-milestone = "M2"
+milestone = "M6"
 mac = ["Cmd+click a plug-in window button"]
 win = ["Ctrl+click a plug-in window button"]
 status = "pending"
+package = "WP-6.75"
 
 [[shortcut]]
 id = "S-DEV-011"

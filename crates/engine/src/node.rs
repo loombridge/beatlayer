@@ -600,6 +600,9 @@ pub struct Block<'a> {
     /// The set's current scale (the scales spec, R9): what a track with no
     /// clip playing on it reads.
     pub(crate) set_scale: Scale,
+    /// Whether the set's tuning hides the scales (the tunings spec, R16): a
+    /// scale-aware device's Use Current Scale then acts as off.
+    pub(crate) scales_hidden: bool,
     /// The scale of the clip playing on the node's track over this block, or
     /// the set's where none plays (the scales spec, R15).
     pub(crate) scale: ScaleRuns,
@@ -668,6 +671,7 @@ impl<'a> Block<'a> {
             session: &[],
             groove_amount: 1.0,
             set_scale: OFF,
+            scales_hidden: false,
             scale: ScaleRuns::of(OFF),
             modulation: Bus::EMPTY,
             rows: None,
@@ -734,6 +738,16 @@ impl<'a> Block<'a> {
     pub fn with_groove_amount(self, groove_amount: f32) -> Self {
         Self {
             groove_amount,
+            ..self
+        }
+    }
+
+    /// The same block with the scales hidden by the set's tuning, as the
+    /// tunings spec's R16 says. For tests of nodes outside a program.
+    #[must_use]
+    pub fn with_scales_hidden(self, scales_hidden: bool) -> Self {
+        Self {
+            scales_hidden,
             ..self
         }
     }
@@ -876,6 +890,14 @@ impl<'a> Block<'a> {
     /// as the Arpeggiator's does, reads it here, with every block.
     pub fn groove_amount(&self) -> f32 {
         self.groove_amount
+    }
+
+    /// Whether the set's tuning hides the scales (the tunings spec, R16): it
+    /// holds other than twelve notes to its pseudo-octave. A scale-aware
+    /// device's Use Current Scale switch then acts as off.
+    #[must_use]
+    pub fn scales_hidden(&self) -> bool {
+        self.scales_hidden
     }
 
     /// The set's current scale (the scales spec, R9).

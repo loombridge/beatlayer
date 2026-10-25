@@ -333,7 +333,6 @@ impl Label {
                 "Instrument presets appear here once Beatlayer has instruments (milestone M2); \
                  its own sound library comes in milestone M9.",
             ),
-            Self::Tunings => Some("Tunings arrive in milestone M6."),
             _ => None,
         }
     }
@@ -426,6 +425,9 @@ pub enum ItemKind {
     Preset,
     /// A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
     ChordBank,
+    /// A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one
+    /// of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).
+    Tuning,
     /// A groove file (`.blgroove`), which loads into the Groove Pool, or
     /// replaces the groove being hot-swapped (WP-6.20; the grooves spec R32,
     /// R33).
@@ -1661,6 +1663,8 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::External)
             .context(Browser)
             .binding("S-BRW-004")
+            .binding("S-DEV-007")
+            .binding("S-TRACK-015")
             .args::<NoArgs>()
             .result::<AddResult>(),
         CommandSpec::new(ADD_TO_ARRANGEMENT, "Add Files to Arrangement")

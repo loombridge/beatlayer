@@ -193,6 +193,35 @@ impl Tuning {
         TuningNote::from_index(self.range.lowest.index(n) + i64::from(key), n)
     }
 
+    /// Whether the tuning hides the scales (the tunings spec, R16): it holds
+    /// other than twelve notes to its pseudo-octave.
+    #[must_use]
+    pub fn hides_scales(&self) -> bool {
+        self.degrees() != 12
+    }
+
+    /// The name of `note` as the note editor, the Tuning section and the Tuner
+    /// show it (the tunings spec, R29): its degree's name from the file with
+    /// its octave number, or, where the file names no degrees, its degree's
+    /// number, a colon and its octave number.
+    #[must_use]
+    pub fn note_name(&self, note: TuningNote) -> String {
+        match self.names.get(note.degree as usize) {
+            Some(name) => format!("{name}{}", note.octave),
+            None => format!("{}:{}", note.degree, note.octave),
+        }
+    }
+
+    /// The name of degree `degree` alone, as the Note chooser lists it: its
+    /// name from the file, or its number.
+    #[must_use]
+    pub fn degree_name(&self, degree: u32) -> String {
+        self.names
+            .get(degree as usize)
+            .cloned()
+            .unwrap_or_else(|| degree.to_string())
+    }
+
     /// The frequency in Hz of a note (the tunings spec, R6):
     /// f × P^(o − o₀) × r(d) / r(d₀), worked in cents so the pitch is exact
     /// to the precision of the double. None where the result isn't a finite

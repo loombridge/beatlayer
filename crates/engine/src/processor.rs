@@ -282,6 +282,8 @@ pub struct Processor {
     groove_amount: f32,
     /// The set's current scale (the scales spec, R9).
     scale: Scale,
+    /// Whether the set's tuning hides the scales (the tunings spec, R16).
+    scales_hidden: bool,
     /// A jump waiting for the next line of the global launch quantisation
     /// (the transport spec, R22).
     pending_locate: Option<PendingLocate>,
@@ -369,6 +371,7 @@ impl Processor {
             song_start: None,
             groove_amount: 1.0,
             scale: Scale::default(),
+            scales_hidden: false,
             pending_locate: None,
             punch: Punch::default(),
             punch_frames: PunchFrames::default(),
@@ -594,7 +597,7 @@ impl Processor {
     /// Called off the audio thread.
     pub(crate) fn prime(&mut self) {
         self.drain();
-        self.publish(0.0);
+        self.publish(0.0, 0);
     }
 
     /// Stops the transport where it is and publishes a state with it
@@ -620,7 +623,7 @@ impl Processor {
         // too: nothing plays until a person launches again.
         self.session.clear();
         self.silence_meters();
-        self.publish(0.0);
+        self.publish(0.0, 0);
         carry
     }
 
@@ -692,7 +695,7 @@ impl Processor {
         for entry in &carry.timed {
             self.queue_transport(entry.command, carry.frame_at(entry.frame, rate));
         }
-        self.publish(0.0);
+        self.publish(0.0, 0);
     }
 
     /// The last block's output.
@@ -1050,6 +1053,8 @@ impl Processor {
             }
             // Spec: scales R15
             TransportCommand::SetScale(scale) => self.scale = scale,
+            // Spec: tunings R16
+            TransportCommand::SetScalesHidden(hidden) => self.scales_hidden = hidden,
             TransportCommand::SetPunch(punch) => {
                 self.punch = punch;
                 self.update_loop_frames();
@@ -1833,6 +1838,7 @@ impl Processor {
                         session: &self.session_playback,
                         groove_amount: self.groove_amount,
                         set_scale: self.scale,
+                        scales_hidden: self.scales_hidden,
                         scale: ScaleRuns::of(self.scale),
                     },
                 );
@@ -2148,11 +2154,11 @@ impl Processor {
             0.0
         };
         self.cpu_load_max = self.cpu_load_max.max(cpu_load);
-        self.publish(cpu_load);
+        self.publish(cpu_load, frames);
     }
 
     /// Publishes the state for the UI, with this load.
-    fn publish(&mut self, cpu_load: f32) {
+    fn publish(&mut self, cpu_load: f32, frames: usize) {
         let position_ticks = self
             .tempo()
             .frames_to_ticks(self.position, self.config.sample_rate);
@@ -2241,6 +2247,8 @@ impl Processor {
                     state.meters_truncated = true;
                 }
             }
+            state.chain_meters.clear();
+            state.chain_meters_truncated = program.chain_meters(&mut state.chain_meters, frames);
         }
         self.state.publish();
     }

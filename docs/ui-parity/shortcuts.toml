@@ -653,8 +653,9 @@ mac = ["Shift+click"]
 win = ["Shift+click"]
 kind = "mouse"
 trigger = "press"
-milestone = "M2"
+milestone = "M6"
 source = "manual 42.4"
+notes = "Moved to M6 by WP-6.70: The Device View selects one device at a time; selecting several changes what Cut, Copy, Duplicate, Delete and the other device commands act on. WP-6.76 builds it."
 
 [[shortcut]]
 id = "S-DEV-005"
@@ -725,9 +726,10 @@ mac = ["Cmd+click a plug-in window button"]
 win = ["Ctrl+click a plug-in window button"]
 kind = "mouse"
 trigger = "press"
-milestone = "M2"
+milestone = "M6"
 source = "manual 42.4; observed in Live 12 (macOS), 12 October 2026: Info View text of the plug-in device's window button"
 confirmed = true
+notes = "Moved to M6 by WP-6.70: Plug-in windows do not yet close the others when one opens, which is what the key undoes, and the Multiple Plug-In Windows setting is not built. WP-6.75 builds it."
 
 [[shortcut]]
 id = "S-DEV-011"
@@ -1171,8 +1173,9 @@ mac = ["Left", "Right"]
 win = ["Left", "Right"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.8"
+notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
 
 [[shortcut]]
 id = "S-LOOP-008"
@@ -1182,8 +1185,9 @@ mac = ["Down", "Up"]
 win = ["Down", "Up"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.8"
+notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
 
 [[shortcut]]
 id = "S-LOOP-009"
@@ -1193,8 +1197,9 @@ mac = ["Cmd+Down", "Cmd+Up"]
 win = ["Ctrl+Down", "Ctrl+Up"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.8"
+notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
 
 [[shortcut]]
 id = "S-LOOP-010"
@@ -1204,8 +1209,9 @@ mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.8"
+notes = "Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
 
 [[shortcut]]
 id = "S-LOOP-011"
@@ -2526,10 +2532,10 @@ mac = ["Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Left", "Ctrl+Right"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.16"
 same_as = "S-LOOP-010"
-notes = "Placed in the loop-brace context because 42.8 says the brace must be selected."
+notes = "Placed in the loop-brace context because 42.8 says the brace must be selected. Moved to M6 by WP-6.70: The loop brace can't be selected or dragged yet, so there is nothing for the key to act on. WP-6.73 builds it."
 
 [[shortcut]]
 id = "S-ARR-013"
@@ -3152,9 +3158,9 @@ mac = ["Option+Space"]
 win = ["Ctrl+Space"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.20"
-notes = "Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused."
+notes = "Live 12.4.3's Playback menu shows these keys beside Play From Insert Marker (S-ARR-032), with the Session View focused. Moved to M6 by WP-6.70: The manual gives Option+Space (Ctrl+Space) two actions, this one and Play From Insert Marker (S-ARR-032), without saying when each applies; it needs an observation of Live. WP-6.74 builds it."
 
 [[shortcut]]
 id = "S-TRANS-004"
@@ -3164,10 +3170,10 @@ mac = ["Space"]
 win = ["Space"]
 kind = "key"
 trigger = "press"
-milestone = "M1"
+milestone = "M6"
 source = "manual 42.20"
 same_as = "S-TRANS-001"
-notes = "Same key as Play: with a time selection, playback starts from it."
+notes = "Same key as Play: with a time selection, playback starts from it. Moved to M6 by WP-6.70: It is the same key as Play, and the manual does not say what Play does with a time selection beyond starting from it; it needs an observation of Live. WP-6.74 builds it."
 
 [[shortcut]]
 id = "S-TRANS-005"

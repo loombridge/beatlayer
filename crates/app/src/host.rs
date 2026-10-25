@@ -2024,29 +2024,30 @@ impl Host {
                         .apply_effect(&main.ctx, &Effect::FocusArea(area));
                 }
             }
-            Effect::MoveFocus { .. } | Effect::FocusClipPanels | Effect::FocusSelectedClipPanel => {
-                match self.shell.focused_window() {
-                    WindowKind::Main => {
-                        if let Some(main) = &self.main {
-                            self.main_ui.apply_effect(&main.ctx, &effect);
-                            main.window.request_redraw();
-                        }
+            Effect::MoveFocus { .. }
+            | Effect::FocusClipPanels
+            | Effect::FocusSelectedClipPanel
+            | Effect::FocusTuning => match self.shell.focused_window() {
+                WindowKind::Main => {
+                    if let Some(main) = &self.main {
+                        self.main_ui.apply_effect(&main.ctx, &effect);
+                        main.window.request_redraw();
                     }
-                    WindowKind::Second => {
-                        if let Some(second) = &self.second {
-                            self.second_ui.apply_effect(&second.ctx, &effect);
-                            second.window.request_redraw();
-                        }
-                    }
-                    WindowKind::Settings => {
-                        self.settings_ui.apply_effect(&effect);
-                        if let Some(settings) = &self.settings {
-                            settings.window.request_redraw();
-                        }
-                    }
-                    WindowKind::Device(_) | WindowKind::Assistant => {}
                 }
-            }
+                WindowKind::Second => {
+                    if let Some(second) = &self.second {
+                        self.second_ui.apply_effect(&second.ctx, &effect);
+                        second.window.request_redraw();
+                    }
+                }
+                WindowKind::Settings => {
+                    self.settings_ui.apply_effect(&effect);
+                    if let Some(settings) = &self.settings {
+                        settings.window.request_redraw();
+                    }
+                }
+                WindowKind::Device(_) | WindowKind::Assistant => {}
+            },
         }
     }
 

@@ -5,7 +5,7 @@
 # differs from what they generate. Each shortcut's `status` says what it does:
 # `bound` (the commands it runs, each in the contexts listed), `system` (the
 # platform handles it), `widget` (the focused control does), or `pending`
-# (nothing yet; the milestone binds it, and `package` names the package for M1).
+# (nothing yet; the milestone binds it, and `package` names the package).
 
 schema = 1
 live_version = "12.4.3"

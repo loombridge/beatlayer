@@ -165,7 +165,8 @@ trigger = "press"
 milestone = "M2"
 mac = ["Left", "Right"]
 win = ["Left", "Right"]
-status = "pending"
+status = "widget"
+handler = "the Device View: Left and Right select the device before or after the selected one (`device.select`, device chains R43)"
 
 [[shortcut]]
 id = "S-A11Y-015"

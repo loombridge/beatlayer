@@ -8,7 +8,7 @@ use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
 use bl_model::{DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
-use crate::midi_fx::{Key, Router, scale_in_use, value};
+use crate::midi_fx::{Key, Router, scale_in_use, use_current_scale, value};
 
 /// The Pitch device type's id.
 pub const LIFT: &str = "beatlayer.lift";
@@ -96,7 +96,7 @@ struct Lift {
 
 impl NativeDevice for Lift {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
-        let degrees = value(params, USE_SCALE) >= 0.5;
+        let degrees = use_current_scale(audio, params, USE_SCALE);
         let pitch = value(params, PITCH) as i32;
         let pitch = if degrees {
             pitch.clamp(-MOST_DEGREES, MOST_DEGREES)

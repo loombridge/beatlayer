@@ -1171,7 +1171,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 ### `clip.set_info_text`
 
-**Edit Info Text**. Permission: `edit`. Contexts: `arrangement`.
+**Edit Info Text**. Permission: `edit`. Contexts: `arrangement`, `session`, `clip-view`.
 
 Sets the info text of a clip, in the Arrangement, a Session slot or a take lane, which the Info View shows while the pointer is over it (Edit Info Text). Empty clears it. One undo step, `Change Info Text`.
 

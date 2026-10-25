@@ -1,6 +1,6 @@
 # Info View
 
-- **Status:** implemented, except the items of the Session View's scene and clip menus and the Clip View title bar's menu, which come with those menus (R10; [session-context-menus.md](session-context-menus.md) R13)
+- **Status:** implemented
 - **Work packages:** WP-2.24 (R1 to R6), WP-6.27 (R7, the Info View beside stacked and hidden detail views), WP-6.29 (R8, the Info View with the second window open), WP-6.58 (R9 to R12, the user's own info text and Edit Info Text)
 - **Parity-matrix row:** Info View (M2, "Built in WP-2.24")
 - **Checked against:** Live 12.4.3, on 10 October 2026; for R9 to R12, the Live 12 reference manual (online edition), read 20 October 2026, and the UI parity reference's menu rows (M-EDIT-025, C-TRACK-006, C-SCENE-006, C-CLIP-SES-006, C-CLIP-ARR-008, C-DEVICE-005, C-TIME-025)
@@ -58,5 +58,4 @@ This spec covers the Info View's place, its show and hide, and what it shows whi
 
 ## Not built yet
 
-- Edit Info Text in the Session View's scene and clip menus (C-SCENE-006, C-CLIP-SES-006) and in the Clip View title bar's menu: those menus come with WP-6.56. Edit ▸ Edit Info Text reaches a selected scene or Session clip meanwhile.
 - The key line of R11 for an item: items aren't controls with a registered command, so the line stays empty while the pointer is over one.

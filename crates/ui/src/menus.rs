@@ -423,6 +423,18 @@ pub(crate) fn item_in_with_args(
         // The arguments the menu adds are part of whether the item can run.
         state.enabled = shell.can_invoke_in(&invocation.id, &invocation.args, contexts);
     }
+    draw_item(ui, state, platform, events)
+}
+
+/// Draws a menu item whose [`ItemState`] the caller has settled, as a
+/// button with its check mark and keys, that runs the state's invocation and
+/// closes the menu when it's clicked.
+pub(crate) fn draw_item(
+    ui: &mut Ui,
+    state: ItemState,
+    platform: Platform,
+    events: &mut Vec<UiEvent>,
+) -> egui::Response {
     let mut text = state.label.clone();
     if state.checked == Some(true) {
         text = format!("✔ {text}");
@@ -433,6 +445,24 @@ pub(crate) fn item_in_with_args(
     }
     let response = ui.add_enabled(state.enabled, button);
     register_item(ui.ctx(), &response);
+    // The keys and the tick reach assistive technology (the accessibility
+    // spec, R8).
+    let keys = state
+        .chord
+        .as_ref()
+        .map(|chord| chord_text(chord, platform));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        if let Some(keys) = keys {
+            node.set_keyboard_shortcut(keys);
+        }
+        if let Some(on) = state.checked {
+            node.set_toggled(if on {
+                egui::accesskit::Toggled::True
+            } else {
+                egui::accesskit::Toggled::False
+            });
+        }
+    });
     if response.clicked()
         && let Some(invocation) = state.invocation
     {

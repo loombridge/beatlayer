@@ -335,6 +335,62 @@ fn a_scene_launch_starts_its_clips_together() {
     );
 }
 
+// Spec: session-context-menus R10
+#[test]
+fn cancelling_a_scene_launch_drops_what_it_queued_at_any_block_size() {
+    for block in [1, 100, 512, 4096] {
+        let mut rig = Rig::new(block);
+        rig.editor
+            .apply(Command::SetTempo { tempo: tempo() })
+            .unwrap();
+        let first = midi_track(&mut rig);
+        let second = midi_track(&mut rig);
+        let scenes: Vec<SceneId> = rig
+            .editor
+            .document()
+            .scenes()
+            .map(|s| s.id)
+            .take(2)
+            .collect();
+        let long = |key| [Note::new(key, Ticks::ZERO, Ticks::WHOLE * 8, 100)];
+        slot_clip(&mut rig.editor, first, scenes[0], &long(60));
+        slot_clip(&mut rig.editor, first, scenes[1], &long(62));
+        slot_clip(&mut rig.editor, second, scenes[1], &long(67));
+        rig.sync();
+        // The first scene plays; the second is launched, and cancelled
+        // before its line.
+        rig.sender.session(SessionCommand::LaunchScene(scenes[0]));
+        play(&mut rig, 24_001, block);
+        rig.sender.session(SessionCommand::LaunchScene(scenes[1]));
+        play(&mut rig, 1_000, block);
+        let queued = rig.monitor.state().session.clone();
+        assert!(
+            queued
+                .iter()
+                .any(|s| s.scene == scenes[1] && s.state == SlotState::Queued),
+            "blocks of {block}: {queued:?}"
+        );
+        assert!(
+            queued
+                .iter()
+                .any(|s| s.scene == scenes[0] && s.state == SlotState::QueuedToStop),
+            "blocks of {block}: {queued:?}"
+        );
+        rig.sender
+            .session(SessionCommand::CancelSceneLaunch(scenes[1]));
+        play(&mut rig, BAR_FRAMES as usize + 8, block);
+        let states = rig.monitor.state().session.clone();
+        assert_eq!(states.len(), 1, "blocks of {block}: {states:?}");
+        assert_eq!(
+            (states[0].scene, states[0].state),
+            (scenes[0], SlotState::Playing)
+        );
+        let heard = notes(&mut rig);
+        assert_eq!(heard.len(), 1, "blocks of {block}: {heard:?}");
+        assert_eq!((heard[0].1, heard[0].2), (60, true));
+    }
+}
+
 // Spec: launch-quantisation R10
 #[test]
 fn every_slot_stops_together_and_stop_all_clears_the_state() {

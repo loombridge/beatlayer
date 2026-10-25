@@ -168,6 +168,7 @@ impl Shell {
             // Not a revision: the window redraws while a meter shows a
             // level, and nothing else depends on them.
             self.audio.meters_into(&mut self.meters);
+            self.audio.chain_meters_into(&mut self.chain_meters);
             // Spec: device-framework R35. The display data the devices'
             // nodes published, which the device displays draw. Not a
             // revision either.

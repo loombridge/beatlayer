@@ -3,7 +3,7 @@
 //! sends gliding as solo, Solo in Place, and send levels change; pre-fader
 //! sends reading the copy of a chain's output; a program swap when a
 //! return's Pre/Post switch moves, with every mixer and route migrating; and
-//! the meters published after every block. Split Stereo Pan Mode and a
+//! the meters published after every block, those between devices included. Split Stereo Pan Mode and a
 //! changed Track Delay are mixed in too. RTSan stops the process at the
 //! first allocation, free, lock, or blocking call in any of it, and the
 //! allocation trap, installed as in every Beatlayer test binary, fails the
@@ -173,6 +173,11 @@ fn the_mixer_passes_under_rtsan() {
     assert_eq!(state.swaps, programs);
     assert!(programs > 5, "{programs} programs");
     assert_eq!(state.meters.len(), 6);
+    // Spec: midi-meters R7. A meter at each device boundary of every chain,
+    // measured and published in every one of those blocks: one for each of
+    // the four tracks with no device, two for each with one.
+    assert_eq!(state.chain_meters.len(), 8);
+    assert!(!state.chain_meters_truncated);
     eprintln!(
         "2,000 blocks of the mixer under RealtimeSanitizer: {} parameter changes, {} swaps, \
          peak engine load {:.1}%",

@@ -1,8 +1,10 @@
 //! The Mixer's columns and meters.
 
 use super::{MainView, Shell};
-use crate::mixer_view::MixerOf;
+use crate::mixer_view::{MixerOf, TrackMeterValue};
+use bl_engine::{MeterOwner, MeterSite, PointReading};
 use bl_model::TrackId;
+use bl_shell_spec::mixer_view::MeterValue;
 
 use super::{Area, ShellError, WindowKind, to_value};
 use crate::mixer_view::MixerViewError;
@@ -82,6 +84,75 @@ impl Shell {
             .collect()
     }
 
+    /// What the engine last published at the meter `at` of the chain
+    /// `owner` (the MIDI meters spec, R2).
+    #[must_use]
+    pub fn chain_meter(
+        &self,
+        owner: bl_engine::MeterOwner,
+        at: bl_engine::MeterSite,
+    ) -> Option<MeterValue> {
+        self.chain_meters
+            .iter()
+            .find(|meter| meter.owner == owner && meter.at == at)
+            .map(|meter| match meter.reading {
+                PointReading::Midi {
+                    velocity,
+                    channel,
+                    expression,
+                } => MeterValue::Midi {
+                    velocity,
+                    channel,
+                    expression,
+                },
+                PointReading::Audio { peak } => MeterValue::Level { peak },
+            })
+    }
+
+    /// Whether any meter between devices shows something, so the window
+    /// keeps redrawing (the MIDI meters spec, R7).
+    #[must_use]
+    pub fn chain_meters_lit(&self) -> bool {
+        self.chain_meters.iter().any(|meter| match meter.reading {
+            PointReading::Midi {
+                velocity,
+                channel,
+                expression,
+            } => velocity > 0.0 || channel > 0.0 || expression > 0.0,
+            PointReading::Audio { peak } => peak.iter().any(|level| *level > 0.0),
+        })
+    }
+
+    /// Every track's meter as `mixer_view.state` reports it (the MIDI meters
+    /// spec, R1 and R6): a MIDI meter for a MIDI track that holds no
+    /// instrument and no audio effect, a level meter for the rest.
+    #[must_use]
+    pub fn track_meter_values(&self) -> Vec<TrackMeterValue> {
+        let doc = self.editor.document();
+        self.meters
+            .iter()
+            .filter_map(|meter| {
+                let midi = doc.track(meter.track)?.shows_midi_meter();
+                let value = if midi {
+                    self.chain_meter(MeterOwner::Track(meter.track), MeterSite::End)?
+                } else {
+                    MeterValue::Level { peak: meter.peak }
+                };
+                Some(TrackMeterValue {
+                    track: meter.track,
+                    value,
+                })
+            })
+            .collect()
+    }
+
+    /// Sets the meters between devices, as [`Shell::poll_engine`] does with
+    /// the engine's: for tests with no engine running.
+    pub fn set_chain_meters(&mut self, meters: &[bl_engine::ChainMeter]) {
+        self.chain_meters.clear();
+        self.chain_meters.extend_from_slice(meters);
+    }
+
     /// Sets the meters the windows draw, as [`Shell::poll_engine`] does with
     /// the engine's: for benchmarks and tests with no engine running (while
     /// one runs, the next poll takes its meters instead).
@@ -121,6 +192,8 @@ impl Shell {
                 // Spec: mixer R31. The Performance Impact values the
                 // engine last published, one per track.
                 state.performance_impact_values = self.impact_values();
+                // Spec: midi-meters R6. Each track's meter, MIDI or level.
+                state.meters = self.track_meter_values();
                 state
             });
         if result.is_ok() && id == mixer_ids::FOCUS {

@@ -1267,6 +1267,17 @@ impl DeviceViewUi {
             debug_assert_eq!(child.id, at.0);
             self.device(ui, shell, theme, child, at.1, false, events);
         }
+        // Spec: midi-meters R2. The shown chain has its meters the same way.
+        if let Some(&chain) = rack.selected_chains.first() {
+            crate::meters::in_gaps(
+                ui,
+                shell,
+                theme,
+                bl_engine::MeterOwner::Chain(chain),
+                &layout.device_frames,
+                DEVICE_GAP,
+            );
+        }
         if let Some(bracket) = layout.bracket {
             // The end bracket closes the devices (racks spec, R18).
             let stroke = Stroke::new(1.5, c.text_dim.0);

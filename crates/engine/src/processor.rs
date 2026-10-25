@@ -587,7 +587,7 @@ impl Processor {
     /// Called off the audio thread.
     pub(crate) fn prime(&mut self) {
         self.drain();
-        self.publish(0.0);
+        self.publish(0.0, 0);
     }
 
     /// Stops the transport where it is and publishes a state with it
@@ -613,7 +613,7 @@ impl Processor {
         // too: nothing plays until a person launches again.
         self.session.clear();
         self.silence_meters();
-        self.publish(0.0);
+        self.publish(0.0, 0);
         carry
     }
 
@@ -685,7 +685,7 @@ impl Processor {
         for entry in &carry.timed {
             self.queue_transport(entry.command, carry.frame_at(entry.frame, rate));
         }
-        self.publish(0.0);
+        self.publish(0.0, 0);
     }
 
     /// The last block's output.
@@ -2098,11 +2098,11 @@ impl Processor {
             0.0
         };
         self.cpu_load_max = self.cpu_load_max.max(cpu_load);
-        self.publish(cpu_load);
+        self.publish(cpu_load, frames);
     }
 
     /// Publishes the state for the UI, with this load.
-    fn publish(&mut self, cpu_load: f32) {
+    fn publish(&mut self, cpu_load: f32, frames: usize) {
         let position_ticks = self
             .tempo()
             .frames_to_ticks(self.position, self.config.sample_rate);
@@ -2191,6 +2191,8 @@ impl Processor {
                     state.meters_truncated = true;
                 }
             }
+            state.chain_meters.clear();
+            state.chain_meters_truncated = program.chain_meters(&mut state.chain_meters, frames);
         }
         self.state.publish();
     }

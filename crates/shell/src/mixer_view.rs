@@ -11,8 +11,9 @@ use bl_model::{Device, DeviceId, Document, RackKind, TrackId};
 use serde_json::Value;
 
 pub use bl_shell_spec::mixer_view::{
-    COLUMN_WIDTH, ChainStrip, MixerOf, MixerViewState, RackFold, ScrollArgs, ScrollReturnsArgs,
-    SectionArgs, ToggleArgs, TrackGainReduction, TrackImpact, ViewMixerState, impact_segments,
+    COLUMN_WIDTH, ChainStrip, MeterValue, MixerOf, MixerViewState, RackFold, ScrollArgs,
+    ScrollReturnsArgs, SectionArgs, ToggleArgs, TrackGainReduction, TrackImpact, TrackMeterValue,
+    ViewMixerState, impact_segments,
 };
 use bl_shell_spec::mixer_view::{
     CROSSFADER, DEVICES, FOCUS, FOLD_CHAINS, IN_OUT, PERFORMANCE_IMPACT, RETURN_TRACKS,
@@ -212,6 +213,7 @@ impl MixerView {
             devices: self.devices,
             performance_impact_values: Vec::new(),
             gain_reduction: Vec::new(),
+            meters: Vec::new(),
             racks,
             chains,
         }

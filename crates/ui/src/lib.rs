@@ -73,6 +73,7 @@ pub mod main_panel;
 pub mod main_window;
 pub mod mapping;
 pub mod menus;
+pub mod meters;
 pub mod middle;
 pub mod mixer;
 pub mod mpe_settings_dialog;

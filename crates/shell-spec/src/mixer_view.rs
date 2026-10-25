@@ -114,6 +114,59 @@ pub struct TrackGainReduction {
     pub reduction: f32,
 }
 
+/// What a meter shows (the MIDI meters spec, R6): a level meter's peak, or
+/// a MIDI meter's lit levels.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MeterValue {
+    /// A level meter.
+    Level {
+        /// The peak level of the left and right channels, as linear
+        /// amplitude.
+        peak: [f32; 2],
+    },
+    /// A MIDI meter. Each value falls from 1 to 0 over 300 ms after what
+    /// lights it passes.
+    Midi {
+        /// The highest note-on velocity that passed, from 0 to 1: the
+        /// meter's height.
+        velocity: f32,
+        /// Lit while a control change, pitch bend or channel pressure
+        /// passed: the lowest dot.
+        channel: f32,
+        /// Lit while a per-note expression passed: the lowest dot, blue.
+        expression: f32,
+    },
+}
+
+impl MeterValue {
+    /// Whether the meter shows anything: a level above silence, or a MIDI
+    /// meter with a dot lit.
+    #[must_use]
+    pub fn is_lit(&self) -> bool {
+        match *self {
+            Self::Level { peak } => peak.iter().any(|level| *level > 0.0),
+            Self::Midi {
+                velocity,
+                channel,
+                expression,
+            } => velocity > 0.0 || channel > 0.0 || expression > 0.0,
+        }
+    }
+}
+
+/// One track's meter, as `mixer_view.state` reports it (the MIDI meters
+/// spec, R1 and R6): a MIDI meter for a MIDI track whose chain holds no
+/// instrument and no audio effect, a level meter for every other.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TrackMeterValue {
+    /// The track.
+    pub track: TrackId,
+    /// What its meter shows.
+    #[serde(flatten)]
+    pub value: MeterValue,
+}
+
 /// What `mixer_view.state` and the other view commands return.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MixerViewState {
@@ -166,6 +219,10 @@ pub struct MixerViewState {
     /// R40); empty when no engine has published meters.
     #[serde(default)]
     pub gain_reduction: Vec<TrackGainReduction>,
+    /// Each track's meter, in the order the tracks run (the MIDI meters
+    /// spec, R6); empty when no engine has published meters.
+    #[serde(default)]
+    pub meters: Vec<TrackMeterValue>,
     /// The racks whose chains fold out in the mixers (racks spec, R27): the
     /// track each is on, the rack, and whether its chains are folded out.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

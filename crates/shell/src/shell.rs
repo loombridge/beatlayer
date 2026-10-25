@@ -267,6 +267,16 @@ pub enum Effect {
         /// opens. Cancelling the dialog keeps them.
         discard_changes: bool,
     },
+    /// Ask where to write a DAWproject file, in a save dialog that suggests
+    /// `file_name` in `folder`, then run `set.export_dawproject` with the path,
+    /// with `replace` when the dialog asked about a file already there (the
+    /// DAWproject spec, R86).
+    PickDawProjectPath {
+        /// The suggested name: the set's, with `.dawproject`.
+        file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
+    },
     /// Ask where to save the set, run `set.save_as` there, then run `then`
     /// if the save worked.
     PickSavePath {
@@ -328,6 +338,9 @@ pub enum Effect {
     /// Move the keyboard focus to the first control of the Clip View's
     /// panels (Navigate ▸ Clip Panels).
     FocusClipPanels,
+    /// Move the keyboard focus to the first control of the shown panel of
+    /// the Clip View's group the focus was last in (Option+8).
+    FocusSelectedClipPanel,
     /// Move the keyboard focus to the name in the browser's Tuning section
     /// (Navigate ▸ Tuning).
     FocusTuning,
@@ -530,6 +543,9 @@ pub struct Shell {
     /// The report of the last DAWproject import, while the set the import
     /// made is open (R12).
     import_report: Option<bl_shell_spec::dawproject::ImportReport>,
+    /// The window that lists the report of a person's import or export, while
+    /// it is open (R87).
+    dawproject_report_window: Option<dawproject_ids::ReportWindow>,
     /// The 14 track colours of the theme in use, from which a DAWproject
     /// import draws the palette it places colours on (R23). The bundled
     /// theme's until a window tells the shell its theme's.
@@ -1189,6 +1205,7 @@ impl Shell {
         let plugin_panels = prefs.plugin_panels.clone();
         let note_preview = prefs.note_preview;
         let (highlight_scales, note_spelling) = (prefs.highlight_scales, prefs.note_spelling);
+        let panel_arrangement = prefs.panel_arrangement;
         let mut shell = Self {
             browser_view,
             media,
@@ -1216,6 +1233,7 @@ impl Shell {
             set_path: None,
             pending_name: None,
             import_report: None,
+            dawproject_report_window: None,
             track_palette: bl_model::DEFAULT_TRACK_PALETTE.to_vec(),
             dirty: false,
             autosave: None,
@@ -1276,6 +1294,7 @@ impl Shell {
                 view.set_preview(note_preview);
                 view.set_highlight_scales(highlight_scales);
                 view.set_note_spelling(note_spelling);
+                view.set_panel_arrangement(panel_arrangement);
                 view
             },
             detail: DetailArea::default(),
@@ -1557,6 +1576,7 @@ impl Shell {
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.poll_capture();
+        self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
         // opens ends when another command edits the set.
         if self.key_edit.is_some() && !self.keeps_key_edit(id) {

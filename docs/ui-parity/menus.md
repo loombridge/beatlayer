@@ -57,6 +57,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 | | — | | | | |
 | M-FILE-015 | Export Audio/Video... | ⇧⌘R | S-FILE-007 | | Opens the Export Audio/Video dialog (L-OTH-003; [export](../specs/export.md) R28) |
 | M-FILE-016 | Export MIDI Clip... | | S-FILE-008 | disabled | Live shows no key here or in the clip context menus; the manual's binding (S-FILE-008) is unconfirmed. Beatlayer adds Export DAWproject... straight after it ([dawproject](../specs/dawproject.md) R86; not in Live), with no key |
+| DAWPROJECT-export | Export DAWproject... | | | | Beatlayer addition, straight after Export MIDI Clip...: opens a save dialog and writes the set as a DAWproject file, then lists what the format couldn't carry ([dawproject](../specs/dawproject.md) R86, R87); built in WP-6.37b |
 
 ## Edit
 

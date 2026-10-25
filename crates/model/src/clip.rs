@@ -226,7 +226,7 @@ impl Clip {
 
     /// The earliest its left edge can go while it plays what it plays: where
     /// an audio clip's file starts (its Start marker at 0), or where a MIDI
-    /// clip's contents begin, and never before 0.
+    /// clip's contents begin (its Start marker at 0), and never before 0.
     #[must_use]
     pub fn earliest_start(&self, tempo: &TempoMap) -> Ticks {
         let earliest = match &self.data {
@@ -244,7 +244,7 @@ impl Clip {
                 }
                 at
             }
-            ClipData::Midi(_) => self.content_start(),
+            ClipData::Midi(midi) => self.start.saturating_sub(midi.start),
         };
         earliest.max(Ticks::ZERO)
     }
@@ -280,14 +280,19 @@ impl Clip {
                 *audio = next;
             }
             ClipData::Midi(midi) => {
-                let offset = start
+                let by = start
                     .checked_sub(self.start)
-                    .and_then(|by| self.offset.checked_add(by))
                     .ok_or(ModelError::PositionOverflow)?;
-                if offset.is_negative() {
-                    return Err(ModelError::NegativeOffset(offset));
+                // The engine plays from the Start marker, so that's what
+                // must not go before the contents' beginning.
+                let marker = midi
+                    .start
+                    .checked_add(by)
+                    .ok_or(ModelError::PositionOverflow)?;
+                if marker.is_negative() {
+                    return Err(ModelError::NegativeOffset(marker));
                 }
-                moved.offset = offset;
+                moved.offset = self.offset.saturating_add(by).max(Ticks::ZERO);
                 midi.move_by(self.start, start);
             }
         }

@@ -1397,6 +1397,7 @@ impl Host {
             WindowKind::Assistant => &mut self.assistant_keys,
             WindowKind::Device(_) => &mut self.device_keys,
         };
+        keys.leave_space_to_focus(bl_ui::clip_panels::tab_has_focus(&surface.ctx));
         let invocations = if kind == WindowKind::Settings && self.settings_ui.recording() {
             // The keys being recorded on the Shortcuts page are the
             // person's, not the app's (the custom shortcuts spec, R8).
@@ -1722,19 +1723,38 @@ impl Host {
             Effect::PickOpenPath { discard_changes } => {
                 let mut dialog = rfd::FileDialog::new()
                     .set_title("Open Beatlayer Set")
-                    .add_filter("Beatlayer Set", &["blset"]);
+                    // Spec: dawproject R83. A DAWproject file imports.
+                    .add_filter("Beatlayer Set", &["blset", "dawproject"]);
                 if let Some(main) = &self.main {
                     dialog = dialog.set_parent(main.window.as_ref());
                 }
                 if let Some(path) = dialog.pick_file() {
-                    let open =
-                        Invocation::new(ids::SET_OPEN, json!({ "path": path.to_string_lossy() }));
+                    let open = Shell::open_invocation(&path);
                     if discard_changes {
                         // The person chose Don't Save before picking it.
                         let _ = self.shell.discard_and_invoke(&open);
                     } else {
                         self.invoke(&open);
                     }
+                }
+            }
+            Effect::PickDawProjectPath { file_name, folder } => {
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Export DAWproject")
+                    .add_filter("DAWproject", &["dawproject"])
+                    .set_file_name(file_name);
+                if let Some(folder) = folder {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    // The save dialog asked about the file itself.
+                    self.invoke(&Invocation::new(
+                        bl_shell::dawproject_commands::EXPORT_DAWPROJECT,
+                        json!({ "path": path.to_string_lossy(), "replace": path.exists() }),
+                    ));
                 }
             }
             Effect::PickSavePath { then } => {
@@ -2023,29 +2043,30 @@ impl Host {
                         .apply_effect(&main.ctx, &Effect::FocusArea(area));
                 }
             }
-            Effect::MoveFocus { .. } | Effect::FocusClipPanels | Effect::FocusTuning => {
-                match self.shell.focused_window() {
-                    WindowKind::Main => {
-                        if let Some(main) = &self.main {
-                            self.main_ui.apply_effect(&main.ctx, &effect);
-                            main.window.request_redraw();
-                        }
+            Effect::MoveFocus { .. }
+            | Effect::FocusClipPanels
+            | Effect::FocusSelectedClipPanel
+            | Effect::FocusTuning => match self.shell.focused_window() {
+                WindowKind::Main => {
+                    if let Some(main) = &self.main {
+                        self.main_ui.apply_effect(&main.ctx, &effect);
+                        main.window.request_redraw();
                     }
-                    WindowKind::Second => {
-                        if let Some(second) = &self.second {
-                            self.second_ui.apply_effect(&second.ctx, &effect);
-                            second.window.request_redraw();
-                        }
-                    }
-                    WindowKind::Settings => {
-                        self.settings_ui.apply_effect(&effect);
-                        if let Some(settings) = &self.settings {
-                            settings.window.request_redraw();
-                        }
-                    }
-                    WindowKind::Device(_) | WindowKind::Assistant => {}
                 }
-            }
+                WindowKind::Second => {
+                    if let Some(second) = &self.second {
+                        self.second_ui.apply_effect(&second.ctx, &effect);
+                        second.window.request_redraw();
+                    }
+                }
+                WindowKind::Settings => {
+                    self.settings_ui.apply_effect(&effect);
+                    if let Some(settings) = &self.settings {
+                        settings.window.request_redraw();
+                    }
+                }
+                WindowKind::Device(_) | WindowKind::Assistant => {}
+            },
         }
     }
 
@@ -2371,7 +2392,9 @@ impl Host {
     fn confirm_discard(&mut self, then: &Invocation) {
         let verb = match then.id.as_str() {
             ids::APP_QUIT => "quitting",
-            ids::SET_OPEN => "opening another set",
+            ids::SET_OPEN | bl_shell::dawproject_commands::IMPORT_DAWPROJECT => {
+                "opening another set"
+            }
             _ => "starting a new set",
         };
         let answer = rfd::MessageDialog::new()

@@ -132,6 +132,11 @@ pub const IMP_29: &str = "IMP-29";
 /// Set Backups: an improvement, so not one of menus.md's Live rows.
 pub const IMP_05: &str = "IMP-05";
 
+/// The row of Beatlayer's own Export DAWproject... (dawproject R86), straight
+/// after Export MIDI Clip...: Live has no such item, so it is no row of
+/// menus.md's Live rows.
+pub const DAWPROJECT_EXPORT: &str = "DAWPROJECT-export";
+
 /// The rows of Beatlayer's own Search Commands… (IMP-16) at the top of Help,
 /// with the separator after it, and Find Track (IMP-18) after Next Neighbor:
 /// improvements, so not rows of menus.md, which records Live's menus.

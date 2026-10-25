@@ -23,9 +23,17 @@ pub const IMPORT_REPORT: &str = "set.import_report";
 /// `set.export_dawproject`: write the open set as a DAWproject file.
 pub const EXPORT_DAWPROJECT: &str = "set.export_dawproject";
 
+/// `set.close_dawproject_report`: close the report window (R87).
+pub const CLOSE_REPORT: &str = "set.close_dawproject_report";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[IMPORT_DAWPROJECT, IMPORT_REPORT, EXPORT_DAWPROJECT];
+pub const IDS: &[&str] = &[
+    IMPORT_DAWPROJECT,
+    IMPORT_REPORT,
+    EXPORT_DAWPROJECT,
+    CLOSE_REPORT,
+];
 
 /// Whether `id` is one of the DAWproject commands.
 #[must_use]
@@ -88,6 +96,87 @@ pub struct ImportReport {
     /// Each thing left out or changed, in the file's order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub entries: Vec<ImportReportEntry>,
+}
+
+impl ImportReport {
+    /// The report as text, as the window's Copy puts it on the clipboard: the
+    /// application, then the entries under Left Out and Changed, each as what,
+    /// where and how many, and what was done when it was a change.
+    #[must_use]
+    pub fn text(&self) -> String {
+        let mut text = String::new();
+        if let Some(application) = &self.application {
+            text.push_str(&format!("Made by {application}\n"));
+        }
+        for (heading, left_out) in [("Left Out", true), ("Changed", false)] {
+            let entries: Vec<&ImportReportEntry> = self
+                .entries
+                .iter()
+                .filter(|entry| entry.is_left_out() == left_out)
+                .collect();
+            if entries.is_empty() {
+                continue;
+            }
+            text.push_str(&format!("\n{heading}\n"));
+            for entry in entries {
+                text.push_str(&entry.line());
+                text.push('\n');
+            }
+        }
+        text
+    }
+}
+
+impl ImportReportEntry {
+    /// Whether the entry was left out of the result (listed under Left Out
+    /// in the report window), as against changed.
+    #[must_use]
+    pub fn is_left_out(&self) -> bool {
+        self.did == "left out" || self.did == "not written"
+    }
+
+    /// The entry as one line: what, where, how many, and for a change what
+    /// was done.
+    #[must_use]
+    pub fn line(&self) -> String {
+        let change = if self.is_left_out() {
+            String::new()
+        } else {
+            format!(": {}", self.did)
+        };
+        format!(
+            "{}, {} (\u{d7}{}){change}",
+            self.what, self.place, self.count
+        )
+    }
+}
+
+/// The window that shows a report after an import or an export (R87).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReportWindow {
+    /// Whether the report is an export's, not an import's.
+    pub export: bool,
+    /// What the window lists.
+    pub report: ImportReport,
+}
+
+impl ReportWindow {
+    /// The window's title.
+    #[must_use]
+    pub const fn title(&self) -> &'static str {
+        if self.export {
+            "DAWproject Export"
+        } else {
+            "DAWproject Import"
+        }
+    }
+}
+
+/// What `set.close_dawproject_report` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ReportWindowState {
+    /// Whether the report window is open.
+    pub open: bool,
 }
 
 /// What `set.export_dawproject` returns.
@@ -172,6 +261,18 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<ExportDawProjectArgs>()
             .result::<ExportDawProjectResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CLOSE_REPORT, "Close DAWproject Report")
+            .description(
+                "Closes the DAWproject Import or DAWproject Export window, which a person's \
+                 import or export opens when its report is not empty. Changes nothing in the \
+                 set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<ReportWindowState>(),
     )?;
     Ok(())
 }

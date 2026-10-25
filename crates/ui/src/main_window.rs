@@ -427,6 +427,7 @@ impl MainWindowUi {
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
             Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
+            Effect::FocusSelectedClipPanel => crate::clip_panels::request_selected_focus(ctx),
             Effect::FocusTuning => crate::tuning_section::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
@@ -561,6 +562,11 @@ impl MainWindowUi {
                         &mut events,
                     );
                 });
+        }
+        if !second {
+            // Spec: dawproject R85. A dropped DAWproject file is imported;
+            // no view places it.
+            crate::dawproject_window::drop_file(ctx, &mut events);
         }
         self.hovered = None;
         let frame = Frame::NONE.fill(theme.colors.window.0);
@@ -762,6 +768,9 @@ impl MainWindowUi {
             // Spec: stem-separation R1. Separate Stems' dialog sits over the
             // window while it's open.
             crate::stems_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: dawproject R87. The report of a person's import or export
+            // sits over the window while it is open.
+            crate::dawproject_window::show(ctx, shell, theme, &mut events);
             // Spec: external-devices R23. The real-time render's dialog sits
             // over the window while a render that runs through external
             // hardware is under way.
@@ -795,6 +804,7 @@ impl MainWindowUi {
         self.menu_open = egui::Popup::is_any_open(ctx)
             || (!second
                 && (shell.stems_dialog().is_some()
+                    || shell.dawproject_report_window().is_some()
                     || shell.export_dialog().is_some()
                     || shell.export_running()
                     || shell.pack_status().job.is_some()

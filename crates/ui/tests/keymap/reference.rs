@@ -242,11 +242,11 @@ fn the_test_fails_when_a_shortcut_is_neither_bound_nor_marked() {
 
 #[test]
 fn the_test_fails_when_a_pending_shortcut_of_m1_to_m3_has_no_package_or_a_done_one() {
-    // S-FOCUS-009 is an M2 shortcut that WP-6.72 binds.
-    let pending = "package = \"WP-6.72\"\n";
+    // S-FOCUS-009 is an M2 shortcut; the test marks it pending again.
+    let bound = "status = \"bound\"\ncommands = [\n  { id = \"focus.selected_clip_panel\", contexts = [\"global\"] },\n]\n";
     assert!(
-        bl_ui::keymap::LIVE12.contains(pending),
-        "S-FOCUS-009's package"
+        bl_ui::keymap::LIVE12.contains(bound),
+        "S-FOCUS-009's binding"
     );
     let Some(reference) = reference() else {
         return;
@@ -255,19 +255,23 @@ fn the_test_fails_when_a_pending_shortcut_of_m1_to_m3_has_no_package_or_a_done_o
         let keymap = Keymap::parse(&text).unwrap();
         problems(&keymap, &reference, &registry())
     };
-    let none = problems_of(bl_ui::keymap::LIVE12.replace(pending, ""));
+    let none = problems_of(bl_ui::keymap::LIVE12.replace(bound, "status = \"pending\"\n"));
     assert!(
         none.iter()
             .any(|p| p.contains("S-FOCUS-009: an M2 shortcut with no package")),
         "{none:#?}"
     );
-    let done = problems_of(bl_ui::keymap::LIVE12.replace(pending, "package = \"WP-1.8b\"\n"));
+    let done = problems_of(
+        bl_ui::keymap::LIVE12.replace(bound, "status = \"pending\"\npackage = \"WP-1.8b\"\n"),
+    );
     assert!(
         done.iter()
             .any(|p| p.contains("S-FOCUS-009: WP-1.8b is done, but left it unbound")),
         "{done:#?}"
     );
-    let unknown = problems_of(bl_ui::keymap::LIVE12.replace(pending, "package = \"WP-99.9\"\n"));
+    let unknown = problems_of(
+        bl_ui::keymap::LIVE12.replace(bound, "status = \"pending\"\npackage = \"WP-99.9\"\n"),
+    );
     assert!(
         unknown
             .iter()

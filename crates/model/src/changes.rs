@@ -161,6 +161,10 @@ impl ChangeSet {
                 } => {
                     if before.differs_only_in_colour(after) {
                         self.colours = true;
+                    } else if before.id != after.id {
+                        // A different clip took the slot.
+                        record(&mut self.clips, before.id, Change::Removed);
+                        record(&mut self.clips, after.id, Change::Added);
                     } else if before != after {
                         record(&mut self.clips, before.id, Change::Modified);
                     }
@@ -512,6 +516,39 @@ mod tests {
         let changes = f.change(Command::DeleteScene { scene });
         assert_eq!(changes.scenes.get(&scene), Some(&Change::Removed));
         assert_eq!(changes.clips, only(clip, Change::Removed));
+    }
+
+    #[test]
+    fn a_different_clip_in_a_slot_is_one_removed_and_one_added() {
+        let mut f = Fixture::new();
+        let scene = f.editor.document().scenes().next().unwrap().id;
+        let slot_clip = |f: &mut Fixture| {
+            let clip: ClipId = f.editor.new_id();
+            f.editor
+                .apply(Command::CreateSlotClip {
+                    track: f.first,
+                    scene,
+                    clip: Clip::new(
+                        clip,
+                        Ticks::ZERO,
+                        Ticks::WHOLE,
+                        ClipData::Midi(MidiData::default()),
+                    ),
+                })
+                .unwrap();
+            clip
+        };
+        let x = slot_clip(&mut f);
+        let with_x = f.editor.document().clone();
+        f.editor.apply(Command::DeleteClip { clip: x }).unwrap();
+        let y = slot_clip(&mut f);
+
+        let both =
+            |first, second| BTreeMap::from([(first, Change::Removed), (second, Change::Added)]);
+        let forward = ChangeSet::between(&with_x, f.editor.document());
+        assert_eq!(forward.clips, both(x, y));
+        let back = ChangeSet::between(f.editor.document(), &with_x);
+        assert_eq!(back.clips, both(y, x));
     }
 
     #[test]

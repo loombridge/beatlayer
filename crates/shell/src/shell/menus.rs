@@ -29,6 +29,7 @@ use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
+use bl_shell_spec::clip_properties as panel_ids;
 use bl_shell_spec::commands::DetailView;
 use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
@@ -175,6 +176,10 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            panel_ids::ARRANGE_PANELS => Some(
+                self.clip_view.panel_arrangement()
+                    == serde_json::from_value(args["arrangement"].clone()).ok()?,
+            ),
             ids::VIEW_NOTE_SPELLING => Some(
                 self.clip_view.note_spelling()
                     == serde_json::from_value(args["spelling"].clone()).ok()?,
@@ -233,6 +238,7 @@ impl Shell {
                     }),
             ),
             ids::VIEW_HIGHLIGHT_SCALES => Some(self.clip_view.highlight_scales()),
+            panel_ids::FOLD_PANELS => Some(self.clip_view.panels_folded()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
@@ -557,7 +563,11 @@ impl Shell {
                     .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)));
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
-            ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
+            ids::SET_OPEN
+            | ids::SET_SAVE
+            | ids::SET_SAVE_AS
+            | ids::APP_SETTINGS
+            | bl_shell_spec::dawproject::EXPORT_DAWPROJECT => return true,
             ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
             // Options ▸ Reduced Latency When Monitoring is available only
             // while Delay Compensation is on (the delay-compensation spec,

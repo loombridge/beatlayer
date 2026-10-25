@@ -423,7 +423,6 @@ fn the_views_gestures_are_marked_and_the_waiting_shortcuts_name_their_packages()
         ("S-TRANS-004", "M6", "WP-6.74"),
         ("S-DEV-010", "M6", "WP-6.75"),
         ("S-DEV-004", "M6", "WP-6.76"),
-        ("S-FOCUS-009", "M2", "WP-6.72"),
     ] {
         let entry = keymap.entry_for(shortcut).expect(shortcut);
         assert_eq!(

@@ -304,3 +304,23 @@ fn the_same_source_with_the_same_edits_is_rendered_once_and_shared() {
     assert_eq!(at_48k.sample_rate(), 48_000);
     assert_eq!(at_48k.frames(), converted_len(1_000, 44_100, 48_000));
 }
+
+#[test]
+fn importing_a_good_copy_replaces_a_path_that_now_holds_other_content() {
+    let dir = TempDir::new("store-overwritten");
+    let a = copy_fixture("sine-44k1-s16-2ch.wav", dir.path());
+    let backup = copy_fixture("sine-44k1-s16-2ch.wav", &dir.path().join("backup"));
+    let store = MediaStore::new();
+    let hash = store.import(&a).unwrap();
+
+    // An editor overwrites the file the store knows.
+    fs::copy(fixtures_dir().join("sweep-44k1-s16-2ch.wav"), &a).unwrap();
+    assert!(matches!(
+        store.check(hash).unwrap(),
+        MediaStatus::Changed { .. }
+    ));
+
+    assert_eq!(store.import(&backup).unwrap(), hash);
+    assert_eq!(store.entry(hash).unwrap().path, backup);
+    assert_eq!(store.check(hash).unwrap(), MediaStatus::Available);
+}

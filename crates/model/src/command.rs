@@ -5830,6 +5830,19 @@ impl Document {
             for sender in senders {
                 self.track_mut(sender)?.sends.remove(&id);
             }
+            // So do their Send envelopes and the clip envelopes on them.
+            let sending: Vec<TrackId> = self
+                .tracks
+                .iter()
+                .filter(|(_, track)| track.kind.has_sends())
+                .map(|(&sender, _)| sender)
+                .collect();
+            for sender in sending {
+                forget_where(
+                    self.track_mut(sender)?,
+                    |target| matches!(*target, AutomationTarget::Send { to } if to == id),
+                );
+            }
             // A drum rack's return chain sent to it goes back to the rack's
             // own output (drum racks R8).
             let holders: Vec<TrackId> = self
@@ -7772,8 +7785,12 @@ impl Document {
         target: AutomationTarget,
     ) -> Result<(), ModelError> {
         match target {
-            AutomationTarget::Mixer { .. } => {
-                self.track_ref(track)?;
+            AutomationTarget::Mixer { param } => {
+                let track_ref = self.track_ref(track)?;
+                // Main has no Track Activator, as SetMute has it.
+                if param == MixerParam::Mute {
+                    check_kind(track_ref, TrackKind::has_mute_and_solo, NOT_MAIN)?;
+                }
             }
             AutomationTarget::Send { to } => {
                 check_kind(self.track_ref(track)?, TrackKind::has_sends, SENDER)?;
@@ -8679,10 +8696,33 @@ fn tempo_breakpoints(tempo: &TempoMap) -> Vec<(Ticks, Bpm)> {
     points
 }
 
-/// Builds a tempo map from breakpoints this module made, which always start
-/// at tick zero and don't move backwards, so the map is valid.
-fn tempo_from_breakpoints(points: Vec<(Ticks, Bpm)>) -> TempoMap {
-    TempoMap::from_breakpoints(points).expect("a tempo map edited this way stays valid")
+/// Builds a tempo map from breakpoints this module made, which don't move
+/// backwards, so the map is valid. Unlike `TempoMap::from_breakpoints` it
+/// keeps a breakpoint on a flat stretch, so one set at the tempo already in
+/// force stays where it was put.
+fn tempo_from_breakpoints(mut points: Vec<(Ticks, Bpm)>) -> TempoMap {
+    // The first breakpoint's tempo holds before it.
+    if let Some(&(at, bpm)) = points.first()
+        && at > Ticks::ZERO
+    {
+        points.insert(0, (Ticks::ZERO, bpm));
+    }
+    let mut segments: Vec<TempoSegment> = points
+        .windows(2)
+        .filter(|pair| pair[0].0 != pair[1].0)
+        .map(|pair| {
+            let ((start, from), (_, to)) = (pair[0], pair[1]);
+            if from == to {
+                TempoSegment::Constant { start, bpm: from }
+            } else {
+                TempoSegment::Ramp { start, from, to }
+            }
+        })
+        .collect();
+    if let Some(&(start, bpm)) = points.last() {
+        segments.push(TempoSegment::Constant { start, bpm });
+    }
+    TempoMap::new(segments).expect("a tempo map edited this way stays valid")
 }
 
 /// Builds a time-signature map from changes this module made, which always
@@ -9565,6 +9605,160 @@ mod tests {
         song.apply(Command::DeleteTrack { track: delay }).unwrap();
         assert_eq!(song.doc.track(group).unwrap().sends().len(), 0);
         assert_eq!(song.doc.track(midi).unwrap().send(reverb), 0.5);
+    }
+
+    // Spec: automation R11
+    #[test]
+    fn deleting_a_return_takes_the_send_envelopes_to_it_along() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        let ret = song.track(TrackKind::Return, None);
+        let other = song.track(TrackKind::Return, None);
+        let clip = song.clip(track, 0);
+        let send = AutomationTarget::Send { to: ret };
+        let kept = AutomationTarget::Send { to: other };
+        for target in [send, kept] {
+            song.apply(Command::SetAutomationBreakpoint {
+                track,
+                target,
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+            song.apply(Command::SetClipEnvelopeBreakpoint {
+                kind: EnvelopeKind::Modulation,
+                clip,
+                target,
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+        }
+
+        song.apply(Command::DeleteTrack { track: ret }).unwrap();
+        let track = song.doc.track(track).unwrap();
+        assert!(track.automation_for(&send).is_none());
+        assert!(track.automation_for(&kept).is_some());
+        let clip = song.doc.clip(clip).unwrap();
+        assert!(clip.envelope(&send).is_none());
+        assert!(clip.envelope(&kept).is_some());
+        song.doc.check_invariants().unwrap();
+    }
+
+    // Spec: tempo-map
+    #[test]
+    fn a_tempo_breakpoint_at_the_tempo_in_force_stays_where_it_was_put() {
+        let bpm = |value| Bpm::new(value).unwrap();
+        let bar = Ticks::WHOLE;
+        let mut song = Song::new();
+        song.apply(Command::SetTempoBreakpoint {
+            at: bar * 5,
+            bpm: bpm(120.0),
+        })
+        .unwrap();
+        song.apply(Command::SetTempoBreakpoint {
+            at: bar * 9,
+            bpm: bpm(140.0),
+        })
+        .unwrap();
+        let tempo = &song.doc.settings().tempo;
+        assert_eq!(
+            tempo.bpm_at(bar * 5),
+            bpm(120.0),
+            "the ramp starts at bar 5"
+        );
+        assert_eq!(tempo.bpm_at(bar * 7), bpm(130.0));
+
+        // Deleting the far end leaves two equal breakpoints, both kept.
+        song.apply(Command::DeleteTempoBreakpoint { at: bar * 9 })
+            .unwrap();
+        song.apply(Command::MoveTempoBreakpoint {
+            at: bar * 5,
+            to: bar * 6,
+        })
+        .unwrap();
+    }
+
+    // Spec: automation R1
+    #[test]
+    fn the_main_track_has_no_activator_to_automate() {
+        let mut song = Song::new();
+        let main = song.main();
+        let audio = song.track(TrackKind::Audio, None);
+        let mute = AutomationTarget::Mixer {
+            param: MixerParam::Mute,
+        };
+        let point = |track| Command::SetAutomationBreakpoint {
+            track,
+            target: mute,
+            at: Ticks::ZERO,
+            value: 1.0,
+        };
+        assert!(matches!(
+            song.reject(point(main)),
+            ModelError::WrongTrackKind { .. }
+        ));
+        song.apply(point(audio)).unwrap();
+        // The Main track's volume is still drawn.
+        song.apply(Command::SetAutomationBreakpoint {
+            track: main,
+            target: AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+            at: Ticks::ZERO,
+            value: 0.5,
+        })
+        .unwrap();
+    }
+
+    // Spec: arrangement-editing R7, R16
+    #[test]
+    fn trimming_a_midi_clip_keeps_what_the_engine_plays_where_it_is() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 4);
+        let region = |start| Command::SetMidiClipRegion {
+            clip,
+            start,
+            end: None,
+        };
+        let marker = |song: &Song| match &song.doc.clip(clip).unwrap().data {
+            ClipData::Midi(midi) => midi.start,
+            ClipData::Audio(_) => unreachable!(),
+        };
+
+        // The Start marker is behind the offset: a trim past the marker
+        // would shift every note, so it's refused.
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 6,
+        })
+        .unwrap();
+        song.apply(region(Ticks::ZERO)).unwrap();
+        assert_eq!(
+            song.reject(Command::TrimClipStart {
+                clip,
+                start: Ticks::QUARTER * 5,
+            }),
+            ModelError::NegativeOffset(-Ticks::QUARTER)
+        );
+
+        // Contents before the Start marker can be trimmed back into view.
+        song.apply(region(Ticks::QUARTER)).unwrap();
+        assert_eq!(
+            song.doc
+                .clip(clip)
+                .unwrap()
+                .earliest_start(&TempoMap::default()),
+            Ticks::QUARTER * 5
+        );
+        song.apply(Command::TrimClipStart {
+            clip,
+            start: Ticks::QUARTER * 5,
+        })
+        .unwrap();
+        assert_eq!(marker(&song), Ticks::ZERO);
+        assert_eq!(song.doc.clip(clip).unwrap().end(), Ticks::QUARTER * 8);
     }
 
     // Spec: mixer R15

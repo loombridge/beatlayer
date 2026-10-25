@@ -16,7 +16,7 @@
 //! | Sample rate changed | The backend invalidates the stream ([`StreamStats::invalidated`]) and the device now runs at another rate |
 //! | Stream stalled | No frames for [`SupervisorOptions::stall_timeout`], whatever the backend says |
 //! | Sleep and wake | A [`PowerMonitor`]: by default [`ClockJump`], which notices a wake afterwards |
-//! | Default device changed | The backend reports it ([`StreamStats::device_changes`]); the stream carries on |
+//! | Default device changed | The backend reports it ([`StreamStats::device_changes`]); the stream carries on, unless it also records, when it reopens on the new default |
 //!
 //! What runs in the stream is a [`StreamClient`]'s: each time a stream
 //! opens, the client makes its callback for what the stream actually runs
@@ -372,7 +372,7 @@ enum Command {
 /// | Sample rate changed | The backend invalidates the stream ([`StreamStats::invalidated`]) and the device now runs at another rate |
 /// | Stream stalled | No frames for [`SupervisorOptions::stall_timeout`], whatever the backend says |
 /// | Sleep and wake | A [`PowerMonitor`]: by default [`ClockJump`], which notices a wake afterwards |
-/// | Default device changed | The backend reports it ([`StreamStats::device_changes`]); the stream carries on |
+/// | Default device changed | The backend reports it ([`StreamStats::device_changes`]); the stream carries on, unless it also records, when it reopens on the new default |
 ///
 /// What runs in the stream is a [`StreamClient`]'s: each time a stream
 /// opens, the client makes its callback for what the stream actually runs
@@ -621,6 +621,7 @@ impl Worker {
     fn start(&mut self) {
         let interruption = self.unavailable(Instant::now());
         self.state = self.attempt(interruption, true);
+        self.power.rebaseline();
         self.publish();
     }
 
@@ -630,6 +631,7 @@ impl Worker {
                 Ok(Command::Stop) | Err(RecvTimeoutError::Disconnected) => break,
                 Ok(Command::Reconfigure(request, reply)) => {
                     let result = self.reconfigure(request);
+                    self.power.rebaseline();
                     let _ = reply.send(result);
                 }
                 Ok(Command::Retry) => {
@@ -682,6 +684,9 @@ impl Worker {
             State::Waiting(interruption, next) if now >= next => self.attempt(interruption, false),
             other => other,
         };
+        // Opening and closing devices block, and a slow one must not read as
+        // a sleep at the next poll.
+        self.power.rebaseline();
     }
 
     /// Checks a running stream; returns why it must close, if it must.
@@ -936,6 +941,10 @@ impl Worker {
             unreachable!("a new hand-off has room for one callback");
         }
         if let Err(error) = stream.start() {
+            // The queue frees its callback only when both ends are gone, and
+            // the callback's drop is what hands the client's state back, so
+            // `closed` needs the producer gone first.
+            drop(handoff);
             drop(stream);
             self.client.closed();
             return Err(error);
@@ -1534,6 +1543,167 @@ mod tests {
         let events = supervisor.events();
         assert!(matches!(&events[0], DeviceEvent::Interrupted(i) if i.cause == Cause::Unavailable));
         assert!(matches!(&events[1], DeviceEvent::Recovered { .. }));
+    }
+
+    /// A callback that logs when it is dropped, as the engine's does when it
+    /// hands its state back.
+    struct Returns(Arc<Mutex<Vec<String>>>);
+
+    impl AudioCallback for Returns {
+        fn process(&mut self, _: &ProcessContext, _: &AudioBuffer<'_>, _: &mut AudioBufferMut<'_>) {
+        }
+    }
+
+    impl Drop for Returns {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().push("returned".to_owned());
+        }
+    }
+
+    /// Logs the order of `returned` and `closed`.
+    struct Returning(Arc<Mutex<Vec<String>>>);
+
+    impl StreamClient for Returning {
+        fn open(
+            &mut self,
+            _: &StreamInfo,
+            _: Option<Workgroup>,
+        ) -> Result<Box<dyn AudioCallback>, Error> {
+            Ok(Box::new(Returns(Arc::clone(&self.0))))
+        }
+
+        fn closed(&mut self) {
+            self.0.lock().unwrap().push("closed".to_owned());
+        }
+    }
+
+    /// A backend whose first stream fails to start.
+    struct FailsToStart(NullBackend, Arc<AtomicBool>);
+
+    struct FailingStream(Box<dyn Stream>, bool);
+
+    impl Backend for FailsToStart {
+        fn kind(&self) -> BackendKind {
+            self.0.kind()
+        }
+
+        fn devices(&self) -> Result<Vec<crate::DeviceInfo>, Error> {
+            self.0.devices()
+        }
+
+        fn open_stream(
+            &self,
+            request: &StreamRequest,
+            callback: Box<dyn AudioCallback>,
+        ) -> Result<Box<dyn Stream>, Error> {
+            let fail = self.1.swap(false, Relaxed);
+            Ok(Box::new(FailingStream(
+                self.0.open_stream(request, callback)?,
+                fail,
+            )))
+        }
+    }
+
+    impl Stream for FailingStream {
+        fn info(&self) -> &StreamInfo {
+            self.0.info()
+        }
+
+        fn start(&mut self) -> Result<(), Error> {
+            if self.1 {
+                return Err(Error::new(ErrorKind::DeviceBusy, "the device is busy"));
+            }
+            self.0.start()
+        }
+
+        fn stop(&mut self) -> Result<(), Error> {
+            self.0.stop()
+        }
+
+        fn stats(&self) -> StreamStats {
+            self.0.stats()
+        }
+
+        fn current_buffer_size(&self) -> Option<u32> {
+            self.0.current_buffer_size()
+        }
+    }
+
+    // Spec: device-changes R2
+    #[test]
+    fn a_stream_that_fails_to_start_returns_the_callback_before_it_closes() {
+        let (backend, control) =
+            NullBackend::with_devices(NullOptions::default(), &[("usb", "USB Interface")]);
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let supervisor = Supervisor::start_with_power(
+            Box::new(move || {
+                Ok(
+                    Box::new(FailsToStart(backend, Arc::new(AtomicBool::new(true))))
+                        as Box<dyn Backend>,
+                )
+            }),
+            on("usb"),
+            Box::new(Returning(Arc::clone(&log))),
+            options(),
+            Box::new(control.power()),
+        )
+        .unwrap();
+        running_on(&supervisor, "usb");
+        // The first attempt returns its callback, and only then closes.
+        assert_eq!(log.lock().unwrap()[..2], ["returned", "closed"]);
+    }
+
+    /// A client whose opens take `4 s` of a manual clock, as a slow driver's does.
+    struct Slow(Arc<Mutex<crate::ClockReading>>);
+
+    impl StreamClient for Slow {
+        fn open(
+            &mut self,
+            _: &StreamInfo,
+            _: Option<Workgroup>,
+        ) -> Result<Box<dyn AudioCallback>, Error> {
+            let mut reading = self.0.lock().unwrap();
+            reading.monotonic += Duration::from_secs(4);
+            reading.wall += Duration::from_secs(4);
+            Ok(Box::new(Count(Arc::default())))
+        }
+    }
+
+    // Spec: device-changes R4
+    #[test]
+    fn a_slow_open_is_not_taken_for_a_wake() {
+        let (backend, control) =
+            NullBackend::with_devices(NullOptions::default(), &[("usb", "USB Interface")]);
+        let reading = Arc::new(Mutex::new(crate::ClockReading {
+            monotonic: Duration::ZERO,
+            wall: Duration::from_secs(1_000_000),
+        }));
+        let clock = Arc::clone(&reading);
+        let supervisor = Supervisor::start_with_power(
+            Box::new(move || Ok(Box::new(backend) as Box<dyn Backend>)),
+            on("usb"),
+            Box::new(Slow(Arc::clone(&reading))),
+            options(),
+            Box::new(ClockJump::with_clock(Duration::from_secs(3), move || {
+                *clock.lock().unwrap()
+            })),
+        )
+        .unwrap();
+        running_on(&supervisor, "usb");
+        control.unplug("usb");
+        interrupted(&supervisor);
+        control.replug("usb");
+        running_on(&supervisor, "usb");
+        // The next poll after the slow open must find no wake.
+        control.unplug("usb");
+        interrupted(&supervisor);
+        let events = supervisor.events();
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, DeviceEvent::Woke { .. })),
+            "{events:?}"
+        );
     }
 
     #[test]

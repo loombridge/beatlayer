@@ -118,8 +118,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Option+8"]
 win = ["Alt+8"]
-status = "pending"
-package = "WP-6.72"
+status = "bound"
+commands = [
+  { id = "focus.selected_clip_panel", contexts = ["global"] },
+]
 
 [[shortcut]]
 id = "S-FOCUS-010"

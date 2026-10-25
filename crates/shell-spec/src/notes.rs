@@ -1429,6 +1429,9 @@ pub struct ClipViewState {
     pub note_spelling: bl_model::NoteSpelling,
     /// The tab the Clip View shows.
     pub tab: ClipTab,
+    /// How the panels are arranged, and whether they're folded (detail views
+    /// R26).
+    pub panels: crate::clip_properties::ClipPanels,
     /// Whether the Preview switch is on (Spec: step-recording R1): one
     /// switch for every MIDI clip's editor, kept between launches.
     pub preview: bool,

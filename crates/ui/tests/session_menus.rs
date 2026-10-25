@@ -789,9 +789,15 @@ fn the_clip_views_title_bar_opens_its_menu_and_rename_types_in_it() {
     ] {
         assert!(has(&output, row), "{row}");
     }
-    let fold = item(&output, "Fold");
-    assert!(fold.disabled);
-    assert!(fold.description.contains("WP-6.72"), "{}", fold.description);
+    // Spec: detail-views R20, R23. The panels' items are live since WP-6.72.
+    for row in [
+        "Fold",
+        "Arrange Clip View Panels Automatically",
+        "Arrange Clip View Panels Horizontally",
+        "Arrange Clip View Panels Vertically",
+    ] {
+        assert!(!item(&output, row).disabled, "{row}");
+    }
     assert!(
         Harness::nodes(&output)
             .iter()

@@ -35,7 +35,9 @@ fn main() {
             error: Some(error),
         },
     };
-    println!("{}", serde_json::to_string(&reply).unwrap_or_default());
+    // Starting a new line keeps the reply off the end of any banner the plug-in
+    // printed without one.
+    println!("\n{}", serde_json::to_string(&reply).unwrap_or_default());
     if !reply.ok {
         std::process::exit(1);
     }

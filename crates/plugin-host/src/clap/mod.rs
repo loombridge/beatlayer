@@ -73,6 +73,7 @@ pub use bl_commands::CommandSpec;
 pub use clack_host::entry::EntryDescriptor;
 pub use node::ClapNode;
 
+use events::{Out, OutputList};
 use handlers::{Host, MainThread, ProcessorData, Shared};
 use node::{HostEnds, MAX_CHANNELS, ParamOut};
 
@@ -1728,6 +1729,38 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
         .access_shared_handler(|s| s.callback.swap(false, Relaxed))
     {
         instance.instance.call_on_main_thread_callback();
+    }
+    // Spec: clap-hosting R6. A plug-in that isn't active has no process call
+    // to carry what its editor queued: it asked for a flush, so flush it here
+    // and take its changes as an active one's.
+    if instance
+        .instance
+        .access_shared_handler(|s| s.flush.swap(false, Relaxed))
+        && let Some(mut inactive) = instance.instance.inactive_plugin_handle()
+        && let Some(params) = inactive.get_extension::<PluginParams>()
+    {
+        let mut out = OutputList::new();
+        params.flush(
+            &mut inactive,
+            &InputEvents::empty(),
+            &mut OutputEvents::from_buffer(&mut out),
+        );
+        for event in out.events {
+            let change = match event {
+                Out::Param(id, value) => ParamOut::Value(id, value),
+                Out::Begin(id) => ParamOut::Begin(id),
+                Out::End(id) => ParamOut::End(id),
+                Out::Note(_) | Out::Midi(..) => continue,
+            };
+            take_change(
+                device,
+                (&mut instance.gestures, &mut instance.held),
+                &mut instance.echoes,
+                change,
+                changes,
+            );
+        }
+        changed = true;
     }
     if instance
         .instance

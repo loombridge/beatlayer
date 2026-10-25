@@ -13,6 +13,7 @@
 //! What the import command does with the tempo and signatures is a separate
 //! question; this module only says what the file holds.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::io::Read as _;
 use std::path::Path;
@@ -322,13 +323,13 @@ pub fn write_bytes(
     let mut track = Track::new();
     let mut previous = 0_i64;
     for (tick, _, kind) in events {
-        let delta =
-            u32::try_from((tick - previous).max(0)).map_err(|_| MidiFileError::OutOfRange)?;
+        // A delta is 28 bits: `u28::new` would mask a larger one, not refuse it.
+        let delta = u32::try_from((tick - previous).max(0))
+            .ok()
+            .and_then(u28::try_from)
+            .ok_or(MidiFileError::OutOfRange)?;
         previous = tick;
-        track.push(TrackEvent {
-            delta: u28::new(delta),
-            kind,
-        });
+        track.push(TrackEvent { delta, kind });
     }
 
     let smf = Smf {
@@ -377,8 +378,10 @@ fn read_track(track: &Track<'_>, division: i64) -> (String, Vec<Note>, Ticks) {
     let mut named = false;
     let mut at = 0_i64;
     let mut end = 0_i64;
-    // A slot per channel and key: the note-on still awaiting its note-off.
-    let mut open: Vec<Option<(i64, u8)>> = vec![None; 16 * 128];
+    // A queue per channel and key: the note-ons still awaiting their
+    // note-offs, the earliest first, so overlapping notes on one key pair
+    // off in the order they began.
+    let mut open: Vec<VecDeque<(i64, u8)>> = vec![VecDeque::new(); 16 * 128];
     let mut notes = Vec::new();
 
     for event in track {
@@ -402,7 +405,7 @@ fn read_track(track: &Track<'_>, division: i64) -> (String, Vec<Note>, Ticks) {
                     }
                     MidiMessage::NoteOn { key, vel } => {
                         let slot = channel * 128 + usize::from(key.as_int());
-                        open[slot] = Some((at, vel.as_int()));
+                        open[slot].push_back((at, vel.as_int()));
                     }
                     MidiMessage::NoteOff { key, vel } => {
                         close(
@@ -427,7 +430,7 @@ fn read_track(track: &Track<'_>, division: i64) -> (String, Vec<Note>, Ticks) {
     }
     // A note the track never released ends where the track does.
     for slot in 0..open.len() {
-        if open[slot].is_some() {
+        while !open[slot].is_empty() {
             let (channel, key) = (slot / 128, (slot % 128) as u8);
             close(&mut open, &mut notes, channel, key, end, 0, division);
         }
@@ -441,9 +444,9 @@ fn read_track(track: &Track<'_>, division: i64) -> (String, Vec<Note>, Ticks) {
     (name, notes, length)
 }
 
-/// Closes the note on `channel` and `key`, if one is open, at tick `at`.
+/// Closes the earliest note open on `channel` and `key`, if any, at tick `at`.
 fn close(
-    open: &mut [Option<(i64, u8)>],
+    open: &mut [VecDeque<(i64, u8)>],
     notes: &mut Vec<Note>,
     channel: usize,
     key: u8,
@@ -451,7 +454,7 @@ fn close(
     off_velocity: u8,
     division: i64,
 ) {
-    let Some((start, velocity)) = open[channel * 128 + usize::from(key)].take() else {
+    let Some((start, velocity)) = open[channel * 128 + usize::from(key)].pop_front() else {
         return;
     };
     let length = (at - start).max(1);

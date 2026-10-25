@@ -310,7 +310,8 @@ struct Processor {
     /// line and `getLatencySamples` follow.
     active_latency: AtomicU32,
     failure: AtomicU8,
-    /// The delay ring's write cursor, shared by its channels.
+    /// The delay ring's write cursor: the slot of the next frame, shared by
+    /// the channels, which move it on once per frame, not once per channel.
     at: Cell<usize>,
     /// Frames processed, for the log.
     frames: AtomicU64,
@@ -385,14 +386,13 @@ impl Processor {
         );
     }
 
-    /// One frame through the delay ring, at the latency in force.
-    fn delayed(&self, channel: usize, input: f32) -> f32 {
+    /// One frame through the delay ring slot `at`, at the latency in force.
+    fn delayed(&self, channel: usize, at: usize, input: f32) -> f32 {
         let frames = self.active_latency.load(Ordering::Relaxed) as usize;
         let channel = channel.min(MAX_CHANNELS - 1);
         if frames == 0 || frames > MAX_LATENCY {
             return input;
         }
-        let at = self.at.get();
         let read = (at + MAX_LATENCY - frames) % MAX_LATENCY;
         // SAFETY: one process call at a time touches the ring, and the
         // cursor's frame is each channel's own slot.
@@ -730,20 +730,21 @@ impl IAudioProcessorTrait for Processor {
             let end = (next.max(start as i32) as usize).min(frames);
             if end > start {
                 let gain = self.gain();
+                let base = self.at.get();
                 for pair in 0..pairs {
-                    // SAFETY: the bus's channels, each `frames` long, as above.
-                    let (input, output) = unsafe {
-                        (
-                            slice::from_raw_parts(in_channels[pair], frames),
-                            slice::from_raw_parts_mut(out_channels[pair], frames),
-                        )
-                    };
                     for frame in start..end {
-                        let held = self.delayed(pair, input[frame]);
-                        output[frame] = held * gain;
-                        self.at.set((self.at.get() + 1) % MAX_LATENCY);
+                        let at = (base + frame - start) % MAX_LATENCY;
+                        // SAFETY: the bus's channels, each `frames` long, as
+                        // above. Read and written through pointers, one
+                        // frame at a time, as a host may process in place
+                        // (the same buffer in and out).
+                        unsafe {
+                            let held = self.delayed(pair, at, *in_channels[pair].add(frame));
+                            *out_channels[pair].add(frame) = held * gain;
+                        }
                     }
                 }
+                self.at.set((base + end - start) % MAX_LATENCY);
             }
             // Apply every change at or before this stretch's end.
             for index in 0..queues {
@@ -1562,4 +1563,91 @@ fn library() -> PathBuf {
         .pop()
         .map(|(_, path)| path)
         .expect("Cargo builds the test plug-in's cdylib beside the tests")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Runs `blocks` of `size` stereo frames through the processor at
+    /// `latency`, the input a ramp that never repeats a value across the
+    /// channels (right is the left plus 0.5). With `in_place`, the host
+    /// hands the input buffers as the output. Returns each channel's
+    /// output over all the blocks.
+    fn run(latency: u32, size: usize, blocks: usize, in_place: bool) -> [Vec<f32>; 2] {
+        let processor = Processor::new();
+        processor.latency.store(latency, Ordering::Relaxed);
+        // SAFETY: no pointers are involved.
+        assert_eq!(unsafe { processor.setProcessing(1) }, kResultOk);
+        let mut result = [Vec::new(), Vec::new()];
+        for block in 0..blocks {
+            let mut left: Vec<f32> = (0..size).map(|i| (block * size + i) as f32).collect();
+            let mut right: Vec<f32> = left.iter().map(|v| v + 0.5).collect();
+            let (mut out_left, mut out_right) = (vec![0.0f32; size], vec![0.0f32; size]);
+            let mut in_pointers = [left.as_mut_ptr(), right.as_mut_ptr()];
+            let mut out_pointers = if in_place {
+                in_pointers
+            } else {
+                [out_left.as_mut_ptr(), out_right.as_mut_ptr()]
+            };
+            // SAFETY: zeroed is a valid AudioBusBuffers and ProcessData
+            // (plain old data, null pointers); the fields the processor
+            // reads are set below.
+            let (mut input, mut output): (AudioBusBuffers, AudioBusBuffers) =
+                unsafe { (std::mem::zeroed(), std::mem::zeroed()) };
+            input.numChannels = 2;
+            input.__field0.channelBuffers32 = in_pointers.as_mut_ptr();
+            output.numChannels = 2;
+            output.__field0.channelBuffers32 = out_pointers.as_mut_ptr();
+            // SAFETY: as above.
+            let mut data: ProcessData = unsafe { std::mem::zeroed() };
+            data.numSamples = size as i32;
+            data.numInputs = 1;
+            data.numOutputs = 1;
+            data.inputs = &mut input;
+            data.outputs = &mut output;
+            // SAFETY: `data` and the buffers it points to outlive the call.
+            assert_eq!(unsafe { processor.process(&mut data) }, kResultOk);
+            if in_place {
+                result[0].extend_from_slice(&left);
+                result[1].extend_from_slice(&right);
+            } else {
+                result[0].extend_from_slice(&out_left);
+                result[1].extend_from_slice(&out_right);
+            }
+        }
+        result
+    }
+
+    /// Frame `i` of the ramp the channel carries, as the output after the
+    /// latency: silence for the first `latency` frames.
+    fn expected(channel: usize, latency: usize, frames: usize) -> Vec<f32> {
+        (0..frames)
+            .map(|i| match i.checked_sub(latency) {
+                Some(n) => n as f32 + if channel == 0 { 0.0 } else { 0.5 },
+                None => 0.0,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn stereo_audio_is_delayed_by_exactly_the_latency_across_blocks() {
+        // Review 23 October 2026: the cursor moved once per channel per
+        // frame, so with 512-frame blocks each block had a latency-long
+        // dropout and the right channel read what the left had written.
+        let out = run(100, 512, 3, false);
+        for (channel, heard) in out.iter().enumerate() {
+            assert_eq!(*heard, expected(channel, 100, 3 * 512));
+        }
+    }
+
+    #[test]
+    fn processing_in_place_gives_the_same_audio() {
+        // Review 23 October 2026: the input and output slices of the same
+        // buffer aliased, which is undefined behaviour.
+        let out = run(100, 64, 3, true);
+        for (channel, heard) in out.iter().enumerate() {
+            assert_eq!(*heard, expected(channel, 100, 3 * 64));
+        }
+    }
 }

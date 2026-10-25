@@ -1038,7 +1038,13 @@ fn automation_becomes_the_envelopes_the_file_asks_for() {
     // Arrangement clip's own points over its span (R59).
     assert_eq!(
         envelope_of(document, "Audio", mixer(MixerParam::Volume)),
-        [(0, 1.0), (2 * q, 0.75), (4 * q, 0.5), (6 * q, 1.0)]
+        [
+            (0, 1.0),
+            (2 * q, 0.75),
+            (4 * q, 0.5),
+            (6 * q, 1.0),
+            (8 * q, 0.625)
+        ]
     );
     // R58, R21: hold points step one tick before the next; pan is placed on
     // -1 to 1.
@@ -1256,6 +1262,57 @@ fn extreme_automation_numbers_never_panic() {
         let container = dawproject::read_container(&container_of(&xml)).unwrap();
         if let Ok(imported) = dawproject::import(&container, &Context::new(&folder, &folder)) {
             imported.project.document.check_invariants().unwrap();
+        }
+    }
+}
+
+/// An Arrangement clip's automation ends at the value its cut segment
+/// reaches at the clip's end, which holds until the next point, and a point
+/// time past what a tick counts doesn't overflow (R59).
+#[test]
+fn clip_automation_ends_where_the_clip_cuts_it_and_holds() {
+    use bl_model::{AutomationTarget, MixerParam};
+    let folder = fixtures().join("nowhere");
+    for (a, b) in [("1e300", "1"), ("-1e300", "1"), ("0", "8")] {
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure>
+<Track contentType="notes" id="b" name="B"><Channel role="regular" id="cb"><Volume unit="linear" value="1" id="v"/></Channel></Track></Structure>
+<Arrangement id="arr"><Lanes id="all"><Lanes track="b" id="lb">
+<Clips id="cb1"><Clip time="4" duration="4" name="x"><Lanes>
+<Notes id="n"><Note time="0" duration="1" key="60"/></Notes>
+<Points unit="linear" id="p1"><Target parameter="v"/><RealPoint time="{a}" value="0" interpolation="linear"/><RealPoint time="{b}" value="1" interpolation="linear"/></Points>
+<Points unit="normalized" id="p7"><Target expression="polyPressure" key="60"/><RealPoint time="{a}" value="0.5"/><RealPoint time="{b}" value="1" interpolation="linear"/></Points>
+</Lanes></Clip>
+<Clip time="12" duration="4" name="y"><Lanes><Notes id="n2"><Note time="0" duration="1" key="60"/></Notes>
+<Points unit="linear" id="p2"><Target parameter="v"/><RealPoint time="0" value="0.2" interpolation="linear"/></Points>
+</Lanes></Clip></Clips></Lanes></Lanes></Arrangement>
+<Scenes/></Project>"#
+        );
+        let container = dawproject::read_container(&container_of(&xml)).unwrap();
+        let imported = dawproject::import(&container, &Context::new(&folder, &folder)).unwrap();
+        imported.project.document.check_invariants().unwrap();
+        let points = envelope_of(
+            &imported.project.document,
+            "B",
+            AutomationTarget::Mixer {
+                param: MixerParam::Volume,
+            },
+        );
+        if b == "8" {
+            let q = 705_600;
+            assert_eq!(
+                points,
+                [
+                    (4 * q, 0.0),
+                    (8 * q, 0.5),
+                    (12 * q - 1, 0.5),
+                    (12 * q, 0.2),
+                    (16 * q, 0.2)
+                ]
+            );
         }
     }
 }

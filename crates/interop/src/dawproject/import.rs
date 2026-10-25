@@ -157,6 +157,7 @@ pub fn import(container: &Container, context: &Context<'_>) -> Result<Imported, 
         targets: HashMap::new(),
         described: HashMap::new(),
         pending: Pending::new(),
+        held_ends: std::collections::BTreeSet::new(),
         track_expressions: HashMap::new(),
         controller_channels: HashMap::new(),
         crossfades: Vec::new(),
@@ -241,6 +242,9 @@ struct Importer<'a, 'c> {
     described: HashMap<(bl_model::PluginFormat, String), Described>,
     /// The Arrangement's envelopes, written when the import is done (R58).
     pending: Pending,
+    /// Where an Arrangement clip's automation ends, by track and parameter,
+    /// so its last value holds after the clip (R59).
+    held_ends: std::collections::BTreeSet<(TrackId, bl_model::AutomationTarget, Ticks)>,
     /// The MIDI controllers outside clips, by the track they are for (R60).
     track_expressions: HashMap<TrackId, Vec<Expressions>>,
     /// The channel each controller of a clip was first given on (R60).

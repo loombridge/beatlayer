@@ -223,7 +223,7 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R56 | `automation_becomes_the_envelopes_the_file_asks_for`, `every_fixture_gives_the_report_it_should` | unit |
 | R57 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/shell/tests/dawproject_plugins.rs`, `a_plugin_parameters_normalized_automation_goes_through_its_mapping` | unit |
 | R58 | `automation_becomes_the_envelopes_the_file_asks_for`; `crates/cli/tests/dawproject_goldens.rs`, `an_imported_volume_ramp_renders_the_same_as_a_hand_drawn_one` | unit, golden render |
-| R59 | `automation_becomes_the_envelopes_the_file_asks_for`, `clip_automation_and_audio_expressions_follow_the_file` | unit |
+| R59 | `automation_becomes_the_envelopes_the_file_asks_for`, `clip_automation_and_audio_expressions_follow_the_file`, `clip_automation_ends_where_the_clip_cuts_it_and_holds` | unit |
 | R60 | `midi_controllers_and_note_expressions_follow_the_file` | unit |
 | R61 | `midi_controllers_and_note_expressions_follow_the_file` | unit |
 | R62 | `clip_automation_and_audio_expressions_follow_the_file` | unit |

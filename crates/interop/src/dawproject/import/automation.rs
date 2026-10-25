@@ -64,6 +64,9 @@ pub(super) enum Driven {
     Unsupported(&'static str),
 }
 
+/// The furthest tick from zero a point is placed at.
+const TICK_LIMIT: i64 = i64::MAX / 4;
+
 /// One automation point in ticks: where, what and whether it holds.
 pub(super) type Step = (Ticks, f64, bool);
 
@@ -103,28 +106,32 @@ pub(super) fn breakpoints(steps: &[Step]) -> Vec<Breakpoint> {
     made
 }
 
+/// The value in force at `at` among `steps`, and whether it holds there.
+fn value_at(steps: &[Step], at: Ticks) -> Option<(f64, bool)> {
+    let before = steps.iter().rposition(|(t, _, _)| *t <= at);
+    let first_after = steps.iter().position(|(t, _, _)| *t > at);
+    match (before, first_after) {
+        (Some(b), Some(a)) if !steps[b].2 => {
+            let (t0, v0, _) = steps[b];
+            let (t1, v1, _) = steps[a];
+            let along = (at - t0).get() as f64 / (t1 - t0).get() as f64;
+            Some((v0 + (v1 - v0) * along, false))
+        }
+        (Some(b), _) => Some((steps[b].1, steps[b].2)),
+        // Before the first point the first point's value holds.
+        (None, Some(a)) => Some((steps[a].1, true)),
+        (None, None) => None,
+    }
+}
+
 /// The steps between `from` and `to`, with a first step at `from` holding the
 /// value in force there, so a clip's share of a longer series starts right.
 fn window(steps: &[Step], from: Ticks, to: Ticks) -> Vec<Step> {
     let mut inside: Vec<Step> = Vec::new();
-    let before = steps.iter().rposition(|(at, _, _)| *at <= from);
-    let first_after = steps.iter().position(|(at, _, _)| *at > from);
-    if !steps.iter().any(|(at, _, _)| *at == from) {
-        let value = match (before, first_after) {
-            (Some(b), Some(a)) if !steps[b].2 => {
-                let (t0, v0, _) = steps[b];
-                let (t1, v1, _) = steps[a];
-                let along = (from - t0).get() as f64 / (t1 - t0).get() as f64;
-                Some((v0 + (v1 - v0) * along, steps[b].2))
-            }
-            (Some(b), _) => Some((steps[b].1, steps[b].2)),
-            // Before the first point the first point's value holds.
-            (None, Some(a)) => Some((steps[a].1, true)),
-            (None, None) => None,
-        };
-        if let Some((value, hold)) = value {
-            inside.push((from, value, hold));
-        }
+    if !steps.iter().any(|(at, _, _)| *at == from)
+        && let Some((value, hold)) = value_at(steps, from)
+    {
+        inside.push((from, value, hold));
     }
     inside.extend(
         steps
@@ -166,7 +173,12 @@ impl Importer<'_, '_> {
             if !time.is_finite() || !value.is_finite() {
                 continue;
             }
-            let at = zero + self.span(unit, time, zero);
+            // Kept well inside a tick count, so later sums can't overflow.
+            let at = Ticks(
+                zero.get()
+                    .saturating_add(self.span(unit, time, zero).get())
+                    .clamp(-TICK_LIMIT, TICK_LIMIT),
+            );
             steps.push((at, value, hold));
         }
         // Of two points at one tick the later in the file wins (R58).
@@ -351,7 +363,17 @@ impl Importer<'_, '_> {
     ) {
         let steps = self.steps(points, unit, zero);
         let steps = match span {
-            Some((from, to)) => window(&steps, from, to),
+            Some((from, to)) => {
+                let mut inside = window(&steps, from, to);
+                // A segment the clip's end cuts ends at the value it reaches
+                // there, which holds after the clip (R59).
+                if !steps.iter().any(|(at, _, _)| *at == to)
+                    && let Some((value, _)) = value_at(&steps, to)
+                {
+                    inside.push((to, value, true));
+                }
+                inside
+            }
             None => steps,
         };
         if steps.is_empty() {
@@ -361,6 +383,11 @@ impl Importer<'_, '_> {
             return;
         };
         let made = breakpoints(&converted);
+        if let Some((_, to)) = span
+            && made.last().is_some_and(|last| last.at == to)
+        {
+            self.held_ends.insert((track, target, to));
+        }
         self.pending
             .entry((track, target))
             .or_default()
@@ -382,6 +409,21 @@ impl Importer<'_, '_> {
             }
             if unique.is_empty() {
                 continue;
+            }
+            // A clip's last value holds until the envelope's next point (R59).
+            for index in (0..unique.len().saturating_sub(1)).rev() {
+                let (at, next) = (unique[index].at, unique[index + 1].at);
+                if next - Ticks(1) > at && self.held_ends.contains(&(track, target, at)) {
+                    let value = unique[index].value;
+                    unique.insert(
+                        index + 1,
+                        Breakpoint {
+                            at: next - Ticks(1),
+                            value,
+                            bend: 0.0,
+                        },
+                    );
+                }
             }
             let place = self.scope_place_of(track);
             self.try_apply(
@@ -734,15 +776,17 @@ impl Importer<'_, '_> {
             };
             match set.target.expression {
                 Some(Expression::Gain) => {
+                    let (low, high) = bl_model::ClipParam::Gain.limits();
                     data.gain = match set.unit {
                         Some(Unit::Decibel) => db_to_gain(value),
                         _ => value,
                     }
-                    .max(0.0);
+                    .clamp(low, high);
                 }
                 Some(Expression::Transpose) => {
                     // To the nearest cent: whole semitones and a detune.
-                    let cents = (value * 100.0).round();
+                    let (low, high) = bl_model::ClipParam::Transpose.limits();
+                    let cents = (value.clamp(low, high) * 100.0).round();
                     let transpose = (cents / 100.0).round();
                     data.transpose = transpose as i32;
                     data.detune = cents - transpose * 100.0;

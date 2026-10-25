@@ -3028,7 +3028,8 @@ impl BrowserView {
                             ([one], [], []) | ([], [one], []) | ([], [], [one]) => one.clone(),
                             _ => {
                                 return Err(BrowserError::Unavailable(
-                                    "select one audio file, clip file or preset to preview".to_owned(),
+                                    "select one audio file, clip file or preset to preview"
+                                        .to_owned(),
                                 ));
                             }
                         }

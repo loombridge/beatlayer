@@ -629,7 +629,9 @@ pub fn render_preset(
         keys.sort_unstable();
         keys.dedup();
         if keys.is_empty() {
-            return Err("this Drum Rack has no pad with a chain, so there is nothing to hear".to_owned());
+            return Err(
+                "this Drum Rack has no pad with a chain, so there is nothing to hear".to_owned(),
+            );
         }
         let notes = (0..)
             .zip(&keys)
@@ -698,7 +700,10 @@ pub fn render_preset(
     }
     let planes = data.channels().map(|c| c[..frames].to_vec()).collect();
     let data = SampleData::new(rate, planes).map_err(|e| e.to_string())?;
-    Ok((data, Box::new(bl_model::AudioData::new(ContentHash([0; 32])))))
+    Ok((
+        data,
+        Box::new(bl_model::AudioData::new(ContentHash([0; 32]))),
+    ))
 }
 
 /// Decodes up to [`MAX_PREVIEW_SECONDS`] of a file and converts it to
@@ -802,8 +807,8 @@ mod tests {
         let path = folder.join("Lead.blpreset");
         let synth = bl_devices::polysynth_type();
         let id = bl_core::id::Id::new(1).unwrap();
-        let device = Device::new(DeviceId(id), synth.name.to_string(), synth.kind)
-            .with_role(synth.role);
+        let device =
+            Device::new(DeviceId(id), synth.name.to_string(), synth.kind).with_role(synth.role);
         bl_project::preset::Preset::of(&device).save(&path).unwrap();
         let request = Request {
             id: 1,

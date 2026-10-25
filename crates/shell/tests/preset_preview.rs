@@ -252,9 +252,7 @@ fn an_instrument_preset_previews_as_its_render_of_the_phrase_once_whatever_raw_s
     shell.run("transport.play", json!({})).unwrap();
     testing::advance(&control, &mut shell, 500);
     for raw in [false, true] {
-        shell
-            .run("browser.set_raw", json!({ "raw": raw }))
-            .unwrap();
+        shell.run("browser.set_raw", json!({ "raw": raw })).unwrap();
         select_and_render(&mut shell, &file);
         testing::advance(&control, &mut shell, 100);
         shell.poll();
@@ -296,7 +294,7 @@ fn a_drum_rack_preset_plays_its_pads_in_order() {
         (40, 60, Vec::new()),
         pad(37, 72, 12),
     ]);
-    let file = save_rack(&scratch, "Kit", rack);
+    let file = save_rack(&scratch, "Pads", rack);
     let data = render_of(&file, 120.0).unwrap();
     let step = 6_000;
     assert!(data.frames() >= 3 * step);
@@ -433,7 +431,11 @@ fn effects_and_missing_plugins_preview_nothing_and_another_item_drops_a_render()
     let effect = save_device(
         &scratch,
         "Gain",
-        &Device::new(DeviceId(id(2)), "Gain", bl_engine::testing::gain_type().kind),
+        &Device::new(
+            DeviceId(id(2)),
+            "Gain",
+            bl_engine::testing::gain_type().kind,
+        ),
     );
     let missing = save_device(
         &scratch,
@@ -484,5 +486,9 @@ fn effects_and_missing_plugins_preview_nothing_and_another_item_drops_a_render()
         bl_shell::browser::preview::render_preset(&lead, 48_000, 120.0, &AtomicBool::new(true))
             .is_err()
     );
-    assert_eq!(shell.editor().undo_history().len(), steps, "the set is as it was");
+    assert_eq!(
+        shell.editor().undo_history().len(),
+        steps,
+        "the set is as it was"
+    );
 }

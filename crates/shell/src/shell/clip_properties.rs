@@ -10,7 +10,8 @@ use bl_core::time::{SampleRate, Ticks};
 use bl_engine::{SlotState, session_content_tick};
 use bl_model::{AudioData, Clip, ClipData, ClipId, Command, MidiData};
 use bl_shell_spec::clip_properties::{
-    self as ids, Marker, MarkerArgs, MarkerAt, PropertiesShown, ShowPropertiesArgs,
+    self as ids, ArrangePanelsArgs, FoldPanelsArgs, Marker, MarkerArgs, MarkerAt, PropertiesShown,
+    ShowPropertiesArgs,
 };
 use serde_json::Value;
 
@@ -72,14 +73,53 @@ impl Shell {
                     position,
                 }))
             }
-            ids::FOCUS_PANELS => {
+            ids::FOCUS_PANELS | ids::FOCUS_SELECTED_PANEL => {
                 Self::args::<NoArgs>(id, args)?;
                 self.run(bl_shell_spec::commands::FOCUS_CLIP_VIEW, json!({}))?;
-                self.effects.push(Effect::FocusClipPanels);
+                // Spec: detail-views R24. Folded panels unfold first.
+                self.clip_view.set_panels_folded(false);
+                self.effects.push(if id == ids::FOCUS_PANELS {
+                    Effect::FocusClipPanels
+                } else {
+                    Effect::FocusSelectedClipPanel
+                });
                 Ok(Value::Null)
+            }
+            ids::ARRANGE_PANELS => {
+                // Spec: detail-views R20, R22. A preference, no part of the
+                // set.
+                let ArrangePanelsArgs { arrangement } = Self::args(id, args)?;
+                self.clip_view.set_panel_arrangement(arrangement);
+                self.prefs.panel_arrangement = arrangement;
+                self.save_preferences();
+                Ok(to_value(&self.clip_view.panels()))
+            }
+            ids::FOLD_PANELS => {
+                // Spec: detail-views R23. View state: no undo step.
+                let FoldPanelsArgs { folded } = Self::args(id, args)?;
+                let folded = folded.unwrap_or(!self.clip_view.panels_folded());
+                self.clip_view.set_panels_folded(folded);
+                Ok(to_value(&self.clip_view.panels()))
             }
             other => Err(ShellError::UnknownCommand(other.to_owned())),
         }
+    }
+
+    /// Tells the Clip View how tall it is, for Automatically to arrange the
+    /// panels by (detail views R20). An expanded Clip View is as tall as the
+    /// window allows; shortcut: the window's own height (any, before the
+    /// host reports one) stands in for the layout's largest, which only the UI
+    /// knows, so a window too short to leave 400 points of Clip View reads
+    /// vertical here where the UI draws horizontal.
+    pub(super) fn sync_panels_height(&mut self) {
+        let height = if self.detail.expanded() {
+            self.prefs
+                .window_size
+                .map_or(f32::MAX, |(_, window)| window)
+        } else {
+            self.detail.clip_height() as f32
+        };
+        self.clip_view.set_panels_height(height);
     }
 
     /// Whether `clip` is playing now, which is when the Set buttons work.

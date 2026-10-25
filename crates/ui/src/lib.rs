@@ -48,6 +48,7 @@ pub mod browser;
 pub mod browser_edge;
 pub mod chain_strips;
 pub mod clip_envelope;
+pub mod clip_panels;
 pub mod clip_selector;
 pub mod clip_view;
 pub mod control_bar;

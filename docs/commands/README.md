@@ -5616,6 +5616,46 @@ Notes of one clip among several shown (Spec: multi-clip-editing R18).
 
 </details>
 
+### `ClipPanels`
+
+How the Clip View's panels are arranged and whether they're folded: the result of `clip_view.arrange_panels` and `clip_view.fold_panels`, and `view.state`'s `clip_view.panels`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `arrangement` | [`PanelArrangement`](#panelarrangement) | yes | The arrangement chosen: a preference, kept between launches. |
+| `in_use` | [`PanelArrangement`](#panelarrangement) | yes | The arrangement in use: `arrangement` with Automatically resolved by the Clip View's height, never `automatic`. |
+| `folded` | boolean | yes | Whether the panels are folded: view state for the session. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the Clip View's panels are arranged and whether they're folded: the result of `clip_view.arrange_panels` and `clip_view.fold_panels`, and `view.state`'s `clip_view.panels`.",
+  "properties": {
+    "arrangement": {
+      "$ref": "#/$defs/PanelArrangement",
+      "description": "The arrangement chosen: a preference, kept between launches."
+    },
+    "folded": {
+      "description": "Whether the panels are folded: view state for the session.",
+      "type": "boolean"
+    },
+    "in_use": {
+      "$ref": "#/$defs/PanelArrangement",
+      "description": "The arrangement in use: `arrangement` with Automatically resolved by the Clip View's height, never `automatic`."
+    }
+  },
+  "required": [
+    "arrangement",
+    "in_use",
+    "folded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipParam`
 
 A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).
@@ -5874,6 +5914,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `highlight_scales` | boolean | yes | Whether Highlight Scales is on (K): one switch for every clip's editor, kept between launches. |
 | `note_spelling` | [`NoteSpelling`](#notespelling) | yes | How the note editor spells keys: one choice for every editor, kept between launches. |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
+| `panels` | [`ClipPanels`](#clippanels) | yes | How the panels are arranged, and whether they're folded (detail views R26). |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
 | `filters` | [`NoteFilters`](#notefilters) | yes | Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on. |
@@ -6044,6 +6085,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "$ref": "#/$defs/NoteSpelling",
       "description": "How the note editor spells keys: one choice for every editor, kept between launches."
     },
+    "panels": {
+      "$ref": "#/$defs/ClipPanels",
+      "description": "How the panels are arranged, and whether they're folded (detail views R26)."
+    },
     "preview": {
       "description": "Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches.",
       "type": "boolean"
@@ -6150,6 +6195,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "highlight_scales",
     "note_spelling",
     "tab",
+    "panels",
     "preview",
     "envelope",
     "filters",
@@ -20569,6 +20615,43 @@ One of:
     {
       "const": "generate",
       "description": "The Generate panel.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PanelArrangement`
+
+How the Clip View arranges its panels (detail views R19, R20).
+
+One of:
+
+- `"automatic"`: Vertically while the Clip View is at least [`VERTICAL_FROM`] tall, and horizontally while it's shorter.
+- `"horizontal"`: Side by side, the right group beside the left.
+- `"vertical"`: Stacked, the right group under the left.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the Clip View arranges its panels (detail views R19, R20).",
+  "oneOf": [
+    {
+      "const": "automatic",
+      "description": "Vertically while the Clip View is at least [`VERTICAL_FROM`] tall, and horizontally while it's shorter.",
+      "type": "string"
+    },
+    {
+      "const": "horizontal",
+      "description": "Side by side, the right group beside the left.",
+      "type": "string"
+    },
+    {
+      "const": "vertical",
+      "description": "Stacked, the right group under the left.",
       "type": "string"
     }
   ]

@@ -2,7 +2,8 @@
 //! left group shows, scrolling the editor to a marker, and the Set buttons.
 //! The panel's other controls run the document's own `clip.*` commands,
 //! which agents run too. The behaviour is in the clip properties spec, R1 to
-//! R12.
+//! R12. The panels' arrangement, their folding and the key that focuses the
+//! shown panel (WP-6.72) are here too: the detail views spec, R19 to R26.
 //!
 //! The Set buttons read where the playing clip has reached, which only the
 //! shell knows, so the shell runs these. [`register`] adds their specs, which
@@ -27,6 +28,16 @@ pub const SET_MARKER_AT_PLAYHEAD: &str = "clip.set_marker_at_playhead";
 /// `focus.clip_panels`: Navigate ▸ Clip Panels.
 pub const FOCUS_PANELS: &str = "focus.clip_panels";
 
+/// `focus.selected_clip_panel`: Option+8, to the shown panel of the group the
+/// focus was last in.
+pub const FOCUS_SELECTED_PANEL: &str = "focus.selected_clip_panel";
+
+/// `clip_view.arrange_panels`: Arrange Clip View Panels.
+pub const ARRANGE_PANELS: &str = "clip_view.arrange_panels";
+
+/// `clip_view.fold_panels`: fold or unfold the panels.
+pub const FOLD_PANELS: &str = "clip_view.fold_panels";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -34,7 +45,40 @@ pub const IDS: &[&str] = &[
     SHOW_MARKER,
     SET_MARKER_AT_PLAYHEAD,
     FOCUS_PANELS,
+    FOCUS_SELECTED_PANEL,
+    ARRANGE_PANELS,
+    FOLD_PANELS,
 ];
+
+/// The Clip View's height, in points at 100%, from which Automatically
+/// arranges the panels vertically (detail views R20, Beatlayer's own).
+pub const VERTICAL_FROM: f32 = 400.0;
+
+/// How the Clip View arranges its panels (detail views R19, R20).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PanelArrangement {
+    /// Vertically while the Clip View is at least [`VERTICAL_FROM`] tall,
+    /// and horizontally while it's shorter.
+    #[default]
+    Automatic,
+    /// Side by side, the right group beside the left.
+    Horizontal,
+    /// Stacked, the right group under the left.
+    Vertical,
+}
+
+impl PanelArrangement {
+    /// Whether the panels stack in a Clip View `height` points tall at 100%.
+    #[must_use]
+    pub fn is_vertical(self, height: f32) -> bool {
+        match self {
+            Self::Automatic => height >= VERTICAL_FROM,
+            Self::Horizontal => false,
+            Self::Vertical => true,
+        }
+    }
+}
 
 /// Whether `id` is one of the Main Properties panel's commands.
 #[must_use]
@@ -119,6 +163,37 @@ pub struct MarkerAt {
     pub position: f64,
 }
 
+/// Arguments of `clip_view.arrange_panels`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ArrangePanelsArgs {
+    /// The arrangement to choose.
+    pub arrangement: PanelArrangement,
+}
+
+/// Arguments of `clip_view.fold_panels`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FoldPanelsArgs {
+    /// Fold (true) or unfold (false); switches if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folded: Option<bool>,
+}
+
+/// How the Clip View's panels are arranged and whether they're folded: the
+/// result of `clip_view.arrange_panels` and `clip_view.fold_panels`, and
+/// `view.state`'s `clip_view.panels`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ClipPanels {
+    /// The arrangement chosen: a preference, kept between launches.
+    pub arrangement: PanelArrangement,
+    /// The arrangement in use: `arrangement` with Automatically resolved by
+    /// the Clip View's height, never `automatic`.
+    pub in_use: PanelArrangement,
+    /// Whether the panels are folded: view state for the session.
+    pub folded: bool,
+}
+
 /// Adds the Main Properties panel's commands to a registry.
 ///
 /// # Errors
@@ -184,6 +259,52 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .args::<NoArgs>()
             .result::<()>(),
     )?;
+    registry.register(
+        CommandSpec::new(FOCUS_SELECTED_PANEL, "Selected Clip Panel")
+            .description(
+                "Moves the keyboard focus to the shown panel of the Clip View's panel group the \
+                 focus was last in (the left group at first), onto its first control, showing \
+                 the Clip View first if it is hidden and unfolding the panels if they are \
+                 folded: Option+8. Changes nothing in the set and isn't an undo step.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding("S-FOCUS-009")
+            .args::<NoArgs>()
+            .result::<()>(),
+    )?;
+    registry.register(
+        CommandSpec::new(ARRANGE_PANELS, "Arrange Clip View Panels")
+            .description(
+                "Chooses how the Clip View arranges its panels (View \u{25b8} Arrange Clip View \
+                 Panels, the clip title bar's menu, a drag of the panels' right edge): \
+                 `automatic` (vertically while the Clip View is at least 400 points tall, \
+                 horizontally while it is shorter), `horizontal` or `vertical`. It is an \
+                 application preference, kept between launches and for every clip and set; \
+                 it isn't part of the set and isn't an undo step. The result and `view.state`'s \
+                 `clip_view.panels` read the choice in `arrangement` and the one in use in \
+                 `in_use`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, ClipView])
+            .args::<ArrangePanelsArgs>()
+            .result::<ClipPanels>(),
+    )?;
+    registry.register(
+        CommandSpec::new(FOLD_PANELS, "Fold Clip View Panels")
+            .description(
+                "Folds or unfolds the Clip View's panels (double-clicking its title bar, Fold \
+                 in the title bar's menu): folded, the panel selector row and both panels hide, \
+                 the title bar stays and the editor takes the Clip View's whole width. `folded` \
+                 says which way; left out, it switches. View state for the session, the same \
+                 for every clip; nothing changes in the set and it isn't an undo step. The \
+                 result and `view.state`'s `clip_view.panels` read `folded`.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, ClipView])
+            .args::<FoldPanelsArgs>()
+            .result::<ClipPanels>(),
+    )?;
     Ok(())
 }
 
@@ -210,5 +331,17 @@ mod tests {
         assert_eq!(class(SHOW_MARKER), Some(Permission::Read));
         assert_eq!(class(SET_MARKER_AT_PLAYHEAD), Some(Permission::Edit));
         assert_eq!(class(FOCUS_PANELS), Some(Permission::Read));
+        assert_eq!(class(FOCUS_SELECTED_PANEL), Some(Permission::Read));
+        assert_eq!(class(ARRANGE_PANELS), Some(Permission::Edit));
+        assert_eq!(class(FOLD_PANELS), Some(Permission::Read));
+    }
+
+    // Spec: detail-views R20
+    #[test]
+    fn automatically_stacks_the_panels_from_400_points() {
+        let automatic = PanelArrangement::Automatic;
+        assert!(!automatic.is_vertical(399.9) && automatic.is_vertical(400.0));
+        assert!(PanelArrangement::Vertical.is_vertical(100.0));
+        assert!(!PanelArrangement::Horizontal.is_vertical(900.0));
     }
 }

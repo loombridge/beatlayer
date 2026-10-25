@@ -24,7 +24,7 @@ use bl_model::{
     AutomationTarget, ClipData, ClipFolds, ClipId, Command, Document, Editor, Expression,
     GroupKind, MidiData, MpeView, Note, NoteGroup, NoteSpelling,
 };
-use bl_shell_spec::clip_properties::Properties;
+use bl_shell_spec::clip_properties::{ClipPanels, PanelArrangement, Properties};
 use bl_shell_spec::editing::{Position, SplitArgs};
 use bl_shell_spec::note_filters::{
     InvertSelectionArgs, NoteFilter, NoteFilters, NoteFiltersArgs, NoteFiltersResult,
@@ -569,6 +569,15 @@ pub struct ClipView {
     /// How keys are spelled: one choice for every editor, kept between
     /// launches in the preferences.
     spelling: NoteSpelling,
+    /// How the panels are arranged: a preference, kept between launches
+    /// (detail views R22).
+    panel_arrangement: PanelArrangement,
+    /// The Clip View's height in points at 100%, as the shell last found it,
+    /// which Automatically arranges the panels by (R20). Never saved.
+    panels_height: f32,
+    /// Whether the panels are folded (R23): for the session, the same for
+    /// every clip.
+    panels_folded: bool,
     /// The notes selected in each clip, by their places in its notes in
     /// order. A clip's selection holds only while the note editor shows it.
     selected: BTreeMap<ClipId, Vec<u32>>,
@@ -875,6 +884,49 @@ impl ClipView {
     /// Switches Highlight Scales.
     pub fn set_highlight_scales(&mut self, on: bool) {
         self.highlight_scales = on;
+    }
+
+    /// How the panels are arranged, as chosen.
+    #[must_use]
+    pub fn panel_arrangement(&self) -> PanelArrangement {
+        self.panel_arrangement
+    }
+
+    /// Chooses how the panels are arranged.
+    pub fn set_panel_arrangement(&mut self, arrangement: PanelArrangement) {
+        self.panel_arrangement = arrangement;
+    }
+
+    /// Sets the Clip View's height in points at 100%, which Automatically
+    /// arranges the panels by.
+    pub fn set_panels_height(&mut self, height: f32) {
+        self.panels_height = height;
+    }
+
+    /// Whether the panels are folded.
+    #[must_use]
+    pub fn panels_folded(&self) -> bool {
+        self.panels_folded
+    }
+
+    /// Folds or unfolds the panels.
+    pub fn set_panels_folded(&mut self, folded: bool) {
+        self.panels_folded = folded;
+    }
+
+    /// The panels' arrangement as chosen and in use, and whether they're
+    /// folded (R26).
+    #[must_use]
+    pub fn panels(&self) -> ClipPanels {
+        ClipPanels {
+            arrangement: self.panel_arrangement,
+            in_use: if self.panel_arrangement.is_vertical(self.panels_height) {
+                PanelArrangement::Vertical
+            } else {
+                PanelArrangement::Horizontal
+            },
+            folded: self.panels_folded,
+        }
     }
 
     /// How the note editor spells keys.
@@ -1643,6 +1695,7 @@ impl ClipView {
             scale_folds: self.scale_folds.iter().copied().collect(),
             highlight_scales: self.highlight_scales,
             note_spelling: self.spelling,
+            panels: self.panels(),
             tab: self.tab,
             mpe: self.mpe_state(doc, clip),
             span: clip.and_then(|id| {

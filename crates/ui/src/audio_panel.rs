@@ -353,17 +353,6 @@ pub fn show(
         return;
     }
     let c = &theme.colors;
-    let group = ui.interact(rect, audio_panel_id(), Sense::hover());
-    ui.ctx().accesskit_node_builder(group.id, |node| {
-        node.set_role(egui::accesskit::Role::Group);
-        node.set_label("Audio Utilities".to_owned());
-        node.set_bounds(egui::accesskit::Rect {
-            x0: rect.min.x.into(),
-            y0: rect.min.y.into(),
-            x1: rect.max.x.into(),
-            y1: rect.max.y.into(),
-        });
-    });
     ui.painter().rect_filled(rect, 0.0, c.panel.0);
 
     // The panel selector row (L-CLIP-003): Audio Utilities and Transform.
@@ -387,6 +376,17 @@ pub fn show(
         crate::tool_panel::show_audio_transform(ui, shell, theme, rect, clip, events);
         return;
     }
+    let group = ui.interact(rect, audio_panel_id(), Sense::hover());
+    ui.ctx().accesskit_node_builder(group.id, |node| {
+        node.set_role(egui::accesskit::Role::TabPanel);
+        node.set_label("Audio Utilities".to_owned());
+        node.set_bounds(egui::accesskit::Rect {
+            x0: rect.min.x.into(),
+            y0: rect.min.y.into(),
+            x1: rect.max.x.into(),
+            y1: rect.max.y.into(),
+        });
+    });
 
     let painter = ui.painter_at(rect);
     let y = Cell::new(rect.top() + SELECTOR + 4.0);

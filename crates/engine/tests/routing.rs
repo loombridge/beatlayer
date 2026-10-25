@@ -484,3 +484,22 @@ fn a_chain_tap_runs_after_the_tapped_track_and_a_loop_is_silent() {
     let graph = Graph::of(rig.editor.document());
     assert_eq!(graph.broken.len(), 1, "one of the two routes is broken");
 }
+
+// Spec: routing R21. A MIDI track's MIDI From another MIDI track carries no
+// audio: that track is heard once, through its own output.
+#[test]
+fn a_midi_track_taking_another_midi_tracks_midi_adds_none_of_its_audio() {
+    let mut rig = Rig::new(256);
+    let ed = &mut rig.editor;
+    let to = track(ed, TrackKind::Midi, None);
+    let from = track(ed, TrackKind::Midi, None);
+    dc(ed, from, 0.5);
+    run(
+        ed,
+        "routing.set_input",
+        json!({ "track": to, "input": { "type": "track", "track": from } }),
+    );
+    monitor(ed, to, "in");
+    rig.sync();
+    assert_eq!(settled(&mut rig), 0.5, "heard once");
+}

@@ -52,6 +52,7 @@ fn display_and_input_has_live_s_keyboard_settings_in_order() {
         "Use Tab Key to Move Focus",
         "Wrap Tab Navigation",
         "Move Clips With Arrow Keys",
+        "Permanent Scrub Areas",
     ];
     for pair in order.windows(2) {
         assert!(
@@ -65,6 +66,7 @@ fn display_and_input_has_live_s_keyboard_settings_in_order() {
         "Outline View in Focus",
         "Use Tab Key to Move Focus",
         "Wrap Tab Navigation",
+        "Permanent Scrub Areas",
     ] {
         let node = Harness::node(&nodes, built);
         assert!(!node.disabled, "{built}");
@@ -94,6 +96,8 @@ fn display_and_input_has_live_s_keyboard_settings_in_order() {
         ),
         ("Use Tab Key to Move Focus", Shell::tab_navigation, false),
         ("Wrap Tab Navigation", Shell::wrap_navigation, true),
+        // Spec: time-editing R26. On in a new install.
+        ("Permanent Scrub Areas", Shell::permanent_scrub_areas, true),
     ] {
         assert_eq!(on(&h.shell), was, "{label} in a new install");
         assert!(tab_to(&mut h, label), "Tab reaches {label}");

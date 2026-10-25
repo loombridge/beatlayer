@@ -294,6 +294,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 Key::Enter,
             ),
         ),
+        (
+            "settings.set_permanent_scrub_areas",
+            settings(
+                "display-input",
+                nothing,
+                "Permanent Scrub Areas",
+                Key::Enter,
+            ),
+        ),
         // The Shortcuts page (the custom shortcuts spec, R8 and R10): the
         // Remove and Reset buttons.
         (

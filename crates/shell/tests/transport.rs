@@ -9,7 +9,9 @@
 use bl_audio_io::NullControl;
 use bl_commands::Permission;
 use bl_core::time::{Bpm, TempoMap, Ticks};
-use bl_shell::audio::EngineTransport;
+use bl_shell::audio::{AudioHost, EngineTransport};
+use bl_shell::files::ProjectFiles;
+use bl_shell::settings::Preferences;
 use bl_shell::testing;
 use bl_shell::transport::{self, Field, Group};
 use bl_shell::transport_commands::TransportState;
@@ -66,6 +68,7 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.continue", "{}"),
     ("transport.play_from_insert_marker", "{}"),
     ("transport.locate", "{\"position\": 2822400}"),
+    ("transport.scrub", "{\"position\": 2822400}"),
     ("transport.return_to_start", "{}"),
     ("transport.insert_marker_to_playhead", "{}"),
     ("transport.stop_recording", "{}"),
@@ -190,6 +193,11 @@ fn without_an_engine_the_transport_says_why() {
     assert!(error.to_string().contains("audio engine is off"), "{error}");
     let shown = state(&mut shell);
     assert!(!shown.engine_running && !shown.playing);
+    // Spec: time-editing R28. A scrub is refused without an engine too.
+    let error = shell
+        .run("transport.scrub", json!({ "position": 0, "held": true }))
+        .unwrap_err();
+    assert!(error.to_string().contains("audio engine is off"), "{error}");
     // Bad arguments are refused as such.
     shell.run("audio.toggle_engine", json!({})).unwrap();
     let error = shell
@@ -537,4 +545,88 @@ fn a_new_set_starts_stopped_at_the_start() {
     });
     assert_eq!(fresh.insert_marker, shell.arrangement().insert_marker());
     shell.audio_mut().stop();
+}
+
+#[test]
+fn a_held_scrub_loops_its_span_by_id_until_it_is_released() {
+    // Spec: time-editing R25, R28; transport R23. The default quantisation
+    // is a bar, so a press at 3.2.1 loops bar 3.
+    let (mut shell, control) = shell();
+    let (start, end) = (Ticks::WHOLE * 2, Ticks::WHOLE * 3);
+    shell
+        .run(
+            "transport.scrub",
+            json!({ "position": start + Ticks::QUARTER, "held": true }),
+        )
+        .unwrap();
+    let first = wait(&control, &mut shell, "the held loop to play", |e| e.playing);
+    let mut wrapped = false;
+    let mut last = Ticks::ZERO;
+    for _ in 0..2_000 {
+        if wrapped {
+            break;
+        }
+        let engine = shell.poll_engine();
+        assert!(
+            (start..end).contains(&engine.position),
+            "the playhead left the span: {engine:?}"
+        );
+        wrapped |= engine.position < last && engine.clock > first.clock;
+        last = engine.position;
+        testing::advance(&control, &mut shell, testing::STEP_MS);
+    }
+    assert!(wrapped, "the span repeated");
+    // Released, playback goes on past the span's end.
+    shell
+        .run(
+            "transport.scrub",
+            json!({ "position": start, "held": false }),
+        )
+        .unwrap();
+    let later = wait(&control, &mut shell, "playback past the span", |e| {
+        e.position >= end
+    });
+    assert!(later.playing);
+    shell.audio_mut().stop();
+}
+
+#[test]
+fn permanent_scrub_areas_is_on_kept_between_launches_and_read_back() {
+    // Spec: time-editing R26. On in a new install; the setting is read back
+    // from `settings.state` and survives a relaunch.
+    let dir = std::env::temp_dir().join(format!("bl-shell-scrub-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let launch = || {
+        Shell::new(
+            Preferences::load(&dir).unwrap(),
+            Some(dir.clone()),
+            AudioHost::null(Default::default()),
+            Box::new(ProjectFiles::new()),
+        )
+    };
+    let read = |shell: &mut Shell| {
+        shell.run("settings.state", json!({})).unwrap()["display_input"]["permanent_scrub_areas"]
+            .clone()
+    };
+    let mut first = launch();
+    assert!(first.permanent_scrub_areas());
+    assert_eq!(read(&mut first), json!(true));
+    let result = first
+        .run("settings.set_permanent_scrub_areas", json!({ "on": false }))
+        .unwrap();
+    assert_eq!(result, json!({ "on": false }));
+    assert_eq!(read(&mut first), json!(false));
+    assert!(matches!(
+        first
+            .run("settings.set_permanent_scrub_areas", json!({ "on": "yes" }))
+            .unwrap_err(),
+        ShellError::InvalidArgs { .. }
+    ));
+    drop(first);
+    let mut second = launch();
+    assert!(!second.permanent_scrub_areas(), "the next start has it off");
+    assert_eq!(read(&mut second), json!(false));
+    // The shell holds a file in `dir` open, which Windows won't delete.
+    drop(second);
+    let _ = std::fs::remove_dir_all(&dir);
 }

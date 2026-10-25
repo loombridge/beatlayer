@@ -173,42 +173,8 @@ pub struct ParamChange {
     pub value: f64,
 }
 
-/// What a saved state starts with: the component's state and the
-/// controller's, each with its length.
-const STATE_MAGIC: &[u8; 4] = b"BLTV";
-
-/// The state bytes a VST3 host saves: the component's state and the
-/// controller's, each length-prefixed, little-endian, after [`STATE_MAGIC`].
-/// Tests and tools use it to hand a plug-in a state, as
-/// [`Vst3Host::load_state`] takes one.
-#[must_use]
-pub fn plugin_state(component: &[u8], controller: &[u8]) -> Vec<u8> {
-    let mut data = Vec::with_capacity(12 + component.len() + controller.len());
-    data.extend_from_slice(STATE_MAGIC);
-    for chunk in [component, controller] {
-        data.extend_from_slice(&u32::try_from(chunk.len()).unwrap_or(u32::MAX).to_le_bytes());
-        data.extend_from_slice(chunk);
-    }
-    data
-}
-
-/// Splits [`plugin_state`]'s bytes back into the component's state and the
-/// controller's.
-fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
-    if data.get(..4) != Some(STATE_MAGIC.as_slice()) {
-        return None;
-    }
-    let length = |at: usize| -> Option<usize> {
-        let bytes: [u8; 4] = data.get(at..at + 4)?.try_into().ok()?;
-        usize::try_from(u32::from_le_bytes(bytes)).ok()
-    };
-    let component_len = length(4)?;
-    let component = data.get(8..8 + component_len)?;
-    let controller_at = 8 + component_len;
-    let controller_len = length(controller_at)?;
-    let controller = data.get(controller_at + 4..controller_at + 4 + controller_len)?;
-    Some((component, controller))
-}
+pub use bl_model::vst3_state::plugin_state;
+use bl_model::vst3_state::split_state;
 
 /// Things only the owner thread may touch: the plug-in instances, which
 /// VST3 hosts on the main thread.

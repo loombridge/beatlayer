@@ -3,12 +3,6 @@
   "entries": [
     {
       "count": 1,
-      "did": "left out",
-      "what": "a colour",
-      "where": "the track \"Pad\""
-    },
-    {
-      "count": 1,
       "did": "its Track Activator is off",
       "what": "a track that isn't loaded",
       "where": "the track \"Disabled\""
@@ -21,37 +15,37 @@
     },
     {
       "count": 1,
-      "did": "left out",
+      "did": "kept as a missing plug-in",
       "what": "a VST3 plug-in",
       "where": "the track \"Instrument\""
     },
     {
       "count": 1,
-      "did": "left out",
-      "what": "a generic equaliser",
+      "did": "switched off",
+      "what": "a band of type `bandPass`",
       "where": "the track \"Vocals\""
     },
     {
       "count": 1,
       "did": "left out",
-      "what": "a generic compressor",
+      "what": "a generic compressor's input gain",
       "where": "the track \"Vocals\""
     },
     {
       "count": 1,
       "did": "left out",
-      "what": "a generic gate",
+      "what": "a generic gate's ratio under 100 %",
       "where": "the track \"Vocals\""
     },
     {
       "count": 1,
       "did": "left out",
-      "what": "a generic limiter",
+      "what": "a generic limiter's attack",
       "where": "the track \"Vocals\""
     },
     {
       "count": 1,
-      "did": "left out",
+      "did": "kept as a missing plug-in",
       "what": "a VST3 plug-in",
       "where": "the track \"Vocals\""
     },
@@ -69,6 +63,12 @@
     },
     {
       "count": 1,
+      "did": "left out",
+      "what": "automation of a plug-in that isn't installed",
+      "where": "the track \"Instrument\""
+    },
+    {
+      "count": 1,
       "did": "the file's own rate, channels and length were used",
       "what": "the file `audio/sound.wav`",
       "where": "the clip \"Sound\" at 1.1.1 on the track \"Strings\""
@@ -80,10 +80,16 @@
       "where": "the track \"Strings\""
     },
     {
-      "count": 2,
+      "count": 1,
       "did": "left out",
-      "what": "a timeline of automation",
-      "where": "the track \"Vocals\""
+      "what": "the metadata field `Title`",
+      "where": "in the container"
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "the metadata field `Artist`",
+      "where": "in the container"
     }
   ]
 }

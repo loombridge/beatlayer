@@ -58,6 +58,7 @@ crates/shell/tests/audio_settings.rs # a device's status changes on the system's
 crates/shell/tests/browser.rs # waits for the browser's index thread to read the disk
 crates/shell/tests/browser_tags.rs # waits for the browser's index thread to read the disk
 crates/shell/tests/clip_streaming.rs # a timeout on a disk read
+crates/shell/tests/dawproject_plugins.rs # waits for a real CLAP plug-in and a real VST3 plug-in
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread
 crates/shell/tests/midi_io.rs # waits for the MIDI output thread to hand messages to the port

@@ -106,6 +106,7 @@ mod shared;
 mod spelling;
 mod track;
 mod tuning;
+pub mod vst3_state;
 mod warp;
 mod warp_settings;
 mod window_views;
@@ -148,7 +149,7 @@ pub use mpe_settings::{MAX_NOTE_CHANNELS, MpeMode, MpeSettings, MpeZone, PluginM
 pub use mpe_view::{DEFAULT_LANE_HEIGHT, MpeLane, MpeView};
 pub use note_expression::Expression;
 pub mod freeze;
-pub use colour::{SWATCHES, TRACK_COLOURS, id_swatch};
+pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
     External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };

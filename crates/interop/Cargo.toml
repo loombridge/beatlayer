@@ -10,6 +10,8 @@ publish.workspace = true
 
 [dependencies]
 bl-core.workspace = true
+bl-devices.workspace = true
+bl-engine.workspace = true
 bl-media.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true

@@ -9,9 +9,15 @@
     },
     {
       "count": 1,
-      "did": "left out",
+      "did": "kept as a missing plug-in",
       "what": "a CLAP plug-in",
       "where": "the track \"Hybrid\""
+    },
+    {
+      "count": 1,
+      "did": "left out",
+      "what": "an expression of a note Beatlayer can't hold",
+      "where": "the clip \"Kick\" at 1.1.1 on the track \"Kick\""
     },
     {
       "count": 1,
@@ -29,12 +35,6 @@
       "count": 2,
       "did": "flattened",
       "what": "a nested clip",
-      "where": "the clip \"Loop\" at 1.1.1 on the track \"Hybrid Audio\""
-    },
-    {
-      "count": 1,
-      "did": "left out",
-      "what": "a clip's fades",
       "where": "the clip \"Loop\" at 1.1.1 on the track \"Hybrid Audio\""
     },
     {

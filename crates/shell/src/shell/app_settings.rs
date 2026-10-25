@@ -206,6 +206,15 @@ impl Shell {
         &self.prefs.look
     }
 
+    /// Tells the shell the 14 track colours of the theme being drawn, so
+    /// that a DAWproject file's colours are placed on the palette the person
+    /// sees (the DAWproject spec, R23).
+    pub fn set_track_palette(&mut self, colours: Vec<[u8; 3]>) {
+        if !colours.is_empty() {
+            self.track_palette = colours;
+        }
+    }
+
     /// Whether the dark colours are drawn now: Follow System resolved
     /// (themes R3).
     #[must_use]

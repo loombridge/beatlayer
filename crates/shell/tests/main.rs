@@ -39,6 +39,7 @@ mod clip_view_tabs;
 mod colours;
 mod comping;
 mod dawproject;
+mod dawproject_plugins;
 mod detail_views;
 mod device_compare;
 mod device_displays;

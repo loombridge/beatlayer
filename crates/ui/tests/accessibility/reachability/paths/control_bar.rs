@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, LaterView, Query};
+    use Reason::{Equivalent, LaterView, Live, Query};
     vec![
         (
             "transport.play",
@@ -50,18 +50,67 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("tuning.set_range", Exception(TUNING_SECTION)),
         ("tuning.set_reference", Exception(TUNING_SECTION)),
         ("tuning.state", Exception(Query)),
-        ("groove.add", Exception(GROOVE_POOL)),
-        ("groove.commit", Exception(GROOVE_POOL)),
-        ("groove.delete", Exception(GROOVE_POOL)),
-        ("groove.extract", Exception(GROOVE_POOL)),
-        ("groove.load", Exception(GROOVE_POOL)),
+        // The Groove Pool (WP-6.20): its fields and buttons are in the
+        // browser column's Tab order, the Control Bar's field has Up and
+        // Down, and the pool's own keys select, rename and delete a groove.
+        (
+            "groove.add",
+            Exception(Reason::AgentOnly(
+                "adds a groove from nothing: a person's pool grows by loading a groove file \
+                 and by extracting a groove from a clip",
+            )),
+        ),
+        (
+            "groove.commit",
+            main(a_groove_pool, pool_focused, "Commit Groove", Key::Enter),
+        ),
+        (
+            "groove.delete",
+            main(a_groove_pool, pool_row_selected, "Groove Pool", Key::Delete),
+        ),
+        (
+            "groove.hot_swap",
+            main(a_groove_pool, pool_focused, "Hot-Swap Groove", Key::Enter),
+        ),
+        (
+            "groove.load",
+            Exception(Equivalent(
+                "Enter on a groove in the browser's Grooves label (S-BRW-004, \
+                 `browser.load_selected`), which loads it into the pool or replaces the groove \
+                 being hot-swapped (grooves R32, R33)",
+            )),
+        ),
         ("groove.pool", Exception(Query)),
-        ("groove.rename", Exception(GROOVE_POOL)),
-        ("groove.save", Exception(GROOVE_POOL)),
-        ("groove.set", Exception(GROOVE_POOL)),
-        ("groove.set_auto_load", Exception(GROOVE_POOL)),
-        ("groove.set_global_amount", Exception(GROOVE_POOL)),
-        ("groove.to_clip", Exception(GROOVE_POOL)),
+        (
+            "groove.rename",
+            Exception(Equivalent(
+                "Cmd+R (Ctrl+R) with the Groove Pool focused and a groove selected, which \
+                 types the new name in its row (grooves R26, S-EDIT-008)",
+            )),
+        ),
+        (
+            "groove.save",
+            main(a_groove_pool, pool_focused, "Save Groove", Key::Enter),
+        ),
+        (
+            "groove.set",
+            main(a_groove_pool, pool_focused, "Quantize", Key::ArrowUp),
+        ),
+        (
+            "groove.set_auto_load",
+            main(a_groove_pool, pool_focused, "Auto Load Groove", Key::Enter),
+        ),
+        (
+            "groove.set_global_amount",
+            main(nothing, control_bar, "Global Amount", Key::ArrowUp),
+        ),
+        (
+            "groove.to_clip",
+            Exception(Live(
+                "dragging a groove from the browser or the pool onto a MIDI track or the drop \
+                 area; the manual gives it no keys (manual 14.2)",
+            )),
+        ),
         ("transport.stop_recording", Exception(RECORDING)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so

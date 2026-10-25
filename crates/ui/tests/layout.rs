@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use bl_ui::layout::{
     D24, ELEMENTS, Element, MINIMUM, REFERENCE, ShellLayout, Strip, TITLE_BAR, placement,
 };
-use egui::vec2;
+use egui::{Rect, Vec2, vec2};
 
 /// layout.md, or `None` in a checkout without the planning documents (they
 /// aren't published yet), where the test skips.
@@ -167,7 +167,8 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
         "{play}"
     );
     for (placement, (_, rect)) in ELEMENTS.iter().zip(&wide.elements) {
-        if placement.element != Element::Message {
+        // The Global Amount is hidden unless the pool holds a groove.
+        if placement.element != Element::Message && placement.element != Element::GlobalAmount {
             assert_eq!(rect.width(), placement.width, "{:?}", placement.element);
         }
     }
@@ -244,4 +245,102 @@ fn the_widest_assistant_pane_leaves_the_minimum_window_without_overlaps() {
             assert!(rect.right() <= pane.left(), "{element:?}");
         }
     }
+}
+
+fn with_groove(size: Vec2) -> ShellLayout {
+    ShellLayout::compute_with_detail(
+        size,
+        true,
+        true,
+        None,
+        None,
+        bl_ui::layout::DetailViews::default().with_global_amount(true),
+    )
+}
+
+// Spec: grooves R30; L-CTRL-008. While the pool holds a groove the Control
+// Bar has the Global Amount field at x 209 to 249, and everything to its
+// right in the left group moves 40 points right; the middle and right groups
+// stay where they are at the reference width, since the gaps between the
+// groups stretch to take the 40 points.
+#[test]
+fn the_global_amount_moves_the_left_group_40_points_and_the_gaps_take_them() {
+    let hidden = ShellLayout::compute(REFERENCE, true, true);
+    let shown = with_groove(REFERENCE);
+    assert_eq!(hidden.rect(Element::GlobalAmount).width(), 0.0, "hidden");
+    let field = shown.rect(Element::GlobalAmount);
+    assert_eq!((field.left(), field.right()), (209.0, 249.0));
+    for element in [
+        Element::Tempo,
+        Element::SignatureNumerator,
+        Element::SignatureDenominator,
+    ] {
+        assert_eq!(shown.rect(element), hidden.rect(element), "{element:?}");
+    }
+    for element in [
+        Element::Metronome,
+        Element::MetronomeMenu,
+        Element::Quantization,
+        Element::ScaleMode,
+        Element::RootNote,
+        Element::ScaleName,
+    ] {
+        assert_eq!(
+            shown.rect(element).left(),
+            hidden.rect(element).left() + 40.0,
+            "{element:?}"
+        );
+    }
+    for element in [
+        Element::Follow,
+        Element::Play,
+        Element::LoopLengthSixteenths,
+        Element::Cpu,
+        Element::ArrangementView,
+    ] {
+        assert_eq!(shown.rect(element), hidden.rect(element), "{element:?}");
+    }
+}
+
+// Spec: grooves R30. The Control Bar's controls never overlap and stay in
+// order: where the gaps can't take the 40 points the window gives the field no
+// room, from the smallest window up to 40 points wider.
+#[test]
+fn the_global_amount_hides_where_the_gaps_have_no_room_for_it() {
+    for width in [
+        MINIMUM.x,
+        MINIMUM.x + 39.0,
+        MINIMUM.x + 40.0,
+        MINIMUM.x + 41.0,
+        1500.0,
+        REFERENCE.x,
+        REFERENCE.x + 300.0,
+    ] {
+        let layout = with_groove(vec2(width, REFERENCE.y));
+        let room = layout.rect(Element::GlobalAmount).width() > 0.0;
+        assert_eq!(room, width >= MINIMUM.x + 40.0, "at {width}");
+        let bar: Vec<Rect> = ELEMENTS
+            .iter()
+            .zip(&layout.elements)
+            .filter(|(p, _)| p.strip == bl_ui::layout::Strip::ControlBar)
+            .map(|(_, (_, rect))| *rect)
+            .filter(|rect| rect.width() > 0.0)
+            .collect();
+        for pair in bar.windows(2) {
+            assert!(
+                pair[0].right() <= pair[1].left() + 1e-3,
+                "at {width}: {:?} and {:?} overlap",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+    // The second window's Control Bar is laid out as the main window's is at
+    // its smallest width: no room.
+    let second = ShellLayout::compute_second(
+        vec2(990.0, 703.0 - TITLE_BAR),
+        false,
+        bl_ui::layout::DetailViews::default().with_global_amount(true),
+    );
+    assert_eq!(second.rect(Element::GlobalAmount).width(), 0.0);
 }

@@ -38,6 +38,7 @@ pub const SECTION: &[Element] = &[
     Element::Tempo,
     Element::SignatureNumerator,
     Element::SignatureDenominator,
+    Element::GlobalAmount,
     Element::Metronome,
     Element::Follow,
     Element::PositionBars,
@@ -65,6 +66,7 @@ pub fn field(element: Element) -> Option<Field> {
         E::Tempo => Field::new(G::Tempo, 0),
         E::SignatureNumerator => Field::new(G::Numerator, 0),
         E::SignatureDenominator => Field::new(G::Denominator, 0),
+        E::GlobalAmount => Field::new(G::GlobalAmount, 0),
         E::PositionBars => Field::new(G::Position, 0),
         E::PositionBeats => Field::new(G::Position, 1),
         E::PositionSixteenths => Field::new(G::Position, 2),
@@ -106,6 +108,7 @@ pub fn command(element: Element) -> Option<&'static str> {
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
             Group::Tempo => ids::SET_TEMPO,
             Group::Numerator | Group::Denominator => ids::SET_TIME_SIGNATURES,
+            Group::GlobalAmount => bl_shell::groove_commands::SET_GLOBAL_AMOUNT,
         }),
     }
 }
@@ -193,6 +196,7 @@ fn group_name(group: Group) -> &'static str {
         Group::LoopLength => "Loop Length",
         Group::Tempo => "Tempo",
         Group::Numerator | Group::Denominator => "Time Signature",
+        Group::GlobalAmount => "Global Amount",
     }
 }
 

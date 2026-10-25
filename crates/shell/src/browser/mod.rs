@@ -1397,6 +1397,24 @@ impl BrowserView {
             .map(|library| library.join("Templates"))
     }
 
+    /// The folders the Grooves label lists: the bundled grooves, then the
+    /// User Library's Grooves folder (spec: grooves R33).
+    fn groove_folders(&self) -> Vec<PathBuf> {
+        crate::resources::grooves()
+            .into_iter()
+            .chain(self.user_library.as_ref().map(|lib| lib.join("Grooves")))
+            .collect()
+    }
+
+    /// The Grooves label's rows: the groove files in its folders.
+    fn groove_rows(&mut self) -> Vec<Item> {
+        let mut items = Vec::new();
+        for folder in self.groove_folders() {
+            self.list_into(&folder, 0, &mut items);
+        }
+        items
+    }
+
     /// A place's folder.
     fn place_path(&self, label: &Label) -> Option<PathBuf> {
         match label {
@@ -1680,6 +1698,12 @@ impl BrowserView {
         self.rebuild();
     }
 
+    /// Files were written in the places: list them afresh (a saved groove
+    /// shows in the Grooves label).
+    pub fn files_written(&mut self) {
+        self.files_changed();
+    }
+
     /// Shows a file the shell wrote in the content pane, selected, with its
     /// name open for editing (clip files R4; set exchange R13), if it lies in
     /// one of the places. Returns whether it was shown.
@@ -1808,6 +1832,22 @@ impl BrowserView {
                     }
                     self.rows = Rows::Items(items);
                 }
+                None if label == Label::Grooves => {
+                    // Spec: grooves R33, browser R9. Grooves aren't in the
+                    // index; the bundled ones and the User Library's folder
+                    // are listed and filtered by every word typed.
+                    let mut items = self.groove_rows();
+                    let needle = self.search.trim().to_lowercase();
+                    items.retain(|item| {
+                        let name = item.name.to_lowercase();
+                        needle.split_whitespace().all(|word| name.contains(word))
+                    });
+                    items.retain(|item| self.item_passes(&selection, &builtin, item));
+                    if items.is_empty() {
+                        self.note = Some(format!("Nothing matches \u{201c}{needle}\u{201d}."));
+                    }
+                    self.rows = Rows::Items(items);
+                }
                 None => {
                     self.rows = Rows::Items(Vec::new());
                     self.note = Some(label.pending().map_or_else(
@@ -1885,6 +1925,16 @@ impl BrowserView {
                         );
                     }
                 },
+                Label::Grooves => {
+                    items = self.groove_rows();
+                    if items.is_empty() {
+                        self.note = Some(
+                            "No grooves yet: save one from the Groove Pool, or extract one from \
+                             a clip."
+                                .to_owned(),
+                        );
+                    }
+                }
                 other => {
                     self.note = other.pending().map(str::to_owned);
                 }
@@ -2594,6 +2644,23 @@ impl BrowserView {
         }
     }
 
+    /// The groove file selected, if one file is and it is that (spec:
+    /// grooves R32, R33).
+    #[must_use]
+    pub fn selected_groove(&self) -> Option<PathBuf> {
+        match self.selected.as_slice() {
+            [one]
+                if one
+                    .file_name()
+                    .and_then(|n| file_kind(&n.to_string_lossy()))
+                    == Some(ItemKind::Groove) =>
+            {
+                Some(one.clone())
+            }
+            _ => None,
+        }
+    }
+
     /// The selected audio files, in the content pane's order.
     pub(crate) fn selected_audio(&self) -> Vec<PathBuf> {
         let mut files: Vec<(Option<usize>, PathBuf)> = self
@@ -2672,6 +2739,7 @@ impl BrowserView {
                     || self.selected_device().is_some()
                     || self.selected_sfz().is_some()
                     || self.selected_chord_bank().is_some()
+                    || self.selected_groove().is_some()
             }
             ids::PREVIEW => {
                 args.get("path").is_some()

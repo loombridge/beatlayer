@@ -163,8 +163,10 @@ fn the_device_menu_ends_with_the_devices_own_items_ticked_while_on() {
             .position(|n| n.label.trim_start_matches("✔ ") == label)
             .unwrap_or_else(|| panic!("no menu item {label:?}"))
     };
+    // By where they are drawn: a list of nodes is in the order of their IDs.
+    let top = |label: &str| nodes[place(&nodes, label)].bounds.unwrap().y0;
     assert!(
-        place(&nodes, "Invert LFO") > place(&nodes, "Save as Default Preset"),
+        top("Invert LFO") > top("Save as Default Preset"),
         "the device's own items follow the general ones"
     );
     let item = &nodes[place(&nodes, "Invert LFO")];

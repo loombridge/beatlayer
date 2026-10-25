@@ -36,6 +36,7 @@ mod export_dialog;
 mod fades;
 mod file_manager;
 mod floating_windows;
+mod groove_pool;
 mod info_view;
 mod keymap;
 mod keymap_sweep;

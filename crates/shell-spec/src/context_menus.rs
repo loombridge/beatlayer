@@ -71,7 +71,7 @@ const CLIP: &[Row] = &[
         "Edit Info Text",
         Cmd("clip.set_info_text"),
     ),
-    ("C-CLIP-ARR-009", "Extract Groove(s)", Pending(None)),
+    ("C-CLIP-ARR-009", "Extract Groove(s)", Cmd(EXTRACT_GROOVE)),
     ("C-CLIP-ARR-010", "Deactivate Clip", Key(&["S-ARR-027"])),
     (
         "C-CLIP-ARR-011",

@@ -1086,6 +1086,10 @@ impl ArrangementUi {
                             self.clips.cancel(events);
                             if count == 1 {
                                 crate::browser::save_clip(ui.ctx(), shell, clip, &target, events);
+                            } else if target == crate::browser::ClipDropTarget::GroovePool {
+                                // Spec: grooves R28. The selected clips each
+                                // give a groove.
+                                invoke(events, bl_shell::groove_commands::EXTRACT, json!({}));
                             }
                         }
                         _ => self.clips.end(&clip_lanes, pointer, keys, events),

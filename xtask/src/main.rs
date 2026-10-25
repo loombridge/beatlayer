@@ -11,6 +11,7 @@ use serde_json::Value;
 
 mod commands;
 mod dashboard;
+mod grooves;
 mod keymap;
 mod private_terms;
 mod progress;
@@ -43,6 +44,8 @@ Tasks:
                  (with --check, fail instead of writing if a file of it is out of date)
   keymap         Regenerate crates/shell-spec/keymaps/live12/ from shortcuts.toml and the
                  command registry (with --check, fail instead if it's out of date)
+  grooves        Write Beatlayer's bundled grooves into crates/app/resources/Grooves
+                 (with --check, fail instead if the files there aren't the script's output)
   deny-selftest  Prove that deny.toml still rejects an incompatible licence
   private-terms  Fail if a tracked file contains a word listed in .git/info/private-terms
                  (maintainers' checkouts only; skipped without it)
@@ -145,6 +148,11 @@ fn run(root: &Path, args: &[String]) -> Result<ExitCode, String> {
             [] => keymap::generate(root).map(|()| ExitCode::SUCCESS),
             [flag] if flag == "--check" => keymap::check(root).map(|()| ExitCode::SUCCESS),
             _ => Err(format!("usage: cargo xtask keymap [--check]\n\n{USAGE}")),
+        },
+        Some("grooves") => match options {
+            [] => grooves::generate(root).map(|()| ExitCode::SUCCESS),
+            [flag] if flag == "--check" => grooves::check(root).map(|()| ExitCode::SUCCESS),
+            _ => Err(format!("usage: cargo xtask grooves [--check]\n\n{USAGE}")),
         },
         Some("deny-selftest") => deny_selftest(root).map(|()| ExitCode::SUCCESS),
         Some("private-terms") => private_terms::check(root).map(|()| ExitCode::SUCCESS),

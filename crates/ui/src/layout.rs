@@ -293,6 +293,7 @@ pub enum Element {
     NudgeUp,
     SignatureNumerator,
     SignatureDenominator,
+    GlobalAmount,
     Metronome,
     MetronomeMenu,
     Quantization,
@@ -427,6 +428,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::NudgeUp, "L-CTRL-006", "Phase Nudge Up", CB, 145.0, 18.0, Left, Button, Some("M7")),
     p(E::SignatureNumerator, "L-CTRL-007", "Time Signature Numerator", CB, 167.0, 20.0, Left, Value, None),
     p(E::SignatureDenominator, "L-CTRL-007", "Time Signature Denominator", CB, 189.0, 18.0, Left, Value, None),
+    p(E::GlobalAmount, "L-CTRL-008", "Global Amount", CB, 209.0, GLOBAL_AMOUNT_WIDTH, Left, Value, None),
     p(E::Metronome, "L-CTRL-009", "Metronome", CB, 209.0, 26.0, Left, Switch, None),
     p(E::MetronomeMenu, "L-CTRL-009", "Metronome Settings", CB, 237.0, 10.0, Left, MenuArrow, None),
     p(E::Quantization, "L-CTRL-010", "Quantization Menu", CB, 250.0, 45.0, Left, Chooser, Some("M3")),
@@ -486,6 +488,10 @@ pub fn placement(element: Element) -> &'static Placement {
         .expect("every element is placed")
 }
 
+/// The Global Groove Amount field's width, and how far it moves everything to
+/// its right while it shows (L-CTRL-008).
+pub const GLOBAL_AMOUNT_WIDTH: f32 = 40.0;
+
 /// The share of extra width that goes to the gap left of the Control Bar's
 /// middle groups: Live's two stretching gaps are 103 points (after the scale
 /// controls) and 177 points (before Draw Mode) at the reference width; the
@@ -510,6 +516,10 @@ pub struct DetailViews {
     pub full_height_browser: bool,
     /// The browser's width as it was set, in layout points (browser R29).
     pub browser_width: f32,
+    /// Whether the Control Bar shows the Global Groove Amount field, which
+    /// moves what is to its right 40 points right (L-CTRL-008, the grooves
+    /// spec R30).
+    pub global_amount: bool,
 }
 
 impl DetailViews {
@@ -523,7 +533,15 @@ impl DetailViews {
             expanded: detail.expanded(),
             full_height_browser: false,
             browser_width: BROWSER_WIDTH,
+            global_amount: false,
         }
+    }
+
+    /// The same, with the Global Groove Amount field showing or not.
+    #[must_use]
+    pub const fn with_global_amount(mut self, on: bool) -> Self {
+        self.global_amount = on;
+        self
     }
 
     /// The same, with the browser running down to the Status Bar or not.
@@ -552,6 +570,7 @@ impl Default for DetailViews {
             expanded: false,
             full_height_browser: false,
             browser_width: BROWSER_WIDTH,
+            global_amount: false,
         }
     }
 }
@@ -818,6 +837,28 @@ impl ShellLayout {
             Rect::from_min_max(pos2(views_left, detail_bottom - device_height), detail.max)
         });
 
+        // Spec: grooves R30. With the Global Groove Amount shown, the Control
+        // Bar's left group from the Metronome on moves 40 points right, out of
+        // the gaps that stretch; the middle group is pushed right by what the
+        // first gap is short of. The gaps hold the 40 points only from
+        // `MINIMUM` plus 40 up, so a narrower window, and the second
+        // window's Control Bar, which is laid out at the minimum, hide the
+        // field and keep the Control Bar's order.
+        let groove_at = placement(Element::GlobalAmount).x;
+        let groove_shown =
+            detail_views.global_amount && !second && w >= MINIMUM.x + GLOBAL_AMOUNT_WIDTH;
+        let groove_shift = if groove_shown {
+            GLOBAL_AMOUNT_WIDTH
+        } else {
+            0.0
+        };
+        let middle_push = {
+            let left_end = placement(Element::ScaleName);
+            let middle = placement(Element::Follow);
+            let gap = (middle.x + controls_extra * MIDDLE_SHARE)
+                - (left_end.x + left_end.width + groove_shift);
+            (-gap).clamp(0.0, groove_shift)
+        };
         let elements = ELEMENTS
             .iter()
             .map(|placement| {
@@ -825,14 +866,27 @@ impl ShellLayout {
                     Strip::ControlBar => controls_extra,
                     Strip::StatusBar => extra,
                 };
+                let control_bar = placement.strip == Strip::ControlBar;
                 let shift = match placement.anchor {
+                    Left if control_bar
+                        && placement.element != Element::GlobalAmount
+                        && placement.x >= groove_at =>
+                    {
+                        groove_shift
+                    }
                     Left => 0.0,
+                    Middle if control_bar => extra * MIDDLE_SHARE + middle_push,
                     Middle => extra * MIDDLE_SHARE,
                     // The Status Bar's right edge is the pane's left edge.
                     Right if placement.strip == Strip::StatusBar => extra - taken,
                     Right => extra,
                 };
                 let mut width = placement.width;
+                if placement.element == Element::GlobalAmount && !groove_shown {
+                    // Hidden while the pool holds no groove, or the Control
+                    // Bar has no room for it.
+                    width = 0.0;
+                }
                 if placement.element == Element::Message {
                     // The message area stretches to the Clip View toggle.
                     width += extra - taken;

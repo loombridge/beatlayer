@@ -474,8 +474,18 @@ fn create(
 
 /// Points a clip's envelopes at the copies of the devices and returns they
 /// drive, and drops the ones whose device or return the copy has no match
-/// for.
+/// for; and takes away a groove the copy's set doesn't hold.
 fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
+    // Spec: grooves R3, R22. A clip's groove is one of its set's pool: in
+    // another set its ID means nothing, and a groove deleted since the copy is
+    // none.
+    if copies.foreign.is_some()
+        || clip
+            .groove
+            .is_some_and(|groove| doc.settings().grooves.get(groove).is_none())
+    {
+        clip.groove = None;
+    }
     clip.envelopes.retain_mut(|envelope| {
         let target = match envelope.target {
             AutomationTarget::Device { device, param } => copies

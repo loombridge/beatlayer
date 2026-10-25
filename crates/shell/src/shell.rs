@@ -582,6 +582,10 @@ pub struct Shell {
     /// Whether the Info View shows (L-INFO-001): view state, never part of
     /// the set, like the browser's.
     info_view: bool,
+    /// The Groove Pool's view: whether it shows in the browser column and
+    /// what the browser's hot-swap replaces (the grooves spec R24, R32).
+    /// View state, never part of the set.
+    groove_pool: bl_shell_spec::groove::GroovePoolView,
     full_screen: bool,
     settings_open: bool,
     /// The themes the Theme chooser offers, which the host reads from the
@@ -1231,6 +1235,7 @@ impl Shell {
             main_view: MainView::Arrangement,
             browser: true,
             info_view: true,
+            groove_pool: bl_shell_spec::groove::GroovePoolView::default(),
             full_screen: false,
             focused_window: WindowKind::Main,
             focused_area: Area::MainView,
@@ -1892,6 +1897,18 @@ impl Shell {
                 session_ids::DROP_FILES,
                 json!({ "paths": paths, "track": track, "scene": scene }),
             );
+        }
+        if id == browser_ids::LOAD_SELECTED
+            && let Some(path) = self.browser_view.selected_groove()
+        {
+            // Spec: grooves R32, R33. A groove file chosen in the browser
+            // loads into the pool, replacing the groove being hot-swapped.
+            Self::args::<NoArgs>(id, args)?;
+            let mut load = json!({ "path": path.to_string_lossy() });
+            if let Some(target) = self.groove_pool_view().hot_swap {
+                load["replace"] = json!(target);
+            }
+            return self.run(bl_shell_spec::groove::LOAD, load);
         }
         if id == browser_ids::LOAD_SELECTED
             && let Some(path) = self.browser_view.selected_chord_bank()

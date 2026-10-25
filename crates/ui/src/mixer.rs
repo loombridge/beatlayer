@@ -228,6 +228,24 @@ struct ValueDrag {
     moved: f64,
 }
 
+/// Where egui's memory notes that a value drag holds a gesture open.
+fn open_drag_id() -> Id {
+    Id::new("mixer-open-value-drag")
+}
+
+/// Ends a value drag whose control was scrolled out of view, and so never
+/// drawn again, before the button came up: its own `drag_stopped` is never
+/// seen. Called at the end of every frame.
+pub(crate) fn end_orphaned_drag(ctx: &egui::Context, events: &mut Vec<UiEvent>) {
+    if ctx.input(|i| !i.pointer.any_down())
+        && ctx
+            .data_mut(|d| d.remove_temp::<bool>(open_drag_id()))
+            .is_some()
+    {
+        events.push(UiEvent::EndGesture);
+    }
+}
+
 /// A drag on the crossfader: where it started, and how far the pointer has
 /// moved since, in points.
 #[derive(Clone, Copy, Debug, Default)]
@@ -2598,6 +2616,7 @@ impl StripParts<'_> {
                     },
                 );
             });
+            ui.data_mut(|d| d.insert_temp(open_drag_id(), true));
             events.push(UiEvent::BeginGesture(control.gesture()));
         }
         if response.dragged() {
@@ -2625,7 +2644,10 @@ impl StripParts<'_> {
             }
         }
         if response.drag_stopped() {
-            ui.data_mut(|d| d.remove::<ValueDrag>(id));
+            ui.data_mut(|d| {
+                d.remove::<ValueDrag>(id);
+                d.remove::<bool>(open_drag_id());
+            });
             events.push(UiEvent::EndGesture);
         }
     }

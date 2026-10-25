@@ -357,6 +357,21 @@ fn rename_and_delete_from_the_keyboard() {
     assert_eq!(last_step(&h), "Delete Device(s)");
 }
 
+// Spec: device-chains R10 (a rename never leaves the keys with a field that is gone)
+#[test]
+fn a_rename_ends_when_its_device_goes() {
+    let mut h = harness();
+    let a = add(&mut h, gain());
+    h.shell.set_focused_area(Area::Detail);
+    h.key(Key::R, command());
+    assert!(h.main.is_typing(), "the title is a text field");
+    h.shell
+        .run("device.remove", json!({ "device": a }))
+        .unwrap();
+    h.settle();
+    assert!(!h.main.is_typing(), "the keys are back");
+}
+
 // Spec: device-chains R25 (dragging a title bar moves the device)
 #[test]
 fn dragging_a_title_bar_moves_the_device() {
@@ -1219,6 +1234,38 @@ fn the_middle_button_pans_the_device_chain() {
         "the chain moved 100 points: {}",
         before - h.main.devices().scroll()
     );
+}
+
+// Spec: device-chains R25 (the chain's scroll is a command with a readback)
+#[test]
+fn an_agent_scrolls_the_device_chain_and_reads_where_it_is() {
+    let mut h = harness();
+    for _ in 0..12 {
+        add(&mut h, gain());
+    }
+    let scroll = |h: &mut Harness| -> f32 {
+        let state: bl_shell::device_commands::DeviceViewState =
+            serde_json::from_value(h.shell.run("device_view.state", json!({})).unwrap()).unwrap();
+        state.scroll
+    };
+    let held = scroll(&mut h);
+    assert_eq!(
+        held,
+        h.main.devices().scroll(),
+        "the view shows what is held"
+    );
+    h.shell
+        .run("device_view.scroll", json!({ "x": -100.0 }))
+        .unwrap();
+    h.settle();
+    assert!((held - scroll(&mut h) - 100.0).abs() < 0.5);
+    assert_eq!(scroll(&mut h), h.main.devices().scroll());
+    h.shell
+        .run("device_view.scroll", json!({ "x": -1.0e6 }))
+        .unwrap();
+    h.settle();
+    assert_eq!(scroll(&mut h), 0.0, "not before the first device");
+    assert_eq!(h.main.devices().scroll(), 0.0);
 }
 
 // Spec: scales R16, device-chains L-DEV-004. Pitch's Use Current Scale is a

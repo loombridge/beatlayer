@@ -626,5 +626,7 @@ fn permanent_scrub_areas_is_on_kept_between_launches_and_read_back() {
     let mut second = launch();
     assert!(!second.permanent_scrub_areas(), "the next start has it off");
     assert_eq!(read(&mut second), json!(false));
-    std::fs::remove_dir_all(&dir).unwrap();
+    // The shell holds a file in `dir` open, which Windows won't delete.
+    drop(second);
+    let _ = std::fs::remove_dir_all(&dir);
 }

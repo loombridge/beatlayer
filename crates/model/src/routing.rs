@@ -983,12 +983,16 @@ mod tests {
         for (path, routing) in [
             (
                 "input",
-                serde_json::json!({ "input": { "type": "external", "channel": { "type": "mono", "channel": 0 } } }),
+                serde_json::json!({
+                    "input": { "type": "external", "channel": { "type": "mono", "channel": 0 } },
+                    "monitor": "auto",
+                }),
             ),
             (
                 "output",
                 serde_json::json!({
                     "input": { "type": "none" },
+                    "monitor": "auto",
                     "output": { "type": "external", "channel": { "type": "pair", "channel": 0 } },
                 }),
             ),
@@ -1003,6 +1007,7 @@ mod tests {
         let mut broken = saved;
         broken["main"]["routing"] = serde_json::json!({
             "input": { "type": "none" },
+            "monitor": "off",
             "main_out": { "type": "pair", "channel": 0 },
         });
         assert!(

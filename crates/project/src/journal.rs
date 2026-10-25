@@ -355,6 +355,8 @@ impl JournalWriter {
             .write(true)
             .create_new(true)
             .open(&path)?;
+        // The file's own syncs don't persist its name in the folder.
+        sync_parent(&path);
         Ok(Self {
             path,
             file,
@@ -502,6 +504,25 @@ impl JournalWriter {
         }
         Ok(self.committed_len > 0)
     }
+}
+
+/// Flushes the folder a new file is in, so its name survives a power cut.
+/// Best effort: not every filesystem allows it, and Windows can't open a
+/// folder as a file.
+fn sync_parent(path: &Path) {
+    if cfg!(unix)
+        && let Some(dir) = path.parent().filter(|dir| !dir.as_os_str().is_empty())
+    {
+        let _ = File::open(dir).and_then(|dir| dir.sync_all());
+        #[cfg(test)]
+        SYNCED.with_borrow_mut(|synced| synced.push(dir.to_owned()));
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// The folders `sync_parent` flushed on this thread.
+    static SYNCED: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 /// Cuts off every entry of a journal file after the newest committed one,
@@ -668,7 +689,7 @@ pub(crate) fn newest_save_point(
     follows: Follows,
     options: &LoadOptions,
 ) -> Option<(Project, SetInfo)> {
-    let mut newest: Option<((SystemTime, u64), Value)> = None;
+    let mut candidates: Vec<((SystemTime, u64), Value)> = Vec::new();
     for journal in journals_beside(set).ok()? {
         let Ok(read) = read_file(&journal, options) else {
             continue;
@@ -680,13 +701,13 @@ pub(crate) fn newest_save_point(
             continue;
         };
         let entry = &read.entries[index];
-        let key = (entry.time, entry.seq);
-        if newest.as_ref().is_none_or(|(best, _)| key > *best) {
-            newest = Some((key, value));
-        }
+        candidates.push(((entry.time, entry.seq), value));
     }
-    let (_, value) = newest?;
-    decode_value(&value, options).ok()
+    // Newest first: one that doesn't decode leaves the older ones.
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates
+        .into_iter()
+        .find_map(|(_, value)| decode_value(&value, options).ok())
 }
 
 #[cfg(test)]
@@ -963,5 +984,39 @@ mod tests {
         assert_eq!(fingerprint(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fingerprint(b"a"), 0xaf63_dc4c_8601_ec8c);
         assert_ne!(fingerprint(b"ab"), fingerprint(b"ba"));
+    }
+
+    #[test]
+    fn a_save_point_that_wont_decode_leaves_the_older_ones() {
+        let dir = TestDir::new("undecodable");
+        let set = dir.0.join("Song.blset");
+        let songs = states(2);
+        let at = |secs| UNIX_EPOCH + Duration::from_secs(secs);
+        let mut good = pending(&songs[1], true);
+        good.time = at(10);
+        let mut bad = pending(&songs[1], true);
+        bad.value = serde_json::json!({ "format": "not a set" });
+        bad.time = at(20);
+        assert!(decode_value(&bad.value, &LoadOptions::default()).is_err());
+        for (session, entry) in [("aaa-1", good), ("bbb-1", bad)] {
+            JournalWriter::create(beside(&set, session).unwrap(), session, Some(FOLLOWS))
+                .unwrap()
+                .append(vec![entry])
+                .unwrap();
+        }
+        assert_eq!(
+            newest_save_point(&set, FOLLOWS, &LoadOptions::default()).map(|(song, _)| song),
+            Some(songs[1].clone())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_new_journals_folder_is_flushed() {
+        let dir = TestDir::new("sync");
+        let path = dir.0.join("j.bljournal");
+        SYNCED.with_borrow_mut(Vec::clear);
+        JournalWriter::create(path, "s", None).unwrap();
+        SYNCED.with_borrow(|synced| assert_eq!(*synced, [dir.0.clone()]));
     }
 }

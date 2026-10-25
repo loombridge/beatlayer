@@ -1197,3 +1197,286 @@ fn the_mode_is_read_at_each_press_and_release() {
         );
     }
 }
+
+/// The frames of the test instrument's note-ons since the last call.
+fn ons(rig: &mut Rig) -> Vec<i64> {
+    notes(rig)
+        .into_iter()
+        .filter(|n| n.2)
+        .map(|n| n.0)
+        .collect()
+}
+
+/// Puts a looping clip of `notes` in the track's slot, its brace
+/// `brace` long from the clip's start.
+fn looping_slot_clip(
+    editor: &mut Editor,
+    track: TrackId,
+    scene: SceneId,
+    notes: &[Note],
+    brace: Ticks,
+) {
+    let mut midi = MidiData::new(notes.to_vec());
+    midi.looping = true;
+    midi.loop_end = Some(brace);
+    let clip = Clip::new(editor.new_id(), Ticks::ZERO, BAR, ClipData::Midi(midi));
+    editor
+        .apply(Command::CreateSlotClip { track, scene, clip })
+        .unwrap();
+}
+
+/// A rig at 120 BPM with a MIDI track, and the first two scenes.
+fn midi_rig(block: usize) -> (Rig, TrackId, SceneId, SceneId) {
+    let mut rig = Rig::new(block);
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
+    let track = midi_track(&mut rig);
+    let first = scene(&rig);
+    let second = rig.editor.document().scenes().nth(1).unwrap().id;
+    (rig, track, first, second)
+}
+
+/// Turns the Arrangement loop on from the start for `bars` bars.
+fn loop_bars(rig: &mut Rig, bars: i64) {
+    rig.editor
+        .apply(Command::SetLoop {
+            start: Ticks::ZERO,
+            length: Ticks::WHOLE * bars,
+        })
+        .unwrap();
+    rig.editor
+        .apply(Command::SetLoopEnabled { enabled: true })
+        .unwrap();
+    rig.sync();
+}
+
+// Spec: launch-quantisation R9. T296 finding 1.
+#[test]
+fn a_launched_looping_midi_clip_goes_on_playing_after_a_hundred_and_twenty_eight_laps() {
+    let (mut rig, track, scene, _) = midi_rig(4096);
+    looping_slot_clip(
+        &mut rig.editor,
+        track,
+        scene,
+        &[Note::new(60, Ticks::ZERO, Ticks::SIXTEENTH, 100)],
+        Ticks::QUARTER,
+    );
+    rig.sync();
+    rig.sender.session(SessionCommand::Launch { track, scene });
+    // A beat is 24,000 frames: 140 laps of a one-beat brace.
+    let mut ons = Vec::new();
+    for _ in 0..140 {
+        play(&mut rig, 24_000, 4096);
+        ons.extend(self::ons(&mut rig));
+    }
+    assert_eq!(
+        ons,
+        (0..140).map(|lap| lap * 24_000).collect::<Vec<_>>(),
+        "a note-on on every lap"
+    );
+}
+
+// Spec: launch-quantisation R2. T296 finding 2.
+#[test]
+fn a_launch_and_a_stop_queued_for_the_loops_end_land_as_the_playhead_wraps() {
+    for block in [64, 512, 4096] {
+        let (mut rig, track, first, second) = midi_rig(block);
+        loop_bars(&mut rig, 4);
+        let long = [Note::new(60, Ticks::ZERO, Ticks::WHOLE * 8, 100)];
+        slot_clip(&mut rig.editor, track, first, &long);
+        slot_clip(
+            &mut rig.editor,
+            track,
+            second,
+            &[Note::new(62, Ticks::ZERO, Ticks::WHOLE * 8, 100)],
+        );
+        rig.sync();
+        rig.sender.transport(TransportCommand::Play);
+        // In bar 2 the first clip is asked for, and it starts on the 3.1.1
+        // line.
+        play(&mut rig, BAR_FRAMES as usize + 1, block);
+        rig.sender.session(SessionCommand::Launch {
+            track,
+            scene: first,
+        });
+        play(&mut rig, BAR_FRAMES as usize * 2, block);
+        assert_eq!(
+            notes(&mut rig),
+            vec![(BAR_FRAMES * 2, 60, true)],
+            "blocks of {block}"
+        );
+        // In bar 4 the second is asked for: the line it waits for is the
+        // loop's end, and it takes over as the playhead wraps.
+        play(&mut rig, BAR_FRAMES as usize - 1_000, block);
+        rig.sender.session(SessionCommand::Launch {
+            track,
+            scene: second,
+        });
+        play(&mut rig, 1_000 + 4_096, block);
+        assert_eq!(
+            notes(&mut rig),
+            vec![(0, 60, false), (0, 62, true)],
+            "blocks of {block}: the launch lands as the loop wraps"
+        );
+        let states = rig.monitor.state().session.clone();
+        assert_eq!(states.len(), 1, "{states:?}");
+        assert_eq!(states[0].scene, second);
+        assert_eq!(states[0].state, SlotState::Playing);
+        // A stop asked for in bar 4 does the same.
+        play(&mut rig, BAR_FRAMES as usize * 4 - 4_096 - 1_000, block);
+        rig.sender.session(SessionCommand::StopTrack(track));
+        play(&mut rig, 1_000 + 4_096, block);
+        assert_eq!(
+            notes(&mut rig),
+            vec![(0, 62, false)],
+            "blocks of {block}: the stop lands as the loop wraps"
+        );
+        assert!(rig.monitor.state().session.is_empty());
+    }
+}
+
+// Spec: transport R15. T296 finding 3: this held on main already.
+#[test]
+fn a_tempo_change_keeps_a_queued_launch_and_a_playing_clip_on_their_beats() {
+    let (mut rig, track, first, second) = midi_rig(256);
+    let beats: Vec<Note> = (0..16)
+        .map(|beat| Note::new(60, Ticks::QUARTER * beat, Ticks::SIXTEENTH, 100))
+        .collect();
+    slot_clip(&mut rig.editor, track, first, &beats);
+    slot_clip(&mut rig.editor, track, second, &beats);
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    play(&mut rig, 24_001, 256);
+    rig.sender.session(SessionCommand::Launch {
+        track,
+        scene: first,
+    });
+    // Half a bar before its line, the tempo halves: 60 BPM, a beat is 48,000
+    // frames, and the line is still the 2.1.1 beat, now at 192,000.
+    play(&mut rig, 24_000, 256);
+    rig.apply(Command::SetTempo {
+        tempo: TempoMap::constant(Bpm::new(60.0).unwrap()),
+    });
+    play(&mut rig, 192_000 + 48_000 * 2 - 48_001, 256);
+    assert_eq!(
+        ons(&mut rig)[..3],
+        [192_000, 240_000, 288_000],
+        "the clip starts on the bar line and plays on beat by beat"
+    );
+    // The clip, playing, keeps its beats through a second change.
+    rig.apply(Command::SetTempo {
+        tempo: TempoMap::constant(Bpm::new(120.0).unwrap()),
+    });
+    play(&mut rig, 100_000, 256);
+    let frames = ons(&mut rig);
+    assert!(
+        frames.windows(2).all(|w| w[1] - w[0] == 24_000) && frames.len() >= 3,
+        "{frames:?}"
+    );
+}
+
+// Spec: launch-quantisation R11. T296 finding 10: through `session.launch`
+// the later launch wins already.
+#[test]
+fn launching_the_playing_slot_again_drops_the_launch_queued_after_it() {
+    let (mut rig, track, first, second) = midi_rig(256);
+    let long = [Note::new(60, Ticks::ZERO, Ticks::WHOLE * 8, 100)];
+    slot_clip(&mut rig.editor, track, first, &long);
+    slot_clip(
+        &mut rig.editor,
+        track,
+        second,
+        &[Note::new(62, Ticks::ZERO, Ticks::WHOLE * 8, 100)],
+    );
+    rig.sync();
+    rig.sender.session(SessionCommand::Launch {
+        track,
+        scene: first,
+    });
+    play(&mut rig, 24_001, 256);
+    rig.sender.session(SessionCommand::Launch {
+        track,
+        scene: second,
+    });
+    play(&mut rig, 6_000, 256);
+    rig.sender.session(SessionCommand::Launch {
+        track,
+        scene: first,
+    });
+    play(&mut rig, BAR_FRAMES as usize + 1_000, 256);
+    let on: Vec<(u8, bool)> = notes(&mut rig).into_iter().map(|n| (n.1, n.2)).collect();
+    assert!(!on.contains(&(62, true)), "the second never plays: {on:?}");
+    let states = rig.monitor.state().session.clone();
+    assert_eq!(states.len(), 1, "{states:?}");
+    assert_eq!(states[0].scene, first);
+}
+
+// Spec: midi-clips R3. T296 finding 6: no sort on the audio thread on main.
+#[test]
+fn a_block_with_hundreds_of_note_events_touches_no_heap() {
+    let (mut rig, track, scene, _) = midi_rig(4096);
+    let cluster: Vec<Note> = (0..300)
+        .map(|i| Note::new((i % 100) as u8 + 10, Ticks::ZERO, Ticks::SIXTEENTH, 100))
+        .collect();
+    slot_clip(&mut rig.editor, track, scene, &cluster);
+    rig.sync();
+    rig.sender.session(SessionCommand::Launch { track, scene });
+    play(&mut rig, 4096, 4096);
+    assert!(!notes(&mut rig).is_empty());
+}
+
+// Spec: midi-clips R3. T296 finding 9: a note-on goes out only when its
+// release has room.
+#[test]
+fn every_note_a_clip_starts_is_let_go_when_the_song_stops() {
+    let (mut rig, track, scene, _) = midi_rig(256);
+    // More long notes at once than the player can keep track of.
+    let cluster: Vec<Note> = (0..300)
+        .map(|i| Note::new((i % 100) as u8 + 10, Ticks::ZERO, Ticks::WHOLE * 8, 100))
+        .collect();
+    slot_clip(&mut rig.editor, track, scene, &cluster);
+    rig.sync();
+    rig.sender.session(SessionCommand::Launch { track, scene });
+    play(&mut rig, 1_024, 256);
+    rig.sender.transport(TransportCommand::Stop);
+    play(&mut rig, 512, 256);
+    let all = notes(&mut rig);
+    let on = all.iter().filter(|n| n.2).count();
+    let off = all.len() - on;
+    assert!(on > 0);
+    assert_eq!(on, off, "every note-on has its note-off");
+}
+
+// Spec: launch-quantisation R10. T296 finding 7: a launched audio clip is
+// silent while the playhead is before its launch frame (after a locate back),
+// as a launched MIDI clip is, and plays from its start when the playhead
+// reaches that frame again.
+#[test]
+fn a_launched_audio_clip_is_silent_while_the_playhead_is_before_its_launch_frame() {
+    for block in [64, 512] {
+        // Play from bar 2; the clip launches on the 3.1.1 line (clock
+        // 96,000), plays 1,000 frames, and the playhead goes back to 1.1.1.
+        let out = render_session_audio(290_000, block, |track, scene| {
+            vec![
+                (0, Cue::Transport(TransportCommand::Locate(Ticks::WHOLE))),
+                (0, Cue::Transport(TransportCommand::Play)),
+                (1_000, Cue::Session(SessionCommand::Launch { track, scene })),
+                (
+                    97_000,
+                    Cue::Transport(TransportCommand::Locate(Ticks::ZERO)),
+                ),
+            ]
+        });
+        for (i, sample) in out[96_000..97_000].iter().enumerate() {
+            assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
+        }
+        assert!(
+            out[97_000..289_000].iter().all(|&s| s == 0.0),
+            "blocks of {block}: silent until the playhead is back at the launch frame"
+        );
+        for (i, sample) in out[289_000..].iter().enumerate() {
+            assert_eq!(*sample, at(i as i64), "frame {i} of the second pass");
+        }
+    }
+}

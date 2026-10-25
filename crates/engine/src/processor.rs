@@ -785,6 +785,13 @@ impl Processor {
         self.swaps += 1;
         // The loop keeps its bars under the new tempo map.
         self.update_loop_frames();
+        // A take that went round the loop keeps going round it, at the loop's
+        // new frames.
+        if let Some(take) = &mut self.take
+            && take.wrap.is_some()
+        {
+            take.wrap = self.held_frames.or(self.loop_frames);
+        }
     }
 
     /// Puts the playhead, the scheduled commands, and the Session View's
@@ -794,6 +801,12 @@ impl Processor {
         let rate = self.config.sample_rate;
         // Keep the playhead on the same beat.
         self.position = same_beat(before, after, rate, self.position);
+        // The take being captured goes on from the playhead. Its start stays:
+        // its MIDI is stamped `start + written` and the shell takes `start`
+        // off again, so moving it would drop or shift what came before.
+        if let Some(take) = &mut self.take {
+            take.next = same_beat(before, after, rate, take.next);
+        }
         self.session
             .remap(|frame| same_beat(before, after, rate, frame));
         for entry in &mut self.scheduled {
@@ -1907,6 +1920,10 @@ impl Processor {
                     "a block part crossed the loop's end"
                 );
                 self.position = region.start;
+                // What waited for a line at or past the loop's end lands as
+                // the playhead reaches that line round the loop.
+                let back = region.start - region.end;
+                self.session.remap_pending(|frame| frame + back);
             }
         }
         // Spec: external-devices R24. A real-time render captures the

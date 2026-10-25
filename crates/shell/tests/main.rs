@@ -117,6 +117,7 @@ mod shell_commands;
 mod shifter;
 mod sidechain;
 mod slice_to_midi;
+mod snapping;
 mod stems;
 mod step_recording;
 mod take_lanes_view;

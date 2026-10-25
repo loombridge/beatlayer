@@ -18,6 +18,7 @@ pub mod grid;
 pub mod locator;
 pub mod placing;
 pub mod rows;
+pub mod snapping;
 pub mod take_lanes;
 pub mod time_commands;
 

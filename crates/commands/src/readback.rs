@@ -513,4 +513,15 @@ mod tests {
         ids.dedup();
         assert_eq!(ids.len(), before);
     }
+
+    #[test]
+    fn discarding_a_recovery_reads_back_from_the_list_of_recoverable_sets() {
+        let row = READBACK
+            .iter()
+            .find(|(id, _)| *id == "set.discard_recovery");
+        assert_eq!(
+            row.map(|(_, readback)| *readback),
+            Some(read("set.list_recoverable", "sets"))
+        );
+    }
 }

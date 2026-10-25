@@ -41,6 +41,22 @@
 //!   pitch bend, control change 74 and channel pressure to parameters of
 //!   their own.
 //!
+//! - **Connection points.** Both the processor and the controller implement
+//!   `IConnectionPoint` and log each `connect` and `disconnect` they get
+//!   (`connect:component`, `disconnect:controller`, ...), so a test sees the
+//!   host connect the two ends both ways.
+//!
+//! - **Skewed gain.** With [`SKEWED_VAR`] set the gain's mapping is a square
+//!   (plain = [`GAIN_MAX`] times the normalized value squared), as a log or
+//!   skewed parameter's is non-linear.
+//!
+//! - **Buses.** With [`BUSES_VAR`] set to `aux` the plug-in has four stereo
+//!   auxiliary input buses beside its main stereo one (ten channels in);
+//!   set to `wide` its main buses have twelve channels. It logs which buses
+//!   the host activates (`bus-active:in<n>`, with 1 or 0 as its value) and,
+//!   in each block, how many channels the host gives each input bus
+//!   (`bus:in<n>`).
+//!
 //! The editor itself is the next part's (WP-2.10).
 
 use std::cell::{Cell, UnsafeCell};
@@ -106,6 +122,22 @@ fn log_path() -> Option<&'static PathBuf> {
         .as_ref()
 }
 
+/// Appends a line for a call that isn't tied to a frame, if there is a log:
+/// `call=<what> key=<k> value=<v>`.
+fn log_call(what: &str, key: i32, value: f64) {
+    use std::io::Write;
+    let Some(path) = log_path() else {
+        return;
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    {
+        let _ = writeln!(file, "call={what} key={key} value={value}");
+    }
+}
+
 /// The environment variable a test sets to `on` so the controller
 /// implements note expression, or to `no-pressure` so its physical mapping
 /// leaves the key's pressure unmapped. Unset for a controller without it.
@@ -115,6 +147,42 @@ pub const EXPRESSIONS_VAR: &str = "BL_TEST_VST3_EXPRESSIONS";
 /// MIDI mapping maps channels 2 to 16's pitch bend, control change 74 and
 /// channel pressure to [`mapped_param`]s.
 pub const MAPPING_VAR: &str = "BL_TEST_VST3_MAPPING";
+
+/// The environment variable a test sets (to anything) so the gain's
+/// mapping is a square instead of linear.
+pub const SKEWED_VAR: &str = "BL_TEST_VST3_SKEWED";
+
+/// The environment variable a test sets to `aux` or `wide` for the bus
+/// layouts above. Unset for one stereo bus each way.
+pub const BUSES_VAR: &str = "BL_TEST_VST3_BUSES";
+
+/// How many channels a `wide` main bus has.
+pub const WIDE_CHANNELS: i32 = 12;
+/// How many auxiliary input buses an `aux` plug-in has, besides its main one.
+pub const AUX_BUSES: i32 = 4;
+
+/// The buses a plug-in has, from [`BUSES_VAR`], read once.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Buses {
+    Stereo,
+    Aux,
+    Wide,
+}
+
+fn buses() -> Buses {
+    static BUSES: OnceLock<Buses> = OnceLock::new();
+    *BUSES.get_or_init(|| match std::env::var(BUSES_VAR).as_deref() {
+        Ok("aux") => Buses::Aux,
+        Ok("wide") => Buses::Wide,
+        _ => Buses::Stereo,
+    })
+}
+
+/// Whether the gain's mapping is skewed, read once.
+fn skewed() -> bool {
+    static SKEWED: OnceLock<bool> = OnceLock::new();
+    *SKEWED.get_or_init(|| std::env::var_os(SKEWED_VAR).is_some())
+}
 
 /// The note expression type the controller gives pressure.
 pub const PRESSURE_TYPE: u32 = 100_000;
@@ -216,7 +284,13 @@ fn to_plain(id: u32, value_normalized: f64) -> f64 {
     let Some((min, max)) = plain_range(id) else {
         return value_normalized;
     };
-    let plain = min + value_normalized.clamp(0.0, 1.0) * (max - min);
+    let value_normalized = value_normalized.clamp(0.0, 1.0);
+    let value_normalized = if id == GAIN && skewed() {
+        value_normalized * value_normalized
+    } else {
+        value_normalized
+    };
+    let plain = min + value_normalized * (max - min);
     match id {
         LATENCY | LAST_NOTE => plain.round(),
         _ => plain,
@@ -231,7 +305,12 @@ fn to_normalized(id: u32, plain: f64) -> f64 {
     if max <= min {
         return 0.0;
     }
-    ((plain.clamp(min, max) - min) / (max - min)).clamp(0.0, 1.0)
+    let linear = ((plain.clamp(min, max) - min) / (max - min)).clamp(0.0, 1.0);
+    if id == GAIN && skewed() {
+        linear.sqrt()
+    } else {
+        linear
+    }
 }
 
 /// Every byte the host's stream holds, as a state.
@@ -346,7 +425,7 @@ impl Processor {
     }
 
     fn set_gain_normalized(&self, value: f64) {
-        let plain = (value * GAIN_MAX).clamp(0.0, GAIN_MAX);
+        let plain = to_plain(GAIN, value).clamp(0.0, GAIN_MAX);
         self.gain.store(plain.to_bits(), Ordering::Relaxed);
     }
 
@@ -406,7 +485,7 @@ impl Processor {
 }
 
 impl Class for Processor {
-    type Interfaces = (IComponent, IAudioProcessor);
+    type Interfaces = (IComponent, IAudioProcessor, IConnectionPoint);
 }
 
 impl IPluginBaseTrait for Processor {
@@ -415,6 +494,38 @@ impl IPluginBaseTrait for Processor {
     }
 
     unsafe fn terminate(&self) -> tresult {
+        kResultOk
+    }
+}
+
+impl IConnectionPointTrait for Processor {
+    unsafe fn connect(&self, _other: *mut IConnectionPoint) -> tresult {
+        log_call("connect:component", -1, 1.0);
+        kResultOk
+    }
+
+    unsafe fn disconnect(&self, _other: *mut IConnectionPoint) -> tresult {
+        log_call("disconnect:component", -1, 1.0);
+        kResultOk
+    }
+
+    unsafe fn notify(&self, _message: *mut IMessage) -> tresult {
+        kResultOk
+    }
+}
+
+impl<const EXPRESSIONS: bool> IConnectionPointTrait for Controller<EXPRESSIONS> {
+    unsafe fn connect(&self, _other: *mut IConnectionPoint) -> tresult {
+        log_call("connect:controller", -1, 1.0);
+        kResultOk
+    }
+
+    unsafe fn disconnect(&self, _other: *mut IConnectionPoint) -> tresult {
+        log_call("disconnect:controller", -1, 1.0);
+        kResultOk
+    }
+
+    unsafe fn notify(&self, _message: *mut IMessage) -> tresult {
         kResultOk
     }
 }
@@ -433,6 +544,7 @@ impl IComponentTrait for Processor {
     unsafe fn getBusCount(&self, media_type: MediaType, dir: BusDirection) -> i32 {
         match media_type as MediaTypes {
             MediaTypes_::kAudio => match dir as BusDirections {
+                BusDirections_::kInput if buses() == Buses::Aux => 1 + AUX_BUSES,
                 BusDirections_::kInput | BusDirections_::kOutput => 1,
                 _ => 0,
             },
@@ -451,7 +563,10 @@ impl IComponentTrait for Processor {
         index: i32,
         bus: *mut BusInfo,
     ) -> tresult {
-        if index != 0 {
+        let aux = buses() == Buses::Aux
+            && dir as BusDirections == BusDirections_::kInput
+            && media_type as MediaTypes == MediaTypes_::kAudio;
+        if index != 0 && !(aux && index <= AUX_BUSES) {
             return kInvalidArgument;
         }
         if !matches!(
@@ -463,14 +578,22 @@ impl IComponentTrait for Processor {
         // SAFETY: the host passes a valid pointer for the call.
         let bus = unsafe { &mut *bus };
         bus.direction = dir;
-        bus.busType = BusTypes_::kMain as BusType;
+        bus.busType = if index == 0 {
+            BusTypes_::kMain
+        } else {
+            BusTypes_::kAux
+        } as BusType;
         // The bindings' default enum type is signed on Windows and unsigned
         // elsewhere; the field is always `uint32`.
         bus.flags = BusInfo_::BusFlags_::kDefaultActive as uint32;
         match media_type as MediaTypes {
             MediaTypes_::kAudio => {
                 bus.mediaType = MediaTypes_::kAudio as MediaType;
-                bus.channelCount = 2;
+                bus.channelCount = if buses() == Buses::Wide {
+                    WIDE_CHANNELS
+                } else {
+                    2
+                };
                 copy_wstring(
                     if dir as BusDirections == BusDirections_::kInput {
                         "Input"
@@ -508,11 +631,16 @@ impl IComponentTrait for Processor {
 
     unsafe fn activateBus(
         &self,
-        _media_type: MediaType,
-        _dir: BusDirection,
-        _index: i32,
-        _state: TBool,
+        media_type: MediaType,
+        dir: BusDirection,
+        index: i32,
+        state: TBool,
     ) -> tresult {
+        if media_type as MediaTypes == MediaTypes_::kAudio
+            && dir as BusDirections == BusDirections_::kInput
+        {
+            log_call(&format!("bus-active:in{index}"), index, f64::from(state));
+        }
         kResultOk
     }
 
@@ -595,7 +723,13 @@ impl IAudioProcessorTrait for Processor {
         match dir as BusDirections {
             BusDirections_::kInput | BusDirections_::kOutput if index == 0 => {
                 // SAFETY: the host passes a valid pointer for the call.
-                unsafe { *arr = SpeakerArr::kStereo };
+                unsafe {
+                    *arr = if buses() == Buses::Wide {
+                        (1 << WIDE_CHANNELS) - 1
+                    } else {
+                        SpeakerArr::kStereo
+                    }
+                };
                 kResultOk
             }
             _ => kInvalidArgument,
@@ -655,6 +789,19 @@ impl IAudioProcessorTrait for Processor {
                 slice::from_raw_parts(data.outputs, data.numOutputs as usize),
             )
         };
+        if buses() != Buses::Stereo {
+            for (index, bus) in inputs.iter().enumerate() {
+                let key = index as i32;
+                self.log(
+                    0,
+                    || format!("bus:in{index}"),
+                    -1,
+                    key,
+                    -1,
+                    f64::from(bus.numChannels),
+                );
+            }
+        }
         let (input, output) = (&inputs[0], &outputs[0]);
         if input.numChannels <= 0 || output.numChannels <= 0 {
             return kResultOk;
@@ -1002,13 +1149,14 @@ impl<const EXPRESSIONS: bool> Controller<EXPRESSIONS> {
 }
 
 impl Class for Controller<false> {
-    type Interfaces = (IEditController, IMidiMapping);
+    type Interfaces = (IEditController, IMidiMapping, IConnectionPoint);
 }
 
 impl Class for Controller<true> {
     type Interfaces = (
         IEditController,
         IMidiMapping,
+        IConnectionPoint,
         INoteExpressionController,
         INoteExpressionPhysicalUIMapping,
     );

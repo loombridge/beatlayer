@@ -101,6 +101,9 @@ struct Renaming {
     device: DeviceId,
     text: String,
     focused: bool,
+    /// Whether the title was drawn this frame: see
+    /// [`DeviceViewUi::end_undrawn_rename`].
+    drawn: bool,
 }
 
 impl std::fmt::Debug for DeviceViewUi {
@@ -336,7 +339,19 @@ impl DeviceViewUi {
             device,
             text: title.to_owned(),
             focused: false,
+            drawn: false,
         });
+    }
+
+    /// Ends a rename whose title wasn't drawn this frame: the device is gone
+    /// or the Detail View hidden, so the field can never lose its focus, and
+    /// the keys would stay with it. Called at the end of every frame.
+    pub(crate) fn end_undrawn_rename(&mut self) {
+        if let Some(renaming) = self.renaming.as_mut()
+            && !std::mem::take(&mut renaming.drawn)
+        {
+            self.renaming = None;
+        }
     }
 
     /// Draws the Device View in `rect`.
@@ -366,22 +381,24 @@ impl DeviceViewUi {
         });
         ui.painter().rect_filled(rect, 0.0, theme.colors.panel.0);
 
-        // The chain scrolls sideways when it's wider than the view.
-        let content = state
-            .devices
-            .iter()
-            .fold(DEVICE_GAP, |w, d| w + ids::frame_width(d) + DEVICE_GAP);
+        // The chain scrolls sideways when it's wider than the view. The shell
+        // holds how far (`device_view.scroll`); the wheel, the middle button
+        // and a device chosen from the list ask it to move.
+        let content = ids::chain_width(&state.devices);
+        let furthest = (content - rect.width()).max(0.0);
+        let held = shell.devices().scroll();
+        let mut scroll = held.clamp(0.0, furthest);
         let over_chain_list = ui.ctx().pointer_hover_pos().is_some_and(|pointer| {
-            crate::rack_view::over_chain_list(&state, rect, self.scroll, pointer)
+            crate::rack_view::over_chain_list(&state, rect, scroll, pointer)
         });
         if (background.hovered() || ui.rect_contains_pointer(rect)) && !over_chain_list {
             let delta = ui.input(|i| i.smooth_scroll_delta);
-            self.scroll -= if delta.x == 0.0 { delta.y } else { delta.x };
+            scroll -= if delta.x == 0.0 { delta.y } else { delta.x };
         }
         // Spec: view-options R1. A middle-button drag pans the chain, the
         // content following the pointer.
         if let Some(delta) = crate::middle::pan(ui, rect) {
-            self.scroll -= delta.x;
+            scroll -= delta.x;
         }
         // Spec: racks R25. A device chosen from the list scrolls into view,
         // wherever in its racks it is.
@@ -395,14 +412,18 @@ impl DeviceViewUi {
             });
             if let Some((_, at)) = found {
                 let (left, right) = (at.left() - rect.left(), at.right() - rect.left());
-                if left < self.scroll {
-                    self.scroll = left - DEVICE_GAP;
-                } else if right > self.scroll + rect.width() && right - left <= rect.width() {
-                    self.scroll = right + DEVICE_GAP - rect.width();
+                if left < scroll {
+                    scroll = left - DEVICE_GAP;
+                } else if right > scroll + rect.width() && right - left <= rect.width() {
+                    scroll = right + DEVICE_GAP - rect.width();
                 }
             }
         }
-        self.scroll = self.scroll.clamp(0.0, (content - rect.width()).max(0.0));
+        let scroll = scroll.clamp(0.0, furthest);
+        if (scroll - held).abs() > 0.01 {
+            invoke(events, ids::SCROLL, json!({ "x": scroll - held }));
+        }
+        self.scroll = scroll;
 
         if state.devices.is_empty() {
             ui.painter().text(
@@ -414,7 +435,7 @@ impl DeviceViewUi {
             );
         }
 
-        let placed = frames(&state, rect, self.scroll);
+        let placed = frames(&state, rect, scroll);
         ui.scope_builder(
             UiBuilder::new().max_rect(rect).accessibility_parent(region),
             |ui| {
@@ -758,6 +779,7 @@ impl DeviceViewUi {
             control_id(frame.id, "title")
         };
         if let Some(renaming) = self.renaming.as_mut().filter(|r| r.device == frame.id) {
+            renaming.drawn = true;
             let edit = ui.put(
                 rect,
                 egui::TextEdit::singleline(&mut renaming.text)

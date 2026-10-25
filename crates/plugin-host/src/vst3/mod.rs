@@ -153,7 +153,9 @@ pub(crate) struct ParamMap {
 impl ParamMap {
     /// The map of a parameter whose controller maps normalized values to
     /// plain ones with `to_plain`: linear if the controller's mapping is,
-    /// else sampled.
+    /// else sampled. A stepped parameter's normalized value is its step
+    /// over its step count, as VST3 defines it, however the controller
+    /// maps values between the steps.
     pub(crate) fn new(
         id: u32,
         (min, max): (f64, f64),
@@ -161,9 +163,10 @@ impl ParamMap {
         steps: i32,
         to_plain: impl Fn(f64) -> f64,
     ) -> Self {
-        let linear = [0.25, 0.5, 0.75]
-            .iter()
-            .all(|n| (to_plain(*n) - (min + n * (max - min))).abs() <= 1e-6 * (max - min));
+        let linear = steps > 0
+            || [0.25, 0.5, 0.75]
+                .iter()
+                .all(|n| (to_plain(*n) - (min + n * (max - min))).abs() <= 1e-6 * (max - min));
         let curve = (!linear).then(|| {
             (0..=CURVE_SEGMENTS)
                 .map(|at| to_plain(at as f64 / CURVE_SEGMENTS as f64))
@@ -1253,11 +1256,12 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
             (Some(component_side), Some(controller_side)) => {
                 // SAFETY: both are live objects of the interface. Each
                 // gets the other as its peer, as the SDK's
-                // `PlugProvider::connectComponents` does.
+                // `PlugProvider::connectComponents` does. Either side
+                // connected is disconnected at teardown.
                 unsafe {
                     let component_to = component_side.connect(controller_side.as_ptr());
                     let controller_to = controller_side.connect(component_side.as_ptr());
-                    component_to == kResultOk && controller_to == kResultOk
+                    component_to == kResultOk || controller_to == kResultOk
                 }
             }
             _ => false,

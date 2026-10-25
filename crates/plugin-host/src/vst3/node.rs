@@ -1315,4 +1315,16 @@ mod tests {
         params.reset();
         assert_eq!(params.dropped(), 0);
     }
+
+    #[test]
+    fn a_stepped_value_is_its_step_over_the_step_count() {
+        // The SDK's stepped range parameter maps normalized values to
+        // min(steps, normalized * (steps + 1)), which isn't linear.
+        let map = ParamMap::new(0, (0.0, 3.0), 0.0, 3, |normalized| {
+            (normalized * 4.0).min(3.0)
+        });
+        for step in 0..=3 {
+            assert_eq!(map.normalized(f64::from(step)), f64::from(step) / 3.0);
+        }
+    }
 }

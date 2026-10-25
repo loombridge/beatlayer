@@ -731,7 +731,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.35b | done | 25 October 2026 | [#437](https://github.com/loombridge/beatlayer/pull/437); Create Pack writes a project into one `.blpack` file without its Backup folder or journals, and Install Pack... unpacks it after checking every name, with progress and cancel. |
 | 6.36 | todo |  |  |
 | 6.36b | done | 25 October 2026 | [#451](https://github.com/loombridge/beatlayer/pull/451); a DAWproject import now brings in colours, fades and crossfades, plug-ins with their saved states (missing ones keep them), the generic devices, automation, MIDI controller data, note expressions and markers ([DAWproject](specs/dawproject.md)) |
-| 6.37 | todo |  |  |
+| 6.37 | done | 25 October 2026 | [#470](https://github.com/loombridge/beatlayer/pull/470); `set.export_dawproject` writes a set as a `.dawproject` file with an export report, and an exported set imports back the same and exports byte-identically ([DAWproject](specs/dawproject.md)) |
 | 6.37b | todo |  |  |
 | 6.38 | done | 22 October 2026 | [#310](https://github.com/loombridge/beatlayer/pull/310); View ▸ Return Tracks Scroll with Tracks (`mixer_view.return_tracks_scroll`, off by default and kept in the preferences) puts the returns after the drop area in the Session View's grid, both mixers and the Arrangement's lanes, scrolling with the tracks, with only Main pinned |
 | 6.39 | done | 24 October 2026 | [#367](https://github.com/loombridge/beatlayer/pull/367); File ▸ Save History (`view.toggle_save_history`) lists the set's save points, saved version and backups newest first in the Undo History's place, and `set.restore` restores one as a single undo step ([crash recovery](specs/crash-recovery.md) R12 to R20) |

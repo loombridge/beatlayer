@@ -222,10 +222,7 @@ impl Hold {
 impl NativeDevice for Hold {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let rate = audio.sample_rate().as_f64();
-        let tempo = audio.tempo();
-        let bpm = tempo
-            .bpm_at(tempo.frames_to_ticks(audio.song_position(), audio.sample_rate()))
-            .get();
+        let bpm = audio.bpm();
         let length = if value(params, SYNC) >= 0.5 {
             let (_, beats) = DIVISIONS[value(params, LENGTH_DIVISION) as usize];
             beats * 60.0 / bpm * rate

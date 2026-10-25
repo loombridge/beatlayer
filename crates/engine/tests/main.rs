@@ -43,6 +43,7 @@ mod modulation;
 mod mpe_input;
 mod mpe_output;
 mod multi_output;
+mod outside_tempo;
 mod pdc;
 mod performance;
 mod playhead;

@@ -764,6 +764,7 @@ impl Sampler {
         rate: SampleRate,
         tempo: &TempoMap,
         position: Frames,
+        speed: f64,
     ) -> Settings {
         let at = |id: ParamId| params.index(id).expect("the description holds it");
         let mode = match params.value(at(MODE)) as usize {
@@ -808,8 +809,9 @@ impl Sampler {
         } else {
             rate.as_f64() * 60.0 / tempo.bpm_at(tempo.frames_to_ticks(position, rate)).get() / 4.0
         };
-        let lfo_sixteenth =
-            rate.as_f64() * 60.0 / tempo.bpm_at(tempo.frames_to_ticks(position, rate)).get() / 4.0;
+        let lfo_sixteenth = rate.as_f64() * 60.0
+            / (tempo.bpm_at(tempo.frames_to_ticks(position, rate)).get() * speed)
+            / 4.0;
         let lfo_cycle_frames = if params.value(at(LFO_SYNC)) >= 0.5 {
             params.value(at(LFO_DIVISION)).max(1.0) * lfo_sixteenth
         } else {
@@ -1357,7 +1359,7 @@ impl NativeDevice for Sampler {
         let rate = audio.sample_rate();
         let song_position = audio.song_position();
         let tempo = audio.tempo();
-        let settings = self.settings(params, rate, tempo, song_position);
+        let settings = self.settings(params, rate, tempo, song_position, audio.speed());
         if let Some(audition) = self.audition.take() {
             self.audition(audition, &settings, sample.frames(), song_position);
         }

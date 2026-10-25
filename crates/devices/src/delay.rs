@@ -376,9 +376,7 @@ impl Delay {
 /// Frames in a sixteenth note at the tempo of the stretch's first frame: the
 /// synced delays' unit, shared by the delays (the delay spec, R1).
 pub(crate) fn sixteenth_frames(audio: &Audio<'_, '_>) -> f64 {
-    let tempo = audio.tempo();
-    let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
-    audio.sample_rate().as_f64() * 60.0 / tempo.bpm_at(ticks).get() / 4.0
+    audio.sample_rate().as_f64() * 60.0 / audio.bpm() / 4.0
 }
 
 /// One stretch's settings, worked out once: the parameters the engine

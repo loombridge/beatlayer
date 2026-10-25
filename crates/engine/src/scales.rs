@@ -136,8 +136,8 @@ impl TrackScale {
         let set = block.set_scale();
         let transport = block.transport();
         let from = transport.position.get();
-        let until = from + block.frames() as i64;
-        let offset = |frame: i64| u32::try_from(frame - from).unwrap_or(0);
+        let until = transport.window_end(block.frames());
+        let offset = |frame: i64| transport.offset(frame, block.frames()) as u32;
         let scale_of = |scene: SceneId| {
             spans
                 .clone()

@@ -55,6 +55,9 @@ pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_on
 pub const SET_MIDI_OVERDUB: &str = "transport.set_midi_overdub";
 /// `transport.set_recording` (`bl-engine`): whether transport is recording.
 pub const SET_RECORDING: &str = "transport.set_recording";
+/// `transport.phase_nudge` (`bl-engine`): the Control Bar's Phase Nudge Down
+/// and Up buttons.
+pub const PHASE_NUDGE: &str = "transport.phase_nudge";
 /// `song.set_tempo` (`bl-model`): the Tempo field.
 pub const SET_TEMPO: &str = "song.set_tempo";
 /// `song.set_time_signatures` (`bl-model`): the time-signature fields.
@@ -150,6 +153,32 @@ pub struct TransportState {
     /// runs and the Control Bar's button and Create menu item are enabled.
     #[serde(default)]
     pub capture_midi_ready: bool,
+    /// The Phase Nudge button held now, the one pressed last when both are:
+    /// `none`, `down` or `up` (the transport spec, R27 and R28).
+    #[serde(default)]
+    pub phase_nudge: PhaseNudge,
+    /// Whether a start waits for the frame an outside clock or Link session
+    /// gives (the transport spec, R25).
+    #[serde(default)]
+    pub waiting_start: bool,
+    /// The frame of the engine's clock (frames processed since it started)
+    /// that a waiting start begins on, once the follower has given it; null
+    /// otherwise.
+    #[serde(default)]
+    pub waiting_frame: Option<u64>,
+}
+
+/// Which Phase Nudge button nudges the song, in `transport.state`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseNudge {
+    /// Neither button is held.
+    #[default]
+    None,
+    /// Phase Nudge Down is held: the song plays 4 % slower.
+    Down,
+    /// Phase Nudge Up is held: the song plays 4 % faster.
+    Up,
 }
 
 /// The recording under way, in `transport.state`.
@@ -215,8 +244,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm and \
                  the mode an Arrangement recording writes control moves in, \
                  the recording under way (its armed tracks and dropped frames) and what the \
-                 last recording came to, and whether the audio engine runs so the transport \
-                 can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where \
+                 last recording came to, which Phase Nudge button is held (`phase_nudge`: \
+                 `none`, `down` or `up`, set by `transport.phase_nudge`), whether a start waits \
+                 for an outside clock's or Link session's frame, and whether the audio engine \
+                 runs so the transport can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where \
                  the song is before and after `transport.play`, `transport.stop`, \
                  `transport.locate`, or `transport.set_loop`.",
             )

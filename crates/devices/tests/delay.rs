@@ -197,6 +197,7 @@ fn a_synced_repeat_follows_a_tempo_change() {
         TransportInfo {
             playing: true,
             position: Frames(3_000),
+            ..TransportInfo::default()
         },
     );
     // The tempo halves, so the repeat moves from 6,000 to 12,000.
@@ -382,4 +383,42 @@ fn the_filter_shapes_the_repeats() {
     };
     assert!(shaped(0.0) > 0.9, "unfiltered, the repeat is whole");
     assert!(shaped(1.0) < 0.1, "the band-pass takes it out");
+}
+
+// Spec: transport R24
+#[test]
+fn a_synced_delay_follows_the_played_tempo() {
+    let params = vec![
+        (SYNC, 1.0),
+        (LINK, 1.0),
+        (L_SYNC, 4.0),
+        (FEEDBACK, 0.0),
+        (DRY_WET, 100.0),
+    ];
+    let run_with = |bpm: f64, speed: f64| {
+        let mut delay = node(&registry(), &device(&delay_type(), &params), 16_384);
+        run_at(
+            delay.as_mut(),
+            &impulse(14_000),
+            &[],
+            &tempo(bpm),
+            TransportInfo {
+                playing: true,
+                position: Frames(0),
+                speed,
+                ..TransportInfo::default()
+            },
+        )
+    };
+    // A quarter note at 240 BPM is 12,000 frames.
+    let followed = run_with(120.0, 2.0);
+    assert!(
+        followed[0][12_000].abs() > 0.99,
+        "the repeat at the played tempo"
+    );
+    assert_eq!(
+        followed,
+        run_with(240.0, 1.0),
+        "the same as that tempo in the map"
+    );
 }

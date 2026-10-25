@@ -34,6 +34,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("transport.set_metronome_sound", Exception(METRONOME_MENU)),
         ("transport.set_metronome_rhythm", Exception(METRONOME_MENU)),
+        (
+            "transport.phase_nudge",
+            Exception(Live(
+                "Live binds no key to Phase Nudge Down or Up, which nudge while the mouse holds \
+                 them; a key or MIDI mapping makes each a momentary control (transport R28)",
+            )),
+        ),
         // The Control Bar's scale controls (scales R9, R12, R14): the
         // switch changes the selected clips' scales, or the set's current
         // scale when no clip is selected.

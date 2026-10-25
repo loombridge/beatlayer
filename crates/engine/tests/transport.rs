@@ -651,6 +651,14 @@ fn every_transport_command_runs_by_id() {
     run(&mut rig, "transport.stop_recording", json!({}));
     // Spec: transport R23
     run(&mut rig, "transport.scrub", json!({ "position": 0 }));
+    // Spec: transport R28
+    for held in [true, false] {
+        run(
+            &mut rig,
+            "transport.phase_nudge",
+            json!({ "direction": "up", "held": held }),
+        );
+    }
 
     let mut registered: Vec<String> = commands
         .iter()

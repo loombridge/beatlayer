@@ -42,7 +42,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::message::TransportCommand;
+use crate::message::{NudgeDirection, TransportCommand};
 
 /// The arguments of `transport.locate`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
@@ -69,6 +69,16 @@ pub struct ScrubArgs {
     /// Whether the mouse button is held: loops the span at `position`
     /// until a call with `held` false ends it.
     #[serde(default)]
+    pub held: bool,
+}
+
+/// The arguments of `transport.phase_nudge`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PhaseNudgeArgs {
+    /// Which button: `down` plays the song 4 % slower while held, `up` 4 % faster.
+    pub direction: NudgeDirection,
+    /// Whether the button is held: true on the press, false on the release.
     pub held: bool,
 }
 
@@ -138,6 +148,11 @@ pub fn command_from_args(id: &str, args: Value) -> Result<TransportCommand, RunE
                 held,
             })
         }
+        Action::PhaseNudge => {
+            let PhaseNudgeArgs { direction, held } =
+                serde_json::from_value(args).map_err(invalid)?;
+            Ok(TransportCommand::PhaseNudge { direction, held })
+        }
         Action::SetRecording => {
             let SetRecordingArgs { recording } = serde_json::from_value(args).map_err(invalid)?;
             Ok(TransportCommand::SetRecording(recording))
@@ -182,6 +197,8 @@ enum Action {
     Locate,
     /// [`TransportCommand::Scrub`], with [`ScrubArgs`].
     Scrub,
+    /// [`TransportCommand::PhaseNudge`], with [`PhaseNudgeArgs`].
+    PhaseNudge,
     /// [`TransportCommand::SetRecording`], with [`SetRecordingArgs`].
     SetRecording,
 }
@@ -217,6 +234,7 @@ impl Entry {
             Action::Run(_) => spec.args::<NoArgs>(),
             Action::Locate => spec.args::<LocateArgs>(),
             Action::Scrub => spec.args::<ScrubArgs>(),
+            Action::PhaseNudge => spec.args::<PhaseNudgeArgs>(),
             Action::SetRecording => spec.args::<SetRecordingArgs>(),
         };
         if self.id == "transport.set_recording" {
@@ -334,6 +352,24 @@ const ENTRIES: &[Entry] = &[
             the project.",
     },
     Entry {
+        id: "transport.phase_nudge",
+        action: Action::PhaseNudge,
+        label: "Phase Nudge",
+        contexts: &[Global],
+        keys: &[],
+        description: "Presses or releases the Control Bar's Phase Nudge Down or Up button. While \
+            `direction` `down` or `up` is held (`held` true) and the song plays, the song plays \
+            4 % slower or faster than the tempo it plays at otherwise, to bring it into phase \
+            with another player; with both held, the one pressed last nudges. Call it again with \
+            `held` false to end the nudge: the next block plays at the tempo again, the song's \
+            beat staying where the nudge moved it. A nudge you leave held ends when your agent \
+            session ends. While the song is stopped a nudge does nothing, and while an incoming \
+            clock or a Link session leads the tempo, a press is refused and only a release \
+            is accepted. The Tempo field, the tempo map and \
+            the set don't change, and it is no undo step. `transport.state`'s `phase_nudge` \
+            reads which button is held.",
+    },
+    Entry {
         id: "transport.return_to_start",
         action: Action::Run(TransportCommand::Locate(Ticks::ZERO)),
         label: "Return Play Position to 1.1.1",
@@ -431,6 +467,27 @@ mod tests {
                 held: false
             })
         );
+        assert_eq!(
+            command_from_args(
+                "transport.phase_nudge",
+                json!({ "direction": "up", "held": true })
+            ),
+            Ok(TransportCommand::PhaseNudge {
+                direction: NudgeDirection::Up,
+                held: true
+            })
+        );
+        assert!(matches!(
+            command_from_args(
+                "transport.phase_nudge",
+                json!({ "direction": "left", "held": true })
+            ),
+            Err(RunError::InvalidArgs { .. })
+        ));
+        assert!(matches!(
+            command_from_args("transport.phase_nudge", json!({ "direction": "down" })),
+            Err(RunError::InvalidArgs { .. })
+        ));
         assert_eq!(
             command_from_args("transport.rewind", json!({})),
             Err(RunError::UnknownCommand("transport.rewind".to_owned()))

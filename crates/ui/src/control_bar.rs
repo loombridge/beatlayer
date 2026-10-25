@@ -14,6 +14,7 @@
 //! bar-beat-sixteenth value, Enter to set it, and Esc to drop it. The
 //! rules are in the control bar transport spec.
 
+use bl_engine::NudgeDirection;
 use bl_shell::arrangement_commands::{AUTOMATION_ARM, FOLLOW};
 use bl_shell::transport::{self, Field, Group};
 use bl_shell::transport_commands as ids;
@@ -103,6 +104,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Follow => Some(FOLLOW),
         Element::AutomationArm => Some(AUTOMATION_ARM),
         Element::CaptureMidi => Some(CAPTURE_MIDI),
+        Element::NudgeDown | Element::NudgeUp => Some(ids::PHASE_NUDGE),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -138,6 +140,15 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
             ids::SET_METRONOME_ENABLED,
             json!({ "enabled": !metronome_on(shell) }),
         )),
+        _ => None,
+    }
+}
+
+/// The Phase Nudge button an element is.
+fn nudge_direction(element: Element) -> Option<NudgeDirection> {
+    match element {
+        Element::NudgeDown => Some(NudgeDirection::Down),
+        Element::NudgeUp => Some(NudgeDirection::Up),
         _ => None,
     }
 }
@@ -218,11 +229,13 @@ struct Drag {
     gesture: bool,
 }
 
-/// The section's state between frames: a value being typed, and a drag.
+/// The section's state between frames: a value being typed, a drag, and the
+/// Phase Nudge button the mouse holds.
 #[derive(Clone, Debug, Default)]
 pub struct TransportFields {
     entry: Option<Entry>,
     drag: Option<Drag>,
+    nudging: Option<Element>,
 }
 
 impl TransportFields {
@@ -313,6 +326,22 @@ impl TransportFields {
                     ..Look::default()
                 });
             }
+            Element::NudgeDown | Element::NudgeUp => {
+                // Spec: transport R28, R29. Pressed while held, and off while
+                // an outside tempo leads.
+                let pressed = shell.phase_nudge() == nudge_direction(element);
+                return Some(Look {
+                    on: pressed,
+                    disabled: shell.following(),
+                    value: Some(if pressed { "pressed" } else { "released" }.to_owned()),
+                    description: Some(
+                        "While held, the song plays 4 % slower or faster, to bring it into \
+                         phase."
+                            .to_owned(),
+                    ),
+                    ..Look::default()
+                });
+            }
             Element::Metronome => {
                 let on = metronome_on(shell);
                 return Some(Look {
@@ -350,6 +379,52 @@ impl TransportFields {
             description: Some(description),
             ..Look::default()
         })
+    }
+
+    /// Presses and releases a Phase Nudge button as the mouse holds it
+    /// (transport R28): the press runs `transport.phase_nudge` held, and the
+    /// release runs it not held. A hold also ends when the window loses the
+    /// mouse or the focus, which can leave the release unseen. A press is
+    /// ignored while an outside tempo leads (R29); a release never is.
+    pub fn nudge(
+        &mut self,
+        ui: &Ui,
+        shell: &Shell,
+        element: Element,
+        response: &Response,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let Some(direction) = nudge_direction(element) else {
+            return;
+        };
+        let run = |held| {
+            UiEvent::Invoke(Invocation::new(
+                ids::PHASE_NUDGE,
+                json!({ "direction": direction, "held": held }),
+            ))
+        };
+        let (down, pressed, lost) = ui.input(|i| {
+            (
+                i.pointer.primary_down(),
+                i.pointer.primary_pressed(),
+                i.events
+                    .iter()
+                    .any(|event| matches!(event, Event::PointerGone | Event::WindowFocused(false))),
+            )
+        });
+        if self.nudging == Some(element) {
+            if !down || lost {
+                self.nudging = None;
+                events.push(run(false));
+            }
+        } else if self.nudging.is_none()
+            && pressed
+            && !shell.following()
+            && response.is_pointer_button_down_on()
+        {
+            self.nudging = Some(element);
+            events.push(run(true));
+        }
     }
 
     /// Handles what the person did to a value field this frame, pushing the

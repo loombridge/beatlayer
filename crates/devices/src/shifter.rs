@@ -941,8 +941,7 @@ impl NativeDevice for Shifter {
             );
         }
         let tempo = audio.tempo();
-        let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
-        let bpm = tempo.bpm_at(ticks).get();
+        let bpm = audio.bpm();
         let delay_time = if choice(DELAY_MODE) == 0 {
             rate / target(DELAY_HZ).max(1e-3)
         } else {

@@ -426,6 +426,8 @@ mod tests {
             transient_envelope: 100.0,
             pitch: 1.0,
             clip,
+            step: 1.0,
+            song: f64::NAN,
         };
         let (before, after) = mode.reach(&request);
         let lo = positions[0].floor() as i64 - before as i64;

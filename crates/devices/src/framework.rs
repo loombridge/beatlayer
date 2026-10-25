@@ -156,6 +156,24 @@ impl Modulation<'_, '_> {
         Frames(self.ctl.transport.position.get() + self.range.start as i64)
     }
 
+    /// The tempo the song plays at here, in BPM: the tempo map's at the
+    /// song position, times how fast the song moves against the map while it
+    /// follows an outside tempo or is nudged (the transport spec, R24, R27).
+    /// A tempo-synced modulator turns beats into frames by this.
+    #[must_use]
+    pub fn bpm(&self) -> f64 {
+        let tempo = self.ctl.tempo;
+        let ticks = tempo.frames_to_ticks(self.song_position(), self.ctl.sample_rate);
+        tempo.bpm_at(ticks).get() * self.ctl.transport.speed
+    }
+
+    /// Song frames per frame of this block: 1 unless the song follows an
+    /// outside tempo or is nudged (the transport spec, R24, R27).
+    #[must_use]
+    pub fn speed(&self) -> f64 {
+        self.ctl.transport.speed
+    }
+
     /// Whether the song is playing.
     #[must_use]
     pub fn playing(&self) -> bool {
@@ -309,6 +327,24 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn song_position(&self) -> Frames {
         Frames(self.block.transport().position.get() + self.range.start as i64)
+    }
+
+    /// The tempo the song plays at here, in BPM: the tempo map's at the
+    /// song position, times how fast the song moves against the map while it
+    /// follows an outside tempo or is nudged (the transport spec, R24, R27).
+    /// A tempo-synced device turns beats into frames by this.
+    #[must_use]
+    pub fn bpm(&self) -> f64 {
+        let tempo = self.block.tempo();
+        let ticks = tempo.frames_to_ticks(self.song_position(), self.block.sample_rate());
+        tempo.bpm_at(ticks).get() * self.block.transport().speed
+    }
+
+    /// Song frames per frame of this block: 1 unless the song follows an
+    /// outside tempo or is nudged (the transport spec, R24, R27).
+    #[must_use]
+    pub fn speed(&self) -> f64 {
+        self.block.transport().speed
     }
 
     /// The song's time-signature map, which places bar lines on ticks: the

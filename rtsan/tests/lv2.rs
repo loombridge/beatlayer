@@ -91,6 +91,7 @@ fn an_lv2_plugin_processes_blocks_under_rtsan() {
         let transport = TransportInfo {
             playing: true,
             position: Frames(position),
+            ..TransportInfo::default()
         };
         {
             let mut block = Block::new(&mut data, 2, FRAMES, FRAMES, &events, transport, RATE)

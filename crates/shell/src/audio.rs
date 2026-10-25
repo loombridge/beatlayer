@@ -388,6 +388,16 @@ pub struct EngineTransport {
     pub take: Option<TakeBounds>,
     /// The take running now, as far as it has got (WP-3.11).
     pub take_so_far: Option<TakeBounds>,
+    /// Whether an outside tempo leads (the transport spec, R24), so Phase
+    /// Nudge is disabled and refused (R29).
+    pub following: bool,
+    /// Whether a start waits for the frame the follower gives (R25).
+    pub waiting_start: bool,
+    /// The frame of the engine clock a waiting start begins on, once the
+    /// follower has given it.
+    pub waiting_frame: Option<u64>,
+    /// The Phase Nudge button held now (R27).
+    pub phase_nudge: Option<bl_engine::NudgeDirection>,
 }
 
 /// The audio device the app plays through, the engine that plays the set
@@ -753,6 +763,15 @@ impl AudioHost {
         }
     }
 
+    /// Sets the outside tempo the running engine follows (the transport spec,
+    /// R24), or with `None` stops following. A new engine starts with none.
+    /// Nothing while no engine runs.
+    pub fn set_follower(&self, follower: Option<Box<dyn bl_engine::Follower>>) {
+        if let Some(engine) = &self.engine {
+            engine.set_follower(follower);
+        }
+    }
+
     /// Sends a transport command, which the engine runs at the start of its
     /// next block.
     ///
@@ -1013,6 +1032,10 @@ impl AudioHost {
                 running: false,
                 playing: false,
                 clock: 0,
+                following: false,
+                waiting_start: false,
+                waiting_frame: None,
+                phase_nudge: None,
                 ..self.memory
             };
         };
@@ -1024,6 +1047,10 @@ impl AudioHost {
                 running,
                 playing: false,
                 clock: state.clock,
+                following: false,
+                waiting_start: false,
+                waiting_frame: None,
+                phase_nudge: None,
                 ..self.memory
             };
         }
@@ -1038,6 +1065,10 @@ impl AudioHost {
             counting_in: state.counting_in,
             take: state.take,
             take_so_far: state.take_so_far,
+            following: state.following.is_some(),
+            waiting_start: state.waiting_start,
+            waiting_frame: state.waiting_frame,
+            phase_nudge: state.phase_nudge,
         };
         self.memory
     }

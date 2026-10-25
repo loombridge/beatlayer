@@ -221,10 +221,7 @@ impl NativeDevice for LevelMod {
             params.ramp(index(RISE)),
             params.ramp(index(FALL)),
         );
-        let tempo = audio.tempo();
-        let bpm = tempo
-            .bpm_at(tempo.frames_to_ticks(audio.song_position(), audio.sample_rate()))
-            .get();
+        let bpm = audio.bpm();
         let (rate, max_delay) = (self.rate, self.delay_len());
         let delay_frames = |f: usize| -> usize {
             let seconds = if params.ramp(index(DELAY_MODE))[f] >= 0.5 {

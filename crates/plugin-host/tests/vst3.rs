@@ -520,6 +520,7 @@ fn gain_render(data: &NodeData, from: i64, blocks: usize) -> Vec<f32> {
             let transport = TransportInfo {
                 playing: true,
                 position: Frames(from + (i * each) as i64),
+                ..TransportInfo::default()
             };
             run_at(node.as_mut(), &vec![1.0; each], &[], &[], transport).channels[0].clone()
         })
@@ -580,6 +581,7 @@ fn a_vst3_parameter_takes_the_played_value() {
     let transport = TransportInfo {
         playing: true,
         position: Frames(from),
+        ..TransportInfo::default()
     };
     run_at(node.as_mut(), &[1.0; FRAMES], &[], &[], transport);
     let stopped = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);

@@ -301,11 +301,12 @@ fn played_regions(
 }
 
 /// Where a block sits in the song, for a route that reads automation
-/// (WP-2.12, WP-3.12): the song frame it starts on, and what places a Session
+/// (WP-2.12, WP-3.12): the transport as it starts, which gives each frame's
+/// song frame, and what places a Session
 /// clip.
 #[derive(Clone, Copy)]
 pub(crate) struct Song<'a> {
-    pub(crate) frame: i64,
+    pub(crate) transport: crate::node::TransportInfo,
     pub(crate) session: &'a [SessionPlayback],
     pub(crate) tempo: &'a TempoMap,
     pub(crate) rate: SampleRate,

@@ -102,6 +102,7 @@ fn a_devices_parameter_follows_its_envelope_on_the_exact_frame() {
             TransportInfo {
                 playing: true,
                 position: Frames(position),
+                ..TransportInfo::default()
             },
         )
     };
@@ -181,6 +182,7 @@ fn a_hand_move_takes_a_devices_parameter_back_from_its_envelope() {
     let transport = TransportInfo {
         playing: true,
         position: Frames(0),
+        ..TransportInfo::default()
     };
     let out = run_at(utility.as_mut(), &input, &[], &tempo, transport);
     assert!(

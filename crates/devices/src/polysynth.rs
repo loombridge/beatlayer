@@ -1423,9 +1423,7 @@ impl Synth {
         let division = (params.value(at(LFO_SYNC)) as usize).min(LFO_DIVISIONS.len() - 1);
         // The Sync mode's cycle comes from the tempo map's tempo at the
         // stretch, as the delay device's does.
-        let tempo = audio.tempo();
-        let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
-        let bpm = tempo.bpm_at(ticks).get();
+        let bpm = audio.bpm();
         let sixteenth = self.rate * 60.0 / bpm / 4.0;
         self.lfos = Lfos {
             shape: (params.value(at(LFO_SHAPE)) as usize).min(LFO_SHAPES.len() - 1),

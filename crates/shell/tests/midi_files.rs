@@ -437,7 +437,7 @@ fn a_clip_round_trips_through_export_and_import() {
     let out = dir.0.join("Out.mid");
     let args = bl_shell_spec::midi_files::MidiExportArgs {
         clip: imported.clips[0].clip,
-        path: out.to_string_lossy().into_owned(),
+        path: Some(out.to_string_lossy().into_owned()),
         replace: false,
     };
     let exported = midi_files::export(editor.document(), &args).unwrap();

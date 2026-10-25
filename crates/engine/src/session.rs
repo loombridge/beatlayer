@@ -164,6 +164,10 @@ pub enum SessionCommand {
     StopTrack(TrackId),
     /// Stops every track's playing clip on the next grid line.
     StopAll,
+    /// Drops what the last launch of a scene queued and hasn't played yet:
+    /// its clips' starts and restarts, the stops it queued on their tracks,
+    /// and its tempo and time signature (WP-6.56).
+    CancelSceneLaunch(SceneId),
     /// Returns every track to the Arrangement at once (WP-3.6).
     BackToArrangement,
     /// Returns one track to the Arrangement at once (WP-3.6).
@@ -592,6 +596,51 @@ impl SessionLauncher {
             .retain(|slot| slot.track != track || slot.started.is_some());
     }
 
+    /// Drops what the last launch of `scene` queued and hasn't happened yet
+    /// (the session context menus spec, R10): a clip of the scene still
+    /// waiting to start is forgotten, one waiting to restart plays on, a stop
+    /// that launch queued on a track's other clip (the same frame) is
+    /// dropped, and the scene's tempo and signature never apply. Clips
+    /// playing or stopped stay as they are.
+    pub(crate) fn cancel_scene_launch(
+        &mut self,
+        scene: SceneId,
+        slots: &[(SceneId, TrackId, LaunchMode)],
+    ) {
+        for &(_, track, _) in slots {
+            let Some(due) = self
+                .slots
+                .iter()
+                .find(|slot| slot.track == track && slot.scene == scene)
+                .and_then(|slot| slot.due)
+            else {
+                continue;
+            };
+            for slot in &mut self.slots {
+                if slot.track != track {
+                    continue;
+                }
+                if slot.scene == scene {
+                    if slot.started.is_some() {
+                        slot.due = None;
+                        slot.restart = false;
+                        slot.then_stop = None;
+                        slot.auto = false;
+                        slot.repeating = false;
+                    }
+                } else if slot.started.is_some() && !slot.restart && slot.due == Some(due) {
+                    slot.due = None;
+                }
+            }
+        }
+        self.slots
+            .retain(|slot| slot.scene != scene || slot.started.is_some());
+        self.scenes.retain(|&(queued, _)| queued != scene);
+        if self.scene_run.is_some_and(|run| run.scene == scene) {
+            self.scene_run = None;
+        }
+    }
+
     /// Stops the playing clip of `track`, or of every one of `tracks` with
     /// `None`, on the next grid line. A launch still queued on the track is
     /// dropped. A track no Session clip has taken over yet is taken over on
@@ -961,6 +1010,10 @@ pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunErr
             let LaunchSceneArgs { scene } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::LaunchScene(scene))
         }
+        Action::CancelSceneLaunch => {
+            let LaunchSceneArgs { scene } = serde_json::from_value(args).map_err(invalid)?;
+            Ok(SessionCommand::CancelSceneLaunch(scene))
+        }
         Action::StopTrack => {
             let StopTrackArgs { track } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::StopTrack(track))
@@ -1018,6 +1071,8 @@ enum Action {
     Release,
     /// [`SessionCommand::LaunchScene`].
     LaunchScene,
+    /// [`SessionCommand::CancelSceneLaunch`].
+    CancelSceneLaunch,
     /// [`SessionCommand::StopTrack`].
     StopTrack,
     /// [`SessionCommand::StopAll`].
@@ -1054,7 +1109,7 @@ impl Entry {
         }
         spec = match self.action {
             Action::Launch | Action::Release => spec.args::<LaunchArgs>(),
-            Action::LaunchScene => spec.args::<LaunchSceneArgs>(),
+            Action::LaunchScene | Action::CancelSceneLaunch => spec.args::<LaunchSceneArgs>(),
             Action::StopTrack => spec.args::<StopTrackArgs>(),
             Action::StopAll | Action::BackToArrangement => spec.args::<NoArgs>(),
             Action::TrackBackToArrangement => spec.args::<BackToArrangementTrackArgs>(),
@@ -1108,6 +1163,22 @@ const ENTRIES: &[Entry] = &[
             launch button does: all of them start on one line of the launch quantisation grid, \
             as one launch, so a scene's clips play together. While the song is stopped the \
             transport starts at once. It changes nothing in the set.",
+    },
+    Entry {
+        id: "session.cancel_scene_launch",
+        action: Action::CancelSceneLaunch,
+        label: "Cancel Scene Launch",
+        contexts: &[Session],
+        key: None,
+        description: "Cancels the launch of the scene at `scene` that is still waiting for its \
+            line of the launch quantisation grid, as the scene menu's Cancel Scene Launch \
+            does: the clips of that scene waiting to start never start, one waiting to \
+            restart plays on, the stops that launch queued on the clips' tracks are dropped, \
+            and the scene's tempo and time signature never apply. Clips already playing keep \
+            playing and stopped ones stay stopped. A launch that has happened isn't undone, \
+            and with nothing of the scene waiting the command is refused. The slots' \
+            states, `queued` among them, show in `session.state`'s `launches`. It changes \
+            nothing in the set.",
     },
     Entry {
         id: "session.stop_track",
@@ -1432,6 +1503,83 @@ mod tests {
             "{playing:?}"
         );
         assert!(playing.iter().all(|entry| entry.scene == Some(scene)));
+    }
+
+    #[test]
+    fn cancelling_a_scene_launch_drops_what_it_queued_and_leaves_what_plays() {
+        // Spec: session-context-menus R10
+        let tempo = tempo();
+        let sigs = TimeSignatureMap::default();
+        let mut launcher = SessionLauncher::new(16);
+        let mut alloc = bl_core::id::IdAllocator::new();
+        let (first, second) = (SceneId(alloc.allocate()), SceneId(alloc.allocate()));
+        let (a, b, c) = (
+            TrackId(alloc.allocate()),
+            TrackId(alloc.allocate()),
+            TrackId(alloc.allocate()),
+        );
+        let bar = tempo.ticks_to_frames(Ticks::WHOLE, SampleRate::HZ_48000);
+        // Track a plays the first scene's clip, and so does c, which the
+        // second scene has nothing on.
+        launcher.launch_scene(
+            first,
+            &[
+                (first, a, LaunchMode::Trigger),
+                (first, c, LaunchMode::Trigger),
+            ],
+            playhead(&tempo, &sigs, false, Ticks::ZERO),
+        );
+        launcher.apply_due(Frames::ZERO);
+        // The second scene launches before the bar line: a takes it over
+        // from the first (its stop is queued), b starts, and its tempo waits.
+        let slots = [
+            (second, a, LaunchMode::Trigger),
+            (second, b, LaunchMode::Trigger),
+        ];
+        launcher.launch_scene(
+            second,
+            &slots,
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
+        launcher.queue_scene(second, bar);
+        assert_eq!(launcher.state_of(a, first), Some(SlotState::QueuedToStop));
+        assert_eq!(launcher.state_of(b, second), Some(SlotState::Queued));
+        launcher.cancel_scene_launch(second, &slots);
+        assert_eq!(launcher.state_of(a, first), Some(SlotState::Playing));
+        assert_eq!(launcher.state_of(a, second), None);
+        assert_eq!(launcher.state_of(b, second), None);
+        assert_eq!(launcher.state_of(c, first), Some(SlotState::Playing));
+        assert_eq!(
+            launcher.take_due_scene(bar),
+            None,
+            "the tempo never applies"
+        );
+        launcher.apply_due(bar);
+        let mut playing = Vec::with_capacity(8);
+        launcher.playback(&mut playing);
+        assert!(
+            playing.iter().all(|entry| entry.scene == Some(first)),
+            "{playing:?}"
+        );
+    }
+
+    #[test]
+    fn cancelling_a_scene_launch_leaves_a_restart_unqueued_and_a_launch_that_happened() {
+        // Spec: session-context-menus R10
+        let tempo = tempo();
+        let sigs = TimeSignatureMap::default();
+        let mut launcher = SessionLauncher::new(16);
+        let (track, scene) = ids();
+        let slots = [(scene, track, LaunchMode::Trigger)];
+        launcher.launch_scene(scene, &slots, playhead(&tempo, &sigs, false, Ticks::ZERO));
+        launcher.apply_due(Frames::ZERO);
+        launcher.launch_scene(scene, &slots, playhead(&tempo, &sigs, true, Ticks::QUARTER));
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Queued));
+        launcher.cancel_scene_launch(scene, &slots);
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
+        // Nothing queued any more: a second cancel changes nothing.
+        launcher.cancel_scene_launch(scene, &slots);
+        assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
     }
 
     #[test]

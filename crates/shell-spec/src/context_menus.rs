@@ -1,8 +1,10 @@
 //! The context menus, as data: the menu a clip opens and the menu a time
 //! selection opens in the Arrangement (WP-1.8b), the menu a device's
-//! title bar and Show Options button open (WP-2.4), and the menu a track's
-//! title bar opens (WP-4.22), in Live's order from
-//! the menu reference (C-CLIP-ARR, C-TIME, C-DEVICE, C-TRACK), each item tied to its
+//! title bar and Show Options button open (WP-2.4), the menu a track's
+//! title bar opens (WP-4.22), and the Session View's slot, clip and scene
+//! menus and the Clip View title bar's (WP-6.56), in Live's order from
+//! the menu reference (C-CLIP-ARR, C-TIME, C-DEVICE, C-TRACK, C-SLOT,
+//! C-CLIP-SES, C-SCENE, C-CLIPTITLE), each item tied to its
 //! shortcut as the menu bar's are ([`Action::Shortcut`]), so it runs the
 //! command the keymap gives that shortcut in the Arrangement, or shows
 //! disabled until a package binds it.
@@ -19,6 +21,7 @@ use crate::devices::{
     COMPARE_COPY, COMPARE_SWITCH, SAVE_DEFAULT_PRESET, SET_FLOATING, SET_ROLE, UNGROUP,
 };
 use crate::menus::{Action, IMP_12, MenuItem, Row, SEPARATOR, items};
+use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
 use crate::notes::{CHOP as CHOP_NOTES, SPLIT as SPLIT_NOTES};
 use crate::slice::OPEN as SLICE_TO_MIDI;
 use crate::stems::OPEN as SEPARATE_STEMS;
@@ -65,7 +68,11 @@ const CLIP: &[Row] = &[
     ("C-CLIP-ARR-008", "Edit Info Text", Pending(None)),
     ("C-CLIP-ARR-009", "Extract Groove(s)", Pending(None)),
     ("C-CLIP-ARR-010", "Deactivate Clip", Key(&["S-ARR-027"])),
-    ("C-CLIP-ARR-011", "Export MIDI Clip...", Pending(None)),
+    (
+        "C-CLIP-ARR-011",
+        "Export MIDI Clip...",
+        Cmd(EXPORT_MIDI_CLIP),
+    ),
     SEPARATOR,
     ("C-CLIP-ARR-012", "Loop Selection", Key(&["S-ARR-011"])),
     SEPARATOR,
@@ -422,6 +429,367 @@ pub fn track(state: TrackMenu) -> Vec<MenuItem> {
     items(&rows)
 }
 
+/// The model's command that colours the selected clips, which the palette
+/// at the end of a Session clip's menu and the Clip View title bar's menu
+/// runs.
+const SET_CLIP_COLOUR: &str = "clip.set_colour";
+
+/// The model's command that colours scenes, which the palette at the end of
+/// a scene's menu runs.
+const SET_SCENE_COLOUR: &str = "scene.set_colour";
+
+/// The row of a Session clip's Paste, straight after Copy (R2; Beatlayer's
+/// place, as menus.md records no id for it).
+pub const CLIP_SES_PASTE: &str = "C-CLIP-SES-002a";
+
+const SLOT: &[Row] = &[
+    ("C-SLOT-001", "Freeze Track", Key(&["S-TRACK-017"])),
+    (
+        "C-SLOT-002",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
+    ("C-SLOT-003", "Bounce to New Track", Key(&["S-BOUNCE-001"])),
+    ("C-SLOT-004", "Paste Bounced Audio", Key(&["S-BOUNCE-002"])),
+    SEPARATOR,
+    ("C-SLOT-005", "Crop Clip", Key(&["S-SES-028"])),
+    SEPARATOR,
+    ("C-SLOT-006", "Remove Stop Button", Key(&["S-SES-005"])),
+    ("C-SLOT-007", "Insert Empty MIDI Clip", Key(&["S-SES-007"])),
+];
+
+/// What makes an empty slot's menu differ from the base one, C-SLOT-001 to
+/// C-SLOT-007 as Live shows them on a MIDI track (C-SLOT-008, C-SLOT-009).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SlotMenu {
+    /// Something to paste is on the clipboard (C-SLOT-008).
+    pub paste: bool,
+    /// The track is a MIDI track, whose slot offers Insert Empty MIDI Clip.
+    pub midi: bool,
+    /// The track is a group (C-SLOT-009).
+    pub group: bool,
+    /// The slot's stop button was removed, so its item reads Add Stop
+    /// Button.
+    pub stop_removed: bool,
+}
+
+impl Default for SlotMenu {
+    fn default() -> Self {
+        Self {
+            paste: false,
+            midi: true,
+            group: false,
+            stop_removed: false,
+        }
+    }
+}
+
+/// The label of the stop button's item (C-SLOT-006, C-CLIP-SES-015).
+const fn stop_button(removed: bool) -> &'static str {
+    if removed {
+        "Add Stop Button"
+    } else {
+        "Remove Stop Button"
+    }
+}
+
+/// The menu an empty slot opens, by a right-click or the keys (C-SLOT), with
+/// the items `state` adds: Paste first, followed by a separator, and Bounce
+/// Group to New Track after Bounce to New Track (the session context menus
+/// spec, R1).
+#[must_use]
+pub fn slot(state: SlotMenu) -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(SLOT.len() + 3);
+    if state.paste {
+        rows.push(("C-SLOT-008", "Paste", Key(&["S-EDIT-003"])));
+        rows.push(SEPARATOR);
+    }
+    for &row in SLOT {
+        match row.0 {
+            "C-SLOT-006" => rows.push((row.0, stop_button(state.stop_removed), row.2)),
+            "C-SLOT-007" if !state.midi => {}
+            _ => rows.push(row),
+        }
+        if row.0 == "C-SLOT-003" && state.group {
+            rows.push((
+                "C-SLOT-009",
+                "Bounce Group to New Track",
+                Cmd("track.bounce_to_new_track"),
+            ));
+        }
+    }
+    items(&rows)
+}
+
+const CLIP_SES: &[Row] = &[
+    ("C-CLIP-SES-001", "Cut", Key(&["S-EDIT-001"])),
+    ("C-CLIP-SES-002", "Copy", Key(&["S-EDIT-002"])),
+    ("C-CLIP-SES-003", "Duplicate", Key(&["S-EDIT-004"])),
+    ("C-CLIP-SES-004", "Delete", Key(&["S-EDIT-005"])),
+    SEPARATOR,
+    ("C-CLIP-SES-005", "Rename", Key(&["S-EDIT-008"])),
+    ("C-CLIP-SES-006", "Edit Info Text", Pending(None)),
+    ("C-CLIP-SES-007", "Extract Groove(s)", Cmd(EXTRACT_GROOVE)),
+    ("C-CLIP-SES-008", "Deactivate Clip", Key(&["S-SES-018"])),
+    (
+        "C-CLIP-SES-009",
+        "Export MIDI Clip...",
+        Cmd(EXPORT_MIDI_CLIP),
+    ),
+    SEPARATOR,
+    ("C-CLIP-SES-010", "Freeze Track", Key(&["S-TRACK-017"])),
+    (
+        "C-CLIP-SES-011",
+        "Bounce Track in Place",
+        Cmd("track.bounce_in_place"),
+    ),
+    (
+        "C-CLIP-SES-012",
+        "Bounce to New Track",
+        Key(&["S-BOUNCE-001"]),
+    ),
+    (
+        "C-CLIP-SES-013",
+        "Paste Bounced Audio",
+        Key(&["S-BOUNCE-002"]),
+    ),
+    SEPARATOR,
+    ("C-CLIP-SES-014", "Crop Clip", Key(&["S-SES-028"])),
+    SEPARATOR,
+    ("C-CLIP-SES-015", "Remove Stop Button", Key(&["S-SES-005"])),
+    (
+        "C-CLIP-SES-016",
+        "Create Follow Action Chain",
+        Key(&["S-SES-014"]),
+    ),
+    SEPARATOR,
+    (
+        "C-CLIP-SES-017",
+        "Select on Launch (Pref)",
+        Cmd("settings.set_select_on_launch"),
+    ),
+    SEPARATOR,
+    ("C-CLIP-SES-018", "Colour palette", Cmd(SET_CLIP_COLOUR)),
+];
+
+/// The rows an audio clip's Session menu adds after Crop Clip and a
+/// separator, in the Arrangement's audio clip menu's order (C-CLIP-SES-019,
+/// C-CLIP-SES-020; the session context menus spec, R2).
+const CLIP_SES_AUDIO: &[Row] = &[
+    SEPARATOR,
+    (
+        "C-CLIP-SES-019a",
+        "Slice to New MIDI Track",
+        Cmd(SLICE_TO_MIDI),
+    ),
+    (
+        "C-CLIP-SES-019b",
+        "Convert Harmony to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-SES-019c",
+        "Convert Melody to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-SES-019d",
+        "Convert Drums to New MIDI Track",
+        Pending(None),
+    ),
+    (
+        "C-CLIP-SES-020",
+        "Separate Stems to New Audio Tracks",
+        Pending(None),
+    ),
+];
+
+/// What makes a Session clip's menu differ from the base one, C-CLIP-SES-001
+/// to C-CLIP-SES-018 as Live shows them on a MIDI clip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SessionClipMenu {
+    /// Something to paste is on the clipboard: Paste comes straight after
+    /// Copy.
+    pub paste: bool,
+    /// The clip is a MIDI clip, whose menu has Export MIDI Clip....
+    pub midi: bool,
+    /// The clip is an audio clip, whose menu adds the Slice, Convert and
+    /// Separate Stems items after Crop Clip (C-CLIP-SES-019, C-CLIP-SES-020).
+    pub audio: bool,
+    /// The slot's stop button was removed, so its item reads Add Stop
+    /// Button.
+    pub stop_removed: bool,
+}
+
+impl Default for SessionClipMenu {
+    fn default() -> Self {
+        Self {
+            paste: false,
+            midi: true,
+            audio: false,
+            stop_removed: false,
+        }
+    }
+}
+
+/// The menu a clip in a Session slot opens (C-CLIP-SES), with the items
+/// `state` adds.
+#[must_use]
+pub fn session_clip(state: SessionClipMenu) -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(CLIP_SES.len() + CLIP_SES_AUDIO.len() + 1);
+    for &row in CLIP_SES {
+        match row.0 {
+            "C-CLIP-SES-009" if !state.midi => continue,
+            "C-CLIP-SES-015" => rows.push((row.0, stop_button(state.stop_removed), row.2)),
+            _ => rows.push(row),
+        }
+        match row.0 {
+            "C-CLIP-SES-002" if state.paste => {
+                rows.push((CLIP_SES_PASTE, "Paste", Key(&["S-EDIT-003"])));
+            }
+            "C-CLIP-SES-014" if state.audio => rows.extend_from_slice(CLIP_SES_AUDIO),
+            _ => {}
+        }
+    }
+    items(&rows)
+}
+
+const SCENE: &[Row] = &[
+    ("C-SCENE-001", "Cut", Key(&["S-EDIT-001"])),
+    ("C-SCENE-002", "Copy", Key(&["S-EDIT-002"])),
+    ("C-SCENE-003", "Duplicate", Key(&["S-EDIT-004"])),
+    ("C-SCENE-004", "Delete", Key(&["S-EDIT-005"])),
+    SEPARATOR,
+    ("C-SCENE-005", "Rename", Key(&["S-EDIT-008"])),
+    ("C-SCENE-006", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    ("C-SCENE-007", "Insert Scene", Key(&["S-SES-008"])),
+    (
+        "C-SCENE-008",
+        "Capture and Insert Scene",
+        Key(&["S-SES-009"]),
+    ),
+    SEPARATOR,
+    (
+        "C-SCENE-009",
+        "Select All Slots in Scene",
+        Cmd(SELECT_SCENE_SLOTS),
+    ),
+    SEPARATOR,
+    (
+        "C-SCENE-010",
+        "Cancel Scene Launch",
+        Cmd(CANCEL_SCENE_LAUNCH),
+    ),
+    SEPARATOR,
+    (
+        "C-SCENE-011",
+        "Select Next Scene on Launch (Pref)",
+        Cmd("settings.set_select_next_scene_on_launch"),
+    ),
+    (
+        "C-SCENE-012",
+        "Trigger Recording on Launch (Pref)",
+        Cmd("settings.set_start_recording_on_scene_launch"),
+    ),
+    SEPARATOR,
+    (
+        "C-SCENE-013",
+        "Scene Tempo and Time Signature",
+        Cmd("mixer_view.scene_tempo"),
+    ),
+    SEPARATOR,
+    ("C-SCENE-014", "No Color", Cmd(SET_SCENE_COLOUR)),
+];
+
+/// The scene menu's item that selects every slot of the selected scenes
+/// (C-SCENE-009). It runs `session.select` once for each slot, so it has no
+/// command of its own: the UI draws it.
+pub const SELECT_SCENE_SLOTS: &str = "session.select";
+
+/// The scene menu's Cancel Scene Launch (C-SCENE-010).
+pub const CANCEL_SCENE_LAUNCH: &str = "session.cancel_scene_launch";
+
+/// The model's command that makes a groove of each clip.
+const EXTRACT_GROOVE: &str = "groove.extract";
+
+/// What makes a scene's menu differ from the base one, C-SCENE-001 to
+/// C-SCENE-014.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SceneMenu {
+    /// Something to paste is on the clipboard: Paste (C-SCENE-015) comes
+    /// straight after Copy.
+    pub paste: bool,
+}
+
+/// The menu a scene opens (C-SCENE), from the Main track's column or the
+/// Scene View's title bar, with the items `state` adds.
+#[must_use]
+pub fn scene(state: SceneMenu) -> Vec<MenuItem> {
+    let mut rows = Vec::with_capacity(SCENE.len() + 1);
+    for &row in SCENE {
+        rows.push(row);
+        if row.0 == "C-SCENE-002" && state.paste {
+            rows.push(("C-SCENE-015", "Paste", Key(&["S-EDIT-003"])));
+        }
+    }
+    items(&rows)
+}
+
+/// The row of a scene field's one item, Return to Default (C-SCENE-016): it
+/// runs `scene.set_tempo` on the tempo field and `scene.set_time_signature`
+/// on the signature's, each with no value.
+#[must_use]
+pub fn scene_field(tempo: bool) -> Vec<MenuItem> {
+    items(&[(
+        "C-SCENE-016",
+        "Return to Default",
+        Cmd(if tempo {
+            "scene.set_tempo"
+        } else {
+            "scene.set_time_signature"
+        }),
+    )])
+}
+
+/// The row of the Clip View title bar's Rename (C-CLIPTITLE-001).
+pub const CLIP_TITLE_RENAME: &str = "C-CLIPTITLE-001";
+
+/// The row of the Clip View title bar's colour palette (C-CLIPTITLE-003).
+pub const CLIP_TITLE_COLOUR: &str = "C-CLIPTITLE-003";
+
+const CLIP_TITLE: &[Row] = &[
+    (CLIP_TITLE_RENAME, "Rename", Key(&["S-EDIT-008"])),
+    ("C-CLIPTITLE-002", "Edit Info Text", Pending(None)),
+    SEPARATOR,
+    (CLIP_TITLE_COLOUR, "Colour palette", Cmd(SET_CLIP_COLOUR)),
+    SEPARATOR,
+    ("C-CLIPTITLE-004", "Fold", Pending(None)),
+    SEPARATOR,
+    (
+        "C-CLIPTITLE-005",
+        "Arrange Clip View Panels Automatically",
+        Pending(None),
+    ),
+    (
+        "C-CLIPTITLE-006",
+        "Arrange Clip View Panels Horizontally",
+        Pending(None),
+    ),
+    (
+        "C-CLIPTITLE-007",
+        "Arrange Clip View Panels Vertically",
+        Pending(None),
+    ),
+];
+
+/// The menu the Clip View's title bar opens (C-CLIPTITLE), in Beatlayer's own
+/// order (the session context menus spec, R4).
+#[must_use]
+pub fn clip_title() -> Vec<MenuItem> {
+    items(CLIP_TITLE)
+}
+
 /// The menu a note or the empty grid in the MIDI Note Editor opens
 /// (C-NOTE), as the piano roll spec's R30 says. Live's order and
 /// separators weren't recorded, so the rows are the manual's and the release
@@ -493,6 +861,14 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
     match row {
         "C-DEVICE-005" | "C-CLIP-ARR-008" | "C-TRACK-006" | "R26-info" => {
             Some("WP-2.24 (the Info View)")
+        }
+        "C-CLIP-SES-006" | "C-SCENE-006" | "C-CLIPTITLE-002" => Some("WP-6.58 (Edit Info Text)"),
+        "C-CLIP-SES-019b" | "C-CLIP-SES-019c" | "C-CLIP-SES-019d" => {
+            Some("Phase 9 (audio to MIDI, IMP-06)")
+        }
+        "C-CLIP-SES-020" => Some("Phase 9 (stem separation of Session clips, IMP-11)"),
+        "C-CLIPTITLE-004" | "C-CLIPTITLE-005" | "C-CLIPTITLE-006" | "C-CLIPTITLE-007" => {
+            Some("WP-6.72 (the Clip View panels' layout)")
         }
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
@@ -995,6 +1371,10 @@ mod tests {
             (note(), "(C-NOTE)"),
             (keys(), "(C-KEYS)"),
             (loop_bar(), "(C-LOOPBAR)"),
+            (slot(SlotMenu::default()), "(C-SLOT)"),
+            (session_clip(SessionClipMenu::default()), "(C-CLIP-SES)"),
+            (scene(SceneMenu::default()), "(C-SCENE)"),
+            (clip_title(), "(C-CLIPTITLE)"),
         ] {
             let Some(theirs) = reference(heading) else {
                 return;
@@ -1007,6 +1387,12 @@ mod tests {
                     None => assert!(item.is_separator(), "{heading}: {}", item.row),
                     Some((id, label)) => {
                         assert_eq!(item.row, id);
+                        // The Clip View title bar's rows describe their item
+                        // after its name.
+                        if id.starts_with("C-CLIPTITLE") {
+                            assert!(label.starts_with(item.label), "{id}: {label}");
+                            continue;
+                        }
                         // A row of choices is named for its kind, and the
                         // reference names the choices after the colon.
                         let choices = ADAPTIVE_GRID_ROWS.contains(&id.as_str())
@@ -1018,6 +1404,8 @@ mod tests {
                             label
                         };
                         let label = label.trim_end_matches(" choices");
+                        // The scene's last row is No Color and the palette.
+                        let label = label.split(", then").next().unwrap();
                         // The note editor's rows name their shortcut.
                         let label = label.split(" (S-").next().unwrap();
                         // A submenu's label ends with the arrow menus.md
@@ -1028,6 +1416,145 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Spec: session-context-menus R1, R13
+    #[test]
+    fn a_slots_menu_adds_paste_and_the_group_bounce_where_the_spec_puts_them() {
+        let rows = |state| -> Vec<&'static str> { slot(state).iter().map(|i| i.row).collect() };
+        let base = rows(SlotMenu::default());
+        assert_eq!(base[0], "C-SLOT-001");
+        let paste = rows(SlotMenu {
+            paste: true,
+            ..SlotMenu::default()
+        });
+        assert_eq!(&paste[..3], ["C-SLOT-008", "", "C-SLOT-001"]);
+        let group = rows(SlotMenu {
+            group: true,
+            ..SlotMenu::default()
+        });
+        let at = group.iter().position(|r| *r == "C-SLOT-003").unwrap();
+        assert_eq!(group[at + 1], "C-SLOT-009");
+        let audio = rows(SlotMenu {
+            midi: false,
+            ..SlotMenu::default()
+        });
+        assert!(!audio.contains(&"C-SLOT-007"));
+        // Add Stop Button reads for a slot without one.
+        let removed = slot(SlotMenu {
+            stop_removed: true,
+            ..SlotMenu::default()
+        });
+        let stop = removed.iter().find(|i| i.row == "C-SLOT-006").unwrap();
+        assert_eq!(stop.label, "Add Stop Button");
+        assert_eq!(stop.action, Key(&["S-SES-005"]));
+    }
+
+    // Spec: session-context-menus R2, R13
+    #[test]
+    fn a_session_clips_menu_adds_paste_the_audio_rows_and_leaves_out_the_midi_export() {
+        let menu = |state| session_clip(state);
+        let rows = |state| -> Vec<&'static str> { menu(state).iter().map(|i| i.row).collect() };
+        let paste = rows(SessionClipMenu {
+            paste: true,
+            ..SessionClipMenu::default()
+        });
+        assert_eq!(
+            &paste[..3],
+            ["C-CLIP-SES-001", "C-CLIP-SES-002", CLIP_SES_PASTE]
+        );
+        let audio = menu(SessionClipMenu {
+            midi: false,
+            audio: true,
+            ..SessionClipMenu::default()
+        });
+        assert!(!audio.iter().any(|i| i.row == "C-CLIP-SES-009"));
+        let crop = audio
+            .iter()
+            .position(|i| i.row == "C-CLIP-SES-014")
+            .unwrap();
+        assert!(audio[crop + 1].is_separator());
+        let labels: Vec<&str> = audio[crop + 2..crop + 7].iter().map(|i| i.label).collect();
+        assert_eq!(
+            labels,
+            [
+                "Slice to New MIDI Track",
+                "Convert Harmony to New MIDI Track",
+                "Convert Melody to New MIDI Track",
+                "Convert Drums to New MIDI Track",
+                "Separate Stems to New Audio Tracks"
+            ]
+        );
+        // The rest of the audio rows are the same as the Arrangement's.
+        assert_eq!(audio[crop + 2].command(), Some(SLICE_TO_MIDI));
+    }
+
+    // Spec: session-context-menus R3
+    #[test]
+    fn a_scenes_menu_adds_paste_after_copy_and_a_field_offers_return_to_default() {
+        let paste = scene(SceneMenu { paste: true });
+        let copy = paste.iter().position(|i| i.row == "C-SCENE-002").unwrap();
+        assert_eq!(paste[copy + 1].row, "C-SCENE-015");
+        assert_eq!(paste[copy + 1].label, "Paste");
+        assert_eq!(scene_field(true)[0].command(), Some("scene.set_tempo"),);
+        assert_eq!(
+            scene_field(false)[0].command(),
+            Some("scene.set_time_signature"),
+        );
+        assert_eq!(scene_field(true)[0].row, "C-SCENE-016");
+    }
+
+    // Spec: session-context-menus R13
+    #[test]
+    fn the_session_menus_pending_items_name_their_package() {
+        let every = [
+            slot(SlotMenu {
+                paste: true,
+                group: true,
+                ..SlotMenu::default()
+            }),
+            session_clip(SessionClipMenu {
+                paste: true,
+                audio: true,
+                ..SessionClipMenu::default()
+            }),
+            scene(SceneMenu { paste: true }),
+            clip_title(),
+        ];
+        let mut pending = Vec::new();
+        for item in every.into_iter().flatten() {
+            if matches!(item.action, Pending(_)) {
+                assert!(pending_package(item.row).is_some(), "{}", item.row);
+                pending.push(item.row);
+            }
+        }
+        // Only the items whose commands still wait for a package.
+        assert_eq!(
+            pending,
+            [
+                "C-CLIP-SES-006",
+                "C-CLIP-SES-019b",
+                "C-CLIP-SES-019c",
+                "C-CLIP-SES-019d",
+                "C-CLIP-SES-020",
+                "C-SCENE-006",
+                "C-CLIPTITLE-002",
+                "C-CLIPTITLE-004",
+                "C-CLIPTITLE-005",
+                "C-CLIPTITLE-006",
+                "C-CLIPTITLE-007",
+            ]
+        );
+    }
+
+    // Spec: session-context-menus R16
+    #[test]
+    fn the_arrangement_clips_export_runs_the_midi_export() {
+        let export = arrangement_clip()
+            .into_iter()
+            .find(|i| i.row == "C-CLIP-ARR-011")
+            .unwrap();
+        assert_eq!(export.command(), Some("midi.export_clip"));
     }
 
     // Spec: track-context-menu R10, comping R29

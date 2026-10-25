@@ -1848,6 +1848,27 @@ impl Host {
                     ));
                 }
             }
+            Effect::PickMidiExportPath { clip, default_name } => {
+                // Spec: session-context-menus R7, R16. Export MIDI Clip...
+                // asks where to save the clip's file. The dialog asks about
+                // a file already there, so the export may replace it.
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Export MIDI Clip")
+                    .add_filter("MIDI File", &["mid", "midi"])
+                    .set_file_name(default_name);
+                if let Some(folder) = self.shell.save_dialog_folder() {
+                    dialog = dialog.set_directory(folder);
+                }
+                if let Some(main) = &self.main {
+                    dialog = dialog.set_parent(main.window.as_ref());
+                }
+                if let Some(path) = dialog.save_file() {
+                    self.invoke(&Invocation::new(
+                        bl_shell::midi_file_commands::EXPORT,
+                        json!({ "clip": clip, "path": path.to_string_lossy(), "replace": true }),
+                    ));
+                }
+            }
             Effect::PickExportPath { file_name, folder } => {
                 self.pick_export_path(&file_name, folder.as_deref());
             }
@@ -1876,6 +1897,8 @@ impl Host {
             | Effect::RenameMacro(_, _)
             | Effect::RenameVariation(_, _)
             | Effect::RenameTrack(_)
+            | Effect::RenameClip(_)
+            | Effect::RenameScene(_)
             | Effect::RenameLocator(_)
             | Effect::RenameTakeLane(_) => {
                 // The renaming happens in the window in front.

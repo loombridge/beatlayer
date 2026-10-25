@@ -245,13 +245,39 @@ fn title_bar(
             theme.swatch(*swatch),
         );
     }
-    ui.painter().text(
-        pos2(rect.left() + 6.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        &value.name,
-        theme.small_font(),
-        c.text.0,
+    // Spec: session-context-menus R4, R9, R14. A right-click on the title
+    // bar, or the keys while the Clip View has the keyboard, open its menu;
+    // Rename types the name over it.
+    let bar = ui.interact(rect, Id::new("clip-title-bar"), Sense::click());
+    let focused = crate::window::has_focus(ui.ctx(), shell, Area::Detail);
+    let mut menu_events = Vec::new();
+    crate::session_menus::SessionMenus::default().clip_title(
+        ui,
+        theme,
+        &bar,
+        shell,
+        focused,
+        &mut menu_events,
     );
+    events.extend(menu_events);
+    let clips = crate::session_menus::title_clips(shell);
+    let renaming = crate::session_menus::rename_edit(
+        ui,
+        theme,
+        rect,
+        &crate::session_menus::Rename::Title(clips),
+        &value.name,
+        events,
+    );
+    if !renaming {
+        ui.painter().text(
+            pos2(rect.left() + 6.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            &value.name,
+            theme.small_font(),
+            c.text.0,
+        );
+    }
     // The Save Default Clip button.
     let button = Rect::from_min_size(
         pos2(rect.right() - 98.0, rect.top() + 1.0),

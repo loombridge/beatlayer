@@ -37,6 +37,7 @@ use crate::layout::mixer::{
     StatusCells,
 };
 use crate::main_window::UiEvent;
+use crate::session_menus::{Rename, SessionMenus};
 use crate::theme::Theme;
 
 /// The ID of the grid's group, which takes the keyboard when a slot or a
@@ -124,6 +125,8 @@ pub struct GridUi {
     /// The slot under the pointer in the last frame, which clips dragged
     /// from the Arrangement are dropped on (second-window R21).
     hover: Option<(TrackId, SceneId)>,
+    /// The slot and scene menus (WP-6.56).
+    menus: SessionMenus,
 }
 
 impl GridUi {
@@ -356,6 +359,26 @@ impl GridUi {
             format!("{track_name}: {scene_name} (empty)")
         };
         response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &label));
+        // Spec: session-context-menus R1, R2, R14. A right-click, or the keys
+        // while the grid has the keyboard, opens the slot's or the clip's
+        // menu.
+        let first = self.focused
+            && shell
+                .session()
+                .selected_slots()
+                .first()
+                .is_some_and(|slot| slot.track == track && slot.scene == scene);
+        if t.kind().can_be_grouped() {
+            self.menus.slot(
+                ui,
+                theme,
+                &response,
+                shell,
+                (track, scene),
+                (cell.center(), first),
+                events,
+            );
+        }
         ui.ctx()
             .accesskit_node_builder(slot_id(track, scene), |node| {
                 node.set_role(Role::ListItem);
@@ -400,6 +423,18 @@ impl GridUi {
                 0.0,
                 Stroke::new(1.5, theme.colors.focus.0),
                 StrokeKind::Outside,
+            );
+        }
+        // Spec: session-context-menus R7. Rename types the clip's name over
+        // its slot.
+        if let Some(held) = clip {
+            crate::session_menus::rename_edit(
+                ui,
+                theme,
+                cell,
+                &Rename::Clip(held.id),
+                &held.name,
+                events,
             );
         }
         // The launch triangle on a slot with a clip, the stop square on an
@@ -763,9 +798,29 @@ impl GridUi {
             let modifiers = ui.input(|i| i.modifiers);
             select(events, None, Some(scene), click_mode(modifiers));
         }
+        // Spec: session-context-menus R3, R14. A right-click on the scene's
+        // launch button, name or number, or the keys while the grid has the
+        // keyboard, open the scene's menu.
+        let first = self.focused && state.slots.is_empty() && state.scenes.first() == Some(&scene);
+        let at = row_rect.center();
+        self.menus
+            .scene(ui, theme, &launch, shell, scene, (at, false), events);
+        self.menus
+            .scene(ui, theme, &response, shell, scene, (at, first), events);
         if fields {
             self.scene_fields(ui, shell, theme, row, scene, events);
         }
+        // Spec: session-context-menus R8. Rename types the name in the
+        // scene's name field.
+        let held = shell.editor().document().scene(scene);
+        crate::session_menus::rename_edit(
+            ui,
+            theme,
+            row.name.shrink(1.0),
+            &Rename::Scene(scene),
+            held.map_or("", |scene| scene.name.as_str()),
+            events,
+        );
     }
 
     /// The scene's tempo, and the numerator and denominator of its time
@@ -795,10 +850,11 @@ impl GridUi {
         }
     }
 
-    /// The arrow keys, Delete, and Esc the grid reads itself, because each
-    /// of their shortcuts has keys that act differently (the keymap gives a
-    /// shortcut one command with one set of arguments), and because a
-    /// focused value field keeps Delete for itself.
+    /// The arrow keys and Esc the grid reads itself, because each of their
+    /// shortcuts has keys that act differently (the keymap gives a shortcut
+    /// one command with one set of arguments). Delete is the keymap's:
+    /// S-EDIT-005 runs `session.delete` in the Session View, and a focused
+    /// scene field keeps the key for itself (session-context-menus R11).
     fn keys(
         &mut self,
         ui: &Ui,
@@ -834,7 +890,7 @@ impl GridUi {
                 );
             });
         }
-        let (up, down, left, right, page_up, page_down, delete, esc, extend) = ui.input(|i| {
+        let (up, down, left, right, page_up, page_down, esc, extend) = ui.input(|i| {
             let pressed = |key: Key| {
                 i.events.iter().any(|event| {
                     matches!(
@@ -851,7 +907,6 @@ impl GridUi {
                 pressed(Key::ArrowRight),
                 pressed(Key::PageUp),
                 pressed(Key::PageDown),
-                pressed(Key::Delete),
                 pressed(Key::Escape),
                 i.modifiers.shift,
             )
@@ -883,12 +938,6 @@ impl GridUi {
         if esc {
             // S-SES-019: Esc goes to the highlighted track's title bar.
             select(events, Some(columns[track_at]), None, "replace");
-            return;
-        }
-        if delete && (!state.slots.is_empty() || !state.scenes.is_empty()) {
-            // Delete removes the selected clips or scenes (S-EDIT-005); the
-            // grid reads the key itself so a focused value field keeps it.
-            events.push(UiEvent::Invoke(Invocation::new(ids::DELETE, json!({}))));
             return;
         }
         let scene_step = if page_up {

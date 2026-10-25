@@ -1,12 +1,14 @@
 //! Launching clips and scenes in the Session View.
 
-use super::{Shell, ShellError, to_value};
+use super::{Effect, Shell, ShellError, to_value};
 use bl_commands::NoArgs;
 use bl_engine::session as engine_session;
 use bl_model::LaunchSettings;
+use bl_model::SceneId;
 use bl_model::TrackId;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_view as session_ids;
+use bl_shell_spec::session_view::{LaunchState, SlotLaunch, SlotRef};
 use serde_json::Value;
 use serde_json::json;
 
@@ -178,6 +180,19 @@ impl Shell {
     ) -> Result<Value, ShellError> {
         // Spec: launch-quantisation R9. The grid's launch buttons, the
         // status row, and agents all reach the engine's launching here.
+        if id == "session.cancel_scene_launch" {
+            // Spec: session-context-menus R10. With nothing of the scene
+            // waiting for its line there is no launch to cancel.
+            let scene = args
+                .get("scene")
+                .and_then(|scene| serde_json::from_value::<SceneId>(scene.clone()).ok());
+            if scene.is_some_and(|scene| !self.scene_launch_queued(scene)) {
+                return Err(ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "no clip of that scene is waiting to launch".to_owned(),
+                });
+            }
+        }
         let command =
             engine_session::command_from_args(id, Self::object(args)).map_err(|error| {
                 ShellError::InvalidArgs {
@@ -232,8 +247,131 @@ impl Shell {
         result.map(|outcome| outcome.value)
     }
 
+    /// What the clipboard holds for the Session View to paste, for the
+    /// context menus to offer Paste: clips (copied from slots, or Arrangement
+    /// material) and scenes.
+    #[must_use]
+    pub fn session_clipboard(&self) -> (bool, bool) {
+        use crate::shell::Clipboard;
+        match self.clipboard() {
+            Some(Clipboard::Slots(slots)) => (!slots.clips.is_empty(), false),
+            Some(Clipboard::Material(material)) => (!material.lanes.is_empty(), false),
+            Some(Clipboard::Scenes(scenes)) => (false, !scenes.scenes.is_empty()),
+            _ => (false, false),
+        }
+    }
+
+    /// Whether a clip of `scene` waits for its line of the launch
+    /// quantisation grid, as the engine last published the slots.
+    #[must_use]
+    pub fn scene_launch_queued(&self, scene: SceneId) -> bool {
+        self.session_states
+            .iter()
+            .any(|slot| slot.scene == scene && slot.state == bl_engine::SlotState::Queued)
+    }
+
+    /// Whether a Session View command can run on the selection now: the
+    /// context menus' enabled states (session-context-menus R12). `None` for
+    /// a command that always can.
+    pub(super) fn can_session_view(&self, id: &str, args: &Value) -> Option<bool> {
+        let doc = self.editor.document();
+        let given = |key: &str| args.get(key).is_some();
+        let clips = || {
+            self.session
+                .selected_slots()
+                .iter()
+                .any(|slot| doc.slot(slot.track, slot.scene).is_some())
+        };
+        let scenes = || !self.session.state().scenes.is_empty();
+        Some(match id {
+            session_ids::DELETE | session_ids::RENAME => clips() || scenes(),
+            session_ids::DEACTIVATE
+            | session_ids::CREATE_FOLLOW_ACTION_CHAIN
+            | session_ids::TOGGLE_FOLLOW_ACTIONS => clips(),
+            session_ids::DUPLICATE_SCENE => given("scene") || scenes(),
+            session_ids::INSERT_EMPTY_MIDI_CLIP => {
+                let slot = match (args.get("track"), args.get("scene")) {
+                    (Some(track), Some(scene)) => serde_json::from_value(track.clone())
+                        .ok()
+                        .zip(serde_json::from_value(scene.clone()).ok()),
+                    _ => self
+                        .session
+                        .selected_slots()
+                        .first()
+                        .map(|slot| (slot.track, slot.scene)),
+                };
+                slot.is_some_and(|(track, scene)| {
+                    doc.slot(track, scene).is_none()
+                        && doc
+                            .track(track)
+                            .is_some_and(|t| t.kind() == bl_model::TrackKind::Midi)
+                })
+            }
+            "session.cancel_scene_launch" => args
+                .get("scene")
+                .and_then(|scene| serde_json::from_value::<SceneId>(scene.clone()).ok())
+                .is_some_and(|scene| self.scene_launch_queued(scene)),
+            _ => return None,
+        })
+    }
+
+    /// `session.rename`: starts typing a new name for the selected clip, or
+    /// else for the selected scene.
+    fn run_session_rename(&mut self, id: &str) -> Result<Value, ShellError> {
+        let doc = self.editor.document();
+        let clip = self
+            .session
+            .selected_slots()
+            .iter()
+            .find_map(|slot| doc.slot(slot.track, slot.scene))
+            .map(|clip| clip.id);
+        let effect = match (clip, self.session.state().scenes.first()) {
+            (Some(clip), _) => Effect::RenameClip(clip),
+            (None, Some(scene)) => Effect::RenameScene(*scene),
+            (None, None) => {
+                return Err(ShellError::Unavailable {
+                    command: id.to_owned(),
+                    reason: "select a clip or a scene first".to_owned(),
+                });
+            }
+        };
+        self.effects.push(effect);
+        self.touch();
+        Ok(Value::Null)
+    }
+
+    /// The slots the engine has queued, is playing or records into, for
+    /// `session.state`.
+    fn session_launches(&self) -> Vec<SlotLaunch> {
+        self.session_states
+            .iter()
+            .map(|status| SlotLaunch {
+                slot: SlotRef {
+                    track: status.track,
+                    scene: status.scene,
+                },
+                state: match status.state {
+                    bl_engine::SlotState::Queued => LaunchState::Queued,
+                    bl_engine::SlotState::Playing => LaunchState::Playing,
+                    bl_engine::SlotState::QueuedToStop => LaunchState::QueuedToStop,
+                    bl_engine::SlotState::Recording => LaunchState::Recording,
+                },
+            })
+            .collect()
+    }
+
     /// Runs the Session View's commands.
     pub(super) fn run_session_view(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if id == session_ids::RENAME {
+            Self::args::<NoArgs>(id, args)?;
+            return self.run_session_rename(id);
+        }
+        if id == session_ids::STATE {
+            Self::args::<NoArgs>(id, args)?;
+            let mut state = self.session.state();
+            state.launches = self.session_launches();
+            return Ok(to_value(&state));
+        }
         if crate::session_clips::handles(id) {
             return self.run_session_clips(id, args);
         }

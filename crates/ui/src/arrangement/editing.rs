@@ -15,6 +15,7 @@ use bl_core::time::Ticks;
 use bl_model::{ClipData, ClipId, Document, TakeLaneId, TrackId, comp};
 use bl_shell::arrangement::editing::{earliest_move, resize_limits};
 use bl_shell::arrangement::rows::{Row, first_row_at};
+use bl_shell::arrangement::snapping::{Dragged, Snapped};
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands as view_ids;
 use bl_shell::arrangement_commands::{FadeHandle, FadeHandleState, Lane};
@@ -540,16 +541,16 @@ impl ClipGestures {
             ClipDrag::Move {
                 anchor,
                 clips,
-                grab,
                 start,
                 track,
                 lane,
                 earliest,
+                ..
             } => {
-                // Spec: arrangement-editing R4: the grabbed clip's start
-                // lands on the grid.
-                let snapped = lanes.view.snap_drag(lanes.doc, at - *grab, keys.bypass);
-                let by = (snapped - *start).max(*earliest);
+                // Spec: arrangement-editing R4, R21: the grabbed clip's
+                // start lands on the grid, or its start or end on an item.
+                let snapped = self.snapped(lanes, at, keys)?;
+                let by = (snapped.at - *start).max(*earliest);
                 // Spec: comping R27. The clip goes to the lane under the
                 // pointer, a take lane or the track's main lane.
                 let (to_track, to_lane) = lanes
@@ -576,12 +577,13 @@ impl ClipGestures {
                 anchor,
                 clips,
                 edge,
-                grab,
                 at: from,
                 limits,
+                ..
             } => {
-                let snapped = lanes.view.snap_drag(lanes.doc, at - *grab, keys.bypass);
-                let by = (snapped - *from).clamp(limits.0, limits.1);
+                // Spec: arrangement-editing R7, R22.
+                let snapped = self.snapped(lanes, at, keys)?;
+                let by = (snapped.at - *from).clamp(limits.0, limits.1);
                 Some((
                     ids::RESIZE_CLIPS,
                     json!({ "clips": clips, "anchor": anchor, "edge": edge, "by": by }),
@@ -627,6 +629,61 @@ impl ClipGestures {
                 ))
             }
         }
+    }
+
+    /// Where a move or a resize dragged to `at` lands before its limits, on
+    /// the grid or an item (arrangement-editing R21, R22).
+    fn snapped(&self, lanes: &Lanes<'_>, at: Ticks, keys: EditKeys) -> Option<Snapped> {
+        let (clips, from, span) = match self.drag.as_ref()? {
+            ClipDrag::Move {
+                clips,
+                anchor,
+                grab,
+                ..
+            } => (clips, at - *grab, lanes.doc.clip(*anchor)?.length),
+            ClipDrag::Resize { clips, grab, .. } => (clips, at - *grab, Ticks::ZERO),
+            _ => return None,
+        };
+        // A copy's frames leave the last frame's copies in the set, which
+        // are the selection: they are carried too.
+        let carried: Vec<ClipId> = clips
+            .iter()
+            .chain(lanes.view.selected_clips())
+            .copied()
+            .collect();
+        Some(lanes.view.snap_to_items(
+            lanes.doc,
+            from,
+            span,
+            Dragged {
+                clips: &carried,
+                ..Dragged::default()
+            },
+            lanes.horizontal.ticks_per_point,
+            keys.bypass,
+        ))
+    }
+
+    /// The position a move or resize is snapped to an item at, for the line
+    /// the lanes show: none where the grid or the drag's limits decided.
+    #[must_use]
+    pub(super) fn snap_line(
+        &self,
+        lanes: &Lanes<'_>,
+        pointer: Pos2,
+        keys: EditKeys,
+    ) -> Option<Ticks> {
+        let snapped = self.snapped(lanes, lanes.at(pointer), keys)?;
+        let landed = match self.drag.as_ref()? {
+            ClipDrag::Move {
+                start, earliest, ..
+            } => *start + (snapped.at - *start).max(*earliest),
+            ClipDrag::Resize {
+                at: from, limits, ..
+            } => *from + (snapped.at - *from).clamp(limits.0, limits.1),
+            _ => return None,
+        };
+        snapped.line.filter(|_| landed == snapped.at)
     }
 
     /// The stretch a Draw Mode drag has covered at `pointer`, earliest first,

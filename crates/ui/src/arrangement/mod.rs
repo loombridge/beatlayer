@@ -34,6 +34,7 @@ use bl_core::time::Ticks;
 use bl_media::PeakEvent;
 use bl_model::{ClipId, Document, TrackId, TrackKind};
 use bl_shell::arrangement::rows::{DROP_AREA, FOLDED_HEIGHT, Row, rows_between};
+use bl_shell::arrangement::snapping::Dragged;
 use bl_shell::arrangement::{ArrangementView, Horizontal};
 use bl_shell::arrangement_commands::{self as ids, Lane};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
@@ -205,6 +206,10 @@ pub struct ArrangementUi {
     /// The playhead the last frame drew: its position and its x, if it was
     /// in view (WP-1.18).
     playhead: Option<(Ticks, f32)>,
+    /// Where the drag under way is snapped to an item (a clip edge, a
+    /// locator or a signature marker), which the lanes show as a line
+    /// (arrangement-editing R23).
+    snap_line: Option<Ticks>,
     /// The locator being dragged in the scrub area, if a drag is under way
     /// (WP-6.24).
     locator_drag: Option<bl_model::LocatorId>,
@@ -361,6 +366,7 @@ impl ArrangementUi {
             track_menus: TrackMenus::default(),
             lane_menus: TakeLaneMenus::default(),
             playhead: None,
+            snap_line: None,
             locator_drag: None,
             locators_drawn: Vec::new(),
             mixer: None,
@@ -398,6 +404,13 @@ impl ArrangementUi {
     #[must_use]
     pub fn drawn_playhead(&self) -> Option<(Ticks, f32)> {
         self.playhead
+    }
+
+    /// The point the last frame drew the snap line at, if a drag was
+    /// snapped to an item (arrangement-editing R23).
+    #[must_use]
+    pub fn drawn_snap_line(&self) -> Option<Ticks> {
+        self.snap_line
     }
 
     /// Where the last frame put the Arrangement's mixer, if it shows: the
@@ -770,6 +783,21 @@ impl ArrangementUi {
             );
         }
 
+        // Arrangement-editing R23: the point a drag snapped to, through the
+        // lanes.
+        if let Some(at) = self.snap_line {
+            let x = lanes.left() + horizontal.x(at) as f32;
+            if x >= lanes.left() && x <= lanes.right() {
+                rulers::marker(
+                    &ui.painter_at(lanes),
+                    x,
+                    lanes.top(),
+                    lanes.bottom(),
+                    theme.colors.insert_marker.0,
+                );
+            }
+        }
+
         // The controls above the track headers, then the headers: the
         // controls come first in the Tab order (accessibility R10).
         self.header_controls(ui, view, doc, theme, &layout, events);
@@ -1046,6 +1074,9 @@ impl ArrangementUi {
             }
             self.drag = None;
         }
+        self.snap_line = pointer
+            .filter(|_| response.dragged() && self.drag == Some(Drag::Clips))
+            .and_then(|pos| self.clips.snap_line(&clip_lanes, pos, keys));
         if let Some(hover) = response.hover_pos()
             && !pan_keys
             && let Some(icon) = self.clips.cursor(&clip_lanes, hover, keys)
@@ -1666,7 +1697,23 @@ impl ArrangementUi {
                 && self.locator_drag == Some(locator.id)
                 && let Some(pos) = response.interact_pointer_pos()
             {
-                let to = view.snap(doc, scrub_at(pos));
+                // Spec: arrangement-editing R22. It snaps to clip edges,
+                // other locators and signature markers as well as the grid.
+                let mut carried = view.selected_locators().to_vec();
+                carried.push(locator.id);
+                let snapped = view.snap_to_items(
+                    doc,
+                    scrub_at(pos),
+                    Ticks::ZERO,
+                    Dragged {
+                        locators: &carried,
+                        ..Dragged::default()
+                    },
+                    horizontal.ticks_per_point,
+                    ui.input(|i| EditKeys::from(i.modifiers).bypass),
+                );
+                self.snap_line = snapped.line;
+                let to = snapped.at;
                 events.push(UiEvent::Gesture {
                     phase: GesturePhase::Update,
                     invocation: Some(Invocation::new(

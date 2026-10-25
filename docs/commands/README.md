@@ -947,7 +947,7 @@ What the Arrangement View shows: every view command returns it.
 | `show_in_out` | boolean | yes | Whether the track headers show their In/Out column. |
 | `show_volume` | boolean | yes | Whether the track headers show their volume, pan, and sends. |
 | `show_return_tracks` | boolean | yes | Whether the return tracks' rows show in the lanes. |
-| `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope. |
+| `automation_lanes` | array of [`AutomationLane`](#automationlane) | no | Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32). |
 | `selected_breakpoint` | [`SelectedBreakpoint`](#selectedbreakpoint) or null | no | The breakpoint selected in that lane (WP-6.26), if any: `automation.select_breakpoint` sets it. |
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
@@ -966,7 +966,7 @@ What the Arrangement View shows: every view command returns it.
       "type": "boolean"
     },
     "automation_lanes": {
-      "description": "The parameter each track's automation lane shows, for the tracks whose lane isn't showing the default (their volume): the choosers' choice. `target` `null` means the lane draws no envelope.",
+      "description": "Each track's automation lanes, for the tracks whose lanes aren't as a new track's (the main lane showing its volume, and no lanes of its own): the choosers' choices, the lanes of their own and whether they show (the automation spec, R32).",
       "items": {
         "$ref": "#/$defs/AutomationLane"
       },
@@ -2266,19 +2266,37 @@ What `device.audition_sample` returns.
 
 ### `AutomationLane`
 
-One track's automation lane and the parameter it shows, as `arrangement.show_automation` last set it.
+One track's automation lanes: what its main lane shows, and the lanes of its own under it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) | yes | The track. |
-| `target` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter the lane shows, or `null` while it draws no envelope. |
+| `target` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter the main lane shows, or `null` while it draws no envelope. |
+| `lanes` | array of [`LaneChoice`](#lanechoice) | no | The lanes of its own, top to bottom; lane numbers count from 1 in this list, the main lane being 0. |
+| `lanes_hidden` | boolean | no | Whether the header's toggle has hidden the lanes of its own. |
+| `only_automated` | boolean | no | Whether the main lane's choosers list only automated parameters. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "One track's automation lane and the parameter it shows, as `arrangement.show_automation` last set it.",
+  "description": "One track's automation lanes: what its main lane shows, and the lanes of its own under it.",
   "properties": {
+    "lanes": {
+      "description": "The lanes of its own, top to bottom; lane numbers count from 1 in this list, the main lane being 0.",
+      "items": {
+        "$ref": "#/$defs/LaneChoice"
+      },
+      "type": "array"
+    },
+    "lanes_hidden": {
+      "description": "Whether the header's toggle has hidden the lanes of its own.",
+      "type": "boolean"
+    },
+    "only_automated": {
+      "description": "Whether the main lane's choosers list only automated parameters.",
+      "type": "boolean"
+    },
     "target": {
       "anyOf": [
         {
@@ -2288,7 +2306,7 @@ One track's automation lane and the parameter it shows, as `arrangement.show_aut
           "type": "null"
         }
       ],
-      "description": "The parameter the lane shows, or `null` while it draws no envelope."
+      "description": "The parameter the main lane shows, or `null` while it draws no envelope."
     },
     "track": {
       "$ref": "#/$defs/TrackId",
@@ -14719,6 +14737,84 @@ One of:
 
 </details>
 
+### `LaneChoice`
+
+What one automation lane shows: the parameter its choosers picked and whether they list only automated parameters (R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter shown, or `null` while the lane draws no envelope. |
+| `only_automated` | boolean | yes | Whether the lane's choosers list only parameters with an envelope. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "What one automation lane shows: the parameter its choosers picked and whether they list only automated parameters (R27).",
+  "properties": {
+    "only_automated": {
+      "default": false,
+      "description": "Whether the lane's choosers list only parameters with an envelope.",
+      "type": "boolean"
+    },
+    "target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AutomationTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": {
+        "param": "volume",
+        "type": "mixer"
+      },
+      "description": "The parameter shown, or `null` while the lane draws no envelope."
+    }
+  },
+  "required": [
+    "target",
+    "only_automated"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LaneSelect`
+
+An automation lane of a track: `true` for its main lane, `false` for none, or a number for one of its lanes of its own, counting from 1.
+
+One of:
+
+- boolean: The main lane (`true`), or no lane (`false`).
+- integer, at least 0: The lane of its own with this number, from 1.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "description": "The main lane (`true`), or no lane (`false`).",
+      "type": "boolean"
+    },
+    {
+      "description": "The lane of its own with this number, from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  ],
+  "description": "An automation lane of a track: `true` for its main lane, `false` for none, or a number for one of its lanes of its own, counting from 1."
+}
+```
+
+</details>
+
 ### `LanesResult`
 
 The take lanes `take_lane.insert` and `take_lane.duplicate` made.
@@ -14994,6 +15090,49 @@ The global launch quantisation and its enabled switch (L-CTRL-010, M-OPT-014): s
     "enabled"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `LaunchState`
+
+What a slot's clip is doing, as the engine publishes it.
+
+One of:
+
+- `"queued"`: A launch or a restart waits for the launch quantisation grid.
+- `"playing"`: The clip plays.
+- `"queued_to_stop"`: A stop waits for the grid.
+- `"recording"`: A Session recording goes into the slot.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a slot's clip is doing, as the engine publishes it.",
+  "oneOf": [
+    {
+      "const": "queued",
+      "description": "A launch or a restart waits for the launch quantisation grid.",
+      "type": "string"
+    },
+    {
+      "const": "playing",
+      "description": "The clip plays.",
+      "type": "string"
+    },
+    {
+      "const": "queued_to_stop",
+      "description": "A stop waits for the grid.",
+      "type": "string"
+    },
+    {
+      "const": "recording",
+      "description": "A Session recording goes into the slot.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -16697,6 +16836,90 @@ One slot's mapping as its panel names it.
     "slot",
     "target",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Marker`
+
+The four markers the panel's Show and Set buttons name.
+
+One of:
+
+- `"start"`: The Start marker.
+- `"end"`: The End marker.
+- `"loop_position"`: The loop brace's start: the Position field.
+- `"loop_length"`: The loop brace's end: the Length field's marker.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The four markers the panel's Show and Set buttons name.",
+  "oneOf": [
+    {
+      "const": "start",
+      "description": "The Start marker.",
+      "type": "string"
+    },
+    {
+      "const": "end",
+      "description": "The End marker.",
+      "type": "string"
+    },
+    {
+      "const": "loop_position",
+      "description": "The loop brace's start: the Position field.",
+      "type": "string"
+    },
+    {
+      "const": "loop_length",
+      "description": "The loop brace's end: the Length field's marker.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `MarkerAt`
+
+What `clip_view.show_marker` and `clip.set_marker_at_playhead` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) | yes | The clip. |
+| `marker` | [`Marker`](#marker) | yes | The marker. |
+| `position` | number | yes | Where the marker is now: ticks of the clip's contents for a MIDI or warped audio clip, seconds into the file for an unwarped one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.show_marker` and `clip.set_marker_at_playhead` return.",
+  "properties": {
+    "clip": {
+      "$ref": "#/$defs/ClipId",
+      "description": "The clip."
+    },
+    "marker": {
+      "$ref": "#/$defs/Marker",
+      "description": "The marker."
+    },
+    "position": {
+      "description": "Where the marker is now: ticks of the clip's contents for a MIDI or warped audio clip, seconds into the file for an unwarped one.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "marker",
+    "position"
   ],
   "type": "object"
 }
@@ -21630,6 +21853,65 @@ The preview: the switch, the volume, and what plays.
 
 </details>
 
+### `Properties`
+
+The panels of the Clip View's left group (Spec: clip-properties R1).
+
+One of:
+
+- `"main"`: Main Properties.
+- `"launch"`: Launch Properties, a Session clip's.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The panels of the Clip View's left group (Spec: clip-properties R1).",
+  "oneOf": [
+    {
+      "const": "main",
+      "description": "Main Properties.",
+      "type": "string"
+    },
+    {
+      "const": "launch",
+      "description": "Launch Properties, a Session clip's.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PropertiesShown`
+
+What `clip_view.show_properties` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `panel` | [`Properties`](#properties) | yes | The panel the left group shows now: Main Properties for an Arrangement clip, whatever was asked. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `clip_view.show_properties` returns.",
+  "properties": {
+    "panel": {
+      "$ref": "#/$defs/Properties",
+      "description": "The panel the left group shows now: Main Properties for an Arrangement clip, whatever was asked."
+    }
+  },
+  "required": [
+    "panel"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `QuantizeSettings`
 
 The Clip View's Quantize settings, as `clip_view.quantize_settings` reports them: what `note.quantize` uses when its arguments leave them out.
@@ -25268,6 +25550,7 @@ What `session.state` and its commands return: what the grid has selected.
 | `tracks` | array of [`TrackId`](#trackid) | yes | The selected track title bars. |
 | `title_tracks` | boolean | yes | Whether the selection is track title bars, so Esc has already gone up as far as it can. |
 | `scroll_y` | number | yes | How far the scenes are scrolled down, in points at 100%. |
+| `launches` | array of [`SlotLaunch`](#slotlaunch) | no | The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in. |
 
 <details><summary>JSON Schema</summary>
 
@@ -25275,6 +25558,13 @@ What `session.state` and its commands return: what the grid has selected.
 {
   "description": "What `session.state` and its commands return: what the grid has selected.",
   "properties": {
+    "launches": {
+      "description": "The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in.",
+      "items": {
+        "$ref": "#/$defs/SlotLaunch"
+      },
+      "type": "array"
+    },
     "scenes": {
       "description": "The selected scenes (their launch buttons or names).",
       "items": {
@@ -25595,6 +25885,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `retune_on_tuning_load` | boolean | yes | Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15). |
+| `snap_automation_to_grid` | boolean | yes | Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31). |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
 | `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
@@ -25669,6 +25960,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15).",
       "type": "boolean"
     },
+    "snap_automation_to_grid": {
+      "description": "Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31).",
+      "type": "boolean"
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -25694,6 +25989,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "tempo_midi",
     "create_fades_on_clip_edges",
     "retune_on_tuning_load",
+    "snap_automation_to_grid",
     "warp_recorded_audio",
     "warp",
     "launch",
@@ -26483,6 +26779,46 @@ The parameters of a device's sample slots: slot `k`'s copy of a parameter is the
   "required": [
     "stride",
     "count"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SlotLaunch`
+
+One slot that is not at rest, in `session.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) | yes | The track. |
+| `scene` | [`SceneId`](#sceneid) | yes | The scene. |
+| `state` | [`LaunchState`](#launchstate) | yes | What its clip is doing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One slot that is not at rest, in `session.state`.",
+  "properties": {
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene."
+    },
+    "state": {
+      "$ref": "#/$defs/LaunchState",
+      "description": "What its clip is doing."
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track."
+    }
+  },
+  "required": [
+    "track",
+    "scene",
+    "state"
   ],
   "type": "object"
 }

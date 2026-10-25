@@ -43,6 +43,7 @@ use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::notes::ClipTab;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
+use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
 use bl_shell_spec::tracks as track_ids;
@@ -216,6 +217,7 @@ impl Shell {
             ids::FOCUS_TOGGLE_TAB_NAVIGATION => Some(self.prefs.tab_navigation),
             ids::FOCUS_TOGGLE_WRAP_NAVIGATION => Some(self.prefs.wrap_navigation.0),
             ids::SETTINGS_SET_RETUNE_ON_TUNING_LOAD => Some(self.prefs.retune_on_tuning_load),
+            ids::SETTINGS_SET_SNAP_AUTOMATION_TO_GRID => Some(self.prefs.snap_automation_to_grid.0),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
@@ -519,6 +521,15 @@ impl Shell {
                         | Clipboard::Slots(_)
                         | Clipboard::Scenes(_) => false,
                     });
+            }
+            // Spec: session-context-menus R12, R16. Export MIDI Clip... is for
+            // a MIDI clip.
+            bl_shell_spec::midi_files::EXPORT => {
+                return args
+                    .get("clip")
+                    .and_then(|clip| serde_json::from_value::<bl_model::ClipId>(clip.clone()).ok())
+                    .and_then(|clip| self.editor.document().clip(clip))
+                    .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)));
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
             ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
@@ -853,6 +864,11 @@ impl Shell {
                 .is_some_and(|schema| bl_commands::validate(schema, &args).is_ok())
                 && self.browser_view.can_run(id, &args);
         }
+        if session_ids::handles(id)
+            && let Some(allowed) = self.can_session_view(id, args)
+        {
+            return allowed;
+        }
         if crate::session_clips::handles(id) {
             let args = if args.is_null() {
                 json!({})
@@ -903,6 +919,9 @@ impl Shell {
                 && engine_transport::command_from_args(id, Self::object(args.clone())).is_ok();
         }
         if engine_session::handles(id) {
+            if let Some(allowed) = self.can_session_view(id, args) {
+                return allowed;
+            }
             // The Session View launches only while an engine runs on a
             // device, as the transport plays.
             // Back to Arrangement is off in a set no clip has taken over

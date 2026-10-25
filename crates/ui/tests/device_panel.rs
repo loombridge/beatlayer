@@ -587,3 +587,78 @@ fn the_oscilloscopes_cell_draws_in_docked_and_floating_windows() {
     let (paths, _, _) = painted(&grown, grown_cell);
     assert!(paths >= 1, "waveform painted in floating window");
 }
+
+// Spec: automation R29. A device parameter's context menu holds the
+// automation items; Show Automation In New Lane gives the parameter a lane of
+// its own and turns Automation Mode on, and a click on the control while the
+// mode is on shows the parameter in the track's main lane.
+#[test]
+fn a_parameters_menu_has_the_automation_items_and_a_click_shows_its_envelope() {
+    let mut h = harness();
+    let utility = add(&mut h, &testing::utility_type());
+    let track = h.shell.editor().document().device_track(utility).unwrap();
+    let target = bl_model::AutomationTarget::Device {
+        device: utility,
+        param: UTILITY_GAIN,
+    };
+    let knob = control(&mut h, utility, UTILITY_GAIN).center();
+    h.frame(vec![Event::PointerMoved(knob)]);
+    h.frame(vec![Event::PointerButton {
+        pos: knob,
+        button: PointerButton::Secondary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerButton {
+        pos: knob,
+        button: PointerButton::Secondary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    let nodes = Harness::nodes(&h.settle());
+    for label in [
+        "Delete Automation",
+        "Re-Enable Automation",
+        "Show Automation",
+        "Show Automation In New Lane",
+    ] {
+        assert!(nodes.iter().any(|n| n.label == label), "no {label:?}");
+    }
+    assert!(
+        Harness::node(&nodes, "Delete Automation").disabled,
+        "the parameter has no envelope"
+    );
+    let item = Harness::node(&nodes, "Show Automation In New Lane")
+        .bounds
+        .unwrap();
+    h.click(pos2(
+        ((item.x0 + item.x1) / 2.0) as f32,
+        ((item.y0 + item.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert!(h.shell.arrangement().automation_mode());
+    assert_eq!(
+        h.shell
+            .arrangement()
+            .track_lanes(track)
+            .lanes
+            .iter()
+            .map(|lane| lane.target)
+            .collect::<Vec<_>>(),
+        [Some(target)]
+    );
+
+    // Back on the main lane: a click on the control shows it there.
+    h.shell
+        .run(
+            "arrangement.remove_automation_lane",
+            json!({ "track": track, "lane": 1 }),
+        )
+        .unwrap();
+    h.settle();
+    assert_ne!(h.shell.arrangement().automation_lane(track), Some(target));
+    let knob = control(&mut h, utility, UTILITY_GAIN).center();
+    h.click(knob);
+    h.settle();
+    assert_eq!(h.shell.arrangement().automation_lane(track), Some(target));
+}

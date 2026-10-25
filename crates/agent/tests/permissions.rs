@@ -131,6 +131,55 @@ fn two_clips(b: u64) -> (Client<InProcess>, u64, u64, u64) {
 }
 
 #[test]
+fn an_agent_s_clearing_of_a_track_s_envelopes_asks_first() {
+    // Spec: automation R28. Clear All Envelopes and Clear Envelopes are
+    // destructive, so an agent asks before it deletes a track's automation.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "automation.set_breakpoint",
+                               "args": { "track": midi,
+                                         "target": { "type": "mixer", "param": "volume" },
+                                         "at": 0, "value": 0.5 } }] }),
+    );
+    for (command, args) in [
+        ("automation.clear_track", json!({ "track": midi })),
+        ("automation.clear_device", json!({ "track": midi })),
+    ] {
+        let went = attempt(&mut client, command, &args);
+        assert_eq!(
+            went,
+            Went {
+                asked: true,
+                permission: "destructive".to_owned()
+            },
+            "{command}"
+        );
+    }
+    // Declined, the envelope is still there; allowed, the query tool's track
+    // no longer lists it.
+    let envelopes = |client: &mut Client<InProcess>| {
+        call(
+            client,
+            "query",
+            json!({ "path": "track \"1 MIDI\" / automation" }),
+        )["automation"]["total"]
+            .clone()
+    };
+    assert_eq!(envelopes(&mut client), 1);
+    client.transport().answer = Box::new(|_| true);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "automation.clear_track",
+                               "args": { "track": midi } }] }),
+    );
+    assert_eq!(envelopes(&mut client), 0);
+}
+
+#[test]
 fn an_agent_s_clip_move_over_another_clip_asks_and_one_into_empty_space_doesn_t() {
     // Spec: agent-permissions R1, R2.
     let (mut client, _, a, b) = two_clips(4);

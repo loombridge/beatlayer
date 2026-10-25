@@ -82,6 +82,27 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  name and activates (multi-clip editing R10)",
             )),
         ),
+        // The Main Properties panel (WP-6.55).
+        (
+            "clip_view.show_marker",
+            main(midi_tools_shown, detail_area, "Show Start", Key::Enter),
+        ),
+        (
+            "clip_view.show_properties",
+            main(
+                midi_tools_shown,
+                detail_area,
+                "Launch Properties",
+                Key::Enter,
+            ),
+        ),
+        (
+            "clip.set_marker_at_playhead",
+            Exception(Equivalent(
+                "the Set buttons in the Main Properties panel, which Tab reaches and Return \
+                 presses while the clip plays (clip properties R5, R8)",
+            )),
+        ),
         ("clip.set_data", Exception(CLIP_VIEW)),
         // The note editor's own view and time commands (WP-6.54).
         (

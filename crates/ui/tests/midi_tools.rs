@@ -132,7 +132,8 @@ fn the_selector_row_shows_the_three_panels_and_a_click_shows_one() {
     for name in ["MIDI Transformation Tools", "MIDI Generative Tools"] {
         assert_eq!(radio(&all, name).toggled, Some(false), "{name}");
     }
-    assert!(Harness::node(&all, "Main Properties").disabled);
+    // The left group shows Main Properties (clip-properties R1).
+    assert_eq!(radio(&all, "Main Properties").toggled, Some(true));
     let steps = steps(&h);
     h.click(centre(radio(&all, "MIDI Transformation Tools")));
     assert_eq!(h.shell.clip_view().midi_tools().panel(), Panel::Transform);

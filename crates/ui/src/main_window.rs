@@ -418,6 +418,7 @@ impl MainWindowUi {
                 self.focus_request = Some(FocusRequest::MainView);
             }
             Effect::FocusArea(Area::Assistant) => self.assistant.focus_prompt(),
+            Effect::FocusClipPanels => crate::main_panel::request_focus(ctx),
             Effect::RenameDevice(device) => {
                 // Spec: device-chains R10. Rename types the name in the
                 // title bar.
@@ -440,6 +441,12 @@ impl MainWindowUi {
                 self.devices.start_variation_rename(*rack, *index);
             }
             Effect::RenameTrack(track) => crate::track_menu::start_rename(ctx, *track),
+            Effect::RenameClip(clip) => {
+                crate::session_menus::start_rename(ctx, crate::session_menus::Rename::Clip(*clip))
+            }
+            Effect::RenameScene(scene) => {
+                crate::session_menus::start_rename(ctx, crate::session_menus::Rename::Scene(*scene))
+            }
             Effect::RenameTakeLane(lane) => {
                 // Spec: comping R28. Rename types the name in the take
                 // lane's header.
@@ -741,6 +748,8 @@ impl MainWindowUi {
         }
         self.mixer_typing = crate::mixer::is_typing(ctx)
             || crate::track_menu::is_renaming(ctx)
+            || crate::session_menus::is_renaming(ctx)
+            || crate::session_menus::field_has_focus(ctx)
             || crate::arrangement::take_lanes::is_renaming(ctx)
             || crate::envelope_keys::is_typing(ctx);
         // An open menu, or a dialog, keeps the keys.

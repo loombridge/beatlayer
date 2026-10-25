@@ -1241,6 +1241,13 @@ impl Processor {
             SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
+            SessionCommand::CancelSceneLaunch(scene) => {
+                let slots = self
+                    .program
+                    .as_ref()
+                    .map_or(&[][..], |program| program.get().scene_slots(scene));
+                self.session.cancel_scene_launch(scene, slots);
+            }
             SessionCommand::StopTrack(track) => self.stop_session(Some(track)),
             SessionCommand::StopAll => self.stop_session(None),
             SessionCommand::BackToArrangement => {

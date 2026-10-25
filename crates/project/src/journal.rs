@@ -704,7 +704,7 @@ pub(crate) fn newest_save_point(
         candidates.push(((entry.time, entry.seq), value));
     }
     // Newest first: one that doesn't decode leaves the older ones.
-    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
     candidates
         .into_iter()
         .find_map(|(_, value)| decode_value(&value, options).ok())
@@ -1017,6 +1017,6 @@ mod tests {
         let path = dir.0.join("j.bljournal");
         SYNCED.with_borrow_mut(Vec::clear);
         JournalWriter::create(path, "s", None).unwrap();
-        SYNCED.with_borrow(|synced| assert_eq!(*synced, [dir.0.clone()]));
+        SYNCED.with_borrow(|synced| assert_eq!(*synced, std::slice::from_ref(&dir.0)));
     }
 }

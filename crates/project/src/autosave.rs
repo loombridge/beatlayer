@@ -1796,12 +1796,11 @@ mod tests {
         // written to for one edit.
         std::fs::remove_dir_all(dir.0.join("Project")).unwrap();
         let writable = std::fs::metadata(dir.recovery()).unwrap().permissions();
-        std::fs::set_permissions(&dir.recovery(), std::fs::Permissions::from_mode(0o555))
-            .unwrap();
+        std::fs::set_permissions(dir.recovery(), std::fs::Permissions::from_mode(0o555)).unwrap();
         let mut editor = Project::new().editor();
         autosave.edited(&rename(&mut editor, "Lost"), "Rename Track");
         let failed = autosave.flush();
-        std::fs::set_permissions(&dir.recovery(), writable).unwrap();
+        std::fs::set_permissions(dir.recovery(), writable).unwrap();
         if failed.is_ok() {
             // Running as a user who ignores permissions: nothing to test.
             return;

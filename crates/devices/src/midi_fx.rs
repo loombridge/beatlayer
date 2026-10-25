@@ -197,6 +197,26 @@ impl Router {
         audio.send(note);
     }
 
+    /// Starts `on` at the device's clock `at` and ends it with `off`
+    /// `length` frames later: now if `at` is this stretch's frame, or from the
+    /// queue.
+    pub(crate) fn sound(
+        &mut self,
+        audio: &mut Audio<'_, '_>,
+        on: NoteEvent,
+        off: NoteEvent,
+        source: Key,
+        at: i64,
+        length: i64,
+    ) {
+        if at <= self.now + i64::from(on.offset) {
+            self.send_now(audio, on, source);
+        } else {
+            self.hold(at, on, source);
+        }
+        self.hold(at + length, off, source);
+    }
+
     /// Holds `note` until the device's clock reaches `at` (at least the
     /// stretch's first frame). Returns `false`, and drops it, if the queue
     /// is full.

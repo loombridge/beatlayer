@@ -283,6 +283,9 @@ pub struct GroovePlay {
     /// The mean velocity of the groove's notes.
     mean: f64,
     quantize: f64,
+    /// Timing, Random and Velocity as the groove sets them, from 0 to 1 (and
+    /// -1 to 1 for Velocity).
+    own: [f64; 3],
     /// Timing, Random and Velocity with the Global Amount applied.
     timing: f64,
     random: f64,
@@ -311,17 +314,27 @@ impl GroovePlay {
                 .sum::<f64>()
                 / groove.notes.len() as f64
         };
-        let amount = global_amount / 100.0;
-        Self {
+        let mut play = Self {
             base,
             length,
             notes,
             mean,
             quantize: groove.quantize / 100.0,
-            timing: groove.timing / 100.0 * amount,
-            random: groove.random / 100.0 * amount,
-            velocity: groove.velocity / 100.0 * amount,
-        }
+            own: [groove.timing, groove.random, groove.velocity].map(|percent| percent / 100.0),
+            timing: 0.0,
+            random: 0.0,
+            velocity: 0.0,
+        };
+        play.set_global_amount(global_amount);
+        play
+    }
+
+    /// Scales Timing, Random and Velocity to `global_amount` percent, as
+    /// [`GroovePlay::new`] does, without allocating: a device whose own
+    /// groove follows the Global Amount calls it with each block.
+    pub fn set_global_amount(&mut self, global_amount: f64) {
+        let amount = global_amount / 100.0;
+        [self.timing, self.random, self.velocity] = self.own.map(|own| own * amount);
     }
 
     /// One step of the Base grid, in ticks.
@@ -799,6 +812,27 @@ mod tests {
         assert_eq!(play.line(0).offset, 0.0);
         assert_eq!(play.line(1).offset, step / 2.0);
         assert_eq!(play.line(1).velocity, Some(80));
+    }
+
+    #[test]
+    fn rescaling_to_a_global_amount_gives_what_making_it_there_gives() {
+        let step = GrooveBase::Sixteenth.ticks();
+        for amount in [0.0, 50.0, 130.0, 100.0] {
+            let mut groove = Groove::new(
+                id(1),
+                "Swing".to_owned(),
+                Ticks::WHOLE,
+                vec![GrooveNote {
+                    position: step / 2,
+                    velocity: 100,
+                }],
+            );
+            groove.velocity = 40.0;
+            let made = GroovePlay::new(&groove, amount);
+            let mut rescaled = GroovePlay::new(&groove, 100.0);
+            rescaled.set_global_amount(amount);
+            assert_eq!(rescaled, made, "{amount} %");
+        }
     }
 
     #[test]

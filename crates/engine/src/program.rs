@@ -2435,7 +2435,8 @@ impl EngineProgram {
                             .filter(|&c| c < self.device_input_channels)
                         {
                             Some(index) => to.copy_from_slice(
-                                &self.device_input[index * stride + block.from as usize..][..frames],
+                                &self.device_input[index * stride + block.from as usize..]
+                                    [..frames],
                             ),
                             None => to.fill(0.0),
                         }

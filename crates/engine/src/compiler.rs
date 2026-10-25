@@ -24,10 +24,10 @@ use crate::mixer::{self, Route, Solo, TrackMixer, route};
 use crate::node::{NodeData, NodeKey, NoteBuffer, ParamValue};
 use crate::points::MeterPoint;
 use crate::program::{
-    ChainSendRef, CvDevice, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram, ExtOut, Input,
-    Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT, NO_OUTPUT_BUFFER,
-    NO_SLOT, NO_TASK, NodeSlot, NoteDelay, Rack, RackChain, RackMode, Span, Step, Task,
-    delay_storage,
+    ChainSendRef, CvDevice, DeviceInput, DeviceMidiSidechain, DeviceSidechain, EngineProgram,
+    ExtOut, Input, Instance, MergeCursor, Migration, ModKind, NO_CHAIN, NO_DELAY, NO_OUTPUT,
+    NO_OUTPUT_BUFFER, NO_SLOT, NO_TASK, NodeSlot, NoteDelay, Rack, RackChain, RackMode, Span, Step,
+    Task, delay_storage,
 };
 use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
@@ -1944,13 +1944,19 @@ impl Compiler {
             // delay compensation lines the rest of the set up with. An
             // external effect's node holds a delay line of that many frames
             // (R19), so the latency is part of the node's identity.
-            let external_latency = device.external.as_ref().map_or(0, |external| {
-                self.config.round_trip_latency.saturating_add(
-                    external
-                        .hardware_latency
-                        .frames(self.config.sample_rate.hz()),
-                )
-            });
+            // Spec: cv-tools R5. A CV effect brings no sound back, so it has
+            // no round trip to report.
+            let external_latency = device
+                .external
+                .as_ref()
+                .filter(|external| !external.is_cv() || device.role != DeviceRole::AudioEffect)
+                .map_or(0, |external| {
+                    self.config.round_trip_latency.saturating_add(
+                        external
+                            .hardware_latency
+                            .frames(self.config.sample_rate.hz()),
+                    )
+                });
             let identity = Identity::Device(
                 device.kind.clone(),
                 device.media.clone(),

@@ -451,6 +451,7 @@ fn fixture() -> Project {
         audio_from: Channel::Mono(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },
+        ..External::default()
     });
     device.sidechain = Some(Sidechain {
         enabled: true,

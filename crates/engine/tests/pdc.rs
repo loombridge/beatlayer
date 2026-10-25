@@ -713,6 +713,7 @@ fn loopback_rig(rate: bl_core::time::SampleRate, latency: bl_model::HardwareLate
         audio_from: Channel::Pair(3),
         audio_to: None,
         hardware_latency: latency,
+        ..External::default()
     });
     ed.apply(Command::InsertDevice {
         track: hardware_track,

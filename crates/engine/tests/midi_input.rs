@@ -187,6 +187,27 @@ fn messages_reach_each_midi_tracks_input_by_source_and_channel_in_the_next_block
 
 // Spec: midi-io R15
 #[test]
+fn the_time_base_puts_a_moment_on_the_engine_clock_with_or_without_a_midi_queue() {
+    // Spec: midi-io R16, control-bar-transport R19. A moment on the main
+    // thread, such as a click, falls on the frame the block clock gives it.
+    let mut midi = Midi::new();
+    let mut bare = Rig::new(BLOCK);
+    let start = Instant::now();
+    for n in 0..4 {
+        midi.block();
+        bl_rt::rt_test!({
+            bare.processor
+                .process_at(BLOCK, &NoInput, start + frames(n * BLOCK as u64));
+        });
+    }
+    let after = frames(3 * BLOCK as u64 + 100);
+    let base = midi.rig.monitor.state().time_base.unwrap();
+    assert_eq!(base.frame_at(midi.start + after), 3 * BLOCK as u64 + 100);
+    let base = bare.monitor.state().time_base.unwrap();
+    assert_eq!(base.frame_at(start + after), 3 * BLOCK as u64 + 100);
+}
+
+#[test]
 fn a_message_stamped_after_the_block_starts_waits_and_a_late_one_lands_first() {
     let mut midi = Midi::new();
     let keys = track(&mut midi.rig.editor, TrackKind::Midi, None);

@@ -162,7 +162,7 @@ fn parts(doc: &Document, shell: &Shell, group: Group) -> [i64; 3] {
 }
 
 /// The time signature where the Arrangement Position fields are.
-fn signature(doc: &Document, shell: &Shell) -> TimeSignature {
+pub(crate) fn signature(doc: &Document, shell: &Shell) -> TimeSignature {
     doc.settings()
         .time_signatures
         .signature_at(shown_position(shell))
@@ -484,6 +484,7 @@ fn set_signature(shell: &Shell, numerator: u8, denominator: u8) -> Option<Invoca
 /// gives it, and the section's fields.
 #[must_use]
 pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
+    let tap_tempo = shell.tap_tempo_report(engine.clock);
     let doc = shell.editor().document();
     let brace = doc.settings().arrangement_loop;
     let signature = signature(doc, shell);
@@ -514,6 +515,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         recording: shell.running_recording(),
         last_recording: shell.last_recording().cloned(),
         capture_midi_ready: shell.capture_midi_ready(),
+        tap_tempo,
     }
 }
 

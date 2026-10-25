@@ -1238,7 +1238,20 @@ impl MainWindowUi {
             if response.hovered() {
                 self.hovered = Some(*el);
             }
-            if response.clicked() {
+            // Spec: control-bar-transport R18, R23. Tap Tempo taps on the
+            // press; a key's or a screen reader's press, which has no
+            // pointer, taps too.
+            let activated = if *el == Element::TapTempo {
+                let (hovered, clicked) = (response.hovered(), response.clicked());
+                !look.disabled
+                    && ui.input(|input| {
+                        (input.pointer.primary_pressed() && hovered)
+                            || (clicked && !input.pointer.any_released())
+                    })
+            } else {
+                response.clicked()
+            };
+            if activated {
                 let option = ui.input(|input| input.modifiers.alt);
                 let invocations = detail_click(*el, shell, self.window, option)
                     .unwrap_or_else(|| click(*el, shell, self.window).into_iter().collect());
@@ -2022,7 +2035,6 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 ..Look::default()
             }
         }
-        Element::TapTempo => text("TAP"),
         // The transport section's values come from `control_bar`.
         Element::Quantization => text("1 Bar"),
         // Spec: scales R6, R9, R14. The scale controls show the selected

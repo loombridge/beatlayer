@@ -103,6 +103,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::Follow => Some(FOLLOW),
         Element::AutomationArm => Some(AUTOMATION_ARM),
         Element::CaptureMidi => Some(CAPTURE_MIDI),
+        Element::TapTempo => Some(ids::TAP_TEMPO),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -120,6 +121,7 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::ReEnableAutomation => Some(Invocation::new(RE_ENABLE_AUTOMATION, json!({}))),
         Element::AutomationArm => Some(Invocation::new(AUTOMATION_ARM, json!({}))),
         Element::CaptureMidi => Some(Invocation::new(CAPTURE_MIDI, json!({}))),
+        Element::TapTempo => Some(Invocation::new(ids::TAP_TEMPO, json!({}))),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
         Element::Loop => Some(Invocation::new(
@@ -310,6 +312,24 @@ impl TransportFields {
                     description: Some(
                         "Brings back the notes just played on a MIDI track as a clip.".to_owned(),
                     ),
+                    ..Look::default()
+                });
+            }
+            Element::TapTempo => {
+                // Spec: control-bar-transport R21, R23. It is disabled while
+                // the song has tempo changes, and describes the run's tempo.
+                let editable = transport::editable(shell, Group::Tempo);
+                let description = match (editable, shell.tap_tempo_tempo()) {
+                    (false, _) => {
+                        "The song has tempo changes, so tapping can't set its tempo.".to_owned()
+                    }
+                    (true, Some(tempo)) => format!("Tempo {tempo:.2} BPM."),
+                    (true, None) => "Tap once a beat to set the tempo.".to_owned(),
+                };
+                return Some(Look {
+                    text: Some("TAP".to_owned()),
+                    disabled: !editable,
+                    description: Some(description),
                     ..Look::default()
                 });
             }

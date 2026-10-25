@@ -49,7 +49,7 @@ use bl_engine::preview::{
 use bl_engine::{
     Collector, DROP_PERIOD, DropThread, Engine, EngineConfig, MediaLibrary, MediaStreams, Pool,
     PoolConfig, Processor, RecordingPlan, Registry, Report, ScheduledCommand, SessionCommand,
-    SlotStatus, TakeBounds, TransportCommand,
+    SlotStatus, TakeBounds, TransportCommand, When,
 };
 use bl_media::{MediaStore, StreamerStats};
 use bl_model::{Channel, Document, LaunchSettings, TrackId};
@@ -763,6 +763,36 @@ impl AudioHost {
     pub fn send_transport(&mut self, command: TransportCommand) -> Result<(), String> {
         self.running_engine()?.transport(command);
         Ok(())
+    }
+
+    /// Sends a transport command for a frame of the engine clock, which it
+    /// runs on that exact frame ([`When::Frame`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`AudioHost::send_transport`].
+    pub fn send_transport_at(&mut self, command: TransportCommand, at: u64) -> Result<(), String> {
+        self.running_engine()?
+            .transport_at(command, When::Frame(at));
+        Ok(())
+    }
+
+    /// The frame of the engine clock that `time` falls on, as MIDI input is
+    /// placed (none before the engine's first block), and the rate the clock
+    /// counts at.
+    ///
+    /// # Errors
+    ///
+    /// As [`AudioHost::send_transport`].
+    pub fn clock_frame_at(&mut self, time: Instant) -> Result<(Option<u64>, u32), String> {
+        self.running_engine()?;
+        let state = self.engine.as_mut().map(Engine::state);
+        Ok(state.map_or((None, 0), |state| {
+            (
+                state.time_base.map(|base| base.frame_at(time)),
+                state.sample_rate.hz(),
+            )
+        }))
     }
 
     /// Sends a sampler's node a click in its display (WP-5.15, the

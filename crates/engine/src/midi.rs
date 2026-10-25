@@ -786,7 +786,33 @@ struct Timing {
     epoch: Instant,
     /// The block's start, in nanoseconds after `epoch`.
     start: f64,
+    /// The engine clock's frame the block starts on.
+    frame: u64,
     ns_per_frame: f64,
+}
+
+/// Where the engine clock stood on the monotonic clock when the last block
+/// started, as the block clock estimated it (R16): what puts a moment on the
+/// main thread, such as a click, onto a frame of the engine clock as MIDI
+/// input is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimeBase {
+    epoch: Instant,
+    /// The block's start, in nanoseconds after `epoch`.
+    start_ns: f64,
+    /// The engine clock's frame the block starts on.
+    frame: u64,
+    ns_per_frame: f64,
+}
+
+impl TimeBase {
+    /// The frame of the engine clock that `time` falls on: before the block
+    /// it names, a frame before its start.
+    #[must_use]
+    pub fn frame_at(&self, time: Instant) -> u64 {
+        let frames = (signed_ns(self.epoch, time) - self.start_ns) / self.ns_per_frame;
+        (self.frame as f64 + frames).round().max(0.0) as u64
+    }
 }
 
 /// The audio thread's MIDI input: the queue's consuming end, the block
@@ -854,7 +880,7 @@ impl MidiIn {
         if let Some(routes) = routes.as_deref_mut() {
             routes.clear();
         }
-        if frames == 0 || (self.queue.is_none() && self.out.is_none()) {
+        if frames == 0 {
             return;
         }
         let epoch = *self.epoch.get_or_insert(now);
@@ -870,6 +896,7 @@ impl MidiIn {
         self.timing = Some(Timing {
             epoch,
             start,
+            frame: clock,
             ns_per_frame: 1.0 / per_ns,
         });
         let Some(queue) = self.queue.as_mut() else {
@@ -964,6 +991,18 @@ impl MidiIn {
 }
 
 impl MidiIn {
+    /// Where the last block started on the engine clock and on the
+    /// monotonic clock, for [`TimeBase::frame_at`]; `None` before the first
+    /// block. Real-time safe.
+    pub(crate) fn time_base(&self) -> Option<TimeBase> {
+        self.timing.map(|t| TimeBase {
+            epoch: t.epoch,
+            start_ns: t.start,
+            frame: t.frame,
+            ns_per_frame: t.ns_per_frame,
+        })
+    }
+
     /// Hands the messages the program made for ports in this part of the
     /// block to the MIDI output thread, each stamped with the moment its
     /// frame is heard at the audio interface's output: the block's start,

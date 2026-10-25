@@ -129,6 +129,7 @@ mod snapping;
 mod stems;
 mod step_recording;
 mod take_lanes_view;
+mod tap_tempo;
 mod tempo_leaders;
 mod time_editing;
 mod track_devices;

@@ -2102,6 +2102,45 @@ fn agents_page(
 /// The width of an assistant setting's text field on the Agents page.
 const ASSISTANT_FIELD: f32 = 240.0;
 
+/// A text field that holds what is typed while it has the keyboard and
+/// returns the text once, when it loses focus (Enter, a click elsewhere):
+/// the shell trims what it is sent and saves the preferences, so sending on
+/// every key would drop a typed space and write the file for each key. Esc
+/// abandons the edit.
+fn committed_field(
+    ui: &mut Ui,
+    rect: Rect,
+    salt: &str,
+    label: &str,
+    current: &str,
+    style: impl FnOnce(egui::TextEdit<'_>) -> egui::TextEdit<'_>,
+    hover: Option<&str>,
+) -> Option<String> {
+    let id = ui.id().with(salt);
+    let mut draft = ui.data(|d| d.get_temp::<String>(id));
+    let mut text = match &draft {
+        Some(draft) if ui.memory(|m| m.has_focus(id)) => draft.clone(),
+        _ => current.to_owned(),
+    };
+    let mut response = ui.put(rect, style(egui::TextEdit::singleline(&mut text).id(id)));
+    if let Some(hover) = hover {
+        response = response.on_hover_text(hover);
+    }
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label.to_owned());
+    });
+    if response.changed() {
+        draft = Some(text);
+    }
+    if response.has_focus() {
+        ui.data_mut(|d| d.insert_temp(id, draft.clone().unwrap_or_default()));
+        return None;
+    }
+    ui.data_mut(|d| d.remove_temp::<String>(id));
+    let escaped = response.lost_focus() && ui.input(|i| i.key_pressed(Key::Escape));
+    draft.filter(|draft| response.lost_focus() && !escaped && draft.trim() != current)
+}
+
 /// The built-in assistant's settings on the Agents page (WP-2.23, part 4):
 /// the provider, its base URL and model, the API key entry (stored to the
 /// OS keychain, shown masked and never echoed), and the activity log. The
@@ -2151,23 +2190,21 @@ fn assistant_section(
     // The base URL is only the OpenAI-compatible provider's: it's where
     // OpenRouter and local servers are reached.
     let rect = rows.row(ui, "Base URL", ASSISTANT_FIELD);
-    let mut base_url = settings.base_url.clone();
-    let response = ui
-        .put(
-            rect,
-            egui::TextEdit::singleline(&mut base_url)
-                .id_salt("assistant-base-url")
-                .hint_text("The provider's own")
-                .interactive(settings.provider.has_base_url()),
-        )
-        .on_hover_text(
+    if let Some(base_url) = committed_field(
+        ui,
+        rect,
+        "assistant-base-url",
+        "Assistant Base URL",
+        &settings.base_url,
+        |edit| {
+            edit.hint_text("The provider's own")
+                .interactive(settings.provider.has_base_url())
+        },
+        Some(
             "The OpenAI-compatible server's address, such as http://localhost:11434/v1 for \
              Ollama. Empty uses the provider's own.",
-        );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("Assistant Base URL".to_owned());
-    });
-    if response.changed() {
+        ),
+    ) {
         invoke(
             events,
             assistant::ASSISTANT_SET_BASE_URL,
@@ -2176,15 +2213,15 @@ fn assistant_section(
     }
 
     let rect = rows.row(ui, "Model", ASSISTANT_FIELD);
-    let mut model = settings.model.clone();
-    let response = ui.put(
+    if let Some(model) = committed_field(
+        ui,
         rect,
-        egui::TextEdit::singleline(&mut model).id_salt("assistant-model"),
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label("Assistant Model".to_owned());
-    });
-    if response.changed() {
+        "assistant-model",
+        "Assistant Model",
+        &settings.model,
+        |edit| edit,
+        None,
+    ) {
         invoke(
             events,
             assistant::ASSISTANT_SET_MODEL,

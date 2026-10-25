@@ -856,6 +856,8 @@ impl MainWindowUi {
                 }
             }
         }
+        crate::mixer::end_orphaned_drag(ctx, &mut events);
+        self.devices.end_undrawn_rename();
         events
     }
 

@@ -15,5 +15,6 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("transport.set_midi_overdub", read("transport.state", "midi_overdub")),
     ("transport.set_punch_in", read("transport.state", "punch_in")),
     ("transport.set_punch_out", read("transport.state", "punch_out")),
+    ("transport.set_record_quantization", read("transport.state", "record_quantization")),
     ("transport.set_recording", read("transport.state", "recording")),
 ];

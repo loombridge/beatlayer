@@ -16,8 +16,9 @@ use bl_model::{
     GrooveId, GrooveNote, HardwareLatency, Input, LaunchMode, LaunchQuantization, Locator,
     LocatorId, MacroStyle, MacroTarget, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
     MixerParam, ModelError, Monitor, NewTakeLane, Note, Output, PanMode, ParamId, PluginFormat,
-    Preserve, RackKind, SceneId, SendTap, SongStart, TakeClip, TakeClipData, TakeLaneId, Tap,
-    TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom, WarpMode, WarpPoint,
+    Preserve, RackKind, RecordQuantization, SceneId, SendTap, SongStart, TakeClip, TakeClipData,
+    TakeLaneId, Tap, TonesUpdate, TrackDelay, TrackId, TrackKind, Tuning, TuningNote, WarpFrom,
+    WarpMode, WarpPoint,
 };
 use serde_json::{Value, json};
 
@@ -55,7 +56,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        267,
+        268,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -95,7 +96,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.32 set_record_quantization"
     );
 
     for op in &ops {
@@ -2204,6 +2205,14 @@ fn every_command_runs_by_id() {
     );
     agent.run("transport.set_midi_overdub", json!({ "enabled": true }));
     assert!(agent.editor.document().settings().midi_overdub);
+    agent.run(
+        "transport.set_record_quantization",
+        json!({ "quantization": "1/8t" }),
+    );
+    assert_eq!(
+        agent.editor.document().settings().record_quantization,
+        RecordQuantization::EighthTriplet
+    );
     assert!(
         agent
             .editor
@@ -4114,6 +4123,13 @@ fn schemas_match_what_commands_serialise() {
         (
             "transport.set_midi_overdub",
             Command::SetMidiOverdub { enabled: true },
+        ),
+        (
+            "transport.set_record_quantization",
+            Command::SetRecordQuantization {
+                quantization: Some(RecordQuantization::Eighth),
+                on: None,
+            },
         ),
         (
             "clip.create_in_slot",

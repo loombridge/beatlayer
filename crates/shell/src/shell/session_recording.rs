@@ -407,6 +407,24 @@ impl Shell {
         Ok(started)
     }
 
+    /// Why Record Quantization can't change now, while a recording runs that
+    /// holds the value it started with: an Arrangement recording or a Session
+    /// slot recording. An overdub of clips that loop leaves it free
+    /// (Spec: recording R21, R22).
+    pub(super) fn record_quantization_locked(&self) -> Option<&'static str> {
+        self.recording.as_ref()?;
+        let held = self.session_run.as_ref().is_none_or(|run| {
+            run.slots.iter().any(|slot| {
+                let RecordingSlot { track, scene, .. } = slot.slot;
+                !(slot.slot.overdub
+                    && self.editor.document().slot(track, scene).is_some_and(
+                        |clip| matches!(&clip.data, ClipData::Midi(data) if data.looping),
+                    ))
+            })
+        });
+        held.then_some("a recording is under way; its Record Quantization holds until it ends")
+    }
+
     /// The slots a Session recording under way goes into, for
     /// `transport.state`.
     pub(super) fn session_slots(&self) -> Vec<RecordingSlot> {
@@ -430,6 +448,13 @@ impl Shell {
             return;
         };
         let tempo = self.editor.document().settings().tempo.clone();
+        let (signatures, value) = {
+            let settings = self.editor.document().settings();
+            (
+                settings.time_signatures.clone(),
+                settings.record_quantization,
+            )
+        };
         let length = (tempo.frames_to_ticks(so_far.end, rate)
             - tempo.frames_to_ticks(so_far.start, rate))
         .max(MIN_LENGTH);
@@ -449,6 +474,9 @@ impl Shell {
             }
             let notes =
                 crate::recording::session_notes(messages, so_far.start, so_far.end, &tempo, rate);
+            // Spec: recording R20. The clip's end isn't known yet, so no note
+            // wraps to the start while it grows.
+            let notes = quantized_session_notes(notes, &signatures, value, Ticks(i64::MAX / 2));
             let data = ClipData::Midi(new_midi(notes));
             let result = match slot.clip {
                 Some(clip) => self
@@ -522,6 +550,13 @@ impl Shell {
             return;
         };
         let tempo = self.editor.document().settings().tempo.clone();
+        let (signatures, value) = {
+            let settings = self.editor.document().settings();
+            (
+                settings.time_signatures.clone(),
+                settings.record_quantization,
+            )
+        };
         let ticks = |frames: Frames| tempo.frames_to_ticks(frames, rate);
         let length = (ticks(take.end) - ticks(take.start)).max(MIN_LENGTH);
         let edge_fades = self.create_fades_on_clip_edges();
@@ -561,6 +596,9 @@ impl Shell {
                         let notes = crate::recording::session_notes(
                             messages, take.start, take.end, &tempo, rate,
                         );
+                        // Spec: recording R20. The notes join the clip on the
+                        // clip's own bars, inside the recording's step.
+                        let notes = quantized_session_notes(notes, &signatures, value, length);
                         let data = ClipData::Midi(new_midi(notes));
                         let clip = match slot.clip {
                             Some(clip) => {
@@ -677,7 +715,30 @@ impl Shell {
             let notes =
                 crate::recording::session_notes(&played.messages, started, take.end, &tempo, rate);
             let moves = crate::recording::session_moves(&played.messages, started, &tempo, rate);
-            let mut passes = crate::recording::overdub_passes(data, clip.length, notes);
+            // Spec: recording R22. Each note takes the value in force when it
+            // reached the main thread; a clip that doesn't loop takes the
+            // value it started with.
+            let origin = ticks(started);
+            let changes: Vec<_> = played
+                .values
+                .iter()
+                .map(|&(frame, value)| (ticks(frame) - origin, value))
+                .collect();
+            let first = changes.first().map_or(value, |&(_, value)| value);
+            let looping = data.looping;
+            let value_at = |at: Ticks| {
+                if looping {
+                    crate::recording::value_at(&changes, at)
+                } else {
+                    first
+                }
+            };
+            let mut passes = crate::recording::overdub_passes_quantized(
+                data,
+                clip.length,
+                notes,
+                Some((&signatures, &value_at)),
+            );
             let mut stepped = crate::recording::overdub_moves(data, clip.length, &moves);
             // A pass with notes only, or with controllers only, is a step too.
             let numbers: std::collections::BTreeSet<usize> =
@@ -861,6 +922,33 @@ impl Shell {
             self.touch();
         }
     }
+}
+
+/// The notes of a new Session clip moved onto `value`'s grid, on the clip's
+/// own bars; one that would land at `length`, the clip's end, goes to its
+/// start (Spec: recording R20).
+fn quantized_session_notes(
+    notes: Vec<bl_model::Note>,
+    signatures: &bl_core::time::TimeSignatureMap,
+    value: bl_model::RecordQuantization,
+    length: Ticks,
+) -> Vec<bl_model::Note> {
+    if value.is_none() {
+        return notes;
+    }
+    notes
+        .into_iter()
+        .map(|note| {
+            crate::record_quantize::quantized_note(
+                note,
+                signatures,
+                value,
+                Ticks::ZERO,
+                (Ticks::ZERO, length),
+                crate::record_quantize::PastEnd::To(Ticks::ZERO),
+            )
+        })
+        .collect()
 }
 
 /// A new recording's MIDI data: the notes in a clip that loops.

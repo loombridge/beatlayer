@@ -180,6 +180,12 @@ impl Shell {
                 self.clip_view.panel_arrangement()
                     == serde_json::from_value(args["arrangement"].clone()).ok()?,
             ),
+            // Spec: recording R17. The submenu's ticked item is the set's
+            // value.
+            transport_ids::SET_RECORD_QUANTIZATION => Some(
+                self.editor.document().settings().record_quantization
+                    == serde_json::from_value(args["quantization"].clone()).ok()?,
+            ),
             ids::VIEW_NOTE_SPELLING => Some(
                 self.clip_view.note_spelling()
                     == serde_json::from_value(args["spelling"].clone()).ok()?,
@@ -481,6 +487,13 @@ impl Shell {
             return self.detail_of(self.window_in(args)).clip_shown();
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
+            return false;
+        }
+        // Spec: recording R21. The submenu's items are disabled while a
+        // recording holds the value.
+        if id == transport_ids::SET_RECORD_QUANTIZATION
+            && self.record_quantization_locked().is_some()
+        {
             return false;
         }
         if info_text::is_info_command(id) && !Self::has_info_text(id, args) {

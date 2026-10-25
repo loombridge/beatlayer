@@ -97,6 +97,7 @@ pub mod note_expression;
 pub mod note_ops;
 pub mod param;
 pub mod rack;
+mod record_quantization;
 pub mod registry;
 mod repr;
 mod routing;
@@ -187,6 +188,7 @@ pub use rack::{
     default_macro_name, description as rack_description, general_midi_drum, macro_number,
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
+pub use record_quantization::RecordQuantization;
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scale::{CHROMATIC, Scale, ScaleName};

@@ -27,7 +27,7 @@ use std::thread;
 use std::time::{Duration, SystemTime};
 
 use bl_core::midi::MidiMessage;
-use bl_core::time::{Frames, SampleRate, TempoMap, Ticks};
+use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_engine::controller_take::{self, REST};
 use bl_engine::mpe::MpeRole;
 use bl_engine::{
@@ -37,9 +37,11 @@ use bl_engine::{
 use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType};
 use bl_model::{
     AutomationTarget, Channel, Clip, ClipData, ClipId, Command, EditError, Editor, EnvelopeKind,
-    MidiData, NewTakeLane, Note, TakeLaneId, TrackId,
+    MidiData, NewTakeLane, Note, RecordQuantization, TakeLaneId, TrackId,
 };
 use rtrb::{Consumer, RingBuffer};
+
+use crate::record_quantize::{PastEnd, quantized_start};
 use std::collections::BTreeMap;
 
 /// Frames of one track's samples the ring between the audio thread and the
@@ -186,6 +188,7 @@ pub fn midi_in_pass(takes: &[MidiTake], take: TakeBounds, pass: &Pass) -> Vec<Mi
         .iter()
         .map(|recorded| MidiTake {
             track: recorded.track,
+            values: recorded.values.clone(),
             messages: recorded
                 .messages
                 .iter()
@@ -310,6 +313,7 @@ pub fn start(
             track,
             consumer,
             messages: Vec::new(),
+            values: Vec::new(),
             dropped: frames,
         });
     }
@@ -341,6 +345,7 @@ pub fn start(
             stale: None,
             fresh: false,
             delay: 0,
+            quantization: RecordQuantization::None,
         },
     ))
 }
@@ -386,6 +391,10 @@ pub struct Recording {
     /// Frames the audio is moved earlier (WP-2.13): the plan's `delay`,
     /// which the shell sets once it knows the device.
     pub delay: i64,
+    /// The Record Quantization value the main thread has now, which the
+    /// messages each drain brings in are taken under (Spec: recording R22).
+    /// The shell sets it before every poll.
+    pub quantization: RecordQuantization,
 }
 
 /// One MIDI track's ring, with what has been drained from it.
@@ -393,6 +402,9 @@ struct MidiReading {
     track: TrackId,
     consumer: Consumer<RecordedMidi>,
     messages: Vec<RecordedMidi>,
+    /// The Record Quantization value in force as each drain brought messages
+    /// in, from the frame of the first message of the drain.
+    values: Vec<(Frames, RecordQuantization)>,
     dropped: Arc<AtomicU64>,
 }
 
@@ -404,6 +416,21 @@ pub struct MidiTake {
     pub track: TrackId,
     /// Its notes' ons and offs and its controllers, in order.
     pub messages: Vec<RecordedMidi>,
+    /// The Record Quantization value that was in force as the main thread
+    /// drained each message, from the frame of the first message drained
+    /// under it (Spec: recording R22).
+    pub values: Vec<(Frames, RecordQuantization)>,
+}
+
+/// The value in force at `at` among `values`, each from the place it began
+/// at: the last that began at or before `at`, or the first for a place from
+/// before them all (Spec: recording R22).
+#[must_use]
+pub fn value_at<T: Ord>(values: &[(T, RecordQuantization)], at: T) -> RecordQuantization {
+    let after = values.partition_point(|(from, _)| *from <= at);
+    values
+        .get(after.saturating_sub(1))
+        .map_or(RecordQuantization::None, |(_, value)| *value)
 }
 
 /// What a finished recording came to.
@@ -509,8 +536,14 @@ impl Recording {
         for reading in &mut self.midi {
             // A ring abandoned before the drain has nothing more to come.
             ended &= reading.consumer.is_abandoned();
+            let before = reading.messages.len();
             while let Ok(message) = reading.consumer.pop() {
                 reading.messages.push(message);
+            }
+            if let Some(first) = reading.messages.get(before)
+                && reading.values.last().map(|(_, value)| *value) != Some(self.quantization)
+            {
+                reading.values.push((first.frame, self.quantization));
             }
         }
         if self.files.is_none() {
@@ -541,6 +574,7 @@ impl Recording {
             .map(|reading| MidiTake {
                 track: reading.track,
                 messages: reading.messages,
+                values: reading.values,
             })
             .collect();
         Some(Outcome {
@@ -935,11 +969,39 @@ pub fn overdub_passes(
     length: Ticks,
     played: Vec<Note>,
 ) -> BTreeMap<usize, Vec<Note>> {
+    overdub_passes_quantized(data, length, played, None)
+}
+
+/// [`overdub_passes`] with Record Quantization (Spec: recording R22): each
+/// note is moved onto the grid of the value `quantizing` gives for its
+/// start, counted from the frame the clip launched on, within its pass: the
+/// grid's bars are the clip's own, and a note that would land on the end of
+/// a clip's loop goes to the loop's start, in the pass it was played in.
+#[must_use]
+pub fn overdub_passes_quantized(
+    data: &MidiData,
+    length: Ticks,
+    played: Vec<Note>,
+    quantizing: Option<(&TimeSignatureMap, &dyn Fn(Ticks) -> RecordQuantization)>,
+) -> BTreeMap<usize, Vec<Note>> {
     let mut passes: BTreeMap<usize, Vec<Note>> = BTreeMap::new();
     for note in played {
-        let Some((pass, at, limit)) = locate(data, length, note.start) else {
+        let Some((pass, mut at, limit)) = locate(data, length, note.start) else {
             continue;
         };
+        if let Some((signatures, value)) = quantizing {
+            let from = if pass == 0 {
+                data.start
+            } else {
+                data.loop_start
+            };
+            let past_end = if data.looping {
+                PastEnd::To(data.loop_start)
+            } else {
+                PastEnd::LastLine
+            };
+            at = quantized_start(signatures, value(note.start), at, (from, limit), past_end);
+        }
         // Spec: mpe R4. A note cut at the end of its pass takes its
         // envelopes' end there.
         let length = note.length.min(limit - at).max(Ticks(1));
@@ -982,7 +1044,9 @@ pub fn overdub_moves(
 /// is replaced (WP-2.14). Controllers go the same way, as steps of the
 /// clip's envelopes (WP-2.29b). With `lane` on, each track's take also goes
 /// whole on a take lane (the comping spec, R12). `placed` holds the clips
-/// already made, which clearing leaves alone.
+/// already made, which clearing leaves alone. Returns each clip it put notes
+/// in with the place in its notes of the first it added, for Record
+/// Quantization to move them (Spec: recording R19).
 ///
 /// # Errors
 ///
@@ -995,12 +1059,13 @@ pub fn place_midi(
     overdub: bool,
     lane: bool,
     placed: &mut std::collections::BTreeSet<ClipId>,
-) -> Result<(), EditError> {
+) -> Result<Vec<(ClipId, usize)>, EditError> {
     let tempo = editor.document().settings().tempo.clone();
     let (start, end) = (
         tempo.frames_to_ticks(take.start, rate),
         tempo.frames_to_ticks(take.end, rate),
     );
+    let mut added = Vec::new();
     for recorded in takes {
         let mut played = notes(&recorded.messages, take.end, &tempo, rate);
         let mut moved = moves(&recorded.messages, &tempo, rate);
@@ -1021,6 +1086,7 @@ pub fn place_midi(
                 .collect::<Vec<_>>();
             let clip = Clip::new(id, start, end - start, ClipData::Midi(MidiData::new(notes)));
             put_on_lane(editor, recorded.track, clip)?;
+            added.push((id, 0));
             // Spec: themes R20. The caller colours what `placed` holds.
             placed.insert(id);
             let steps: Vec<_> = moved.iter().map(|&(at, m)| (at - start, m)).collect();
@@ -1055,6 +1121,7 @@ pub fn place_midi(
                 continue;
             };
             if !inside.is_empty() {
+                added.push((*id, data.notes.len()));
                 for note in inside {
                     data.notes.push_back(Note {
                         start: note.start - *origin,
@@ -1111,6 +1178,7 @@ pub fn place_midi(
                 .with_groove(editor.document().settings().grooves.auto_loaded());
             crate::arrangement::placing::clear(editor, recorded.track, from, to, placed)?;
             placed.insert(id);
+            added.push((id, 0));
             editor.apply(Command::CreateClip {
                 track: recorded.track,
                 clip,
@@ -1118,7 +1186,7 @@ pub fn place_midi(
             write_moves(editor, id, &steps, None)?;
         }
     }
-    Ok(())
+    Ok(added)
 }
 
 #[cfg(test)]
@@ -1300,6 +1368,7 @@ mod tests {
         vec![MidiTake {
             track,
             messages: frames.iter().map(|&(f, m)| midi(f, m)).collect(),
+            values: Vec::new(),
         }]
     }
 

@@ -148,6 +148,39 @@ fn each_transport_setting_reads_back_from_transport_state() {
     assert_eq!(state["punch_out"], true, "the other switch is untouched");
 }
 
+// Spec: recording R17. An agent sets Record Quantization, switches it off
+// and back on with `on`, and reads the value and the last one other than none
+// from `transport.state`.
+#[test]
+fn record_quantization_reads_back_from_transport_state() {
+    let mut client = client();
+    let state = transport_state(&mut client);
+    assert_eq!(state["record_quantization"], "none");
+    run(
+        &mut client,
+        "transport.set_record_quantization",
+        json!({ "quantization": "1/8t" }),
+    );
+    let state = transport_state(&mut client);
+    assert_eq!(state["record_quantization"], "1/8t");
+    assert_eq!(state["record_quantization_last"], "1/8t");
+    run(
+        &mut client,
+        "transport.set_record_quantization",
+        json!({ "on": false }),
+    );
+    let state = transport_state(&mut client);
+    assert_eq!(state["record_quantization"], "none");
+    assert_eq!(state["record_quantization_last"], "1/8t");
+    run(
+        &mut client,
+        "transport.set_record_quantization",
+        json!({ "on": true }),
+    );
+    let state = transport_state(&mut client);
+    assert_eq!(state["record_quantization"], "1/8t");
+}
+
 #[test]
 fn each_settings_command_reads_back_from_settings_state() {
     let mut client = client();

@@ -100,6 +100,7 @@ mod rack_presets;
 mod racks;
 mod realtime;
 mod realtime_export;
+mod record_quantization;
 mod recording;
 mod recovery;
 mod routing;

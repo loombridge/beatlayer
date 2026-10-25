@@ -782,6 +782,22 @@ const ENTRIES: &[Entry] = &[
             set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_record_quantization",
+        action: Action::Apply("set_record_quantization"),
+        label: "Record Quantization",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets Record Quantization, as Edit > Record Quantization does: the grid the \
+            notes an Arrangement recording, a Session slot recording or a Session overdub makes \
+            are moved onto. Give `quantization` as `none`, `1/4`, `1/8`, `1/8t`, `1/8+1/8t`, \
+            `1/16`, `1/16t`, `1/16+1/16t` or `1/32`, or give `on` as false to turn it off and as \
+            true to turn it back on at the last value chosen other than `none`. Step recording, \
+            Capture MIDI and notes drawn, pasted or made by a command are never moved. It can't \
+            be changed while an Arrangement or Session slot recording runs. The setting is saved \
+            with the set, and undo restores it.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",

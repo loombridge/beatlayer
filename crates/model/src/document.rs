@@ -13,6 +13,7 @@ use crate::ids::{ChainId, ClipId, DeviceId, GrooveId, LocatorId, SceneId, TakeLa
 use crate::locator::{Locator, SongStart};
 use crate::metronome::MetronomeSettings;
 use crate::rack::Chain;
+use crate::record_quantization::RecordQuantization;
 use crate::scale::Scale;
 use crate::scene::Scene;
 use crate::shared::Shared;
@@ -76,6 +77,19 @@ pub struct Settings {
     /// replacing them (WP-2.14). Off in a new set, and not written when off.
     #[serde(default, skip_serializing_if = "is_off")]
     pub midi_overdub: bool,
+    /// Record Quantization: the grid the notes a recording makes are moved
+    /// onto (the recording spec, R17). No Quantization in a new set and in a
+    /// set saved before it existed, and not written then.
+    #[serde(default, skip_serializing_if = "RecordQuantization::is_none")]
+    pub record_quantization: RecordQuantization,
+    /// The last Record Quantization value other than No Quantization that
+    /// was chosen, which switching record quantising back on returns to.
+    /// Not written while it is the first one a switch picks.
+    #[serde(
+        default = "last_record_quantization",
+        skip_serializing_if = "is_first_record_quantization"
+    )]
+    pub record_quantization_last: RecordQuantization,
     /// Delay Compensation: whether the engine holds every path back so
     /// signals through high-latency devices reach the Main output aligned
     /// (the delay-compensation spec, manual 23.3). On in a new set; a set
@@ -144,6 +158,8 @@ impl Default for Settings {
             punch_in: false,
             punch_out: false,
             midi_overdub: false,
+            record_quantization: RecordQuantization::None,
+            record_quantization_last: RecordQuantization::FIRST_ON,
             delay_compensation: true,
             reduced_latency_monitoring: false,
             lock_envelopes: false,
@@ -186,6 +202,14 @@ fn is_unity(value: &f64) -> bool {
 /// For serde's `skip_serializing_if`, which passes a reference.
 fn is_on(value: &bool) -> bool {
     *value
+}
+
+fn last_record_quantization() -> RecordQuantization {
+    RecordQuantization::FIRST_ON
+}
+
+fn is_first_record_quantization(value: &RecordQuantization) -> bool {
+    *value == RecordQuantization::FIRST_ON
 }
 
 fn is_off(value: &bool) -> bool {

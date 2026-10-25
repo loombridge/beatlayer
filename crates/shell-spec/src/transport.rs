@@ -53,6 +53,8 @@ pub const SET_METRONOME_RHYTHM: &str = "transport.set_metronome_rhythm";
 pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_only_while_recording";
 /// `transport.set_midi_overdub` (`bl-model`): Options ▸ MIDI Arrangement Overdub.
 pub const SET_MIDI_OVERDUB: &str = "transport.set_midi_overdub";
+/// `transport.set_record_quantization` (`bl-model`): Edit ▸ Record Quantization.
+pub const SET_RECORD_QUANTIZATION: &str = "transport.set_record_quantization";
 /// `transport.set_recording` (`bl-engine`): whether transport is recording.
 pub const SET_RECORDING: &str = "transport.set_recording";
 /// `song.set_tempo` (`bl-model`): the Tempo field.
@@ -133,6 +135,13 @@ pub struct TransportState {
     pub punch_out: bool,
     /// Whether MIDI Arrangement Overdub is on.
     pub midi_overdub: bool,
+    /// Record Quantization, the grid recorded notes are moved onto (the
+    /// recording spec, R17): `none` or a note value such as `1/16`.
+    pub record_quantization: bl_model::RecordQuantization,
+    /// The last Record Quantization value other than `none` that was chosen,
+    /// which `transport.set_record_quantization` with `on` set to true
+    /// returns to.
+    pub record_quantization_last: bl_model::RecordQuantization,
     /// Whether Automation Arm is on (view state, not saved with the set).
     pub automation_arm: bool,
     /// The mode an Arrangement recording writes control moves in, as

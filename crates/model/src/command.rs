@@ -40,6 +40,7 @@ use crate::rack::{
     CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
     MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
+use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
@@ -346,6 +347,19 @@ pub enum Command {
         /// When on, MIDI recorded into the Arrangement merges into the clips
         /// already there instead of replacing them.
         enabled: bool,
+    },
+
+    /// Sets Record Quantization, the grid recorded notes are moved onto
+    /// (the recording spec, R17): `quantization` chooses a value, `on` turns
+    /// record quantising off, or back on at the last value chosen other than
+    /// No Quantization. Exactly one of the two is given.
+    SetRecordQuantization {
+        /// The value to choose.
+        #[serde(default)]
+        quantization: Option<RecordQuantization>,
+        /// Whether record quantising is on.
+        #[serde(default)]
+        on: Option<bool>,
     },
 
     /// Creates an empty track with default mixer settings.
@@ -2826,6 +2840,7 @@ impl Command {
             Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
             Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
             Self::SetMidiOverdub { .. } => "MIDI Arrangement Overdub",
+            Self::SetRecordQuantization { .. } => "Record Quantization",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -3371,6 +3386,27 @@ impl Document {
             }
             Command::SetMidiOverdub { enabled } => {
                 self.settings.midi_overdub = *enabled;
+                Ok(())
+            }
+            Command::SetRecordQuantization { quantization, on } => {
+                let settings = &mut self.settings;
+                let value = match (quantization, on) {
+                    (Some(value), None) => *value,
+                    (None, Some(true)) if settings.record_quantization.is_none() => {
+                        settings.record_quantization_last
+                    }
+                    (None, Some(true)) => settings.record_quantization,
+                    (None, Some(false)) => RecordQuantization::None,
+                    _ => {
+                        return Err(ModelError::InvalidInput(
+                            "give either `quantization` or `on`",
+                        ));
+                    }
+                };
+                settings.record_quantization = value;
+                if !value.is_none() {
+                    settings.record_quantization_last = value;
+                }
                 Ok(())
             }
             Command::CreateTrack {

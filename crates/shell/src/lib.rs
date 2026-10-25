@@ -100,6 +100,7 @@ pub mod placeholders;
 pub mod plugins;
 pub mod processed;
 pub mod realtime;
+pub mod record_quantize;
 pub mod recording;
 pub mod resources;
 pub mod routing;

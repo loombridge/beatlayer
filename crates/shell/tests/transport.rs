@@ -99,6 +99,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
         "transport.set_midi_overdub",
         "transport.set_punch_in",
         "transport.set_punch_out",
+        "transport.set_record_quantization",
         "transport.state",
     ]);
     expected.sort_unstable();

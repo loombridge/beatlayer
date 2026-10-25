@@ -52,6 +52,9 @@ pub const CREATE_FADE: &str = "arrangement.create_fade";
 /// `arrangement.delete_fades`: delete the fades and crossfades of clips
 /// (Cmd-Option-Delete, and Delete with a fade handle selected).
 pub const DELETE_FADES: &str = "arrangement.delete_fades";
+/// `arrangement.insert_empty_midi_clip`: make an empty MIDI clip over the time
+/// selection on each selected MIDI track (Cmd-Shift-M).
+pub const INSERT_EMPTY_MIDI_CLIP: &str = "arrangement.insert_empty_midi_clip";
 /// `arrangement.insert_silence`: open empty time on every track (Cmd-I).
 pub const INSERT_SILENCE: &str = "arrangement.insert_silence";
 /// `arrangement.cut_time`: copy a span of every track, then delete it
@@ -94,6 +97,7 @@ pub const IDS: &[&str] = &[
     SELECT_LOOP,
     CREATE_FADE,
     DELETE_FADES,
+    INSERT_EMPTY_MIDI_CLIP,
     INSERT_SILENCE,
     CUT_TIME,
     COPY_TIME,
@@ -241,6 +245,22 @@ pub struct TargetArgs {
     /// linked-track editing spec, R15). `true` if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub linked: Option<bool>,
+}
+
+/// Arguments of `arrangement.insert_empty_midi_clip`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InsertMidiClipArgs {
+    /// The tracks to make a clip on; only MIDI tracks get one. Left out, the
+    /// selected tracks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracks: Option<Vec<TrackId>>,
+    /// Where the clip starts. Left out, the time selection's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<Position>,
+    /// Where the clip ends, after `start`. Left out, the time selection's end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<Position>,
 }
 
 /// A span of time on every track, for the …Time commands (time editing R14).
@@ -806,6 +826,19 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-ARR-008")
         .args::<TargetArgs>(),
+        edit(
+            INSERT_EMPTY_MIDI_CLIP,
+            "Insert Empty MIDI Clip",
+            Permission::Edit,
+            "Makes an empty MIDI clip from `start` to `end`, or over the time selection, on \
+             each of `tracks` that is a MIDI track, or on the selected MIDI tracks, as Insert \
+             Empty MIDI Clip (Cmd-Shift-M, Ctrl-Shift-M) does with a time selection. A new \
+             clip takes the set's scale, auto-loaded groove and the colour Clip Color gives. \
+             Refused where a track already has a clip inside the span, so it never replaces \
+             one. One undo step.",
+        )
+        .binding("S-ARR-037")
+        .args::<InsertMidiClipArgs>(),
         edit(
             DELETE_FADES,
             "Delete Fades",

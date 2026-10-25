@@ -1661,6 +1661,8 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::External)
             .context(Browser)
             .binding("S-BRW-004")
+            .binding("S-DEV-007")
+            .binding("S-TRACK-015")
             .args::<NoArgs>()
             .result::<AddResult>(),
         CommandSpec::new(ADD_TO_ARRANGEMENT, "Add Files to Arrangement")

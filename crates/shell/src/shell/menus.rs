@@ -551,6 +551,7 @@ impl Shell {
                 return args
                     .get("clip")
                     .and_then(|clip| serde_json::from_value::<bl_model::ClipId>(clip.clone()).ok())
+                    .or_else(|| self.selected_clip())
                     .and_then(|clip| self.editor.document().clip(clip))
                     .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)));
             }
@@ -951,9 +952,13 @@ impl Shell {
                 );
         }
         if engine_transport::handles(id) {
-            // The transport plays only while an engine runs on a device.
+            // The transport plays only while an engine runs on a device. F9
+            // names no state: it switches recording (transport R30).
+            let keyed = id == "transport.set_recording" && args.get("recording").is_none();
             return self.audio.engine_running()
-                && engine_transport::command_from_args(id, Self::object(args.clone())).is_ok();
+                && (keyed
+                    || engine_transport::command_from_args(id, Self::object(args.clone()))
+                        .is_ok());
         }
         if engine_session::handles(id) {
             if let Some(allowed) = self.can_session_view(id, args) {

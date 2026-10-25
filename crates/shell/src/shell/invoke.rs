@@ -15,6 +15,7 @@ use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::file_manager as file_manager_ids;
 use bl_shell_spec::locator as locator_ids;
+use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::tracks as track_ids;
@@ -134,6 +135,14 @@ impl Shell {
                 let on = current.is_some_and(|d| d.enabled);
                 fields.insert("enabled".to_owned(), json!(!on));
             }
+        }
+        if id == midi_ids::EXPORT
+            && !fields.contains_key("clip")
+            && let Some(clip) = self.selected_clip()
+        {
+            // Spec: session-context-menus R17. File ▸ Export MIDI Clip... and
+            // its key export the selected clip.
+            fields.insert("clip".to_owned(), json!(clip));
         }
         if id == "transport.set_midi_overdub" && !fields.contains_key("enabled") {
             // Options ▸ MIDI Arrangement Overdub switches the setting to the
@@ -550,6 +559,16 @@ impl Shell {
             "transport.set_midi_overdub" if !has("enabled") => {
                 let args = self.filled_args(id, args)?;
                 self.run(id, args)
+            }
+            midi_ids::EXPORT if !has("clip") => {
+                let args = self.filled_args(id, args)?;
+                self.run(id, args)
+            }
+            "transport.set_recording" if !has("recording") => {
+                // Spec: transport R30. F9 and Playback ▸ Record to Arrangement
+                // switch recording to the other state.
+                let recording = !self.audio.transport_state().recording;
+                self.run(id, json!({ "recording": recording }))
             }
             "transport.set_metronome_enabled" if !has("enabled") => {
                 let args = self.filled_args(id, args)?;

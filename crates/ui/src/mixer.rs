@@ -807,7 +807,8 @@ fn title_bars(
                 bar.bottom(),
             ),
         );
-        if !rename_edit(ui, theme, name, track, t.name(), events) {
+        let next = crate::track_menu::next_renamable(shell.editor().document(), track);
+        if !rename_edit(ui, theme, name, track, t.name(), next, events) {
             painter.text(
                 pos2(name.left(), name.center().y),
                 Align2::LEFT_CENTER,

@@ -111,7 +111,6 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  area; the manual gives it no keys (manual 14.2)",
             )),
         ),
-        ("transport.set_recording", Exception(RECORDING)),
         ("transport.stop_recording", Exception(RECORDING)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so

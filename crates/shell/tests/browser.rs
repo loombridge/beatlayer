@@ -1355,7 +1355,10 @@ fn every_browser_command_is_registered_with_its_class() {
     };
     assert_eq!(bound(ids::FOCUS_BROWSER), ["S-FOCUS-006"]);
     assert_eq!(bound(ids::FOCUS_SEARCH), ["S-BRW-006"]);
-    assert_eq!(bound(ids::LOAD_SELECTED), ["S-BRW-004"]);
+    assert_eq!(
+        bound(ids::LOAD_SELECTED),
+        ["S-BRW-004", "S-DEV-007", "S-TRACK-015"]
+    );
 }
 
 // Spec: browser R8.

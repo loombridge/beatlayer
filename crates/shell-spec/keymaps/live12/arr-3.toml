@@ -9,4 +9,7 @@ trigger = "press"
 milestone = "M2"
 mac = ["Cmd+Shift+M"]
 win = ["Ctrl+Shift+M"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "arrangement.insert_empty_midi_clip", contexts = ["arrangement"] },
+]

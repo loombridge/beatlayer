@@ -9,8 +9,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Right-click", "Ctrl+click"]
 win = ["Right-click"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "every view's items open their context menu on a right-click, or a Ctrl-click on macOS (the Arrangement's, the track headers', the Session View's, the browser's and the Device View's menus)"
 
 [[shortcut]]
 id = "S-CTX-002"

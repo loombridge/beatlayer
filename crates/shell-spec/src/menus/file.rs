@@ -9,6 +9,7 @@ use crate::commands::{
 };
 use crate::export::OPEN_DIALOG as EXPORT_OPEN_DIALOG;
 use crate::file_manager::{SET_SAVE_COPY, VIEW_TOGGLE_FILE_MANAGER};
+use crate::midi_files::EXPORT as EXPORT_MIDI_CLIP;
 use crate::set_exchange::INSTALL_PACK;
 
 pub(super) const FILE: &[Row] = &[
@@ -49,9 +50,5 @@ pub(super) const FILE: &[Row] = &[
         "Export Audio/Video...",
         Cmd(EXPORT_OPEN_DIALOG),
     ),
-    (
-        "M-FILE-016",
-        "Export MIDI Clip...",
-        Pending(Some("S-FILE-008")),
-    ),
+    ("M-FILE-016", "Export MIDI Clip...", Cmd(EXPORT_MIDI_CLIP)),
 ];

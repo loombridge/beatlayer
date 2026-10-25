@@ -593,14 +593,23 @@ impl Shell {
             return self.run_automation(automation_id, args);
         }
         let before = self.editor.document().clone();
-        let result = editing::run(
-            id,
-            args,
-            &mut self.editor,
-            &mut self.arrangement,
-            &mut self.clipboard,
-            self.prefs.create_fades_on_clip_edges.0,
-        )
+        let result = if id == bl_shell_spec::editing::INSERT_EMPTY_MIDI_CLIP {
+            editing::insert_empty_midi_clips(
+                args,
+                &mut self.editor,
+                &self.arrangement,
+                &self.prefs.look,
+            )
+        } else {
+            editing::run(
+                id,
+                args,
+                &mut self.editor,
+                &mut self.arrangement,
+                &mut self.clipboard,
+                self.prefs.create_fades_on_clip_edges.0,
+            )
+        }
         .map_err(|failure| edit_error(id, failure));
         if *self.editor.document() != before {
             self.dirty = true;

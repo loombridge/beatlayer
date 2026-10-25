@@ -280,7 +280,7 @@ fn import_signature_map(
     let before = current.signature_at(start);
     let mut changes: Vec<TimeSignatureChange> = current
         .changes()
-        .filter(|change| change.at != start && change.at != end)
+        .filter(|change| change.at < start || change.at > end)
         .collect();
     changes.push(TimeSignatureChange {
         at: start,

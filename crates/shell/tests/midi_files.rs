@@ -407,6 +407,45 @@ fn import_tempo_writes_time_signature_markers() {
     );
 }
 
+// Spec: midi-clips R18. A signature change the song already has inside the
+// clip's span goes, as the tempo's segments there do, so the clip plays under
+// its own signature throughout.
+#[test]
+fn import_tempo_drops_the_signature_changes_inside_the_clip() {
+    let dir = TempDir::new("signature-inside");
+    let bytes = generate(
+        Format::SingleTrack,
+        &[(
+            "Four",
+            &[note(0, 16 * u32::from(PPQ), 60, 90)],
+            &[(0, Meta::Signature(4, 4))],
+        )],
+    );
+    let path = dir.file("Four.mid", &bytes);
+    let mut editor = Editor::new();
+    let three_four = TimeSignature::new(3, 4).unwrap();
+    let bar = |n: i64| Ticks(Ticks::WHOLE.get() * n);
+    editor
+        .apply(Command::SetTimeSignatureChange {
+            at: bar(2),
+            signature: three_four,
+        })
+        .unwrap();
+
+    let result = midi_files::import(&mut editor, &path, None, Ticks::ZERO, true).unwrap();
+    let signatures = &editor.document().settings().time_signatures;
+    assert_eq!(result.clips[0].length, bar(4));
+    for at in 0..4 {
+        assert_eq!(
+            signatures.signature_at(bar(at)),
+            TimeSignature::FOUR_FOUR,
+            "bar {}",
+            at + 1
+        );
+    }
+    assert_eq!(signatures.changes().count(), 2, "{signatures:?}");
+}
+
 // Spec: midi-clips R15, R19 (export, import keeps every note, and the file
 // carries the clip's tempo and signature).
 #[test]

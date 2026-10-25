@@ -383,7 +383,8 @@ pub fn header(
         name_right = rect.left() - 2.0;
     }
     let name_rect = Rect::from_min_max(pos2(name_left, row_top), pos2(name_right, row_top + 15.0));
-    if !rename_edit(ui, theme, name_rect, id, name, events) {
+    let next = crate::track_menu::next_renamable(shell.editor().document(), id);
+    if !rename_edit(ui, theme, name_rect, id, name, next, events) {
         painter.with_clip_rect(title.shrink(1.0)).text(
             pos2(name_left, row_top + 7.5),
             Align2::LEFT_CENTER,

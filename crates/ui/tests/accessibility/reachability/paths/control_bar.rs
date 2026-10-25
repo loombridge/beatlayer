@@ -62,7 +62,6 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("groove.set_auto_load", Exception(GROOVE_POOL)),
         ("groove.set_global_amount", Exception(GROOVE_POOL)),
         ("groove.to_clip", Exception(GROOVE_POOL)),
-        ("transport.set_recording", Exception(RECORDING)),
         ("transport.stop_recording", Exception(RECORDING)),
         // Tempo breakpoints and time-signature markers (WP-2.20): the
         // arrangement's tempo envelope and marker lane aren't drawn yet, so

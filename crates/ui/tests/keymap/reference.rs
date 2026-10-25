@@ -37,6 +37,24 @@ fn reference() -> Option<Vec<Reference>> {
     Some(file.shortcut)
 }
 
+/// Each work package's status in the build plan's status table, by its
+/// `WP-` name: the rows that read `| 6.70 | todo | ... |`.
+fn package_statuses() -> std::collections::HashMap<String, String> {
+    let text = std::fs::read_to_string(repo().join("docs/03-build-plan.md")).unwrap();
+    text.lines()
+        .filter_map(|line| {
+            let mut cells = line.split('|').skip(1).map(str::trim);
+            let (id, status) = (cells.next()?, cells.next()?);
+            let status = matches!(
+                status,
+                "done" | "todo" | "in progress" | "review" | "blocked"
+            )
+            .then(|| status.to_owned())?;
+            Some((format!("WP-{id}"), status))
+        })
+        .collect()
+}
+
 /// The shortcuts of the views and windows the shell (WP-1.7) builds, which
 /// must be bound.
 const SHELL: &[&str] = &[
@@ -82,6 +100,7 @@ const SHELL: &[&str] = &[
 
 /// Everything wrong with a keymap against the reference and the registry.
 fn problems(keymap: &Keymap, reference: &[Reference], registry: &Registry) -> Vec<String> {
+    let package_statuses = package_statuses();
     let mut problems = Vec::new();
     let entries = keymap.entries();
     if entries.len() != reference.len() {
@@ -142,12 +161,24 @@ fn problems(keymap: &Keymap, reference: &[Reference], registry: &Registry) -> Ve
                         source.milestone
                     ));
                 }
-                match (source.milestone.as_str(), package.as_deref()) {
-                    ("M1", None) => problems.push(format!("{id}: an M1 shortcut with no package")),
-                    ("M1", Some("WP-1.7")) => {
-                        problems.push(format!("{id}: the shell's own, but unbound"));
+                // Spec: ui-parity README, "How UI packages use it". A pending
+                // shortcut of M1 to M3 names a package that isn't done.
+                if matches!(source.milestone.as_str(), "M1" | "M2" | "M3") {
+                    match package.as_deref() {
+                        None => problems.push(format!(
+                            "{id}: an {} shortcut with no package",
+                            source.milestone
+                        )),
+                        Some("WP-1.7") => {
+                            problems.push(format!("{id}: the shell's own, but unbound"));
+                        }
+                        Some(package) => match package_statuses.get(package) {
+                            None => problems.push(format!("{id}: {package} isn't in the plan")),
+                            Some(status) if status == "done" => problems
+                                .push(format!("{id}: {package} is done, but left it unbound")),
+                            Some(_) => {}
+                        },
                     }
-                    _ => {}
                 }
             }
         }
@@ -204,5 +235,41 @@ fn the_test_fails_when_a_shortcut_is_neither_bound_nor_marked() {
         problems
             .iter()
             .any(|p| p.contains("S-FILE-003: the shell builds"))
+    );
+}
+
+#[test]
+fn the_test_fails_when_a_pending_shortcut_of_m1_to_m3_has_no_package_or_a_done_one() {
+    // S-FOCUS-009 is an M2 shortcut that WP-6.72 binds.
+    let pending = "package = \"WP-6.72\"\n";
+    assert!(
+        bl_ui::keymap::LIVE12.contains(pending),
+        "S-FOCUS-009's package"
+    );
+    let Some(reference) = reference() else {
+        return;
+    };
+    let problems_of = |text: String| {
+        let keymap = Keymap::parse(&text).unwrap();
+        problems(&keymap, &reference, &registry())
+    };
+    let none = problems_of(bl_ui::keymap::LIVE12.replace(pending, ""));
+    assert!(
+        none.iter()
+            .any(|p| p.contains("S-FOCUS-009: an M2 shortcut with no package")),
+        "{none:#?}"
+    );
+    let done = problems_of(bl_ui::keymap::LIVE12.replace(pending, "package = \"WP-1.8b\"\n"));
+    assert!(
+        done.iter()
+            .any(|p| p.contains("S-FOCUS-009: WP-1.8b is done, but left it unbound")),
+        "{done:#?}"
+    );
+    let unknown = problems_of(bl_ui::keymap::LIVE12.replace(pending, "package = \"WP-99.9\"\n"));
+    assert!(
+        unknown
+            .iter()
+            .any(|p| p.contains("S-FOCUS-009: WP-99.9 isn't in the plan")),
+        "{unknown:#?}"
     );
 }

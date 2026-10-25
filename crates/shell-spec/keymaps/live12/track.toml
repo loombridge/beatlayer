@@ -65,8 +65,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Tab"]
 win = ["Tab"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the name being typed in a track's title bar: Tab keeps the name and starts the next track's (`track.rename`)"
 
 [[shortcut]]
 id = "S-TRACK-006"
@@ -161,8 +161,8 @@ trigger = "press"
 milestone = "M1"
 mac = ["Cmd+Up", "Cmd+Down", "Cmd+Left", "Cmd+Right"]
 win = ["Ctrl+Up", "Ctrl+Down", "Ctrl+Left", "Ctrl+Right"]
-status = "pending"
-package = "WP-1.8b"
+status = "widget"
+handler = "the Arrangement View, with title bars selected: Cmd-Up and Cmd-Down (Ctrl) move the selected tracks a place, keeping the gaps between them (`track.move`)"
 
 [[shortcut]]
 id = "S-TRACK-013"
@@ -201,7 +201,10 @@ trigger = "press"
 milestone = "M2"
 mac = ["Enter"]
 win = ["Enter"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "browser.load_selected", contexts = ["browser"] },
+]
 
 [[shortcut]]
 id = "S-TRACK-016"

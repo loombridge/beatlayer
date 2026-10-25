@@ -18,6 +18,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("arrangement.delete", query(Track, "clips")),
     ("arrangement.duplicate", query(Track, "clips")),
     ("arrangement.insert_silence", query(Track, "clips")),
+    ("arrangement.insert_empty_midi_clip", query(Track, "clips")),
     ("arrangement.duplicate_time", query(Track, "clips")),
     ("arrangement.loop_selection", read("transport.state", "loop_start")),
     ("arrangement.move_clips", query(Track, "clips")),

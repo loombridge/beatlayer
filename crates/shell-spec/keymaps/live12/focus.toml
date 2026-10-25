@@ -116,6 +116,7 @@ milestone = "M2"
 mac = ["Option+8"]
 win = ["Alt+8"]
 status = "pending"
+package = "WP-6.72"
 
 [[shortcut]]
 id = "S-FOCUS-010"

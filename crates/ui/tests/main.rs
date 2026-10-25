@@ -38,6 +38,7 @@ mod file_manager;
 mod floating_windows;
 mod info_view;
 mod keymap;
+mod keymap_sweep;
 mod launch_panel;
 mod layout;
 mod locator;

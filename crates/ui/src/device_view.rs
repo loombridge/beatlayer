@@ -427,6 +427,31 @@ impl DeviceViewUi {
         );
         self.drop_target(ui, shell, theme, &state, &placed, rect, events);
         sample_drop(ui, &state, &placed, rect, events);
+        // Spec: device-chains R43. With the Device View holding the keyboard,
+        // and no control in it using the arrow keys, Left and Right select the
+        // device before or after the selected one (S-A11Y-014).
+        if shell
+            .active_contexts()
+            .contains(&bl_commands::Context::DeviceView)
+        {
+            let step = ui.input_mut(|i| {
+                i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowRight))
+                    - i32::from(i.consume_key(egui::Modifiers::NONE, Key::ArrowLeft))
+            });
+            let at = state.devices.iter().position(|d| d.selected);
+            let to = match at {
+                Some(at) => i64::try_from(at).ok().map(|at| at + i64::from(step)),
+                None if step > 0 => Some(0),
+                None => i64::try_from(state.devices.len()).ok().map(|n| n - 1),
+            };
+            if step != 0
+                && let Some(device) = to
+                    .and_then(|to| usize::try_from(to).ok())
+                    .and_then(|to| state.devices.get(to))
+            {
+                invoke(events, ids::SELECT, json!({ "device": device.id }));
+            }
+        }
     }
 
     /// Where the zone editor is, if the selected multisampler has it open:

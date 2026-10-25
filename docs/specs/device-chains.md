@@ -33,6 +33,7 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 | S8 | Observation | Live 12.4.6 on macOS, 12 October 2026, a plug-in's editor window (Apple's AUDelay on an audio track) | A plug-in's window is a small-title-bar utility window that stays above the main window, titled with the device then the track (`AUDelay/4-Audio`); with Settings, Plug-Ins, Auto-Hide Plug-In Windows on (its default), it hides when another track is selected and comes back with its track; Multiple Plug-In Windows and Auto-Open Plug-In Windows are on by default |
 | S11 | Beatlayer | [The improvements](../05-improvements.md), IMP-25, accepted 20 October 2026, with its placements | Deactivate All Devices sits in the track context menu's group with Freeze Track and Flatten, just before Freeze Track; it reaches the selected tracks' top-level devices, not into racks, and when every one of them is already off it reads Activate All Devices and turns them back on, one undo step either way. Close All Plug-in Windows follows the plug-in window items in the View menu and closes plug-in editor windows only: floating native device windows stay as they are, so it never changes the set, is read class, is never an undo step, and has no key |
 | S12 | Manual | Live 12 reference manual, chapter 34 "MIDI and Key Remote Control", section 34.1.1.1 "Instant Mappings"; [menus.md](../ui-parity/menus.md) C-DEVICE-014 | A device's title bar menu has Lock to, listing the control surfaces chosen in the Settings; a locked device shows a hand icon in its title bar; some surfaces can't be locked |
+| S13 | Manual | The Live 12 reference manual (online edition, read 25 October 2026), chapter 41, section 41.4.1.5, and chapter 42, section 42.4; [shortcuts.toml](../ui-parity/shortcuts.toml) S-A11Y-014, S-DEV-004, S-DEV-007 and S-DEV-010 | Left and Right move between devices; Enter loads the browser's selected device; Shift-click adds devices to the selection and Cmd (Ctrl) with the plug-in window button opens several windows at once |
 
 ## Rules
 
@@ -78,6 +79,7 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 - **R40.** View ▸ Close All Plug-in Windows (IMP-25, no key), `view.close_plug_in_windows`, sits straight after Plug-In Windows (R33) and closes every open plug-in editor window (R13 of [clap-hosting](clap-hosting.md)) at once. It closes editors only: a floating native device window (R26 to R33) stays as it is, so it never docks a device, changes nothing in the set, and is never an undo step. It is in the read class, returns how many editors it closed, and is disabled while no editor is open. (S11)
 - **R41.** A device's menu (R24) holds Lock to (C-DEVICE-014) after Save as Default Preset and before the device's own items, with a separator before it: one item per running control surface that supports locking, in the Control Surfaces table's row order, reading "Lock to <surface name>", ticked while that surface is locked to this device. Choosing an unticked one runs `control_surface.lock` and a ticked one `control_surface.unlock` ([control surfaces](control-surfaces.md) R23); neither is an undo step. With no such surface running, a single "Lock to Control Surface" item is shown disabled (Beatlayer's own wording). A rack's menu holds the same items. (S12)
 - **R42.** While a surface is locked to a device, its title bar shows the hand icon (Beatlayer's own drawing) straight after the name, before Hot-Swap Presets, the name giving up the room; a folded device shows it under its name. Hovering it shows "Locked to <surface name>" in the Status Bar, every surface named when there are several, and it reaches assistive technology as an image with that text. `device_view.state` reports each device's locks ([control surfaces](control-surfaces.md) R35). (S12)
+- **R43.** With the Device View holding the keyboard and none of its controls using the arrow keys, Left and Right select the device before or after the selected one in the chain shown, and with none selected the first or the last (S-A11Y-014), as `device.select`. The last device stays selected on Right and the first on Left. Enter in the browser loads the selected device (S-DEV-007, S-TRACK-015, the key S-BRW-004 runs). Shift-click to add devices to the selection (S-DEV-004) and Cmd-click on a plug-in window button (S-DEV-010) wait for WP-6.76 and WP-6.75. (S13)
 
 ## Tests
 
@@ -122,6 +124,7 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 | R40 | `crates/shell/tests/plugins.rs`, `close_all_plug_in_windows_closes_every_editor_without_an_undo_step`; `crates/cli/tests/agent.rs`, `close_all_plug_in_windows_closes_the_editors_through_the_agent_api` | unit; MCP script |
 | R41 | to be written in WP-7.6 | UI script |
 | R42 | to be written in WP-7.6 | UI script, agent |
+| R43 | `crates/ui/tests/keymap_sweep.rs`, `left_and_right_move_between_devices`, `enter_in_the_browser_loads_the_selected_item` | UI script |
 
 ## Details
 
@@ -130,4 +133,4 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 - The Delete item in a device's menu shows the Delete key it is bound to.
 - On macOS a floating window's close button is 10 points across, centred 9 points from the left of its title bar.
 - The expanded part (R34) is the kind that sits within the device, as Phaser-Flanger's LFO and Envelope Follower sections do. Panels above the Device View (Roar's, EQ Eight's Frequency Display), which the same toggle shows in Live, are not built; where Live draws a within-device section, and the toggle's exact look, are to observe.
-- Shift-click to add devices to the selection (S-DEV-004) and the level meters between devices (L-DEV-003) are not built yet.
+- Shift-click to add devices to the selection (S-DEV-004, WP-6.76) and the level meters between devices (L-DEV-003) are not built yet.

@@ -267,6 +267,7 @@ fn title_bar(
         rect,
         &crate::session_menus::Rename::Title(clips),
         &value.name,
+        None,
         events,
     );
     if !renaming {

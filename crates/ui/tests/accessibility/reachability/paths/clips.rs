@@ -507,13 +507,6 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
-            "midi.export_clip",
-            Exception(Equivalent(
-                "the File menu's Export MIDI Clip... dialog, which waits on the file dialogs \
-                 (midi-clips R19)",
-            )),
-        ),
-        (
             "clip.create_in_slot",
             Exception(LaterView("the Session grid and its menus (WP-3.7)")),
         ),

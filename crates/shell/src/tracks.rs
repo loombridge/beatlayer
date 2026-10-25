@@ -1281,6 +1281,102 @@ pub fn ungroup_tracks(
     Ok(children)
 }
 
+/// Where each of the places in `selected` goes when every one of them moves a
+/// place towards the start (or, with `later`, the end) of a list of `len`
+/// places, as `(from, to)` pairs in the order to apply them: the selected
+/// places that aren't next to each other keep the gaps between them, and
+/// nothing moves when one is at the end it moves towards (S-TRACK-012,
+/// S-SES-016).
+#[must_use]
+pub fn shifted(len: usize, selected: &[usize], later: bool) -> Vec<(usize, usize)> {
+    let mut places: Vec<usize> = selected.iter().copied().filter(|p| *p < len).collect();
+    places.sort_unstable();
+    places.dedup();
+    let blocked = if later {
+        places.last().is_some_and(|p| p + 1 == len)
+    } else {
+        places.first() == Some(&0)
+    };
+    if blocked {
+        return Vec::new();
+    }
+    if later {
+        places.reverse();
+    }
+    places
+        .into_iter()
+        .map(|from| (from, if later { from + 1 } else { from - 1 }))
+        .collect()
+}
+
+/// The moves that take every selected track a place towards the start (or,
+/// with `later`, the end) of the list it is in: its group's, the top level or
+/// the returns. Each is `(track, group, index)` as `track.move` takes them, in
+/// the order to run. Main doesn't move.
+#[must_use]
+pub fn moved_by_one(
+    doc: &Document,
+    selected: &[TrackId],
+    later: bool,
+) -> Vec<(TrackId, Option<TrackId>, usize)> {
+    let mut lists: Vec<(Option<TrackId>, Vec<TrackId>)> = Vec::new();
+    for &track in selected {
+        let Some(kind) = doc.track(track).map(Track::kind) else {
+            continue;
+        };
+        if kind == TrackKind::Main {
+            continue;
+        }
+        let parent = doc.parent(track);
+        let siblings: Vec<TrackId> = match parent {
+            Some(group) => doc
+                .track(group)
+                .map_or_else(Vec::new, |g| g.children().collect()),
+            None if kind == TrackKind::Return => doc.returns().collect(),
+            None => doc.top_level().collect(),
+        };
+        if !lists.iter().any(|(_, list)| *list == siblings) {
+            lists.push((parent, siblings));
+        }
+    }
+    lists
+        .into_iter()
+        .flat_map(|(parent, siblings)| {
+            let places: Vec<usize> = siblings
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| selected.contains(t))
+                .map(|(place, _)| place)
+                .collect();
+            shifted(siblings.len(), &places, later)
+                .into_iter()
+                .map(move |(from, to)| (siblings[from], parent, to))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The moves that take every selected scene a place up (or, with `later`,
+/// down), as `(scene, index)` as `scene.move` takes them, in the order to run.
+#[must_use]
+pub fn scenes_moved_by_one(
+    doc: &Document,
+    selected: &[SceneId],
+    later: bool,
+) -> Vec<(SceneId, usize)> {
+    let order: Vec<SceneId> = doc.scenes().map(|s| s.id).collect();
+    let places: Vec<usize> = order
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| selected.contains(s))
+        .map(|(place, _)| place)
+        .collect();
+    shifted(order.len(), &places, later)
+        .into_iter()
+        .map(|(from, to)| (order[from], to))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1754,5 +1850,19 @@ mod tests {
             editor.document().track_order(),
             [one, two, three, editor.document().main_id()]
         );
+    }
+
+    #[test]
+    fn selected_places_move_one_place_and_keep_their_gaps() {
+        // Spec: tracks and undo; S-TRACK-012, S-SES-016.
+        assert_eq!(shifted(6, &[1, 4], false), [(1, 0), (4, 3)]);
+        assert_eq!(shifted(6, &[1, 4], true), [(4, 5), (1, 2)]);
+        // A block moves together, the one nearest the end it moves to first.
+        assert_eq!(shifted(6, &[2, 3], false), [(2, 1), (3, 2)]);
+        assert_eq!(shifted(6, &[2, 3], true), [(3, 4), (2, 3)]);
+        // One at the end it moves towards holds them all.
+        assert_eq!(shifted(6, &[0, 3], false), []);
+        assert_eq!(shifted(6, &[2, 5], true), []);
+        assert_eq!(shifted(6, &[], true), []);
     }
 }

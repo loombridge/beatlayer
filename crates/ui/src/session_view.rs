@@ -433,6 +433,7 @@ impl GridUi {
                 cell,
                 &Rename::Clip(held.id),
                 &held.name,
+                None,
                 events,
             );
         }
@@ -819,6 +820,7 @@ impl GridUi {
             row.name.shrink(1.0),
             &Rename::Scene(scene),
             held.map_or("", |scene| scene.name.as_str()),
+            crate::session_menus::next_scene(shell.editor().document(), scene),
             events,
         );
     }
@@ -914,6 +916,43 @@ impl GridUi {
         // Esc during a drag of clips ends the drag, nothing else.
         let esc = esc && shell.clip_drag().is_none();
         let state = shell.session().state();
+        // Spec: session-view R44; track-context-menu R18. Cmd (Ctrl) with Left
+        // and Right moves the selected tracks a place (S-SES-015), and with Up
+        // and Down the selected scenes (S-SES-016), keeping the gaps between
+        // them.
+        let (cmd_up, cmd_down, cmd_left, cmd_right) = ui.input(|i| {
+            let pressed = |key: Key| {
+                i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key { key: k, pressed: true, modifiers, .. }
+                            if *k == key
+                                && modifiers.command
+                                && !modifiers.alt
+                                && !modifiers.shift
+                    )
+                })
+            };
+            (
+                pressed(Key::ArrowUp),
+                pressed(Key::ArrowDown),
+                pressed(Key::ArrowLeft),
+                pressed(Key::ArrowRight),
+            )
+        });
+        if cmd_left || cmd_right {
+            crate::track_menu::move_tracks(
+                events,
+                shell.editor().document(),
+                &state.tracks,
+                cmd_right,
+            );
+            return;
+        }
+        if cmd_up || cmd_down {
+            move_scenes(events, shell.editor().document(), &state.scenes, cmd_down);
+            return;
+        }
         // Where the arrows move from: the selected slot, else the selected
         // scene or track.
         let (track_at, scene_at) = if let Some(slot) = state.slots.first().copied() {
@@ -1213,4 +1252,26 @@ pub fn column_track(
         ColumnKind::Return => returns[column.index],
         ColumnKind::Main => doc.main_id(),
     }
+}
+
+/// Moves every one of `selected` a scene down (or up) as one undo step
+/// (S-SES-016).
+fn move_scenes(
+    events: &mut Vec<UiEvent>,
+    doc: &bl_model::Document,
+    selected: &[SceneId],
+    later: bool,
+) {
+    let moves = bl_shell::tracks::scenes_moved_by_one(doc, selected, later);
+    if moves.is_empty() {
+        return;
+    }
+    events.push(UiEvent::BeginNamedGesture("Move scene".to_owned()));
+    for (scene, index) in moves {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "scene.move",
+            json!({ "scene": scene, "index": index }),
+        )));
+    }
+    events.push(UiEvent::EndGesture);
 }

@@ -7,10 +7,8 @@
 //! external class and an agent asks the person first. The behaviour they
 //! follow is in the MIDI clips spec (WP-2.21).
 //!
-//! The Create menu's Import Audio/MIDI File... and the File menu's Export MIDI
-//! Clip... open a file dialog the app doesn't have yet, so those menu items
-//! and their keys stay pending and the commands have no binding: a person
-//! reaches them once the dialogs are built.
+//! The File menu's Export MIDI Clip... and its key (S-FILE-008) run
+//! `midi.export_clip` on the selected clip, which asks where to save it.
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
@@ -164,11 +162,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  velocities, its tempo (the song's tempo where the clip starts) and its time \
                  signature. Fails for an audio clip, or for a file already at `path` unless \
                  `replace` is true. With no `path` the app asks where to save the file (as the \
-                 clip menus' Export MIDI Clip... does), and runs this again with it. Writes a \
+                 clip menus' Export MIDI Clip... does), and runs this again with it; a key or \
+                 the File menu's item gives no `clip` and exports the selected clip. Writes a \
                  file outside the project; changes nothing in the set.",
             )
             .permission(Permission::External)
             .context(Global)
+            .binding("S-FILE-008")
             .args::<MidiExportArgs>()
             .result::<MidiExportResult>(),
     )?;

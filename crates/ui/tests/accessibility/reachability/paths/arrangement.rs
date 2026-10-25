@@ -6,7 +6,7 @@ use egui::Key;
 
 pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
-    use Reason::{Equivalent, Gap, LaterView, Live, Query};
+    use Reason::{Equivalent, LaterView, Live, Query};
     vec![
         // The Control Bar's transport (control-bar-transport R11).
         ("automation.copy", Exception(ENVELOPE_EDIT)),
@@ -313,13 +313,6 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Live(
                 "a fade handle is a pointer target Live doesn't expose to a screen reader \
                  (manual 41.4.1.3)",
-            )),
-        ),
-        // Gaps.
-        (
-            "track.move",
-            Exception(Gap(
-                "moving tracks with Cmd and the arrows (S-TRACK-012), not bound yet",
             )),
         ),
     ]

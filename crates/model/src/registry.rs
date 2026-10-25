@@ -1001,7 +1001,10 @@ const ENTRIES: &[Entry] = &[
         label: "Arm Track",
         permission: Permission::Edit,
         contexts: MIXER,
-        keys: &[Key::Toggles("S-TRACK-013", "arm")],
+        keys: &[
+            Key::Toggles("S-TRACK-013", "arm"),
+            Key::Toggles("S-TRANS-007", "arm"),
+        ],
         description: "Arms or disarms one track for recording, leaving other tracks' arm \
             switches as they are, so it records its input when recording starts (recording \
             arrives in Phase 2; until then the switch is only saved). Only audio and MIDI \

@@ -1,6 +1,6 @@
 # The arpeggiator MIDI effect
 
-- **Status:** partial (R1 to R17 have passing tests; R18 to R20, the Groove chooser, are WP-6.68's)
+- **Status:** implemented (every rule below has a passing test)
 - **Work packages:** WP-5.31 (R1 to R14); WP-6.8 (Root, Scale and Use Current Scale: R15 to R17; under a tuning the switch follows [tunings.md](tunings.md) R16); WP-6.68 (the Groove chooser's grooves and their swing under the Global Amount: R18 to R20, with R10 as it reads now). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), with the note rules of R30 to R34
 - **Parity-matrix row:** Devices: MIDI effects
 - **Checked against:** the Live 12 reference manual, chapter 30 "Live MIDI Effect Reference", section 30.1 "Arpeggiator", read on 19 October 2026; for Root, Scale and Use Current Scale, the same section and the manual's chapter 3, section 3.13 "Scale Awareness", read 20 October 2026, and the Live 12 release notes, 12.0, 12.1.5 and 12.1.10; for the Groove chooser, section 30.1 and the Live 12 release notes, 12.0 and 12.2, read 20 October 2026
@@ -63,17 +63,17 @@ The device takes Live's name, Arpeggiator; its appearance is the device framewor
 | R7 | `crates/devices/tests/arpeggiator.rs`, `repeats_limits_pattern_cycles` | real-time trap |
 | R8 | `crates/devices/tests/arpeggiator.rs`, `steps_and_distance_transpose_cycles` | real-time trap |
 | R9 | `crates/devices/tests/arpeggiator.rs`, `velocity_decay_ramps_toward_target` | real-time trap |
-| R10 | `crates/devices/tests/arpeggiator.rs`, `scale_and_groove_phase_6_placeholders`, to be rewritten in WP-6.68 | real-time trap |
+| R10 | `crates/devices/tests/arpeggiator.rs`, `the_groove_chooser_lists_none_and_the_ten_swing_grooves` | unit |
 | R11 | `crates/devices/tests/arpeggiator.rs`, `random_styles_are_deterministic_and_repeat_identically` | real-time trap |
 | R12 | `crates/devices/tests/arpeggiator.rs`, `stopping_transport_leaves_no_hanging_notes` | real-time trap |
 | R13 | `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect` | MCP script |
-| R14 | `crates/devices/tests/rules.rs`; `crates/devices/tests/arpeggiator.rs`, `a_chord_of_many_held_notes_allocates_nothing`; `rtsan/tests/midi_effects.rs` | real-time trap |
+| R14 | `crates/devices/tests/rules.rs`; `crates/devices/tests/arpeggiator.rs`, `a_chord_of_many_held_notes_allocates_nothing`; `rtsan/tests/midi_effects.rs`, `a_chain_of_midi_effects_passes_under_rtsan` | real-time trap |
 | R15 | `crates/devices/tests/arpeggiator.rs`, `distance_counts_degrees_of_the_chosen_root_and_scale`; `crates/agent/tests/midi_effects.rs`, `an_agent_reaches_every_parameter_of_every_midi_effect`; `crates/shell/tests/macros.rs`, `the_scale_choosers_map_to_macros`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_use_current_scale_loads_its_devices_unchanged` | real-time trap; MCP script; unit |
 | R16 | `crates/devices/tests/arpeggiator.rs`, `use_current_scale_counts_distance_in_the_current_scale`; `crates/ui/tests/device_view.rs`, `the_choosers_a_device_takes_from_the_current_scale_are_disabled` | real-time trap; unit |
 | R17 | `crates/devices/tests/arpeggiator.rs`, `a_scale_change_while_a_note_sounds_does_not_move_it`, `a_bend_is_carried_in_degrees`, `random_styles_with_the_scale_repeat_identically` | real-time trap |
-| R18 | to be written in WP-6.68 | unit |
-| R19 | to be written in WP-6.68 | real-time trap |
-| R20 | to be written in WP-6.68 | real-time trap |
+| R18 | `crates/devices/tests/arpeggiator.rs`, `the_groove_chooser_lists_none_and_the_ten_swing_grooves`; `crates/agent/tests/midi_effects.rs`, `an_agent_chooses_the_arpeggiators_groove_by_id`; `crates/cli/tests/older_sets.rs`, `an_arpeggiator_saved_with_the_placeholders_swing_loads_with_none` | unit; MCP script |
+| R19 | `crates/devices/tests/arpeggiator.rs`, `swing_moves_every_second_note_on_where_a_clip_note_would_play`, `nothing_moves_at_zero_percent_with_sync_off_or_with_none`, `the_global_amount_scales_the_move`, `a_moved_note_keeps_its_gate_length_and_renders_the_same_every_time` | real-time trap |
+| R20 | `crates/devices/tests/arpeggiator.rs`, `a_moved_note_keeps_its_gate_length_and_renders_the_same_every_time`, `a_note_waiting_for_its_frame_when_the_key_goes_up_never_sounds`; `rtsan/tests/midi_effects.rs`, `a_swung_arpeggio_passes_under_rtsan` | real-time trap |
 
 ## Defaults, ranges and details
 

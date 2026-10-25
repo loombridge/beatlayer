@@ -5,9 +5,14 @@
 //!
 //! Its look is the framework's generic layout: Beatlayer's own.
 
+use bl_core::id::IdAllocator;
+use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::scales::OFF;
 use bl_engine::{DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry};
-use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit, Scale};
+use bl_model::{
+    Device, DeviceDescription, DeviceRole, Groove, GrooveBase, GrooveId, GrooveNote, GroovePlay,
+    ParamDescriptor, ParamId, ParamUnit, Scale,
+};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 use crate::midi_fx::{Key, Router, scale_choices, scale_named, seed, value};
@@ -50,11 +55,13 @@ pub const RETRIGGER_VELOCITY: ParamId = ParamId(15);
 /// Counts Distance in degrees of the device's current scale (the arpeggiator
 /// spec, R16); the title bar draws it.
 pub const USE_SCALE: ParamId = ParamId(16);
-/// Groove chooser (Phase 6).
-pub const GROOVE: ParamId = ParamId(17);
+/// The Groove chooser (the arpeggiator spec, R18). It replaced a placeholder
+/// at `ParamId(17)`, whose saved value is left out on loading, so an
+/// Arpeggiator saved with the placeholder's Swing loads with None.
+pub const GROOVE: ParamId = ParamId(20);
 /// The root of the scale Distance counts degrees of (the arpeggiator spec,
-/// R15). A parameter after Groove, so a device saved before keeps its
-/// numbers.
+/// R15). A parameter after the placeholder Groove's, so a device saved
+/// before keeps its numbers.
 pub const ROOT: ParamId = ParamId(18);
 /// Chromatic, which counts Distance in semitones, or a scale of the list,
 /// whose degrees Distance counts from Root.
@@ -103,7 +110,21 @@ pub const INTERVALS: [(&str, f64); 7] = [
     ("4 bars", 16.0),
 ];
 
-pub const GROOVE_CHOICES: [&str; 2] = ["None", "Swing"];
+/// The Groove choices: None, then the bundled swing grooves in order (the
+/// grooves spec, R36).
+pub const GROOVE_CHOICES: [&str; 11] = [
+    "None",
+    "Swing 8ths 55",
+    "Swing 8ths 60",
+    "Swing 8ths 65",
+    "Swing 8ths 70",
+    "Swing 8ths 75",
+    "Swing 16ths 55",
+    "Swing 16ths 60",
+    "Swing 16ths 65",
+    "Swing 16ths 70",
+    "Swing 16ths 75",
+];
 
 const MAX_HELD: usize = 128;
 
@@ -178,8 +199,12 @@ pub fn arpeggiator_type() -> DeviceType {
                 "Counts Distance in degrees of the current scale instead of the Root and Scale \
                  chosen here.",
             ),
-            ParamDescriptor::choice(GROOVE, "Groove", &GROOVE_CHOICES, 0)
-                .describe("Applies swing groove to pattern timing. Waits for Phase 6 groove pool."),
+            ParamDescriptor::choice(GROOVE, "Groove", &GROOVE_CHOICES, 0).describe(
+                "Swings the pattern's timing: None plays it straight, and Swing 8ths and Swing \
+                 16ths put each second step of a pair 55 to 75 % of the way through the pair, \
+                 moving it as a clip's note would move, scaled by the Global Amount. Needs Sync \
+                 on and the song playing.",
+            ),
             ParamDescriptor::choice(ROOT, "Root", &ROOTS, 0)
                 .describe("The root of the scale Distance counts degrees of."),
             ParamDescriptor::choice(SCALE, "Scale", &scale_choices("Chromatic"), 0).describe(
@@ -196,6 +221,47 @@ pub fn register(registry: &mut Registry) {
     add(registry, arpeggiator_type(), |device, _| {
         Arpeggiator::new(device)
     });
+}
+
+/// Swing `percent` on a grid of eighths or sixteenths, one 4/4 bar long (the
+/// grooves spec, R36), worked out for playing at a Global Amount of 100 %.
+fn swing_groove(eighths: bool, percent: i64) -> GroovePlay {
+    let base = if eighths {
+        GrooveBase::Eighth
+    } else {
+        GrooveBase::Sixteenth
+    };
+    let pair = 2 * base.ticks().get();
+    let bar = 4 * TICKS_PER_QUARTER;
+    let notes = (0..bar / pair)
+        .flat_map(|n| [n * pair, n * pair + pair * percent / 100])
+        .map(|position| GrooveNote {
+            position: Ticks(position),
+            velocity: if position % TICKS_PER_QUARTER == 0 {
+                127
+            } else {
+                100
+            },
+        })
+        .collect();
+    let mut groove = Groove::new(
+        GrooveId(IdAllocator::new().allocate()),
+        String::new(),
+        Ticks(bar),
+        notes,
+    );
+    groove.base = base;
+    GroovePlay::new(&groove, 100.0)
+}
+
+/// How many frames a step at song frame `song_frame` is delayed by `groove`
+/// (the arpeggiator spec, R19): where a clip's note starting there would
+/// play, less where it starts. The grooves are late, never early, so the
+/// step waits in the device's queue.
+fn groove_delay(groove: &GroovePlay, tempo: &TempoMap, rate: SampleRate, song_frame: i64) -> i64 {
+    let start = tempo.frames_to_ticks(Frames(song_frame), rate);
+    let moved = Ticks(groove.note_start(start, 0, 0, 0).round() as i64);
+    (tempo.ticks_to_frames(moved, rate).0 - tempo.ticks_to_frames(start, rate).0).max(0)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -264,6 +330,8 @@ pub struct Arpeggiator {
     scratch_pool: Vec<usize>,
     was_playing: bool,
     was_held_mode: bool,
+    /// The ten swing grooves of the Groove chooser after None, in its order.
+    grooves: Vec<GroovePlay>,
 }
 
 impl Arpeggiator {
@@ -288,6 +356,9 @@ impl Arpeggiator {
             scratch_pool: Vec::with_capacity(MAX_HELD),
             was_playing: false,
             was_held_mode: false,
+            grooves: (0..10)
+                .map(|n| swing_groove(n < 5, 55 + 5 * (n % 5)))
+                .collect(),
         }
     }
 
@@ -521,6 +592,8 @@ impl NativeDevice for Arpeggiator {
         // If no notes are held, cut sounding arpeggiated notes if hold is off
         if self.held.is_empty() {
             self.router.cut(audio, 0, |_| true);
+            // A step still waiting for its grooved frame never sounds.
+            self.router.clear_queue();
             self.next_step_frame = block_start;
             self.step_in_pattern = 0;
             self.transposition_step = 0;
@@ -541,10 +614,32 @@ impl NativeDevice for Arpeggiator {
             }
         }
 
+        // Spec: arpeggiator R19. A groove moves steps only while the song
+        // plays on its grid, with Sync on.
+        let swing = (is_sync && is_playing)
+            .then(|| (value(params, GROOVE) as usize).checked_sub(1))
+            .flatten()
+            .filter(|n| *n < self.grooves.len());
+        if let Some(n) = swing {
+            self.grooves[n].set_global_amount(f64::from(audio.groove_amount()) * 100.0);
+        }
+
         // Run arpeggio step scheduler across this block
         while self.next_step_frame < block_end {
             let step_time = self.next_step_frame;
             let offset_in_block = (step_time - block_start).max(0) as u32;
+            // Spec: arpeggiator R20. What waits for its frame and is due
+            // before this step goes out first, whatever the block size.
+            self.router.advance(audio, offset_in_block);
+            let delay = swing.map_or(0, |n| {
+                let song_frame = audio.song_position().0 + i64::from(offset_in_block);
+                groove_delay(
+                    &self.grooves[n],
+                    audio.tempo(),
+                    audio.sample_rate(),
+                    song_frame,
+                )
+            });
 
             // Check Beat retriggering
             if retrigger_mode == 2 && is_playing {
@@ -610,8 +705,14 @@ impl NativeDevice for Arpeggiator {
                             k.key == final_key && k.channel == channel
                         });
                         if self.router.track(&dummy_src, Some(Key::of(&on))) {
-                            self.router.send_now(audio, on, src_key);
-                            self.router.hold(step_time + gate_frames, off, src_key);
+                            self.router.sound(
+                                audio,
+                                on,
+                                off,
+                                src_key,
+                                step_time + delay,
+                                gate_frames,
+                            );
                         }
                     }
 
@@ -710,8 +811,8 @@ impl NativeDevice for Arpeggiator {
                         k.key == final_key && k.channel == channel
                     });
                     if self.router.track(&dummy_src, Some(Key::of(&on))) {
-                        self.router.send_now(audio, on, src_key);
-                        self.router.hold(step_time + gate_frames, off, src_key);
+                        self.router
+                            .sound(audio, on, off, src_key, step_time + delay, gate_frames);
                     }
 
                     // Advance pattern step

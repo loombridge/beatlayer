@@ -214,6 +214,13 @@ impl<'a> Audio<'_, 'a> {
         self.block.scale_at(self.range.start + offset as usize)
     }
 
+    /// The set's Global Amount of groove (the grooves spec, R21): 1 at
+    /// 100 %, 0 at 0 % and up to 1.3.
+    #[must_use]
+    pub fn groove_amount(&self) -> f32 {
+        self.block.groove_amount()
+    }
+
     /// What an external device brings back from the audio interface over
     /// the stretch on `channel` (WP-5.34), or `None` for any other device.
     ///

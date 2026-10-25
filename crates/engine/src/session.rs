@@ -337,8 +337,9 @@ struct Slot {
     /// The clip's own launch quantisation as the last press or release read
     /// it, which Repeat's restarts are counted on (R21, R25).
     quantization: Option<LaunchQuantization>,
-    /// Whether the launch or restart waiting at `due` takes over the clip
-    /// time of the clip playing on the track (R27, R28).
+    /// Whether the clip, as the last press read it, takes over the clip time
+    /// of the clip playing on the track when it launches or restarts (R27,
+    /// R28).
     legato: bool,
     /// The grid tick the clip last started on, which its clip time is
     /// counted from (zero for a clip whose launch tick is unknown).
@@ -1046,7 +1047,9 @@ impl SessionLauncher {
         let settings = self.settings;
         let global = settings.enabled && settings.quantization != LaunchQuantization::None;
         for slot in &mut self.slots {
-            let steps = slot.quantization.map_or(global, |step| step != LaunchQuantization::None);
+            let steps = slot
+                .quantization
+                .map_or(global, |step| step != LaunchQuantization::None);
             if steps && slot.repeating && slot.started.is_some() && slot.due.is_none() {
                 slot.line = match slot.quantization {
                     Some(step) => step.next_line(slot.line, playhead.signatures),
@@ -1311,7 +1314,9 @@ pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunErr
             if steps == 0 || steps.unsigned_abs() > 64 {
                 return Err(RunError::InvalidArgs {
                     command: entry.id,
-                    message: format!("`steps` is {steps}, not a whole number from -64 to 64 other than 0"),
+                    message: format!(
+                        "`steps` is {steps}, not a whole number from -64 to 64 other than 0"
+                    ),
                 });
             }
             Ok(SessionCommand::Nudge {
@@ -2233,7 +2238,12 @@ mod tests {
             enabled: true,
             ..LaunchSettings::default()
         });
-        launcher.press(track, scene, mode(LaunchMode::Repeat), on(Ticks::QUARTER * 5));
+        launcher.press(
+            track,
+            scene,
+            mode(LaunchMode::Repeat),
+            on(Ticks::QUARTER * 5),
+        );
         launcher.apply_due(frame(Ticks::QUARTER * 5));
         launcher.repeat(on(Ticks::QUARTER * 5));
         assert_eq!(launcher.state_of(track, scene), Some(SlotState::Playing));
@@ -2423,6 +2433,37 @@ mod tests {
             command_from_args("session.stop_all", serde_json::json!({})),
             Ok(SessionCommand::StopAll)
         );
+        // Spec: launch-quantisation R34. Steps are whole numbers from -64 to
+        // 64 other than 0.
+        let nudge = |steps: i32| {
+            command_from_args(
+                "session.nudge",
+                serde_json::json!({ "track": track, "scene": scene, "steps": steps }),
+            )
+        };
+        for steps in [-64, -1, 1, 64] {
+            assert_eq!(
+                nudge(steps),
+                Ok(SessionCommand::Nudge {
+                    track,
+                    scene,
+                    steps
+                })
+            );
+        }
+        for steps in [0, 65, -65] {
+            assert!(
+                matches!(nudge(steps), Err(RunError::InvalidArgs { .. })),
+                "{steps}"
+            );
+        }
+        assert!(matches!(
+            command_from_args(
+                "session.nudge",
+                serde_json::json!({ "track": track, "scene": scene, "steps": 1.5 })
+            ),
+            Err(RunError::InvalidArgs { .. })
+        ));
         assert!(matches!(
             command_from_args("session.launch", serde_json::json!({})),
             Err(RunError::InvalidArgs { .. })
@@ -2431,5 +2472,168 @@ mod tests {
             command_from_args("session.stop", serde_json::json!({})),
             Err(RunError::UnknownCommand("session.stop".to_owned()))
         );
+    }
+
+    /// The song frame of tick `at` at 120 BPM.
+    fn at_tick(tempo: &TempoMap, at: Ticks) -> Frames {
+        tempo.ticks_to_frames(at, SampleRate::HZ_48000)
+    }
+
+    fn button(mode: LaunchMode, legato: bool, quantization: Option<LaunchQuantization>) -> Button {
+        Button {
+            mode,
+            legato,
+            quantization,
+        }
+    }
+
+    #[test]
+    fn a_clips_own_grid_places_its_press_and_the_global_one_places_a_stop() {
+        // Spec: launch-quantisation R25, R26
+        let (track, scene) = ids();
+        let tempo = tempo();
+        let sigs = TimeSignatureMap::default();
+        let mut launcher = SessionLauncher::new(16);
+        // The global value is 1 Bar; the clip's own is 1/4. A press an
+        // eighth past 1.1.1 starts on the next quarter, and with the global
+        // switch off the clip keeps its step.
+        for enabled in [true, false] {
+            launcher.set_settings(LaunchSettings {
+                enabled,
+                ..LaunchSettings::default()
+            });
+            launcher.clear();
+            launcher.press(
+                track,
+                scene,
+                button(
+                    LaunchMode::Trigger,
+                    false,
+                    Some(LaunchQuantization::Quarter),
+                ),
+                playhead(&tempo, &sigs, true, Ticks::QUARTER / 2),
+            );
+            assert_eq!(
+                launcher.next_due(Frames::ZERO),
+                Some(at_tick(&tempo, Ticks::QUARTER)),
+                "switch {enabled}"
+            );
+        }
+        // A stop button ignores the clip's step: global 1 Bar, so the bar line.
+        launcher.set_settings(LaunchSettings::default());
+        launcher.apply_due(at_tick(&tempo, Ticks::QUARTER));
+        launcher.stop(
+            Some(track),
+            &[],
+            playhead(&tempo, &sigs, true, Ticks::QUARTER + Ticks::QUARTER / 2),
+        );
+        assert_eq!(
+            launcher.next_due(Frames::ZERO),
+            Some(at_tick(&tempo, Ticks::WHOLE))
+        );
+    }
+
+    #[test]
+    fn a_legato_launch_takes_the_clip_time_of_the_clip_playing_and_none_when_nothing_plays() {
+        // Spec: launch-quantisation R27, R28
+        let (track, first) = ids();
+        let (_, second) = ids();
+        let tempo = tempo();
+        let sigs = TimeSignatureMap::default();
+        let none = Some(LaunchQuantization::None);
+        let mut launcher = SessionLauncher::new(16);
+        launcher.press(
+            track,
+            first,
+            button(LaunchMode::Trigger, false, none),
+            playhead(&tempo, &sigs, true, Ticks::QUARTER),
+        );
+        launcher.apply_due(at_tick(&tempo, Ticks::QUARTER));
+        // Three quarters on, a Legato clip launches.
+        let later = Ticks::QUARTER * 4;
+        launcher.press(
+            track,
+            second,
+            button(LaunchMode::Trigger, true, none),
+            playhead(&tempo, &sigs, true, later),
+        );
+        launcher.apply_due(at_tick(&tempo, later));
+        let mut status = Vec::with_capacity(4);
+        launcher.status(&mut status);
+        let taken = status.iter().find(|s| s.scene == second).unwrap();
+        assert_eq!(taken.offset.ticks, Ticks::QUARTER * 3);
+        assert_eq!(taken.offset.frames, 3 * 24_000);
+        // A relaunch of the same clip keeps what it had reached.
+        let again = later + Ticks::QUARTER;
+        launcher.press(
+            track,
+            second,
+            button(LaunchMode::Trigger, true, none),
+            playhead(&tempo, &sigs, true, again),
+        );
+        launcher.apply_due(at_tick(&tempo, again));
+        launcher.status(&mut status);
+        assert_eq!(status[0].offset.ticks, Ticks::QUARTER * 4);
+        // With the transport stopped nothing is taken over, whatever
+        // "plays" in the slots: the clip starts from its start.
+        let (other, third) = ids();
+        launcher.press(
+            other,
+            third,
+            button(LaunchMode::Trigger, true, none),
+            playhead(&tempo, &sigs, false, again),
+        );
+        launcher.apply_due(at_tick(&tempo, again));
+        launcher.status(&mut status);
+        let started = status.iter().find(|s| s.scene == third).unwrap();
+        assert_eq!(started.offset, ClipOffset::ZERO);
+    }
+
+    #[test]
+    fn a_nudge_moves_a_playing_clip_by_the_global_step_and_wraps_back_into_its_loop() {
+        // Spec: launch-quantisation R30 to R32
+        let (track, scene) = ids();
+        let tempo = tempo();
+        let sigs = TimeSignatureMap::default();
+        let mut launcher = SessionLauncher::new(16);
+        launcher.set_settings(LaunchSettings {
+            quantization: LaunchQuantization::Quarter,
+            ..LaunchSettings::default()
+        });
+        let none = Some(LaunchQuantization::None);
+        launcher.press(
+            track,
+            scene,
+            button(LaunchMode::Trigger, false, none),
+            playhead(&tempo, &sigs, true, Ticks::ZERO),
+        );
+        launcher.apply_due(Frames::ZERO);
+        let at = Ticks::QUARTER / 2;
+        let ahead = playhead(&tempo, &sigs, true, at);
+        let time = |launcher: &SessionLauncher| {
+            let mut status = Vec::with_capacity(4);
+            launcher.status(&mut status);
+            status[0].offset.ticks + at
+        };
+        // Forward a quarter, at once.
+        launcher.nudge(track, scene, 1, None, ahead);
+        assert_eq!(time(&launcher), Ticks::QUARTER * 3 / 2);
+        // Back two quarters: before the start. A clip without Loop goes to
+        // its start; a looping one a whole loop later.
+        launcher.nudge(track, scene, -2, None, ahead);
+        assert_eq!(time(&launcher), Ticks::ZERO);
+        launcher.nudge(track, scene, 1, None, ahead);
+        let one_bar = Some(LoopLength::Ticks(Ticks::WHOLE));
+        launcher.nudge(track, scene, -2, one_bar, ahead);
+        assert_eq!(
+            time(&launcher),
+            Ticks::QUARTER - Ticks::QUARTER * 2 + Ticks::WHOLE
+        );
+        // A slot that doesn't play changes nothing.
+        let (_, idle) = ids();
+        launcher.nudge(track, idle, 1, None, ahead);
+        let mut status = Vec::with_capacity(4);
+        launcher.status(&mut status);
+        assert_eq!(status.len(), 1);
     }
 }

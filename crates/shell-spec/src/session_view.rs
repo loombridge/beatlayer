@@ -14,8 +14,8 @@
 //! the session view spec.
 
 use bl_commands::Context::{Global, Session};
-use bl_core::time::Ticks;
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_core::time::Ticks;
 use bl_model::{ChangeSet, ClipId, SceneId, TrackId};
 
 use crate::editing::Position;

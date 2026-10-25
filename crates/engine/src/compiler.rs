@@ -6,8 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{
     Chain, ChainId, Change, ChangeSet, ContentHash, Device, DeviceId, DeviceKind, DeviceOutput,
-    DeviceRole, Document, Mixer, OrdMap, Output, ParamId, RackKind, Tap,
-    Track, TrackId, TrackKind,
+    DeviceRole, Document, Mixer, OrdMap, Output, ParamId, RackKind, Tap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -271,13 +270,15 @@ fn scene_slots(document: &Document) -> Vec<SlotRow> {
 fn loop_length(clip: &bl_model::Clip) -> Option<LoopLength> {
     match &clip.data {
         bl_model::ClipData::Midi(midi) if midi.looping => {
-            let end = midi
-                .loop_end
-                .unwrap_or_else(|| (midi.loop_start + clip.length).max(midi.loop_start + Ticks::QUARTER));
+            let end = midi.loop_end.unwrap_or_else(|| {
+                (midi.loop_start + clip.length).max(midi.loop_start + Ticks::QUARTER)
+            });
             Some(LoopLength::Ticks(end - midi.loop_start))
         }
         bl_model::ClipData::Audio(audio) if audio.looping => Some(match audio.loop_end {
-            Some(end) if audio.warp => LoopLength::Ticks(Ticks((end - audio.loop_start).round() as i64)),
+            Some(end) if audio.warp => {
+                LoopLength::Ticks(Ticks((end - audio.loop_start).round() as i64))
+            }
             Some(end) => LoopLength::Seconds(end - audio.loop_start),
             None => LoopLength::Ticks(clip.length),
         }),

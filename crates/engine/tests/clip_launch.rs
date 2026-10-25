@@ -187,8 +187,7 @@ fn clip_time(rig: &mut Rig, scene: SceneId, now: i64) -> Option<Ticks> {
     let slot = state.session.iter().find(|slot| slot.scene == scene)?;
     let started = slot.started?;
     Some(
-        slot.offset.ticks
-            + tempo().frames_to_ticks(Frames(now), RATE)
+        slot.offset.ticks + tempo().frames_to_ticks(Frames(now), RATE)
             - tempo().frames_to_ticks(started, RATE),
     )
 }
@@ -212,7 +211,14 @@ fn a_clip_on_a_quarter_launches_restarts_and_stops_on_the_quarter_with_the_globa
                 mode: LaunchMode::Gate,
                 ..launch(quarter)
             };
-            clip(&mut rig.editor, track, scene, long_note(60), (1, false), mode);
+            clip(
+                &mut rig.editor,
+                track,
+                scene,
+                long_note(60),
+                (1, false),
+                mode,
+            );
             settings(&mut rig, LaunchQuantization::Bar, enabled);
             let mut now = start(&mut rig);
             send_at(&mut rig, &mut now, 6_001, block, press(track, scene));
@@ -231,7 +237,14 @@ fn a_clip_on_a_quarter_launches_restarts_and_stops_on_the_quarter_with_the_globa
                 mode: LaunchMode::Toggle,
                 ..launch(quarter)
             };
-            clip(&mut rig.editor, track, scene, long_note(60), (1, false), mode);
+            clip(
+                &mut rig.editor,
+                track,
+                scene,
+                long_note(60),
+                (1, false),
+                mode,
+            );
             settings(&mut rig, LaunchQuantization::Bar, enabled);
             let mut now = start(&mut rig);
             send_at(&mut rig, &mut now, 6_001, block, press(track, scene));
@@ -246,7 +259,14 @@ fn a_clip_on_a_quarter_launches_restarts_and_stops_on_the_quarter_with_the_globa
             // Trigger: a press of the playing clip restarts it on a quarter.
             let (mut rig, tracks, scenes) = self::rig(1);
             let (track, scene) = (tracks[0], scenes[0]);
-            clip(&mut rig.editor, track, scene, long_note(60), (1, false), launch(quarter));
+            clip(
+                &mut rig.editor,
+                track,
+                scene,
+                long_note(60),
+                (1, false),
+                launch(quarter),
+            );
             settings(&mut rig, LaunchQuantization::Bar, enabled);
             let mut now = start(&mut rig);
             send_at(&mut rig, &mut now, 6_001, block, press(track, scene));
@@ -340,7 +360,13 @@ fn a_scene_and_a_stop_button_use_the_global_grid_whatever_the_clips_own() {
         );
         settings(&mut rig, LaunchQuantization::Bar, true);
         let mut now = start(&mut rig);
-        send_at(&mut rig, &mut now, 6_001, block, SessionCommand::LaunchScene(scene));
+        send_at(
+            &mut rig,
+            &mut now,
+            6_001,
+            block,
+            SessionCommand::LaunchScene(scene),
+        );
         play_to(&mut rig, &mut now, BAR_FRAMES + 100, block);
         let mut ons = ons_and_offs(&mut rig).0;
         ons.sort_unstable();
@@ -364,7 +390,13 @@ fn a_scene_and_a_stop_button_use_the_global_grid_whatever_the_clips_own() {
         settings(&mut rig, LaunchQuantization::Bar, true);
         let mut now = start(&mut rig);
         send_at(&mut rig, &mut now, 1, block, press(track, scene));
-        send_at(&mut rig, &mut now, 18_001, block, SessionCommand::StopTrack(track));
+        send_at(
+            &mut rig,
+            &mut now,
+            18_001,
+            block,
+            SessionCommand::StopTrack(track),
+        );
         play_to(&mut rig, &mut now, BAR_FRAMES + 100, block);
         assert_eq!(
             ons_and_offs(&mut rig).1,
@@ -415,7 +447,11 @@ fn a_legato_clip_takes_over_the_clip_time_of_the_clip_on_its_track() {
         let from_b: Vec<_> = ons.into_iter().filter(|&(_, key)| key >= 60).collect();
         assert_eq!(
             from_b,
-            vec![(at, 70), (at + QUARTER_FRAMES, 71), (at + 2 * QUARTER_FRAMES, 72)],
+            vec![
+                (at, 70),
+                (at + QUARTER_FRAMES, 71),
+                (at + 2 * QUARTER_FRAMES, 72)
+            ],
             "blocks of {block}"
         );
         assert!(near(
@@ -515,8 +551,22 @@ fn a_follow_next_between_two_legato_clips_keeps_the_clip_time() {
             legato: true,
             ..launch(Some(LaunchQuantization::None))
         };
-        let first = clip(&mut rig.editor, track, scenes[0], beats(), (4, true), legato);
-        clip(&mut rig.editor, track, scenes[1], beats(), (4, true), legato);
+        let first = clip(
+            &mut rig.editor,
+            track,
+            scenes[0],
+            beats(),
+            (4, true),
+            legato,
+        );
+        clip(
+            &mut rig.editor,
+            track,
+            scenes[1],
+            beats(),
+            (4, true),
+            legato,
+        );
         rig.editor
             .apply(Command::SetClipFollowActions {
                 clip: first,
@@ -552,7 +602,11 @@ fn nudge_forward_moves_the_clip_time_by_a_step_of_the_global_value_at_once() {
         // thirty-second note.
         let cases = [
             (LaunchQuantization::Bar, true, Ticks::WHOLE),
-            (LaunchQuantization::QuarterTriplet, true, Ticks::QUARTER * 2 / 3),
+            (
+                LaunchQuantization::QuarterTriplet,
+                true,
+                Ticks::QUARTER * 2 / 3,
+            ),
             (LaunchQuantization::None, true, Ticks::SIXTEENTH / 2),
             (LaunchQuantization::Bar, false, Ticks::SIXTEENTH / 2),
         ];
@@ -612,7 +666,10 @@ fn nudge_backward_before_the_start_goes_a_loop_on_or_to_the_start() {
         send_at(&mut rig, &mut now, 1, block, press(track, scene));
         send_at(&mut rig, &mut now, 6_001, block, nudge(track, scene, -1));
         play_to(&mut rig, &mut now, 6_002, block);
-        assert!(near(clip_time(&mut rig, scene, 6_001).unwrap(), Ticks::ZERO));
+        assert!(near(
+            clip_time(&mut rig, scene, 6_001).unwrap(),
+            Ticks::ZERO
+        ));
         // And it goes on from there.
         send_at(&mut rig, &mut now, 6_002, block, nudge(track, scene, 2));
         play_to(&mut rig, &mut now, 6_003, block);
@@ -650,7 +707,11 @@ fn a_nudge_of_a_stopped_or_queued_slot_changes_nothing_and_a_queued_stop_keeps_i
         send_at(&mut rig, &mut now, 6_001, block, press(track, scene));
         send_at(&mut rig, &mut now, 12_001, block, nudge(track, scene, 1));
         play_to(&mut rig, &mut now, BAR_FRAMES + 100, block);
-        assert_eq!(ons_and_offs(&mut rig).0[0], (BAR_FRAMES, 60), "blocks of {block}");
+        assert_eq!(
+            ons_and_offs(&mut rig).0[0],
+            (BAR_FRAMES, 60),
+            "blocks of {block}"
+        );
 
         // A playing one with a stop queued is nudged, and still stops on
         // the frame it was queued for.
@@ -667,7 +728,13 @@ fn a_nudge_of_a_stopped_or_queued_slot_changes_nothing_and_a_queued_stop_keeps_i
         settings(&mut rig, LaunchQuantization::Bar, true);
         let mut now = start(&mut rig);
         send_at(&mut rig, &mut now, 1, block, press(track, scene));
-        send_at(&mut rig, &mut now, 6_001, block, SessionCommand::StopTrack(track));
+        send_at(
+            &mut rig,
+            &mut now,
+            6_001,
+            block,
+            SessionCommand::StopTrack(track),
+        );
         send_at(&mut rig, &mut now, 12_001, block, nudge(track, scene, 1));
         play_to(&mut rig, &mut now, BAR_FRAMES - 100, block);
         let states = rig.monitor.state().session.clone();
@@ -737,9 +804,7 @@ fn render_swap_and_nudge(audio: AudioData, block: usize) -> Vec<f32> {
             })
             .unwrap();
     }
-    editor
-        .apply(Command::SetTempo { tempo: tempo() })
-        .unwrap();
+    editor.apply(Command::SetTempo { tempo: tempo() }).unwrap();
     offline.sync(editor.document());
     assert!(offline.missing_media().is_empty());
     offline
@@ -764,7 +829,9 @@ fn render_swap_and_nudge(audio: AudioData, block: usize) -> Vec<f32> {
             next += 1;
         }
         let until = cues.get(next).map_or(60_000, |&(frame, _)| frame);
-        let n = block.min((60_000 - done) as usize).min((until - done) as usize);
+        let n = block
+            .min((60_000 - done) as usize)
+            .min((until - done) as usize);
         offline.render(n as u64, |output| out.extend_from_slice(output.channel(0)));
         done += n as u64;
     }
@@ -808,6 +875,10 @@ fn an_offline_render_of_a_legato_swap_and_a_nudge_is_the_same_at_every_block_siz
     // Unwarped, the swap takes over B's time at the swap frame, and the
     // nudge moves it on by a thirty-second (1,500 frames) at once.
     let out = render_swap_and_nudge(unwarped, 64);
-    assert_eq!(out[21_000], at(20_999), "B reads on from A's place, not from its start");
+    assert_eq!(
+        out[21_000],
+        at(20_999),
+        "B reads on from A's place, not from its start"
+    );
     assert_eq!(out[45_000], at(45_000 - 1 + 1_500), "after the nudge");
 }

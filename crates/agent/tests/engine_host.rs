@@ -424,7 +424,9 @@ fn slot_state(
         "run",
         json!({ "commands": [{ "command": "session.state", "args": {} }] }),
     );
-    let launches = state["results"][0]["result"]["launches"].as_array()?.clone();
+    let launches = state["results"][0]["result"]["launches"]
+        .as_array()?
+        .clone();
     let slot = launches.iter().find(|slot| slot["scene"] == *scene)?;
     Some((slot["launched"].as_i64()?, slot["clip_time"].as_i64()?))
 }
@@ -473,7 +475,11 @@ fn an_agent_launches_legato_swaps_and_nudges_by_command_id_and_reads_each_back()
         track.slots().map(|(_, clip)| json!(clip.id)).collect()
     };
     for clip in &clips {
-        run(&mut client, "clip.set_legato", json!({ "clip": clip, "legato": true }));
+        run(
+            &mut client,
+            "clip.set_legato",
+            json!({ "clip": clip, "legato": true }),
+        );
         run(
             &mut client,
             "clip.set_launch_quantization",
@@ -504,12 +510,20 @@ fn an_agent_launches_legato_swaps_and_nudges_by_command_id_and_reads_each_back()
         slot_state(&control, c, &scenes[1]).is_some()
     });
     // The transport stands still from here, so clip times stand still.
-    call(&control, &mut client, "transport", json!({ "action": "stop" }));
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "stop" }),
+    );
     wait(&control, &mut client, "the stop", |c| {
         !c.transport().shell.is_playing()
     });
     let (_, second) = slot_state(&control, &mut client, &scenes[1]).unwrap();
-    assert!(second >= first, "Legato took over {first}, the clip reads {second}");
+    assert!(
+        second >= first,
+        "Legato took over {first}, the clip reads {second}"
+    );
 
     // With the global value None, a nudge of two steps is two thirty-seconds.
     run(
@@ -519,7 +533,8 @@ fn an_agent_launches_legato_swaps_and_nudges_by_command_id_and_reads_each_back()
     );
     let thirty_second = Ticks::SIXTEENTH.get() / 2;
     wait(&control, &mut client, "the nudge", |c| {
-        slot_state(&control, c, &scenes[1]).is_some_and(|(_, time)| time == second + 2 * thirty_second)
+        slot_state(&control, c, &scenes[1])
+            .is_some_and(|(_, time)| time == second + 2 * thirty_second)
     });
 
     // 0 and 65 steps are refused.

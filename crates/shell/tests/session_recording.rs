@@ -443,11 +443,21 @@ fn an_overdub_into_a_nudged_clip_records_at_its_clip_time() {
     let rate = bl_core::time::SampleRate::new(shell.audio().sample_rate().unwrap()).unwrap();
     let ahead = {
         let states = shell.session_states();
-        let of = |track| states.iter().find(|s| s.track == track && s.scene == scene).unwrap();
+        let of = |track| {
+            states
+                .iter()
+                .find(|s| s.track == track && s.scene == scene)
+                .unwrap()
+        };
         let (a, b) = (of(plain), of(nudged));
-        assert_eq!(b.offset.ticks, Ticks::QUARTER, "the nudge moved a quarter note");
+        assert_eq!(
+            b.offset.ticks,
+            Ticks::QUARTER,
+            "the nudge moved a quarter note"
+        );
         assert_eq!(a.offset.ticks, Ticks::ZERO);
-        b.offset.ticks - a.offset.ticks
+        b.offset.ticks
+            - a.offset.ticks
             - (tempo.frames_to_ticks(b.started.unwrap(), rate)
                 - tempo.frames_to_ticks(a.started.unwrap(), rate))
     };

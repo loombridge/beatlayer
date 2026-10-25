@@ -44,8 +44,8 @@ use crate::clip_sound::ClipSound;
 use crate::clip_source::ClipSource;
 use crate::mixer::{Ramp, scale, smoothing_frames};
 use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
-use crate::session::ClipOffset;
 use crate::scales::{ScaleRuns, Span, TrackScale};
+use crate::session::ClipOffset;
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 use crate::warped::{
     BeatsMedia, CUE_BACK, Flat, Histories, History, Past, Playing, PoolSpec, Positions, Stretchers,
@@ -1783,7 +1783,10 @@ impl Node for ClipPlayer {
                     window,
                     block,
                     0..frames,
-                    (elapsed, from),
+                    // The groove counts from the clip time already (its origin
+                    // is moved back by the offset), so this is the time since
+                    // the launch frame alone.
+                    ((from - launch) as u64, from),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
                     with_groove(warped, tempo, rate, launch, ticks, PlacedClip::launch_level),
@@ -1899,7 +1902,14 @@ impl Node for ClipPlayer {
                     (elapsed, start),
                     warp,
                     history.as_deref_mut(),
-                    with_groove(warped, tempo, rate, clip.geometry.start, 0.0, PlacedClip::level),
+                    with_groove(
+                        warped,
+                        tempo,
+                        rate,
+                        clip.geometry.start,
+                        0.0,
+                        PlacedClip::level,
+                    ),
                     stretchers,
                     clip.lane as usize,
                 );

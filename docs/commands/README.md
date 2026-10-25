@@ -27287,6 +27287,8 @@ One slot that is not at rest, in `session.state`.
 | `track` | [`TrackId`](#trackid) | yes | The track. |
 | `scene` | [`SceneId`](#sceneid) | yes | The scene. |
 | `state` | [`LaunchState`](#launchstate) | yes | What its clip is doing. |
+| `clip_time` | [`Ticks`](#ticks) or null | no | The clip's own time now, in ticks: what a Legato start or a nudge moves, and what time it has played since its launch adds to (launch-quantisation R34). It stands still while the transport does. |
+| `launched` | [`Ticks`](#ticks) or null | no | The tick the clip launched on, while it plays or waits to restart (launch-quantisation R34). |
 
 <details><summary>JSON Schema</summary>
 
@@ -27294,6 +27296,28 @@ One slot that is not at rest, in `session.state`.
 {
   "description": "One slot that is not at rest, in `session.state`.",
   "properties": {
+    "clip_time": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip's own time now, in ticks: what a Legato start or a nudge moves, and what time it has played since its launch adds to (launch-quantisation R34). It stands still while the transport does."
+    },
+    "launched": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The tick the clip launched on, while it plays or waits to restart (launch-quantisation R34)."
+    },
     "scene": {
       "$ref": "#/$defs/SceneId",
       "description": "The scene."

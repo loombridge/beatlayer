@@ -152,8 +152,15 @@ fn the_recorded_defaults_show_and_the_nudge_buttons_are_live() {
         let node = Harness::node(&all, name);
         assert!(!node.disabled, "{name} is live");
         assert_eq!(node.role, egui::accesskit::Role::Button, "{name}");
-        assert!(node.description.contains(word), "{name}: {}", node.description);
-        assert!(node.description.contains("global launch quantization"), "{name}");
+        assert!(
+            node.description.contains(word),
+            "{name}: {}",
+            node.description
+        );
+        assert!(
+            node.description.contains("global launch quantization"),
+            "{name}"
+        );
     }
 }
 
@@ -183,7 +190,10 @@ fn the_nudge_buttons_move_the_playing_clip_and_change_nothing_in_the_set() {
 
     // With the global value None the step is a thirty-second note.
     h.shell
-        .run("session.set_quantization", json!({ "quantization": "none" }))
+        .run(
+            "session.set_quantization",
+            json!({ "quantization": "none" }),
+        )
         .unwrap();
     h.shell
         .run("session.launch", json!({ "track": track, "scene": scene }))

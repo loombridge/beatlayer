@@ -938,14 +938,17 @@ impl EngineProgram {
 
     /// The slot `(track, scene)`, or `None` for an empty one.
     pub(crate) fn slot_row(&self, track: TrackId, scene: SceneId) -> Option<&SlotRow> {
-        self.scene_slots(scene).iter().find(|row| row.track == track)
+        self.scene_slots(scene)
+            .iter()
+            .find(|row| row.track == track)
     }
 
     /// What a press or a release of the launch button of `(track, scene)`
     /// reads from its clip; the default, a Trigger on the global grid, for
     /// an empty slot (R22).
     pub(crate) fn launch_button(&self, track: TrackId, scene: SceneId) -> Button {
-        self.slot_row(track, scene).map_or_else(Button::default, |row| row.button)
+        self.slot_row(track, scene)
+            .map_or_else(Button::default, |row| row.button)
     }
 
     /// What a MIDI track's input received in the last block, and whether

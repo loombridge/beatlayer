@@ -68,6 +68,12 @@
       "where": "the track \"Lead\""
     },
     {
+      "count": 2,
+      "did": "left out",
+      "what": "a pitch bend in semitones",
+      "where": "the track \"Lead\""
+    },
+    {
       "count": 1,
       "did": "left out",
       "what": "points of a MIDI controller outside every clip",

@@ -1400,6 +1400,7 @@ def automation_fixture() -> None:
         + expression("normalized", "pitchBend", rp(0, 0.5), rp(2, 1.0), target_extra=' channel="0"')
         + expression("normalized", "channelPressure", rp(0, 0.5, "hold"), rp(4, 1.0, "hold"), target_extra=' channel="0"')
         + expression("normalized", "programChange", rp(0, 0.5))
+        + expression("semitones", "pitchBend", rp(0, 2), target_extra=' channel="0"')
         + expression("normalized", "polyPressure", rp(0, 0.0), rp(1, 1.0), target_extra=' key="72" channel="0"')
         + expression("normalized", "channelController", rp(40, 0.5), target_extra=' controller="1" channel="0"')
         + "      </Lanes>\n"
@@ -1575,6 +1576,7 @@ AUTOMATION_REPORT: list[dict] = [
         2,
         "left out",
     ),
+    entry("a pitch bend in semitones", 'the track "Lead"', 2, "left out"),
     entry("points of a MIDI controller outside every clip", 'the track "Lead"', 1, "left out"),
     entry(
         "automation in a Session clip of another track's parameter",

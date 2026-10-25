@@ -531,6 +531,13 @@ impl Importer<'_, '_> {
                     None => (None, |v| v),
                 }
             }
+            Expression::PitchBend if unit == Unit::Semitones => {
+                // The bend's range isn't in the file, so semitones can't be
+                // placed on it.
+                self.report
+                    .add("a pitch bend in semitones", place, "left out");
+                return;
+            }
             Expression::PitchBend => (Some(AutomationTarget::MidiPitchBend), |v| {
                 ((v - 0.5) * 2.0 * 8192.0).clamp(-8192.0, 8191.0)
             }),

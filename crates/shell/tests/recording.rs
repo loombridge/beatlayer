@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
-use bl_core::time::{Bpm, SampleRate, TempoMap, TempoSegment, Ticks};
+use bl_core::time::{Bpm, Frames, SampleRate, TempoMap, TempoSegment, Ticks};
 use bl_media::MediaStore;
 use bl_model::TrackId;
 use bl_shell::Shell;
@@ -1329,4 +1329,127 @@ fn midi_passes_round_the_loop_each_go_on_a_take_lane() {
     shell.run("edit.undo", json!({})).unwrap();
     let held = shell.editor().document().track(track).unwrap();
     assert_eq!((held.take_lanes().len(), held.clips().len()), (0, 0));
+}
+
+/// The folder of the project `set.save_as` made.
+fn save_set(shell: &mut Shell, dir: &TestDir) -> PathBuf {
+    let saved: Value = shell
+        .run("set.save_as", json!({ "path": dir.arg("Take.blset") }))
+        .unwrap();
+    PathBuf::from(saved["path"].as_str().unwrap())
+        .parent()
+        .unwrap()
+        .to_path_buf()
+}
+
+// Spec: recording R4. Turning recording on while a take runs changes
+// nothing: the take keeps its one file, and its clip sits where the take
+// began and is as long as the file.
+#[test]
+fn recording_on_during_a_take_leaves_the_take_alone() {
+    let dir = TestDir::new("twice");
+    let (mut shell, control) = duplex_shell();
+    let folder = save_set(&mut shell, &dir);
+    let track = armed_track(&mut shell, 3, "Guitar");
+    control.set_input_tone(2, 12_000.0, 0.5);
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&control, &mut shell, 100);
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    play_for(&control, &mut shell, 100);
+    shell.run("transport.stop", json!({})).unwrap();
+
+    let clip = wait_for_clip(&control, &mut shell, track);
+    recorded_file(&folder);
+    let report = transport_state(&mut shell)["last_recording"].clone();
+    let frames = report["files"][0]["frames"].as_u64().unwrap();
+    assert_eq!(clip.start, Ticks::ZERO, "where the take began");
+    let rate = shell.audio().sample_rate().and_then(SampleRate::new).unwrap();
+    let tempo = shell.editor().document().settings().tempo.clone();
+    let filled = tempo.frames_to_ticks(Frames(frames as i64), rate);
+    assert!(
+        (clip.length - filled).get().abs() <= 1,
+        "the clip is as long as the file: {:?} against {filled:?}",
+        clip.length
+    );
+}
+
+// Spec: recording R4. Reconfiguring the audio device ends the take, which
+// the closed engine never publishes: the recording is reported as failed,
+// not left running.
+#[test]
+fn reconfiguring_the_device_during_a_take_ends_the_recording() {
+    let dir = TestDir::new("reconfigure");
+    let (mut shell, control) = duplex_shell();
+    save_set(&mut shell, &dir);
+    let track = armed_track(&mut shell, 3, "Guitar");
+    control.set_input_tone(2, 12_000.0, 0.5);
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&control, &mut shell, 100);
+    assert_eq!(
+        transport_state(&mut shell)["recording"]["armed_tracks"],
+        json!([track])
+    );
+    shell
+        .run("audio.configure", json!({ "buffer_size": 512 }))
+        .unwrap();
+
+    testing::wait_for(&control, &mut shell, "the recording to end", |shell| {
+        transport_state(shell)["recording"] == Value::Null
+    });
+    let report = &transport_state(&mut shell)["last_recording"];
+    assert_ne!(report["error"], Value::Null, "{report}");
+    assert_eq!(report["clips_made"], false);
+}
+
+// Spec: recording R4. A recording and an automation take under way belong
+// to the set they began in: a new set does not receive them.
+#[test]
+fn a_new_set_gets_neither_the_recording_nor_the_automation_take_of_the_old_one() {
+    let dir = TestDir::new("new-set");
+    let (mut shell, control) = duplex_shell();
+    let track = armed_track(&mut shell, 3, "Guitar");
+    save_set(&mut shell, &dir);
+    control.set_input_tone(2, 12_000.0, 0.5);
+
+    shell
+        .run("arrangement.automation_arm", json!({ "on": true }))
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&control, &mut shell, 100);
+    shell
+        .run("mixer.set_volume", json!({ "track": track, "volume": 0.5 }))
+        .unwrap();
+    play_for(&control, &mut shell, 100);
+    shell.run("set.new", json!({})).unwrap();
+    play_for(&control, &mut shell, 400);
+
+    let state = transport_state(&mut shell);
+    assert_eq!(state["recording"], Value::Null);
+    assert_eq!(state["last_recording"], Value::Null);
+    assert!(!shell.is_dirty(), "nothing was added to the new set");
+    assert!(
+        shell.editor().document().tracks().all(|track| {
+            track.clips().next().is_none() && track.take_lanes().len() == 0
+        }),
+        "no clips in the new set"
+    );
+    assert!(
+        shell
+            .editor()
+            .undo_history()
+            .all(|label| label != "Record Automation")
+    );
 }

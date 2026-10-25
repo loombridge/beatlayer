@@ -541,6 +541,13 @@ impl Shell {
     pub(super) fn new_set_transport(&mut self) {
         self.gesture = false;
         self.key_edit = None;
+        // The recordings and automation takes under way belong to the set
+        // that was replaced: finishing them would put them in this one.
+        self.recording = None;
+        self.session_run = None;
+        self.session_automation = crate::automation_record::SessionTake::default();
+        self.automation_take = crate::automation_record::Take::default();
+        self.automation_recording = false;
         self.audio.reset_transport();
         // Spec: launch-quantisation R1. The set's global quantisation, so
         // launching waits for the right grid (the engine defaults to it too,

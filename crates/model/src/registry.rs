@@ -2485,7 +2485,7 @@ const ENTRIES: &[Entry] = &[
         id: "clip.delete_envelope",
         action: Action::Apply("delete_clip_envelope"),
         label: "Clear Envelope",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[ClipView],
         keys: &[],
         description: "Deletes a clip's envelope for a parameter, as Clear Envelope in the \

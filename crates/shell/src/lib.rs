@@ -192,6 +192,7 @@ pub use bl_shell_spec::pads as pad_commands;
 pub use bl_shell_spec::perception as perception_commands;
 /// The plug-in command IDs and their argument and result types (WP-2.6).
 pub use bl_shell_spec::plugins as plugin_commands;
+pub use bl_shell_spec::remote as remote_commands;
 /// The Sample Editor's view command IDs and their argument and result types
 /// (WP-4.10).
 pub use bl_shell_spec::sample_editor as sample_editor_commands;

@@ -139,6 +139,11 @@ pub struct Settings {
     /// A set with no ARA plug-in doesn't write them.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ara_archives: Vec<crate::ara::AraArchive>,
+    /// The set's MIDI and key mappings (WP-7.1; the remote mapping spec, R1
+    /// to R6). A set saved before them loads with none, and a set with none
+    /// doesn't write them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote: Vec<crate::remote::RemoteMapping>,
 }
 
 impl Default for Settings {
@@ -169,6 +174,7 @@ impl Default for Settings {
             scale: Scale::default(),
             tuning: None,
             ara_archives: Vec::new(),
+            remote: Vec::new(),
         }
     }
 }
@@ -294,6 +300,10 @@ pub struct Document {
     /// clip slot in every scene; the clips live in the tracks.
     pub(crate) scenes: Vector<Scene>,
     pub(crate) index: Index,
+    /// How many mappings the load that made this document dropped because
+    /// their control isn't in the set (remote mapping R6). Not saved, and
+    /// not part of what makes two documents equal.
+    pub(crate) remote_dropped: usize,
 }
 
 /// Lookups derived from the tree, kept in step with it by every command and
@@ -373,6 +383,7 @@ impl Document {
             tracks,
             scenes: scenes.into_iter().map(Scene::new).collect(),
             index: Index::default(),
+            remote_dropped: 0,
         }
     }
 

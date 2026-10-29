@@ -686,6 +686,13 @@ pub enum Command {
         /// Whether the envelopes stay where they are.
         enabled: bool,
     },
+    /// Replaces the set's MIDI and key mappings (the remote mapping spec,
+    /// R1 to R6), each checked against the set: its control is there, and
+    /// no two share a source or a control of a kind.
+    SetRemoteMappings {
+        /// The mappings, in the order the set keeps them.
+        mappings: Vec<crate::remote::RemoteMapping>,
+    },
     /// Switches Cue mode: the tracks' Solo switches become Cue switches
     /// that feed the Cue Out. Needs a Cue Out that shares no channel with
     /// Main Out to turn on. It is no undo step.
@@ -2890,6 +2897,7 @@ impl Command {
             Self::SetKeepMonitoringLatency { .. } => "Switch Keep Monitoring Latency",
             Self::SetSoloInPlace { .. } => "Switch Solo in Place",
             Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
+            Self::SetRemoteMappings { .. } => "Change MIDI and key mappings",
             Self::SetCueMode { .. } => "Switch Cue mode",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
@@ -3799,6 +3807,16 @@ impl Document {
                 self.settings.lock_envelopes = *enabled;
                 Ok(())
             }
+            Command::SetRemoteMappings { mappings } => {
+                crate::remote::check_all(mappings)?;
+                if mappings.iter().any(|m| !self.has_remote_target(&m.target)) {
+                    return Err(ModelError::InvalidInput(
+                        "a mapped control isn't in the set",
+                    ));
+                }
+                self.settings.remote.clone_from(mappings);
+                Ok(())
+            }
             Command::SetCueMode { enabled } => {
                 if *enabled && !self.cue_available() {
                     return Err(ModelError::CueOverlapsMain);
@@ -4521,7 +4539,11 @@ impl Document {
                 points,
             } => self.set_clip_envelope(*clip, *target, *kind, points),
             Command::CreateScene { id, index } => self.create_scene(*id, *index),
-            Command::DeleteScene { scene } => self.delete_scene(*scene),
+            Command::DeleteScene { scene } => {
+                self.delete_scene(*scene)?;
+                self.prune_mappings();
+                Ok(())
+            }
             Command::MoveScene { scene, index } => self.move_scene(*scene, *index),
             Command::DuplicateScene { scene, id, clips } => {
                 self.duplicate_scene(*scene, *id, clips)

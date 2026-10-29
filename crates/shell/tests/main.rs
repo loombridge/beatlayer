@@ -103,6 +103,7 @@ mod realtime_export;
 mod record_quantization;
 mod recording;
 mod recovery;
+mod remote_mapping;
 mod routing;
 mod sample_editor;
 mod sample_edits;

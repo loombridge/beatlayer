@@ -99,6 +99,7 @@ pub mod param;
 pub mod rack;
 mod record_quantization;
 pub mod registry;
+pub mod remote;
 mod repr;
 mod routing;
 mod sample_edits;
@@ -189,6 +190,9 @@ pub use rack::{
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
 pub use record_quantization::RecordQuantization;
+pub use remote::{
+    ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
+};
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scale::{CHROMATIC, Scale, ScaleName};

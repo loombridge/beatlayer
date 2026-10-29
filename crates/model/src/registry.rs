@@ -1092,6 +1092,22 @@ const ENTRIES: &[Entry] = &[
             their own. The setting is saved with the set, and each change is one undo step.",
     },
     Entry {
+        id: "song.set_remote_mappings",
+        action: Action::Apply("set_remote_mappings"),
+        label: "Change MIDI and Key Mappings",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Replaces the set's MIDI and key mappings with `mappings`, each a source \
+            (a note, a range of notes, a controller, a 14-bit controller, pitch bend, or a \
+            computer key), the control it drives, that control's kind, a Min and a Max, and for a \
+            controller a mode. A mapped control must be in the set, and no two mappings share a \
+            source or a control of a kind (one MIDI and one key mapping at most). Use \
+            `remote.map`, `remote.unmap`, `remote.set_range`, `remote.invert_range` and \
+            `remote.set_mode` to change single mappings. The mappings are saved with the set, and \
+            each change is one undo step.",
+    },
+    Entry {
         id: "mixer.set_cue_mode",
         action: Action::Apply("set_cue_mode"),
         label: "Cue Switches",

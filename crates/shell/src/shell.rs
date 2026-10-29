@@ -410,6 +410,11 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start typing a new signature for the time-signature marker at this
+    /// position, in the lane under the beat-time ruler; Return runs
+    /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
+    /// spec, R31).
+    EditTimeSignature(Ticks),
     /// Turn the Info View into a text field for an item's info text, with
     /// the keyboard focus; Return runs the item's command with the text
     /// ([`Shell::info_text_invocation`]), Option-Return starts a new line

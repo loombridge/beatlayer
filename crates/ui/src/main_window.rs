@@ -467,6 +467,11 @@ impl MainWindowUi {
                 // scrub area.
                 crate::arrangement::start_rename(ctx, *locator);
             }
+            Effect::EditTimeSignature(at) => {
+                // Spec: time-editing R31. The signature is typed over its
+                // marker in the lane.
+                crate::arrangement::signatures::start_edit(ctx, *at);
+            }
             Effect::EditInfoText(target) => {
                 // Spec: info-view R10. The Info View becomes a field with
                 // the focus.
@@ -865,6 +870,8 @@ impl MainWindowUi {
                 }
             }
         }
+        crate::mixer::end_orphaned_drag(ctx, &mut events);
+        self.devices.end_undrawn_rename();
         events
     }
 

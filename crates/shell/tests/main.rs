@@ -124,6 +124,7 @@ mod sfz_import;
 mod shell_commands;
 mod shifter;
 mod sidechain;
+mod signature_lane;
 mod slice_to_midi;
 mod snap_automation;
 mod snapping;

@@ -558,6 +558,76 @@ fn the_wheel_scrolls_the_key_track() {
     );
 }
 
+/// A folded editor with 40 rows, more than the note area shows.
+fn folded_forty() -> Notes {
+    let step = n_step();
+    let mut n = set((0..40)
+        .map(|i| Note::new(40 + i, Ticks::ZERO, step, 100))
+        .collect());
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    n.h.key(egui::Key::F, Modifiers::NONE);
+    n.h.settle();
+    assert!(n.h.shell.clip_view().is_folded(n.clip));
+    n
+}
+
+fn wheel_notches(n: &mut Notes, notches: f32) {
+    let grid = n.grid();
+    n.h.frame(vec![
+        Event::PointerMoved(grid.center()),
+        Event::MouseWheel {
+            unit: MouseWheelUnit::Point,
+            delta: vec2(0.0, KEY_HEIGHT * notches),
+            phase: TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    for _ in 0..30 {
+        n.h.frame(Vec::new());
+    }
+}
+
+#[test]
+fn the_wheel_scrolls_a_folded_key_track_the_way_it_scrolls_an_unfolded_one() {
+    // Spec: piano-roll R12, R16. Wheel up shows the higher keys, which are
+    // the first rows, folded or not.
+    let mut n = folded_forty();
+    assert_eq!(n.h.main.clip_view().first_row(), 0.0);
+    wheel_notches(&mut n, -3.0);
+    assert!(
+        (n.h.main.clip_view().first_row() - 3.0).abs() < 0.01,
+        "wheel down moves to lower keys, {}",
+        n.h.main.clip_view().first_row()
+    );
+    wheel_notches(&mut n, 3.0);
+    assert!(
+        n.h.main.clip_view().first_row().abs() < 0.01,
+        "wheel up goes back to higher keys, {}",
+        n.h.main.clip_view().first_row()
+    );
+}
+
+#[test]
+fn a_folded_key_track_scrolls_back_when_notes_are_deleted() {
+    // Spec: piano-roll R16. With fewer rows left, the grid isn't left
+    // scrolled past the last one.
+    let mut n = folded_forty();
+    let clip = n.clip;
+    n.h.shell
+        .run(
+            "clip_view.note_view",
+            json!({ "clip": clip, "show": "scroll", "top": 30.0, "bottom": 36.0 }),
+        )
+        .unwrap();
+    n.h.settle();
+    assert_eq!(n.h.main.clip_view().first_row(), 30.0);
+    n.h.key(egui::Key::A, command());
+    n.h.key(egui::Key::Delete, Modifiers::NONE);
+    n.h.settle();
+    assert!(n.notes().is_empty());
+    assert_eq!(n.h.main.clip_view().first_row(), 0.0);
+}
+
 #[test]
 fn the_arrow_keys_transpose_the_selection_a_semitone_or_an_octave() {
     // Spec: piano-roll (WP-2.3 part 3). S-A11Y-008 and S-A11Y-009: with

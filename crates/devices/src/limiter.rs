@@ -376,9 +376,22 @@ impl NativeDevice for Brickwall {
             let peaks = &self.peaks[channel];
             let targets = &mut self.targets[channel][..frames];
             for ((target, sample), oversampled) in targets.iter_mut().zip(work).zip(peaks) {
-                let peak = sample.abs().max(*oversampled);
-                *target = if peak > 0.0 {
-                    (limit / peak).min(1.0)
+                *target = sample.abs().max(*oversampled);
+            }
+        }
+        // In mid/side, L and R are m + s and m - s, so both follow peak(m) + peak(s):
+        // the left and right outputs then never pass the ceiling.
+        if mid_side {
+            let (first, second) = self.targets.split_at_mut(1);
+            for (m, s) in first[0][..frames].iter_mut().zip(&mut second[0][..frames]) {
+                *m += *s;
+                *s = *m;
+            }
+        }
+        for channel in 0..channels {
+            for target in &mut self.targets[channel][..frames] {
+                *target = if *target > 0.0 {
+                    (limit / *target).min(1.0)
                 } else {
                     1.0
                 };

@@ -99,6 +99,30 @@ fn a_plugin_that_hangs_on_scan_times_out_and_is_blocklisted() {
     assert!(reason.contains("didn't answer"), "{reason}");
 }
 
+// Spec: plugin-scanning R4. A reply bigger than the pipe's buffer must not
+// look like a hang.
+#[test]
+fn a_reply_bigger_than_the_pipe_buffer_is_read() {
+    let scanner = scanner()
+        .with_env(TEST_SCAN_VAR, "big")
+        .with_timeout(Duration::from_secs(20));
+    let report = scanner.scan(clap(), &[bundle().to_path_buf()]);
+    assert!(report.blocked.is_empty(), "{:?}", report.blocked);
+    assert_eq!(report.plugins.len(), 1);
+    assert_eq!(report.plugins[0].name.len(), 200_000);
+}
+
+// Spec: plugin-scanning R4. A plug-in's own text on standard output doesn't
+// hide the reply.
+#[test]
+fn a_plugin_that_prints_a_banner_is_still_scanned() {
+    let scanner = scanner().with_env(TEST_SCAN_VAR, "banner");
+    let report = scanner.scan(clap(), &[bundle().to_path_buf()]);
+    assert!(report.blocked.is_empty(), "{:?}", report.blocked);
+    assert_eq!(report.plugins.len(), 1);
+    assert_eq!(report.plugins[0].name, PLUGIN_NAME);
+}
+
 // Spec: plugin-scanning R3.
 #[test]
 fn a_file_that_isnt_a_plugin_is_blocklisted_with_why() {

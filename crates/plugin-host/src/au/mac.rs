@@ -1157,15 +1157,23 @@ fn make_window(controller: &NSViewController, title: &str) -> Retained<NSWindow>
     window
 }
 
+/// Empties the editor's event buffer, or returns `None` if the observer holds
+/// it. It drains instead of taking the Vec, so the buffer keeps the room
+/// reserved when the editor opened: the observer pushes into it, perhaps on
+/// the audio thread, and mustn't allocate.
+fn take_events(events: &Mutex<Vec<RawEvent>>) -> Option<Vec<RawEvent>> {
+    let mut events = events.try_lock().ok()?;
+    Some(events.drain(..).collect())
+}
+
 /// Turns the events an editor's observer saw into the set's changes, one
 /// per gesture with its final value (spec: clap-hosting R6).
 fn pump_editor_changes(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange>) {
     let Some(editor) = &mut instance.editor else {
         return;
     };
-    let events: Vec<RawEvent> = match editor.events.try_lock() {
-        Ok(mut events) => std::mem::take(&mut *events),
-        Err(_) => return,
+    let Some(events) = take_events(&editor.events) else {
+        return;
     };
     if events.is_empty() {
         return;
@@ -1512,6 +1520,11 @@ fn serve(main: &mut Main, request: Request) {
     };
     if let Some(old) = instance.ends.take() {
         old.status.hand_back.store(true, Relaxed);
+        // An open editor's observer is the originator of the new node's own
+        // parameter sets too, so they don't come back as the unit's edits.
+        ends.status
+            .observer
+            .store(old.status.observer.load(Relaxed), Relaxed);
         instance.retired.push(old);
     }
     instance.ends = Some(ends);
@@ -1989,6 +2002,56 @@ mod tests {
         assert_eq!(version_text(0x0001_0203), "1.2.3");
         assert_eq!(version_text(0x0000_0000), "0.0.0");
         assert_eq!(version_text(0xFFFF_FFFF), "65535.255.255");
+    }
+
+    /// Spec: au-hosting R6. The editor's buffer keeps its room after the
+    /// main thread drains it, so the observer never allocates.
+    #[test]
+    fn draining_the_editors_events_keeps_the_buffers_room() {
+        let events = Mutex::new(Vec::with_capacity(EDITOR_EVENTS));
+        events.lock().unwrap().push(RawEvent {
+            address: 1,
+            value: 0.5,
+            kind: EventKind::Value,
+        });
+        assert_eq!(take_events(&events).map(|taken| taken.len()), Some(1));
+        assert!(events.lock().unwrap().capacity() >= EDITOR_EVENTS);
+    }
+
+    /// Spec: au-hosting R6. A node made after the editor opened sets the
+    /// unit's parameters with the editor's observer as their originator.
+    #[test]
+    fn a_new_node_keeps_the_open_editors_observer() {
+        let host = AuHost::new();
+        host.load("aufx", "dely", "appl")
+            .expect("AUDelay is installed");
+        let device = Device::new(
+            DeviceId(bl_core::id::Id::new(1).expect("an ID")),
+            "Test AU",
+            kind("aufx/dely/appl"),
+        );
+        let config = NodeConfig {
+            round_trip_latency: 0,
+            sample_rate: bl_core::time::SampleRate::HZ_48000,
+            max_frames: 512,
+            channels: 2,
+        };
+        let factory = host.factory();
+        let _first = factory.create(&device, &config).expect("a node");
+        let token = 0x10 as *mut std::ffi::c_void;
+        let observer = |set: Option<*mut std::ffi::c_void>| {
+            let mut guard = lock(&host.inner.main);
+            let instance = guard.get().unwrap().instances.get_mut(&device.id).unwrap();
+            let status = &instance.ends.as_ref().unwrap().status;
+            if let Some(token) = set {
+                status.observer.store(token, Relaxed);
+            }
+            status.observer.load(Relaxed)
+        };
+        // The first node's ends hold the token finish_editor stores.
+        observer(Some(token));
+        let _second = factory.create(&device, &config).expect("a node");
+        assert_eq!(observer(None), token);
     }
 
     #[test]

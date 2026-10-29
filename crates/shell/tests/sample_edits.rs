@@ -154,6 +154,16 @@ fn set_param(shell: &mut Shell, device: DeviceId, param: bl_model::ParamId, valu
         .unwrap();
 }
 
+/// Moves Simpler's Start and End flags, in frames.
+fn set_region(shell: &mut Shell, device: DeviceId, start: u64, end: u64) {
+    shell
+        .run(
+            "device.set_sample_region",
+            json!({ "device": device, "start": start, "end": end }),
+        )
+        .unwrap();
+}
+
 fn file_hash(path: &Path) -> bl_media::ContentHash {
     bl_media::ContentHash::of_file(path).unwrap()
 }
@@ -294,8 +304,7 @@ fn crop_and_reverse_write_a_processed_copy_and_keep_the_original() {
     let ramp = source.channel(0).unwrap().to_vec();
 
     // Simpler's Crop keeps the region (a quarter in, half the length).
-    set_param(&mut shell, snap, sampler::START, 25.0);
-    set_param(&mut shell, snap, sampler::LENGTH, 50.0);
+    set_region(&mut shell, snap, 1_200, 3_600);
     edit(&mut shell, snap, "fade_in", Some((0, 10)));
     let cropped = shell
         .run("device.crop_sample", json!({ "device": snap }))
@@ -332,30 +341,18 @@ fn crop_and_reverse_write_a_processed_copy_and_keep_the_original() {
         serde_json::from_value(cropped["media"].clone()).unwrap()
     );
     assert!(now.sample_edits.is_empty());
-    let value = |id| {
-        sampler::sampler_type()
-            .description
-            .value(&now.params, id)
-            .unwrap()
-    };
-    assert_eq!(
-        (value(sampler::START), value(sampler::LENGTH)),
-        (0.0, 100.0)
-    );
+    assert_eq!(now.region, None, "the region is the whole copy");
     // One undo step puts the original and the region back.
     undo(&mut shell);
     let back = device(&shell, snap);
     assert_eq!(back.media_at(0).unwrap().0, *before.as_bytes());
     assert_eq!(back.sample_edits.len(), 1);
-    let value = |id| {
-        sampler::sampler_type()
-            .description
-            .value(&back.params, id)
-            .unwrap()
-    };
     assert_eq!(
-        (value(sampler::START), value(sampler::LENGTH)),
-        (25.0, 50.0)
+        back.region,
+        Some(bl_model::SampleRegion::Frames {
+            start: 1_200,
+            end: 3_600
+        })
     );
 
     // A layer's Reverse writes the whole sample reversed and keeps its markers.
@@ -398,6 +395,164 @@ fn crop_and_reverse_write_a_processed_copy_and_keep_the_original() {
     );
 }
 
+// Spec: sampler R22
+#[test]
+fn the_flags_are_one_undo_step_each_and_stay_inside_the_sample() {
+    use bl_model::SampleRegion::Frames;
+    let scratch = Scratch::new("flags");
+    let file = scratch.path("Ramp.wav");
+    wav(&file);
+    let mut shell = shell(&scratch);
+    let snap = snapshot(&mut shell, &file);
+    assert_eq!(
+        device(&shell, snap).region,
+        None,
+        "a loaded sample is whole"
+    );
+    let steps = shell.editor().undo_history().len();
+
+    let set = shell
+        .run(
+            "device.set_sample_region",
+            json!({ "device": snap, "start": 1_200, "end": 3_600 }),
+        )
+        .unwrap();
+    assert_eq!(
+        (
+            set["start"].as_u64(),
+            set["end"].as_u64(),
+            set["length"].as_u64()
+        ),
+        (Some(1_200), Some(3_600), Some(FRAMES as u64))
+    );
+    assert_eq!(
+        device(&shell, snap).region,
+        Some(Frames {
+            start: 1_200,
+            end: 3_600
+        })
+    );
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+
+    // A flag left out stays; an End past the sample comes back to it.
+    shell
+        .run(
+            "device.set_sample_region",
+            json!({ "device": snap, "end": 99_999 }),
+        )
+        .unwrap();
+    assert_eq!(
+        device(&shell, snap).region,
+        Some(Frames {
+            start: 1_200,
+            end: FRAMES as u64
+        })
+    );
+    // A Start at or after End is refused and changes nothing.
+    let was = device(&shell, snap);
+    for start in [FRAMES as u64, FRAMES as u64 + 10] {
+        assert!(
+            shell
+                .run(
+                    "device.set_sample_region",
+                    json!({ "device": snap, "start": start }),
+                )
+                .is_err()
+        );
+    }
+    assert_eq!(device(&shell, snap), was);
+    // The flags that cover the whole sample are no region.
+    shell
+        .run(
+            "device.set_sample_region",
+            json!({ "device": snap, "start": 0 }),
+        )
+        .unwrap();
+    assert_eq!(device(&shell, snap).region, None);
+    undo(&mut shell);
+    assert_eq!(device(&shell, snap), was, "one undo step");
+}
+
+// Spec: sampler R22; multisampler R56
+#[test]
+fn an_edit_moves_the_flags_with_the_audio_they_mark_and_reverting_makes_the_region_whole() {
+    use bl_model::SampleRegion::Frames;
+    let scratch = Scratch::new("flags-edits");
+    let file = scratch.path("Ramp.wav");
+    wav(&file);
+    let mut shell = shell(&scratch);
+    let snap = snapshot(&mut shell, &file);
+    set_region(&mut shell, snap, 1_200, 3_600);
+    // A Cut before the Start flag moves both flags by its length.
+    edit(&mut shell, snap, "cut", Some((0, 200)));
+    assert_eq!(
+        device(&shell, snap).region,
+        Some(Frames {
+            start: 1_000,
+            end: 3_400
+        })
+    );
+    // A fade changes no length and moves nothing.
+    edit(&mut shell, snap, "fade_in", Some((0, 50)));
+    assert_eq!(
+        device(&shell, snap).region,
+        Some(Frames {
+            start: 1_000,
+            end: 3_400
+        })
+    );
+    // A Cut inside the region shortens it; one that swallows it leaves none.
+    edit(&mut shell, snap, "cut", Some((1_500, 1_900)));
+    assert_eq!(
+        device(&shell, snap).region,
+        Some(Frames {
+            start: 1_000,
+            end: 3_000
+        })
+    );
+    edit(&mut shell, snap, "trim", Some((3_100, 4_000)));
+    assert_eq!(device(&shell, snap).region, None);
+    // Reverting the edits brings the whole sample back.
+    set_region(&mut shell, snap, 10, 20);
+    shell
+        .run(
+            "device.edit_sample",
+            json!({ "device": snap, "revert": true }),
+        )
+        .unwrap();
+    assert_eq!(device(&shell, snap).region, None);
+}
+
+// Spec: sampler R24
+#[test]
+fn opening_a_set_from_before_the_region_names_the_simplers_whose_start_was_driven() {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../project/tests/fixtures");
+    for (fixture, named) in [
+        ("simplers-schema-11.json", false),
+        ("simplers-driven-schema-11.json", true),
+    ] {
+        let scratch = Scratch::new("old-simplers");
+        let path = scratch.path("Old.blset");
+        let json = std::fs::read(fixtures.join(fixture)).unwrap();
+        std::fs::write(&path, bl_project::format::compress(&json)).unwrap();
+        let mut shell = shell(&scratch);
+        shell
+            .run("set.open", json!({ "path": path.to_string_lossy() }))
+            .unwrap();
+        let text = shell.message().map(|message| message.text.clone());
+        if named {
+            let text = text.expect("a message in the Status Bar");
+            assert!(text.starts_with("Simpler One-Shot: "), "{text}");
+            assert_eq!(text.matches("Simpler ").count(), 1, "named once: {text}");
+        } else {
+            assert!(
+                text.is_none_or(|text| !text.contains("Simpler")),
+                "no device is named"
+            );
+        }
+    }
+}
+
 // Spec: multisampler R59
 #[test]
 fn an_unsaved_set_refuses_crop() {
@@ -406,7 +561,7 @@ fn an_unsaved_set_refuses_crop() {
     wav(&file);
     let mut shell = shell(&scratch);
     let snap = snapshot(&mut shell, &file);
-    set_param(&mut shell, snap, sampler::LENGTH, 50.0);
+    set_region(&mut shell, snap, 0, 2_400);
     let before = device(&shell, snap);
     for command in ["device.crop_sample", "device.reverse_sample"] {
         let error = shell.run(command, json!({ "device": snap })).unwrap_err();
@@ -431,7 +586,7 @@ fn snapshots_normalize_volumes_sets_its_gain() {
     let snap = snapshot(&mut shell, &file);
     // The region's largest magnitude is the last frame it holds: half the
     // sample, 0.125.
-    set_param(&mut shell, snap, sampler::LENGTH, 50.0);
+    set_region(&mut shell, snap, 0, 2_400);
     shell
         .run(
             "device.normalize_layers",
@@ -468,6 +623,9 @@ fn snapshot_and_the_multisampler_convert_both_ways() {
             json!({ "device": snap, "name": "My Sample" }),
         )
         .unwrap();
+    // Classic plays S Start's quarter of the region for half of it: with
+    // the flags at a quarter and the end, frames 2,100 to 3,900.
+    set_region(&mut shell, snap, 1_200, 4_800);
     set_param(&mut shell, snap, sampler::START, 25.0);
     set_param(&mut shell, snap, sampler::LENGTH, 50.0);
     set_param(&mut shell, snap, sampler::LOOP, 1.0);
@@ -501,15 +659,15 @@ fn snapshot_and_the_multisampler_convert_both_ways() {
     );
     assert_eq!(
         (layer.start, layer.end),
-        (1_200, 3_600),
-        "the region is the markers"
+        (2_100, 3_900),
+        "the part Classic plays is the markers"
     );
     assert_eq!(
         layer.sustain,
         bl_model::SustainMode::Loop,
         "the loop is a sustain loop"
     );
-    assert_eq!((layer.loop_start, layer.loop_end), (2_400, 3_600));
+    assert_eq!((layer.loop_start, layer.loop_end), (3_000, 3_900));
     assert_eq!(layer.edits.len(), 1, "the edits go with the sample");
     let attack = bl_devices::multisampler::multisampler_type()
         .description
@@ -554,8 +712,18 @@ fn snapshot_and_the_multisampler_convert_both_ways() {
     };
     assert_eq!(value(sampler::MODE), 0.0);
     assert_eq!(held.name, "My Sample");
-    assert!(
-        (value(sampler::START) - 25.0).abs() < 1e-9 && (value(sampler::LENGTH) - 50.0).abs() < 1e-9
+    // The layer's markers are Simpler's flags again, and S Start and S
+    // Length are at their defaults.
+    assert_eq!(
+        held.region,
+        Some(bl_model::SampleRegion::Frames {
+            start: 2_100,
+            end: 3_900
+        })
+    );
+    assert_eq!(
+        (value(sampler::START), value(sampler::LENGTH)),
+        (0.0, 100.0)
     );
     assert_eq!(value(sampler::LOOP), 1.0);
     assert!((value(sampler::LOOP_LENGTH) - 50.0).abs() < 1e-9);

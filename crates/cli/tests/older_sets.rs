@@ -21,7 +21,12 @@ const MEDIA: ContentHash = ContentHash([3; 32]);
 
 /// A file whose every frame says which it is.
 fn media() -> MediaMap {
-    let left: Vec<f32> = (0..200_000).map(|i| (i + 1) as f32 / 262_144.0).collect();
+    media_of(200_000)
+}
+
+/// [`media`] with `frames` frames.
+fn media_of(frames: usize) -> MediaMap {
+    let left: Vec<f32> = (0..frames).map(|i| (i + 1) as f32 / 262_144.0).collect();
     let mut map = MediaMap::new();
     map.insert(
         MEDIA,
@@ -2048,4 +2053,83 @@ fn a_set_saved_before_info_text_loads_with_none_and_a_set_with_some_keeps_it() {
     assert_eq!(document.device(device).unwrap().info_text, "Gain staging");
     assert_eq!(*document, *editor.document());
     assert_eq!(encode_json(&loaded, 1).unwrap(), saved);
+}
+
+/// The frames a Simpler of a set saved before the region (the version 11
+/// fixtures of `bl-project`) plays, in the track named `name`, rendered at
+/// `rate` with the other tracks muted.
+fn simpler_track_heard(project: &Project, name: &str, rate: SampleRate) -> Vec<f32> {
+    let mut editor = Editor::from_document(project.document.clone(), project.ids);
+    let others: Vec<_> = editor
+        .document()
+        .tracks()
+        .filter(|track| track.name() != name && track.kind() != TrackKind::Main)
+        .map(bl_model::Track::id)
+        .collect();
+    for track in others {
+        editor
+            .apply(Command::SetMute { track, mute: true })
+            .unwrap();
+    }
+    let mut registry = Registry::new().with_media(Arc::new(media_of(48_000)));
+    bl_devices::register(&mut registry);
+    let mut offline = Offline::new(EngineConfig::new(rate, 256), registry);
+    offline.sync(editor.document());
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(100_000, |output| out.extend_from_slice(output.channel(0)));
+    out
+}
+
+// Spec: sampler R24
+/// A set saved before the region opens in each mode playing the very frames
+/// it played, at either engine rate: the file is at 48 kHz, so at 44.1 kHz
+/// the shares meet the converted sample, as the old playback met it.
+#[test]
+fn a_set_saved_before_the_region_plays_the_same_frames_at_either_rate() {
+    use bl_engine::MediaLibrary;
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../project/tests/fixtures/simplers-schema-11.json");
+    let (project, _) = decode_json(&std::fs::read(path).unwrap(), &LoadOptions::default()).unwrap();
+    for rate in [SampleRate::HZ_44100, SampleRate::HZ_48000] {
+        let heard = media_of(48_000).sample(MEDIA, rate).unwrap();
+        let converted = heard.channel(0).unwrap();
+        let n = converted.len() as f64;
+        // The arithmetic of the playback that read the shares: Start and
+        // Length as shares of the decoded sample, each rounded down to a
+        // frame.
+        let frames = |start: f64, length: f64| {
+            let start = start / 100.0;
+            (
+                (start * n) as u64,
+                (((start + length / 100.0).min(1.0)) * n) as u64,
+            )
+        };
+        let plays = |name: &str, (from, to): (u64, u64)| {
+            let out = simpler_track_heard(&project, name, rate);
+            let len = (to - from) as usize;
+            let mid = len / 2;
+            let gain = out[mid] / converted[from as usize + mid];
+            assert!(gain > 0.0, "{name} at {rate:?} plays");
+            for i in (0..len).step_by(61) {
+                let wanted = gain * converted[from as usize + i];
+                assert!(
+                    (out[i] - wanted).abs() < 1e-5,
+                    "{name} at {rate:?} frame {i}: {} against {wanted}",
+                    out[i]
+                );
+            }
+            assert!(
+                out[len + 2..].iter().all(|s| s.abs() < 1e-6),
+                "{name} at {rate:?} ends at its frame {to}"
+            );
+        };
+        // Classic keeps Start and Length as S Start and S Length: the
+        // automated Start of 25 % to the sample's end.
+        plays("Classic", frames(25.0, 100.0));
+        plays("One-Shot", frames(20.0, 30.0));
+        // The Slice Simpler's second of two slices.
+        let (from, to) = frames(10.0, 60.0);
+        plays("Slice", (from + (to - from) / 2, to));
+    }
 }

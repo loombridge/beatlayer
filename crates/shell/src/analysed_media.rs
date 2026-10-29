@@ -80,6 +80,10 @@ impl MediaLibrary for AnalysedMedia {
         self.inner.sample(media, rate)
     }
 
+    fn native_rate(&self, media: ContentHash) -> Option<u32> {
+        self.inner.native_rate(media)
+    }
+
     fn edited_sample(
         &self,
         media: ContentHash,

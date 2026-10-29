@@ -610,6 +610,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "`device.crop_sample` and `device.reverse_sample`, which write the copy",
             )),
         ),
+        // Simpler's Start and End flags (WP-7.33): the model's command writes
+        // them as given, and the shell's checks them against the sample.
+        (
+            "device.write_sample_region",
+            Exception(Equivalent(
+                "`device.set_sample_region`, which clamps the flags to the sample",
+            )),
+        ),
+        (
+            "device.set_sample_region",
+            Exception(Gap(
+                "dragging a flag in the sample display, which has no keyboard form yet \
+                 (sampler R22)",
+            )),
+        ),
         // Manual slicing in the sample display, and the Warp controls
         // (WP-5.15b): the slicing gestures have no keyboard form yet, and
         // the Warp controls are in the Device View's Tab order.

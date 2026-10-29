@@ -13,11 +13,12 @@ use bl_devices::{multisampler as mosaic, sampler};
 use bl_media::SampleData;
 use bl_model::{
     Command, ContentHash, DeviceId, DeviceKind, Layer, LayerId, ParamId, SampleEdit, SampleRange,
-    SustainMode,
+    SampleRegion, SustainMode,
 };
 use bl_shell_spec::multisampler::{
     self as ids, AuditionArgs, Auditioned, ConvertArgs, ConvertTo, Converted, EditSampleArgs,
-    Normalize, ProcessSampleArgs, SampleEdited, SampleProcessed,
+    Normalize, ProcessSampleArgs, SampleEdited, SampleProcessed, SampleRegionSet,
+    SetSampleRegionArgs,
 };
 
 use super::*;
@@ -165,6 +166,10 @@ impl Shell {
                 let args: ConvertArgs = Self::args(id, args)?;
                 self.convert(id, &args)
             }
+            ids::SET_SAMPLE_REGION => {
+                let args: SetSampleRegionArgs = Self::args(id, args)?;
+                self.set_sample_region(id, &args)
+            }
             ids::AUDITION_SAMPLE => {
                 let args: AuditionArgs = Self::args(id, args)?;
                 let target = self.sample_target(id, args.device, args.layer)?;
@@ -246,25 +251,77 @@ impl Shell {
         }))
     }
 
-    /// Simpler's region as frames of its edited sample: Start and Length
-    /// are shares of it (the sampler spec, R3).
+    /// Simpler's Start and End flags as frames of its edited sample, which is
+    /// `frames` long (the sampler spec, R22).
     fn snapshot_region(&self, device: DeviceId, frames: u64) -> (u64, u64) {
-        let (start, length) = self.snapshot_shares(device);
-        let first = (start * frames as f64) as u64;
-        let end = (((start + length).min(1.0) * frames as f64) as u64).min(frames);
-        (first, end)
+        self.editor
+            .document()
+            .device(device)
+            .and_then(|d| d.region)
+            .map_or((0, frames), |region| region.frames_in(frames))
     }
 
-    /// Simpler's Start and Length as shares of the sample, 0 to 1.
-    fn snapshot_shares(&self, device: DeviceId) -> (f64, f64) {
+    /// The part Classic mode plays, in frames of the edited sample: S Start's
+    /// share of the region for S Length's (R3), as the node works it out.
+    fn snapshot_played(&self, device: DeviceId, frames: u64) -> (u64, u64) {
+        let (first, last) = self.snapshot_region(device, frames);
         let description = sampler::sampler_type().description;
-        self.editor
+        let (start, length) = self
+            .editor
             .document()
             .device(device)
             .map_or((0.0, 1.0), |d| {
                 let value = |id| description.value(&d.params, id).unwrap_or_default() / 100.0;
                 (value(sampler::START), value(sampler::LENGTH))
+            });
+        let span = last.saturating_sub(first) as f64;
+        let from = first + (start * span) as u64;
+        (
+            from,
+            (first + ((start + length).min(1.0) * span) as u64).min(last),
+        )
+    }
+
+    /// `device.set_sample_region` (R22): the flags in frames, an End past the
+    /// sample coming back to it. Flags that cover the whole sample are no
+    /// region.
+    fn set_sample_region(
+        &mut self,
+        id: &str,
+        args: &SetSampleRegionArgs,
+    ) -> Result<Value, ShellError> {
+        let target = self.sample_target(id, args.device, None)?;
+        let device = target.device;
+        let sample = self.sample_of(id, target)?;
+        let length = self
+            .edited_audio(sample.media, &sample.edits)
+            .ok_or_else(|| self.failed(id, "the sample's file is missing"))?
+            .frames() as u64;
+        let (was_start, was_end) = self.snapshot_region(device, length);
+        let end = args.end.unwrap_or(was_end).min(length);
+        let start = args.start.unwrap_or(was_start);
+        if start >= end {
+            return Err(self.failed(
+                id,
+                format!(
+                    "Start ({start}) must be before End ({end}) in a sample of {length} frames"
+                ),
+            ));
+        }
+        let region = (start, end) != (0, length);
+        self.editor
+            .apply(Command::SetDeviceRegion {
+                device,
+                region: region.then_some(SampleRegion::Frames { start, end }),
             })
+            .map_err(|error| self.failed(id, error))?;
+        self.changed();
+        Ok(to_value(&SampleRegionSet {
+            device,
+            start,
+            end,
+            length,
+        }))
     }
 
     /// `device.crop_sample` and `device.reverse_sample` (R59): the edited
@@ -377,24 +434,15 @@ impl Shell {
                         })
                         .map(drop),
                     None => {
-                        // Loading the copy clears Simpler's edits; a crop
-                        // makes the region the whole of the copy.
-                        editor.apply(Command::SetDeviceSample {
-                            device,
-                            media: Some(media),
-                            slot: 0,
-                        })?;
-                        if crop {
-                            for param in [sampler::START, sampler::LENGTH] {
-                                let value = if param == sampler::START { 0.0 } else { 100.0 };
-                                editor.apply(Command::SetDeviceParam {
-                                    device,
-                                    param,
-                                    value,
-                                })?;
-                            }
-                        }
-                        Ok(())
+                        // Loading the copy clears Simpler's edits and region,
+                        // so a crop's region is the whole of the copy.
+                        editor
+                            .apply(Command::SetDeviceSample {
+                                device,
+                                media: Some(media),
+                                slot: 0,
+                            })
+                            .map(drop)
                     }
                 })
                 .map_err(|error| error.to_string())?;
@@ -543,8 +591,8 @@ impl Shell {
     }
 
     /// Simpler as a multisampler's device and its one layer: the whole
-    /// zones, the region as Sample Start and Sample End, the loop as a
-    /// sustain loop (R62).
+    /// zones, the part Classic plays as Sample Start and Sample End, the loop
+    /// as a sustain loop (R62).
     fn snapshot_to_multisampler(
         &self,
         id: &str,
@@ -598,7 +646,7 @@ impl Shell {
             .edited_audio(media, &old.sample_edits)
             .ok_or_else(|| self.failed(id, "the sample's file is missing"))?;
         let frames = audio.frames() as u64;
-        let (start, end) = self.snapshot_region(old.id, frames);
+        let (start, end) = self.snapshot_played(old.id, frames);
         let name = self
             .media
             .entry(bl_media::ContentHash::from_bytes(media.0))
@@ -678,12 +726,12 @@ impl Shell {
             (value(mosaic::PAN) + layer.pan).clamp(-50.0, 50.0),
         );
         set(sampler::GAIN, layer.volume);
-        let length = layer.length.max(1) as f64;
-        set(sampler::START, layer.start as f64 / length * 100.0);
-        set(
-            sampler::LENGTH,
-            (layer.end - layer.start) as f64 / length * 100.0,
-        );
+        // Sample Start and Sample End become Simpler's flags (R62).
+        let whole = (layer.start, layer.end) == (0, layer.length);
+        new.region = (!whole && layer.start < layer.end).then_some(SampleRegion::Frames {
+            start: layer.start,
+            end: layer.end,
+        });
         // Simpler plays C3 at the sample's own pitch; the layer's root key
         // is where the multisampler does.
         set(

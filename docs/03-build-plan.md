@@ -812,5 +812,5 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.30 | todo |  |  |
 | 7.31 | done | 29 October 2026 | [#508](https://github.com/loombridge/beatlayer/pull/508): the Control Bar's Tap button runs `transport.tap_tempo` with the tap law on the engine's time base, a run of taps is one undo step, and Start Transport With Tap Tempo is in Settings and Playback ▸ Options; Link, EXT and mapping the button come with WP-7.14, 7.12 and 7.3b |
 | 7.32 | todo |  |  |
-| 7.33 | todo |  |  |
+| 7.33 | done | 29 October 2026 | [#512](https://github.com/loombridge/beatlayer/pull/512): Simpler's region is the Start and End flags in the sample's own frames, set by `device.set_sample_region` as one undo step; Classic plays S Start, S Length and S Loop Length inside the flags and One-Shot and Slice play flag to flag; the display, Crop, Normalize, the conversions and Slice to New MIDI Track read the flags, and schema 13 moves older sets over |
 | 7.33b | todo |  |  |

@@ -117,6 +117,15 @@ pub trait MediaLibrary: Send + Sync {
         None
     }
 
+    /// The sample rate the file is in, which a sampler's flags and slices
+    /// count frames at (the sampler spec, R22). `None` where the library
+    /// doesn't know it, and the compiler then takes the file to be at the
+    /// engine's rate.
+    fn native_rate(&self, media: ContentHash) -> Option<u32> {
+        let _ = media;
+        None
+    }
+
     /// The media decoded into memory at `rate`, whole, for a device that
     /// reads it at positions of its own (a sampler's sample, WP-2.16):
     /// `None` if the media is missing, has changed, or doesn't decode, and
@@ -214,17 +223,22 @@ pub struct SlotSample {
     pub warp: bl_model::DeviceWarp,
     /// Slices in frames from the sample's start.
     pub slices: Arc<[u64]>,
+    /// The Start and End flags in frames of `sample`, the sampler spec's
+    /// region (R22): the whole sample unless the device holds one.
+    pub region: (u64, u64),
 }
 
 impl SlotSample {
     /// Makes a new slot sample with default warp and no slices.
     #[must_use]
     pub fn new(slot: usize, sample: Arc<SampleData>) -> Self {
+        let region = (0, sample.frames() as u64);
         Self {
             slot,
             sample,
             warp: bl_model::DeviceWarp::default(),
             slices: Arc::from([]),
+            region,
         }
     }
 }
@@ -264,6 +278,11 @@ impl MediaLibrary for MediaStore {
     fn sample(&self, media: ContentHash, rate: SampleRate) -> Option<Arc<SampleData>> {
         let hash = bl_media::ContentHash::from_bytes(media.0);
         self.load_at_rate(hash, rate.hz()).ok()
+    }
+
+    fn native_rate(&self, media: ContentHash) -> Option<u32> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.info(hash).ok().map(|info| info.sample_rate)
     }
 
     fn edited_sample(
@@ -414,6 +433,11 @@ impl MediaLibrary for MediaStreams {
         self.store.load_at_rate(hash, rate.hz()).ok()
     }
 
+    fn native_rate(&self, media: ContentHash) -> Option<u32> {
+        let hash = bl_media::ContentHash::from_bytes(media.0);
+        self.store.info(hash).ok().map(|info| info.sample_rate)
+    }
+
     fn edited_sample(
         &self,
         media: ContentHash,
@@ -524,6 +548,10 @@ impl MediaLibrary for MediaMap {
             return Some(Arc::clone(audio));
         }
         convert_sample_rate(audio, rate.hz()).ok().map(Arc::new)
+    }
+
+    fn native_rate(&self, media: ContentHash) -> Option<u32> {
+        self.files.get(&media).map(|audio| audio.sample_rate())
     }
 
     /// Renders the edits each time it's asked, with no sharing.

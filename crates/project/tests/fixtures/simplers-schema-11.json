@@ -1,0 +1,265 @@
+{
+  "document": {
+    "main": {
+      "colour": 1,
+      "id": 1,
+      "kind": "main",
+      "mixer": {
+        "arm": false,
+        "mute": false,
+        "pan": 0.0,
+        "solo": false,
+        "volume": 1.0
+      },
+      "name": "Main"
+    },
+    "returns": [],
+    "scenes": [],
+    "settings": {
+      "tempo": [
+        {
+          "bpm": 120.0,
+          "kind": "constant",
+          "start": 0
+        }
+      ],
+      "time_signatures": [
+        {
+          "at": 0,
+          "signature": {
+            "denominator": 4,
+            "numerator": 4
+          }
+        }
+      ]
+    },
+    "tracks": [
+      {
+        "automation": [
+          {
+            "points": [
+              {
+                "at": 0,
+                "value": 25.0
+              }
+            ],
+            "target": {
+              "device": 3,
+              "param": 1,
+              "type": "device"
+            }
+          }
+        ],
+        "clips": [
+          {
+            "colour": 2,
+            "data": {
+              "midi": {
+                "notes": [
+                  {
+                    "key": 60,
+                    "length": 2822400,
+                    "start": 0,
+                    "velocity": 100
+                  }
+                ]
+              }
+            },
+            "id": 4,
+            "length": 2822400,
+            "mute": false,
+            "name": "",
+            "start": 0
+          }
+        ],
+        "colour": 2,
+        "devices": [
+          {
+            "enabled": true,
+            "id": 3,
+            "kind": {
+              "native": {
+                "device_type": "beatlayer.snapshot"
+              }
+            },
+            "media": [
+              "0303030303030303030303030303030303030303030303030303030303030303"
+            ],
+            "name": "Classic",
+            "params": [
+              [
+                0,
+                0.0
+              ]
+            ],
+            "role": "instrument"
+          }
+        ],
+        "id": 2,
+        "kind": "midi",
+        "mixer": {
+          "arm": false,
+          "mute": false,
+          "pan": 0.0,
+          "solo": false,
+          "volume": 1.0
+        },
+        "name": "Classic"
+      },
+      {
+        "clips": [
+          {
+            "colour": 5,
+            "data": {
+              "midi": {
+                "notes": [
+                  {
+                    "key": 60,
+                    "length": 2822400,
+                    "start": 0,
+                    "velocity": 100
+                  }
+                ]
+              }
+            },
+            "id": 7,
+            "length": 2822400,
+            "mute": false,
+            "name": "",
+            "start": 0
+          }
+        ],
+        "colour": 5,
+        "devices": [
+          {
+            "enabled": true,
+            "id": 6,
+            "kind": {
+              "native": {
+                "device_type": "beatlayer.snapshot"
+              }
+            },
+            "media": [
+              "0303030303030303030303030303030303030303030303030303030303030303"
+            ],
+            "name": "One-Shot",
+            "params": [
+              [
+                0,
+                1.0
+              ],
+              [
+                1,
+                20.0
+              ],
+              [
+                2,
+                30.0
+              ]
+            ],
+            "role": "instrument"
+          }
+        ],
+        "id": 5,
+        "kind": "midi",
+        "mixer": {
+          "arm": false,
+          "mute": false,
+          "pan": 0.0,
+          "solo": false,
+          "volume": 1.0
+        },
+        "name": "One-Shot"
+      },
+      {
+        "clips": [
+          {
+            "colour": 8,
+            "data": {
+              "midi": {
+                "notes": [
+                  {
+                    "key": 61,
+                    "length": 2822400,
+                    "start": 0,
+                    "velocity": 100
+                  }
+                ]
+              }
+            },
+            "id": 10,
+            "length": 2822400,
+            "mute": false,
+            "name": "",
+            "start": 0
+          }
+        ],
+        "colour": 8,
+        "devices": [
+          {
+            "enabled": true,
+            "id": 9,
+            "kind": {
+              "native": {
+                "device_type": "beatlayer.snapshot"
+              }
+            },
+            "media": [
+              "0303030303030303030303030303030303030303030303030303030303030303"
+            ],
+            "name": "Slice",
+            "params": [
+              [
+                0,
+                2.0
+              ],
+              [
+                1,
+                10.0
+              ],
+              [
+                2,
+                60.0
+              ],
+              [
+                24,
+                2.0
+              ],
+              [
+                27,
+                2.0
+              ]
+            ],
+            "role": "instrument"
+          }
+        ],
+        "id": 8,
+        "kind": "midi",
+        "mixer": {
+          "arm": false,
+          "mute": false,
+          "pan": 0.0,
+          "solo": false,
+          "volume": 1.0
+        },
+        "name": "Slice"
+      }
+    ]
+  },
+  "format": "beatlayer-set",
+  "ids": 11,
+  "launch": {
+    "enabled": true,
+    "quantization": "1_bar"
+  },
+  "media": [
+    {
+      "hash": "0303030303030303030303030303030303030303030303030303030303030303",
+      "path": "Samples/Imported/Ramp.wav",
+      "size": 96044
+    }
+  ],
+  "revision": 7,
+  "saved_by": "Beatlayer 0.0.0",
+  "schema": 11
+}

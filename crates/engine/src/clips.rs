@@ -748,6 +748,9 @@ pub(crate) struct PlacedClip {
     /// only an Arrangement clip has it, and only when something does.
     sound: Option<Box<ClipSound>>,
     gain: f64,
+    /// How much a launch's velocity changes the gain of a Session slot clip,
+    /// from 0 to 1 (the remote mapping spec, R16); 0 for an Arrangement clip.
+    velocity_amount: f64,
     fade_in: u64,
     fade_out: u64,
     /// The fades' shape and reach past the clip's own edges (the audio clips
@@ -1209,6 +1212,7 @@ impl ClipList {
                     carry,
                     sound: sound.map(Box::new),
                     gain: audio.gain,
+                    velocity_amount: 0.0,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
                     playing: Playing::of(clip.id.0.get(), audio),
@@ -1293,6 +1297,7 @@ impl ClipList {
                     carry,
                     sound: None,
                     gain: audio.gain,
+                    velocity_amount: clip.launch.velocity_amount,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
                     playing: Playing::of(clip.id.0.get(), audio),
@@ -1647,6 +1652,13 @@ fn render(
     }
 }
 
+/// The gain a launch of `velocity` gives a clip whose velocity amount is
+/// `amount`: full at 127, and silent at 1 with the amount at 1 (the remote
+/// mapping spec, R16).
+fn velocity_gain(amount: f64, velocity: u8) -> f64 {
+    1.0 - amount * f64::from(127 - velocity.clamp(1, 127)) / 126.0
+}
+
 /// A clip's level with the gain its groove's Velocity gives it (the grooves
 /// spec, R13): `level` is the clip's own, `elapsed` frames after the song
 /// frame `origin` where its contents began.
@@ -1656,7 +1668,7 @@ fn with_groove<'a>(
     rate: f64,
     origin: i64,
     offset: f64,
-    level: fn(&PlacedClip, u64) -> f64,
+    level: impl Fn(&PlacedClip, u64) -> f64 + 'a,
 ) -> impl Fn(&PlacedClip, u64) -> f64 + 'a {
     // A clip `offset` ticks into its own time has played that much longer.
     let ticks = tempo.seconds_to_ticks_exact(origin as f64 / rate) - offset;
@@ -1794,6 +1806,10 @@ impl Node for ClipPlayer {
                 Transition::Cut
             };
             let clip = &list.clips[at];
+            // Spec: remote-mapping R16. The launch's velocity holds as a gain
+            // until the clip stops or launches again.
+            let gain = velocity_gain(clip.velocity_amount, entry.velocity);
+            let launch_level = move |clip: &PlacedClip, elapsed| clip.launch_level(elapsed) * gain;
             if let (Some(source), Some(warped)) = (bank[at].as_mut(), clip.geometry.warped.as_ref())
             {
                 // Spec: warping R15. A launched warped clip follows the
@@ -1817,7 +1833,7 @@ impl Node for ClipPlayer {
                     ((from - launch) as u64, from),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
-                    with_groove(warped, tempo, rate, launch, ticks, PlacedClip::launch_level),
+                    with_groove(warped, tempo, rate, launch, ticks, launch_level),
                     stretchers,
                     clip.lane as usize,
                 );
@@ -1836,7 +1852,7 @@ impl Node for ClipPlayer {
                         (elapsed, from),
                         &mut self.warp,
                         histories[at].as_deref_mut(),
-                        PlacedClip::launch_level,
+                        launch_level,
                         stretchers,
                         clip.lane as usize,
                     );
@@ -1849,7 +1865,7 @@ impl Node for ClipPlayer {
                         elapsed,
                         &mut self.scratch,
                         self.max_frames,
-                        PlacedClip::launch_level,
+                        launch_level,
                         first,
                     );
                 }
@@ -2191,6 +2207,7 @@ mod tests {
             carry: false,
             sound: None,
             gain: 0.5,
+            velocity_amount: 0.0,
             fade_in: 10,
             fade_out: 20,
             shape: FadeShape::straight(),

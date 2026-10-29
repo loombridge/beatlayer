@@ -27671,6 +27671,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
+| `takeover_mode` | [`TakeoverMode`](#takeovermode) | yes | Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it (the remote mapping spec, R28). |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `retune_on_tuning_load` | boolean | yes | Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15). |
 | `snap_automation_to_grid` | boolean | yes | Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31). |
@@ -27757,6 +27758,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Record, Warp & Launch: Start Transport With Tap Tempo, as `settings.set_start_transport_with_tap_tempo` sets it (the control bar transport spec, R20).",
       "type": "boolean"
     },
+    "takeover_mode": {
+      "$ref": "#/$defs/TakeoverMode",
+      "description": "Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it (the remote mapping spec, R28)."
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -27780,6 +27785,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "theme_colors",
     "audio",
     "tempo_midi",
+    "takeover_mode",
     "create_fades_on_clip_edges",
     "retune_on_tuning_load",
     "snap_automation_to_grid",
@@ -29603,6 +29609,43 @@ Type: integer, at least 1.
   "format": "uint64",
   "minimum": 1,
   "type": "integer"
+}
+```
+
+</details>
+
+### `TakeoverMode`
+
+What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.
+
+One of:
+
+- `"none"`: The control jumps to the controller's value at once.
+- `"pick_up"`: The control waits until the controller reaches its value, then follows.
+- `"value_scaling"`: The control and the controller converge as the controller moves.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "The control jumps to the controller's value at once.",
+      "type": "string"
+    },
+    {
+      "const": "pick_up",
+      "description": "The control waits until the controller reaches its value, then follows.",
+      "type": "string"
+    },
+    {
+      "const": "value_scaling",
+      "description": "The control and the controller converge as the controller moves.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

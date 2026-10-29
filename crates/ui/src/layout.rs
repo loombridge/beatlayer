@@ -1381,6 +1381,13 @@ pub mod header_columns {
     }
 }
 
+/// How tall the time-signature lane is (L-ARR-004).
+pub const SIGNATURE_LANE: f32 = 11.0;
+
+/// How tall the bar numbers are, above the time-signature lane inside the
+/// beat-time ruler.
+const BAR_NUMBERS: f32 = 12.0;
+
 /// The Arrangement View's parts inside the main view, from layout.md's
 /// L-ARR rows measured in Live 12.4.3 at 1600 × 1000 points. Rows from the
 /// top keep their distance from the main view's top, rows from the bottom
@@ -1396,6 +1403,10 @@ pub struct ArrangementLayout {
     pub beat_ruler: Rect,
     /// The scrub area, with the locators (L-ARR-003).
     pub scrub: Rect,
+    /// The time-signature marker lane, inside the beat-time ruler between
+    /// its bar numbers and the loop brace, while the set has signature
+    /// changes (L-ARR-004).
+    pub signature_lane: Option<Rect>,
     /// Set Locator (L-ARR-010, first row).
     pub set_locator: Rect,
     /// Automation Mode (L-ARR-010, first row).
@@ -1476,6 +1487,7 @@ impl ArrangementLayout {
                 pos2(view.left(), top(99.0) + shift),
                 pos2(lanes_right, top(115.0) + shift),
             ),
+            signature_lane: None,
             set_locator: row(1299.0, 1335.0, 82.0),
             automation_mode: row(1340.0, 1356.0, 82.0),
             lock_envelopes: row(1360.0, 1376.0, 82.0),
@@ -1557,6 +1569,23 @@ impl ArrangementLayout {
         self
     }
 
+    /// The same layout with the time-signature lane showing (L-ARR-004): the
+    /// beat-time ruler grows by the lane's height, and the scrub area and the
+    /// track lanes move down by it.
+    #[must_use]
+    pub fn with_signature_lane(mut self) -> Self {
+        let top = self.beat_ruler.top() + BAR_NUMBERS;
+        self.signature_lane = Some(Rect::from_min_max(
+            pos2(self.beat_ruler.left(), top),
+            pos2(self.beat_ruler.right(), top + SIGNATURE_LANE),
+        ));
+        self.beat_ruler.max.y += SIGNATURE_LANE;
+        self.scrub = self.scrub.translate(vec2(0.0, SIGNATURE_LANE));
+        self.lanes.min.y += SIGNATURE_LANE;
+        self.headers.min.y += SIGNATURE_LANE;
+        self
+    }
+
     /// The same view with its mixer showing (L-ARR-018; the mixer view
     /// spec, R2): the mixer, as tall as its title row and the `sections`
     /// that show, takes the main view's bottom, and the rest of the view
@@ -1607,6 +1636,9 @@ impl ArrangementLayout {
             row("L-ARR-017", "Optimize Height", self.optimize_height),
             row("L-ARR-017", "Optimize Width", self.optimize_width),
         ]);
+        if let Some(lane) = self.signature_lane {
+            rows.push(row("L-ARR-004", "Time Signature Lane", lane));
+        }
         if let Some(mixer) = self.mixer {
             rows.push(row("L-ARR-018", "Arrangement Mixer", mixer));
         }

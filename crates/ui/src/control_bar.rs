@@ -362,7 +362,21 @@ impl TransportFields {
                 transport::group_text(shell, field.group)
             );
         }
+        // Spec: time-editing R33. The signature fields show an automation
+        // LED while the set has signature changes.
+        let automated = matches!(field.group, Group::Numerator | Group::Denominator)
+            && shell
+                .editor()
+                .document()
+                .settings()
+                .time_signatures
+                .has_changes();
+        if automated {
+            description
+                .push_str(" The set has time-signature changes; this sets the one in force.");
+        }
         Some(Look {
+            automated,
             entry: typed.is_some(),
             text: Some(typed.unwrap_or_else(|| shown.clone())),
             value: Some(shown),

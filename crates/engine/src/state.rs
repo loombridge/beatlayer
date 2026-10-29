@@ -107,6 +107,9 @@ pub struct PlayedParam {
     pub played: f64,
 }
 
+/// How many latency changes one block can report; the rest wait for the next.
+pub(crate) const LATENCY_CHANGES: usize = 64;
+
 /// Counters the audio thread keeps, since the engine started.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EngineCounters {
@@ -217,6 +220,12 @@ pub struct EngineState {
     /// The parameters under modulation while the song plays, as the last
     /// block played them (WP-5.9); the rest play their base.
     pub modulated: Vec<PlayedParam>,
+    /// The devices whose node reports a latency other than the one the
+    /// program compensates for (WP-2.11): what the shell hands to
+    /// [`Engine::set_device_latency`](crate::Engine::set_device_latency), so
+    /// a native device whose latency follows a parameter, such as a
+    /// look-ahead, is compensated at its new latency.
+    pub latency_changes: Vec<(DeviceId, u32)>,
     /// The rack chains that were processing in the last block (WP-5.3, the
     /// racks spec, R37): in an instrument or MIDI effect rack each chain a
     /// held note reached, in an audio effect rack each chain whose chain
@@ -263,6 +272,7 @@ impl EngineState {
             chain_meters: Vec::with_capacity(chain_meters),
             chain_meters_truncated: false,
             modulated: Vec::with_capacity(modulated),
+            latency_changes: Vec::with_capacity(LATENCY_CHANGES),
             processing: Vec::with_capacity(processing),
             counters: EngineCounters::default(),
         }
@@ -323,6 +333,8 @@ impl Clone for EngineState {
         session.extend_from_slice(&self.session);
         let mut modulated = Vec::with_capacity(self.modulated.capacity());
         modulated.extend_from_slice(&self.modulated);
+        let mut latency_changes = Vec::with_capacity(self.latency_changes.capacity());
+        latency_changes.extend_from_slice(&self.latency_changes);
         let mut processing = Vec::with_capacity(self.processing.capacity());
         processing.extend_from_slice(&self.processing);
         let mut session_over = Vec::with_capacity(self.session_over.capacity());
@@ -353,6 +365,7 @@ impl Clone for EngineState {
             chain_meters,
             chain_meters_truncated: self.chain_meters_truncated,
             modulated,
+            latency_changes,
             processing,
             counters: self.counters,
         }

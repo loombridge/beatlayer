@@ -1730,3 +1730,50 @@ fn malformed_messages_get_json_rpc_errors_and_notifications_get_nothing() {
         .unwrap();
     assert_eq!(reply["error"]["code"], -32_602);
 }
+
+#[test]
+fn a_session_view_edit_is_the_agent_s_undo_step_under_its_label() {
+    // Spec: agent-permissions R6. The Session View opens a transaction of its
+    // own, which must not give the step its own name.
+    let mut client = headless(false);
+    let ran = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "session.insert_scene", "args": {} }],
+                "label": "Add verse scene" }),
+    );
+    assert_eq!(ran["undo_step"], "test-agent: Add verse scene");
+    assert_eq!(
+        client.transport().shell.editor().undo_history().next(),
+        Some("test-agent: Add verse scene")
+    );
+}
+
+#[test]
+fn a_scheduled_recording_start_is_refused_because_nothing_would_set_the_files_up() {
+    // Spec: agent-permissions R10. Only `Shell::send_transport` gives the
+    // engine what a recording writes, and a fired command doesn't pass it.
+    let mut client = headless(true);
+    let message = call_err(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "2.1.1", "command": "transport.set_recording",
+                "args": { "recording": true } }),
+    );
+    assert!(message.contains("can't start a recording"), "{message}");
+    assert!(
+        client
+            .transport()
+            .agent
+            .take_engine_messages()
+            .iter()
+            .all(|message| !matches!(message, EngineMessage::Schedule(_)))
+    );
+    // Stopping one is still fine.
+    call(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "2.1.1", "command": "transport.set_recording",
+                "args": { "recording": false } }),
+    );
+}

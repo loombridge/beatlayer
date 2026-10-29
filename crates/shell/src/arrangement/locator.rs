@@ -7,17 +7,23 @@
 //! one transaction. The jumps change nothing in the set, and they need the
 //! audio engine, so they are refused without one.
 //!
+//! The time-signature lane's commands (WP-6.61) are here too: selecting,
+//! inserting, typing and moving a marker, which the view keeps selected by
+//! its position.
+//!
 //! The behaviour is in the time editing spec.
 
-use bl_core::time::Ticks;
+use bl_core::time::{Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::{
     Command, Document, Editor, LaunchQuantization, LaunchSettings, Locator, LocatorId, SongStart,
 };
 use bl_shell_spec::arrangement::ArrangementState;
+use bl_shell_spec::editing::Position;
 use bl_shell_spec::editing::SelectMode;
 use bl_shell_spec::locator::{
-    self as ids, AddLocatorArgs, DeleteLocatorArgs, JumpArgs, LocatorResult, LoopToNextArgs,
-    MoveLocatorArgs, RenameLocatorArgs, SelectLocatorArgs, SetInfoTextArgs, SetStartTimeArgs,
+    self as ids, AddLocatorArgs, DeleteLocatorArgs, EditSignatureArgs, InsertSignatureArgs,
+    JumpArgs, LocatorResult, LoopToNextArgs, MoveLocatorArgs, MoveSignatureArgs, RenameLocatorArgs,
+    SelectLocatorArgs, SelectSignatureArgs, SetInfoTextArgs, SetStartTimeArgs, SignatureResult,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -39,6 +45,9 @@ pub fn label(id: &str) -> &'static str {
         ids::SET_INFO_TEXT => "Edit Info Text",
         ids::LOOP_TO_NEXT => "Loop to Next Locator",
         ids::SET_START_TIME => "Set Song Start Time",
+        ids::INSERT_SIGNATURE => "Insert Time Signature Change",
+        ids::EDIT_SIGNATURE => "Edit Time Signature",
+        ids::MOVE_SIGNATURE => "Move Time Signature Change",
         _ => "Select",
     }
 }
@@ -375,7 +384,116 @@ pub fn run(
             })?;
             Ok(to_value(&result(view, true)))
         }
+        ids::SELECT_SIGNATURE => {
+            let SelectSignatureArgs { at } = parse(args)?;
+            let doc = editor.document();
+            let at = at
+                .map(|at| marker_at(&doc.settings().time_signatures, at))
+                .transpose()?;
+            view.select_signature(at);
+            Ok(to_value(&view.state(doc)))
+        }
+        ids::INSERT_SIGNATURE => {
+            let InsertSignatureArgs { at } = parse(args)?;
+            let signatures = &editor.document().settings().time_signatures;
+            let at = match at {
+                Some(at) => at.resolve(signatures).map_err(invalid)?,
+                None => view.insert_marker(),
+            };
+            if at.is_negative() {
+                return Err(invalid("`at` must be 1.1.1 or later"));
+            }
+            // Where a marker is already, it is the one selected.
+            let new = !signatures.changes().any(|change| change.at == at);
+            let command = Command::SetTimeSignatureChange {
+                at,
+                signature: signatures.signature_at(at),
+            };
+            if new {
+                apply(editor, label(id), |editor| {
+                    editor.apply(command.clone())?;
+                    Ok(())
+                })?;
+            }
+            view.select_signature(Some(at));
+            Ok(to_value(&signature_result(view, new)))
+        }
+        ids::EDIT_SIGNATURE => {
+            let EditSignatureArgs { at, signature } = parse(args)?;
+            let signatures = &editor.document().settings().time_signatures;
+            let at = chosen_marker(signatures, view, at)?;
+            // With no signature, the person types it in place; the shell
+            // asks the UI to start (the time editing spec, R31).
+            let signature: TimeSignature = signature
+                .ok_or_else(|| invalid("`signature` says the new signature"))?
+                .parse()
+                .map_err(|error: bl_core::time::TimeError| invalid(error.to_string()))?;
+            if signatures.signature_at(at) == signature {
+                return Ok(to_value(&signature_result(view, false)));
+            }
+            let command = Command::SetTimeSignatureChange { at, signature };
+            apply(editor, label(id), |editor| {
+                editor.apply(command.clone())?;
+                Ok(())
+            })?;
+            Ok(to_value(&signature_result(view, true)))
+        }
+        ids::MOVE_SIGNATURE => {
+            let MoveSignatureArgs { at, to } = parse(args)?;
+            let signatures = &editor.document().settings().time_signatures;
+            let at = chosen_marker(signatures, view, at)?;
+            let to = to.resolve(signatures).map_err(invalid)?;
+            if to == at {
+                return Ok(to_value(&signature_result(view, false)));
+            }
+            let command = Command::MoveTimeSignatureChange { at, to };
+            apply(editor, label(id), |editor| {
+                editor.apply(command.clone())?;
+                Ok(())
+            })?;
+            // A marker that was selected stays selected where it lands.
+            if view.selected_signature() == Some(at) {
+                view.select_signature(Some(to));
+            }
+            Ok(to_value(&signature_result(view, true)))
+        }
         other => Err(invalid(format!("`{other}` isn't a locator command"))),
+    }
+}
+
+/// The position of the marker `at` names, which must be a marker.
+fn marker_at(signatures: &TimeSignatureMap, at: Position) -> Result<Ticks, EditFailure> {
+    let at = at.resolve(signatures).map_err(invalid)?;
+    if signatures.changes().any(|change| change.at == at) {
+        Ok(at)
+    } else {
+        Err(invalid(format!(
+            "no time-signature change is at tick {}",
+            at.get()
+        )))
+    }
+}
+
+/// The marker a command acts on: the one `at` names, or the selected one.
+fn chosen_marker(
+    signatures: &TimeSignatureMap,
+    view: &ArrangementView,
+    at: Option<Position>,
+) -> Result<Ticks, EditFailure> {
+    match at {
+        Some(at) => marker_at(signatures, at),
+        None => view
+            .selected_signature()
+            .ok_or_else(|| unavailable("no time-signature change is selected")),
+    }
+}
+
+/// What a time-signature command reports: the marker selected afterwards,
+/// and whether it was an undo step.
+fn signature_result(view: &ArrangementView, undo_step: bool) -> SignatureResult {
+    SignatureResult {
+        selected: view.selected_signature(),
+        undo_step,
     }
 }
 

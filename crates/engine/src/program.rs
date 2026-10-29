@@ -7,7 +7,7 @@ use std::collections::VecDeque;
 use std::panic::{self, AssertUnwindSafe};
 
 use bl_core::time::{Bpm, SampleRate, TempoMap, TimeSignature, TimeSignatureMap};
-use bl_model::{ChainId, Channel, LaunchMode, ParamId, Scale, SceneId, Tap, TrackId};
+use bl_model::{ChainId, Channel, DeviceId, LaunchMode, ParamId, Scale, SceneId, Tap, TrackId};
 
 use crate::disjoint::Shared;
 use crate::drum::DrumNotes;
@@ -1016,6 +1016,28 @@ impl EngineProgram {
                     });
                 }
             });
+        }
+    }
+
+    /// Adds to `out`, up to its capacity, each device whose node now reports
+    /// another latency than the program compensates for (WP-2.11). An
+    /// external device's latency is the interface's, and a switched-off one
+    /// adds none. Real-time safe: `out` was made with room for them.
+    pub(crate) fn latency_changes(&self, out: &mut Vec<(DeviceId, u32)>) {
+        for slot in self.slots.iter() {
+            let (NodeKey::Device(device), Some(Instance::Device(node))) = (slot.key, &slot.node)
+            else {
+                continue;
+            };
+            let frames = node.latency();
+            if frames != slot.latency
+                && !slot.bypass
+                && slot.external.is_none()
+                && slot.external_to.is_none()
+                && out.len() < out.capacity()
+            {
+                out.push((device, frames));
+            }
         }
     }
 

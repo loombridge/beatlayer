@@ -77,6 +77,7 @@ mod session_menus;
 mod session_view;
 mod set_exchange;
 mod settings_window;
+mod signature_lane;
 mod slice_to_midi;
 mod stems_dialog;
 mod take_lanes;

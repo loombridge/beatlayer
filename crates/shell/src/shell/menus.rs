@@ -337,6 +337,12 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: time-editing R30. Create ▸ Add Time Signature Change reads
+            // Insert Time Signature Change with the Arrangement focused.
+            locator_ids::INSERT_SIGNATURE => self
+                .active_contexts()
+                .contains(&Context::Arrangement)
+                .then(|| "Insert Time Signature Change".to_owned()),
             // Spec: time-editing R17. Create ▸ Insert Scene reads Insert
             // Silence with the Arrangement focused.
             edit_ids::INSERT_SILENCE => Some("Insert Silence".to_owned()),
@@ -635,6 +641,7 @@ impl Shell {
             // while there are any.
             "clip.rename" => {
                 return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_signature().is_none()
                     && self.arrangement.selected_take_lanes().is_empty();
             }
             // Spec: comping R28, R29. Rename on a take lane's header types the
@@ -964,6 +971,7 @@ impl Shell {
                 // selected locators while there are any.
                 && !(id == edit_ids::DELETE
                     && (!self.arrangement.selected_locators().is_empty()
+                        || self.arrangement.selected_signature().is_some()
                         // Spec: audio-clips R29. Delete deletes the selected
                         // fade handle's fade instead.
                         || self.arrangement.selected_fade().is_some()))
@@ -1052,6 +1060,11 @@ impl Shell {
                 locator_ids::DELETE => {
                     args.get("locators").is_some()
                         || !self.arrangement.selected_locators().is_empty()
+                }
+                // Spec: time-editing R31, R32. Typing a marker's signature
+                // and moving it act on the selected marker.
+                locator_ids::EDIT_SIGNATURE | locator_ids::MOVE_SIGNATURE => {
+                    args.get("at").is_some() || self.arrangement.selected_signature().is_some()
                 }
                 // Spec: time-editing R13. The jumps need the engine.
                 locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {

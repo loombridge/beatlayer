@@ -134,6 +134,14 @@ pub trait SetStore {
         None
     }
 
+    /// What the last `open` has to tell the person for the Status Bar, once:
+    /// a set saved before the sampler's region, whose One-Shot and Slice
+    /// Simplers had their Start or Length driven (the sampler spec, R24).
+    /// Taking it clears it.
+    fn open_notice(&mut self) -> Option<String> {
+        None
+    }
+
     /// The open set's media files with their paths on disk, for the media
     /// store after the set is opened (WP-1.10).
     fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {
@@ -350,6 +358,8 @@ const COPY_UNSUPPORTED: &str = "this set store can't write a copy of a set";
 #[derive(Debug, Default)]
 pub struct ProjectFiles {
     set: Option<SetFile>,
+    /// What opening the set has to tell the person (`SetStore::open_notice`).
+    notice: Option<String>,
     media: Media,
     /// Files added since the set was opened (WP-1.10), by their paths on
     /// disk, for the next save's media table.
@@ -406,6 +416,19 @@ impl SetStore for ProjectFiles {
         if set.info().is_some_and(SetInfo::before_relative_modulation) {
             bl_devices::relative_clip_envelopes(&mut project.document);
         }
+        // Spec: sampler R24. A set from before the region says which Simplers
+        // the flags can no longer follow.
+        self.notice = set.info().filter(|info| info.schema < 12).and_then(|_| {
+            let named = bl_project::migrate::simplers_whose_start_was_driven(&project.document);
+            (!named.is_empty()).then(|| {
+                format!(
+                    "Simpler {}: automation, envelopes, macros or modulation of Start or \
+                         Length no longer move the played region; One-Shot and Slice play \
+                         between the Start and End flags",
+                    named.join(", ")
+                )
+            })
+        });
         let editor = project.editor();
         let opened = set.path().to_owned();
         self.set = Some(set);
@@ -653,6 +676,10 @@ impl SetStore for ProjectFiles {
 
     fn set_temporary_folder(&mut self, folder: PathBuf) {
         self.temporary = Some(folder);
+    }
+
+    fn open_notice(&mut self) -> Option<String> {
+        self.notice.take()
     }
 
     fn media_files(&self) -> Vec<(ContentHash, PathBuf, u64)> {

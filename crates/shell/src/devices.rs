@@ -2554,9 +2554,9 @@ impl DeviceView {
     }
 
     /// Replaces the Drum Sampler `device` with Simpler in One-Shot
-    /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22): the
-    /// same place, sample and on or off state, and the same Start and
-    /// Length, in one undo step.
+    /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22, R23): the
+    /// same place, sample and on or off state, and its Start and Length as
+    /// Simpler's Start and End flags, in one undo step.
     fn swap_to_snapshot(
         &mut self,
         editor: &mut Editor,
@@ -2585,8 +2585,17 @@ impl DeviceView {
         snapshot.enabled = enabled;
         snapshot.media = media;
         snapshot.params.insert(sampler::MODE, 1.0);
-        snapshot.params.insert(sampler::START, start);
-        snapshot.params.insert(sampler::LENGTH, length);
+        // Drum Sampler's Start and Length are shares of the sample, which
+        // the flags hold as an older set's region does (the sampler spec,
+        // R24): the same frames play, and the next edit of the flags writes
+        // frames. A region of the whole sample is none.
+        let (start_share, end_share) = (start / 100.0, (start + length).min(100.0) / 100.0);
+        if (start_share, end_share) != (0.0, 1.0) && start_share < end_share {
+            snapshot.region = Some(bl_model::SampleRegion::Shares {
+                start_share,
+                end_share,
+            });
+        }
         // A chain holds one instrument, so the old one goes first.
         editor
             .transact("Swap to Simpler", |editor| {

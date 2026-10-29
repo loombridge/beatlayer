@@ -30,13 +30,16 @@ pub const SAMPLER: &str = "beatlayer.snapshot";
 /// Classic (polyphonic, looping), One-Shot (monophonic, straight through)
 /// or Slice (monophonic, one note per slice).
 pub const MODE: ParamId = ParamId(0);
-/// Where the played region starts, as a share of the sample.
+/// S Start: where the played part starts, as a share of the region between
+/// the Start and End flags (Classic only; the sampler spec, R3).
 pub const START: ParamId = ParamId(1);
-/// How long the played region is, as a share of the sample.
+/// S Length: how long the played part is, as a share of the region (Classic
+/// only).
 pub const LENGTH: ParamId = ParamId(2);
-/// Whether the played region's end loops into its start.
+/// Whether the played part's end loops into its start.
 pub const LOOP: ParamId = ParamId(3);
-/// How much of the played region loops, counted back from its end.
+/// S Loop Length: how much of the played part loops, counted back from its
+/// end (Classic only).
 pub const LOOP_LENGTH: ParamId = ParamId(4);
 /// The constant-power crossfade at the loop's wrap, as a share of the
 /// loop.
@@ -248,26 +251,31 @@ pub fn sampler_type() -> DeviceType {
     };
     let params = vec![
         ParamDescriptor::choice(MODE, "Mode", &MODES, 0).describe(
-            "Classic plays the region polyphonically with the loop and the envelope; \
-                       One-Shot plays it monophonically straight through, whatever the note \
-                       does; Slice plays one slice per note up the keyboard.",
+            "Classic plays part of the region polyphonically with the loop and the \
+                       envelope; One-Shot plays the region monophonically from flag to flag, \
+                       whatever the note does; Slice plays one slice per note up the keyboard.",
         ),
-        ParamDescriptor::continuous(START, "Start", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("Where in the sample the played region starts, as a share of it."),
-        ParamDescriptor::continuous(LENGTH, "Length", (0.0, 100.0), 100.0, ParamUnit::Percent)
-            .describe("How long the played region is, as a share of the sample from Start."),
+        ParamDescriptor::continuous(START, "S Start", (0.0, 100.0), 0.0, ParamUnit::Percent)
+            .describe(
+                "Classic only: where in the region between the Start and End flags the played \
+                 part starts, as a share of the region.",
+            ),
+        ParamDescriptor::continuous(LENGTH, "S Length", (0.0, 100.0), 100.0, ParamUnit::Percent)
+            .describe(
+                "Classic only: how long the played part is, as a share of the region from S Start.",
+            ),
         ParamDescriptor::toggle(LOOP, "Loop", false)
-            .describe("Loops the region's end into its start for as long as a voice sounds."),
+            .describe("Loops the played part's end into its start for as long as a voice sounds."),
         ParamDescriptor::continuous(
             LOOP_LENGTH,
-            "Loop Length",
+            "S Loop Length",
             (0.0, 100.0),
             100.0,
             ParamUnit::Percent,
         )
         .describe(
-            "How much of the played region the loop repeats, counted back from the \
-                   region's end; the whole region at 100 %.",
+            "Classic only: how much of the played part the loop repeats, counted back from \
+                   the part's end; the whole part at 100 %.",
         ),
         ParamDescriptor::continuous(FADE, "Fade", (0.0, 100.0), 0.0, ParamUnit::Percent).describe(
             "Crossfades the loop's end into its start over this share of the loop, so \
@@ -752,9 +760,14 @@ impl Sampler {
             .and_then(|data| data.downcast_ref::<SlotSample>())
     }
 
-    /// The sample, if the media library gave one.
-    fn sample(&self) -> Option<&SampleData> {
-        self.slot_sample().map(|slot| slot.sample.as_ref())
+    /// The Start and End flags in frames of the sample, the whole of it
+    /// without a slot sample (R22).
+    fn region(&self) -> (u64, u64) {
+        self.slot_sample().map_or((0, 0), |slot| {
+            let frames = slot.sample.frames() as u64;
+            let start = slot.region.0.min(frames);
+            (start, slot.region.1.min(frames).max(start))
+        })
     }
 
     /// The settings one stretch of a block plays by.
@@ -771,12 +784,21 @@ impl Sampler {
             2 => Mode::Slice,
             _ => Mode::Classic,
         };
-        let sample_frames = self.sample().map_or(0, |sample| sample.frames() as u64);
-        let start = params.value(at(START)) / 100.0;
-        let length = params.value(at(LENGTH)) / 100.0;
-        let region_start = (start * sample_frames as f64) as u64;
-        let region_end = ((start + length).min(1.0) * sample_frames as f64) as u64;
-        let region_end = region_end.min(sample_frames);
+        // Spec: sampler R3, R22. The Start and End flags bound every mode;
+        // Classic plays S Start's share of the region for S Length's, the
+        // other modes the region from flag to flag.
+        let (flag_start, flag_end) = self.region();
+        let (start, length) = if mode == Mode::Classic {
+            (
+                params.value(at(START)) / 100.0,
+                params.value(at(LENGTH)) / 100.0,
+            )
+        } else {
+            (0.0, 1.0)
+        };
+        let span = (flag_end - flag_start) as f64;
+        let region_start = flag_start + (start * span) as u64;
+        let region_end = (flag_start + ((start + length).min(1.0) * span) as u64).min(flag_end);
         let loop_share = params.value(at(LOOP_LENGTH)) / 100.0;
         let loop_start =
             region_end - ((loop_share * (region_end.saturating_sub(region_start)) as f64) as u64);
@@ -1603,24 +1625,24 @@ impl Settings {
 /// (R13, R14): the first is the region's start and the last its end, so
 /// `n` slices have `n + 1`. This is what the display draws (WP-5.15, R54);
 /// the device cuts the same way. `value` reads a parameter by ID, and
+/// `region` is the Start and End flags in frames of `sample` (R22), and
 /// `sixteenth` is the frames in a sixteenth note at the set's tempo, at the
 /// sample's rate. The boundaries are empty for Manual, which places none.
 #[must_use]
 pub fn slice_boundaries(
     sample: &SampleData,
+    region: (u64, u64),
     value: &dyn Fn(ParamId) -> f64,
     sixteenth: f64,
     manual: &[u64],
 ) -> Vec<u64> {
-    let frames = sample.frames() as f64;
-    let (start, length) = (value(START) / 100.0, value(LENGTH) / 100.0);
     let cut = Cut {
         by: SliceBy::of(value(SLICE_BY)),
         sensitivity: value(SLICE_SENSITIVITY) / 100.0,
         division_frames: value(SLICE_DIVISION).max(1.0) * sixteenth,
         regions: value(SLICE_REGIONS).max(1.0) as usize,
-        region_start: (start * frames) as u64,
-        region_end: (((start + length).min(1.0) * frames) as u64).min(sample.frames() as u64),
+        region_start: region.0,
+        region_end: region.1.min(sample.frames() as u64),
         rate: f64::from(sample.sample_rate()),
     };
     let mut slices = Slices::new();

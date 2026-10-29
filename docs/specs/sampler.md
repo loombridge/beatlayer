@@ -1,6 +1,6 @@
 # The sampler
 
-- **Status:** partial (filter circuit models/morph and velocity wait; R3, R10 and R13 reworded and R22 to R24 drafted for WP-7.33)
+- **Status:** partial (filter circuit models/morph and velocity wait; WP-7.33 built R3, R10, R13's flags, R22 and R24, and R23 waits for WP-7.33b)
 - **Work packages:** WP-2.16 (parts 1 and 2: playback, envelopes and voices; slicing, the filter and the LFO), WP-5.15 (the sample display, IMP-28), WP-5.15b (the warp controls, manual slicing, and the pitch envelope); WP-6.9 (tuning systems: R21); WP-7.33 (the region's Start and End flags with S Start, S Length and S Loop Length inside them, Slice mode's Playback chooser, and opening older sets: R3, R10, R13 reworded, R22 to R24)
 - **Parity-matrix row:** Devices: Simpler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.11 "Simpler" (31.11.1 "Playback Modes", including 31.11.1.3 "Slicing Playback Mode"; 31.11.2 "Warp Controls"; 31.11.3 "Filter"; 31.11.4 "Envelopes"; 31.11.5 "LFO"; 31.11.6 "Global Parameters"), read October 2026; for R3, R10, R13 and R22 to R24, the online edition read 23 October 2026 (31.11 in full, and chapter 36, section 36.8)
@@ -70,17 +70,17 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter, LFO
 |---|---|---|
 | R1 | `crates/devices/tests/sampler.rs`, `the_sampler_is_described_and_laid_out` | unit |
 | R2 | `crates/devices/tests/sampler.rs`, `a_note_plays_the_sample_at_its_own_pitch_and_an_octave_up_plays_it_twice_as_fast`, `a_sampler_without_a_sample_is_silent` | unit, real-time trap |
-| R3 | `crates/devices/tests/sampler.rs`, `the_region_plays_from_its_start_for_its_length` | unit, real-time trap |
+| R3 | `crates/devices/tests/sampler.rs`, `the_region_plays_from_its_start_for_its_length`, `classic_plays_s_start_and_s_length_inside_the_flags_and_loops_the_end_of_that_part`, `the_sampler_is_described_and_laid_out` (the three parameters' names) | unit, real-time trap |
 | R4 | `crates/devices/tests/sampler.rs`, `the_loop_crossfades_without_a_click` | unit, real-time trap |
 | R5 | `crates/devices/tests/sampler.rs`, `the_envelope_stages_take_their_times_within_five_percent` | unit, real-time trap |
 | R6 | `crates/devices/tests/sampler.rs`, `velocity_scales_the_level_and_pan_places_the_voice` | unit, real-time trap |
 | R7 | `crates/devices/tests/rules.rs` over the shipped types; `crates/devices/tests/sampler.rs`, `the_output_level_follows_volume_and_gain` | real-time trap |
 | R8 | `crates/devices/tests/sampler.rs`, `a_stolen_voice_fades_out_without_a_click` | unit, real-time trap |
 | R9 | `crates/devices/tests/sampler.rs`, `glide_slides_from_the_last_note_and_portamento_keeps_the_voices` | unit, real-time trap |
-| R10 | `crates/devices/tests/sampler.rs`, `one_shot_ignores_a_note_off_with_trigger_on_and_fades_with_it_off` | unit, real-time trap |
+| R10 | `crates/devices/tests/sampler.rs`, `one_shot_ignores_a_note_off_with_trigger_on_and_fades_with_it_off`, `one_shot_and_slice_play_flag_to_flag_whatever_s_start_says` | unit, real-time trap |
 | R11 | `crates/shell/tests/sampler.rs`, `loading_a_sample_keeps_it_in_the_set_and_undoes_as_one_step`, `a_set_with_a_sampler_reopens_with_its_sample`; `crates/ui/tests/device_view.rs`, `a_dropped_sample_loads_into_the_sampler_under_the_pointer`; `crates/devices/tests/sampler.rs`, `the_engine_plays_the_sample_the_set_names` | unit; UI script |
 | R12 | `crates/devices/tests/sampler.rs`, `the_samplers_blocks_run_under_the_allocation_trap`; every test file in `crates/devices/tests/` runs its blocks as real-time sections | real-time trap |
-| R13 | `crates/devices/tests/sampler.rs`, `slicing_a_drum_loop_by_transient_finds_its_hits_within_a_millisecond` (each key plays its own slice, in order, and a key past the slices is silent) | unit, real-time trap |
+| R13 | `crates/devices/tests/sampler.rs`, `slicing_a_drum_loop_by_transient_finds_its_hits_within_a_millisecond` (each key plays its own slice, in order, and a key past the slices is silent), `one_shot_and_slice_play_flag_to_flag_whatever_s_start_says` (Slice by Region cuts only inside the flags, the last slice ending at End) | unit, real-time trap |
 | R14 | `crates/devices/tests/sampler.rs`, `slicing_a_drum_loop_by_transient_finds_its_hits_within_a_millisecond`, `region_and_beat_slicing_cut_the_region_by_parameter_and_tempo` | unit, real-time trap |
 | R15 | `crates/devices/tests/sampler.rs`, `the_filters_types_match_their_prototypes_within_point_two_db` | unit, real-time trap |
 | R16 | `crates/devices/tests/sampler.rs`, `key_tracking_and_the_filter_envelope_move_the_cutoff` | unit, real-time trap |
@@ -89,9 +89,9 @@ This spec covers the sampler's playback, envelopes, voices, slicing, filter, LFO
 | R19 | `crates/devices/tests/sampler.rs`, `pitch_envelope_moves_pitch_by_amount_rule_by_rule` | unit, real-time trap |
 | R20 | `crates/devices/tests/sampler.rs`, `manual_slices_play_chromatically_from_c3`; `crates/ui/tests/sample_display.rs`, `manual_slice_gestures_add_move_and_delete` | unit, real-time trap; UI script |
 | R21 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_sounding_note_does_not_move_when_the_tuning_changes`, `keys_above_the_range_are_silent` | unit |
-| R22 | to be written in WP-7.33 | unit, real-time trap (each mode plays inside the flags), UI script (a flag drag is one undo step), agent API |
+| R22 | `crates/devices/tests/sampler.rs`, `classic_plays_s_start_and_s_length_inside_the_flags_and_loops_the_end_of_that_part`, `one_shot_and_slice_play_flag_to_flag_whatever_s_start_says`, `the_engine_counts_the_flags_in_the_samples_own_rate`; `crates/shell/tests/sample_edits.rs`, `the_flags_are_one_undo_step_each_and_stay_inside_the_sample`, `an_edit_moves_the_flags_with_the_audio_they_mark_and_reverting_makes_the_region_whole`; `crates/ui/tests/sample_display.rs`, `snapshots_display_draws_its_flags_and_slices`; `crates/cli/tests/agent.rs`, `an_agent_sets_the_warp_controls_and_manual_slices_and_reads_them_back` | unit, real-time trap (each mode plays inside the flags), UI script (a flag drag is one undo step), agent API |
 | R23 | to be written in WP-7.33 | unit, real-time trap (Mono, Poly with Voices and Retrig, Thru with its fades) |
-| R24 | to be written in WP-7.33 | project fixture test (a set of the schema before the region, with a Classic, a One-Shot and a Slice Simpler renders sample-identically before and after), unit |
+| R24 | `crates/project/tests/schemas.rs`, `a_set_saved_before_the_region_opens_its_one_shot_and_slice_simplers_with_one`, `the_simplers_whose_start_was_automated_are_named_once`; `crates/cli/tests/older_sets.rs`, `a_set_saved_before_the_region_plays_the_same_frames_at_either_rate`; `crates/shell/tests/sample_edits.rs`, `opening_a_set_from_before_the_region_names_the_simplers_whose_start_was_driven` | project fixture test (a set of the schema before the region, with a Classic, a One-Shot and a Slice Simpler, plays the same frames before and after, at 44.1 and 48 kHz), unit |
 
 ## Not built yet
 

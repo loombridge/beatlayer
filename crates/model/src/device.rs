@@ -18,7 +18,7 @@ use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
 use crate::mpe_settings::PluginMpe;
 use crate::rack::{Chain, RackKind, RackMacros};
-use crate::sample_edits::SampleEdit;
+use crate::sample_edits::{SampleEdit, SampleRegion};
 use crate::track::{Channel, Input};
 use crate::warp_settings::{WarpMode, WarpSettings};
 
@@ -145,6 +145,12 @@ pub struct Device {
     /// there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sample_edits: Vec<SampleEdit>,
+    /// The part of slot 0's sample a Simpler plays, between its Start and End
+    /// flags (the sampler spec, R22): `None` for the whole sample. Loading
+    /// another sample clears it; an edit that changes the sample's length
+    /// moves it. Left out of the saved set while it is the whole sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<SampleRegion>,
     /// A multisampler's layers and the options of its layer list (WP-5.13,
     /// the multisampler spec, R2). Left out of the saved set for a device
     /// that holds none.
@@ -456,6 +462,7 @@ impl Device {
             configured: None,
             media: Vec::new(),
             sample_edits: Vec::new(),
+            region: None,
             layers: Layers::default(),
             mappings: Vec::new(),
             shape: None,
@@ -476,11 +483,12 @@ impl Device {
 
     /// Puts `media` in sample slot `slot`, growing the list to reach it and
     /// trimming empty slots off its end. Another sample in slot 0 clears the
-    /// edits made to the one before it and any manual slices.
+    /// edits made to the one before it, any manual slices and the region.
     pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
         if slot == 0 && self.media_at(0) != media {
             self.sample_edits.clear();
             self.slices.clear();
+            self.region = None;
         }
         if self.media.len() <= slot {
             if media.is_none() {
@@ -914,5 +922,20 @@ mod tests {
         assert_eq!(&*device.configured(&all), &[ParamId(2)]);
         device.set_configured(Vec::new());
         assert!(device.configured(&all).is_empty());
+    }
+
+    // Spec: sampler R22. A sample that replaces another gets the whole
+    // sample, not the flags of the one before it; the same sample again
+    // keeps them.
+    #[test]
+    fn another_sample_clears_the_region_and_the_same_one_keeps_it() {
+        let mut device = plugin();
+        let (a, b) = (ContentHash([1; 32]), ContentHash([2; 32]));
+        device.set_media(0, Some(a));
+        device.region = Some(SampleRegion::Frames { start: 10, end: 20 });
+        device.set_media(0, Some(a));
+        assert!(device.region.is_some());
+        device.set_media(0, Some(b));
+        assert_eq!(device.region, None);
     }
 }

@@ -188,7 +188,7 @@ pub use rack::{
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
 pub use repr::{SavedSong, saved_schema};
-pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
+pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use spelling::NoteSpelling;

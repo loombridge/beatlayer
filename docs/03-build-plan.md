@@ -808,7 +808,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.26 | todo |  |  |
 | 7.27 | todo |  |  |
 | 7.28 | todo |  |  |
-| 7.29 | todo |  |  |
+| 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |
 | 7.30 | todo |  |  |
 | 7.31 | todo |  |  |
 | 7.32 | todo |  |  |

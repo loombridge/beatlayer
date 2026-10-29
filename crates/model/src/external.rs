@@ -258,7 +258,10 @@ impl CvCalibration {
                 .steps
                 .iter()
                 .all(|s| s.volts.is_finite() && s.error_cents.is_finite())
-            && self.steps.windows(2).all(|pair| pair[0].volts < pair[1].volts)
+            && self
+                .steps
+                .windows(2)
+                .all(|pair| pair[0].volts < pair[1].volts)
     }
 
     /// How far above the fitted line, in octaves, the oscillator sounds at

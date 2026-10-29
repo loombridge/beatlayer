@@ -730,7 +730,14 @@ impl Processor {
                 Message::Program(program) => self.swap(program),
                 Message::Param(event) => self.queue_param(event),
                 Message::Data { key, data } => self.deliver(key, data),
-                Message::Transport(command, When::Now) => self.transport(command),
+                Message::Transport(command, When::Now) => {
+                    // Spec: control-bar-transport R20. A Stop abandons a
+                    // start that waits for its frame.
+                    if command == TransportCommand::Stop {
+                        self.timed.retain(|entry| !starts_playback(entry.command));
+                    }
+                    self.transport(command);
+                }
                 Message::Transport(command, When::Frame(frame)) => {
                     self.queue_transport(command, frame);
                 }
@@ -2274,6 +2281,7 @@ impl Processor {
 
         let state = self.state.input_buffer_mut();
         state.clock = self.clock;
+        state.time_base = self.midi.time_base();
         state.playing = self.playing;
         state.position = self.position;
         state.position_ticks = position_ticks;

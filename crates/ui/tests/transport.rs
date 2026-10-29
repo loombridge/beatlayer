@@ -537,7 +537,6 @@ fn the_section_reaches_assistive_technology() {
     for (name, package) in [
         ("Arrangement Record", "WP-2.13"),
         ("MIDI Arrangement Overdub", "WP-2.14"),
-        ("Tap Tempo", "M2"),
     ] {
         let node = Harness::node(&nodes, name);
         assert!(
@@ -570,5 +569,114 @@ fn the_section_reaches_assistive_technology() {
     assert!(document.settings().punch_in && document.settings().punch_out);
     assert!(!document.settings().arrangement_loop.enabled);
 
+    h.shell.audio_mut().stop();
+}
+
+/// How many times the window ran `transport.tap_tempo` among `events`.
+fn taps(events: &[UiEvent]) -> usize {
+    events
+        .iter()
+        .filter(|event| matches!(event, UiEvent::Invoke(i) if i.id == "transport.tap_tempo"))
+        .count()
+}
+
+#[test]
+fn tap_tempo_taps_on_the_press_and_reaches_assistive_technology() {
+    // Spec: control-bar-transport R18, R23
+    let mut h = Harness::manual(Window::Main);
+    h.settle();
+    h.shell
+        .run(
+            "song.set_tempo",
+            json!({ "tempo": bl_core::time::TempoMap::constant(
+            bl_core::time::Bpm::new(90.0).unwrap()) }),
+        )
+        .unwrap();
+    h.advance(4);
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let tap = Harness::node(&nodes, "Tap Tempo");
+    assert_eq!(tap.role, Role::Button);
+    assert!(!tap.disabled);
+    assert!(tap.description.contains("Tap once a beat"), "{tap:?}");
+    // A press taps; holding and releasing tap nothing more.
+    let at = rect(Element::TapTempo).center();
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.take_events();
+    let pressed = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    h.frame(vec![pressed(true)]);
+    assert_eq!(taps(&h.take_events()), 1, "on the press");
+    h.frame(vec![]);
+    h.frame(vec![pressed(false)]);
+    assert_eq!(taps(&h.take_events()), 0, "not on the release");
+    // About half a second of the engine's clock later (each frame runs two
+    // blocks of the null device's 256 frames), a second press sets 120.
+    h.advance(88);
+    h.frame(vec![pressed(true)]);
+    h.frame(vec![pressed(false)]);
+    assert_eq!(taps(&h.take_events()), 1);
+    let tempo = state(&mut h.shell).tempo;
+    assert!((tempo - 120.0).abs() < 1.0, "{tempo}");
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let tap = Harness::node(&nodes, "Tap Tempo");
+    assert!(tap.description.contains(&format!("{tempo:.2}")), "{tap:?}");
+    // Return presses it with the keyboard focus, and a screen reader's press
+    // taps once.
+    focus(&mut h, Element::TapTempo);
+    h.take_events();
+    press(&mut h, Key::Enter, Modifiers::NONE);
+    assert_eq!(taps(&h.take_events()), 1, "Return");
+    h.accesskit(element_id(Element::TapTempo), Action::Click);
+    assert_eq!(taps(&h.take_events()), 1, "a screen reader's press");
+    h.shell.audio_mut().stop();
+}
+
+#[test]
+fn tap_tempo_is_disabled_with_a_reason_while_the_song_has_tempo_changes() {
+    // Spec: control-bar-transport R21, R23
+    let mut h = Harness::manual(Window::Main);
+    h.settle();
+    let ramp = bl_core::time::TempoMap::from_breakpoints([
+        (Ticks::ZERO, bl_core::time::Bpm::new(100.0).unwrap()),
+        (BAR * 4, bl_core::time::Bpm::new(140.0).unwrap()),
+    ])
+    .unwrap();
+    h.shell
+        .run("song.set_tempo", json!({ "tempo": ramp }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let tap = Harness::node(&nodes, "Tap Tempo");
+    assert!(tap.disabled);
+    assert!(tap.description.contains("tempo changes"), "{tap:?}");
+    h.take_events();
+    h.click(rect(Element::TapTempo).center());
+    assert_eq!(taps(&h.take_events()), 0);
+    h.shell.audio_mut().stop();
+}
+
+#[test]
+fn playback_options_switches_start_transport_with_tap_tempo_and_ticks_while_on() {
+    // Spec: control-bar-transport R20 (M-PLAY-006c)
+    let mut h = Harness::new(Window::Main);
+    h.settle();
+    let menus = menu_bar(MenuPlatform::current());
+    let playback = menus.iter().find(|m| m.title == "Playback").unwrap();
+    let item = playback
+        .walk()
+        .find(|item| item.row == "M-PLAY-006c")
+        .expect("Options lists Start Transport With Tap Tempo");
+    let state_of = |h: &Harness| item_state(item, &h.shell, &h.keymap, Platform::current());
+    let on = state_of(&h);
+    assert!(on.enabled);
+    assert_eq!(on.checked, Some(true), "on in a new install");
+    let invocation = on.invocation.unwrap();
+    assert_eq!(invocation.id, "settings.set_start_transport_with_tap_tempo");
+    h.shell.invoke(&invocation.id, invocation.args).unwrap();
+    assert!(!h.shell.start_transport_with_tap_tempo());
+    assert_eq!(state_of(&h).checked, Some(false));
     h.shell.audio_mut().stop();
 }

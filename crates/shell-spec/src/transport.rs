@@ -55,13 +55,16 @@ pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_on
 pub const SET_MIDI_OVERDUB: &str = "transport.set_midi_overdub";
 /// `transport.set_recording` (`bl-engine`): whether transport is recording.
 pub const SET_RECORDING: &str = "transport.set_recording";
+/// `transport.tap_tempo`: the Control Bar's Tap Tempo button (the control bar
+/// transport spec, R18 to R22).
+pub const TAP_TEMPO: &str = "transport.tap_tempo";
 /// `song.set_tempo` (`bl-model`): the Tempo field.
 pub const SET_TEMPO: &str = "song.set_tempo";
 /// `song.set_time_signatures` (`bl-model`): the time-signature fields.
 pub const SET_TIME_SIGNATURES: &str = "song.set_time_signatures";
 
 /// Every command this module registers.
-pub const IDS: &[&str] = &[STATE];
+pub const IDS: &[&str] = &[STATE, TAP_TEMPO];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -150,6 +153,32 @@ pub struct TransportState {
     /// runs and the Control Bar's button and Create menu item are enabled.
     #[serde(default)]
     pub capture_midi_ready: bool,
+    /// The run of taps Tap Tempo has now (the control bar transport spec,
+    /// R22).
+    #[serde(default)]
+    pub tap_tempo: TapTempo,
+}
+
+/// Arguments of `transport.tap_tempo`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TapTempoArgs {
+    /// The tap's frame on the engine clock; left out, the tap is now.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<u64>,
+}
+
+/// A run of taps, as `transport.tap_tempo` returns it and `transport.state`
+/// reports it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TapTempo {
+    /// How many taps the run has; 0 once a new run would start.
+    pub taps: u32,
+    /// The tempo the run set, in quarter notes per minute: none until its
+    /// second tap.
+    pub tempo: Option<f64>,
+    /// The engine-clock frame a tap start waits for, if one does.
+    pub start_at: Option<u64>,
 }
 
 /// The recording under way, in `transport.state`.
@@ -204,6 +233,27 @@ pub struct RecordingReport {
 ///
 /// [`RegisterError`] if its ID is already registered.
 pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
+    registry.register(
+        CommandSpec::new(TAP_TEMPO, "Tap Tempo")
+            .description(
+                "Taps the tempo, as the Control Bar's Tap Tempo button does: each tap is one beat \
+                 of the time signature, and from the second tap of a run every tap sets the \
+                 song's tempo to the mean of the run's last eight intervals or fewer, to the \
+                 hundredth within 20 to 999 BPM, as one undo step named Tap Tempo. A tap more \
+                 than 3 seconds after the last starts a new run, and one less than 60 ms after \
+                 it is ignored. `at` is the tap's frame on the engine clock, \
+                 which counts the frames the engine has processed; left out, the tap is now. With Start Transport With Tap Tempo on \
+                 and the song stopped, the tap that makes the run as many taps as the time \
+                 signature's numerator starts the song one beat later, on a frame the result \
+                 gives as `start_at`; Stop before it cancels the start. Refused while the song \
+                 has tempo changes. The result gives the run's `taps`, its `tempo` and \
+                 `start_at`; `transport.state` reports them under `tap_tempo`.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<TapTempoArgs>()
+            .result::<TapTempo>(),
+    )?;
     registry.register(
         CommandSpec::new(STATE, "Transport Status")
             .description(

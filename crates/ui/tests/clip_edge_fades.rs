@@ -31,9 +31,11 @@ fn the_record_warp_and_launch_page_switches_create_fades_on_clip_edges() {
     // Live's rows in Live's order, every other one pending but the Launch
     // section's (WP-3.4), Record Session automation in (WP-3.12) and the
     // Warp/Fades rows before the switch (WP-4.9): Record's seven, then
-    // Warp/Fades' three before the switch, then Launch and Tap Tempo.
+    // Warp/Fades' three before the switch, then Launch and Tap Tempo, whose
+    // switch is built (WP-7.31).
     let live = |label: &str| {
         label == "Create Fades on Clip Edges"
+            || label == "Start Transport With Tap Tempo"
             || label == "Record Session automation in"
             || label.contains("Launch")
             || [
@@ -141,6 +143,38 @@ fn the_record_warp_and_launch_page_switches_warp_recorded_audio() {
     h.accesskit(Id::new(("switch", "warp-recorded-audio")), Action::Click);
     h.settle();
     assert!(h.shell.warp_recorded_audio());
+}
+
+// Spec: control-bar-transport R20. Start Transport With Tap Tempo is a switch
+// on the Record, Warp & Launch page, on in a new install, and runs its
+// command.
+#[test]
+fn the_record_warp_and_launch_page_switches_start_transport_with_tap_tempo() {
+    let mut h = Harness::new(Window::Settings);
+    h.shell
+        .invoke("app.settings", json!({ "page": "record-warp-launch" }))
+        .unwrap();
+    h.shell.take_effects();
+    h.settle();
+
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let switch = Harness::node(&nodes, "Start Transport With Tap Tempo");
+    assert_eq!(switch.role, Role::Button);
+    assert!(!switch.disabled);
+    assert!(h.shell.start_transport_with_tap_tempo());
+
+    h.accesskit(
+        Id::new(("switch", "start-transport-with-tap-tempo")),
+        Action::Click,
+    );
+    h.settle();
+    assert!(!h.shell.start_transport_with_tap_tempo());
+    assert!(h.events.iter().any(|e| matches!(
+        e,
+        bl_ui::main_window::UiEvent::Invoke(i)
+            if i.id == "settings.set_start_transport_with_tap_tempo"
+                && i.args == json!({ "on": false })
+    )));
 }
 
 // Spec: launch-quantisation R15. The Launch section's rows are live on the

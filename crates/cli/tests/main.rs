@@ -18,6 +18,7 @@ mod agent_macros;
 mod agent_midi_files;
 mod agent_midi_io;
 mod agent_modulation;
+mod agent_remote_mapping;
 mod agent_session_recording;
 mod agent_slice;
 mod audio;

@@ -71,6 +71,8 @@
 //!   it and the seed.
 //! - [`modulation`]: what a track's clips modulate (`modulation.state`,
 //!   WP-5.9).
+//! - [`remote`]: the set's MIDI and key mappings and the remote input
+//!   (`remote.*`, WP-7.1).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
 //!   WP-1.16): audio previews, analysis, and view captures.
 //! - [`warping`]: a clip's transients (`clip.transients`, WP-4.3).
@@ -130,6 +132,7 @@ pub mod notes;
 pub mod pads;
 pub mod perception;
 pub mod plugins;
+pub mod remote;
 pub mod sample_editor;
 pub mod scales;
 pub mod search;
@@ -173,6 +176,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_files::register(registry)?;
     dawproject::register(registry)?;
     midi_io::register(registry)?;
+    remote::register(registry)?;
     midi_tools::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;

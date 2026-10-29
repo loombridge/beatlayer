@@ -7,7 +7,7 @@
 //! command left without `retune` follows.
 
 use bl_model::Command;
-use bl_shell_spec::tunings::{self as ids, LoadArgs, TuningState};
+use bl_shell_spec::tunings::{self as ids, LayoutDialog, LoadArgs, ShowLayoutArgs, TuningState};
 use serde_json::{Value, json};
 
 use super::*;
@@ -33,11 +33,52 @@ impl Shell {
                 self.changed();
                 Ok(to_value(&self.tuning_state()))
             }
+            ids::SHOW_LAYOUT => {
+                let ShowLayoutArgs { track, shown } = Self::args(id, args)?;
+                if shown == Some(false) {
+                    self.layout_dialog = None;
+                } else {
+                    let previous = self.layout_dialog.replace(track);
+                    if !self.tuning_layout_dialog().open {
+                        self.layout_dialog = previous;
+                        return Err(ShellError::Unavailable {
+                            command: id.to_owned(),
+                            reason: "it needs a MIDI track that plays the set's tuning".to_owned(),
+                        });
+                    }
+                }
+                self.touch();
+                Ok(to_value(&self.tuning_layout_dialog()))
+            }
             ids::STATE => {
                 Self::args::<NoArgs>(id, args)?;
                 Ok(to_value(&self.tuning_state()))
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
+    }
+
+    /// The Configure MIDI Layout dialog (the tunings spec, R23): whether
+    /// it's open, the track it edits and that track's layout. It closes by
+    /// itself when the track has gone or no longer plays a tuning.
+    #[must_use]
+    pub fn tuning_layout_dialog(&self) -> LayoutDialog {
+        let document = self.editor.document();
+        let shown = self.layout_dialog.and_then(|id| {
+            let track = document.track(id).filter(|track| track.plays_tuning())?;
+            let tuning = document.settings().tuning.as_ref()?;
+            Some((id, track.tuning_layout().clone(), tuning))
+        });
+        match shown {
+            Some((id, layout, tuning)) => LayoutDialog {
+                open: true,
+                track: Some(id),
+                layout: Some(layout),
+                tuning_keys: (0..128u8)
+                    .take_while(|&key| tuning.key_pitch(key).is_some())
+                    .count(),
+            },
+            None => LayoutDialog::default(),
         }
     }
 

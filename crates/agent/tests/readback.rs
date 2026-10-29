@@ -8,12 +8,12 @@ use bl_agent::client::{Client, InProcess};
 use bl_core::time::{Bpm, Ticks, TimeSignature};
 use bl_model::{
     AudioData, AutomationTarget, Breakpoint, Channel, Clip, ClipData, Command, ContentHash,
-    CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole, DeviceWarp,
-    Editor, External, GroupKind, HardwareLatency, Input, LaunchMode, LaunchQuantization,
-    LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MidiTo, MixerParam, Monitor,
-    NewTakeLane, Note, NoteGroup, Output, PanMode, ParamId, SendTap, Sidechain, TakeClip,
-    TakeClipData, Tap, TonesSettings, TrackDelay, TrackId, TrackKind, TransientEdits, WarpMarker,
-    WarpMode, WarpSettings,
+    ControlKind, CountIn, CrossfadeAssign, Device, DeviceId, DeviceKind, DeviceOutput, DeviceRole,
+    DeviceWarp, Editor, External, GroupKind, HardwareLatency, Input, LaunchMode,
+    LaunchQuantization, LaunchSettings, MetronomeRhythm, MetronomeSound, MidiData, MidiTo,
+    MixerParam, Monitor, NewTakeLane, Note, NoteGroup, Output, PanMode, ParamId, RemoteMapping,
+    RemoteSource, RemoteTarget, SendTap, Sidechain, TakeClip, TakeClipData, Tap, TonesSettings,
+    TrackDelay, TrackId, TrackKind, TransientEdits, WarpMarker, WarpMode, WarpSettings,
 };
 use bl_project::{Media, Project};
 use bl_shell::Shell;
@@ -116,6 +116,20 @@ fn fixture() -> Project {
         // Spec: automation-editing R8. Lock Envelopes is saved with the
         // set, so the fixture has it on.
         Command::SetLockEnvelopes { enabled: true },
+        Command::SetRemoteMappings {
+            mappings: vec![
+                RemoteMapping::new(
+                    RemoteSource::Key {
+                        key: "S".to_owned(),
+                    },
+                    RemoteTarget::StopAll,
+                    ControlKind::Button,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ],
+        },
         Command::SetPunchIn { enabled: true },
         Command::SetPunchOut { enabled: true },
         Command::SetMidiOverdub { enabled: true },
@@ -154,6 +168,12 @@ fn fixture() -> Project {
         Command::SetTuningBypass {
             track: pad,
             bypass: true,
+        },
+        // Spec: tunings R22, R24.
+        Command::SetTuningLayout {
+            track: pad,
+            layout: Some(bl_model::LayoutKind::BlackKeysOnly),
+            keys: None,
         },
         // Spec: scales R9.
         Command::SetScale {

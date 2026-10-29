@@ -397,6 +397,10 @@ pub struct ArrangementState {
     /// The locator commands act on these.
     #[serde(default)]
     pub selected_locators: Vec<LocatorId>,
+    /// The position of the selected time-signature marker (WP-6.61), if
+    /// any: Delete deletes it and Cmd-R types its signature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_time_signature: Option<Ticks>,
     /// The selected fade handle (WP-6.51), if any: Delete deletes its fade.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub selected_fade: Option<FadeHandleState>,

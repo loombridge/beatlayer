@@ -140,6 +140,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("plugin.set_mpe", read("plugin.info", "mpe")),
     ("plugin.set_mpe_settings", read("plugin.info", "mpe")),
     ("plugin.set_panel_param", read("device_view.state", "devices")),
+    ("plugin.set_tuning", read("plugin.info", "mpe")),
     ("plugin.settings", read("settings.state", "plug_ins")),
     ("plugin.unconfigure_param", read("device.parameters", "params")),
     ("rack.set_auto_select", read("device_view.state", "devices")),

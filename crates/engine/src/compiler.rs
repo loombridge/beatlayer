@@ -209,6 +209,21 @@ pub struct Compiler {
     hits: ChainHits,
 }
 
+/// The tuning a plug-in device plays through per-note pitch bend (the
+/// tunings spec, R20): the track's, while the device's MPE Mode and tuning
+/// switch are both on.
+fn plugin_tuning<'a>(
+    document: &'a Document,
+    track: TrackId,
+    device: &bl_model::Device,
+) -> Option<&'a bl_model::Tuning> {
+    (matches!(device.kind, bl_model::DeviceKind::Plugin { .. })
+        && device.mpe.on
+        && device.mpe.tuning)
+        .then(|| tuning_of(document, track))
+        .flatten()
+}
+
 /// Whether the set's tuning hides the scales (the tunings spec, R16): it
 /// holds other than twelve notes to its pseudo-octave.
 fn scales_hidden(document: &Document) -> bool {
@@ -615,6 +630,26 @@ impl Compiler {
             let (before, after) = (tuning_of(&old, id), tuning_of(document, id));
             if before != after && (!recompile || after.is_none()) {
                 self.send_key_pitches(document, id, after.is_some(), &mut update);
+            }
+        }
+        // Spec: tunings R20. A plug-in's tuning switch or MPE Mode, the
+        // set's tuning, or its track's Bypass Tuning changed.
+        if !recompile {
+            for track in document.tracks() {
+                for device in track.devices_deep() {
+                    let before = old.device(device.id).and_then(|was| {
+                        let track = old.device_track(device.id)?;
+                        Some(plugin_tuning(&old, track, was))
+                    });
+                    let after = plugin_tuning(document, track.id(), device);
+                    if before.is_some_and(|before| before != after) {
+                        update.data.push((
+                            NodeKey::Device(device.id),
+                            self.gc
+                                .data(crate::node::PluginTuningData(crate::KeyPitches::of(after))),
+                        ));
+                    }
+                }
             }
         }
         for track in document.tracks() {
@@ -1463,6 +1498,23 @@ impl Compiler {
             // Spec: tunings R18. Every node is new too, so each instrument
             // on a track that plays the tuning is sent its pitches.
             self.send_key_pitches(document, id, true, &mut update);
+            // Spec: tunings R20. A plug-in's node starts with twelve equal
+            // steps, so each one that plays the tuning is sent it.
+            for device in document
+                .track(id)
+                .into_iter()
+                .flat_map(bl_model::Track::devices_deep)
+            {
+                if let Some(tuning) = plugin_tuning(document, id, device) {
+                    update.data.push((
+                        NodeKey::Device(device.id),
+                        self.gc
+                            .data(crate::node::PluginTuningData(crate::KeyPitches::of(Some(
+                                tuning,
+                            )))),
+                    ));
+                }
+            }
             // Spec: mpe R14. A plug-in's node starts with MPE Mode off, so
             // each one whose mode or settings differ is sent them.
             for device in document
@@ -3158,6 +3210,21 @@ fn needs_program(
         }
     }
     chain_events(changes, old, new, params);
+    // Spec: tunings R22. A MIDI track's route maps its keys by its MIDI
+    // Controller Layout under the set's tuning, so a change to the map is a
+    // change to the route.
+    if !recompile
+        && new.tracks().any(|track| {
+            track.kind() == TrackKind::Midi
+                && (!track.tuning_layout().is_default()
+                    || old
+                        .track(track.id())
+                        .is_some_and(|was| !was.tuning_layout().is_default()))
+                && crate::midi::key_map(old, track.id()) != crate::midi::key_map(new, track.id())
+        })
+    {
+        recompile = true;
+    }
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
     // player its clips as node data (the audio clips spec, R12). The Session
     // View's slots are the exception: which slots hold a clip travels in the

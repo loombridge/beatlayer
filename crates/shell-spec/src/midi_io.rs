@@ -76,8 +76,9 @@ pub struct PortInfo {
     /// Sync: an input's clock and transport messages are followed; an output
     /// sends clock. Kept now, acted on when sync is built.
     pub sync: bool,
-    /// Remote: an input controls Beatlayer through MIDI mapping; an output
-    /// sends feedback. Kept now, acted on when MIDI mapping is built.
+    /// Remote: an input controls Beatlayer through the set's MIDI mappings
+    /// (the remote mapping spec, R7 and R8); an output sends feedback, kept
+    /// now and acted on when feedback is built.
     pub remote: bool,
     /// MPE: an input's messages reach tracks as MPE, each note on a channel of
     /// its own; an output has no MPE switch, and reads false.
@@ -211,7 +212,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  are off; MPE opens nothing by itself. An input's notes and controllers reach \
                  tracks only while its Track switch is on, and as MPE, each note on a channel \
                  of its own with its own pitch, slide and pressure, while its MPE switch is on \
-                 too; Sync and Remote are kept and act when sync and MIDI mapping are built. \
+                 too; an input with Remote on feeds the set's MIDI mappings, and a message one takes \
+                 never reaches a track (`remote.mappings`); Sync is kept and acts when sync \
+                 is built, and so is an output's Remote. \
                  Output ports have no MPE switch, and `mpe` on one is refused. The port's \
                  switches are kept for the next start, and aren't part of the set or an undo \
                  step. Opens or closes a device outside Beatlayer. Fails if the computer \

@@ -1,6 +1,6 @@
 # Locators and time editing: locators, the song start time, the scrub area, Insert Silence, the …Time commands, and time-signature changes
 
-- **Status:** partial (WP-6.24 builds R1 to R13, WP-6.24b R14 to R24 and WP-6.59 R25 to R28, each with a passing test; R29 to R36 are WP-6.61's)
+- **Status:** built (WP-6.24 builds R1 to R13, WP-6.24b R14 to R24, WP-6.59 R25 to R28 and WP-6.61 R29 to R36, each with a passing test)
 - **Work packages:** WP-6.24 (locators, launching from them and from the scrub area, and the song start time: R1 to R13); WP-6.24b (Insert Silence and the Cut, Copy, Paste, Duplicate and Delete Time commands, and Shift with an edit command: R14 to R24). WP-6.59 (the scrub area's press-and-hold loop, Shift-click scrubbing and Permanent Scrub Areas: R25 to R28); WP-6.61 (the time-signature lane, Add and Insert Time Signature Change, editing markers, the Control Bar's signature fields over changes, and the fragmentary-bar commands: R29 to R36). The arranger track's sections, which these commands move too, are [arranger-track.md](arranger-track.md)'s (WP-6.45); whether clip edits carry automation is [automation-editing.md](automation-editing.md)'s (Lock Envelopes, WP-6.25)
 - **Parity-matrix row:** Other: Locators, Copy Time, insert and delete time; Other: Tempo automation and time-signature changes (the time-signature lane and fragmentary bars); Views and workflow: Arrangement View (the scrub area)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.1.5, 12.2 and 12.4; the UI parity reference's rows L-ARR-003, L-ARR-004, L-ARR-010, L-SET-010, M-CREATE-017, C-TIME-024, I-CLICK-013, I-CLICK-014, M-CREATE-005, M-CREATE-016, M-EDIT-018 to M-EDIT-025, C-TIME-018, C-TIME-022, C-TIME-023, I-CLICK-012, I-CLICK-018, I-DRAG-020, I-FOCUS-004, and shortcuts S-ARR-014 to S-ARR-019, S-EDIT-015 and S-A11Y-001
@@ -114,11 +114,11 @@ This spec covers locators, the song start time, the scrub area's click, and the 
 | R26 | `crates/shell/tests/transport.rs`, `permanent_scrub_areas_is_on_kept_between_launches_and_read_back`; `crates/shell/src/settings.rs`, `permanent_scrub_areas_is_on_unless_saved_off`; `crates/ui/tests/locator.rs`, `with_permanent_scrub_areas_off_a_click_places_the_insert_marker_and_a_hold_loops_nothing`; `crates/ui/tests/accessibility/settings.rs`, `display_and_input_has_live_s_keyboard_settings_in_order`; `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state` | unit, UI script |
 | R27 | `crates/ui/tests/locator.rs`, `with_permanent_scrub_areas_off_a_click_places_the_insert_marker_and_a_hold_loops_nothing`, `shift_click_in_the_beat_time_ruler_plays_without_scrolling`, `a_shift_hold_in_the_beat_time_ruler_loops` | UI script |
 | R28 | `crates/shell/tests/transport.rs`, `a_held_scrub_loops_its_span_by_id_until_it_is_released`, `without_an_engine_the_transport_says_why`; `crates/engine/tests/transport.rs`, `every_transport_command_runs_by_id`, `a_scrub_with_none_held_plays_from_the_point`; `crates/engine/src/transport.rs`, `arguments_are_checked` | unit |
-| R29 | to be written in WP-6.61 | |
-| R30 | to be written in WP-6.61 | |
-| R31 | to be written in WP-6.61 | |
-| R32 | to be written in WP-6.61 | |
-| R33 | to be written in WP-6.61 | |
-| R34 | to be written in WP-6.61 | |
-| R35 | to be written in WP-6.61 | |
-| R36 | to be written in WP-6.61 | |
+| R29 | `crates/ui/tests/signature_lane.rs`, `the_lane_shows_with_the_first_change_and_the_rows_below_move_down`; `crates/core/src/time/signature.rs`, `a_change_inside_a_bar_leaves_a_fragmentary_bar` | UI script, unit |
+| R30 | `crates/shell/tests/signature_lane.rs`, `inserting_a_marker_selects_it_and_is_one_undo_step`; `crates/ui/tests/signature_lane.rs`, `the_create_menus_item_reads_insert_with_the_arrangement_focused`, `the_scrub_areas_menu_inserts_a_marker_at_the_insert_marker` | unit, UI script |
+| R31 | `crates/shell/tests/signature_lane.rs`, `typing_a_signature_takes_each_separator_and_refuses_what_live_does`, `selecting_a_marker_is_view_state_and_clears_the_locators`; `crates/ui/tests/signature_lane.rs`, `clicking_a_marker_selects_it_and_cmd_r_types_a_signature` | unit, UI script |
+| R32 | `crates/shell/tests/signature_lane.rs`, `markers_move_and_delete_with_the_first_one_fixed`; `crates/ui/tests/signature_lane.rs`, `dragging_a_marker_moves_it_in_one_undo_step_and_the_first_stays` | unit, UI script |
+| R33 | `crates/shell/tests/signature_lane.rs`, `the_control_bars_fields_change_the_marker_in_force`; `crates/ui/tests/signature_lane.rs`, `the_control_bars_fields_show_an_led_and_set_the_marker_in_force` | unit, UI script |
+| R34 | `crates/shell/tests/signature_lane.rs`, `delete_fragmentary_bar_time_puts_the_next_marker_on_a_bar_line`, `complete_fragmentary_bar_inserts_the_time_the_bar_lacks`, `completing_a_short_bar_that_starts_at_a_marker_keeps_that_marker`; `crates/ui/tests/signature_lane.rs`, `a_short_bar_is_hatched_and_its_menu_deletes_or_completes_it` | unit, UI script |
+| R35 | `crates/shell/tests/signature_lane.rs`, `moving_a_marker_leaves_fragmentary_bars_as_they_fall` | unit |
+| R36 | `crates/shell/tests/signature_lane.rs`, `every_lane_command_is_registered_with_its_class`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`, `schemas_match_what_commands_serialise`; `crates/agent/tests/readback.rs` | unit |

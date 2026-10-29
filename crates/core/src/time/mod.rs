@@ -35,6 +35,6 @@ mod units;
 
 pub use bbs::BarBeatSixteenth;
 pub use error::TimeError;
-pub use signature::{TimeSignature, TimeSignatureChange, TimeSignatureMap};
+pub use signature::{FragmentaryBar, TimeSignature, TimeSignatureChange, TimeSignatureMap};
 pub use tempo::{Bpm, TempoMap, TempoSegment};
 pub use units::{Frames, SampleRate, TICKS_PER_QUARTER, Ticks};

@@ -27,6 +27,10 @@ use crate::Audio;
 /// BS.1770's offset, which makes a 1 kHz sine read its level.
 const OFFSET: f64 = -0.691;
 
+/// The lowest rate the K-weighting shelf (centred at 1.68 kHz) is stable at:
+/// below it the shelf lies above Nyquist, so nothing is measured.
+const MIN_RATE: u32 = 4_000;
+
 /// The absolute gate, in LUFS.
 pub const ABSOLUTE_GATE: f64 = -70.0;
 
@@ -124,7 +128,11 @@ pub struct Loudness {
 /// Measures the loudness and true peak of `audio`.
 #[must_use]
 pub fn measure(audio: &Audio<'_>) -> Loudness {
-    let steps = step_powers(audio);
+    let steps = if audio.rate() < MIN_RATE {
+        Vec::new()
+    } else {
+        step_powers(audio)
+    };
     let momentary = blocks(&steps, 4);
     let short = blocks(&steps, 30);
     let lufs = |power: f64| {
@@ -461,6 +469,16 @@ mod tests {
         // Under 400 ms, there's no block at all.
         let short = sine(1_000.0, 0.5, 0.3, 48_000, 2, 0.0);
         assert_eq!(loudness(&short).integrated, None);
+    }
+
+    #[test]
+    fn a_rate_too_low_for_the_weighting_has_no_loudness() {
+        let samples = sine(100.0, 0.5, 5.0, 1_000, 2, 0.0);
+        let measured = measure(&Audio::new(&samples, 2, 1_000).unwrap());
+        assert_eq!(measured.integrated, None);
+        assert_eq!(measured.momentary_max, None);
+        assert_eq!(measured.short_term_max, None);
+        assert!(measured.short_term.is_empty());
     }
 
     #[test]

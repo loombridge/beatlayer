@@ -60,6 +60,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_midi();
+        changed |= self.poll_remote();
         self.expire_previews();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
@@ -78,11 +79,13 @@ impl Shell {
         }
         // A plug-in that changed its latency: the engine recompiles with
         // it, so delay compensation follows it (WP-2.7, WP-2.11).
+        let native = self.audio.latency_changes();
         for (device, frames) in self
             .vst3
             .take_latency_changes()
             .into_iter()
             .chain(self.lv2.take_latency_changes())
+            .chain(native)
         {
             self.audio.set_device_latency(device, frames);
             changed = true;

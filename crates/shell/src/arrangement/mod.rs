@@ -184,6 +184,9 @@ pub struct ArrangementView {
     selected_clips: Vec<ClipId>,
     /// The selected locators (WP-6.24): see [`locator`].
     selected_locators: Vec<LocatorId>,
+    /// The position of the selected time-signature marker (WP-6.61): see
+    /// [`locator`].
+    selected_signature: Option<Ticks>,
     /// The take lanes whose headers are selected (the comping spec, R26): see
     /// [`take_lanes`].
     selected_take_lanes: Vec<TakeLaneId>,
@@ -274,6 +277,7 @@ impl ArrangementView {
             selected: Vec::new(),
             selected_clips: Vec::new(),
             selected_locators: Vec::new(),
+            selected_signature: None,
             selected_take_lanes: Vec::new(),
             shown_take_lanes: BTreeSet::new(),
             take_heights: BTreeMap::new(),
@@ -584,13 +588,40 @@ impl ArrangementView {
     /// Selects locators, as clicking one does. An empty list clears the
     /// locator selection and leaves the rest.
     pub fn select_locators(&mut self, locators: Vec<LocatorId>) {
+        if !locators.is_empty() {
+            self.selected_signature = None;
+        }
         self.selected_locators = locators;
     }
 
-    /// Drops selected locators the document no longer has.
+    /// Drops selected locators, and a selected time-signature marker, the
+    /// document no longer has.
     pub fn forget_missing_locators(&mut self, doc: &Document) {
         self.selected_locators
             .retain(|id| doc.locator(*id).is_some());
+        let signatures = &doc.settings().time_signatures;
+        if self
+            .selected_signature
+            .is_some_and(|at| !signatures.changes().any(|change| change.at == at))
+        {
+            self.selected_signature = None;
+        }
+    }
+
+    /// The position of the selected time-signature marker (WP-6.61).
+    #[must_use]
+    pub fn selected_signature(&self) -> Option<Ticks> {
+        self.selected_signature
+    }
+
+    /// Selects the time-signature marker at `at`, or none, as clicking a
+    /// marker does: the locator, clip and time selections go.
+    pub fn select_signature(&mut self, at: Option<Ticks>) {
+        self.selected_signature = at;
+        if at.is_some() {
+            self.selected_locators.clear();
+            self.clear_clip_selection();
+        }
     }
 
     /// Clears the clip selection and the time selection, as clicking a
@@ -1470,6 +1501,7 @@ impl ArrangementView {
             selected_tracks: self.selected.clone(),
             selected_clips: self.selected_clips.clone(),
             selected_locators: self.selected_locators.clone(),
+            selected_time_signature: self.selected_signature,
             selected_take_lanes: self.selected_take_lanes.clone(),
             shown_take_lanes: self.shown_take_lanes.iter().copied().collect(),
             selected_fade: self.selected_fade,

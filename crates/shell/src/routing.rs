@@ -15,6 +15,7 @@ use bl_model::{
 };
 use bl_shell_spec::commands::APP_SETTINGS;
 use bl_shell_spec::plugins::SHOW_MPE_SETTINGS;
+use bl_shell_spec::tunings::SHOW_LAYOUT;
 use serde_json::{Value, json};
 
 use crate::Invocation;
@@ -155,6 +156,19 @@ pub struct TuningBypass {
     pub run: Invocation,
 }
 
+/// A MIDI track's MIDI Controller Layout chooser and the "…" button beside
+/// it (WP-6.9b; the tunings spec, R22, R23), shown while the set has a
+/// tuning.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TuningLayoutRow {
+    /// The chooser; its choices can't be chosen while Bypass Tuning is on.
+    pub chooser: Chooser,
+    /// The command the "…" button runs, which opens the Configure MIDI
+    /// Layout dialog; none while the layout isn't Custom or Bypass Tuning
+    /// is on, when the button is disabled.
+    pub configure: Option<Invocation>,
+}
+
 /// One track's In/Out section, top to bottom.
 #[derive(Clone, Debug, PartialEq)]
 #[expect(
@@ -178,6 +192,8 @@ pub enum InOut {
         output_channel: Chooser,
         /// A MIDI track's Bypass Tuning, while the set has a tuning.
         tuning_bypass: Option<TuningBypass>,
+        /// A MIDI track's MIDI Controller Layout, while the set has a tuning.
+        tuning_layout: Option<TuningLayoutRow>,
     },
     /// A group or a return: Audio To and its channel.
     Output {
@@ -194,6 +210,56 @@ pub enum InOut {
         /// Main Out.
         main: Chooser,
     },
+}
+
+/// The labels of the MIDI Controller Layouts, in the chooser's order (the
+/// tunings spec, R22).
+const LAYOUTS: [(bl_model::LayoutKind, &str); 5] = [
+    (bl_model::LayoutKind::AllKeys, "All Keys"),
+    (bl_model::LayoutKind::BlackKeysOnly, "Black Keys Only"),
+    (bl_model::LayoutKind::WhiteKeysOnly, "White Keys Only"),
+    (
+        bl_model::LayoutKind::ClosestInPitch,
+        "Closest in Pitch to Keyboard",
+    ),
+    (bl_model::LayoutKind::Custom, "Custom Controller Layout"),
+];
+
+/// A MIDI track's MIDI Controller Layout chooser (the tunings spec, R22,
+/// R23); `bypassed` disables it.
+fn tuning_layout(
+    track: TrackId,
+    layout: &bl_model::TuningLayout,
+    bypassed: bool,
+) -> TuningLayoutRow {
+    let entries = LAYOUTS
+        .iter()
+        .map(|&(kind, label)| Entry::Choice {
+            label: label.to_owned(),
+            run: (!bypassed).then(|| {
+                Invocation::new(
+                    "track.set_tuning_layout",
+                    json!({ "track": track, "layout": kind }),
+                )
+            }),
+            chosen: kind == layout.layout,
+            pending: None,
+        })
+        .collect();
+    let text = LAYOUTS
+        .iter()
+        .find(|(kind, _)| *kind == layout.layout)
+        .map_or("", |(_, label)| label);
+    TuningLayoutRow {
+        chooser: Chooser {
+            name: "MIDI Controller Layout",
+            text: text.to_owned(),
+            entries,
+            pending: None,
+        },
+        configure: (!bypassed && layout.layout == bl_model::LayoutKind::Custom)
+            .then(|| Invocation::new(SHOW_LAYOUT, json!({ "track": track }))),
+    }
 }
 
 /// What a track is called in another track's chooser: its number and name
@@ -313,6 +379,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
             output: audio_to(doc, track),
             output_channel: output_channel(track, t.routing().output, interface.outputs),
             tuning_bypass: None,
+            tuning_layout: None,
         },
         TrackKind::Midi => InOut::Clips {
             input: midi_from(doc, track, &interface.midi_inputs),
@@ -340,6 +407,14 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
                         json!({ "track": track, "bypass": !on }),
                     ),
                 }
+            }),
+            // Spec: tunings R22, R23. Disabled while Bypass Tuning is on.
+            tuning_layout: doc.settings().tuning.is_some().then(|| {
+                tuning_layout(
+                    track,
+                    t.tuning_layout(),
+                    t.tuning_bypass() || t.holds_drum_rack(),
+                )
             }),
         },
         TrackKind::Group | TrackKind::Return => InOut::Output {

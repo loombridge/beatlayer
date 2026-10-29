@@ -267,6 +267,8 @@ impl View<'_> {
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),
             "tuning_bypass": track.tuning_bypass(),
+            // Spec: tunings R24. Only a MIDI track's layout does anything.
+            "tuning_layout": track.tuning_layout(),
             "clips": track.clips().len(),
             "devices": track.devices().len(),
             "frozen": track.frozen(),
@@ -402,6 +404,10 @@ impl View<'_> {
             "params_set": device.params.len(),
         });
         with_info_text(&mut value, &device.info_text);
+        // Spec: tunings R24. A plug-in's tuning switch.
+        if matches!(device.kind, bl_model::DeviceKind::Plugin { .. }) {
+            value["tuning"] = json!(device.mpe.tuning);
+        }
         // A rack's chains, each with its mixer and its devices, racks inside
         // included (the racks spec, R17).
         if device.rack_kind().is_some() {

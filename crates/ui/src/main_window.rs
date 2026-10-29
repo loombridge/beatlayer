@@ -467,6 +467,11 @@ impl MainWindowUi {
                 // scrub area.
                 crate::arrangement::start_rename(ctx, *locator);
             }
+            Effect::EditTimeSignature(at) => {
+                // Spec: time-editing R31. The signature is typed over its
+                // marker in the lane.
+                crate::arrangement::signatures::start_edit(ctx, *at);
+            }
             Effect::EditInfoText(target) => {
                 // Spec: info-view R10. The Info View becomes a field with
                 // the focus.
@@ -790,6 +795,9 @@ impl MainWindowUi {
             // Spec: mpe R18. The MPE/Multi-channel Settings dialog sits over
             // the window while it's open.
             crate::mpe_settings_dialog::show(ctx, shell, theme, &mut events);
+            // Spec: tunings R23. The Configure MIDI Layout dialog does the
+            // same.
+            crate::tuning_layout_dialog::show(ctx, shell, theme, &mut events);
             // Spec: crash-recovery R22. The recovery prompt sits over the
             // window while there are sets a crash left to offer.
             crate::recovery_dialog::show(ctx, shell, theme, &mut events);
@@ -810,7 +818,8 @@ impl MainWindowUi {
                     || shell.pack_status().job.is_some()
                     || shell.autosampler_dialog().is_some()
                     || shell.slice_dialog().is_some()
-                    || shell.mpe_settings_dialog().open));
+                    || shell.mpe_settings_dialog().open
+                    || crate::tuning_layout_dialog::is_open(shell)));
         // The track whose control has the focus, for the neighbour items'
         // state (the accessibility spec, R4).
         let order = crate::focus::drawn(ctx);

@@ -98,6 +98,7 @@ pub mod note_ops;
 pub mod param;
 pub mod rack;
 pub mod registry;
+pub mod remote;
 mod repr;
 mod routing;
 mod sample_edits;
@@ -107,6 +108,7 @@ mod shared;
 mod spelling;
 mod track;
 mod tuning;
+mod tuning_layout;
 pub mod vst3_state;
 mod warp;
 mod warp_settings;
@@ -188,6 +190,9 @@ pub use rack::{
     default_macro_name, description as rack_description, general_midi_drum, macro_number,
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
+pub use remote::{
+    ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
+};
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
 pub use scale::{CHROMATIC, Scale, ScaleName};
@@ -201,6 +206,7 @@ pub use tuning::{
     DEFAULT_REFERENCE_HZ, DEFAULT_REFERENCE_OCTAVE, MAX_CENTS, MAX_DEGREES, MAX_KEYS, Reference,
     Tuning, TuningNote, TuningRange, TuningReadout, pitch_of,
 };
+pub use tuning_layout::{LAYOUT_KEYS, LayoutKind, TuningLayout};
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{
     BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN,

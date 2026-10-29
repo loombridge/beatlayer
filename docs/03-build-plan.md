@@ -777,7 +777,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.74 | todo |  |  |
 | 6.75 | todo |  |  |
 | 6.76 | todo |  |  |
-| 7.1 | todo |  |  |
+| 7.1 | done | 29 October 2026 | [#501](https://github.com/loombridge/beatlayer/pull/501): MIDI and key mappings are saved with the set and leave with a deleted target, the remote input keeps mapped messages off tracks through a lock-free table on the MIDI thread, mapped messages are applied on the main thread as hand moves with placeholder value laws for WP-7.2 to replace, and the `remote.*` commands read back |
 | 7.2 | todo |  |  |
 | 7.2b | todo |  |  |
 | 7.3 | todo |  |  |

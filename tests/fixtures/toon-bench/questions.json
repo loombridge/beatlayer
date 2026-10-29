@@ -18,7 +18,7 @@
     "question": "How many tracks hold at least one clip?"
   },
   {
-    "answer": "Chords",
+    "answer": "Bass",
     "fixture": "overview",
     "id": "overview-id-18",
     "question": "What is the name of the track whose id is 18?"
@@ -42,7 +42,7 @@
     "question": "How many tracks are muted?"
   },
   {
-    "answer": "19",
+    "answer": "20",
     "fixture": "tracks",
     "id": "tracks-lead-id",
     "question": "What is the id of the track named Lead?"
@@ -192,7 +192,7 @@
     "question": "What is the sum of the velocity of all notes?"
   },
   {
-    "answer": "90",
+    "answer": "91",
     "fixture": "commands_clip",
     "id": "commands-total",
     "question": "How many commands are listed?"
@@ -216,7 +216,7 @@
     "question": "What is the label of the command clip.set_gain?"
   },
   {
-    "answer": "33",
+    "answer": "34",
     "fixture": "commands_clip",
     "id": "commands-set-prefix",
     "question": "How many command ids start with clip.set_?"

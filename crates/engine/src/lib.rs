@@ -124,6 +124,7 @@ mod sources;
 mod state;
 pub mod transport;
 mod tuned;
+mod tuned_notes;
 mod warped;
 mod zones;
 
@@ -159,8 +160,8 @@ pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
     Articulations, Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent,
-    NoteExpression, NoteKind, ParamValue, PluginMpeData, Segment, Segments, TransportInfo,
-    segments,
+    NoteExpression, NoteKind, ParamValue, PluginMpeData, PluginTuningData, Segment, Segments,
+    TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
@@ -179,7 +180,8 @@ pub use state::{
     ChainMeter, EngineCounters, EngineState, MeterOwner, MeterSite, Monitor, PlayedParam,
     PointReading, TrackMeter,
 };
-pub use tuned::KeyPitches;
+pub use tuned::{KeyMap, KeyPitches};
+pub use tuned_notes::TunedNotes;
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
 /// within them and allocates nothing, so each is a ceiling: what goes over

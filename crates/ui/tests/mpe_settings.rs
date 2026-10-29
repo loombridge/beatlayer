@@ -15,7 +15,7 @@ use egui::{Event, Modifiers, PointerButton, Pos2, Rect, pos2};
 use serde_json::json;
 
 /// The main window with the test plug-in on the third track.
-fn harness() -> (Harness, DeviceId, TrackId) {
+pub(crate) fn harness() -> (Harness, DeviceId, TrackId) {
     let mut h = Harness::with_title_bar(Window::Main);
     h.settle();
     let track: TrackId = h.shell.editor().document().top_level().nth(2).unwrap();
@@ -59,7 +59,7 @@ fn press(at: Pos2, pressed: bool) -> Event {
 }
 
 /// Opens the plug-in's title bar menu with a right-click.
-fn open_menu(h: &mut Harness, device: DeviceId) -> Vec<common::Node> {
+pub(crate) fn open_menu(h: &mut Harness, device: DeviceId) -> Vec<common::Node> {
     let frame = frame_of(h, device);
     let at = title_rect(frame, false).center();
     h.frame(vec![Event::PointerMoved(at)]);
@@ -69,7 +69,7 @@ fn open_menu(h: &mut Harness, device: DeviceId) -> Vec<common::Node> {
 }
 
 /// Clicks the node labelled `label` among those drawn now.
-fn click_labelled(h: &mut Harness, label: &str) {
+pub(crate) fn click_labelled(h: &mut Harness, label: &str) {
     let nodes = Harness::nodes(&h.settle());
     let node = nodes.iter().find(|n| n.label == label).unwrap_or_else(|| {
         panic!(
@@ -86,7 +86,7 @@ fn click_labelled(h: &mut Harness, label: &str) {
     h.settle();
 }
 
-fn last_step(h: &Harness) -> String {
+pub(crate) fn last_step(h: &Harness) -> String {
     h.shell
         .editor()
         .undo_history()

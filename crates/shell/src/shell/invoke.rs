@@ -359,6 +359,10 @@ impl Shell {
                 let on = !self.prefs.snap_automation_to_grid.0;
                 self.run(id, json!({ "on": on }))
             }
+            ids::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO if !has("on") => {
+                let on = !self.prefs.start_transport_with_tap_tempo.0;
+                self.run(id, json!({ "on": on }))
+            }
             ids::SETTINGS_SET_TEMPORARY_FOLDER if !has("path") => {
                 self.effects.push(Effect::PickTemporaryFolder);
                 Ok(Value::Null)

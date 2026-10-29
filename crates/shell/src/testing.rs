@@ -20,6 +20,12 @@ pub const STEP_MS: u64 = 5;
 /// needs, then call [`Shell::start_audio`].
 #[must_use]
 pub fn rig() -> (Shell, NullControl) {
+    rig_with(AudioSettings::default())
+}
+
+/// [`rig`] with the audio settings `settings`, such as a buffer size.
+#[must_use]
+pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             pacing: Pacing::Manual,
@@ -30,7 +36,7 @@ pub fn rig() -> (Shell, NullControl) {
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
         Box::new(move |_| Ok(Box::new(backend.clone()))),
-        AudioSettings::default(),
+        settings,
     );
     let mut shell = Shell::new(
         Preferences::default(),

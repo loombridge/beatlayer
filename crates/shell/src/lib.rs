@@ -115,6 +115,7 @@ pub mod set_exchange;
 pub mod settings;
 mod shell;
 pub mod stems;
+pub mod tap_tempo;
 #[doc(hidden)]
 pub mod testing;
 pub mod tracks;

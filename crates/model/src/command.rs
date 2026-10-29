@@ -4549,11 +4549,7 @@ impl Document {
                 result
             }
             Command::SetClipVelocityAmount { clip, amount } => {
-                if !(0.0..=1.0).contains(amount) {
-                    return Err(ModelError::InvalidInput(
-                        "the velocity amount is from 0 to 1",
-                    ));
-                }
+                check_velocity_amount(*amount)?;
                 self.edit_launch(*clip, |launch| launch.velocity_amount = *amount)
             }
             Command::SetClipEnvelopeBreakpoint {
@@ -9074,7 +9070,19 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
     if clip.data.is_audio() && clip.offset != Ticks::ZERO {
         return Err(ModelError::AudioClipOffset(clip.offset));
     }
+    check_velocity_amount(clip.launch.velocity_amount)?;
     check_clip_data(&clip.data)
+}
+
+/// Checks a clip's velocity amount: from 0 to 1.
+fn check_velocity_amount(amount: f64) -> Result<(), ModelError> {
+    if (0.0..=1.0).contains(&amount) {
+        Ok(())
+    } else {
+        Err(ModelError::InvalidInput(
+            "the velocity amount is from 0 to 1",
+        ))
+    }
 }
 
 /// Checks a device's parameter values, and, for a rack, its chains and the

@@ -94,6 +94,17 @@ pub(crate) fn a_midi_port(h: &mut Harness) {
     h.shell.use_midi_backend(Box::new(test));
 }
 
+/// Show Resync Button is on, so the Control Bar has the Resync External
+/// Hardware button.
+pub(crate) fn the_resync_button_shown(h: &mut Harness) {
+    h.shell
+        .run(
+            "midi.set_show_resync_button",
+            serde_json::json!({ "on": true }),
+        )
+        .unwrap();
+}
+
 /// The Arrangement View has the keyboard.
 pub(crate) fn arrangement_view(h: &mut Harness) {
     h.key(Key::Num2, Modifiers::ALT);

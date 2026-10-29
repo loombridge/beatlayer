@@ -498,6 +498,51 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
 }
 
+/// An agent taps the tempo with frames of its own and reads the run, the
+/// song's tempo and the setting back.
+#[test]
+fn tap_tempo_and_its_setting_read_back() {
+    let (mut shell, _control) = bl_shell::testing::rig();
+    shell.start_audio();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    assert_eq!(
+        settings_state(&mut client)["start_transport_with_tap_tempo"],
+        true,
+        "on in a new install"
+    );
+    assert_eq!(transport_state(&mut client)["tap_tempo"]["taps"], 0);
+    run(
+        &mut client,
+        "song.set_tempo",
+        json!({ "tempo": bl_core::time::TempoMap::constant(bl_core::time::Bpm::new(90.0).unwrap()) }),
+    );
+    // Four taps 500 ms apart at 48 kHz.
+    let mut last = Value::Null;
+    for n in 0..4u64 {
+        last = run(
+            &mut client,
+            "transport.tap_tempo",
+            json!({ "at": 1_000 + n * 24_000 }),
+        );
+    }
+    assert_eq!(last["taps"], 4);
+    assert_eq!(last["tempo"], 120.0);
+    assert_eq!(last["start_at"], 1_000 + 4 * 24_000);
+    let state = transport_state(&mut client);
+    assert_eq!(state["tempo"], 120.0);
+    assert_eq!(state["tap_tempo"], last);
+    run(
+        &mut client,
+        "settings.set_start_transport_with_tap_tempo",
+        json!({ "on": false }),
+    );
+    assert_eq!(
+        settings_state(&mut client)["start_transport_with_tap_tempo"],
+        false
+    );
+}
+
 #[test]
 fn settings_state_reports_secrets_only_as_stored_or_not() {
     let mut client = client();

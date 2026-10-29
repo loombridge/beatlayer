@@ -126,6 +126,10 @@ pub struct Preferences {
     /// as Live warps its recordings, and on for preferences saved before the
     /// setting existed.
     pub warp_recorded_audio: OnByDefault,
+    /// Start Transport With Tap Tempo (Record, Warp & Launch, L-SET-018, and
+    /// Playback ▸ Options; the control bar transport spec, R20). On in a new
+    /// install, and on for preferences saved before it existed.
+    pub start_transport_with_tap_tempo: OnByDefault,
     /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode
     /// (Record, Warp & Launch, L-SET-018; WP-4.9): what a new clip of a file
     /// gets (the warping spec, R29 and R33).
@@ -208,6 +212,10 @@ pub struct MidiPrefs {
     pub ports: Vec<PortPrefs>,
     /// Whether the computer MIDI keyboard is on.
     pub keyboard_on: bool,
+    /// Show Resync Button (Tempo & MIDI, L-SET-014; the MIDI clock spec,
+    /// R10): the Control Bar shows Resync External Hardware. Off in a new
+    /// install.
+    pub show_resync_button: bool,
 }
 
 /// One MIDI port's switches in the preferences.
@@ -226,6 +234,16 @@ pub struct PortPrefs {
     /// MPE, for an input; a preferences file from before it has none.
     #[serde(default)]
     pub mpe: bool,
+    /// MIDI Clock Sync Delay in milliseconds (the MIDI clock spec, R2); a
+    /// preferences file from before it has 0.
+    #[serde(default)]
+    pub sync_delay_ms: i16,
+    /// An output's MIDI Clock Type.
+    #[serde(default)]
+    pub clock_type: bl_shell_spec::midi_io::ClockTypeChoice,
+    /// An output's Hardware Resync.
+    #[serde(default)]
+    pub hardware_resync: bl_shell_spec::midi_io::HardwareResyncChoice,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and
@@ -430,6 +448,19 @@ mod tests {
         assert!(!off.warp_recorded_audio.0);
         let saved = serde_json::to_value(&off).unwrap();
         assert_eq!(saved["warp_recorded_audio"], false);
+    }
+
+    #[test]
+    fn start_transport_with_tap_tempo_is_on_unless_saved_off() {
+        // Spec: control-bar-transport R20.
+        assert!(Preferences::default().start_transport_with_tap_tempo.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.start_transport_with_tap_tempo.0);
+        let off: Preferences =
+            serde_json::from_str(r#"{"start_transport_with_tap_tempo": false}"#).unwrap();
+        assert!(!off.start_transport_with_tap_tempo.0);
+        let saved = serde_json::to_value(&off).unwrap();
+        assert_eq!(saved["start_transport_with_tap_tempo"], false);
     }
 
     #[test]

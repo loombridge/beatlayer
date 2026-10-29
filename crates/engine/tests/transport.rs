@@ -121,6 +121,23 @@ fn play_starts_from_the_song_start_time_and_play_from_marker_ignores_it() {
 }
 
 #[test]
+fn a_stop_abandons_a_start_waiting_for_its_frame() {
+    // Spec: control-bar-transport R20. A start sent for a later frame, as a
+    // tap start is, does not happen once a Stop has come before the frame.
+    for block in [1, 64, 512] {
+        let mut rig = rig(512, None);
+        rig.sender
+            .transport_at(TransportCommand::Play, When::Frame(1_000));
+        let out = rig.render(600, block);
+        stopped(&out, 0..600);
+        rig.sender.transport(TransportCommand::Stop);
+        let out = rig.render(1_000, block);
+        stopped(&out, 0..1_000);
+        assert!(!rig.monitor.state().playing);
+    }
+}
+
+#[test]
 fn stop_keeps_where_playback_stopped_and_continue_resumes_there() {
     let mut rig = rig(256, None);
     let bar_2 = frames(&TempoMap::default(), BAR);
@@ -656,6 +673,8 @@ fn every_transport_command_runs_by_id() {
     run(&mut rig, "transport.stop_recording", json!({}));
     // Spec: transport R23
     run(&mut rig, "transport.scrub", json!({ "position": 0 }));
+    // Spec: midi-clock R11. With no output port on, it changes nothing.
+    run(&mut rig, "transport.resync_external_hardware", json!({}));
 
     let mut registered: Vec<String> = commands
         .iter()

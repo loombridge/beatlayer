@@ -70,6 +70,7 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.locate", "{\"position\": 2822400}"),
     ("transport.scrub", "{\"position\": 2822400}"),
     ("transport.return_to_start", "{}"),
+    ("transport.resync_external_hardware", "{}"),
     ("transport.insert_marker_to_playhead", "{}"),
     ("transport.stop_recording", "{}"),
     ("transport.set_recording", "{\"recording\": true}"),
@@ -101,6 +102,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
         "transport.set_punch_out",
         "transport.set_record_quantization",
         "transport.state",
+        "transport.tap_tempo",
     ]);
     expected.sort_unstable();
     assert_eq!(registered, expected);

@@ -84,6 +84,7 @@ use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::settings::STATE as SETTINGS_STATE;
 use bl_shell_spec::slice as slice_ids;
 use bl_shell_spec::stems as stems_ids;
+use bl_shell_spec::sync as sync_ids;
 use bl_shell_spec::tracks as track_ids;
 use bl_shell_spec::transport as transport_ids;
 use bl_shell_spec::transport::RecordingReport;
@@ -143,6 +144,7 @@ mod set_files;
 mod slice;
 mod stems;
 mod step_input;
+mod tap_tempo;
 mod track_commands;
 mod tunings;
 mod view_commands;
@@ -588,6 +590,11 @@ pub struct Shell {
     /// while the indicator still lit (external-devices R7).
     midi_seen: (u64, u64),
     midi_lit: [Option<std::time::Instant>; 2],
+    /// The quarter notes of MIDI clock the engine had sent when
+    /// [`Shell::poll`] last looked, and since when the lower sync lamp has
+    /// been lit (the MIDI clock spec, R12).
+    sync_seen: u64,
+    sync_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     /// The remote input and the set's MIDI and key mappings (WP-7.1).
@@ -701,6 +708,8 @@ pub struct Shell {
     plugin_list: plugin_list::PluginList,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
+    /// The run of taps Tap Tempo has (the control bar transport spec, R18).
+    tap: crate::tap_tempo::TapRun,
     /// The browser (WP-1.10).
     browser_view: BrowserView,
     /// The media the set's clips play, which the browser fills and the
@@ -1095,6 +1104,10 @@ const MIDI_RELIST: std::time::Duration = std::time::Duration::from_secs(2);
 /// How long a MIDI indicator stays lit after a message.
 const MIDI_LAMP: std::time::Duration = std::time::Duration::from_millis(120);
 
+/// How long the lower sync lamp stays lit after a quarter note of MIDI clock
+/// (the MIDI clock spec, R12).
+const SYNC_LAMP: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// The macro edit a document command makes, so the shell writes the values
 /// its law gives each mapped parameter in the same undo step (macros spec,
 /// R13).
@@ -1261,6 +1274,8 @@ impl Shell {
             midi_listed: std::time::Instant::now(),
             midi_seen: (0, 0),
             midi_lit: [None; 2],
+            sync_seen: 0,
+            sync_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),
             remote: remote::RemoteState::default(),
             step: step_input::StepInput::default(),
@@ -1316,6 +1331,7 @@ impl Shell {
             search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
+            tap: crate::tap_tempo::TapRun::default(),
             clipboard: None,
             envelope_clipboard: None,
             clip_drag: None,
@@ -1837,6 +1853,9 @@ impl Shell {
             Self::args::<NoArgs>(id, args)?;
             return Ok(to_value(&self.settings_state()));
         }
+        if id == transport_ids::TAP_TEMPO {
+            return self.run_tap_tempo(args);
+        }
         if transport_ids::handles(id) {
             Self::args::<NoArgs>(id, args)?;
             let engine = self.poll_engine();
@@ -2122,6 +2141,9 @@ impl Shell {
         }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
+        }
+        if sync_ids::handles(id) {
+            return self.run_sync(id, args);
         }
         if remote_ids::handles(id) {
             return self.run_remote(id, args);

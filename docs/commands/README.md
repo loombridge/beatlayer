@@ -8304,6 +8304,7 @@ One device as the Device View shows it.
 | `floating` | boolean | yes | Whether it floats in a window of its own, its place in the chain a strip (WP-2.5b). |
 | `b_active` | boolean | yes | Whether its B state is the active one, which the title bar marks "(B)" (device compare R5). |
 | `configure` | boolean | yes | Whether the device is in Plug-In Configure Mode (clap-hosting R5, WP-5.40): its title bar's Configure switch is lit. View state, never saved with the set. False for a device that isn't a plug-in. |
+| `tuning_loaded` | boolean | yes | Whether the set has a tuning loaded, which shows a plug-in's Apply Tuning to Per-Note Pitch Bend item in its title bar menu (the tunings spec, R20, C-DEVICE-015). |
 | `selected` | boolean | yes | Whether it's the selected device. |
 | `hot_swap` | boolean | yes | Whether it's the device being hot-swapped. |
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
@@ -8491,6 +8492,11 @@ One device as the Device View shows it.
     "title": {
       "description": "What its title bar reads: its preset's or given name while Show Preset Name is on, otherwise its own name.",
       "type": "string"
+    },
+    "tuning_loaded": {
+      "default": false,
+      "description": "Whether the set has a tuning loaded, which shows a plug-in's Apply Tuning to Per-Note Pitch Bend item in its title bar menu (the tunings spec, R20, C-DEVICE-015).",
+      "type": "boolean"
     }
   },
   "required": [
@@ -8509,6 +8515,7 @@ One device as the Device View shows it.
     "floating",
     "b_active",
     "configure",
+    "tuning_loaded",
     "selected",
     "hot_swap",
     "sidechain"
@@ -16319,6 +16326,116 @@ What the layer commands return.
 
 </details>
 
+### `LayoutDialog`
+
+What `tuning.show_layout` returns: whether the dialog is open and what it edits.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the dialog is open. |
+| `tuning_keys` | integer, at least 0 | yes | How many keys the set's tuning holds, from key 0: a value of the table from this up is unavailable and plays nothing (R23). |
+| `layout` | [`TuningLayout`](#tuninglayout) or null | no | The track's layout and custom table, while it is open. |
+| `track` | [`TrackId`](#trackid) or null | no | The MIDI track it edits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `tuning.show_layout` returns: whether the dialog is open and what it edits.",
+  "properties": {
+    "layout": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TuningLayout"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track's layout and custom table, while it is open."
+    },
+    "open": {
+      "description": "Whether the dialog is open.",
+      "type": "boolean"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The MIDI track it edits."
+    },
+    "tuning_keys": {
+      "default": 0,
+      "description": "How many keys the set's tuning holds, from key 0: a value of the table from this up is unavailable and plays nothing (R23).",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "open",
+    "tuning_keys"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LayoutKind`
+
+Which mapping a layout uses (the tunings spec, R22).
+
+One of:
+
+- `"all_keys"`: Each key plays the same key of the tuning.
+- `"black_keys_only"`: The black keys play the tuning's keys from key 60 up, C#3 first.
+- `"white_keys_only"`: The white keys play the tuning's keys from key 60 up, C3 first.
+- `"closest_in_pitch"`: Each key plays the tuning's key nearest its twelve-step pitch.
+- `"custom"`: Each key plays the key the custom table gives it, or none.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which mapping a layout uses (the tunings spec, R22).",
+  "oneOf": [
+    {
+      "const": "all_keys",
+      "description": "Each key plays the same key of the tuning.",
+      "type": "string"
+    },
+    {
+      "const": "black_keys_only",
+      "description": "The black keys play the tuning's keys from key 60 up, C#3 first.",
+      "type": "string"
+    },
+    {
+      "const": "white_keys_only",
+      "description": "The white keys play the tuning's keys from key 60 up, C3 first.",
+      "type": "string"
+    },
+    {
+      "const": "closest_in_pitch",
+      "description": "Each key plays the tuning's key nearest its twelve-step pitch.",
+      "type": "string"
+    },
+    {
+      "const": "custom",
+      "description": "Each key plays the key the custom table gives it, or none.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `LayoutNode`
 
 A part of a device's layout.
@@ -21994,19 +22111,20 @@ What `plugin.load` returns.
 
 ### `PluginMpe`
 
-A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the MPE/Multi-channel Settings; left out while they are the new settings').
+A plug-in device's MPE: `on` (MPE Mode, off in a new device), `settings` (the MPE/Multi-channel Settings; left out while they are the new settings') and `tuning` (Apply Tuning to Per-Note Pitch Bend, on in a new device; left out while on).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `on` | boolean | yes | MPE Mode. |
 | `settings` | [`MpeSettings`](#mpesettings) | no | The settings MPE MIDI goes out on, left out while they are the new settings'. |
+| `tuning` | boolean | no | Apply Tuning to Per-Note Pitch Bend (the tunings spec, R20): on in a new device, so saved only when off. It reaches the plug-in only while MPE Mode is on. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
   "additionalProperties": false,
-  "description": "A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the MPE/Multi-channel Settings; left out while they are the new settings').",
+  "description": "A plug-in device's MPE: `on` (MPE Mode, off in a new device), `settings` (the MPE/Multi-channel Settings; left out while they are the new settings') and `tuning` (Apply Tuning to Per-Note Pitch Bend, on in a new device; left out while on).",
   "properties": {
     "on": {
       "description": "MPE Mode.",
@@ -22015,6 +22133,10 @@ A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` (the
     "settings": {
       "$ref": "#/$defs/MpeSettings",
       "description": "The settings MPE MIDI goes out on, left out while they are the new settings'."
+    },
+    "tuning": {
+      "description": "Apply Tuning to Per-Note Pitch Bend (the tunings spec, R20): on in a new device, so saved only when off. It reaches the plug-in only while MPE Mode is on.",
+      "type": "boolean"
     }
   },
   "required": [
@@ -31560,6 +31682,50 @@ A tuning: its `name`, `description`, the `cents` of degrees 1 to n above the uni
     "cents",
     "reference",
     "range"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TuningLayout`
+
+A MIDI track's MIDI Controller Layout: `layout` (`all_keys`, `black_keys_only`, `white_keys_only`, `closest_in_pitch` or `custom`) and `keys`, the custom table: for each of the 128 incoming keys the key of the tuning it plays, or null for none (left out while each key plays itself). The table is kept while another layout is chosen.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `layout` | [`LayoutKind`](#layoutkind) | yes | The mapping in use. |
+| `keys` | array of integer or null | no | The custom table, 128 entries, or empty while each key plays itself. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "additionalProperties": false,
+  "description": "A MIDI track's MIDI Controller Layout: `layout` (`all_keys`, `black_keys_only`, `white_keys_only`, `closest_in_pitch` or `custom`) and `keys`, the custom table: for each of the 128 incoming keys the key of the tuning it plays, or null for none (left out while each key plays itself). The table is kept while another layout is chosen.",
+  "properties": {
+    "keys": {
+      "description": "The custom table, 128 entries, or empty while each key plays itself.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "type": "array"
+    },
+    "layout": {
+      "$ref": "#/$defs/LayoutKind",
+      "default": "all_keys",
+      "description": "The mapping in use."
+    }
+  },
+  "required": [
+    "layout"
   ],
   "type": "object"
 }

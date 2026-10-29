@@ -182,6 +182,7 @@ fn mpe_clap_note_expressions_pass_under_rtsan() {
             .with_role(DeviceRole::MidiEffect);
             plugin.mpe = PluginMpe {
                 on: true,
+                tuning: true,
                 settings: MpeSettings::default(),
             };
             editor

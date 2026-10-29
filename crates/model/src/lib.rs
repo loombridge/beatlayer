@@ -109,6 +109,7 @@ mod shared;
 mod spelling;
 mod track;
 mod tuning;
+mod tuning_layout;
 pub mod vst3_state;
 mod warp;
 mod warp_settings;
@@ -206,6 +207,7 @@ pub use tuning::{
     DEFAULT_REFERENCE_HZ, DEFAULT_REFERENCE_OCTAVE, MAX_CENTS, MAX_DEGREES, MAX_KEYS, Reference,
     Tuning, TuningNote, TuningRange, TuningReadout, pitch_of,
 };
+pub use tuning_layout::{LAYOUT_KEYS, LayoutKind, TuningLayout};
 pub use warp::{TRANSIENT_MATCH, TransientEdits, WarpMarker};
 pub use warp_settings::{
     BeatsSettings, BeatsUpdate, ComplexProSettings, ComplexProUpdate, DETUNE_MAX, DETUNE_MIN,

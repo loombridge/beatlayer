@@ -86,6 +86,7 @@ mod track_colours;
 mod track_menu;
 mod transformation_displays;
 mod transport;
+mod tuning_layout;
 mod tuning_section;
 mod undo_history;
 mod user_keymap;

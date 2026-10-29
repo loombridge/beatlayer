@@ -468,6 +468,10 @@ impl Shell {
                 command: id.to_owned(),
                 reason,
             })?;
+        if command == bl_engine::TransportCommand::Stop {
+            // Spec: control-bar-transport R20.
+            self.cancel_tap_start();
+        }
         Ok(Value::Null)
     }
 }

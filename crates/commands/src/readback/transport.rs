@@ -16,4 +16,5 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("transport.set_punch_in", read("transport.state", "punch_in")),
     ("transport.set_punch_out", read("transport.state", "punch_out")),
     ("transport.set_recording", read("transport.state", "recording")),
+    ("transport.tap_tempo", read("transport.state", "tap_tempo.tempo")),
 ];

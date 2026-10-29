@@ -61,6 +61,10 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_reduced_automatic_colours", read("settings.state", "theme_colors.reduced_automatic_colours")),
     ("settings.set_clip_colour", read("settings.state", "theme_colors.clip_colour")),
     ("settings.set_warp_recorded_audio", read("settings.state", "warp_recorded_audio")),
+    (
+        "settings.set_start_transport_with_tap_tempo",
+        read("settings.state", "start_transport_with_tap_tempo"),
+    ),
     ("view.set_zoom", read("view.state", "window.zoom")),
     (
         "view.toggle_full_height_browser",

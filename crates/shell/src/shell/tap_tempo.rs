@@ -80,6 +80,8 @@ impl Shell {
                 })?;
             self.dirty = true;
             self.document_changed();
+            // Spec: crash-recovery R1. The amended step is journalled too.
+            self.journal_edit(Some("Tap Tempo"));
             self.touch();
         } else {
             self.run_labelled(

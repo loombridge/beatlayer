@@ -185,7 +185,6 @@ fn messages_reach_each_midi_tracks_input_by_source_and_channel_in_the_next_block
     assert_eq!(midi.input(all).0, vec![]);
 }
 
-// Spec: midi-io R15
 #[test]
 fn the_time_base_puts_a_moment_on_the_engine_clock_with_or_without_a_midi_queue() {
     // Spec: midi-io R16, control-bar-transport R19. A moment on the main
@@ -207,6 +206,7 @@ fn the_time_base_puts_a_moment_on_the_engine_clock_with_or_without_a_midi_queue(
     assert_eq!(base.frame_at(start + after), 3 * BLOCK as u64 + 100);
 }
 
+// Spec: midi-io R15
 #[test]
 fn a_message_stamped_after_the_block_starts_waits_and_a_late_one_lands_first() {
     let mut midi = Midi::new();

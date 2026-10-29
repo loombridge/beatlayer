@@ -2,6 +2,7 @@
 
 use super::{Effect, Shell, ShellError, to_value};
 use bl_commands::NoArgs;
+use bl_core::time::{SampleRate, Ticks};
 use bl_engine::session as engine_session;
 use bl_model::LaunchSettings;
 use bl_model::SceneId;
@@ -355,19 +356,32 @@ impl Shell {
     /// The slots the engine has queued, is playing or records into, for
     /// `session.state`.
     fn session_launches(&self) -> Vec<SlotLaunch> {
+        let rate = self.audio.sample_rate().and_then(SampleRate::new);
+        let tempo = &self.editor.document().settings().tempo;
+        let now = self.arrangement.transport().position;
         self.session_states
             .iter()
-            .map(|status| SlotLaunch {
-                slot: SlotRef {
-                    track: status.track,
-                    scene: status.scene,
-                },
-                state: match status.state {
-                    bl_engine::SlotState::Queued => LaunchState::Queued,
-                    bl_engine::SlotState::Playing => LaunchState::Playing,
-                    bl_engine::SlotState::QueuedToStop => LaunchState::QueuedToStop,
-                    bl_engine::SlotState::Recording => LaunchState::Recording,
-                },
+            .map(|status| {
+                // Spec: launch-quantisation R34. The tick it launched on and
+                // the clip time it has now: its offset plus the time since.
+                let launched = rate
+                    .zip(status.started)
+                    .map(|(rate, started)| tempo.frames_to_ticks(started, rate));
+                SlotLaunch {
+                    slot: SlotRef {
+                        track: status.track,
+                        scene: status.scene,
+                    },
+                    state: match status.state {
+                        bl_engine::SlotState::Queued => LaunchState::Queued,
+                        bl_engine::SlotState::Playing => LaunchState::Playing,
+                        bl_engine::SlotState::QueuedToStop => LaunchState::QueuedToStop,
+                        bl_engine::SlotState::Recording => LaunchState::Recording,
+                    },
+                    launched,
+                    clip_time: launched
+                        .map(|launched| status.offset.ticks + (now - launched).max(Ticks::ZERO)),
+                }
             })
             .collect()
     }

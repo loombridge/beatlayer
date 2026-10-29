@@ -13,6 +13,7 @@ mod grooves;
 mod http;
 mod kit_devices;
 mod linked_tracks;
+mod midi_clock;
 mod midi_effects;
 mod midi_tools;
 mod perception;

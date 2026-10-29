@@ -694,7 +694,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.7b | done | 25 October 2026 | [#458](https://github.com/loombridge/beatlayer/pull/458); the Main Properties panel's scale controls, the piano ruler's scale keys, Highlight Scales (K), Fold to Scale (G) and the note spelling menu ([the spec](specs/scales.md) R19 to R25) |
 | 6.8 | done | 23 October 2026 | [#351](https://github.com/loombridge/beatlayer/pull/351); each track's scale-aware devices follow the scale of the clip playing on it, and Arpeggiator, Chord, Pitch, Random and Scale count in its degrees with Use Current Scale in the title bar ([the spec](specs/scales.md) R15 to R18) |
 | 6.9 | done | 23 October 2026 | [#353](https://github.com/loombridge/beatlayer/pull/353); a set holds one tuning read from a `.scl` file (or an `.ascl` file read as one), with its reference pitch, note range, per-track Bypass Tuning and Retune Set On Loading, and Drift, Simpler, Sampler and Drum Sampler play its keys within 0.1 cent at any block size; the `.ascl` extras and `tuning.save` wait on the decision about the ASCL specification |
-| 6.9b | todo |  |  |
+| 6.9b | done | 29 October 2026 | [#503](https://github.com/loombridge/beatlayer/pull/503); a plug-in in MPE Mode gets each tuned note on the nearest key with the per-note bend that tunes it (Apply Tuning to Per-Note Pitch Bend, on by default), and a track's MIDI Controller Layout maps incoming keys onto the tuning, set from its chooser or the Configure MIDI Layout dialog |
 | 6.10 | done | 25 October 2026 | [#472](https://github.com/loombridge/beatlayer/pull/472); the Tunings label lists Beatlayer's 23 script-written tunings and the places' `.scl` and `.ascl` files, the Tuning section sets the loaded tuning, the note editor and Tuner name the tuning's notes, and a tuning of other than twelve notes hides the scale controls; saving a tuning waits on the ASCL decision |
 | 6.11 | done | 24 October 2026 | [#355](https://github.com/loombridge/beatlayer/pull/355); the MIDI Tools framework: the Transform and Generate panels in the Clip View, choosing a tool per track, what a tool acts on, Auto, the Apply button and Cmd+Enter as one undo step named for the tool, re-running from the kept input as parameters move, seeds, settings saved with the set, and the tool interface the extension API reuses ([MIDI Tools](specs/midi-tools.md)) |
 | 6.12 | done | 24 October 2026 | [#398](https://github.com/loombridge/beatlayer/pull/398); the first five MIDI transformations, Arpeggiate (sharing the Arpeggiator's styles), Chop, Connect, Ornament and Quantize, with Cmd+U applying Quantize's saved settings, Cmd+Shift+U showing it, and the audio clip's Quantize panel ([MIDI transformations](specs/midi-transformations.md) R1 to R22) |
@@ -789,7 +789,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.8 | todo |  |  |
 | 7.9 | todo |  |  |
 | 7.10 | todo |  |  |
-| 7.11 | todo |  |  |
+| 7.11 | done | 29 October 2026 | [#504](https://github.com/loombridge/beatlayer/pull/504); Sync on an output sends 24-ppqn clock, Start, Stop, Continue and Song Position Pointer stamped per frame through the tempo map and placed on the output bus ahead of time, with Song or Pattern clock type, a per-output sync delay that may be negative, Resync External Hardware and Show Resync Button, the lower sync lamp, the outputs' sync rows in Settings, and `sync.state` for agents |
 | 7.12 | todo |  |  |
 | 7.13 | todo |  |  |
 | 7.14 | todo |  |  |
@@ -808,7 +808,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.26 | todo |  |  |
 | 7.27 | todo |  |  |
 | 7.28 | todo |  |  |
-| 7.29 | todo |  |  |
+| 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |
 | 7.30 | todo |  |  |
 | 7.31 | todo |  |  |
 | 7.32 | todo |  |  |

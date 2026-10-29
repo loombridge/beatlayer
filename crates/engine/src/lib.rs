@@ -122,8 +122,10 @@ pub mod session;
 pub mod sidechain;
 mod sources;
 mod state;
+mod sync_out;
 pub mod transport;
 mod tuned;
+mod tuned_notes;
 mod warped;
 mod zones;
 
@@ -159,8 +161,8 @@ pub use midi_clips::{MidiClipList, MidiClipPlayer};
 pub use mixer::METER_RELEASE_DB_PER_SECOND;
 pub use node::{
     Articulations, Block, Node, NodeConfig, NodeData, NodeEvent, NodeKey, NoteBuffer, NoteEvent,
-    NoteExpression, NoteKind, ParamValue, PluginMpeData, Segment, Segments, TransportInfo,
-    segments,
+    NoteExpression, NoteKind, ParamValue, PluginMpeData, PluginTuningData, Segment, Segments,
+    TransportInfo, segments,
 };
 pub use offline::Offline;
 pub use processor::{Carry, Output, Processor};
@@ -172,14 +174,16 @@ pub use registry::{DeviceType, NodeFactory, Registry};
 pub use render::{RenderOutput, RenderPlan};
 pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
-    SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
-    StoppedClip,
+    ClipOffset, SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState,
+    SlotStatus, StoppedClip,
 };
 pub use state::{
     ChainMeter, EngineCounters, EngineState, MeterOwner, MeterSite, Monitor, PlayedParam,
     PointReading, TrackMeter,
 };
-pub use tuned::KeyPitches;
+pub use sync_out::{MAX_SYNC_OUTPUTS, SyncOutState};
+pub use tuned::{KeyMap, KeyPitches};
+pub use tuned_notes::TunedNotes;
 
 /// An engine's fixed sizes, chosen when it's made. The audio thread works
 /// within them and allocates nothing, so each is a ceiling: what goes over

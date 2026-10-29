@@ -25,10 +25,11 @@ serde = { version = "1.0.228", default-features = false, features = ["std", "der
 serde_json = "1"
 
 [dev-dependencies]
+# The test MIDI backend the MIDI clock test plugs ports in with (WP-7.11),
+# and the Control Surfaces table's tests use (WP-7.5).
+bl-midi-io.workspace = true
 # The tests that drive the null device by hand (T199).
 bl-audio-io.workspace = true
-# The test MIDI backend, for the Control Surfaces table's tests (WP-7.5).
-bl-midi-io.workspace = true
 # The perception tests' fixtures (WP-1.16): signals with known answers,
 # written as WAV files the browser adds, and the previews read back.
 bl-analysis.workspace = true

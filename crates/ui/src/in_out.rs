@@ -9,7 +9,7 @@
 
 use bl_model::{Monitor, TrackId};
 use bl_shell::Invocation;
-use bl_shell::routing::{Chooser, Entry, InOut, MonitorSwitch, TuningBypass};
+use bl_shell::routing::{Chooser, Entry, InOut, MonitorSwitch, TuningBypass, TuningLayoutRow};
 use egui::accesskit::Role;
 use egui::{Align2, Id, Rect, Response, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 
@@ -57,6 +57,7 @@ impl InOutParts<'_> {
                 output,
                 output_channel,
                 tuning_bypass,
+                tuning_layout,
             } => {
                 if labels {
                     rows.push(Row::Label("From"));
@@ -71,6 +72,9 @@ impl InOutParts<'_> {
                 rows.push(Row::Chooser(output_channel, Slot::OutputChannel));
                 if let Some(switch) = tuning_bypass {
                     rows.push(Row::TuningBypass(switch));
+                }
+                if let Some(layout) = tuning_layout {
+                    rows.push(Row::Layout(layout));
                 }
             }
             InOut::Output {
@@ -113,6 +117,7 @@ impl InOutParts<'_> {
                 }
                 Row::Monitor(switch) => self.monitor(ui, rect, switch, events),
                 Row::TuningBypass(switch) => self.tuning_bypass(ui, rect, switch, events),
+                Row::Layout(layout) => self.tuning_layout(ui, rect, layout, events),
             }
         }
     }
@@ -320,6 +325,72 @@ impl InOutParts<'_> {
         );
     }
 
+    /// The MIDI Controller Layout (the tunings spec, R22, R23): a chooser,
+    /// disabled while Bypass Tuning is on, and the "…" button at its right,
+    /// which opens the Configure MIDI Layout dialog while the layout is
+    /// Custom.
+    fn tuning_layout(
+        &self,
+        ui: &mut Ui,
+        rect: Rect,
+        layout: &TuningLayoutRow,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let dots = Rect::from_min_max(pos2(rect.right() - 16.0, rect.top()), rect.max);
+        let chooser = Rect::from_min_max(rect.min, pos2(dots.left() - 2.0, rect.bottom()));
+        self.chooser(ui, chooser, &layout.chooser, Slot::TuningLayout, events);
+        let id = control_id(self.place, self.track, Slot::TuningLayoutConfigure, 0);
+        let enabled = layout.configure.is_some();
+        let response = ui.interact(
+            dots,
+            id,
+            if enabled {
+                Sense::click()
+            } else {
+                Sense::focusable_noninteractive()
+            },
+        );
+        self.register(ui, id, Slot::TuningLayoutConfigure);
+        if response.clicked()
+            && let Some(run) = &layout.configure
+        {
+            response.request_focus();
+            events.push(UiEvent::Invoke(run.clone()));
+        }
+        let c = &self.theme.colors;
+        let painter = ui.painter_at(dots.expand(2.0));
+        let face = if response.hovered() && enabled {
+            c.control_hover.0
+        } else {
+            c.control.0
+        };
+        painter.rect_filled(
+            dots,
+            self.theme.sizes.corner,
+            if enabled {
+                face
+            } else {
+                face.gamma_multiply(0.6)
+            },
+        );
+        painter.text(
+            dots.center(),
+            Align2::CENTER_CENTER,
+            "…",
+            self.theme.small_font(),
+            if enabled { c.text.0 } else { c.pending.0 },
+        );
+        focus_ring(&painter, self.theme, dots, &response);
+        describe(
+            ui,
+            &response,
+            Role::Button,
+            "Configure MIDI Layout",
+            "",
+            None,
+        );
+    }
+
     /// The Monitor switch: In, Auto, and Off side by side, the chosen one
     /// lit. It's one stop in the keyboard's order, as Live's Monitoring is
     /// (observed); with the focus on it, Left and Right choose the state
@@ -432,6 +503,7 @@ enum Row<'a> {
     Chooser(&'a Chooser, Slot),
     Monitor(&'a MonitorSwitch),
     TuningBypass(&'a TuningBypass),
+    Layout(&'a TuningLayoutRow),
 }
 
 /// What a Monitor button reads.

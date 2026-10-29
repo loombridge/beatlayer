@@ -1935,11 +1935,14 @@ fn library_page(
     rows.copyable_row(ui, "Path", "user-library", &path);
 }
 
-/// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
-/// output with its Track, Sync, and Remote switches, and an input its MPE
-/// switch after them, as the MIDI I/O spec R2 and R27 give it. The Tempo Follower, control surfaces, and Takeover Mode come
-/// with later packages. Sync and Remote are kept and act when sync and MIDI
-/// mapping are built (R5).
+/// Tempo & MIDI (L-SET-014): the second section's Show Resync Button, and the
+/// MIDI ports table (WP-2.2), each input and output with its Track, Sync, and
+/// Remote switches, and an input its MPE switch after them, as the MIDI I/O
+/// spec R2 and R27 give it. An output with Sync on has a disclosure triangle
+/// after its switches that opens its MIDI Clock Sync Delay, MIDI Clock Type
+/// and Hardware Resync (the MIDI clock spec, R1). The Tempo Follower, control
+/// surfaces, and Takeover Mode come with later packages. Remote is kept and
+/// acts when MIDI mapping is built (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -1947,6 +1950,21 @@ fn tempo_midi_page(
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
 ) {
+    // Spec: midi-clock R10
+    let rect = rows.row(ui, "Show Resync Button", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "show-resync-button",
+        "Show Resync Button",
+        rect,
+        shell.resync_button_shown(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            midi_ids::SET_SHOW_RESYNC_BUTTON,
+            json!({ "on": on }),
+        )));
+    }
     rows.heading(ui, "MIDI");
     control_surfaces_table(ui, shell, theme, rows, events);
     rows.note(
@@ -1960,22 +1978,38 @@ fn tempo_midi_page(
     }
     for port in ports {
         let label = format!("{}: {}", port.direction.label(), port.name);
+        let output = port.direction == midi_ids::PortDirection::Output;
         // Spec: midi-io R27. Only an input has an MPE switch, after Remote.
         let mut switches = vec![
             ("Track", port.track),
             ("Sync", port.sync),
             ("Remote", port.remote),
         ];
-        if port.direction == midi_ids::PortDirection::Input {
+        if !output {
             switches.push(("MPE", port.mpe));
         }
-        let rects = rows.row_of(ui, &label, &vec![SettingsLayout::SWITCH; switches.len()]);
-        for (rect, (name, on)) in rects.into_iter().zip(switches) {
+        // Spec: midi-clock R1. An output with Sync on has the triangle.
+        let triangle = output && port.sync;
+        let mut widths = vec![SettingsLayout::SWITCH; switches.len()];
+        if triangle {
+            widths.push(SettingsLayout::TRIANGLE);
+        }
+        let mut rects = rows.row_of(ui, &label, &widths).into_iter();
+        for ((name, on), rect) in switches.into_iter().zip(rects.by_ref()) {
             let salt = format!("midi-port-{}-{}-{name}", port.direction as u8, port.name);
             if let Some(on) = switch(ui, theme, &salt, &format!("{label} {name}"), rect, on) {
                 let mut args = json!({ "direction": port.direction, "name": port.name });
                 args[name.to_lowercase()] = json!(on);
                 events.push(UiEvent::Invoke(Invocation::new(midi_ids::SET_PORT, args)));
+            }
+        }
+        if triangle {
+            let open = match rects.next() {
+                Some(rect) => disclosure(ui, &format!("{label} Sync Options"), rect),
+                None => false,
+            };
+            if open {
+                sync_options(ui, theme, rows, events, &port);
             }
         }
         if let Some(error) = &port.error {
@@ -2113,6 +2147,118 @@ fn control_surfaces_table(
         if let Some(error) = &row.error {
             rows.note(ui, &format!("Row {n} stopped: {error}"));
         }
+    }
+}
+
+/// A disclosure triangle in `rect` that opens and closes on a click, kept in
+/// the context's memory; returns whether it is open.
+fn disclosure(ui: &mut Ui, name: &str, rect: Rect) -> bool {
+    let id = Id::new(("disclosure", name));
+    let response = ui.interact(rect, id, Sense::click());
+    let mut open = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    if response.clicked() {
+        open = !open;
+        ui.data_mut(|d| d.insert_temp(id, open));
+    }
+    let ink = ui.visuals().text_color();
+    let c = rect.center();
+    let points = if open {
+        vec![
+            c + vec2(-4.0, -2.0),
+            c + vec2(4.0, -2.0),
+            c + vec2(0.0, 3.0),
+        ]
+    } else {
+        vec![
+            c + vec2(-2.0, -4.0),
+            c + vec2(3.0, 0.0),
+            c + vec2(-2.0, 4.0),
+        ]
+    };
+    ui.painter()
+        .add(egui::Shape::convex_polygon(points, ink, egui::Stroke::NONE));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::DisclosureTriangle);
+        node.set_label(name.to_owned());
+        node.set_expanded(open);
+    });
+    open
+}
+
+/// An output's three sync options, the rows under its port row (the MIDI
+/// clock spec, R1).
+fn sync_options(
+    ui: &mut Ui,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+    port: &midi_ids::PortInfo,
+) {
+    let set = |events: &mut Vec<UiEvent>, field: &str, value: Value| {
+        let mut args = json!({ "direction": port.direction, "name": port.name });
+        args[field] = value;
+        events.push(UiEvent::Invoke(Invocation::new(midi_ids::SET_PORT, args)));
+    };
+    let name = |option: &str| format!("{}: {} {option}", port.direction.label(), port.name);
+    let delay = i32::from(port.sync_delay_ms);
+    let rect = rows.row(ui, "MIDI Clock Sync Delay", SettingsLayout::NUMBER);
+    if let Some(ms) = number_box(
+        ui,
+        theme,
+        &name("delay"),
+        &name("MIDI Clock Sync Delay"),
+        rect,
+        f64::from(delay),
+        (
+            f64::from(*midi_ids::SYNC_DELAY_RANGE.start()),
+            f64::from(*midi_ids::SYNC_DELAY_RANGE.end()),
+        ),
+        &|ms, steps| ms + f64::from(steps),
+        &format!("{delay} ms"),
+    ) {
+        set(events, "sync_delay_ms", json!(ms.round() as i16));
+    }
+    let types: Vec<Choice<midi_ids::ClockTypeChoice>> = midi_ids::ClockTypeChoice::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "MIDI Clock Type", SettingsLayout::CHOOSER);
+    if let Some(value) = chooser(
+        ui,
+        theme,
+        &name("clock type"),
+        &name("MIDI Clock Type"),
+        rect,
+        &types,
+        Some(&port.clock_type),
+        true,
+    ) {
+        set(events, "clock_type", json!(value));
+    }
+    let resyncs: Vec<Choice<midi_ids::HardwareResyncChoice>> = midi_ids::HardwareResyncChoice::ALL
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label().to_owned(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Hardware Resync", SettingsLayout::CHOOSER);
+    if let Some(value) = chooser(
+        ui,
+        theme,
+        &name("hardware resync"),
+        &name("Hardware Resync"),
+        rect,
+        &resyncs,
+        Some(&port.hardware_resync),
+        true,
+    ) {
+        set(events, "hardware_resync", json!(value));
     }
 }
 

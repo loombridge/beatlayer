@@ -66,6 +66,7 @@
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
+//! - [`sync`]: the state of MIDI clock (`sync.state`, WP-7.11).
 //! - [`midi_tools`]: the MIDI Tools' commands (`midi_tool.*`, WP-6.11): the
 //!   Transform and Generate panels, choosing a tool, its settings, applying
 //!   it and the seed.
@@ -145,6 +146,7 @@ pub mod set_exchange;
 pub mod settings;
 pub mod slice;
 pub mod stems;
+pub mod sync;
 pub mod tracks;
 pub mod transport;
 pub mod tunings;
@@ -205,5 +207,6 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     warping::register(registry)?;
     scales::register(registry)?;
     tunings::register(registry)?;
+    sync::register(registry)?;
     search::register(registry)
 }

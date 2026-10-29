@@ -758,6 +758,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // dialog's controls, which a keyboard reaches by Tab.
         ("plugin.set_mpe", Exception(DEVICE_MENU)),
         ("plugin.show_mpe_settings", Exception(DEVICE_MENU)),
+        // Apply Tuning to Per-Note Pitch Bend (WP-6.9b): the menu's last item.
+        ("plugin.set_tuning", Exception(DEVICE_MENU)),
         (
             "plugin.set_mpe_settings",
             Exception(Equivalent(

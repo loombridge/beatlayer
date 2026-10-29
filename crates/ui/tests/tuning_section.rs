@@ -727,6 +727,57 @@ fn the_status_bar_shows_a_rows_name_and_frequency() {
     assert!(!painted(&output, &line(34)));
 }
 
+// Spec: tunings R30. The key an incoming keyboard plays a row with follows
+// the track's MIDI Controller Layout, and is left out where no key does.
+#[test]
+fn the_status_bar_names_the_incoming_key_the_layout_gives() {
+    let (mut h, track) = editor_under_tuning();
+    let tuning = tuning(&h).unwrap();
+    let grid = grid(&mut h);
+    let top = h.main.clip_view().top();
+    h.shell
+        .run(
+            "track.set_tuning_layout",
+            json!({ "track": track, "layout": "black_keys_only" }),
+        )
+        .unwrap();
+    let at = |key: u8| {
+        pos2(
+            grid.right() - 20.0,
+            bl_ui::clip_view::y_of_key(grid, top, key) + bl_ui::clip_view::KEY_HEIGHT / 2.0,
+        )
+    };
+    let line = |key: u8, incoming: Option<u8>| {
+        let mut text = format!(
+            "{}, {:.2} Hz",
+            tuning.note_name(tuning.key_note(key).unwrap()),
+            tuning.key_frequency(key).unwrap(),
+        );
+        if let Some(incoming) = incoming {
+            text += &format!(", key {}", bl_midi_tools::key_name(incoming));
+        }
+        text
+    };
+    // Under Black Keys Only the black keys play the tuning's keys from 60
+    // up: the incoming key for a row is the one the layout's map gives it.
+    let layout = bl_model::TuningLayout {
+        layout: bl_model::LayoutKind::BlackKeysOnly,
+        keys: Vec::new(),
+    };
+    let map = bl_engine::KeyPitches::of(Some(&tuning))
+        .layout_map(&layout)
+        .unwrap();
+    // The lowest black key plays key 35, so no key plays 34 and the line
+    // leaves the incoming key out.
+    for key in [34, 36] {
+        let incoming = (0..128u8).find(|&k| map[usize::from(k)] == Some(key));
+        assert_eq!(incoming.is_none(), key == 34, "{key}");
+        h.frame(vec![Event::PointerMoved(at(key))]);
+        let output = h.frame(vec![Event::PointerMoved(at(key))]);
+        assert!(painted(&output, &line(key, incoming)), "{key}");
+    }
+}
+
 // Spec: tunings R16. The Clip View's scale controls — the Main Properties
 // panel's and the editor toolbar's Fold to Scale and Highlight Scale — are
 // hidden under a tuning of other than twelve notes, and back with it gone.

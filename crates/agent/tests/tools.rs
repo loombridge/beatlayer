@@ -193,6 +193,7 @@ fn discovery_lists_areas_searches_and_describes_with_schemas() {
             "track.set_info_text",
             "track.set_link_group",
             "track.set_tuning_bypass",
+            "track.set_tuning_layout",
             "track.unfreeze",
             "track.ungroup",
             "track.unlink"
@@ -757,13 +758,14 @@ fn checkpoints_save_restore_as_one_undo_step_and_ask_before_removing() {
 /// Every transport command, the engine's and the loop's, by ID.
 /// The transport's commands: the engine's playback commands, the loop's
 /// (the document's), and the shell's Return to Start and state (WP-1.18).
-const TRANSPORT_COMMANDS: [&str; 22] = [
+const TRANSPORT_COMMANDS: [&str; 23] = [
     "transport.continue",
     "transport.insert_marker_to_playhead",
     "transport.locate",
     "transport.play",
     "transport.play_from_insert_marker",
     "transport.play_stop",
+    "transport.resync_external_hardware",
     "transport.return_to_start",
     "transport.scrub",
     "transport.set_loop",

@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use bl_core::midi::{MidiOutputEvent, PortId};
+use bl_core::midi::{MidiMessage, MidiOutputEvent, PortId};
 use rtrb::{Consumer, Producer, RingBuffer};
 
 use crate::backend::{MidiError, OutputConnection};
@@ -25,7 +25,8 @@ pub struct OutputStats {
     /// Messages whose moment had gone by when the thread took them, sent at
     /// once.
     pub late: AtomicU64,
-    /// Messages for a port that isn't open, or whose Track switch is off.
+    /// Messages for a port that isn't open, or whose Track switch (for
+    /// tracks' MIDI) or Sync switch (for clock) is off.
     pub unrouted: AtomicU64,
     /// Messages a port refused.
     pub refused: AtomicU64,
@@ -65,6 +66,9 @@ struct Slot {
     port: PortId,
     /// The port's Track switch: whether tracks' MIDI reaches it.
     track: bool,
+    /// The port's Sync switch: whether clock and transport messages reach
+    /// it.
+    sync: bool,
     connection: Box<dyn OutputConnection>,
 }
 
@@ -154,6 +158,7 @@ impl OutputBus {
         owner: u64,
         port: PortId,
         track: bool,
+        sync: bool,
         connection: Box<dyn OutputConnection>,
     ) {
         let mut table = lock(&self.shared.table);
@@ -162,6 +167,7 @@ impl OutputBus {
             owner,
             port,
             track,
+            sync,
             connection,
         });
     }
@@ -170,12 +176,13 @@ impl OutputBus {
         lock(&self.shared.table).retain(|slot| !(slot.owner == owner && slot.port == port));
     }
 
-    pub(crate) fn set_track(&self, owner: u64, port: PortId, track: bool) {
+    pub(crate) fn set_switches(&self, owner: u64, port: PortId, track: bool, sync: bool) {
         if let Some(slot) = lock(&self.shared.table)
             .iter_mut()
             .find(|s| s.owner == owner && s.port == port)
         {
             slot.track = track;
+            slot.sync = sync;
         }
     }
 
@@ -229,10 +236,16 @@ impl Shared {
         let mut table = lock(&self.table);
         // Spec: external-devices R6. A note off still leaves on a port whose
         // Track switch went off, so the notes sent before it don't hang.
-        let Some(slot) = table
-            .iter_mut()
-            .find(|s| s.port == event.port && (s.track || event.message.is_note_off()))
-        else {
+        // Spec: midi-clock R3. Sync messages go by the Sync switch alone.
+        let sync = is_sync_out(&event.message);
+        let Some(slot) = table.iter_mut().find(|s| {
+            s.port == event.port
+                && if sync {
+                    s.sync
+                } else {
+                    s.track || event.message.is_note_off()
+                }
+        }) else {
             self.stats.unrouted.fetch_add(1, Relaxed);
             return;
         };
@@ -249,6 +262,12 @@ impl Shared {
             Err(_) => self.stats.refused.fetch_add(1, Relaxed),
         };
     }
+}
+
+/// Whether a message is one of the sync messages an output's Sync switch
+/// lets through: Song Position Pointer, Timing Clock, Start, Continue, Stop.
+fn is_sync_out(message: &MidiMessage) -> bool {
+    matches!(message.status(), 0xF2 | 0xF8 | 0xFA | 0xFB | 0xFC)
 }
 
 /// The output thread: it looks at the queue every millisecond while it is

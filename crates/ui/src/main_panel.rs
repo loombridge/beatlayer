@@ -680,7 +680,7 @@ pub fn show(
     let c = &theme.colors;
     let group = ui.interact(rect, main_panel_id(), Sense::hover());
     ui.ctx().accesskit_node_builder(group.id, |node| {
-        node.set_role(Role::Group);
+        node.set_role(Role::TabPanel);
         node.set_label("Main Properties".to_owned());
         node.set_bounds(accesskit::Rect {
             x0: rect.min.x.into(),

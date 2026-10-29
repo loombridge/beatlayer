@@ -515,15 +515,25 @@ impl Autosave {
         );
         let copy = discarded.join(name);
         let copied = std::fs::create_dir_all(&discarded)
-            .and_then(|()| std::fs::copy(&offer.journal, &copy))
+            // Not `std::fs::copy`: on macOS it keeps the source's modified
+            // time, and the copy is kept for seven days from now.
+            .and_then(|()| std::fs::read(&offer.journal))
+            .and_then(|bytes| std::fs::write(&copy, bytes))
             .map_err(io_error(&copy));
         if let Err(error) = copied {
             self.offers.insert(0, offer);
             return Err(error);
         }
-        let read = journal::read_file(&offer.journal, &LoadOptions::default())
-            .map_err(io_error(&offer.journal))?;
-        discard_uncommitted_file(&offer.journal, &read).map_err(io_error(&offer.journal))?;
+        let cut = journal::read_file(&offer.journal, &LoadOptions::default())
+            .and_then(|read| discard_uncommitted_file(&offer.journal, &read))
+            .map_err(io_error(&offer.journal));
+        if let Err(error) = cut {
+            // Nothing was removed from beside the set: it stays offered, and
+            // a retry makes its own copy.
+            let _ = std::fs::remove_file(&copy);
+            self.offers.insert(0, offer);
+            return Err(error);
+        }
         forget_session(&self.dir, &offer.info.id, offer.lock);
         Ok(copy)
     }
@@ -979,8 +989,16 @@ impl Writer {
             let journal = match created {
                 Ok(journal) => journal,
                 Err(_) if self.journal_is_beside_set() => {
-                    self.journal_path = self.dir.join(format!("{}.{JOURNAL_EXTENSION}", self.id));
-                    self.write_index().map_err(io::Error::other)?;
+                    let beside = std::mem::replace(
+                        &mut self.journal_path,
+                        self.dir.join(format!("{}.{JOURNAL_EXTENSION}", self.id)),
+                    );
+                    // The index still names the journal beside the set if it
+                    // can't be rewritten, so the next edit must try again.
+                    if let Err(error) = self.write_index() {
+                        self.journal_path = beside;
+                        return Err(io::Error::other(error));
+                    }
                     JournalWriter::create(self.journal_path.clone(), &self.id, self.target.follows)?
                 }
                 Err(error) => return Err(error),
@@ -1004,11 +1022,21 @@ impl Writer {
 
     /// After a save: the journal's edits are in the set file, so it goes,
     /// and the next edit starts a new one that follows the new revision.
+    /// After Save As the old set keeps the save points it already has.
     fn retire(&mut self, set: PathBuf, follows: Follows, through: u64) {
+        let save_as = self.journal_is_beside_set() && self.target.set.as_ref() != Some(&set);
         if let Some(journal) = self.journal.take() {
             let path = journal.path().to_owned();
-            drop(journal);
-            let _ = std::fs::remove_file(path);
+            let kept = if save_as {
+                // On an error, leave the file as it is.
+                journal.discard_uncommitted().unwrap_or(true)
+            } else {
+                drop(journal);
+                false
+            };
+            if !kept {
+                let _ = std::fs::remove_file(path);
+            }
         }
         tidy_beside(&self.dir, &set, follows, &self.id);
         self.target = Target {
@@ -1105,7 +1133,15 @@ fn tidy_beside(dir: &Path, set: &Path, follows: Follows, own: &str) {
         let Ok(read) = journal::read_file(&path, &options) else {
             continue;
         };
-        if read.follows != Some(follows) && read.uncommitted() == 0 && !read.newer {
+        // A save point that doesn't decode may be from a newer version too.
+        if read.follows != Some(follows)
+            && read.uncommitted() == 0
+            && !read.newer
+            && read
+                .committed
+                .as_ref()
+                .is_none_or(|value| decode_value(value, &options).is_ok())
+        {
             let _ = std::fs::remove_file(&path);
         }
     }
@@ -1618,5 +1654,164 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn save_as_leaves_the_old_sets_save_points() {
+        let dir = TestDir::new("save-as");
+        let set_path = dir.0.join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        autosave.set_continuous(true);
+        let mut editor = Project::new().editor();
+        let three = rename(&mut editor, "Three");
+        autosave.edited(&three, "Rename Track");
+        autosave.flush().unwrap();
+        assert_eq!(SetFile::open(&set_path).unwrap().1, three);
+
+        let copy_path = dir.0.join("Song v2.blset");
+        let mut copy = SetFile::new(&copy_path);
+        copy.save(&three).unwrap();
+        autosave.saved(&copy);
+        autosave.flush().unwrap();
+        // The old set still opens at its save point.
+        assert_eq!(SetFile::open(&set_path).unwrap().1, three);
+        assert_eq!(SetFile::open(&copy_path).unwrap().1, three);
+
+        // Saving the same set again still retires its journal.
+        let four = rename(&mut editor, "Four");
+        autosave.edited(&four, "Rename Track");
+        autosave.flush().unwrap();
+        copy.save(&four).unwrap();
+        autosave.saved(&copy);
+        autosave.flush().unwrap();
+        assert!(journal::journals_beside(&copy_path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_save_point_that_wont_decode_survives_a_normal_save() {
+        let dir = TestDir::new("undecodable");
+        let set_path = dir.0.join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let follows = set.follows().unwrap();
+        // A dead session's save point, as a newer Beatlayer might write it.
+        let stale = journal::beside(&set_path, "dead-1").unwrap();
+        let bad = serde_json::json!({ "format": "not a set" });
+        assert!(decode_value(&bad, &LoadOptions::default()).is_err());
+        JournalWriter::create(stale.clone(), "dead-1", Some(follows))
+            .unwrap()
+            .append(vec![Pending {
+                value: bad,
+                label: "Rename Track".to_owned(),
+                time: SystemTime::now(),
+                committed: true,
+            }])
+            .unwrap();
+
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        set.save(&Project::new()).unwrap();
+        autosave.saved(&set);
+        autosave.flush().unwrap();
+        assert!(stale.exists());
+    }
+
+    #[test]
+    fn a_discarded_copy_is_kept_a_week_from_the_discard() {
+        let dir = TestDir::new("discard-age");
+        let set_path = dir.0.join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        let mut editor = Project::new().editor();
+        autosave.edited(&rename(&mut editor, "Lost"), "Rename Track");
+        autosave.flush().unwrap();
+        drop(autosave);
+        // The crash was a month ago.
+        let month = Duration::from_secs(30 * 24 * 60 * 60);
+        let beside = journal::journals_beside(&set_path).unwrap().remove(0);
+        File::options()
+            .write(true)
+            .open(&beside)
+            .unwrap()
+            .set_modified(SystemTime::now() - month)
+            .unwrap();
+
+        let mut relaunched = Autosave::start(dir.recovery()).unwrap();
+        let copy = relaunched.discard(None).unwrap();
+        prune_discarded(&dir.recovery().join(DISCARDED), SystemTime::now());
+        assert!(copy.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_discard_leaves_the_set_offered_and_no_copy() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TestDir::new("discard-fails");
+        let folder = dir.0.join("Project");
+        let set_path = folder.join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        let mut editor = Project::new().editor();
+        autosave.edited(&rename(&mut editor, "Lost"), "Rename Track");
+        autosave.flush().unwrap();
+        drop(autosave);
+
+        let mut relaunched = Autosave::start(dir.recovery()).unwrap();
+        // The project's folder turns read-only: its journal can't be cut.
+        let writable = std::fs::metadata(&folder).unwrap().permissions();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let result = relaunched.discard(None);
+        let offered = relaunched.offers().len();
+        let copies = dir.files(&dir.recovery().join(DISCARDED));
+        std::fs::set_permissions(&folder, writable).unwrap();
+        if result.is_ok() {
+            // Running as a user who ignores permissions: nothing to test.
+            return;
+        }
+        assert_eq!(offered, 1);
+        assert_eq!(copies, Vec::<String>::new());
+        relaunched.discard(None).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_index_write_leaves_the_journal_where_the_index_says() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = TestDir::new("index-fails");
+        let set_path = dir.0.join("Project").join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        // The project's folder goes, and the recovery folder can't be
+        // written to for one edit.
+        std::fs::remove_dir_all(dir.0.join("Project")).unwrap();
+        let writable = std::fs::metadata(dir.recovery()).unwrap().permissions();
+        std::fs::set_permissions(dir.recovery(), std::fs::Permissions::from_mode(0o555)).unwrap();
+        let mut editor = Project::new().editor();
+        autosave.edited(&rename(&mut editor, "Lost"), "Rename Track");
+        let failed = autosave.flush();
+        std::fs::set_permissions(dir.recovery(), writable).unwrap();
+        if failed.is_ok() {
+            // Running as a user who ignores permissions: nothing to test.
+            return;
+        }
+        let kept = rename(&mut editor, "Kept");
+        autosave.edited(&kept, "Rename Track");
+        autosave.flush().unwrap();
+        drop(autosave);
+
+        let mut relaunched = Autosave::start(dir.recovery()).unwrap();
+        assert_eq!(relaunched.offers().len(), 1);
+        assert_eq!(relaunched.recover(None).unwrap().project, kept);
     }
 }

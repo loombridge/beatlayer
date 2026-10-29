@@ -99,6 +99,13 @@ pub fn selector(
 ) {
     let c = &theme.colors;
     let half = rect.width() / 2.0;
+    crate::clip_panels::tab_list(
+        ui,
+        Id::new("launch-panel-tabs"),
+        Rect::from_min_size(rect.min, vec2(rect.width(), SELECTOR)),
+        "Properties Panels",
+    );
+    let mut buttons = Vec::new();
     let panels = [
         (Properties::Main, "Main Properties"),
         (Properties::Launch, "Launch Properties"),
@@ -111,7 +118,7 @@ pub fn selector(
             rect.min + vec2(half * index as f32, 0.0),
             vec2(half - 2.0, SELECTOR),
         );
-        let id = Id::new(("launch-panel-selector", index));
+        let id = crate::clip_panels::left_tab_id(index);
         let response = ui.interact(button, id, Sense::click());
         let lit = panel == shown;
         ui.painter().rect_filled(
@@ -132,8 +139,9 @@ pub fn selector(
             theme.small_font(),
             if lit { c.text.0 } else { c.text_dim.0 },
         );
-        response.widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, lit, name));
+        crate::clip_panels::tab(ui, &response, name, lit);
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        buttons.push(id);
         if response.clicked() && !lit {
             events.push(UiEvent::Invoke(Invocation::new(
                 bl_shell::clip_properties_commands::SHOW_PROPERTIES,
@@ -141,6 +149,7 @@ pub fn selector(
             )));
         }
     }
+    crate::clip_panels::selector_keys(ui, &buttons);
 }
 
 /// Draws the Launch Properties panel for the Session clip `clip` in `rect`,
@@ -159,7 +168,7 @@ pub fn show(
     let c = &theme.colors;
     let group = ui.interact(rect, launch_panel_id(), Sense::hover());
     ui.ctx().accesskit_node_builder(group.id, |node| {
-        node.set_role(Role::Group);
+        node.set_role(Role::TabPanel);
         node.set_label("Launch Properties".to_owned());
         node.set_bounds(accesskit::Rect {
             x0: rect.min.x.into(),

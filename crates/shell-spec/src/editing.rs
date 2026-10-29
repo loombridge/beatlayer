@@ -70,6 +70,12 @@ pub const PASTE_TIME: &str = "arrangement.paste_time";
 pub const DUPLICATE_TIME: &str = "arrangement.duplicate_time";
 /// `arrangement.delete_time`: close a span on every track (Cmd-Shift-Delete).
 pub const DELETE_TIME: &str = "arrangement.delete_time";
+/// `arrangement.delete_fragmentary_bar_time`: delete the span of a bar a
+/// time-signature marker cuts short, from every track.
+pub const DELETE_FRAGMENTARY_BAR_TIME: &str = "arrangement.delete_fragmentary_bar_time";
+/// `arrangement.complete_fragmentary_bar`: insert the time a short bar lacks
+/// of a whole bar, on every track.
+pub const COMPLETE_FRAGMENTARY_BAR: &str = "arrangement.complete_fragmentary_bar";
 /// `arrangement.nudge`: move the selection by one grid step (Left, Right).
 pub const NUDGE: &str = "arrangement.nudge";
 /// `arrangement.loop_selection`: set the loop brace to the selection and
@@ -104,6 +110,8 @@ pub const IDS: &[&str] = &[
     PASTE_TIME,
     DUPLICATE_TIME,
     DELETE_TIME,
+    DELETE_FRAGMENTARY_BAR_TIME,
+    COMPLETE_FRAGMENTARY_BAR,
 ];
 
 /// Whether `id` is one of the Arrangement's editing commands.
@@ -276,6 +284,15 @@ pub struct TimeSpanArgs {
     /// end.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub end: Option<Position>,
+}
+
+/// Arguments of `arrangement.delete_fragmentary_bar_time` and
+/// `arrangement.complete_fragmentary_bar`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FragmentaryBarArgs {
+    /// A position inside the short bar, such as its start.
+    pub at: Position,
 }
 
 /// Arguments of `arrangement.paste_time`.
@@ -782,6 +799,29 @@ fn specs() -> Vec<CommandSpec> {
         )
         .binding("S-ARR-019")
         .args::<TimeSpanArgs>(),
+        edit(
+            DELETE_FRAGMENTARY_BAR_TIME,
+            "Delete Fragmentary Bar Time",
+            Permission::Destructive,
+            "Deletes the span of the short bar that a time-signature marker cuts, the bar \
+             that contains `at`, from every track, as `arrangement.delete_time` does, so what \
+             follows closes up and the marker after the bar falls on a bar line. Refused, \
+             changing nothing, where `at` isn't in a short bar. One undo step, `Delete \
+             Fragmentary Bar Time`. The short bar's context menu runs this. Undo restores it, \
+             but because it removes the person's work an agent asks first.",
+        )
+        .args::<FragmentaryBarArgs>(),
+        edit(
+            COMPLETE_FRAGMENTARY_BAR,
+            "Complete Fragmentary Bar",
+            Permission::Edit,
+            "Inserts, at the start of the short bar that contains `at`, the time it lacks of \
+             a whole bar in its signature, on every track as `arrangement.insert_silence` \
+             does, so the bar becomes whole and what follows moves later. Refused, changing \
+             nothing, where `at` isn't in a short bar. One undo step, `Complete Fragmentary \
+             Bar`. The short bar's context menu runs this.",
+        )
+        .args::<FragmentaryBarArgs>(),
         edit(
             NUDGE,
             "Nudge",

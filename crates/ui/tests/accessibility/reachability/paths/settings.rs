@@ -8,6 +8,43 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
     use Reason::{AgentOnly, Equivalent, LaterView, Query};
     vec![
+        // The mappings' commands (WP-7.1): the map modes' overlays and the
+        // Mapping Browser that make them by a click and a key come with
+        // WP-7.3; until then agents reach them.
+        ("remote.mappings", Exception(Query)),
+        (
+            "remote.map",
+            Exception(LaterView("the map modes' overlays (WP-7.3)")),
+        ),
+        (
+            "remote.unmap",
+            Exception(LaterView("the Mapping Browser's Delete (WP-7.3)")),
+        ),
+        (
+            "remote.set_range",
+            Exception(LaterView("the Mapping Browser's Min and Max (WP-7.3)")),
+        ),
+        (
+            "remote.invert_range",
+            Exception(LaterView("the Mapping Browser's Invert Range (WP-7.3)")),
+        ),
+        (
+            "remote.set_mode",
+            Exception(LaterView("the Status Bar's mode chooser (WP-7.3)")),
+        ),
+        (
+            "remote.input",
+            Exception(Equivalent(
+                "a mapped key, which the window sends as this command on its press and \
+                 release (the remote mapping spec, R13)",
+            )),
+        ),
+        (
+            "song.set_remote_mappings",
+            Exception(AgentOnly(
+                "replaces the whole list; the remote.* commands change one",
+            )),
+        ),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (
@@ -46,11 +83,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "assistant.set_base_url",
-            settings("agents", nothing, "Assistant Base URL", Key::K),
+            Exception(Equivalent(
+                "the Base URL field, typed into and then committed with Enter or by leaving \
+                 it: it sends its text once, so a typed space isn't trimmed away",
+            )),
         ),
         (
             "assistant.set_model",
-            settings("agents", nothing, "Assistant Model", Key::K),
+            Exception(Equivalent(
+                "the Model field, typed into and then committed with Enter or by leaving \
+                 it: it sends its text once, so a typed space isn't trimmed away",
+            )),
         ),
         (
             "assistant.set_key",

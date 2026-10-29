@@ -83,6 +83,11 @@ fn buttons(audio: bool) -> &'static [(Panel, &'static str)] {
     }
 }
 
+/// How many buttons the right group's selector row has.
+pub(crate) fn button_count(audio: bool) -> usize {
+    buttons(audio).len()
+}
+
 /// The right group's panel selector row (L-CLIP-003): a button for each
 /// panel, the shown one lit. Clicking one runs `clip_view.show_panel`.
 pub fn selector(
@@ -96,12 +101,14 @@ pub fn selector(
     let c = &theme.colors;
     let row = buttons(audio);
     let each = rect.width() / row.len() as f32;
+    crate::clip_panels::tab_list(ui, Id::new(("clip-tool-tabs", audio)), rect, "Tool Panels");
+    let mut ids = Vec::new();
     for (index, (panel, label)) in row.iter().enumerate() {
         let button = Rect::from_min_size(
             rect.min + vec2(each * index as f32, 0.0),
             vec2(each - 2.0, SELECTOR),
         );
-        let id = Id::new(("clip-view-panel-selector", audio, index));
+        let id = crate::clip_panels::right_tab_id(audio, index);
         let response = ui.interact(button, id, Sense::click());
         let is_shown = *panel == shown;
         ui.painter().rect_filled(
@@ -122,9 +129,7 @@ pub fn selector(
             theme.small_font(),
             if is_shown { c.text.0 } else { c.text_dim.0 },
         );
-        let name = panel_name(*panel, audio);
-        response
-            .widget_info(|| WidgetInfo::selected(WidgetType::RadioButton, true, is_shown, name));
+        crate::clip_panels::tab(ui, &response, panel_name(*panel, audio), is_shown);
         if response.clicked() && !is_shown {
             events.push(UiEvent::Invoke(Invocation::new(
                 bl_shell::midi_tool_commands::SHOW_PANEL,
@@ -132,7 +137,9 @@ pub fn selector(
             )));
         }
         crate::focus::register(ui.ctx(), id, Area::Detail, None);
+        ids.push(id);
     }
+    crate::clip_panels::selector_keys(ui, &ids);
 }
 
 /// What the Info View shows for the control the pointer is over, put there
@@ -179,7 +186,7 @@ pub fn show(
     ui.painter().rect_filled(rect, 0.0, c.panel.0);
     let group = ui.interact(rect, group_id(shown), Sense::hover());
     ui.ctx().accesskit_node_builder(group.id, |node| {
-        node.set_role(Role::Group);
+        node.set_role(Role::TabPanel);
         node.set_label(panel_name(shown, false).to_owned());
         node.set_bounds(accesskit::Rect {
             x0: rect.min.x.into(),
@@ -677,7 +684,7 @@ pub fn show_audio_transform(
 ) {
     let group = ui.interact(rect, group_id(Panel::Transform), Sense::hover());
     ui.ctx().accesskit_node_builder(group.id, |node| {
-        node.set_role(Role::Group);
+        node.set_role(Role::TabPanel);
         node.set_label(panel_name(Panel::Transform, true).to_owned());
     });
     let Some(tool) = bl_midi_tools::Registry::native().find("quantize") else {

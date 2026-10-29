@@ -682,7 +682,7 @@ impl SetStore for ProjectFiles {
                 .map_err(|e| format!("couldn't create {}: {e}", parent.display()))?;
         }
         let mut media = self.media.clone();
-        let mut warnings = self.add_media_to(&mut media, path);
+        let mut warnings = Vec::new();
         // The copy lives in a folder of its own, so its media paths are
         // re-pointed from the open set's folder, as Save Set As does.
         if let Some(from) = self.folder()
@@ -693,6 +693,9 @@ impl SetStore for ProjectFiles {
         {
             warnings.push(note);
         }
+        // The files the set gained are listed from the copy's folder after
+        // that, since the table holds only paths from the open set's.
+        warnings.extend(self.add_media_to(&mut media, path));
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
             .with_rack_views(&self.rack_views)

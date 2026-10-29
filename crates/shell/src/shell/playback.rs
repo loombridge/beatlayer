@@ -60,6 +60,7 @@ impl Shell {
             changed |= self.refresh_midi();
         }
         changed |= self.learn_midi();
+        changed |= self.poll_remote();
         self.expire_previews();
         changed |= self.track_midi_activity();
         // Plug-ins' main-thread work (WP-2.6 to WP-2.8), and the changes
@@ -78,11 +79,13 @@ impl Shell {
         }
         // A plug-in that changed its latency: the engine recompiles with
         // it, so delay compensation follows it (WP-2.7, WP-2.11).
+        let native = self.audio.latency_changes();
         for (device, frames) in self
             .vst3
             .take_latency_changes()
             .into_iter()
             .chain(self.lv2.take_latency_changes())
+            .chain(native)
         {
             self.audio.set_device_latency(device, frames);
             changed = true;
@@ -417,7 +420,16 @@ impl Shell {
             if self.session_run.is_some() {
                 return Err("a Session recording is under way; end it first".to_owned());
             }
-            if let Err(reason) = self.begin_recording() {
+            // A take is already under way, or its writer hasn't finished:
+            // a second plan would orphan the first's file and start its
+            // clips mid-take. The engine ignores record-on while it records.
+            if self.recording.is_some() {
+                if !self.audio.transport_state().recording {
+                    return Err(
+                        "a recording is already under way or still being finished".to_owned()
+                    );
+                }
+            } else if let Err(reason) = self.begin_recording() {
                 self.set_message(reason, true);
             }
         }

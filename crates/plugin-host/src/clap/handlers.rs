@@ -48,7 +48,7 @@ pub(crate) struct Shared {
     pub(crate) restart: AtomicBool,
     /// It asked the main thread to call it back.
     pub(crate) callback: AtomicBool,
-    /// It asked for a parameter flush while not processing.
+    /// It asked for a parameter flush while not processing; `pump` flushes it.
     pub(crate) flush: AtomicBool,
     /// Its editor's window closed itself.
     pub(crate) editor_closed: AtomicBool,

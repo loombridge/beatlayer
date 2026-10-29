@@ -709,11 +709,12 @@ impl Agent {
         }
         for message in std::mem::take(&mut program.state.outbox) {
             // The engine ran while the call was handled; if it has just
-            // stopped, there's nothing to send to. A transport command goes
-            // through the shell, so recording is set up as the UI's is.
+            // stopped, there's nothing to send to. A transport or launch
+            // command goes through the shell, so recording is set up and the
+            // selection follows a launch as the UI's do.
             let _ = match message {
                 EngineMessage::Transport(command) => shell.send_transport(command),
-                EngineMessage::Session(command) => shell.audio_mut().send_session(command),
+                EngineMessage::Session(command) => shell.send_session(command),
                 EngineMessage::Schedule(command) => shell.audio_mut().schedule(command),
                 EngineMessage::Cancel(id) => shell.audio_mut().cancel(id),
             };

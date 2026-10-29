@@ -3,6 +3,7 @@
 
 use bl_commands::Context;
 use bl_shell::midi_io_commands as midi_ids;
+use bl_shell::remote_commands as remote_ids;
 use bl_shell::{Invocation, Shell};
 use egui::{Event, Key, RawInput};
 use serde_json::{Value, json};
@@ -33,6 +34,11 @@ pub struct KeyDispatcher {
     /// The computer MIDI keyboard's note keys that are down, until released
     /// (the MIDI I/O spec, R21).
     notes: Vec<Key>,
+    /// The keys a key mapping took, until released (remote mapping R13).
+    mapped: Vec<Key>,
+    /// Whether Space goes to the focused control and not to the keymap: a
+    /// panel selector button's tab takes it (the detail views spec, R24).
+    leave_space: bool,
 }
 
 /// What a letter does while the computer MIDI keyboard is on: A W S E D F T G
@@ -64,7 +70,14 @@ impl KeyDispatcher {
             platform,
             held: Vec::new(),
             notes: Vec::new(),
+            mapped: Vec::new(),
+            leave_space: false,
         }
+    }
+
+    /// Says whether the next frame's Space is left to the focused control.
+    pub fn leave_space_to_focus(&mut self, on: bool) {
+        self.leave_space = on;
     }
 
     /// Takes the key presses the keymap binds out of `input` and returns
@@ -170,6 +183,32 @@ impl KeyDispatcher {
                     None => {}
                 }
             }
+            // Spec: remote-mapping R13. A key mapping acts on the key's press
+            // and release, and beats the key's shortcut; Cmd, Ctrl and
+            // Option keep their shortcuts, and a text field keeps its keys.
+            let mapped = |pressed| {
+                Invocation::new(
+                    remote_ids::INPUT,
+                    json!({ "key": key.name(), "pressed": pressed }),
+                )
+            };
+            if let Some(index) = self.mapped.iter().position(|k| k == key) {
+                if !*pressed {
+                    self.mapped.remove(index);
+                    invocations.push(mapped(false));
+                }
+                return false;
+            }
+            if *pressed
+                && !*repeat
+                && !text_focused
+                && !(modifiers.alt || modifiers.ctrl || modifiers.command)
+                && shell.key_is_mapped(key.name())
+            {
+                self.mapped.push(*key);
+                invocations.push(mapped(true));
+                return false;
+            }
             if let Some(index) = self.held.iter().position(|held| held.key == *key) {
                 if *pressed {
                     // Auto-repeat of a key that ran a command runs nothing more.
@@ -184,6 +223,9 @@ impl KeyDispatcher {
                 return false;
             }
             if !*pressed || *repeat {
+                return true;
+            }
+            if self.leave_space && *key == Key::Space && *modifiers == egui::Modifiers::NONE {
                 return true;
             }
             let mods = mods_from_egui(*modifiers, self.platform);

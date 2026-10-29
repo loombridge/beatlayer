@@ -61,6 +61,7 @@ The commands, by the part of their ID before its first dot:
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
 - [`rack`](rack.md)
+- [`remote`](remote.md)
 - [`routing`](routing.md)
 - [`scene`](scene.md)
 - [`search`](search.md)
@@ -952,6 +953,7 @@ What the Arrangement View shows: every view command returns it.
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
+| `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane. |
 
@@ -1071,6 +1073,17 @@ What the Arrangement View shows: every view command returns it.
         "$ref": "#/$defs/TakeLaneId"
       },
       "type": "array"
+    },
+    "selected_time_signature": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature."
     },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
@@ -5616,6 +5629,46 @@ Notes of one clip among several shown (Spec: multi-clip-editing R18).
 
 </details>
 
+### `ClipPanels`
+
+How the Clip View's panels are arranged and whether they're folded: the result of `clip_view.arrange_panels` and `clip_view.fold_panels`, and `view.state`'s `clip_view.panels`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `arrangement` | [`PanelArrangement`](#panelarrangement) | yes | The arrangement chosen: a preference, kept between launches. |
+| `in_use` | [`PanelArrangement`](#panelarrangement) | yes | The arrangement in use: `arrangement` with Automatically resolved by the Clip View's height, never `automatic`. |
+| `folded` | boolean | yes | Whether the panels are folded: view state for the session. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the Clip View's panels are arranged and whether they're folded: the result of `clip_view.arrange_panels` and `clip_view.fold_panels`, and `view.state`'s `clip_view.panels`.",
+  "properties": {
+    "arrangement": {
+      "$ref": "#/$defs/PanelArrangement",
+      "description": "The arrangement chosen: a preference, kept between launches."
+    },
+    "folded": {
+      "description": "Whether the panels are folded: view state for the session.",
+      "type": "boolean"
+    },
+    "in_use": {
+      "$ref": "#/$defs/PanelArrangement",
+      "description": "The arrangement in use: `arrangement` with Automatically resolved by the Clip View's height, never `automatic`."
+    }
+  },
+  "required": [
+    "arrangement",
+    "in_use",
+    "folded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ClipParam`
 
 A sound setting of an audio clip: `gain` (linear, 1 is 0 dB), `transpose` (semitones), `sample_offset` (Beats only, in sixteenth notes, an envelope only), `detune` (cents), `high_quality` (the HiQ switch), `preserve`, `transient_loop_mode` and `transient_envelope` (Beats), `tones_grain_size`, `texture_grain_size` and `texture_flux`, `formants` and `complex_pro_envelope` (Complex Pro).
@@ -5874,6 +5927,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
 | `highlight_scales` | boolean | yes | Whether Highlight Scales is on (K): one switch for every clip's editor, kept between launches. |
 | `note_spelling` | [`NoteSpelling`](#notespelling) | yes | How the note editor spells keys: one choice for every editor, kept between launches. |
 | `tab` | [`ClipTab`](#cliptab) | yes | The tab the Clip View shows. |
+| `panels` | [`ClipPanels`](#clippanels) | yes | How the panels are arranged, and whether they're folded (detail views R26). |
 | `preview` | boolean | yes | Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches. |
 | `envelope` | [`AutomationTarget`](#automationtarget) or null | yes | The parameter whose envelope the Envelopes tab shows; `null` when it shows none. |
 | `filters` | [`NoteFilters`](#notefilters) | yes | Find and Select Notes: whether the filter bar shows, and every filter's settings, with which are on. |
@@ -6044,6 +6098,10 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
       "$ref": "#/$defs/NoteSpelling",
       "description": "How the note editor spells keys: one choice for every editor, kept between launches."
     },
+    "panels": {
+      "$ref": "#/$defs/ClipPanels",
+      "description": "How the panels are arranged, and whether they're folded (detail views R26)."
+    },
     "preview": {
       "description": "Whether the Preview switch is on (Spec: step-recording R1): one switch for every MIDI clip's editor, kept between launches.",
       "type": "boolean"
@@ -6150,6 +6208,7 @@ What the Clip View shows: which clip it is editing, the notes selected in it, it
     "highlight_scales",
     "note_spelling",
     "tab",
+    "panels",
     "preview",
     "envelope",
     "filters",
@@ -7054,6 +7113,116 @@ A band of controls, of a fixed size.
     "controls"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ControlKind`
+
+A control's kind: `slot`, `switch`, `ranged_switch` (a track activator or a device's on/off switch, on for controller values from Min to Max), `button`, `radio` (with its number of `options`), or `continuous`.
+
+One of:
+
+- an object with `type` = `"slot"`: A Session slot: a press and a release launch it.
+- an object with `type` = `"switch"`: A switch: on or off.
+- an object with `type` = `"ranged_switch"`: A switch that is on for controller values from Min to Max.
+- an object with `type` = `"button"`: A button: pressed, and released.
+- an object with `type` = `"radio"`, `options` (integer, at least 0): A radio button with this many options, in order.
+- an object with `type` = `"continuous"`: A continuous control.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control's kind: `slot`, `switch`, `ranged_switch` (a track activator or a device's on/off switch, on for controller values from Min to Max), `button`, `radio` (with its number of `options`), or `continuous`.",
+  "oneOf": [
+    {
+      "description": "A Session slot: a press and a release launch it.",
+      "properties": {
+        "type": {
+          "const": "slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A switch: on or off.",
+      "properties": {
+        "type": {
+          "const": "switch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A switch that is on for controller values from Min to Max.",
+      "properties": {
+        "type": {
+          "const": "ranged_switch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A button: pressed, and released.",
+      "properties": {
+        "type": {
+          "const": "button",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A radio button with this many options, in order.",
+      "properties": {
+        "options": {
+          "description": "How many options it has, at least 2.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "radio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "options"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A continuous control.",
+      "properties": {
+        "type": {
+          "const": "continuous",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 
@@ -8960,6 +9129,7 @@ What `device_view.state` returns.
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
 | `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
 | `meters` | array of [`ChainMeterValue`](#chainmetervalue) | yes | The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters. |
+| `scroll` | number | yes | How far the chain is scrolled sideways, in points; the view keeps it within the chain's width. |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 | `map_mode` | [`DeviceId`](#deviceid) or null | no | The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list. |
 
@@ -9034,6 +9204,12 @@ What `device_view.state` returns.
       },
       "type": "array"
     },
+    "scroll": {
+      "default": 0.0,
+      "description": "How far the chain is scrolled sideways, in points; the view keeps it within the chain's width.",
+      "format": "float",
+      "type": "number"
+    },
     "selected": {
       "anyOf": [
         {
@@ -9077,7 +9253,8 @@ What `device_view.state` returns.
     "can_paste",
     "can_paste_chain",
     "device_list",
-    "meters"
+    "meters",
+    "scroll"
   ],
   "type": "object"
 }
@@ -13984,6 +14161,34 @@ One of:
 
 </details>
 
+### `InputResult`
+
+What `remote.input` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `taken` | boolean | yes | Whether a mapping took the message or the key. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.input` returns.",
+  "properties": {
+    "taken": {
+      "description": "Whether a mapping took the message or the key.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "taken"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `InstalledPack`
 
 What `set.install_pack` returns.
@@ -14235,6 +14440,7 @@ One of:
 - `"audio"`: An audio file Beatlayer can open.
 - `"sfz"`: An SFZ multisample instrument, which imports as a multisampler (WP-5.14).
 - `"set"`: A Beatlayer set.
+- `"daw_project"`: A DAWproject file (`.dawproject`), which imports as a new set (WP-6.37b; the DAWproject spec, R84).
 - `"preset"`: A Beatlayer device preset, which loads into the device being hot-swapped (WP-2.4).
 - `"chord_bank"`: A Stacks chord bank (`.blstacks`), which loads into Stacks (WP-6.14b).
 - `"tuning"`: A tuning (`.scl` or `.ascl`), which loads as the set's tuning, or one of Beatlayer's own, whose path is `tunings:/` and its name (WP-6.10).
@@ -14274,6 +14480,11 @@ One of:
     {
       "const": "set",
       "description": "A Beatlayer set.",
+      "type": "string"
+    },
+    {
+      "const": "daw_project",
+      "description": "A DAWproject file (`.dawproject`), which imports as a new set (WP-6.37b; the DAWproject spec, R84).",
       "type": "string"
     },
     {
@@ -17131,6 +17342,78 @@ One slot's mapping: the parameter it modulates.
 
 </details>
 
+### `MappingInfo`
+
+One mapping as `remote.mappings` reports it (R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`RemoteSource`](#remotesource) | yes | Its source; with a note range, the range's root. |
+| `target` | [`RemoteTarget`](#remotetarget) | yes | The control, named by IDs. |
+| `path` | string | yes | The path to the control: its track and device, or its view. |
+| `name` | string | yes | The control's name. |
+| `kind` | [`ControlKind`](#controlkind) | yes | The control's kind. |
+| `min` | number | yes | The bottom of the range, in the control's own units. |
+| `max` | number | yes | The top of the range. |
+| `mode` | [`RemoteMode`](#remotemode) | yes | How a controller's values are read. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mapping as `remote.mappings` reports it (R14).",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/ControlKind",
+      "description": "The control's kind."
+    },
+    "max": {
+      "description": "The top of the range.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The bottom of the range, in the control's own units.",
+      "format": "double",
+      "type": "number"
+    },
+    "mode": {
+      "$ref": "#/$defs/RemoteMode",
+      "description": "How a controller's values are read."
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The path to the control: its track and device, or its view.",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/RemoteSource",
+      "description": "Its source; with a note range, the range's root."
+    },
+    "target": {
+      "$ref": "#/$defs/RemoteTarget",
+      "description": "The control, named by IDs."
+    }
+  },
+  "required": [
+    "source",
+    "target",
+    "path",
+    "name",
+    "kind",
+    "min",
+    "max",
+    "mode"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `MappingRow`
 
 One slot's mapping as its panel names it.
@@ -17167,6 +17450,45 @@ One slot's mapping as its panel names it.
     "slot",
     "target",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `MappingsResult`
+
+What `remote.mappings` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mappings` | array of [`MappingInfo`](#mappinginfo) | yes | Every mapping, MIDI then keys, in the order the set keeps them. |
+| `dropped_on_load` | integer, at least 0 | yes | How many mappings the set's load dropped because their control isn't in the set. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.mappings` returns.",
+  "properties": {
+    "dropped_on_load": {
+      "description": "How many mappings the set's load dropped because their control isn't in the set.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "mappings": {
+      "description": "Every mapping, MIDI then keys, in the order the set keeps them.",
+      "items": {
+        "$ref": "#/$defs/MappingInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "mappings",
+    "dropped_on_load"
   ],
   "type": "object"
 }
@@ -20571,6 +20893,43 @@ One of:
 
 </details>
 
+### `PanelArrangement`
+
+How the Clip View arranges its panels (detail views R19, R20).
+
+One of:
+
+- `"automatic"`: Vertically while the Clip View is at least [`VERTICAL_FROM`] tall, and horizontally while it's shorter.
+- `"horizontal"`: Side by side, the right group beside the left.
+- `"vertical"`: Stacked, the right group under the left.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the Clip View arranges its panels (detail views R19, R20).",
+  "oneOf": [
+    {
+      "const": "automatic",
+      "description": "Vertically while the Clip View is at least [`VERTICAL_FROM`] tall, and horizontally while it's shorter.",
+      "type": "string"
+    },
+    {
+      "const": "horizontal",
+      "description": "Side by side, the right group beside the left.",
+      "type": "string"
+    },
+    {
+      "const": "vertical",
+      "description": "Stacked, the right group under the left.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ParamDescriptor`
 
 What one of a device's parameters is.
@@ -21861,7 +22220,7 @@ One MIDI port as the Settings window's table shows it.
 | `name` | string | yes | The name the MIDI system gives it. |
 | `track` | boolean | yes | Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI. |
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
-| `remote` | boolean | yes | Remote: an input controls Beatlayer through MIDI mapping; an output sends feedback. Kept now, acted on when MIDI mapping is built. |
+| `remote` | boolean | yes | Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built. |
 | `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
@@ -21902,7 +22261,7 @@ One MIDI port as the Settings window's table shows it.
       "type": "boolean"
     },
     "remote": {
-      "description": "Remote: an input controls Beatlayer through MIDI mapping; an output sends feedback. Kept now, acted on when MIDI mapping is built.",
+      "description": "Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built.",
       "type": "boolean"
     },
     "sync": {
@@ -23489,6 +23848,49 @@ A tuning's reference pitch (the tunings spec, R7): a note, and the frequency in 
 
 </details>
 
+### `RelativeEncoding`
+
+The four relative encodings an encoder sends (R2).
+
+One of:
+
+- `"signed_bit"`: Signed Bit.
+- `"signed_bit2"`: Signed Bit 2.
+- `"bin_offset"`: Bin Offset.
+- `"twos_complement"`: Twos Complement.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The four relative encodings an encoder sends (R2).",
+  "oneOf": [
+    {
+      "const": "signed_bit",
+      "description": "Signed Bit.",
+      "type": "string"
+    },
+    {
+      "const": "signed_bit2",
+      "description": "Signed Bit 2.",
+      "type": "string"
+    },
+    {
+      "const": "bin_offset",
+      "description": "Bin Offset.",
+      "type": "string"
+    },
+    {
+      "const": "twos_complement",
+      "description": "Twos Complement.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `ReleaseMode`
 
 What a note's end does while a sustain loop is on (R18).
@@ -23525,6 +23927,618 @@ One of:
       "const": "back_and_forth",
       "description": "As `loop`, back and forth.",
       "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RemoteMapping`
+
+One mapping: a source drives a control over a range (R1 to R4).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`RemoteSource`](#remotesource) | yes | Where the messages come from. |
+| `target` | [`RemoteTarget`](#remotetarget) | yes | The control they drive. |
+| `kind` | [`ControlKind`](#controlkind) | yes | What kind of control it is, which decides what a message does. |
+| `min` | number | yes | The bottom of the range, in the control's own units: a continuous control's value, a radio button's first option, or a ranged switch's controller value (R4). |
+| `max` | number | yes | The top of the range, in the same units. |
+| `mode` | [`RemoteMode`](#remotemode) | no | How a controller's values are read. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mapping: a source drives a control over a range (R1 to R4).",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/ControlKind",
+      "description": "What kind of control it is, which decides what a message does."
+    },
+    "max": {
+      "description": "The top of the range, in the same units.",
+      "format": "double",
+      "type": "number"
+    },
+    "min": {
+      "description": "The bottom of the range, in the control's own units: a continuous control's value, a radio button's first option, or a ranged switch's controller value (R4).",
+      "format": "double",
+      "type": "number"
+    },
+    "mode": {
+      "$ref": "#/$defs/RemoteMode",
+      "default": {
+        "type": "absolute"
+      },
+      "description": "How a controller's values are read."
+    },
+    "source": {
+      "$ref": "#/$defs/RemoteSource",
+      "description": "Where the messages come from."
+    },
+    "target": {
+      "$ref": "#/$defs/RemoteTarget",
+      "description": "The control they drive."
+    }
+  },
+  "required": [
+    "source",
+    "target",
+    "kind",
+    "min",
+    "max"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RemoteMode`
+
+How a controller's values are read: `absolute`, `absolute14` for a 14-bit source, or `relative` with its `encoding` (`signed_bit`, `signed_bit2`, `bin_offset` or `twos_complement`) and whether it is `accelerated`.
+
+One of:
+
+- an object with `type` = `"absolute"`: The value is a position: 0 to 127.
+- an object with `type` = `"absolute14"`: The value is a position: 0 to 16,383.
+- an object with `type` = `"relative"`, `encoding` ([`RelativeEncoding`](#relativeencoding)), `accelerated` (boolean): The value is an increment or a decrement.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a controller's values are read: `absolute`, `absolute14` for a 14-bit source, or `relative` with its `encoding` (`signed_bit`, `signed_bit2`, `bin_offset` or `twos_complement`) and whether it is `accelerated`.",
+  "oneOf": [
+    {
+      "description": "The value is a position: 0 to 127.",
+      "properties": {
+        "type": {
+          "const": "absolute",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The value is a position: 0 to 16,383.",
+      "properties": {
+        "type": {
+          "const": "absolute14",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The value is an increment or a decrement.",
+      "properties": {
+        "accelerated": {
+          "description": "Whether a larger value moves further; otherwise it is linear.",
+          "type": "boolean"
+        },
+        "encoding": {
+          "$ref": "#/$defs/RelativeEncoding",
+          "description": "The encoding."
+        },
+        "type": {
+          "const": "relative",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "encoding",
+        "accelerated"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RemoteSource`
+
+A mapping's source: `note` (a `channel` 1 to 16 and a `key` 0 to 127), `note_range` (a `channel`, a `low` and a `high` key, and for a slot a `root` key between them), `cc` (a `channel` and a `controller` 0 to 127), `cc14` (a `channel` and a `controller` 0 to 31, whose partner 32 higher carries the low seven bits), `pitch_bend` (a `channel`), or `key` (one key of the computer keyboard, named as the keymap names it).
+
+One of:
+
+- an object with `type` = `"note"`, `channel` (integer from 0 to 255), `key` (integer from 0 to 255): One key of one channel.
+- an object with `type` = `"note_range"`, `channel` (integer from 0 to 255), `low` (integer from 0 to 255), `high` (integer from 0 to 255), `root` (integer or null): A range of keys of one channel.
+- an object with `type` = `"cc"`, `channel` (integer from 0 to 255), `controller` (integer from 0 to 255): A control change.
+- an object with `type` = `"cc14"`, `channel` (integer from 0 to 255), `controller` (integer from 0 to 255): A 14-bit control change: the controller carries the high seven bits and the one 32 higher the low seven.
+- an object with `type` = `"pitch_bend"`, `channel` (integer from 0 to 255): Pitch bend.
+- an object with `type` = `"key"`, `key` (string): A key of the computer keyboard.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A mapping's source: `note` (a `channel` 1 to 16 and a `key` 0 to 127), `note_range` (a `channel`, a `low` and a `high` key, and for a slot a `root` key between them), `cc` (a `channel` and a `controller` 0 to 127), `cc14` (a `channel` and a `controller` 0 to 31, whose partner 32 higher carries the low seven bits), `pitch_bend` (a `channel`), or `key` (one key of the computer keyboard, named as the keymap names it).",
+  "oneOf": [
+    {
+      "description": "One key of one channel.",
+      "properties": {
+        "channel": {
+          "description": "The channel, 1 to 16.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "description": "The key, 0 to 127.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "channel",
+        "key"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A range of keys of one channel.",
+      "properties": {
+        "channel": {
+          "description": "The channel, 1 to 16.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "high": {
+          "description": "The highest key.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "low": {
+          "description": "The lowest key.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "root": {
+          "description": "For a slot, the key that plays its clip as it is.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "type": {
+          "const": "note_range",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "channel",
+        "low",
+        "high"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control change.",
+      "properties": {
+        "channel": {
+          "description": "The channel, 1 to 16.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "controller": {
+          "description": "The controller, 0 to 127.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "cc",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "channel",
+        "controller"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A 14-bit control change: the controller carries the high seven bits and the one 32 higher the low seven.",
+      "properties": {
+        "channel": {
+          "description": "The channel, 1 to 16.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "controller": {
+          "description": "The controller, 0 to 31.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "cc14",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "channel",
+        "controller"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Pitch bend.",
+      "properties": {
+        "channel": {
+          "description": "The channel, 1 to 16.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": {
+          "const": "pitch_bend",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "channel"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A key of the computer keyboard.",
+      "properties": {
+        "key": {
+          "description": "Its name, as the keymap names keys.",
+          "type": "string"
+        },
+        "type": {
+          "const": "key",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "key"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RemoteTarget`
+
+A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer `param`).
+
+One of:
+
+- an object with `type` = `"slot"`, `track` ([`TrackId`](#trackid)), `scene` ([`SceneId`](#sceneid)): A Session slot of a track at a scene, not its clip.
+- an object with `type` = `"scene_launch"`, `scene` ([`SceneId`](#sceneid)): A scene's launch button.
+- an object with `type` = `"track_stop"`, `track` ([`TrackId`](#trackid)): A track's stop button.
+- an object with `type` = `"stop_all"`: Stop All Clips.
+- an object with `type` = `"mixer"`, `track` ([`TrackId`](#trackid)), `param` ([`MixerParam`](#mixerparam)): A control of a track's mixer.
+- an object with `type` = `"send"`, `track` ([`TrackId`](#trackid)), `to` ([`TrackId`](#trackid)): A track's send to a return track.
+- an object with `type` = `"solo"`, `track` ([`TrackId`](#trackid)): A track's Solo switch.
+- an object with `type` = `"arm"`, `track` ([`TrackId`](#trackid)): A track's Arm button.
+- an object with `type` = `"crossfade_assign"`, `track` ([`TrackId`](#trackid)): A track's crossfade assignment: A, off, B.
+- an object with `type` = `"crossfader"`: The crossfader.
+- an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device, whose kind its description gives.
+- an object with `type` = `"device_on"`, `device` ([`DeviceId`](#deviceid)): A device's on/off switch.
+- an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer `param`).",
+  "oneOf": [
+    {
+      "description": "A Session slot of a track at a scene, not its clip.",
+      "properties": {
+        "scene": {
+          "$ref": "#/$defs/SceneId",
+          "description": "The scene."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "scene"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A scene's launch button.",
+      "properties": {
+        "scene": {
+          "$ref": "#/$defs/SceneId",
+          "description": "The scene."
+        },
+        "type": {
+          "const": "scene_launch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "scene"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's stop button.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "track_stop",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "Stop All Clips.",
+      "properties": {
+        "type": {
+          "const": "stop_all",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a track's mixer.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "mixer",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's send to a return track.",
+      "properties": {
+        "to": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The return track."
+        },
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "send",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track",
+        "to"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's Solo switch.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "solo",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's Arm button.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "arm",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's crossfade assignment: A, off, B.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "crossfade_assign",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The crossfader.",
+      "properties": {
+        "type": {
+          "const": "crossfader",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A parameter of a device, whose kind its description gives.",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceId",
+          "description": "The device."
+        },
+        "param": {
+          "$ref": "#/$defs/ParamId",
+          "description": "Its parameter."
+        },
+        "type": {
+          "const": "device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "device",
+        "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A device's on/off switch.",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceId",
+          "description": "The device."
+        },
+        "type": {
+          "const": "device_on",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "device"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a rack chain's mixer.",
+      "properties": {
+        "chain": {
+          "$ref": "#/$defs/ChainId",
+          "description": "The chain."
+        },
+        "param": {
+          "$ref": "#/$defs/MixerParam",
+          "description": "The control."
+        },
+        "type": {
+          "const": "chain",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "chain",
+        "param"
+      ],
+      "type": "object"
     }
   ]
 }
@@ -23786,6 +24800,34 @@ What `clip.replace_sample` returns.
     "clip",
     "file",
     "media"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ReportWindowState`
+
+What `set.close_dawproject_report` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the report window is open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `set.close_dawproject_report` returns.",
+  "properties": {
+    "open": {
+      "description": "Whether the report window is open.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "open"
   ],
   "type": "object"
 }
@@ -26868,6 +27910,47 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "mix",
     "gain",
     "listen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SignatureResult`
+
+What a time-signature command did: the marker selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected` | [`Ticks`](#ticks) or null | yes | The position of the selected marker, if one is. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a time-signature command did: the marker selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The position of the selected marker, if one is."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected",
+    "undo_step"
   ],
   "type": "object"
 }
@@ -30690,6 +31773,36 @@ What `device.ungroup` returns.
 
 </details>
 
+### `UnmapResult`
+
+What `remote.unmap` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `removed` | integer, at least 0 | yes | How many mappings went. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.unmap` returns.",
+  "properties": {
+    "removed": {
+      "description": "How many mappings went.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "removed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `UnusedFile`
 
 A file in the project that nothing uses (R17).
@@ -31090,6 +32203,37 @@ The Velocity filter.
     "max"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `Via`
+
+Which kind of mapping a control's mapping is.
+
+One of:
+
+- `"midi"`: The control's MIDI mapping.
+- `"key"`: The control's key mapping.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which kind of mapping a control's mapping is.",
+  "oneOf": [
+    {
+      "const": "midi",
+      "description": "The control's MIDI mapping.",
+      "type": "string"
+    },
+    {
+      "const": "key",
+      "description": "The control's key mapping.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

@@ -436,6 +436,9 @@ pub struct AudioHost {
     held_reports: Vec<Report>,
     /// Captured notes from closed engines, not yet read (WP-3.14).
     held_captured: Vec<bl_engine::CapturedMidi>,
+    /// How many engines have been closed: a recording that began on an
+    /// earlier one has lost its take.
+    engines_closed: u64,
     /// The CLAP host whose factory makes each engine's CLAP nodes
     /// (WP-2.6).
     plugins: Option<bl_plugin_host::clap::ClapHost>,
@@ -533,6 +536,7 @@ impl AudioHost {
             engines: 0,
             held_reports: Vec::new(),
             held_captured: Vec::new(),
+            engines_closed: 0,
             plugins: None,
             au: None,
             vst3: None,
@@ -698,7 +702,13 @@ impl AudioHost {
         // threads stop, and its drop thread frees the last program.
         self.stream = None;
         self.preview = None;
-        self.engine = None;
+        self.engines_closed += u64::from(self.engine.take().is_some());
+    }
+
+    /// How many engines have been closed so far.
+    #[must_use]
+    pub fn engines_closed(&self) -> u64 {
+        self.engines_closed
     }
 
     /// Whether an engine runs on an open device, so the transport can play.
@@ -741,6 +751,16 @@ impl AudioHost {
         if let Some(engine) = &self.engine {
             engine.set_device_latency(device, frames);
         }
+    }
+
+    /// The devices whose node reports another latency than the engine
+    /// compensates for, as a native device's look-ahead moves it (WP-2.11):
+    /// each goes to [`set_device_latency`](Self::set_device_latency). Empty
+    /// while no engine runs.
+    pub fn latency_changes(&mut self) -> Vec<(bl_model::DeviceId, u32)> {
+        self.engine
+            .as_mut()
+            .map_or_else(Vec::new, |engine| engine.state().latency_changes.clone())
     }
 
     /// Sends a transport command, which the engine runs at the start of its

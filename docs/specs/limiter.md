@@ -27,7 +27,7 @@ The device delays the signal by the look-ahead time and, over that same window, 
 - **R4.** Ceiling Mode offers Standard, Soft Clip, and True Peak, Standard by default. True Peak detects peaks at four times the sample rate and holds the inter-sample peak at the ceiling, leaving a little headroom for the reconstruction filters. Soft Clip rounds peaks off near the ceiling, so the output stays below it. (S1, S3)
 - **R5.** Lookahead offers 1.5, 3, or 6 ms, 3 ms by default. The output is delayed by the look-ahead time, and the device reports that delay as its latency for delay compensation (WP-2.11). (S1)
 - **R6.** Link, 0 to 100 % (default 100 %), shares the gain reduction across the two channels: at 100 % both take the larger reduction, at 0 % each is limited on its own. (S1)
-- **R7.** Routing Mode is L/R or M/S: in M/S the signal is encoded to mid/side, the ceiling applies in that domain, and the output is decoded back to left/right. The mid/side matrix adds no latency. (S1)
+- **R7.** Routing Mode is L/R or M/S: in M/S the signal is encoded to mid/side, the output is decoded back to left/right, and the ceiling bounds the left and right peaks: mid and side take the same gain reduction, set by the sum of the mid peak and the side peak (measured in Live 12.4, 25 October 2026). The mid/side matrix adds no latency. (S1)
 - **R8.** Soft Clip never lets the output pass the ceiling: it is the identity below half the ceiling and curves off above it. (S1)
 - **R9.** Gain is the input gain, a gain parameter that boosts to a top of +18 dB (default 0 dB) and reaches −∞ dB at the bottom (rule G1), and is automatable, like every parameter (rule G2). (S2)
 
@@ -41,7 +41,7 @@ The device delays the signal by the look-ahead time and, over that same window, 
 | R4 | `crates/devices/tests/limiter.rs`, `true_peak_mode_holds_the_inter_sample_peaks_at_the_ceiling` | unit, real-time trap |
 | R5 | `crates/devices/tests/limiter.rs`, `the_output_is_delayed_by_the_look_ahead_and_reported_as_latency` | unit, real-time trap |
 | R6 | `crates/devices/tests/limiter.rs`, `the_link_shares_the_gain_reduction_across_the_channels` | unit, real-time trap |
-| R7 | `crates/devices/tests/limiter.rs`, `mid_side_routing_limits_the_mid_and_the_side` | unit, real-time trap |
+| R7 | `crates/devices/tests/limiter.rs`, `mid_side_routing_keeps_the_left_and_right_under_the_ceiling` | unit, real-time trap |
 | R8 | `crates/devices/tests/limiter.rs`, `soft_clip_keeps_the_output_below_the_ceiling` | unit, real-time trap |
 | R9 | `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity`, `every_parameter_is_automatable_to_the_frame` | real-time trap |
 

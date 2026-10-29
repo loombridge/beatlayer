@@ -104,6 +104,10 @@ pub struct Preferences {
     /// the scales spec, R24): one choice for every editor, Sharps in a new
     /// install.
     pub note_spelling: bl_model::NoteSpelling,
+    /// How the Clip View arranges its panels (View ▸ Arrange Clip View
+    /// Panels; the detail views spec, R22): one choice for every clip and
+    /// set, Automatically in a new install.
+    pub panel_arrangement: bl_shell_spec::clip_properties::PanelArrangement,
     /// Create Fades on Clip Edges (Record, Warp & Launch, L-SET-018): new
     /// audio clips get 4 ms fades at their edges (WP-1.4b; the audio clips
     /// spec, R7 and R22). On by default, as observed in Live 12.4.6, and on

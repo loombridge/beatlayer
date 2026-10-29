@@ -332,21 +332,28 @@ fn ping_pong_moves_the_repeats_between_the_channels() {
         (DRY_WET, 100.0),
         (PING_PONG, 1.0),
     ];
-    let mut delay = node(&registry(), &device(&delay_type(), &params), 16_384);
-    let out = run_at(
-        delay.as_mut(),
-        &left_impulse(14_000),
-        &[],
-        &tempo(120.0),
-        TransportInfo::default(),
-    );
-    assert!(
-        out[0][6_000].abs() > 0.99,
-        "the first repeat is on the left"
-    );
-    assert!(out[1][6_000].abs() < 1e-6, "and not on the right");
-    assert!(out[1][12_000].abs() > 0.49, "the second is on the right");
-    assert!(out[0][12_000].abs() < 1e-6, "and not on the left");
+    // A left click, then the same click on both channels: Live sums both
+    // channels into the left line, so the centred click is twice as loud and
+    // follows the same pattern. The repeats come every 6,000 frames: left,
+    // right at the same level, then the pair at the Feedback (-6 dB).
+    for (input, gain) in [(left_impulse(26_000), 1.0f32), (impulse(26_000), 2.0)] {
+        let mut delay = node(&registry(), &device(&delay_type(), &params), 32_768);
+        let out = run_at(
+            delay.as_mut(),
+            &input,
+            &[],
+            &tempo(120.0),
+            TransportInfo::default(),
+        );
+        let at = |channel: usize, frame: usize| out[channel][frame];
+        let near = |value: f32, expected: f32| (value - expected).abs() < 1e-4;
+        assert!(near(at(0, 6_000), gain), "left repeat: {}", at(0, 6_000));
+        assert!(near(at(1, 6_000), 0.0), "not on the right");
+        assert!(near(at(1, 12_000), gain), "right repeat: {}", at(1, 12_000));
+        assert!(near(at(0, 12_000), 0.0), "not on the left");
+        assert!(near(at(0, 18_000), gain * 0.5), "left: {}", at(0, 18_000));
+        assert!(near(at(1, 24_000), gain * 0.5), "right: {}", at(1, 24_000));
+    }
 }
 
 // Spec: delay R5
@@ -382,4 +389,56 @@ fn the_filter_shapes_the_repeats() {
     };
     assert!(shaped(0.0) > 0.9, "unfiltered, the repeat is whole");
     assert!(shaped(1.0) < 0.1, "the band-pass takes it out");
+}
+
+// Spec: delay R1
+#[test]
+fn a_synced_repeat_longer_than_the_free_time_range_lands_on_its_frame() {
+    // Sixteen sixteenths at 40 BPM is 6.0 s, 288,000 frames at 48 kHz.
+    let params = vec![
+        (SYNC, 1.0),
+        (LINK, 1.0),
+        (L_SYNC, 16.0),
+        (R_SYNC, 16.0),
+        (FEEDBACK, 0.0),
+        (DRY_WET, 100.0),
+    ];
+    let mut delay = node(&registry(), &device(&delay_type(), &params), 300_000);
+    let out = run_at(
+        delay.as_mut(),
+        &impulse(300_000),
+        &[],
+        &tempo(40.0),
+        TransportInfo::default(),
+    );
+    assert!(out[0][288_000].abs() > 0.99, "at 6.0 s");
+    assert!(out[0][245_760].abs() < 1e-6, "not at the old 5.12 s cap");
+}
+
+// Spec: delay R7
+#[test]
+fn freeze_keeps_the_dry_signal_and_ignores_new_input() {
+    let params = vec![
+        (SYNC, 0.0),
+        (LINK, 1.0),
+        (L_TIME, 100.0),
+        (FEEDBACK, 50.0),
+        (DRY_WET, 50.0),
+        (FREEZE, 1.0),
+    ];
+    let mut delay = node(&registry(), &device(&delay_type(), &params), 12_000);
+    let out = run_at(
+        delay.as_mut(),
+        &step(12_000),
+        &[],
+        &tempo(120.0),
+        TransportInfo::default(),
+    );
+    // The lines are empty and stay empty, so only the dry half is heard.
+    for channel in &out {
+        assert!(
+            channel.iter().all(|s| (s - 0.5).abs() < 1e-6),
+            "half dry, nothing frozen in"
+        );
+    }
 }

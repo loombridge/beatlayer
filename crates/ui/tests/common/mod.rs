@@ -303,6 +303,8 @@ impl Harness {
         // As the app does: the keys go to a value being typed as to a text
         // field, and the frame draws what the engine last published.
         let text_focused = self.ctx.text_edit_focused() || self.main.is_typing();
+        self.dispatcher
+            .leave_space_to_focus(bl_ui::clip_panels::tab_has_focus(&self.ctx));
         let invocations = if self.window == Window::Settings && self.settings.recording() {
             // The keys being recorded on the Shortcuts page are the
             // person's, not the app's (the custom shortcuts spec, R8).
@@ -502,6 +504,8 @@ impl Harness {
         };
         bl_ui::middle::take(&mut input, &side.ctx);
         let text_focused = side.ctx.text_edit_focused() || side.ui.is_typing();
+        side.dispatcher
+            .leave_space_to_focus(bl_ui::clip_panels::tab_has_focus(&side.ctx));
         let invocations =
             side.dispatcher
                 .take_bound_keys(&mut input, &self.keymap, &self.shell, text_focused);

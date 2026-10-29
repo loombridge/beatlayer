@@ -543,6 +543,37 @@ fn view_state_reads_back_the_detail_area() {
     assert_eq!(hidden["clip_view"], false);
 }
 
+/// `clip_view.arrange_panels` and `clip_view.fold_panels`, run by ID through
+/// the agent API, read back from `view.state`'s `clip_view.panels` (the detail
+/// views spec, R26).
+#[test]
+fn view_state_reads_back_the_clip_view_panels() {
+    let mut client = client();
+    let panels =
+        |client: &mut _| run(client, "view.state", json!({}))["clip_view"]["panels"].clone();
+    assert_eq!(
+        panels(&mut client),
+        json!({ "arrangement": "automatic", "in_use": "horizontal", "folded": false })
+    );
+    let chosen = run(
+        &mut client,
+        "clip_view.arrange_panels",
+        json!({ "arrangement": "vertical" }),
+    );
+    assert_eq!(chosen, panels(&mut client));
+    assert_eq!(chosen["arrangement"], "vertical");
+    assert_eq!(chosen["in_use"], "vertical");
+    let folded = run(&mut client, "clip_view.fold_panels", json!({}));
+    assert_eq!(folded, panels(&mut client));
+    assert_eq!(folded["folded"], true);
+    let unfolded = run(
+        &mut client,
+        "clip_view.fold_panels",
+        json!({ "folded": false }),
+    );
+    assert_eq!(unfolded["folded"], false);
+}
+
 /// The second window and the commands that act on one window, run by ID
 /// through the agent API, read back from `view.state`'s `second_window` and
 /// `focused_window` (the second-window spec, R15; interface-zoom R14).

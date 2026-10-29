@@ -95,6 +95,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("clip.warp_selection_as_loop", query(Clip, "data.audio.warp_markers")),
     ("clip_view.set_marker", query(Clip, "data.midi")),
     ("clip_view.set_preview", read("view.state", "clip_view.preview")),
+    ("clip_view.arrange_panels", read("view.state", "clip_view.panels.arrangement")),
     ("view.highlight_scales", read("view.state", "clip_view.highlight_scales")),
     ("view.note_spelling", read("view.state", "clip_view.note_spelling")),
     ("clip_view.step_input_mode", query(Track, "mixer.arm")),

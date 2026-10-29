@@ -73,6 +73,7 @@ use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::remote as remote_ids;
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::scales as scales_ids;
 use bl_shell_spec::search as search_ids;
@@ -133,6 +134,7 @@ mod plugin_scan;
 mod plugin_windows;
 mod recording_takes;
 mod recovery;
+mod remote;
 mod search;
 mod session_launch;
 mod session_recording;
@@ -267,6 +269,16 @@ pub enum Effect {
         /// opens. Cancelling the dialog keeps them.
         discard_changes: bool,
     },
+    /// Ask where to write a DAWproject file, in a save dialog that suggests
+    /// `file_name` in `folder`, then run `set.export_dawproject` with the path,
+    /// with `replace` when the dialog asked about a file already there (the
+    /// DAWproject spec, R86).
+    PickDawProjectPath {
+        /// The suggested name: the set's, with `.dawproject`.
+        file_name: String,
+        /// The folder the dialog opens in, if there is one.
+        folder: Option<PathBuf>,
+    },
     /// Ask where to save the set, run `set.save_as` there, then run `then`
     /// if the save worked.
     PickSavePath {
@@ -328,6 +340,9 @@ pub enum Effect {
     /// Move the keyboard focus to the first control of the Clip View's
     /// panels (Navigate ▸ Clip Panels).
     FocusClipPanels,
+    /// Move the keyboard focus to the first control of the shown panel of
+    /// the Clip View's group the focus was last in (Option+8).
+    FocusSelectedClipPanel,
     /// Move the keyboard focus to the name in the browser's Tuning section
     /// (Navigate ▸ Tuning).
     FocusTuning,
@@ -395,6 +410,11 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start typing a new signature for the time-signature marker at this
+    /// position, in the lane under the beat-time ruler; Return runs
+    /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
+    /// spec, R31).
+    EditTimeSignature(Ticks),
     /// Turn the Info View into a text field for an item's info text, with
     /// the keyboard focus; Return runs the item's command with the text
     /// ([`Shell::info_text_invocation`]), Option-Return starts a new line
@@ -530,6 +550,9 @@ pub struct Shell {
     /// The report of the last DAWproject import, while the set the import
     /// made is open (R12).
     import_report: Option<bl_shell_spec::dawproject::ImportReport>,
+    /// The window that lists the report of a person's import or export, while
+    /// it is open (R87).
+    dawproject_report_window: Option<dawproject_ids::ReportWindow>,
     /// The 14 track colours of the theme in use, from which a DAWproject
     /// import draws the palette it places colours on (R23). The bundled
     /// theme's until a window tells the shell its theme's.
@@ -567,6 +590,8 @@ pub struct Shell {
     midi_lit: [Option<std::time::Instant>; 2],
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The remote input and the set's MIDI and key mappings (WP-7.1).
+    remote: remote::RemoteState,
     /// The keys held on the MIDI input and the previews sounding, for the
     /// MIDI Note Editor's step recording and Preview (WP-6.5).
     step: step_input::StepInput,
@@ -1189,6 +1214,7 @@ impl Shell {
         let plugin_panels = prefs.plugin_panels.clone();
         let note_preview = prefs.note_preview;
         let (highlight_scales, note_spelling) = (prefs.highlight_scales, prefs.note_spelling);
+        let panel_arrangement = prefs.panel_arrangement;
         let mut shell = Self {
             browser_view,
             media,
@@ -1216,6 +1242,7 @@ impl Shell {
             set_path: None,
             pending_name: None,
             import_report: None,
+            dawproject_report_window: None,
             track_palette: bl_model::DEFAULT_TRACK_PALETTE.to_vec(),
             dirty: false,
             autosave: None,
@@ -1231,6 +1258,7 @@ impl Shell {
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            remote: remote::RemoteState::default(),
             step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
@@ -1276,6 +1304,7 @@ impl Shell {
                 view.set_preview(note_preview);
                 view.set_highlight_scales(highlight_scales);
                 view.set_note_spelling(note_spelling);
+                view.set_panel_arrangement(panel_arrangement);
                 view
             },
             detail: DetailArea::default(),
@@ -1507,6 +1536,9 @@ impl Shell {
     /// plays the set as it is now (its tempo, loop, and tracks).
     fn document_changed(&mut self) {
         self.document_revision = self.document_revision.wrapping_add(1);
+        // Spec: remote-mapping R9. The MIDI thread's table follows the set's
+        // mappings.
+        self.publish_remote();
         self.arrangement
             .forget_missing_tracks(self.editor.document());
         self.mixer
@@ -1556,7 +1588,11 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        // Spec: remote-mapping R12. Any other edit ends a run of mapped
+        // messages that is one undo step.
+        self.remote_run_ends_for(id);
         self.poll_capture();
+        self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
         // opens ends when another command edits the set.
         if self.key_edit.is_some() && !self.keeps_key_edit(id) {
@@ -2073,6 +2109,9 @@ impl Shell {
         }
         if midi_io_ids::handles(id) {
             return self.run_midi_io(id, args);
+        }
+        if remote_ids::handles(id) {
+            return self.run_remote(id, args);
         }
         if file_manager_ids::handles(id) {
             // Spec: file-management R10 to R17. The File Manager's own

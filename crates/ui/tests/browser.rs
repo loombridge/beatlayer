@@ -1235,3 +1235,90 @@ fn double_clicking_a_chord_bank_loads_it_into_stacks() {
         json!("Shell")
     );
 }
+
+/// A harness whose User Library holds `Plain.dawproject` and `Song.blset`,
+/// the rows after the library's six folders.
+fn harness_with_dawproject(scratch: &Scratch) -> Harness {
+    let root = scratch.0.join("User Library");
+    create_user_library(&root).unwrap();
+    std::fs::copy(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/dawproject/minimal.dawproject"),
+        root.join("Plain.dawproject"),
+    )
+    .unwrap();
+    std::fs::write(root.join("Song.blset"), b"not really a set").unwrap();
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell.set_user_library(Some(root));
+    h.shell
+        .run(ids::OPEN_PLACE, json!({ "label": "user_library" }))
+        .unwrap();
+    h.settle();
+    h.shell
+        .run(ids::SET_PREVIEW, json!({ "on": false }))
+        .unwrap();
+    assert_eq!(&names(&h)[6..], ["Plain.dawproject", "Song.blset"]);
+    h
+}
+
+/// A double-click, long enough after the last click to be no triple click.
+fn double_click(h: &mut Harness, over: Pos2) {
+    h.time += 1.0;
+    h.frame(vec![Event::PointerMoved(over)]);
+    for _ in 0..2 {
+        for pressed in [true, false] {
+            h.frame(vec![Event::PointerButton {
+                pos: over,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }]);
+        }
+    }
+    h.settle();
+}
+
+// Spec: dawproject R84, browser R30. A double-click on a DAWproject file
+// imports it, and Enter on one does too.
+#[test]
+fn a_double_click_or_enter_on_a_dawproject_file_imports_it() {
+    let scratch = Scratch::new("dawproject-import");
+    let mut h = harness_with_dawproject(&scratch);
+    assert_eq!(
+        h.shell.browser_view().row(6).unwrap().kind,
+        bl_shell::browser_commands::ItemKind::DawProject
+    );
+    double_click(&mut h, row(6));
+    assert_eq!(h.shell.set_name(), "Plain");
+    let scratch = Scratch::new("dawproject-enter");
+    let mut h = harness_with_dawproject(&scratch);
+    h.click(row(6));
+    h.key(Key::Enter, Modifiers::NONE);
+    assert_eq!(h.shell.set_name(), "Plain");
+}
+
+// Spec: browser R30. A double-click on a set opens it, after asking about
+// unsaved changes, and doesn't list its tracks.
+#[test]
+fn a_double_click_on_a_set_asks_then_opens_it() {
+    let scratch = Scratch::new("dawproject-set");
+    let mut h = harness_with_dawproject(&scratch);
+    let id: TrackId = h.shell.new_id();
+    h.shell
+        .run(
+            "track.create",
+            json!({ "id": id, "kind": "midi", "name": "Added", "index": 0 }),
+        )
+        .unwrap();
+    assert!(h.shell.unsaved_changes());
+    let rows = names(&h);
+    double_click(&mut h, row(7));
+    assert_eq!(names(&h), rows, "the set didn't open like a folder");
+    let asked = h.effects.iter().find_map(|effect| match effect {
+        bl_shell::Effect::ConfirmDiscard { then } => Some(then.clone()),
+        _ => None,
+    });
+    let then = asked.expect("the person is asked about the unsaved changes");
+    assert_eq!(then.id, "set.open");
+    assert!(then.args["path"].as_str().unwrap().ends_with("Song.blset"));
+}

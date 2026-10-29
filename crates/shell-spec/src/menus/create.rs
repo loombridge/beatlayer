@@ -69,7 +69,11 @@ pub(super) const CREATE: &[Row] = &[
     ),
     SEPARATOR,
     ("M-CREATE-016", "Add Locator", Cmd(crate::locator::ADD)),
-    ("M-CREATE-017", "Add Time Signature Change", Pending(None)),
+    (
+        "M-CREATE-017",
+        "Add Time Signature Change",
+        Cmd(crate::locator::INSERT_SIGNATURE),
+    ),
     SEPARATOR,
     ("M-CREATE-018", "Import Audio/MIDI File...", Pending(None)),
 ];

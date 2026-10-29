@@ -13,10 +13,10 @@ use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_devices::sampler::{
     ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_ENV_AMOUNT, FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN,
     FILTER_FREQ, FILTER_KEY, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
-    LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, MODE, PAN, PITCH_ENV_AMOUNT,
-    PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN, RELEASE, SAMPLER,
-    SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY, START, SUSTAIN, TRIGGER, VELOCITY,
-    VOICES, VOLUME, sampler_type,
+    LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, LOOP_LENGTH, MODE, PAN,
+    PITCH_ENV_AMOUNT, PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN,
+    RELEASE, SAMPLER, SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY, START, SUSTAIN,
+    TRIGGER, VELOCITY, VOICES, VOLUME, sampler_type,
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
@@ -224,6 +224,34 @@ fn the_loop_crossfades_without_a_click() {
     assert!(step(&out[0]) > 1.0, "a bare wrap clicks");
 }
 
+// Spec: sampler R4
+#[test]
+fn a_full_length_fade_still_crossfades_the_wrap_without_a_click_or_a_swell() {
+    // The cosine of the test above, its whole length the loop and the fade.
+    let cosine = sample(4800, |i| {
+        (std::f64::consts::TAU * 15.0 * i as f64 / 48_000.0).cos() as f32
+    });
+    let collector = Collector::new();
+    let mut looped = sampler(
+        &[
+            (LOOP, 1.0),
+            (LOOP_LENGTH, 100.0),
+            (FADE, 100.0),
+            (ATTACK, 5.0),
+        ],
+        14_400,
+    );
+    give(looped.as_mut(), &collector, &cosine);
+    let out = run_notes(looped.as_mut(), 14_400, &[note(0, NoteKind::On, 60, 1.0)]);
+    let step = out[0]
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0.0f32, f32::max);
+    assert!(step < 0.05, "no click at the wrap: {step}");
+    let peak = out[0].iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+    assert!(peak < 1.01, "no swell mid-loop: {peak}");
+}
+
 // Spec: sampler R5
 #[test]
 fn the_envelope_stages_take_their_times_within_five_percent() {
@@ -429,6 +457,39 @@ fn glide_slides_from_the_last_note_and_portamento_keeps_the_voices() {
         ],
     );
     assert_eq!(first(&out[0], |s| s.abs() > 0.9), 3400);
+}
+
+// Spec: sampler R9
+#[test]
+fn a_glided_note_is_not_taken_over_into_a_voice_that_is_releasing() {
+    let flat = sample(96_000, |_| 1.0);
+    let collector = Collector::new();
+    let mut mono = sampler(
+        &[
+            (GLIDE, 1.0),
+            (GLIDE_MODE, 0.0),
+            (GLIDE_TIME, 10.0),
+            (RELEASE, 10.0),
+        ],
+        24_000,
+    );
+    give(mono.as_mut(), &collector, &flat);
+    // The first note has ended and is releasing when the second starts, and
+    // the second is held long after the first's release is over.
+    let out = run_notes(
+        mono.as_mut(),
+        24_000,
+        &[
+            note(0, NoteKind::On, 60, 1.0),
+            note(2000, NoteKind::Off, 60, 1.0),
+            note(2100, NoteKind::On, 64, 1.0),
+        ],
+    );
+    assert!(
+        (out[0][10_000] - 1.0).abs() < 0.01,
+        "the held note sounds: {}",
+        out[0][10_000]
+    );
 }
 
 // Spec: sampler R10

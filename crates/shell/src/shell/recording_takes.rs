@@ -86,6 +86,7 @@ impl Shell {
             .ok_or("no audio device is open")?;
         plan.delay = delay;
         recording.delay = delay;
+        recording.began_on(&mut self.audio);
         self.audio.record(plan)?;
         self.recording = Some(recording);
         Ok(())
@@ -99,10 +100,10 @@ impl Shell {
         let Some(recording) = self.recording.as_mut() else {
             return;
         };
-        if let Some(take) = engine.take {
-            recording.note_take(take);
-        }
-        if let Some(outcome) = recording.poll(engine.running) {
+        recording.follow(engine.take, engine.take_running);
+        // A closed engine (a reconfigured device) never publishes the take.
+        let running = engine.running && !recording.engine_closed(&self.audio);
+        if let Some(outcome) = recording.poll(running) {
             self.recording = None;
             self.finish_recording(outcome);
         } else {

@@ -29,6 +29,7 @@ use bl_shell_spec::bounce as bounce_ids;
 use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
+use bl_shell_spec::clip_properties as panel_ids;
 use bl_shell_spec::commands::DetailView;
 use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
@@ -175,6 +176,10 @@ impl Shell {
     pub fn choice_state(&self, id: &str, args: &Value) -> Option<bool> {
         match id {
             CUE_MODE => Some(self.editor.document().cue_active() == args["enabled"].as_bool()?),
+            panel_ids::ARRANGE_PANELS => Some(
+                self.clip_view.panel_arrangement()
+                    == serde_json::from_value(args["arrangement"].clone()).ok()?,
+            ),
             ids::VIEW_NOTE_SPELLING => Some(
                 self.clip_view.note_spelling()
                     == serde_json::from_value(args["spelling"].clone()).ok()?,
@@ -233,6 +238,7 @@ impl Shell {
                     }),
             ),
             ids::VIEW_HIGHLIGHT_SCALES => Some(self.clip_view.highlight_scales()),
+            panel_ids::FOLD_PANELS => Some(self.clip_view.panels_folded()),
             ids::VIEW_TOGGLE_INFO_VIEW => Some(self.info_view),
             assistant_ids::VIEW_TOGGLE_ASSISTANT => Some(self.assistant_open),
             ids::VIEW_TOGGLE_UNDO_HISTORY => Some(self.undo_history_open),
@@ -325,6 +331,12 @@ impl Shell {
             // Spec: time-editing R4. The Create menu's Add Locator reads
             // Delete Locator while a locator is selected.
             locator_ids::DELETE => Some("Delete Locator".to_owned()),
+            // Spec: time-editing R30. Create ▸ Add Time Signature Change reads
+            // Insert Time Signature Change with the Arrangement focused.
+            locator_ids::INSERT_SIGNATURE => self
+                .active_contexts()
+                .contains(&Context::Arrangement)
+                .then(|| "Insert Time Signature Change".to_owned()),
             // Spec: time-editing R17. Create ▸ Insert Scene reads Insert
             // Silence with the Arrangement focused.
             edit_ids::INSERT_SILENCE => Some("Insert Silence".to_owned()),
@@ -557,7 +569,11 @@ impl Shell {
                     .is_some_and(|clip| matches!(clip.data, ClipData::Midi(_)));
             }
             ids::APP_HIDE => return cfg!(target_os = "macos"),
-            ids::SET_OPEN | ids::SET_SAVE | ids::SET_SAVE_AS | ids::APP_SETTINGS => return true,
+            ids::SET_OPEN
+            | ids::SET_SAVE
+            | ids::SET_SAVE_AS
+            | ids::APP_SETTINGS
+            | bl_shell_spec::dawproject::EXPORT_DAWPROJECT => return true,
             ids::SET_DISCARD_CHANGES => return self.unsaved_changes(),
             // Options ▸ Reduced Latency When Monitoring is available only
             // while Delay Compensation is on (the delay-compensation spec,
@@ -612,6 +628,7 @@ impl Shell {
             // while there are any.
             "clip.rename" => {
                 return self.arrangement.selected_locators().is_empty()
+                    && self.arrangement.selected_signature().is_none()
                     && self.arrangement.selected_take_lanes().is_empty();
             }
             // Spec: comping R28, R29. Rename on a take lane's header types the
@@ -941,6 +958,7 @@ impl Shell {
                 // selected locators while there are any.
                 && !(id == edit_ids::DELETE
                     && (!self.arrangement.selected_locators().is_empty()
+                        || self.arrangement.selected_signature().is_some()
                         // Spec: audio-clips R29. Delete deletes the selected
                         // fade handle's fade instead.
                         || self.arrangement.selected_fade().is_some()))
@@ -1029,6 +1047,11 @@ impl Shell {
                 locator_ids::DELETE => {
                     args.get("locators").is_some()
                         || !self.arrangement.selected_locators().is_empty()
+                }
+                // Spec: time-editing R31, R32. Typing a marker's signature
+                // and moving it act on the selected marker.
+                locator_ids::EDIT_SIGNATURE | locator_ids::MOVE_SIGNATURE => {
+                    args.get("at").is_some() || self.arrangement.selected_signature().is_some()
                 }
                 // Spec: time-editing R13. The jumps need the engine.
                 locator_ids::JUMP | locator_ids::JUMP_PREVIOUS | locator_ids::JUMP_NEXT => {

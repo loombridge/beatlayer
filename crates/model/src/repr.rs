@@ -12,7 +12,7 @@ use imbl::{OrdMap, Vector};
 use schemars::{JsonSchema, Schema, schema_for};
 use serde::{Deserialize, Serialize};
 
-use crate::automation::{AutomationTarget, Breakpoint, Envelope};
+use crate::automation::{AutomationTarget, Breakpoint, Envelope, MixerParam};
 use crate::clip::{Clip, ClipData, TakeLane};
 use crate::command::{
     check_chain, check_clip, check_clip_fits, check_crossfader, check_device, check_extent,
@@ -280,6 +280,7 @@ impl TryFrom<DocumentRepr> for Document {
             settings.arrangement_loop.length,
         )?;
         check_locators(&settings.locators)?;
+        crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
             tuning.check()?;
         }
@@ -327,6 +328,7 @@ impl TryFrom<DocumentRepr> for Document {
             // the document's largest.
             scenes: Vector::new(),
             index: loader.index,
+            remote_dropped: 0,
         };
         document.scenes = match scenes {
             Some(scenes) => scenes.into_iter().collect(),
@@ -370,6 +372,16 @@ impl TryFrom<DocumentRepr> for Document {
                 }
             }
         }
+        // A Track Activator envelope on Main, which earlier versions let a
+        // command draw, is dropped: Main has no Track Activator.
+        let main = document.main_id();
+        if let Some(track) = document.tracks.get_mut(&main) {
+            Shared::make_mut(track)
+                .automation
+                .remove(&AutomationTarget::Mixer {
+                    param: MixerParam::Mute,
+                });
+        }
         // Routing, automation, and clips' envelopes name tracks and devices
         // anywhere in the tree, so they're checked once every track is in.
         for id in document.track_order() {
@@ -386,7 +398,11 @@ impl TryFrom<DocumentRepr> for Document {
         }
         // Spec: modulation R19. A mapping naming a parameter the set doesn't
         // have doesn't load.
+        // Spec: remote-mapping R6. A remote mapping whose control the set
+        // doesn't hold is dropped, and the load counts them.
+        let held = document.settings.remote.len();
         document.prune_mappings();
+        document.remote_dropped = held - document.settings.remote.len();
         Ok(document)
     }
 }
@@ -1398,6 +1414,33 @@ mod tests {
         bad["tracks"][0]["clips"][0]["data"]["audio"]["fade_out_curve"] = json!(2.0);
         let error = load(bad).unwrap_err();
         assert!(error.contains("fade-out curve"), "{error}");
+    }
+
+    // Spec: automation R1
+    #[test]
+    fn a_set_with_a_track_activator_envelope_on_main_loads_without_it() {
+        let mut editor = Editor::new();
+        let main = editor.document().main_id();
+        editor
+            .apply(Command::SetAutomationBreakpoint {
+                track: main,
+                target: AutomationTarget::Mixer {
+                    param: crate::MixerParam::Volume,
+                },
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+        let doc = editor.document().clone();
+        let mut value = serde_json::to_value(&doc).unwrap();
+        let mut mute = value["main"]["automation"][0].clone();
+        mute["target"]["param"] = json!("mute");
+        value["main"]["automation"]
+            .as_array_mut()
+            .unwrap()
+            .push(mute);
+        let loaded = load(value).unwrap();
+        assert_eq!(loaded, doc, "the volume envelope stays");
     }
 
     // Spec: automation R7

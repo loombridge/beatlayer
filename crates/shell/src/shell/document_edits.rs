@@ -8,6 +8,7 @@ use bl_model::registry as model;
 use bl_shell_spec::scales as scales_ids;
 use serde_json::Value;
 use serde_json::json;
+use std::collections::BTreeSet;
 
 use super::{automation_command, sample_edit_command, to_value};
 use crate::arrangement::editing;
@@ -615,6 +616,9 @@ impl Shell {
             self.dirty = true;
             self.document_changed();
         }
+        if id == bl_shell_spec::editing::PASTE && result.is_ok() {
+            self.record_pasted_media();
+        }
         // Spec: second-window R20. Pasted Session clips that weren't placed.
         if let Ok(value) = &result
             && let Some(skipped) = value.get("skipped").and_then(Value::as_u64)
@@ -624,6 +628,34 @@ impl Shell {
         }
         self.touch();
         result
+    }
+
+    /// Lists the files of the audio clips just pasted in the open set's media
+    /// table. The clipboard outlives a set, so the clips may come from one
+    /// whose table doesn't hold their files.
+    fn record_pasted_media(&mut self) {
+        let listed: BTreeSet<bl_model::ContentHash> = self
+            .store
+            .media_files()
+            .into_iter()
+            .map(|(hash, ..)| hash)
+            .collect();
+        let doc = self.editor.document();
+        let hashes: BTreeSet<bl_model::ContentHash> = self
+            .arrangement
+            .selected_clips()
+            .iter()
+            .filter_map(|clip| match &doc.clip(*clip)?.data {
+                bl_model::ClipData::Audio(audio) => Some(audio.media),
+                _ => None,
+            })
+            .filter(|hash| !listed.contains(hash))
+            .collect();
+        for hash in hashes {
+            if let Some(entry) = self.media.entry(bl_media::ContentHash::from_bytes(hash.0)) {
+                self.store.add_media(hash, &entry.path, entry.size);
+            }
+        }
     }
 
     /// Runs the locator commands.

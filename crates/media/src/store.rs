@@ -110,7 +110,8 @@ impl MediaStore {
 
     /// Imports a file: hashes its content, reads its header, and records
     /// where it is. Importing a file whose content the store already has
-    /// keeps the path the store has, unless that file is gone.
+    /// keeps the path the store has, unless that file is gone or no longer
+    /// holds the content.
     ///
     /// The file isn't copied or changed.
     ///
@@ -125,11 +126,13 @@ impl MediaStore {
         // A file that changed while it was hashed is hashed again later.
         let verified = (Fingerprint::of(&path)? == before).then_some(before);
 
+        let keeps_its_path = self
+            .read()
+            .get(&hash)
+            .is_some_and(|record| record.entry.path != path)
+            && matches!(self.check(hash), Ok(MediaStatus::Available));
         let mut records = self.write();
-        if let Some(record) = records.get_mut(&hash)
-            && record.entry.path.exists()
-            && record.entry.path != path
-        {
+        if keeps_its_path && let Some(record) = records.get_mut(&hash) {
             record.entry.info = Some(info);
             return Ok(hash);
         }

@@ -1,6 +1,6 @@
 # DAWproject import and export
 
-- **Status:** partial
+- **Status:** implemented
 - **Work packages:** WP-6.36 (reading a file and opening it as a set: the tracks, mixer and routing, clips, media, the Session View's scenes, tempo and time signature, and the import report: R1 to R22, R24 to R32 and R34 to R43), WP-6.36b (colours and crossfades as they're read, devices and plug-in states, automation, MIDI controllers and note expressions, markers and metadata: R23's reading, R33, R44 to R64), WP-6.37 (writing a set as a file, and the round trip: R23's writing, R65 to R82), WP-6.37b (the Open dialog, the browser, dropping a file on the window, the Export DAWproject menu item and the report window: R83 to R88). The colours a set holds are [themes.md](themes.md)'s (WP-6.30b), and the Arrangement's crossfades between adjacent clips [audio-clips.md](audio-clips.md)'s (WP-6.51)
 - **Parity-matrix row:** Files and export: (Beatlayer only) DAWproject import and export
 - **Checked against:** the DAWproject format, version 1.0: its repository's README, `Project.xsd`, `MetaData.xsd`, XML reference and reference library (github.com/bitwig/dawproject, MIT licence), read 20 October 2026; the Live 12 reference manual (online edition), chapter 5, read 20 October 2026; the Live 12 release notes, read 20 October 2026; the UI parity reference's M-FILE-002, M-FILE-016 and I-DROP-025
@@ -247,9 +247,9 @@ The fixtures are written by `tests/fixtures/gen/gen_dawproject.py` into `tests/f
 | R80 | `the_report_lists_every_item_the_format_cannot_carry` | unit |
 | R81 | `the_report_lists_every_item_the_format_cannot_carry`; `an_agent_exports_the_open_set_and_imports_the_file_again` | unit, agent test |
 | R82 | `a_set_exports_and_imports_as_the_same_set`, `any_layout_of_tracks_groups_and_returns_comes_back_the_same`; `crates/shell/tests/dawproject_export.rs`, `an_exported_and_imported_set_renders_the_same_samples` | property, golden render |
-| R83 | to be written in WP-6.37b | UI script |
-| R84 | to be written in WP-6.37b | UI script |
-| R85 | to be written in WP-6.37b | UI script |
-| R86 | to be written in WP-6.37b | UI script |
-| R87 | to be written in WP-6.37b | UI script |
+| R83 | `crates/shell/tests/dawproject_app.rs`, `a_chosen_dawproject_runs_the_import_and_a_set_runs_the_open`, `an_import_asks_about_unsaved_changes_first` | unit, UI script |
+| R84 | `crates/ui/tests/browser.rs`, `a_double_click_or_enter_on_a_dawproject_file_imports_it`, `a_double_click_on_a_set_asks_then_opens_it`; `crates/shell/tests/dawproject_app.rs`, `enter_in_the_browser_imports_a_dawproject_and_opens_a_set` | unit, UI script |
+| R85 | `crates/ui/tests/dawproject_window.rs`, `a_dropped_dawproject_imports_and_no_view_places_it`, `a_dropped_dawproject_asks_about_unsaved_changes` | unit, UI script |
+| R86 | `crates/shell/tests/menus.rs`, `export_dawproject_follows_export_midi_clip_with_no_key`; `crates/shell/tests/dawproject_app.rs`, `export_dawproject_asks_where_then_writes_the_file` | unit, UI script |
+| R87 | `crates/ui/tests/dawproject_window.rs`, `the_report_window_lists_the_entries_and_copy_and_close_work`, `escape_closes_the_report_window`, `an_empty_report_opens_no_window`; `crates/shell/tests/dawproject_app.rs`, `a_report_with_entries_opens_the_window_and_close_shuts_it`, `an_empty_report_opens_no_window_and_the_status_bar_says_so` | unit, UI script |
 | R88 | an_agent_imports_a_dawproject_file_and_reads_its_report, an_agent_exports_the_open_set_and_imports_the_file_again, without_autonomous_a_dawproject_export_is_refused | unit, agent test |

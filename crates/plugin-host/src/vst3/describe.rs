@@ -123,13 +123,10 @@ pub(crate) fn parameters(controller: &ComPtr<IEditController>) -> Vec<Parameter>
         }
         out.push(Parameter {
             descriptor,
-            map: ParamMap {
-                id: info.id,
-                min,
-                max,
-                default,
-                steps: info.stepCount,
-            },
+            map: ParamMap::new(info.id, (min, max), default, info.stepCount, |normalized| {
+                // SAFETY: as above.
+                unsafe { controller.normalizedParamToPlain(info.id, normalized) }
+            }),
         });
     }
     out

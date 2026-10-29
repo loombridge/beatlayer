@@ -780,7 +780,11 @@ impl Sampler {
         let loop_share = params.value(at(LOOP_LENGTH)) / 100.0;
         let loop_start =
             region_end - ((loop_share * (region_end.saturating_sub(region_start)) as f64) as u64);
+        // The crossfade takes at most half the loop: longer, the loop's end
+        // and start would overlap and the wrap would have no head left to
+        // resume past.
         let fade = (params.value(at(FADE)) / 100.0 * (region_end - loop_start) as f64) as u32;
+        let fade = fade.min(((region_end - loop_start) / 2) as u32);
         // One-Shot and Slice have Fade In and Fade Out instead of the
         // envelope: their attack is Fade In and they hold at the peak.
         let (attack_ms, decay_ms, sustain) = if mode == Mode::Classic {
@@ -1094,10 +1098,12 @@ impl Sampler {
         self.voices.iter_mut().filter(|v| v.active && !v.fading)
     }
 
-    /// The newest sounding voice: the one a glide takes over.
+    /// The newest voice still held: the one a glide takes over. A released
+    /// voice is on its way out and would take the new note with it.
     fn newest_playing(&mut self) -> Option<&mut Voice> {
-        let counter = self.playing().map(|v| v.counter).max()?;
-        self.playing().find(|v| v.counter == counter)
+        self.playing()
+            .filter(|v| v.env.stage != Stage::Release)
+            .max_by_key(|v| v.counter)
     }
 
     /// A slot for a new voice: an idle one, else the oldest fading one,

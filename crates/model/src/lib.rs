@@ -98,6 +98,7 @@ pub mod note_ops;
 pub mod param;
 pub mod rack;
 pub mod registry;
+pub mod remote;
 mod repr;
 mod routing;
 mod sample_edits;
@@ -187,6 +188,9 @@ pub use rack::{
     RackKind, RackMacros, RackView, RackViewMap, RackViews, Receive, SHOWN_MACROS,
     default_macro_name, description as rack_description, general_midi_drum, macro_number,
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
+};
+pub use remote::{
+    ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};

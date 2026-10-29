@@ -137,6 +137,60 @@ fn a_deleted_scene_takes_its_removed_stop_button_with_it() {
     decode_json(&json, &LoadOptions::default()).expect("the set opens again");
 }
 
+/// Spec: remote-mapping R6. The set's MIDI and key mappings save with it and
+/// load back, in the same JSON.
+#[test]
+fn midi_and_key_mappings_survive_a_save_and_a_load() {
+    use bl_model::{RemoteMapping, RemoteSource, RemoteTarget};
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Edit::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: "Keys".to_owned(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let target = RemoteTarget::Solo { track };
+    let kind = target.natural_kind().unwrap();
+    let mappings = vec![
+        RemoteMapping::new(
+            RemoteSource::Note {
+                channel: 1,
+                key: 36,
+            },
+            target,
+            kind,
+            None,
+            None,
+        )
+        .unwrap(),
+        RemoteMapping::new(
+            RemoteSource::Key {
+                key: "S".to_owned(),
+            },
+            target,
+            kind,
+            None,
+            None,
+        )
+        .unwrap(),
+    ];
+    editor
+        .apply(Edit::SetRemoteMappings {
+            mappings: mappings.clone(),
+        })
+        .unwrap();
+    let project = Project::from_editor(&editor, Media::new());
+    let json = encode_json(&project, 1).unwrap();
+    let (loaded, _) = decode_json(&json, &LoadOptions::default()).unwrap();
+    assert_eq!(loaded, project);
+    assert_eq!(loaded.document.settings().remote, mappings);
+    assert_eq!(encode_json(&loaded, 1).unwrap(), json);
+}
+
 /// A warped clip saves and loads with every warp field (the warping spec,
 /// R11), and an unwarped clip's JSON holds none of them.
 #[test]

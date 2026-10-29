@@ -17,6 +17,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, control_bar, "Stop", Key::Enter),
         ),
         (
+            "transport.resync_external_hardware",
+            main(
+                the_resync_button_shown,
+                control_bar,
+                "Resync External Hardware",
+                Key::Enter,
+            ),
+        ),
+        (
             "transport.set_loop_enabled",
             main(nothing, control_bar, "Arrangement Loop", Key::Enter),
         ),

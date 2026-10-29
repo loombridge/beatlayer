@@ -2,10 +2,10 @@
 //! (WP-3.2): launches and stops landing on the quantisation grid while the
 //! song plays, scenes, the global quantisation changing under a queued
 //! launch, the published slot states, and the track players sounding a
-//! launched clip. RTSan stops the process at the first allocation, free,
-//! lock, or blocking call in any of it, and the allocation trap, installed
-//! as in every Beatlayer test binary, fails the test at any heap use it
-//! sees.
+//! launched clip, Legato starts, a clip's own grid, and nudges. RTSan stops
+//! the process at the first allocation, free, lock, or blocking call in any
+//! of it, and the allocation trap, installed as in every Beatlayer test
+//! binary, fails the test at any heap use it sees.
 
 bl_rt::install_trap!();
 
@@ -69,6 +69,11 @@ fn the_session_views_launching_passes_under_rtsan() {
         );
         // One track of each mode that acts on a release (WP-3.3).
         clip.launch.mode = [LaunchMode::Gate, LaunchMode::Repeat][usize::from(index)];
+        // Legato, and on one track the clip's own grid, so the takeover of
+        // a playing clip's time and the clip's grid run under the sanitizer
+        // too (WP-7.29).
+        clip.launch.legato = true;
+        clip.launch.quantization = [Some(LaunchQuantization::Eighth), None][usize::from(index)];
         // Follow actions that fire every sixteenth, so their arming, draws
         // and launches run under the sanitizer too (WP-3.10).
         clip.launch.follow = FollowActions {
@@ -108,6 +113,12 @@ fn the_session_views_launching_passes_under_rtsan() {
             7 => Some(SessionCommand::LaunchScene(scene)),
             17 => Some(SessionCommand::StopAll),
             8 => Some(SessionCommand::TrackBackToArrangement(track)),
+            // Nudges forward and back, which wrap a looping clip (WP-7.29).
+            6 | 16 => Some(SessionCommand::Nudge {
+                track,
+                scene,
+                steps: if round % 20 == 6 { 1 } else { -3 },
+            }),
             19 => Some(SessionCommand::BackToArrangement),
             1 => Some(SessionCommand::SetQuantization(LaunchSettings {
                 quantization: LaunchQuantization::None,

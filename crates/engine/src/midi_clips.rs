@@ -279,11 +279,16 @@ const MAX_SESSION_REPEATS: usize = 128;
 /// sat at its launch frame, so it plays from its Start marker, repeats its
 /// loop brace while its Loop switch is on, and plays once while it's off
 /// (WP-3.2). What a non-looping clip does when it reaches its end is to
-/// observe; Beatlayer leaves the slot playing.
+/// observe; Beatlayer leaves the slot playing. The clip plays as if it had
+/// started `offset` ticks before its launch tick, which is how a Legato start
+/// or a nudge puts it somewhere else in its own time; its unlinked
+/// controller envelopes keep counting from the launch (the launch
+/// quantisation spec, R29).
 #[allow(clippy::too_many_arguments)]
 fn play_session_clip(
     clip: &PlacedMidiClip,
     launch_tick: Ticks,
+    offset: Ticks,
     from_frame: i64,
     to_frame: i64,
     tempo: &TempoMap,
@@ -304,6 +309,7 @@ fn play_session_clip(
         sample_rate,
         messages,
     );
+    let launch_tick = launch_tick - offset;
     let start_marker = clip.start_marker;
     if !clip.looping {
         let end_marker = clip.end_marker.unwrap_or(start_marker + clip.length);
@@ -441,7 +447,7 @@ pub struct MidiClipPlayer {
     /// The Session slot clip sounding in the last block and the frame it
     /// launched on: when the engine stops it, restarts it or another slot
     /// takes over, its notes are let go.
-    session: Option<(ClipId, i64)>,
+    session: Option<(ClipId, Ticks)>,
     /// Whether a Session clip has taken the track over from the Arrangement
     /// (WP-3.6).
     taken_over: bool,
@@ -1061,8 +1067,28 @@ impl Node for MidiClipPlayer {
             }
         }
         self.taken_over = taken_over.is_some();
-        let launched_id = launched.map(|(entry, clip)| (clip.id, entry.frame.get()));
-        if self.session != launched_id {
+        // Where the clip would have started to be at this clip time. A
+        // restart that takes over its own time keeps it, within the rounding
+        // of a frame to a tick; a nudge, a Legato swap of another time and a
+        // plain restart change it, and let the sounding notes go
+        // (launch-quantisation R28, R29).
+        let started = launched.map(|(entry, clip)| {
+            (
+                clip.id,
+                tempo.frames_to_ticks(entry.frame, sample_rate) - entry.offset.ticks,
+            )
+        });
+        let slack = (tempo.frames_to_ticks(Frames(from_frame + 2), sample_rate)
+            - tempo.frames_to_ticks(Frames(from_frame), sample_rate))
+        .get()
+        .abs();
+        let same = match (self.session, started) {
+            (None, None) => true,
+            (Some((old, a)), Some((new, b))) => old == new && (a - b).get().abs() <= slack,
+            _ => false,
+        };
+        let launched_id = started;
+        if !same {
             if let Some((old, _)) = self.session {
                 stop_clip_sounding(old, 0, &mut self.sounding, &mut self.scratch_notes);
             }
@@ -1081,6 +1107,7 @@ impl Node for MidiClipPlayer {
             play_session_clip(
                 clip,
                 launch_tick,
+                entry.offset.ticks,
                 from_frame,
                 to_frame,
                 tempo,

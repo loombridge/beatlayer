@@ -401,6 +401,9 @@ impl SessionNow<'_> {
 struct Anchor {
     scene: SceneId,
     launched: Ticks,
+    /// The clip time it had on that tick, which a linked envelope follows
+    /// and an unlinked one does not (launch-quantisation R29).
+    offset: Ticks,
     /// For a clip that stopped, the frame it did, where its envelopes hold.
     stopped: Option<Frames>,
 }
@@ -513,11 +516,13 @@ impl AutomationList {
             (Some(scene), _) => Some(Anchor {
                 scene,
                 launched: tempo.frames_to_ticks(entry.frame, rate),
+                offset: entry.offset.ticks,
                 stopped: None,
             }),
             (None, Some(last)) => Some(Anchor {
                 scene: last.scene,
                 launched: tempo.frames_to_ticks(last.launched, rate),
+                offset: last.offset.ticks,
                 stopped: Some(last.stopped),
             }),
             (None, None) => None,
@@ -602,6 +607,11 @@ impl AutomationList {
         if since < Ticks::ZERO {
             return None;
         }
+        let since = if clip.linked {
+            since + anchor.offset
+        } else {
+            since
+        };
         clip.envelope
             .value_at(clip.layout.content_at(since, clip.linked))
     }

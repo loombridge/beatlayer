@@ -411,6 +411,145 @@ fn an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does() {
     );
 }
 
+/// What `session.state` lists for the slot at `scene`: its `launched` and
+/// `clip_time`, in ticks, if the engine publishes it.
+fn slot_state(
+    control: &NullControl,
+    client: &mut Client<InProcess>,
+    scene: &Value,
+) -> Option<(i64, i64)> {
+    let state = call(
+        control,
+        client,
+        "run",
+        json!({ "commands": [{ "command": "session.state", "args": {} }] }),
+    );
+    let launches = state["results"][0]["result"]["launches"]
+        .as_array()?
+        .clone();
+    let slot = launches.iter().find(|slot| slot["scene"] == *scene)?;
+    Some((slot["launched"].as_i64()?, slot["clip_time"].as_i64()?))
+}
+
+// Spec: launch-quantisation R27, R30, R34. An agent launches, swaps by Legato
+// and nudges by command ID, and reads each back from `session.state`'s
+// `clip_time`; a nudge of 0 or 65 steps is refused.
+#[test]
+fn an_agent_launches_legato_swaps_and_nudges_by_command_id_and_reads_each_back() {
+    let (mut client, control) = host();
+    let (track, scenes) = {
+        let document = client.transport().shell.editor().document();
+        let track = document.top_level().next().unwrap();
+        let scenes: Vec<Value> = document
+            .scenes()
+            .take(2)
+            .map(|scene| json!(scene.id))
+            .collect();
+        (track, scenes)
+    };
+    // A batch holds only document edits, so each Session command runs in a
+    // call of its own.
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        call(
+            &control,
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )
+    };
+    for scene in &scenes {
+        run(
+            &mut client,
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        );
+    }
+    run(
+        &mut client,
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
+    let clips: Vec<Value> = {
+        let document = client.transport().shell.editor().document();
+        let track = document.track(track).unwrap();
+        track.slots().map(|(_, clip)| json!(clip.id)).collect()
+    };
+    for clip in &clips {
+        run(
+            &mut client,
+            "clip.set_legato",
+            json!({ "clip": clip, "legato": true }),
+        );
+        run(
+            &mut client,
+            "clip.set_launch_quantization",
+            json!({ "clip": clip, "quantization": "none" }),
+        );
+    }
+
+    // Launch the first clip, let it play, then launch the second: it takes
+    // over the first's clip time instead of starting from zero.
+    run(
+        &mut client,
+        "session.launch",
+        json!({ "track": track, "scene": scenes[0] }),
+    );
+    // Three beats in, so a clip that started from zero a moment ago would
+    // read far less.
+    wait(&control, &mut client, "the first clip", |c| {
+        slot_state(&control, c, &scenes[0])
+            .is_some_and(|(_, time)| time >= 3 * Ticks::QUARTER.get())
+    });
+    let (_, first) = slot_state(&control, &mut client, &scenes[0]).unwrap();
+    run(
+        &mut client,
+        "session.launch",
+        json!({ "track": track, "scene": scenes[1] }),
+    );
+    wait(&control, &mut client, "the swap", |c| {
+        slot_state(&control, c, &scenes[1]).is_some()
+    });
+    // The transport stands still from here, so clip times stand still.
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "stop" }),
+    );
+    wait(&control, &mut client, "the stop", |c| {
+        !c.transport().shell.is_playing()
+    });
+    let (_, second) = slot_state(&control, &mut client, &scenes[1]).unwrap();
+    assert!(
+        second >= first,
+        "Legato took over {first}, the clip reads {second}"
+    );
+
+    // With the global value None, a nudge of two steps is two thirty-seconds.
+    run(
+        &mut client,
+        "session.nudge",
+        json!({ "track": track, "scene": scenes[1], "steps": 2 }),
+    );
+    let thirty_second = Ticks::SIXTEENTH.get() / 2;
+    wait(&control, &mut client, "the nudge", |c| {
+        slot_state(&control, c, &scenes[1])
+            .is_some_and(|(_, time)| time == second + 2 * thirty_second)
+    });
+
+    // 0 and 65 steps are refused.
+    for steps in [0, 65] {
+        let refused = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": "session.nudge",
+                    "args": { "track": track, "scene": scenes[1], "steps": steps } }] }),
+            )
+            .unwrap();
+        assert!(refused.ok().is_err(), "{steps} steps is refused");
+    }
+}
+
 /// What `transport.state` says of the Phase Nudge buttons, through the tool
 /// an agent reads it with.
 fn phase_nudge(control: &NullControl, client: &mut Client<InProcess>) -> Value {

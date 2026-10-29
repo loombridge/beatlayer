@@ -361,6 +361,14 @@ const MIDI_QUEUE_MESSAGES: usize = 4096;
 /// holds (the external devices spec, R5).
 const MIDI_OUT_MESSAGES: usize = 4096;
 
+// Spec: midi-clock R13. Room for the notes of a block and, for every output
+// with Sync on, the clocks of a 4,096-frame block at 44.1 kHz at 999 BPM
+// (38) and of 100 ms written ahead for a negative sync delay (40), rounded
+// to 80.
+const _: () = assert!(
+    MIDI_OUT_MESSAGES >= bl_engine::MIDI_EVENTS_PER_BLOCK + bl_engine::MAX_SYNC_OUTPUTS * 80
+);
+
 /// The transport as the engine last published it: what the Control Bar's
 /// transport section and the Arrangement show. While no engine runs, it's
 /// the transport as the last one left it, stopped.
@@ -467,6 +475,9 @@ pub struct AudioHost {
     /// The bus MIDI output leaves on (WP-5.34): each engine's processor
     /// attaches its own queue to it.
     midi_out: Option<bl_midi_io::OutputBus>,
+    /// The output ports with Sync on, which every engine's clock out goes to
+    /// (WP-7.11).
+    sync_outputs: Vec<bl_core::midi::SyncOutput>,
     /// The output latency and round trip, in frames, the engine was last
     /// told (WP-5.34).
     latency_sent: (u32, u32),
@@ -554,6 +565,7 @@ impl AudioHost {
             kit: None,
             midi: None,
             midi_out: None,
+            sync_outputs: Vec::new(),
             latency_sent: (0, 0),
             test_clock: None,
         }
@@ -576,6 +588,27 @@ impl AudioHost {
     /// ports on (WP-5.34; the external devices spec, R5).
     pub fn set_midi_output(&mut self, bus: bl_midi_io::OutputBus) {
         self.midi_out = Some(bus);
+    }
+
+    /// Sets the output ports with Sync on and their options, which the
+    /// engine sends MIDI clock to (the MIDI clock spec, R3): now, and for
+    /// every engine that starts.
+    pub fn set_sync_outputs(&mut self, outputs: Vec<bl_core::midi::SyncOutput>) {
+        if outputs == self.sync_outputs {
+            return;
+        }
+        if let Some(engine) = &self.engine {
+            engine.sync_outputs(&outputs);
+        }
+        self.sync_outputs = outputs;
+    }
+
+    /// What the engine reports of the MIDI clock it sends; all zeros while
+    /// none runs.
+    pub fn sync_out_state(&mut self) -> bl_engine::SyncOutState {
+        self.engine
+            .as_mut()
+            .map_or_else(Default::default, |engine| engine.state().sync_out)
     }
 
     /// Plays clips' audio from `media`, streaming long files from disk, from
@@ -1433,6 +1466,7 @@ impl AudioHost {
         // Spec: launch-quantisation R1. The set's global quantisation, so
         // launching waits for the right grid from the first block.
         engine.session(SessionCommand::SetQuantization(self.launch));
+        engine.sync_outputs(&self.sync_outputs);
         let _ = engine.flush(ENGINE_START_TIMEOUT);
         handoff
             .push(processor)

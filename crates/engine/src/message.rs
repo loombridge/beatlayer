@@ -136,6 +136,11 @@ pub enum TransportCommand {
     SetRecording(bool),
     /// Sets where recording punches in and out (WP-2.13).
     SetPunch(Punch),
+    /// Resync External Hardware (`docs/specs/midi-clock.md`, R11): while the
+    /// song plays, sends each output with Sync on its Hardware Resync choice
+    /// before the clock of the next bar line. Does nothing while the
+    /// transport is stopped.
+    ResyncExternalHardware,
     /// Presses or releases Phase Nudge Down or Up: while one is held and the
     /// song plays, the song plays 4 % slower or faster (the transport spec,
     /// R27). With both held, the one pressed last nudges. The engine ignores
@@ -275,4 +280,11 @@ pub(crate) enum Message {
     /// The outside tempo the song follows from the next block on, or `None`
     /// for none (the transport spec, R24).
     Follower(Option<Owned<Box<dyn Follower>>>),
+    /// Output `index` of the `count` output ports with Sync on and their
+    /// options (midi-clock R3); a `count` of 0 clears the list.
+    SyncOutput {
+        index: u8,
+        count: u8,
+        output: Option<bl_core::midi::SyncOutput>,
+    },
 }

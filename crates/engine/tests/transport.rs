@@ -659,6 +659,8 @@ fn every_transport_command_runs_by_id() {
             json!({ "direction": "up", "held": held }),
         );
     }
+    // Spec: midi-clock R11. With no output port on, it changes nothing.
+    run(&mut rig, "transport.resync_external_hardware", json!({}));
 
     let mut registered: Vec<String> = commands
         .iter()

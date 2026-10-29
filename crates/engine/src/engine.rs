@@ -108,6 +108,27 @@ impl Sender {
         self.push(Message::Follower(follower));
     }
 
+    /// Sends the output ports with Sync on and their options, which clock
+    /// out sends to (`docs/specs/midi-clock.md`, R3). The engine keeps the
+    /// first [`MAX_SYNC_OUTPUTS`](crate::MAX_SYNC_OUTPUTS).
+    pub fn sync_outputs(&mut self, outputs: &[bl_core::midi::SyncOutput]) {
+        let count = outputs.len().min(crate::MAX_SYNC_OUTPUTS) as u8;
+        if count == 0 {
+            self.push(Message::SyncOutput {
+                index: 0,
+                count,
+                output: None,
+            });
+        }
+        for (index, &output) in outputs.iter().take(usize::from(count)).enumerate() {
+            self.push(Message::SyncOutput {
+                index: index as u8,
+                count,
+                output: Some(output),
+            });
+        }
+    }
+
     /// Sends a parameter change.
     pub fn send_param(&mut self, event: ParamEvent) {
         self.push(Message::Param(event));
@@ -250,6 +271,9 @@ enum Request {
     Transport(TransportCommand, When),
     Schedule(ScheduledCommand),
     Cancel(u64),
+    /// The output ports with Sync on and their options (WP-7.11), kept for
+    /// every processor that follows.
+    SyncOutputs(Vec<bl_core::midi::SyncOutput>),
     /// A Session View command (WP-3.2).
     Session(SessionCommand),
     /// What the audio thread says a launched scene put in place: compile
@@ -359,6 +383,7 @@ impl std::fmt::Debug for Request {
             Self::Transport(..) => "Transport",
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
+            Self::SyncOutputs(_) => "SyncOutputs",
             Self::Session(_) => "Session",
             Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
@@ -627,6 +652,13 @@ impl Engine {
         self.request(Request::Transport(command, at));
     }
 
+    /// Sets the output ports with Sync on and their options, which clock
+    /// out sends to (`docs/specs/midi-clock.md`, R3). They go to the
+    /// processor running now and to every one after it.
+    pub fn sync_outputs(&self, outputs: &[bl_core::midi::SyncOutput]) {
+        self.request(Request::SyncOutputs(outputs.to_vec()));
+    }
+
     /// Schedules a command at a musical position (D17).
     pub fn schedule(&self, command: ScheduledCommand) {
         self.request(Request::Schedule(command));
@@ -760,6 +792,7 @@ fn compile_loop(
     let mut batch = Vec::new();
     let mut flushes: Vec<mpsc::Sender<()>> = Vec::new();
     let mut detached = Detached::new();
+    let mut sync_outputs = Vec::new();
     loop {
         // While messages wait for room, look again every millisecond.
         let first = if sender.as_ref().is_some_and(|s| s.backlog() > 0) {
@@ -867,6 +900,12 @@ fn compile_loop(
                     Some(sender) => sender.cancel(id),
                     None => detached.push(Held::Cancel(id)),
                 },
+                Request::SyncOutputs(outputs) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.sync_outputs(&outputs);
+                    }
+                    sync_outputs = outputs;
+                }
                 Request::Session(command) => match sender.as_mut() {
                     Some(sender) => sender.session(command),
                     // Spec: device-changes R7. Nothing plays while no device
@@ -932,6 +971,8 @@ fn compile_loop(
                     // The engine reads the new processor's state from now on.
                     let _ = monitors.send(monitor);
                     if reply.send(processor).is_ok() {
+                        let mut next = next;
+                        next.sync_outputs(&sync_outputs);
                         sender = Some(next);
                     } else {
                         // Nobody waits for it any more, so nothing runs it,

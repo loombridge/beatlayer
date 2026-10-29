@@ -55,6 +55,10 @@ impl Document {
         check_input(self, track)?;
         check_output(self, track)?;
         check_main_out(track)?;
+        // Spec: routing R1. Only an audio or MIDI track monitors.
+        if track.routing.monitor != Routing::new(track.kind).monitor && !track.kind.holds_clips() {
+            return Err(wrong_kind(track, "an audio or MIDI track"));
+        }
         if let Some(to) = &track.routing.midi_output {
             if track.kind != TrackKind::Midi {
                 return Err(wrong_kind(track, "a MIDI track"));
@@ -355,6 +359,9 @@ fn wrong_kind(track: &Track, needs: &'static str) -> ModelError {
 /// a port (the routing spec, R2, R16).
 fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
     let input = &track.routing.input;
+    if let Input::External { channel } = input {
+        check_channel(*channel)?;
+    }
     if let Input::Port { name } = input
         && name.is_empty()
     {
@@ -465,16 +472,20 @@ fn check_chain_tap(doc: &Document, from: TrackId, chain: ChainId) -> Result<(), 
 }
 
 /// Audio, group, and return tracks go to Main, the group they're in, an
-/// audio track, their sends only, or Ext. Out; MIDI tracks (which have no
-/// instrument yet) and Main where they go.
+/// audio track, their sends only, or Ext. Out; MIDI tracks go to Main or the
+/// group they're in, and Main nowhere else.
 fn check_output(doc: &Document, track: &Track) -> Result<(), ModelError> {
     let output = track.routing.output;
     let routed = matches!(
         track.kind,
         TrackKind::Audio | TrackKind::Group | TrackKind::Return
     );
+    if let Output::External { channel } = output {
+        check_channel(channel)?;
+    }
     match (track.kind, output) {
         (_, Output::Default) => Ok(()),
+        (TrackKind::Midi, Output::Main) => Ok(()),
         (_, Output::Main | Output::External { .. } | Output::SendsOnly) if routed => Ok(()),
         (_, Output::Track { track: to }) if routed => {
             let parent = doc.parent(track.id);
@@ -490,6 +501,17 @@ fn check_output(doc: &Document, track: &Track) -> Result<(), ModelError> {
         (TrackKind::Main, _) => Err(ModelError::MainTrack),
         _ => Err(wrong_kind(track, "an audio, group, or return track")),
     }
+}
+
+/// An interface channel counts from 1.
+fn check_channel(channel: Channel) -> Result<(), ModelError> {
+    let (Channel::Mono(first) | Channel::Pair(first)) = channel;
+    if first == 0 {
+        return Err(ModelError::InvalidInput(
+            "the interface's channels count from 1",
+        ));
+    }
+    Ok(())
 }
 
 /// A MIDI output port a track or the external instrument names: a name, and
@@ -508,6 +530,8 @@ pub(crate) fn check_port(name: &str, channel: u8) -> Result<(), ModelError> {
 /// interface's outputs; every other track keeps them at their default.
 fn check_main_out(track: &Track) -> Result<(), ModelError> {
     let (main_out, cue_out) = (track.routing.main_out, track.routing.cue_out);
+    check_channel(main_out)?;
+    check_channel(cue_out)?;
     if track.kind != TrackKind::Main {
         return if main_out.is_first_pair() && cue_out.is_first_pair() {
             Ok(())
@@ -942,6 +966,89 @@ mod tests {
             serde_json::from_value::<Document>(broken).is_err(),
             "Main Out on another track doesn't load"
         );
+    }
+
+    // Spec: routing R2, R3
+    #[test]
+    fn interface_channels_count_from_1() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        for channel in [Channel::Mono(0), Channel::Pair(0)] {
+            assert!(input(&mut editor, a, Input::External { channel }).is_err());
+            assert!(output(&mut editor, a, Output::External { channel }).is_err());
+            assert!(editor.apply(Command::SetMainOut { channel }).is_err());
+            assert!(editor.apply(Command::SetCueOut { channel }).is_err());
+        }
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        for (path, routing) in [
+            (
+                "input",
+                serde_json::json!({
+                    "input": { "type": "external", "channel": { "type": "mono", "channel": 0 } },
+                    "monitor": "auto",
+                }),
+            ),
+            (
+                "output",
+                serde_json::json!({
+                    "input": { "type": "none" },
+                    "monitor": "auto",
+                    "output": { "type": "external", "channel": { "type": "pair", "channel": 0 } },
+                }),
+            ),
+        ] {
+            let mut broken = saved.clone();
+            broken["tracks"][0]["routing"] = routing;
+            assert!(
+                serde_json::from_value::<Document>(broken).is_err(),
+                "channel 0 on {path} doesn't load"
+            );
+        }
+        let mut broken = saved;
+        broken["main"]["routing"] = serde_json::json!({
+            "input": { "type": "none" },
+            "monitor": "off",
+            "main_out": { "type": "pair", "channel": 0 },
+        });
+        assert!(
+            serde_json::from_value::<Document>(broken).is_err(),
+            "channel 0 on Main Out doesn't load"
+        );
+    }
+
+    // Spec: routing R3
+    #[test]
+    fn a_midi_track_in_a_group_goes_to_main_or_its_group() {
+        let mut editor = Editor::new();
+        let g = add(&mut editor, TrackKind::Group, None);
+        let m = add(&mut editor, TrackKind::Midi, Some(g));
+        instrument(&mut editor, m, "Drums");
+        output(&mut editor, m, Output::Main).unwrap();
+        assert_eq!(
+            editor.document().output_of(m),
+            Some(editor.document().main_id())
+        );
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
+        output(&mut editor, m, Output::Track { track: g }).unwrap();
+        assert_eq!(editor.document().output_of(m), Some(g));
+    }
+
+    // Spec: routing R1
+    #[test]
+    fn a_set_gives_only_audio_and_midi_tracks_a_monitor_setting() {
+        let mut editor = Editor::new();
+        add(&mut editor, TrackKind::Group, None);
+        let saved = serde_json::to_value(editor.document()).unwrap();
+        let mut broken = saved.clone();
+        broken["tracks"][0]["routing"] =
+            serde_json::json!({ "input": { "type": "none" }, "monitor": "in" });
+        assert!(
+            serde_json::from_value::<Document>(broken).is_err(),
+            "a group that monitors doesn't load"
+        );
+        assert!(serde_json::from_value::<Document>(saved).is_ok());
     }
 
     // Spec: routing R5

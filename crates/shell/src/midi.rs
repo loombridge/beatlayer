@@ -13,7 +13,8 @@ use bl_midi_io::{
     PortState, PortSwitches,
 };
 use bl_shell_spec::midi_io::{
-    KeyboardInfo, KeyboardKeyResult, MidiPortsResult, PortDirection, PortInfo,
+    KeyboardInfo, KeyboardKeyResult, MidiPortsResult, PortDirection, PortInfo, SYNC_DELAY_RANGE,
+    SetPortArgs,
 };
 
 use crate::settings::{MidiPrefs, PortPrefs};
@@ -27,6 +28,8 @@ pub struct MidiHost {
     /// A clock that stamps the keyboard's notes instead of the system's,
     /// for tests that drive a null device by hand (T199).
     clock: Option<bl_core::clock::TestClock>,
+    /// Show Resync Button (the MIDI clock spec, R10).
+    show_resync_button: bool,
 }
 
 impl std::fmt::Debug for MidiHost {
@@ -60,6 +63,9 @@ fn info(state: PortState) -> PortInfo {
         sync: state.switches.sync,
         remote: state.switches.remote,
         mpe: state.switches.mpe,
+        sync_delay_ms: state.switches.delay_ms,
+        clock_type: state.switches.clock_type.into(),
+        hardware_resync: state.switches.resync.into(),
         present: state.present,
         open: state.open,
         error: state.error,
@@ -87,6 +93,11 @@ impl MidiHost {
                     sync: port.sync,
                     remote: port.remote,
                     mpe: port.mpe,
+                    delay_ms: port
+                        .sync_delay_ms
+                        .clamp(*SYNC_DELAY_RANGE.start(), *SYNC_DELAY_RANGE.end()),
+                    clock_type: port.clock_type.into(),
+                    resync: port.hardware_resync.into(),
                 },
             );
         }
@@ -97,6 +108,7 @@ impl MidiHost {
             keyboard,
             sender,
             clock: None,
+            show_resync_button: prefs.show_resync_button,
         };
         host.refresh();
         host
@@ -106,6 +118,12 @@ impl MidiHost {
     /// (T199), as the null device's manual pacing needs.
     pub fn set_test_clock(&mut self, clock: bl_core::clock::TestClock) {
         self.clock = Some(clock);
+    }
+
+    /// The test clock that stamps the keyboard's notes, if one was given.
+    #[must_use]
+    pub fn test_clock(&self) -> Option<bl_core::clock::TestClock> {
+        self.clock.clone()
     }
 
     /// Lists the system's ports again, opening and closing them as their
@@ -129,9 +147,13 @@ impl MidiHost {
                     sync: switches.sync,
                     remote: switches.remote,
                     mpe: switches.mpe,
+                    sync_delay_ms: switches.delay_ms,
+                    clock_type: switches.clock_type.into(),
+                    hardware_resync: switches.resync.into(),
                 })
                 .collect(),
             keyboard_on: self.keyboard.is_on(),
+            show_resync_button: self.show_resync_button,
         }
     }
 
@@ -188,24 +210,18 @@ impl MidiHost {
             system: self.ports.system().to_owned(),
             ports: self.ports(),
             keyboard: self.keyboard_info(),
+            show_resync_button: self.show_resync_button,
         }
     }
 
-    /// Sets the switches the arguments give.
+    /// Sets the switches and sync options the arguments give.
     ///
     /// # Errors
     ///
-    /// A message if the system doesn't offer the port now.
-    pub fn set_port(
-        &mut self,
-        dir: PortDirection,
-        name: &str,
-        track: Option<bool>,
-        sync: Option<bool>,
-        remote: Option<bool>,
-        mpe: Option<bool>,
-    ) -> Result<PortInfo, String> {
-        let dir = direction(dir);
+    /// A message if the system doesn't offer the port now, or an option
+    /// doesn't fit the port or its range.
+    pub fn set_port(&mut self, args: &SetPortArgs) -> Result<PortInfo, String> {
+        let (dir, name) = (direction(args.direction), args.name.as_str());
         let now = self
             .ports
             .port(dir, name)
@@ -213,21 +229,60 @@ impl MidiHost {
             .ok_or_else(|| format!("no MIDI {} port is called \"{name}\"", dir.label()))?
             .switches;
         // Spec: midi-io R27. An output has no MPE switch.
-        if mpe.is_some() && dir == Direction::Output {
+        if args.mpe.is_some() && dir == Direction::Output {
             return Err(format!(
                 "the MIDI output port \"{name}\" has no MPE switch: a track sends MPE out through its MIDI To"
             ));
         }
+        // Spec: midi-clock R1, R2, R14. An input has a Sync Delay and no more.
+        if (args.clock_type.is_some() || args.hardware_resync.is_some()) && dir == Direction::Input
+        {
+            return Err(format!(
+                "the MIDI input port \"{name}\" has no MIDI Clock Type or Hardware Resync: they are an output's"
+            ));
+        }
+        if let Some(delay) = args.sync_delay_ms
+            && !SYNC_DELAY_RANGE.contains(&delay)
+        {
+            return Err(format!(
+                "MIDI Clock Sync Delay runs from {} to {} ms, not {delay}",
+                SYNC_DELAY_RANGE.start(),
+                SYNC_DELAY_RANGE.end()
+            ));
+        }
         let switches = PortSwitches {
-            track: track.unwrap_or(now.track),
-            sync: sync.unwrap_or(now.sync),
-            remote: remote.unwrap_or(now.remote),
-            mpe: mpe.unwrap_or(now.mpe),
+            track: args.track.unwrap_or(now.track),
+            sync: args.sync.unwrap_or(now.sync),
+            remote: args.remote.unwrap_or(now.remote),
+            mpe: args.mpe.unwrap_or(now.mpe),
+            delay_ms: args.sync_delay_ms.unwrap_or(now.delay_ms),
+            clock_type: args.clock_type.map_or(now.clock_type, Into::into),
+            resync: args.hardware_resync.map_or(now.resync, Into::into),
         };
         self.ports
             .set_switches(dir, name, switches)
             .map(info)
             .map_err(|e| e.to_string())
+    }
+
+    /// The open outputs with Sync on and their options: where the engine
+    /// sends MIDI clock.
+    #[must_use]
+    pub fn sync_outputs(&self) -> Vec<bl_core::midi::SyncOutput> {
+        self.ports.sync_outputs()
+    }
+
+    /// Whether Show Resync Button is on.
+    #[must_use]
+    pub fn show_resync_button(&self) -> bool {
+        self.show_resync_button
+    }
+
+    /// Sets Show Resync Button (the other state if `on` is `None`) and
+    /// returns it.
+    pub fn set_show_resync_button(&mut self, on: Option<bool>) -> bool {
+        self.show_resync_button = on.unwrap_or(!self.show_resync_button);
+        self.show_resync_button
     }
 
     /// The sending end of the engine's input queue, for the audio host to

@@ -393,6 +393,19 @@ const ENTRIES: &[Entry] = &[
             changes nothing in the project.",
     },
     Entry {
+        id: "transport.resync_external_hardware",
+        action: Action::Run(TransportCommand::ResyncExternalHardware),
+        label: "Resync External Hardware",
+        contexts: &[Global],
+        keys: &[],
+        description: "Sends each output port with Sync on its own Hardware Resync choice, as \
+            the Control Bar's Resync External Hardware button does: Stop then Start, Start \
+            only, or nothing. While the song plays they go out at the next bar line, just \
+            before that bar line's clock, so hardware that has drifted starts again in step on \
+            the bar; while the song is stopped, or counting in, it does nothing. Set the \
+            choices with `midi.set_port`. It changes nothing in the project.",
+    },
+    Entry {
         id: "transport.set_recording",
         action: Action::SetRecording,
         label: "Set Recording",

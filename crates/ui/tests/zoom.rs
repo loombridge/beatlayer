@@ -234,10 +234,16 @@ fn controls_keep_their_live_size_times_the_zoom() {
             if placement.strip == Strip::ControlBar {
                 assert!((rect.height() - 18.0 * zoom).abs() < EPS * 10.0);
             }
-            // The Global Amount is hidden unless the pool holds a groove.
-            if placement.element != bl_ui::layout::Element::Message
-                && placement.element != bl_ui::layout::Element::GlobalAmount
-            {
+            // The Global Amount is hidden unless the pool holds a groove, and the
+            // sync lamps and the Resync button unless an input has Sync on or
+            // Show Resync Button is on.
+            if !matches!(
+                placement.element,
+                bl_ui::layout::Element::Message
+                    | bl_ui::layout::Element::GlobalAmount
+                    | bl_ui::layout::Element::SyncLamps
+                    | bl_ui::layout::Element::ResyncExternalHardware
+            ) {
                 assert!(
                     (rect.width() - placement.width * zoom).abs() < EPS * 10.0,
                     "{} at {zoom}",
@@ -431,6 +437,9 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
                     // Panes are named as their regions are.
                     let (label, role) = match row.name {
                         "Main view" => ("Arrangement View", Some(Role::Pane)),
+                        // The view selector's button shares its name with the
+                        // pane; the tree's order of nodes isn't fixed.
+                        "Arrangement View" => ("Arrangement View", Some(Role::Button)),
                         other => (other, None),
                     };
                     let Some(rect) = drawn_as(&nodes, label, role) else {
@@ -440,9 +449,10 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
                     checked += 1;
                 }
                 // Every row but the Global Amount, which the Control Bar hides
-                // where it has no room for it.
+                // where it has no room for it, and the sync lamps and the
+                // Resync button, which show only when asked for.
                 assert!(
-                    checked >= ELEMENTS.len() + 16,
+                    checked >= ELEMENTS.len() - 2 + 16,
                     "{what}: only {checked} rows drawn"
                 );
 

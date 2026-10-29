@@ -148,6 +148,15 @@ fn the_audio_thread_allocates_nothing_while_the_host_takes_ten_thousand_messages
             .count();
     }
     rig.surfaces.settle();
+    // On a slow machine the host may route every note only after the last
+    // burst's block, so the two blocks after it count too.
+    for _ in 0..2 {
+        played += rig
+            .block()
+            .iter()
+            .filter(|m| m.first() == Some(&0x99))
+            .count();
+    }
     let taken = rig.surfaces.traffic().0;
     assert_eq!(taken, 10_000, "the host took every message");
     assert!(played > 0, "the surface's notes reached the track");

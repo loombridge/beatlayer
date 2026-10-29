@@ -148,6 +148,7 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         track,
         scene: Some(scene),
         frame: launched,
+        velocity: 127,
         last: None,
     }];
     // The clip launched at the second bar line: from it, in blocks of any
@@ -184,6 +185,7 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         track,
         scene: None,
         frame: Frames::ZERO,
+        velocity: 127,
         last: Some(StoppedClip {
             scene,
             launched,

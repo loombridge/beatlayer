@@ -344,6 +344,11 @@ fn each_settings_command_reads_back_from_settings_state() {
     );
     run(
         &mut client,
+        "settings.set_takeover_mode",
+        json!({ "mode": "pick_up" }),
+    );
+    run(
+        &mut client,
         "settings.set_snap_automation_to_grid",
         json!({ "on": false }),
     );
@@ -459,6 +464,7 @@ fn each_settings_command_reads_back_from_settings_state() {
     assert_eq!(state["audio"]["tone"]["frequency_hz"], 880.0);
     assert_eq!(state["tempo_midi"]["keyboard"]["on"], true);
     assert_eq!(state["automation_record_mode"], "latch");
+    assert_eq!(state["takeover_mode"], "pick_up");
     assert_eq!(
         transport_state(&mut client)["automation_record_mode"],
         "latch"

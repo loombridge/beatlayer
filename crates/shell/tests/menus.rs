@@ -135,6 +135,9 @@ fn every_shell_command_is_on_a_menu_or_a_control() {
         // The Automation Arm button's context menu (the automation spec,
         // R18).
         commands::SETTINGS_SET_AUTOMATION_RECORD_MODE,
+        // The Tempo & MIDI page's Takeover Mode chooser (the remote mapping
+        // spec, R28).
+        commands::SETTINGS_SET_TAKEOVER_MODE,
         // The Plug-Ins page's switch (the device chains spec, R31).
         commands::SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
         // The Display & Input page's Zoom (interface-zoom R4).

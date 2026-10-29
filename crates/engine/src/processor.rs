@@ -27,7 +27,7 @@ use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool};
 use crate::session::{
     Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
-    SlotState, SlotStatus,
+    SlotState, SlotStatus, VELOCITY_MAX,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 
@@ -1301,12 +1301,14 @@ impl Processor {
     /// global launch quantisation.
     fn session_command(&mut self, command: SessionCommand) {
         match command {
-            SessionCommand::Launch { track, scene } if self.is_recording_slot(track, scene) => {
-                // Spec: session-recording R4. The launch button of a
-                // recording slot ends the recording and loops the clip.
-                self.stop_session_take(true);
+            SessionCommand::Launch { track, scene } => {
+                self.launch_button(track, scene, VELOCITY_MAX);
             }
-            SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
+            SessionCommand::LaunchAt {
+                track,
+                scene,
+                velocity,
+            } => self.launch_button(track, scene, velocity),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
             SessionCommand::CancelSceneLaunch(scene) => {
@@ -1419,10 +1421,22 @@ impl Processor {
             })
     }
 
-    /// Launches a slot's clip: on the next grid line while the song plays,
-    /// and at once from the Arrangement position while it's stopped, which
-    /// also starts the transport (the launch quantisation spec, R5).
-    fn launch_slot(&mut self, track: TrackId, scene: SceneId) {
+    /// Presses a slot's launch button at `velocity`.
+    fn launch_button(&mut self, track: TrackId, scene: SceneId, velocity: u8) {
+        if self.is_recording_slot(track, scene) {
+            // Spec: session-recording R4. The launch button of a recording
+            // slot ends the recording and loops the clip.
+            self.stop_session_take(true);
+        } else {
+            self.launch_slot(track, scene, velocity);
+        }
+    }
+
+    /// Launches a slot's clip at `velocity` (remote-mapping R16): on the next
+    /// grid line while the song plays, and at once from the Arrangement
+    /// position while it's stopped, which also starts the transport (the
+    /// launch quantisation spec, R5).
+    fn launch_slot(&mut self, track: TrackId, scene: SceneId, velocity: u8) {
         let was_playing = self.playing;
         if !was_playing {
             // Spec: launch-quantisation R5. A launch with the transport
@@ -1439,7 +1453,8 @@ impl Processor {
             self.config.sample_rate,
         );
         let mode = self.slot_mode(track, scene);
-        self.session.press(track, scene, mode, playhead);
+        self.session
+            .press_with(track, scene, mode, velocity, playhead);
     }
 
     /// Releases a slot's launch button: a Gate or Repeat clip stops on the

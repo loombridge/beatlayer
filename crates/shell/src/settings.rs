@@ -13,8 +13,9 @@ pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
     ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
-    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs,
-    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
+    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
+    WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
+    zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -140,6 +141,11 @@ pub struct Preferences {
     /// automation spec, R18): Touch, Latch or Write. It's kept between
     /// launches, and isn't part of the set.
     pub automation_record_mode: AutomationRecordMode,
+    /// Takeover Mode (Tempo & MIDI, L-SET-014; the remote mapping spec, R28):
+    /// what an absolute controller does when it and its control disagree.
+    /// It's kept between launches, is the same for every set, and is None in
+    /// a new install.
+    pub takeover_mode: TakeoverMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),

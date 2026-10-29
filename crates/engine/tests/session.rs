@@ -13,8 +13,8 @@ use bl_engine::{
 };
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Editor, LaunchMode, LaunchQuantization,
-    LaunchSettings, MidiData, Note, SceneId, TrackId, TrackKind,
+    AudioData, Clip, ClipData, ClipLaunch, Command, ContentHash, Editor, LaunchMode,
+    LaunchQuantization, LaunchSettings, MidiData, Note, SceneId, TrackId, TrackKind,
 };
 use common::{RATE, Rig, device, track};
 
@@ -485,6 +485,18 @@ fn render_session_file(
     block: usize,
     cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
 ) -> Vec<f32> {
+    render_session_launch(file, ClipLaunch::default(), audio, frames, block, cues)
+}
+
+/// As [`render_session_file`], for a slot clip with `launch`'s settings.
+fn render_session_launch(
+    file: Arc<SampleData>,
+    launch: ClipLaunch,
+    audio: AudioData,
+    frames: u64,
+    block: usize,
+    cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
+) -> Vec<f32> {
     let mut media = MediaMap::new();
     media.insert(ContentHash([7; 32]), file);
     let registry = Registry::new().with_media(Arc::new(media));
@@ -492,12 +504,13 @@ fn render_session_file(
     let mut editor = Editor::new();
     let track = track(&mut editor, TrackKind::Audio, None);
     let scene = editor.document().scenes().next().unwrap().id;
-    let clip = Clip::new(
+    let mut clip = Clip::new(
         editor.new_id(),
         Ticks::ZERO,
         Ticks::WHOLE,
         ClipData::Audio(audio),
     );
+    clip.launch = launch;
     editor
         .apply(Command::CreateSlotClip { track, scene, clip })
         .unwrap();
@@ -554,6 +567,109 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     assert_eq!(out[95_999], 0.0);
     for (i, sample) in out[96_000..].iter().enumerate().take(600) {
         assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
+    }
+}
+
+// Spec: remote-mapping R16. A launch at velocity v plays the clip at a gain of
+// 1 - a * (127 - v) / 126: silent at velocity 1 with the amount at 100 %,
+// unchanged at 127 and with the amount at 0, and the gain holds until the clip
+// launches again, which restarts it at the next launch's velocity.
+#[test]
+fn a_launch_velocity_scales_the_clip_by_its_velocity_amount_at_any_block_size() {
+    let launch = |amount: f64| ClipLaunch {
+        velocity_amount: amount,
+        ..ClipLaunch::default()
+    };
+    // The unlaunched-velocity ramp gives the reference.
+    let render = |amount: f64, command: &dyn Fn(TrackId, SceneId) -> SessionCommand, block| {
+        render_session_launch(
+            ramp(96_000),
+            launch(amount),
+            AudioData::new(ContentHash([7; 32])),
+            2_000,
+            block,
+            |track, scene| vec![(0, Cue::Session(command(track, scene)))],
+        )
+    };
+    for block in [37, 64, 512] {
+        let at_velocity = |amount, velocity| {
+            render(
+                amount,
+                &|track, scene| SessionCommand::LaunchAt {
+                    track,
+                    scene,
+                    velocity,
+                },
+                block,
+            )
+        };
+        let silent = at_velocity(1.0, 1);
+        assert!(
+            silent[..1_500].iter().all(|&s| s == 0.0),
+            "blocks of {block}: velocity 1 at 100 % is silent"
+        );
+        for (amount, velocity) in [(1.0, 127), (0.0, 1), (0.5, 127), (0.0, 64)] {
+            let out = at_velocity(amount, velocity);
+            for (i, sample) in out.iter().enumerate().take(1_500) {
+                assert_eq!(*sample, at(i as i64), "frame {i}, blocks of {block}");
+            }
+        }
+        // A plain launch is velocity 127.
+        let plain = render(
+            1.0,
+            &|track, scene| SessionCommand::Launch { track, scene },
+            block,
+        );
+        assert_eq!(plain[..1_500], at_velocity(1.0, 127)[..1_500]);
+        // Half way: 1 - 0.5 * (127 - 64) / 126 = 0.75.
+        let half = at_velocity(0.5, 64);
+        for (i, sample) in half.iter().enumerate().take(1_500) {
+            let want = f64::from(at(i as i64)) * 0.75;
+            assert!(
+                (f64::from(*sample) - want).abs() < 1e-7,
+                "frame {i}, blocks of {block}: {sample} vs {want}"
+            );
+        }
+    }
+}
+
+// Spec: remote-mapping R16. A restart at another velocity plays at the new
+// gain from the restart's frame, and the gain before it is the first's.
+#[test]
+fn a_restart_takes_the_gain_of_its_own_launch() {
+    let out = render_session_launch(
+        ramp(96_000),
+        ClipLaunch {
+            velocity_amount: 1.0,
+            ..ClipLaunch::default()
+        },
+        AudioData::new(ContentHash([7; 32])),
+        194_000,
+        512,
+        |track, scene| {
+            let launch = |velocity| {
+                Cue::Session(SessionCommand::LaunchAt {
+                    track,
+                    scene,
+                    velocity,
+                })
+            };
+            vec![
+                (0, Cue::Transport(TransportCommand::Play)),
+                (1, launch(127)),
+                (150_000, launch(64)),
+            ]
+        },
+    );
+    // The first launch lands on the 2.1.1 line (96,000) and the restart on
+    // the 3.1.1 line (192,000), at 1 - 63 / 126 = half the gain.
+    assert!(out[..96_000].iter().all(|&s| s == 0.0));
+    for (i, sample) in out[96_000..97_500].iter().enumerate() {
+        assert_eq!(*sample, at(i as i64), "frame {i} of the first launch");
+    }
+    for (i, sample) in out[192_000..].iter().enumerate() {
+        let want = at(i as i64) * 0.5;
+        assert!((sample - want).abs() < 1e-9, "frame {i} of the restart");
     }
 }
 

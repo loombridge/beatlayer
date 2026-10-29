@@ -806,6 +806,7 @@ dependencies = [
  "bl-core",
  "bl-midi-io",
  "bl-model",
+ "proptest",
 ]
 
 [[package]]

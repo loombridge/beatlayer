@@ -388,7 +388,14 @@ impl SessionLauncher {
                 let scene = table.scenes[target].scene;
                 let quantization = table.slot(slot.track, scene).and_then(|i| i.quantization);
                 let (line, at) = start_of(quantization, tick, playhead);
-                self.press_at(slot.track, scene, LaunchMode::Trigger, line, at);
+                self.press_at(
+                    slot.track,
+                    scene,
+                    LaunchMode::Trigger,
+                    super::VELOCITY_MAX,
+                    line,
+                    at,
+                );
                 // A target waiting for its own grid leaves the track silent
                 // from the follow time (observed in Live 12.4.3).
                 if scene != slot.scene
@@ -437,7 +444,14 @@ impl SessionLauncher {
                 for &(_, track, _) in program.scene_slots(scene) {
                     let quantization = table.slot(track, scene).and_then(|i| i.quantization);
                     let (line, at) = start_of(quantization, tick, playhead);
-                    self.press_at(track, scene, LaunchMode::Trigger, line, at);
+                    self.press_at(
+                        track,
+                        scene,
+                        LaunchMode::Trigger,
+                        super::VELOCITY_MAX,
+                        line,
+                        at,
+                    );
                 }
                 self.start_scene_run(scene, tick);
                 if program.scene_maps.iter().any(|maps| maps.scene == scene) {

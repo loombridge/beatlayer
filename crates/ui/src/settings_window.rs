@@ -10,7 +10,7 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
-use bl_model::{LaunchMode, LaunchQuantization};
+use bl_model::{LaunchMode, LaunchQuantization, TakeoverMode};
 use bl_project::registry as recovery_ids;
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
@@ -1936,9 +1936,10 @@ fn library_page(
 
 /// Tempo & MIDI (L-SET-014): the MIDI ports table (WP-2.2), each input and
 /// output with its Track, Sync, and Remote switches, and an input its MPE
-/// switch after them, as the MIDI I/O spec R2 and R27 give it. The Tempo Follower, control surfaces, and Takeover Mode come
-/// with later packages. Sync and Remote are kept and act when sync and MIDI
-/// mapping are built (R5).
+/// switch after them, as the MIDI I/O spec R2 and R27 give it. Takeover Mode
+/// comes before the ports (the remote mapping spec, R28). The Tempo Follower
+/// and control surfaces come with later packages. Sync and Remote are kept
+/// and act when sync and MIDI mapping are built (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -1949,9 +1950,35 @@ fn tempo_midi_page(
     rows.heading(ui, "MIDI");
     rows.note(
         ui,
-        "The Tempo Follower, control surface, and Takeover Mode settings come with later \
-         packages.",
+        "The Tempo Follower and control surface settings come with later packages.",
     );
+    // Spec: remote-mapping R28. Takeover Mode sits where Live has it: after
+    // the Control Surfaces table's place and before the MIDI ports table.
+    let modes: Vec<Choice<TakeoverMode>> = TakeoverMode::ALL
+        .into_iter()
+        .map(|mode| Choice {
+            label: mode.label().to_owned(),
+            value: mode,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Takeover Mode", SettingsLayout::CHOOSER);
+    let current = shell.takeover_mode();
+    if let Some(mode) = chooser(
+        ui,
+        theme,
+        "takeover-mode",
+        "Takeover Mode",
+        rect,
+        &modes,
+        Some(&current),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_TAKEOVER_MODE,
+            json!({ "mode": mode }),
+        )));
+    }
     rows.heading(ui, "MIDI Ports");
     let ports = shell.midi().ports();
     if ports.is_empty() {

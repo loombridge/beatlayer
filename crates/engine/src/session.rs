@@ -78,6 +78,9 @@ pub struct SessionPlayback {
     pub scene: Option<SceneId>,
     /// The song frame the clip launched on (zero when `scene` is `None`).
     pub frame: Frames,
+    /// The velocity the clip was launched with, 127 unless a launch gave one
+    /// (the remote mapping spec, R16); 127 when `scene` is `None`.
+    pub velocity: u8,
     /// For a taken-over track with nothing playing, the clip that stopped on
     /// it last: its Automation envelopes hold the value they had there
     /// until Back to Arrangement (WP-3.12).
@@ -139,6 +142,10 @@ pub(crate) struct SceneMaps {
     pub(crate) signature: Option<(TimeSignature, TimeSignatureMap)>,
 }
 
+/// The velocity of a launch that gives none: a click, a key or a controller
+/// (the remote mapping spec, R16).
+pub(crate) const VELOCITY_MAX: u8 = 127;
+
 /// A command to the engine's Session View (WP-3.2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionCommand {
@@ -149,6 +156,18 @@ pub enum SessionCommand {
         track: TrackId,
         /// The scene whose slot it is.
         scene: SceneId,
+    },
+    /// Launches the clip in a slot as [`SessionCommand::Launch`] does, with
+    /// a velocity from 1 to 127 that the clip's velocity amount turns into a
+    /// gain on the launch frame (the remote mapping spec, R16). A launch
+    /// without one has velocity 127.
+    LaunchAt {
+        /// The track whose slot it is.
+        track: TrackId,
+        /// The scene whose slot it is.
+        scene: SceneId,
+        /// The velocity of the launch.
+        velocity: u8,
     },
     /// Releases the launch button of a slot: a Gate or Repeat clip stops on
     /// the grid, and the other modes ignore it (WP-3.3).
@@ -246,6 +265,11 @@ struct Slot {
     auto: bool,
     /// Where the clip's follow action is (WP-3.10).
     follow: FollowState,
+    /// The velocity the clip plays at, from the launch or restart that
+    /// started it (remote-mapping R16).
+    velocity: u8,
+    /// The velocity of the launch or restart queued at `due`.
+    next: u8,
 }
 
 /// The follow action of the scene launched last, which runs from the line it
@@ -372,8 +396,8 @@ impl SessionLauncher {
         self.settings.enabled && self.settings.quantization != LaunchQuantization::None
     }
 
-    /// A press of the launch button of `(track, scene)`, whose clip has
-    /// launch mode `mode`: what it does is the mode's rule (R12 to R21).
+    /// A press at velocity 127, for the tests.
+    #[cfg(test)]
     pub(crate) fn press(
         &mut self,
         track: TrackId,
@@ -381,9 +405,23 @@ impl SessionLauncher {
         mode: LaunchMode,
         playhead: Playhead<'_>,
     ) {
+        self.press_with(track, scene, mode, VELOCITY_MAX, playhead);
+    }
+
+    /// A press of the launch button of `(track, scene)`, whose clip has
+    /// launch mode `mode`, at a launch velocity (R16): what it does is the
+    /// mode's rule (R12 to R21).
+    pub(crate) fn press_with(
+        &mut self,
+        track: TrackId,
+        scene: SceneId,
+        mode: LaunchMode,
+        velocity: u8,
+        playhead: Playhead<'_>,
+    ) {
         let line = self.line_for(playhead);
         let at = playhead.frames(line);
-        self.press_at(track, scene, mode, line, at);
+        self.press_at(track, scene, mode, velocity, line, at);
     }
 
     /// A release of the launch button of `(track, scene)`, whose clip has
@@ -433,7 +471,7 @@ impl SessionLauncher {
         let line = self.line_for(playhead);
         let at = playhead.frames(line);
         for &(_, track, _) in slots {
-            self.press_at(track, scene, LaunchMode::Trigger, line, at);
+            self.press_at(track, scene, LaunchMode::Trigger, VELOCITY_MAX, line, at);
         }
         self.start_scene_run(scene, line);
         at
@@ -526,7 +564,14 @@ impl SessionLauncher {
     /// block it is asked in, so no release reads its grid line first.
     pub(crate) fn launch_at(&mut self, track: TrackId, scene: SceneId, at: Frames) {
         if self.find_mut(track, scene).is_none() {
-            self.press_at(track, scene, LaunchMode::Trigger, Ticks::ZERO, at);
+            self.press_at(
+                track,
+                scene,
+                LaunchMode::Trigger,
+                VELOCITY_MAX,
+                Ticks::ZERO,
+                at,
+            );
             // The launch tick is unknown, so a recorded clip follows nothing.
             if let Some(slot) = self.find_mut(track, scene) {
                 slot.follow = FollowState::Spent;
@@ -541,6 +586,7 @@ impl SessionLauncher {
         track: TrackId,
         scene: SceneId,
         mode: LaunchMode,
+        velocity: u8,
         line: Ticks,
         at: Frames,
     ) {
@@ -562,6 +608,8 @@ impl SessionLauncher {
                 repeating,
                 auto: false,
                 follow: FollowState::Unarmed,
+                velocity: VELOCITY_MAX,
+                next: velocity,
             });
             return;
         };
@@ -583,6 +631,7 @@ impl SessionLauncher {
             slot.due = Some(at);
             slot.restart = true;
             slot.line = line;
+            slot.next = velocity;
             self.clear_way_for(track, scene, at);
         }
     }
@@ -804,6 +853,7 @@ impl SessionLauncher {
                 self.note(track, scene, due, Some(due));
                 let slot = &mut self.slots[i];
                 slot.started = Some(due);
+                slot.velocity = slot.next;
                 slot.restart = false;
                 slot.auto = false;
                 slot.follow = FollowState::Unarmed;
@@ -899,6 +949,7 @@ impl SessionLauncher {
                     track: slot.track,
                     scene: Some(slot.scene),
                     frame,
+                    velocity: slot.velocity,
                     last: None,
                 });
             }
@@ -909,6 +960,7 @@ impl SessionLauncher {
                     track,
                     scene: None,
                     frame: Frames::ZERO,
+                    velocity: VELOCITY_MAX,
                     last: self
                         .stopped
                         .iter()
@@ -940,6 +992,21 @@ impl SessionLauncher {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LaunchArgs {
+    /// The track whose slot it is.
+    pub track: TrackId,
+    /// The scene whose slot it is.
+    pub scene: SceneId,
+    /// The launch's velocity, 1 to 127: the clip's velocity amount turns it
+    /// into the clip's gain (the remote mapping spec, R16). A click, a key
+    /// and a controller launch at 127, as a launch without one does.
+    #[serde(default)]
+    pub velocity: Option<u8>,
+}
+
+/// The arguments of `session.release`: the slot whose launch button lets go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ReleaseArgs {
     /// The track whose slot it is.
     pub track: TrackId,
     /// The scene whose slot it is.
@@ -1008,11 +1075,26 @@ pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunErr
     };
     match entry.action {
         Action::Launch => {
-            let LaunchArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
-            Ok(SessionCommand::Launch { track, scene })
+            let LaunchArgs {
+                track,
+                scene,
+                velocity,
+            } = serde_json::from_value(args).map_err(invalid)?;
+            match velocity {
+                None | Some(VELOCITY_MAX) => Ok(SessionCommand::Launch { track, scene }),
+                Some(velocity @ 1..=VELOCITY_MAX) => Ok(SessionCommand::LaunchAt {
+                    track,
+                    scene,
+                    velocity,
+                }),
+                Some(_) => Err(RunError::InvalidArgs {
+                    command: entry.id,
+                    message: "the velocity is from 1 to 127".to_owned(),
+                }),
+            }
         }
         Action::Release => {
-            let LaunchArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
+            let ReleaseArgs { track, scene } = serde_json::from_value(args).map_err(invalid)?;
             Ok(SessionCommand::Release { track, scene })
         }
         Action::LaunchScene => {
@@ -1117,7 +1199,8 @@ impl Entry {
             spec = spec.binding(key);
         }
         spec = match self.action {
-            Action::Launch | Action::Release => spec.args::<LaunchArgs>(),
+            Action::Launch => spec.args::<LaunchArgs>(),
+            Action::Release => spec.args::<ReleaseArgs>(),
             Action::LaunchScene | Action::CancelSceneLaunch => spec.args::<LaunchSceneArgs>(),
             Action::StopTrack => spec.args::<StopTrackArgs>(),
             Action::StopAll | Action::BackToArrangement => spec.args::<NoArgs>(),
@@ -1145,7 +1228,11 @@ const ENTRIES: &[Entry] = &[
             next: a Trigger, Gate or Repeat clip that already plays restarts on the grid, and a \
             Toggle clip that plays is queued to stop. A Gate or Repeat clip stops when \
             `session.release` follows. The engine publishes the slots' states with the \
-            playhead, so the UI can draw them. It changes nothing in the set.",
+            playhead, so the UI can draw them. The optional `velocity`, 1 to 127, is a MIDI note's: \
+            the clip's velocity amount (`clip.set_velocity_amount`) turns it into the clip's \
+            gain, from full at 127 down to silence at 1 with the amount at 100 %, and the gain \
+            holds until the clip stops or launches again; a launch without one is at 127. \
+            It changes nothing in the set.",
     },
     Entry {
         id: "session.release",
@@ -1305,6 +1392,7 @@ mod tests {
                 track,
                 scene: Some(scene),
                 frame: due,
+                velocity: 127,
                 last: None,
             }]
         );
@@ -1949,6 +2037,7 @@ mod tests {
                 track,
                 scene: None,
                 frame: Frames::ZERO,
+                velocity: 127,
                 // Spec: session-automation R7. The clip that stopped is
                 // kept, with the frames it played between.
                 last: Some(StoppedClip {
@@ -2053,6 +2142,42 @@ mod tests {
             ),
             Ok(SessionCommand::Launch { track, scene })
         );
+        // Spec: remote-mapping R16, R37
+        for (velocity, want) in [
+            (
+                64,
+                Ok(SessionCommand::LaunchAt {
+                    track,
+                    scene,
+                    velocity: 64,
+                }),
+            ),
+            (127, Ok(SessionCommand::Launch { track, scene })),
+        ] {
+            assert_eq!(
+                command_from_args(
+                    "session.launch",
+                    serde_json::json!({ "track": track, "scene": scene, "velocity": velocity })
+                ),
+                want
+            );
+        }
+        for velocity in [0, 128] {
+            assert!(matches!(
+                command_from_args(
+                    "session.launch",
+                    serde_json::json!({ "track": track, "scene": scene, "velocity": velocity })
+                ),
+                Err(RunError::InvalidArgs { .. })
+            ));
+        }
+        assert!(matches!(
+            command_from_args(
+                "session.release",
+                serde_json::json!({ "track": track, "scene": scene, "velocity": 64 })
+            ),
+            Err(RunError::InvalidArgs { .. })
+        ));
         assert_eq!(
             command_from_args(
                 "session.launch_scene",

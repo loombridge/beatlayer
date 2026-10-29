@@ -12,5 +12,8 @@ bl-core.workspace = true
 bl-model.workspace = true
 bl-midi-io.workspace = true
 
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+
 [lints]
 workspace = true

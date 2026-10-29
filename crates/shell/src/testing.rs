@@ -35,13 +35,21 @@ pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
         },
         &[("null", "Null device")],
     );
-    rig_on(backend, control)
+    rig_on_with(backend, control, settings)
 }
 
 /// As [`rig`], on `backend` and the `control` it came with: a test gives the
 /// null device more channels or a cable (WP-7.17).
 #[must_use]
 pub fn rig_on(backend: NullBackend, control: NullControl) -> (Shell, NullControl) {
+    rig_on_with(backend, control, AudioSettings::default())
+}
+
+fn rig_on_with(
+    backend: NullBackend,
+    control: NullControl,
+    settings: AudioSettings,
+) -> (Shell, NullControl) {
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
         Box::new(move |_| Ok(Box::new(backend.clone()))),

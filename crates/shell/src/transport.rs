@@ -14,7 +14,7 @@
 //! | Arrangement Position | `transport.locate` |
 //! | Loop Start, Loop Length | `transport.set_loop` |
 //! | Tempo | `song.set_tempo` |
-//! | Numerator, Denominator | `song.set_time_signatures` |
+//! | Numerator, Denominator | `song.set_time_signatures`, or `song.set_time_signature_change` over changes |
 //! | Global Amount (L-CTRL-008) | `groove.set_global_amount` |
 //!
 //! [`step`] is a change by the arrow keys, a drag, or a screen reader;
@@ -181,9 +181,9 @@ pub fn tempo(shell: &Shell) -> f64 {
 }
 
 /// Whether the field's group can be changed here: the Tempo field while the
-/// song has one constant tempo, the time-signature fields while it has one
-/// signature throughout (tempo and signature changes come with WP-2.20),
-/// and the rest always.
+/// song has one constant tempo, and the rest always: over time-signature
+/// changes the signature fields change the marker in force (the time
+/// editing spec, R33).
 #[must_use]
 pub fn editable(shell: &Shell, group: Group) -> bool {
     let settings = shell.editor().document().settings();
@@ -200,8 +200,12 @@ pub fn editable(shell: &Shell, group: Group) -> bool {
                     .next()
                     .is_some_and(|segment| segment.start_bpm() == segment.end_bpm())
         }
-        Group::Numerator | Group::Denominator => settings.time_signatures.changes().len() == 1,
-        Group::Position | Group::LoopStart | Group::LoopLength | Group::GlobalAmount => true,
+        Group::Position
+        | Group::LoopStart
+        | Group::LoopLength
+        | Group::Numerator
+        | Group::Denominator
+        | Group::GlobalAmount => true,
     }
 }
 
@@ -475,8 +479,25 @@ fn set_denominator(shell: &Shell, denominator: u8) -> Option<Invocation> {
 
 fn set_signature(shell: &Shell, numerator: u8, denominator: u8) -> Option<Invocation> {
     let signature = TimeSignature::new(numerator, denominator).ok()?;
+    let signatures = &shell.editor().document().settings().time_signatures;
+    if signatures.has_changes() {
+        // Spec: time-editing R33. The marker in force at the position
+        // takes the new value.
+        let position = shown_position(shell);
+        let at = signatures
+            .changes()
+            .take_while(|c| c.at <= position)
+            .last()?
+            .at;
+        return (signatures.signature_at(at) != signature).then(|| {
+            Invocation::new(
+                "song.set_time_signature_change",
+                json!({ "at": at, "signature": signature }),
+            )
+        });
+    }
     let map = TimeSignatureMap::constant(signature);
-    (shell.editor().document().settings().time_signatures != map)
+    (*signatures != map)
         .then(|| Invocation::new(ids::SET_TIME_SIGNATURES, json!({ "time_signatures": map })))
 }
 

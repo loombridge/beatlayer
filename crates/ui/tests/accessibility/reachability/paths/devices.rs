@@ -704,6 +704,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("device_view.state", Exception(Query)),
+        (
+            "device_view.scroll",
+            Exception(Equivalent(
+                "the wheel and a middle-button drag; Left and Right select the next device \
+                 and bring it into view (racks R25)",
+            )),
+        ),
         ("device.parameters", Exception(Query)),
         ("device.display", Exception(Query)),
         // A display's view buttons (device framework R38): Enter on one.

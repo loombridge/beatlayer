@@ -242,20 +242,24 @@ fn the_link_shares_the_gain_reduction_across_the_channels() {
 
 // Spec: limiter R7
 #[test]
-fn mid_side_routing_limits_the_mid_and_the_side() {
-    // A mid of 0.5 and a side of 1.0 at a -6 dB ceiling: the side is held
-    // at the ceiling, the mid is left alone, so the left sample passes the
-    // ceiling, as the mid/side domain's ceiling allows.
+fn mid_side_routing_keeps_the_left_and_right_under_the_ceiling() {
+    // Live holds a hard-left signal at the ceiling in M/S with the right
+    // channel silent: the ceiling bounds left and right, and mid and side get
+    // the same reduction.
     let ceiling = db_to_gain(-6.0) as f32;
     let left = vec![1.5f32; 2048];
-    let right = vec![-0.5f32; 2048];
+    let right = vec![0.0f32; 2048];
     let mut node = brickwall(&[(CEILING, -6.0), (ROUTING, 1.0), (LINK, 0.0)], 2048);
     let out = run_stereo(node.as_mut(), &left, &right);
     let (l, r) = (out[0][2047], out[1][2047]);
-    let mid = (l + r) * 0.5;
-    let side = (l - r) * 0.5;
-    assert!((mid - 0.5).abs() < 1e-3, "mid {mid}");
-    assert!((side - ceiling).abs() < 1e-3, "side {side}");
+    assert!((l - ceiling).abs() < 1e-3, "left {l}");
+    assert!(r.abs() < 1e-3, "right {r}");
+
+    let right = vec![-0.5f32; 2048];
+    let mut node = brickwall(&[(CEILING, -6.0), (ROUTING, 1.0), (LINK, 0.0)], 2048);
+    let out = run_stereo(node.as_mut(), &left, &right);
+    let peak = out.iter().flatten().fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(peak <= ceiling + 1e-3, "{peak}");
 }
 
 // Spec: limiter R8

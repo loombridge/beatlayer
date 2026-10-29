@@ -454,6 +454,18 @@ impl KeyRows {
             height: KEY_HEIGHT,
             limit: 127,
         }
+        .within_rows()
+    }
+
+    /// These rows with a folded scroll kept to the rows there are: deleting
+    /// notes leaves fewer, and the grid mustn't stay scrolled past them.
+    fn within_rows(self) -> Self {
+        let first = if self.folded {
+            self.first.min(self.scroll_room())
+        } else {
+            self.first
+        };
+        Self { first, ..self }
     }
 
     /// These rows with keys past `limit` not shown.
@@ -478,6 +490,7 @@ impl KeyRows {
             height,
             ..self
         }
+        .within_rows()
     }
 
     /// The rows the grid shows: the one at its top edge, and the one at its
@@ -3372,10 +3385,9 @@ impl ClipViewUi {
     ) {
         let (first, last) = rows.visible(grid);
         let by = f64::from(delta / rows.height);
-        // Unfolded, the row at the top edge falls as the keys rise; folded
-        // the wheel runs along the rows as it always has.
-        let top = if rows.folded { first + by } else { first - by };
-        let top = top.clamp(0.0, f64::from(rows.scroll_room()));
+        // Row 0 is the highest key, folded or not: the row at the top edge
+        // falls as the keys rise.
+        let top = (first - by).clamp(0.0, f64::from(rows.scroll_room()));
         show_rows(events, clip, top, top + (last - first));
     }
 

@@ -143,6 +143,9 @@ const SMOOTH_FAST_SECONDS: f64 = 0.05;
 const SMOOTH_SLOW_SECONDS: f64 = 1.0;
 /// A state value below this is left as zero rather than as a denormal.
 const FLUSH: f32 = 1e-30;
+/// The most a comb holds, in full-scale units (+18 dBFS), so a frozen tail
+/// that keeps taking in input (Cut off) cannot grow to infinity.
+const COMB_LIMIT: f32 = 8.0;
 
 /// The reverb's type: Beatlayer's own look, Live's controls
 /// (the reverb spec, "The behaviour").
@@ -766,7 +769,8 @@ impl Comb {
             self.low = flush(self.low + damping.low_a * (sink - self.low));
             sink -= damping.low * self.low;
         }
-        let write = flush(x + feedback * sink);
+        // A frozen tail with Cut off takes in input at a feedback of 1: the clamp keeps it finite.
+        let write = flush((x + feedback * sink).clamp(-COMB_LIMIT, COMB_LIMIT));
         self.buffer[self.write] = write;
         self.write = (self.write + 1) % self.buffer.len();
         delayed

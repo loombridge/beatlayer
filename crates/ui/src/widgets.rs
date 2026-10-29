@@ -33,6 +33,15 @@ pub struct Look {
     /// Whether a switch is only partly on, which the Scale Mode switch
     /// shows where the selected clips differ (the scales spec, R6).
     pub mixed: bool,
+    /// Whether an automation LED shows in the element's upper left corner,
+    /// as the signature fields do while the set has signature changes (the
+    /// time editing spec, R33).
+    pub automated: bool,
+}
+
+/// The automation LED in the upper left corner of a field.
+fn led(painter: &Painter, rect: Rect, colour: Color32) {
+    painter.circle_filled(rect.left_top() + vec2(3.5, 3.5), 1.75, colour);
 }
 
 /// Draws an element of the Control Bar or Status Bar at `rect` and returns
@@ -130,6 +139,9 @@ fn paint(
             ink
         };
         painter.text(pos, anchor, text, font, ink);
+        if look.automated {
+            led(&painter, rect, c.accent.0);
+        }
     } else if placement.element == Element::MidiIndicators && live {
         lamps(
             &painter,

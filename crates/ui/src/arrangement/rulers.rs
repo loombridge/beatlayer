@@ -151,6 +151,68 @@ pub fn beat_ruler(
     );
 }
 
+/// Draws the time-signature lane (L-ARR-004): a line and the signature at
+/// each marker, a selected one in the selection colour, and each bar a
+/// marker cuts short hatched.
+pub fn signature_lane(
+    painter: &Painter,
+    rect: Rect,
+    signatures: &TimeSignatureMap,
+    selected: Option<Ticks>,
+    horizontal: Horizontal,
+    theme: &Theme,
+) {
+    let colors = &theme.colors;
+    painter.rect_filled(rect, 0.0, colors.bar.0);
+    let x_of = |at: Ticks| rect.left() + horizontal.x(at) as f32;
+    let hatch = Stroke::new(1.0, colors.ruler_tick.0);
+    for bar in signatures.fragmentary_bars() {
+        let (x0, x1) = (x_of(bar.start), x_of(bar.end));
+        if x1 < rect.left() || x0 > rect.right() {
+            continue;
+        }
+        let shown = Rect::from_min_max(
+            pos2(x0.max(rect.left()), rect.top()),
+            pos2(x1.min(rect.right()), rect.bottom()),
+        );
+        let hatched = painter.with_clip_rect(shown);
+        let mut x = shown.left() - rect.height();
+        while x < shown.right() {
+            hatched.line_segment(
+                [pos2(x, rect.bottom()), pos2(x + rect.height(), rect.top())],
+                hatch,
+            );
+            x += 4.0;
+        }
+    }
+    for change in signatures.changes() {
+        let x = x_of(change.at);
+        if x < rect.left() - 40.0 || x > rect.right() {
+            continue;
+        }
+        let colour = if selected == Some(change.at) {
+            colors.accent.0
+        } else {
+            colors.text_dim.0
+        };
+        painter.line_segment(
+            [pos2(x, rect.top()), pos2(x, rect.bottom())],
+            Stroke::new(1.0, colour),
+        );
+        painter.text(
+            pos2(x + 3.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            change.signature.to_string(),
+            theme.small_font(),
+            colour,
+        );
+    }
+    painter.line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, colors.separator.0),
+    );
+}
+
 /// Draws the scrub area, with the locators in it (L-ARR-003): each at its
 /// position, with its name, a selected one in the selection colour, and the
 /// one that holds the song start time in the theme's song start colour.

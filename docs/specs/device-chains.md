@@ -80,6 +80,7 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 - **R41.** A device's menu (R24) holds Lock to (C-DEVICE-014) after Save as Default Preset and before the device's own items, with a separator before it: one item per running control surface that supports locking, in the Control Surfaces table's row order, reading "Lock to <surface name>", ticked while that surface is locked to this device. Choosing an unticked one runs `control_surface.lock` and a ticked one `control_surface.unlock` ([control surfaces](control-surfaces.md) R23); neither is an undo step. With no such surface running, a single "Lock to Control Surface" item is shown disabled (Beatlayer's own wording). A rack's menu holds the same items. (S12)
 - **R42.** While a surface is locked to a device, its title bar shows the hand icon (Beatlayer's own drawing) straight after the name, before Hot-Swap Presets, the name giving up the room; a folded device shows it under its name. Hovering it shows "Locked to <surface name>" in the Status Bar, every surface named when there are several, and it reaches assistive technology as an image with that text. `device_view.state` reports each device's locks ([control surfaces](control-surfaces.md) R35). (S12)
 - **R43.** With the Device View holding the keyboard and none of its controls using the arrow keys, Left and Right select the device before or after the selected one in the chain shown, and with none selected the first or the last (S-A11Y-014), as `device.select`. The last device stays selected on Right and the first on Left. Enter in the browser loads the selected device (S-DEV-007, S-TRACK-015, the key S-BRW-004 runs). Shift-click to add devices to the selection (S-DEV-004) and Cmd-click on a plug-in window button (S-DEV-010) wait for WP-6.76 and WP-6.75. (S13)
+- **R44.** A chain wider than the Device View scrolls sideways with the wheel, a middle-button drag, or choosing a device from the list (racks R25), and every move is `device_view.scroll`, which an agent runs too: `x` points, positive towards the last device, kept between the first device and the chain's end. It changes only the view, and `device_view.state` reports where the chain is as `scroll`. (S12)
 
 ## Tests
 
@@ -125,6 +126,7 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 | R41 | to be written in WP-7.6 | UI script |
 | R42 | to be written in WP-7.6 | UI script, agent |
 | R43 | `crates/ui/tests/keymap_sweep.rs`, `left_and_right_move_between_devices`, `enter_in_the_browser_loads_the_selected_item` | UI script |
+| R44 | `crates/ui/tests/device_view.rs`, `an_agent_scrolls_the_device_chain_and_reads_where_it_is`, `the_middle_button_pans_the_device_chain` | UI script, agent |
 
 ## Details
 

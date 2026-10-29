@@ -123,3 +123,25 @@ fn an_agent_is_refused_a_plugin_without_a_note_output() {
     );
     assert_eq!(role(&mut client, device), DeviceRole::AudioEffect);
 }
+
+// Spec: agent-permissions R6; clap-hosting R1
+#[test]
+fn an_agent_s_plugin_load_is_its_undo_step_under_its_label() {
+    let mut client = client();
+    let track = midi_track(&client.transport().shell);
+    let ran = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "plugin.load",
+                                   "args": { "path": bl_test_clap::bundle(), "track": track } }],
+                    "label": "Load the synth" }),
+        )
+        .unwrap()
+        .ok()
+        .unwrap_or_else(|error| panic!("plugin.load failed: {error}"));
+    assert_eq!(ran["undo_step"], "test-agent: Load the synth");
+    assert_eq!(
+        client.transport().shell.editor().undo_history().next(),
+        Some("test-agent: Load the synth")
+    );
+}

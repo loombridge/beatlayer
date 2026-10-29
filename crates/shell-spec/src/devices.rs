@@ -25,6 +25,8 @@ use serde::{Deserialize, Serialize};
 
 /// `device_view.state`: what the Device View shows.
 pub const STATE: &str = "device_view.state";
+/// `device_view.scroll`: scroll the chain sideways.
+pub const SCROLL: &str = "device_view.scroll";
 /// `device.add`: add a device as a person does.
 pub const ADD: &str = "device.add";
 /// `device.select`: select a device.
@@ -162,6 +164,7 @@ pub const ARTICULATION_LEARN: &str = "articulation.learn";
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
     STATE,
+    SCROLL,
     ADD,
     SELECT,
     FOLD,
@@ -282,6 +285,15 @@ pub const RACK_LIST_HEADER_HEIGHT: f32 = 34.0;
 /// The width at 100% of the end bracket that closes a rack's devices
 /// (racks spec, R18; to observe).
 pub const RACK_END_BRACKET_WIDTH: f32 = 8.0;
+
+/// The width at 100% of a track's chain: its devices left to right with the
+/// gap before each and after the last.
+#[must_use]
+pub fn chain_width(devices: &[DeviceFrame]) -> f32 {
+    devices
+        .iter()
+        .fold(DEVICE_GAP, |w, d| w + frame_width(d) + DEVICE_GAP)
+}
 
 /// The width at 100% of a rack's devices view while the chain holds no
 /// device, or none is shown (to observe).
@@ -1052,6 +1064,10 @@ pub struct DeviceViewState {
     /// Controls tint mappable parameters and show the mappings list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub map_mode: Option<DeviceId>,
+    /// How far the chain is scrolled sideways, in points; the view keeps it
+    /// within the chain's width.
+    #[serde(default)]
+    pub scroll: f32,
 }
 
 /// One meter between the devices of a chain, as `device_view.state` reports
@@ -1141,6 +1157,14 @@ pub struct ArticulationLearn {
     /// The articulation's place in the list, from 0, or `null` when none is
     /// learning.
     pub index: Option<u8>,
+}
+
+/// Arguments of `device_view.scroll`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ScrollDeviceViewArgs {
+    /// How far to scroll, in points: positive towards the last device.
+    pub x: f32,
 }
 
 /// Arguments of `device.select`.
@@ -1845,6 +1869,17 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(Global)
             .args::<NoArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(SCROLL, "Scroll Device View")
+            .description(
+                "Scrolls the Device View's chain sideways by `x` points (positive towards the \
+                 last device), as the wheel over the chain does. It can't scroll before the \
+                 first device or past the chain's end. `device_view.state` reports `scroll`. \
+                 Changes only the view.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<ScrollDeviceViewArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(ADD, "Add Device")
             .description(

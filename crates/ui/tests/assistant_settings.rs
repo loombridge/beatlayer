@@ -226,3 +226,48 @@ fn the_activity_log_opens_shows_what_ran_and_closes() {
         "closing hides the log"
     );
 }
+
+#[test]
+fn the_model_is_sent_when_the_field_loses_focus_so_a_typed_space_stays() {
+    let mut h = open_agents();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let b = Harness::node(&nodes, "Assistant Model").bounds.unwrap();
+    h.click(egui::pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    for text in ["my", " ", "model"] {
+        h.frame(vec![egui::Event::Text(text.to_owned())]);
+        assert_eq!(
+            h.shell.assistant_settings().model,
+            "",
+            "nothing is sent while typing"
+        );
+    }
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.assistant_settings().model, "my model");
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Assistant Model").value, "my model");
+}
+
+#[test]
+fn clicking_into_the_model_field_keeps_the_stored_model() {
+    let mut h = open_agents();
+    h.shell
+        .invoke("assistant.set_model", json!({ "model": "gpt-4" }))
+        .unwrap();
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let b = Harness::node(&nodes, "Assistant Model").bounds.unwrap();
+    h.click(egui::pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.frame(vec![]);
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Assistant Model").value, "gpt-4");
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.assistant_settings().model, "gpt-4");
+}

@@ -952,6 +952,7 @@ What the Arrangement View shows: every view command returns it.
 | `selected_fade` | [`FadeHandleState`](#fadehandlestate) or null | no | The selected fade handle (WP-6.51), if any: Delete deletes its fade. |
 | `selected_lane` | [`Lane`](#lane) or null | no | The automation lane that has the keyboard (WP-6.26): the one the last click, or Up and Down, selected, while Automation Mode is on. The keys of the automation editing spec's R20 to R26 act on its envelope. |
 | `selected_take_lanes` | array of [`TakeLaneId`](#takelaneid) | no | The take lanes whose headers are selected (the comping spec, R26), in the order they were selected. Their tracks are selected tracks too. |
+| `selected_time_signature` | [`Ticks`](#ticks) or null | no | The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature. |
 | `shown_take_lanes` | array of [`TrackId`](#trackid) | no | The tracks whose take lanes show (the comping spec, R24). |
 | `time_selection_lanes` | array of [`Lane`](#lane) | no | The lanes the time selection covers: each a track's own lane, a take lane under it, or its automation lane (the automation editing spec, R1; the comping spec, R26). Empty when the selection names no lane. |
 
@@ -1071,6 +1072,17 @@ What the Arrangement View shows: every view command returns it.
         "$ref": "#/$defs/TakeLaneId"
       },
       "type": "array"
+    },
+    "selected_time_signature": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The position of the selected time-signature marker (WP-6.61), if any: Delete deletes it and Cmd-R types its signature."
     },
     "selected_tracks": {
       "description": "The selected tracks, top to bottom.",
@@ -9013,6 +9025,7 @@ What `device_view.state` returns.
 | `can_paste_chain` | boolean | yes | Whether the chain clipboard holds chains to paste. |
 | `device_list` | array of [`DeviceListEntry`](#devicelistentry) | yes | Every device on the track as a hierarchy, each rack's devices under it chain by chain: the Device View selector's list (racks spec, R25). |
 | `meters` | array of [`ChainMeterValue`](#chainmetervalue) | yes | The meters between the devices of the track's chain and of its racks' chains, in signal order (the MIDI meters spec, R2 and R6); empty when no engine has published meters. |
+| `scroll` | number | yes | How far the chain is scrolled sideways, in points; the view keeps it within the chain's width. |
 | `armed_map` | [`ArmedMap`](#armedmap) or null | no | The Map button that is lit, on any track: a click on any parameter's control maps it to the slot (WP-5.10). |
 | `map_mode` | [`DeviceId`](#deviceid) or null | no | The rack whose Map mode is on, if one is (WP-5.4): the Macro Controls tint mappable parameters and show the mappings list. |
 
@@ -9087,6 +9100,12 @@ What `device_view.state` returns.
       },
       "type": "array"
     },
+    "scroll": {
+      "default": 0.0,
+      "description": "How far the chain is scrolled sideways, in points; the view keeps it within the chain's width.",
+      "format": "float",
+      "type": "number"
+    },
     "selected": {
       "anyOf": [
         {
@@ -9130,7 +9149,8 @@ What `device_view.state` returns.
     "can_paste",
     "can_paste_chain",
     "device_list",
-    "meters"
+    "meters",
+    "scroll"
   ],
   "type": "object"
 }
@@ -27107,6 +27127,47 @@ A device's sidechain section, as its left strip and the section show it (WP-2.19
     "mix",
     "gain",
     "listen"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SignatureResult`
+
+What a time-signature command did: the marker selected afterwards, and whether it was recorded as an undo step.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `selected` | [`Ticks`](#ticks) or null | yes | The position of the selected marker, if one is. |
+| `undo_step` | boolean | yes | Whether the edit was recorded as an undo step: false when it changed nothing. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a time-signature command did: the marker selected afterwards, and whether it was recorded as an undo step.",
+  "properties": {
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Ticks"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The position of the selected marker, if one is."
+    },
+    "undo_step": {
+      "description": "Whether the edit was recorded as an undo step: false when it changed nothing.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "selected",
+    "undo_step"
   ],
   "type": "object"
 }

@@ -75,8 +75,8 @@ pub struct Request<'a> {
     /// Song frames per output frame: 1 unless the song follows an outside
     /// tempo.
     pub step: f64,
-    /// The song frame the run's first output frame plays on, unrounded, when
-    /// `step` isn't 1; ignored at 1, where it is `first`.
+    /// The song frame the run's first output frame plays on, unrounded; NaN
+    /// where `first` is it.
     pub song: f64,
 }
 
@@ -84,7 +84,7 @@ impl Request<'_> {
     /// The song frame output frame `i` of the run plays on.
     #[must_use]
     pub fn song_frame(&self, i: usize) -> i64 {
-        if self.step == 1.0 {
+        if self.song.is_nan() {
             self.first + i as i64
         } else {
             (self.song + i as f64 * self.step).round() as i64

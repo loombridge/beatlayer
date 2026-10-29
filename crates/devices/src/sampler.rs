@@ -873,6 +873,7 @@ impl Sampler {
             lfo_filter: (params.value(at(LFO_FILTER)) / 100.0) as f32,
             warped,
             warp_bpm,
+            speed,
             pitch_env_attack_frames: pitch_attack_frames,
             pitch_env_decay_frames: pitch_decay_frames,
             pitch_env_sustain: pitch_sustain,
@@ -1240,7 +1241,7 @@ impl Sampler {
                     / 12.0,
             );
             if s.warped {
-                let current_frame = song_position + Frames(frame as i64);
+                let current_frame = song_position + song_frames(frame, s.speed);
                 let now_ticks =
                     tempo.seconds_to_ticks_exact(current_frame.get() as f64 / rate.as_f64());
                 let start_ticks = tempo
@@ -1388,7 +1389,7 @@ impl NativeDevice for Sampler {
         // 1. The notes and the voices: each voice's sample into its lane,
         //    with its cutoff and LFO.
         for frame in 0..frames {
-            let current_frame = song_position + Frames(frame as i64);
+            let current_frame = song_position + song_frames(frame, settings.speed);
             while notes
                 .peek()
                 .is_some_and(|note| note.offset as usize <= frame)
@@ -1423,6 +1424,16 @@ impl NativeDevice for Sampler {
         {
             self.data = Some(data);
         }
+    }
+}
+
+/// The song frames `frame` frames of a stretch cover at `speed` song frames
+/// per frame.
+fn song_frames(frame: usize, speed: f64) -> Frames {
+    if speed == 1.0 {
+        Frames(frame as i64)
+    } else {
+        Frames((frame as f64 * speed).round() as i64)
     }
 }
 
@@ -1491,6 +1502,9 @@ struct Settings {
     lfo_filter: f32,
     warped: bool,
     warp_bpm: f64,
+    /// Song frames per frame (the transport spec, R24): a warped voice
+    /// reads the song frames its frames play.
+    speed: f64,
     pitch_env_attack_frames: u32,
     pitch_env_decay_frames: u32,
     pitch_env_sustain: f32,

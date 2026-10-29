@@ -1897,7 +1897,12 @@ impl Node for ClipPlayer {
                     );
                 }
                 if before.is_some() || transport.speed != 1.0 {
-                    own_note(&mut self.own, self.blocks, clip.id, elapsed + frames as u64);
+                    own_note(
+                        &mut self.own,
+                        self.blocks,
+                        clip.id,
+                        elapsed + (frames - begin) as u64,
+                    );
                 }
             }
         }
@@ -1999,9 +2004,11 @@ impl Node for ClipPlayer {
                 let elapsed = (song - clip.geometry.start as f64).round().max(0.0) as u64;
                 (begin..finish, elapsed)
             };
-            if own_speed && (before.is_some() || transport.speed != 1.0) {
-                // The clip is noted even when it has played out, so it isn't
-                // taken for a new one while the song is still over it.
+            // The clip is noted even when it has played out, so it isn't taken
+            // for a new one while the song is still over it; once the song has
+            // passed it too, its entry is let go.
+            let passed = clip.geometry.end <= from && range.is_empty();
+            if own_speed && !passed && (before.is_some() || transport.speed != 1.0) {
                 let played = elapsed + range.len() as u64;
                 own_note(&mut self.own, self.blocks, clip.id, played);
             }

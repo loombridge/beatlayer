@@ -1982,12 +1982,13 @@ impl Processor {
         self.asked = Some(self.clock);
         self.followed = None;
         self.deciding = false;
+        // The ticks of where the song is now, not where the last part ended:
+        // a wrap or a locate moves the playhead after it.
+        let exact = self.exact_at_position().ticks;
         if let Some(follower) = self.follower.as_mut() {
             let rate = self.config.sample_rate.as_f64();
-            let ticks = match self.exact {
-                Some(Exact {
-                    ticks: Some(ticks), ..
-                }) if self.playing => ticks,
+            let ticks = match exact {
+                Some(ticks) if self.playing => ticks,
                 _ => {
                     let tempo = self
                         .program

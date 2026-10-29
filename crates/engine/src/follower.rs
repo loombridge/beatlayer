@@ -120,8 +120,8 @@ impl Follow {
     }
 }
 
-/// An outside tempo the song follows (R24). T324 (MIDI clock in), T326
-/// (Link) and T330 (CV Clock In) implement it. It runs on the audio thread:
+/// An outside tempo the song follows (R24): an incoming MIDI clock, a Link
+/// session or a CV clock. It runs on the audio thread:
 /// no allocation, lock or blocking call.
 pub trait Follower: Send {
     /// Answers for the block `ask` describes by calling `answer`'s methods.

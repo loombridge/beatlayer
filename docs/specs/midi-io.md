@@ -78,7 +78,7 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 |---|---|---|
 | R3, R17 | `bl-shell` `midi_io::port_switches_and_the_keyboard_persist_across_restarts` | integration |
 | R2 | `bl-ui` `midi_input::the_tempo_and_midi_page_lists_each_port_with_its_switches` | UI |
-| R4, R5 | `bl-shell` `midi_io::switching_a_ports_track_off_stops_its_notes_reaching_tracks` | integration |
+| R4, R5 | `bl-shell` `midi_io::switching_a_ports_track_off_stops_its_notes_reaching_tracks`, `midi_io::a_mapped_message_never_reaches_an_armed_tracks_input_and_an_unmapped_one_does` | integration |
 | R7, R8, R9 | `bl-shell` `midi_io::midi_from_one_port_ignores_another_and_a_channel_ignores_the_rest`, `midi_io::midi_from_lists_the_ports_and_the_channel_chooser_follows_the_input` | integration |
 | R10, R12 | `bl-engine` `midi_play::a_monitored_tracks_devices_play_its_input_on_the_exact_frames`, `midi_play::input_merges_with_a_playing_clips_notes_in_frame_order`, `midi_play::a_track_that_doesnt_monitor_sends_its_devices_nothing`; `bl-shell` `midi_io::the_computer_keyboard_plays_snapshot_on_a_monitoring_track`; `rtsan` `midi_input` | integration, real-time |
 | R26 | `bl-engine` `midi_play::switching_monitoring_off_ends_the_held_notes`, `midi_play::disarming_a_track_on_auto_ends_the_held_notes`, `midi_play::changing_the_input_or_its_channel_ends_the_held_notes`, `midi_play::an_edit_that_keeps_the_input_keeps_the_held_notes_sounding` | integration |

@@ -420,6 +420,11 @@ fn fixture() -> Project {
         bpm: Some(90.0),
     };
     device.slices = vec![1_000, 2_000];
+    // The flags that bound what a Simpler plays (sampler R22).
+    device.region = Some(bl_model::SampleRegion::Frames {
+        start: 500,
+        end: 4_000,
+    });
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(

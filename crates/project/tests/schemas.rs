@@ -854,9 +854,11 @@ fn write_simpler_fixtures() {
     }
 }
 
-/// The Simplers of a loaded `project`, by name, with their region and their
-/// Start and Length parameters.
-fn simplers_of(project: &Project) -> Vec<(String, Option<SampleRegion>, Option<f64>, Option<f64>)> {
+/// A Simpler's name, region, and Start and Length parameters.
+type SimplerRow = (String, Option<SampleRegion>, Option<f64>, Option<f64>);
+
+/// The Simplers of a loaded `project`.
+fn simplers_of(project: &Project) -> Vec<SimplerRow> {
     project
         .document
         .tracks()

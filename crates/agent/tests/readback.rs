@@ -169,6 +169,12 @@ fn fixture() -> Project {
             track: pad,
             bypass: true,
         },
+        // Spec: tunings R22, R24.
+        Command::SetTuningLayout {
+            track: pad,
+            layout: Some(bl_model::LayoutKind::BlackKeysOnly),
+            keys: None,
+        },
         // Spec: scales R9.
         Command::SetScale {
             enabled: Some(true),

@@ -219,6 +219,7 @@ pub use bl_shell_spec::tracks as track_commands;
 /// The transport's command IDs the shell's menus and controls run, and
 /// `transport.state`'s result.
 pub use bl_shell_spec::transport as transport_commands;
+pub use bl_shell_spec::tunings as tuning_commands;
 pub use bl_shell_spec::{
     audio_editing, bounce, commands, context_menus, freeze, keymap, menus, register,
 };

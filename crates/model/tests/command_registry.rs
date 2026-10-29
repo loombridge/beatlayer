@@ -55,7 +55,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        269,
+        271,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -94,7 +94,7 @@ fn every_document_command_is_registered() {
              seven for grooves: add_groove, delete_groove, rename_groove, set_groove, \
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
-             set_tuning_range and set_tuning_bypass, WP-6.22 move_clip_to_lane, and WP-6.24b \
+             set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
              the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.33 set_device_region"
     );
 
@@ -804,6 +804,21 @@ fn every_command_runs_by_id() {
         json!({ "track": bass, "bypass": true }),
     );
     assert!(changes.tracks.contains_key(&bass));
+    // Spec: tunings R22, R23, R24.
+    agent.run(
+        "track.set_tuning_layout",
+        json!({ "track": bass, "layout": "black_keys_only" }),
+    );
+    assert_eq!(
+        agent
+            .editor
+            .document()
+            .track(bass)
+            .unwrap()
+            .tuning_layout()
+            .layout,
+        bl_model::LayoutKind::BlackKeysOnly
+    );
     // Spec: linked-track editing R16.
     let link: bl_model::LinkGroupId = agent.new_id();
     agent.run(
@@ -1760,6 +1775,10 @@ fn every_command_runs_by_id() {
     assert!(mpe.on);
     assert_eq!(mpe.settings.zone, bl_model::MpeZone::Upper);
     assert_eq!(mpe.settings.channels, 7);
+    // Spec: tunings R20, R24. The tuning switch is on in a new device.
+    assert!(mpe.tuning);
+    agent.run("plugin.set_tuning", json!({ "device": synth, "on": false }));
+    assert!(!agent.editor.document().device(synth).unwrap().mpe.tuning);
     // Racks (WP-5.1): a rack with a chain, a second chain added with a
     // device in it, a device moved in and switched on and off with
     // everything inside, and the chain's controls.
@@ -3896,6 +3915,10 @@ fn schemas_match_what_commands_serialise() {
             Command::SetPluginMpeMode { device, on: true },
         ),
         (
+            "plugin.set_tuning",
+            Command::SetPluginTuning { device, on: false },
+        ),
+        (
             "plugin.set_mpe_settings",
             Command::SetPluginMpeSettings {
                 device,
@@ -4439,6 +4462,14 @@ fn schemas_match_what_commands_serialise() {
             Command::SetTuningBypass {
                 track,
                 bypass: true,
+            },
+        ),
+        (
+            "track.set_tuning_layout",
+            Command::SetTuningLayout {
+                track,
+                layout: Some(bl_model::LayoutKind::Custom),
+                keys: Some(vec![None; 128]),
             },
         ),
         (

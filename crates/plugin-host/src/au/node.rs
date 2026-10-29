@@ -28,7 +28,7 @@ use bl_core::midi::MidiMessage;
 use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
     AutomationList, Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteExpression,
-    NoteKind, ParamValue, PluginMpeData,
+    NoteKind, ParamValue, PluginMpeData, PluginTuningData, TunedNotes,
 };
 use bl_model::{ParamId, PluginMpe};
 use block2::RcBlock;
@@ -266,6 +266,9 @@ pub struct AuNode {
     /// MPE MIDI laid out for the unit's MIDI block (R17), made with the
     /// node.
     layout: MpeLayout,
+    /// Retunes the block's notes while the plug-in plays the set's tuning
+    /// (the tunings spec, R20).
+    tuned: TunedNotes,
     /// The notes it was given as plain notes, which MPE Mode turned on ends.
     plain: PlainNotes,
 }
@@ -292,6 +295,7 @@ impl AuNode {
             mpe: PluginMpe::default(),
             pending_mpe: None,
             layout: MpeLayout::new(PluginMpe::default().settings),
+            tuned: TunedNotes::new(),
             plain: PlainNotes::default(),
         };
         let ends = HostEnds {
@@ -397,6 +401,7 @@ impl Node for AuNode {
                 &mut self.mpe,
                 &mut self.layout,
                 &mut self.plain,
+                &mut self.tuned,
             ),
         );
         self.pending.clear();
@@ -467,6 +472,8 @@ impl Node for AuNode {
             self.automation = Some(data);
         } else if let Some(PluginMpeData(mpe)) = data.downcast_ref() {
             self.pending_mpe = Some(*mpe);
+        } else if let Some(PluginTuningData(keys)) = data.downcast_ref() {
+            self.tuned.set(*keys);
         }
     }
 
@@ -503,11 +510,12 @@ fn collect(
     status: &Status,
     processor: &mut Processor,
     list: Option<&AutomationList>,
-    (pending_mpe, mpe, layout, plain): (
+    (pending_mpe, mpe, layout, plain, tuned): (
         &mut Option<PluginMpe>,
         &mut PluginMpe,
         &mut MpeLayout,
         &mut PlainNotes,
+        &mut TunedNotes,
     ),
 ) {
     events.clear();
@@ -554,6 +562,8 @@ fn collect(
         layout.configure(new.settings, &mut sink);
         *mpe = new;
     }
+    // Spec: tunings R20.
+    let notes = tuned.retune(block.notes());
     if mpe.on {
         // Spec: au-hosting R20. The notes and their expressions go in as
         // MPE MIDI, each message at its frame in the order MPE MIDI lays
@@ -562,9 +572,9 @@ fn collect(
             push(events, offset, In::Midi(message));
         };
         layout.open(&mut sink);
-        layout.lay_out(block.notes(), &mut sink);
+        layout.lay_out(notes, &mut sink);
     } else {
-        for note in block.notes() {
+        for note in notes {
             match note.kind {
                 // Spec: au-hosting R19. A note's pressure is polyphonic key
                 // pressure on its key and channel.

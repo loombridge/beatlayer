@@ -159,23 +159,12 @@ fn sampler<'a>(device: &'a Device, chain: &'a Chain) -> &'a Device {
         .unwrap_or_else(|| panic!("no sampler in {}", device.name))
 }
 
-/// The frames a sampler's Start and Length shares land on, by the sampler's
-/// own arithmetic (sampler R3).
+/// The frames a sampler's Start and End flags are on (sampler R22): the
+/// whole file where it holds none.
 fn region(sampler: &Device, file_frames: u64) -> (u64, u64) {
-    let value = |id: u32| {
-        sampler
-            .params
-            .get(&bl_model::ParamId(id))
-            .copied()
-            .unwrap_or(0.0)
-    };
-    let start = value(1) / 100.0;
-    let length = value(2) / 100.0;
-    let frames = file_frames as f64;
-    (
-        (start * frames) as u64,
-        ((start + length).min(1.0) * frames) as u64,
-    )
+    sampler
+        .region
+        .map_or((0, file_frames), |flags| flags.frames_in(file_frames))
 }
 
 /// The media a device plays.

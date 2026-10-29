@@ -86,7 +86,7 @@ The test of R8 walks the whole registry. A command is reached by a key, a menu i
 **Gaps in sample editing** ([multisampler](multisampler.md), WP-5.15):
 
 7. `device.edit_sample`, `device.crop_sample` and `device.reverse_sample`: the sample display's context menu isn't opened from the keyboard (R55, R59).
-8. `device.audition_sample`: a click on the sample display has no keyboard form yet (R54).
+8. `device.audition_sample` and `device.set_sample_region`: a click on the sample display, and dragging one of Simpler's Start and End flags, have no keyboard form yet (R54; [sampler](sampler.md) R22).
 9. `device.convert`: the device's title bar menu isn't opened from the keyboard (R62).
 
 **Gaps in rack presets** ([racks](racks.md), WP-5.8):

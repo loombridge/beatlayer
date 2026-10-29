@@ -76,6 +76,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("device.save_default_preset", nothing(FILE)),
     ("device.save_preset", nothing(FILE)),
     ("device.scale_tempo", query(Device, "warp.bpm")),
+    ("device.set_sample_region", query(Device, "region")),
+    ("device.write_sample_region", query(Device, "region")),
     ("device.swap_to_snapshot", query(Track, "devices")),
     ("device.set_enabled", query(Device, "enabled")),
     ("device.set_enabled_all", query(Device, "chains")),

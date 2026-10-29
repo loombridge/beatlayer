@@ -784,11 +784,12 @@ impl Importer<'_, '_> {
                     .clamp(low, high);
                 }
                 Some(Expression::Transpose) => {
-                    // To the nearest cent: whole semitones and a detune from
-                    // -50 up to 50 cents, so -50 cents stays a detune.
+                    // To the nearest cent: whole semitones and a detune
+                    // from −50 up to, not including, 50 cents, so a half
+                    // semitone splits one way only.
                     let (low, high) = bl_model::ClipParam::Transpose.limits();
                     let cents = (value.clamp(low, high) * 100.0).round();
-                    let transpose = (cents / 100.0 + 0.5).floor();
+                    let transpose = ((cents + 50.0) / 100.0).floor();
                     data.transpose = transpose as i32;
                     data.detune = cents - transpose * 100.0;
                 }

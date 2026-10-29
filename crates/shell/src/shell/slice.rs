@@ -14,8 +14,8 @@ use bl_core::time::{TempoMap, Ticks, TimeSignature};
 use bl_devices::sampler as sampler_ids;
 use bl_model::{
     AudioData, Chain, ChainId, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
-    DeviceKind, DeviceRole, Document, MacroTarget, MidiData, Note, RackKind, SceneId, TrackId,
-    TrackKind,
+    DeviceKind, DeviceRole, Document, MacroTarget, MidiData, Note, RackKind, SampleRegion, SceneId,
+    TrackId, TrackKind,
 };
 use bl_project::rack_preset::{RackPreset, Samples, Saved};
 use bl_shell_spec::slice::{
@@ -81,6 +81,9 @@ struct Plan {
     ends: Vec<u64>,
     /// The file's length, in frames at the engine's rate.
     file_frames: u64,
+    /// The file's own sample rate, which a sampler's flags and slices count
+    /// frames at (the sampler spec, R22); the engine's for a rendered file.
+    file_rate: u32,
     /// Each note's start and end, in ticks from the clip's contents (R9).
     notes: Vec<(Ticks, Ticks)>,
     /// How the preset shapes the track.
@@ -94,6 +97,16 @@ struct Plan {
     start: Ticks,
     length: Ticks,
     looping: bool,
+}
+
+impl Plan {
+    /// `frame` of the file at the engine's rate, as the flags and slices of
+    /// a sampler count it: frames at the file's own rate (the sampler spec,
+    /// R22).
+    fn own(&self, frame: u64, engine_rate: u32) -> u64 {
+        let (own, engine) = (u128::from(self.file_rate), u128::from(engine_rate.max(1)));
+        ((u128::from(frame) * own + engine / 2) / engine) as u64
+    }
 }
 
 impl Shell {
@@ -263,10 +276,10 @@ impl Shell {
         // its warped audio, rendered as Consolidate renders it (R6).
         let warped = audio.warp && preserve;
         let song_region = region_song(&clip, &audio, &tempo, region_start, region_end);
-        let (frames, ends, file_frames) = if warped {
+        let (frames, ends, file_frames, file_rate) = if warped {
             let frames = rendered_frames(&clip, &audio, &tempo, rate, song_region.0, &points);
             let ends = next_ends(&frames, 0);
-            (frames, ends, 0)
+            (frames, ends, 0, rate)
         } else {
             let file_frames = self
                 .sample_frames(audio.media, rate)
@@ -276,7 +289,11 @@ impl Shell {
                 &frames,
                 region_end_frame(&audio, rate, region_end, file_frames),
             );
-            (frames, ends, file_frames)
+            let file_rate = self
+                .media
+                .info(bl_media::ContentHash::from_bytes(audio.media.0))
+                .map_or(rate, |info| info.sample_rate);
+            (frames, ends, file_frames, file_rate)
         };
         let notes = slice_notes(
             &clip,
@@ -291,6 +308,7 @@ impl Shell {
             frames,
             ends,
             file_frames,
+            file_rate,
             notes,
             preset,
             name: clip.name.clone(),
@@ -711,14 +729,16 @@ impl Shell {
     fn slice_devices(&mut self, id: DeviceId, plan: &Plan, media: ContentHash) -> Device {
         match &plan.preset {
             Preset::OneSampler => {
+                let rate = self.engine_rate();
                 let last = plan.ends.last().copied().unwrap_or(plan.file_frames);
+                let slices: Vec<u64> = plan.frames.iter().map(|&f| plan.own(f, rate)).collect();
                 sampler_device(
                     id,
                     media,
                     MODE_SLICE,
-                    Some((plan.frames[0], last)),
-                    &plan.frames,
-                    plan.file_frames,
+                    Some((plan.own(plan.frames[0], rate), plan.own(last, rate))),
+                    &slices,
+                    plan.own(plan.file_frames, rate),
                 )
             }
             Preset::DrumRack => self.drum_rack(id, plan, media, None),
@@ -739,6 +759,8 @@ impl Shell {
         pattern: Option<RackPreset>,
     ) -> Device {
         let mut rack = Device::rack(id, RackKind::Drum);
+        let rate = self.engine_rate();
+        let whole = plan.own(plan.file_frames, rate);
         let template = pattern
             .as_ref()
             .and_then(|preset| preset.rack.chains.first().cloned());
@@ -760,9 +782,9 @@ impl Shell {
                         first.id,
                         media,
                         MODE_ONE_SHOT,
-                        Some((start, end)),
+                        Some((plan.own(start, rate), plan.own(end, rate))),
                         &[],
-                        plan.file_frames,
+                        whole,
                     );
                     chain.devices
                 }
@@ -772,9 +794,9 @@ impl Shell {
                         sampler_id,
                         media,
                         MODE_ONE_SHOT,
-                        Some((start, end)),
+                        Some((plan.own(start, rate), plan.own(end, rate))),
                         &[],
-                        plan.file_frames,
+                        whole,
                     )]
                 }
             };
@@ -823,8 +845,9 @@ fn is_sampler(device: &Device) -> bool {
 }
 
 /// A native sampler device in `mode` playing `media`'s region (sampler R1,
-/// R3, R13). `region` is the played region's frames and `slices` its manual
-/// slice points, both at the engine's rate.
+/// R22, R13). `region` is the played region's frames and `slices` its manual
+/// slice points, both at the file's own rate, and `file_frames` the file's
+/// length in the same frames: a region of all of it is none.
 fn sampler_device(
     id: DeviceId,
     media: ContentHash,
@@ -843,19 +866,9 @@ fn sampler_device(
     .with_role(DeviceRole::Instrument);
     device.set_media(0, Some(media));
     device.params.insert(sampler_ids::MODE, mode);
-    if let Some((start, end)) = region {
-        // Spec: sampler R3. The region is Start and Length as shares of the
-        // sample, and the sampler rounds each down to a frame, so half a
-        // frame is added: the shares then land on the slice's own frames.
-        let total = file_frames.max(1) as f64;
-        device
-            .params
-            .insert(sampler_ids::START, (start as f64 + 0.5) * 100.0 / total);
-        device.params.insert(
-            sampler_ids::LENGTH,
-            end.saturating_sub(start) as f64 * 100.0 / total,
-        );
-    }
+    device.region = region
+        .filter(|&(start, end)| start < end && (start, end) != (0, file_frames))
+        .map(|(start, end)| SampleRegion::Frames { start, end });
     if !slices.is_empty() {
         device.slices = slices.to_vec();
         device.params.insert(sampler_ids::SLICE_BY, SLICE_BY_MANUAL);

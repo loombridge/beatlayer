@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        271,
+        272,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region"
     );
 
     for op in &ops {
@@ -1564,6 +1564,18 @@ fn every_command_runs_by_id() {
     agent.run(
         "device.delete_slice",
         json!({ "device": eq, "frame": 35_000 }),
+    );
+    // WP-7.33: the sampler's Start and End flags.
+    agent.run(
+        "device.write_sample_region",
+        json!({ "device": eq, "region": { "start": 100, "end": 900 } }),
+    );
+    assert_eq!(
+        agent.editor.document().device(eq).unwrap().region,
+        Some(bl_model::SampleRegion::Frames {
+            start: 100,
+            end: 900
+        })
     );
     let warp = &agent.editor.document().device(eq).unwrap().warp;
     assert!(warp.warp && warp.mode == WarpMode::Beats && warp.bpm == Some(190.0));
@@ -3801,6 +3813,16 @@ fn schemas_match_what_commands_serialise() {
             Command::DeleteSlice {
                 device,
                 frame: 35_000,
+            },
+        ),
+        (
+            "device.write_sample_region",
+            Command::SetDeviceRegion {
+                device,
+                region: Some(bl_model::SampleRegion::Frames {
+                    start: 100,
+                    end: 900,
+                }),
             },
         ),
         (

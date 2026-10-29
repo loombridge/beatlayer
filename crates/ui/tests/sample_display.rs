@@ -189,6 +189,15 @@ fn double_click(h: &mut Harness, at: Pos2) {
     h.settle();
 }
 
+/// Simpler's Start and End flags in frames, or none while they hold the
+/// whole sample.
+fn region_of(h: &Harness, device: DeviceId) -> Option<(u64, u64)> {
+    match h.shell.editor().document().device(device)?.region? {
+        bl_model::SampleRegion::Frames { start, end } => Some((start, end)),
+        shares => panic!("a region as shares: {shares:?}"),
+    }
+}
+
 // Spec: multisampler R54
 #[test]
 fn snapshots_display_draws_its_flags_and_slices() {
@@ -241,7 +250,11 @@ fn snapshots_display_draws_its_flags_and_slices() {
     let steps = h.shell.editor().undo_history().len();
     let from = centre(bounds(&all, "Region End"));
     drag(&mut h, from, from - vec2(60.0, 0.0), Modifiers::NONE);
-    assert!(value_of(&h, device, LENGTH) < 100.0);
+    // The flags are the sample's markers, not parameters (the sampler spec,
+    // R22): the region is written in frames, and S Length is untouched.
+    let flags = region_of(&h, device).expect("the End flag was dragged");
+    assert!(flags.1 < 48_000 && flags.0 == 0, "{flags:?}");
+    assert_eq!(value_of(&h, device, LENGTH), 100.0);
     assert_eq!(
         h.shell.editor().undo_history().len(),
         steps + 1,
@@ -251,9 +264,20 @@ fn snapshots_display_draws_its_flags_and_slices() {
     let all = nodes(&mut h);
     let end_before = bounds(&all, "Region End").x0;
     let from = centre(bounds(&all, "Region Start"));
+    let steps = h.shell.editor().undo_history().len();
     drag(&mut h, from, from + vec2(40.0, 0.0), Modifiers::NONE);
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "the Start flag too is one step"
+    );
     let all = nodes(&mut h);
-    assert!(value_of(&h, device, sampler::START) > 0.0);
+    let moved = region_of(&h, device).expect("both flags are set");
+    assert!(
+        moved.0 > 0 && moved.1 == flags.1,
+        "{moved:?} against {flags:?}"
+    );
+    assert_eq!(value_of(&h, device, sampler::START), 0.0);
     assert!((bounds(&all, "Region End").x0 - end_before).abs() < 1.5);
 }
 

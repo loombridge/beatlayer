@@ -21,8 +21,11 @@
 //! set saved before it opens with each pressure point a step. Version 10
 //! (T348) made Loop Back-and-Forth the default Transient Loop Mode; a set
 //! saved before it names Loop Forward on each audio clip that had it by default.
-//! Version 12 (WP-7.1) added the set's MIDI and key mappings; a set saved
-//! before it opens with none.
+//! Version 11 (T262) added colours. Version 12 (WP-7.1) added the set's MIDI
+//! and key mappings; a set saved before it opens with none. Version 13
+//! (WP-7.33) gave Simpler's sample a region between Start and End flags; a
+//! set saved before it opens with a One-Shot or Slice Simpler's Start and
+//! Length as its region.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -34,8 +37,9 @@ use bl_core::time::{
     Bpm, TempoMap, TempoSegment, Ticks, TimeSignature, TimeSignatureChange, TimeSignatureMap,
 };
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Device, DeviceKind, Editor, MidiData, Note,
-    ParamId, PluginFormat, TrackKind, TransientLoopMode,
+    AudioData, AutomationTarget, Breakpoint, Clip, ClipData, Command, ContentHash, Device,
+    DeviceKind, DeviceRole, Editor, MidiData, Note, ParamId, PluginFormat, SampleRegion, TrackKind,
+    TransientLoopMode,
 };
 use bl_project::migrate::{MIGRATIONS, OLDEST_SCHEMA_VERSION};
 use bl_project::{
@@ -542,6 +546,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[8],
     MIGRATIONS[9],
     MIGRATIONS[10],
+    MIGRATIONS[11],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads
@@ -697,4 +702,237 @@ fn a_schema_7_set_with_take_lanes_opens_with_ids_for_its_lanes_and_passes() {
     )
     .unwrap();
     behind.document.check_invariants().unwrap();
+}
+
+/// Simpler's device type and the IDs of the parameters the version 11
+/// fixtures below set: Mode, Start, Length, Slice By and Regions.
+const SIMPLER: &str = "beatlayer.snapshot";
+const MODE: ParamId = ParamId(0);
+const START: ParamId = ParamId(1);
+const LENGTH: ParamId = ParamId(2);
+const SLICE_BY: ParamId = ParamId(24);
+const SLICE_REGIONS: ParamId = ParamId(27);
+
+/// A set as version 11 saved it, with Simplers in all three modes: a Classic
+/// one whose Start an envelope drives, a One-Shot one at Start 20 % and
+/// Length 30 %, and a Slice one at Start 10 % and Length 60 % cutting two
+/// slices. With `driven`, the One-Shot Simpler's Start is automated as well.
+/// Each plays one note from a one-bar clip of a track of its own.
+fn simplers_project(driven: bool) -> Project {
+    let mut ids = IdAllocator::new();
+    let main = bl_model::TrackId(ids.allocate());
+    let mut editor = Editor::from_document(bl_model::Document::new(main, []), ids);
+    let sample = ContentHash([3; 32]);
+    let simplers = [
+        ("Classic", 0.0, &[][..], 60, true),
+        (
+            "One-Shot",
+            1.0,
+            &[(START, 20.0), (LENGTH, 30.0)][..],
+            60,
+            driven,
+        ),
+        (
+            "Slice",
+            2.0,
+            &[
+                (START, 10.0),
+                (LENGTH, 60.0),
+                (SLICE_BY, 2.0),
+                (SLICE_REGIONS, 2.0),
+            ][..],
+            61,
+            false,
+        ),
+    ];
+    for (index, (name, mode, params, key, automated)) in simplers.into_iter().enumerate() {
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: name.to_owned(),
+                parent: None,
+                index,
+            })
+            .unwrap();
+        let id = editor.new_id();
+        let mut device = Device::new(
+            id,
+            name,
+            DeviceKind::Native {
+                device_type: SIMPLER.to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        device.set_media(0, Some(sample));
+        device.params.insert(MODE, mode);
+        device.params.extend(params.iter().copied());
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+        if automated {
+            editor
+                .apply(Command::SetAutomationEnvelope {
+                    track,
+                    target: AutomationTarget::Device {
+                        device: id,
+                        param: START,
+                    },
+                    points: vec![Breakpoint {
+                        at: Ticks::ZERO,
+                        value: 25.0,
+                        bend: 0.0,
+                    }],
+                })
+                .unwrap();
+        }
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::new([Note::new(
+                        key,
+                        Ticks::ZERO,
+                        Ticks::WHOLE,
+                        100,
+                    )])),
+                ),
+            })
+            .unwrap();
+    }
+    Project {
+        document: editor.document().clone(),
+        ids: editor.ids(),
+        media: [MediaRef {
+            hash: sample,
+            path: MediaPath::new("Samples/Imported/Ramp.wav").unwrap(),
+            size: 96_044,
+            reversed_from: None,
+        }]
+        .into_iter()
+        .collect(),
+        windows: bl_model::DeviceWindows::new(),
+        rack_views: bl_model::RackViewMap::new(),
+        folds: bl_model::ClipFolds::new(),
+        scale_folds: bl_model::ClipFolds::new(),
+        midi_tools: bl_project::midi_tools::MidiToolSettings::default(),
+        launch: bl_model::LaunchSettings::default(),
+        multisamplers: bl_model::MultisamplerViews::new(),
+        window_views: bl_model::WindowViews::default(),
+        mpe_view: bl_model::MpeView::default(),
+        lane_views: bl_model::LaneViews::new(),
+        column_widths: bl_model::ColumnWidths::new(),
+    }
+}
+
+/// Creates the version 11 Simpler fixtures if they're missing: the song above
+/// as that version saved it (a Simpler held its Start and Length as
+/// parameters and had no region, so today's form with the version's number is
+/// the same file). Run it once, by hand; it never overwrites a fixture.
+#[test]
+#[ignore = "creates fixture files; run by hand"]
+fn write_simpler_fixtures() {
+    for (name, driven) in [
+        ("simplers-schema-11", false),
+        ("simplers-driven-schema-11", true),
+    ] {
+        let path = fixtures().join(format!("{name}.json"));
+        if path.exists() {
+            continue;
+        }
+        let compact = encode_json(&simplers_project(driven), REVISION).unwrap();
+        let mut value: Value = serde_json::from_slice(&compact).unwrap();
+        value["schema"] = json!(11);
+        value["saved_by"] = json!("Beatlayer 0.0.0");
+        std::fs::write(&path, pretty(&serde_json::to_vec(&value).unwrap())).unwrap();
+    }
+}
+
+/// A Simpler's name, region, and Start and Length parameters.
+type SimplerRow = (String, Option<SampleRegion>, Option<f64>, Option<f64>);
+
+/// The Simplers of a loaded `project`.
+fn simplers_of(project: &Project) -> Vec<SimplerRow> {
+    project
+        .document
+        .tracks()
+        .flat_map(bl_model::Track::devices)
+        .map(|d| {
+            (
+                d.name.clone(),
+                d.region,
+                d.params.get(&START).copied(),
+                d.params.get(&LENGTH).copied(),
+            )
+        })
+        .collect()
+}
+
+// Spec: sampler R24
+/// A Classic Simpler is left as it is. A One-Shot or Slice one takes the part
+/// its Start and Length chose as its region, as the shares they were, with
+/// Start and Length back at their defaults; the next edit of the region would
+/// write frames.
+#[test]
+fn a_set_saved_before_the_region_opens_its_one_shot_and_slice_simplers_with_one() {
+    let (project, info) =
+        decode_json(&read("simplers-schema-11.json"), &LoadOptions::default()).unwrap();
+    assert_eq!(info.schema, 11);
+    assert_eq!(
+        simplers_of(&project),
+        [
+            ("Classic".to_owned(), None, None, None),
+            (
+                "One-Shot".to_owned(),
+                Some(SampleRegion::Shares {
+                    start_share: 0.2,
+                    end_share: 0.5
+                }),
+                None,
+                None
+            ),
+            (
+                "Slice".to_owned(),
+                Some(SampleRegion::Shares {
+                    start_share: 0.1,
+                    end_share: 0.7
+                }),
+                None,
+                None
+            ),
+        ]
+    );
+    // Saved, it writes the new form and opens the same again.
+    let (again, info) = decode(
+        &encode(&project, REVISION).unwrap(),
+        &LoadOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(info.schema, SCHEMA_VERSION);
+    assert_eq!(again, project);
+}
+
+// Spec: sampler R24
+/// Automation of a One-Shot or Slice Simpler's Start or Length can't move
+/// its flags: the opened set names that device, once, and none of a set
+/// whose only automated Start is a Classic Simpler's.
+#[test]
+fn the_simplers_whose_start_was_automated_are_named_once() {
+    let options = LoadOptions::default();
+    let (quiet, _) = decode_json(&read("simplers-schema-11.json"), &options).unwrap();
+    assert!(bl_project::migrate::simplers_whose_start_was_driven(&quiet.document).is_empty());
+    let (driven, _) = decode_json(&read("simplers-driven-schema-11.json"), &options).unwrap();
+    assert_eq!(
+        bl_project::migrate::simplers_whose_start_was_driven(&driven.document),
+        ["One-Shot"]
+    );
 }

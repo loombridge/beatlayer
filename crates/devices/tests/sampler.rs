@@ -56,6 +56,18 @@ fn give(node: &mut dyn Node, collector: &Collector, data: &Arc<bl_media::SampleD
     );
 }
 
+/// Gives `node` the sample with its Start and End flags at `region`.
+fn give_region(
+    node: &mut dyn Node,
+    collector: &Collector,
+    data: &Arc<bl_media::SampleData>,
+    region: (u64, u64),
+) {
+    let mut slot = SlotSample::new(0, Arc::clone(data));
+    slot.region = region;
+    node.receive_data(collector.handle().data(slot));
+}
+
 fn note(offset: u32, kind: NoteKind, key: u8, velocity: f32) -> NoteEvent {
     NoteEvent {
         offset,
@@ -151,6 +163,19 @@ fn the_sampler_is_described_and_laid_out() {
     // Every parameter is described once and placed in the layout.
     device_type.description.check().unwrap();
     assert!(device_type.description.params.len() >= 20);
+    // Spec: sampler R3. S Start, S Length and S Loop Length are the
+    // parameters Start, Length and Loop Length were.
+    let name = |id: ParamId| {
+        device_type
+            .description
+            .params
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.name.to_string())
+    };
+    assert_eq!(name(START).as_deref(), Some("S Start"));
+    assert_eq!(name(LENGTH).as_deref(), Some("S Length"));
+    assert_eq!(name(LOOP_LENGTH).as_deref(), Some("S Loop Length"));
 }
 
 // Spec: sampler R2
@@ -191,6 +216,90 @@ fn the_region_plays_from_its_start_for_its_length() {
     // which are 1.0, then ends.
     assert!(out[0][..1200].iter().all(|s| (s - 1.0).abs() < 1e-6));
     assert!(out[0][1200..].iter().all(|s| *s == 0.0));
+}
+
+// Spec: sampler R3, R22
+#[test]
+fn classic_plays_s_start_and_s_length_inside_the_flags_and_loops_the_end_of_that_part() {
+    // A ramp of one frame per step, the flags at a quarter and three
+    // quarters: the region is frames 1200 to 3600.
+    let ramp = sample(4800, |i| i as f32 / 4800.0);
+    let collector = Collector::new();
+    let wanted = |from: usize, i: usize| (from + i) as f32 / 4800.0;
+
+    // S Start 50 % and S Length 25 % of the region: its third quarter,
+    // frames 2400 to 3000.
+    let mut node = sampler(&[(START, 50.0), (LENGTH, 25.0)], 4800);
+    give_region(node.as_mut(), &collector, &ramp, (1200, 3600));
+    let out = run_notes(node.as_mut(), 4800, &[note(0, NoteKind::On, 60, 1.0)]);
+    for (i, played) in out[0][..600].iter().enumerate() {
+        assert!((played - wanted(2400, i)).abs() < 1e-6, "frame {i}");
+    }
+    assert!(out[0][600..].iter().all(|s| *s == 0.0), "then it ends");
+
+    // With the loop on, S Loop Length 50 % repeats the part's last half,
+    // frames 2700 to 3000.
+    let mut node = sampler(
+        &[
+            (START, 50.0),
+            (LENGTH, 25.0),
+            (LOOP, 1.0),
+            (LOOP_LENGTH, 50.0),
+        ],
+        4800,
+    );
+    give_region(node.as_mut(), &collector, &ramp, (1200, 3600));
+    let out = run_notes(node.as_mut(), 4800, &[note(0, NoteKind::On, 60, 1.0)]);
+    for i in [0, 300, 599] {
+        assert!((out[0][i] - wanted(2400, i)).abs() < 1e-6, "frame {i}");
+    }
+    for i in [600, 750, 899, 900, 1500, 4799] {
+        let looped = 2700 + (i - 600) % 300;
+        assert!((out[0][i] - wanted(looped, 0)).abs() < 1e-6, "frame {i}");
+    }
+}
+
+// Spec: sampler R10, R13, R22
+#[test]
+fn one_shot_and_slice_play_flag_to_flag_whatever_s_start_says() {
+    let ramp = sample(4800, |i| i as f32 / 4800.0);
+    let collector = Collector::new();
+
+    let mut node = sampler(&[(MODE, 1.0), (START, 50.0), (LENGTH, 25.0)], 4800);
+    give_region(node.as_mut(), &collector, &ramp, (1200, 3600));
+    let out = run_notes(node.as_mut(), 4800, &[note(0, NoteKind::On, 60, 1.0)]);
+    for i in [0, 1000, 2399] {
+        assert!(
+            (out[0][i] - (1200 + i) as f32 / 4800.0).abs() < 1e-6,
+            "frame {i}"
+        );
+    }
+    assert!(
+        out[0][2400..].iter().all(|s| *s == 0.0),
+        "it ends at the End flag"
+    );
+
+    // Slice by Region cuts only inside the flags: four slices of 600
+    // frames, the last ending at End.
+    let mut node = sampler(&[(MODE, 2.0), (SLICE_BY, 2.0), (SLICE_REGIONS, 4.0)], 4800);
+    give_region(node.as_mut(), &collector, &ramp, (1200, 3600));
+    for (index, start) in [1200usize, 1800, 2400, 3000].into_iter().enumerate() {
+        let out = run_notes(
+            node.as_mut(),
+            4800,
+            &[note(0, NoteKind::On, 60 + index as u8, 1.0)],
+        );
+        assert!(
+            (out[0][10] - (start + 10) as f32 / 4800.0).abs() < 1e-6,
+            "slice {index}"
+        );
+        assert!(
+            out[0][600..].iter().all(|s| *s == 0.0),
+            "slice {index} ends"
+        );
+    }
+    let out = run_notes(node.as_mut(), 4800, &[note(0, NoteKind::On, 64, 1.0)]);
+    assert!(out.iter().flatten().all(|s| *s == 0.0), "no fifth slice");
 }
 
 // Spec: sampler R4
@@ -594,6 +703,107 @@ fn the_engine_plays_the_sample_the_set_names() {
     assert_eq!(offline.heap_operations(), 0, "no allocation in a block");
     assert!(out[1000] > 0.9, "the note plays the sample: {}", out[1000]);
     assert!(out[47_000] > 0.9, "and holds: {}", out[47_000]);
+}
+
+// Spec: sampler R22
+#[test]
+fn the_engine_counts_the_flags_in_the_samples_own_rate() {
+    let hash = bl_model::ContentHash([8u8; 32]);
+    // One second of a ramp at 24 kHz, played by an engine at 48 kHz.
+    let ramp = Arc::new(
+        bl_media::SampleData::new(
+            24_000,
+            vec![(0..24_000).map(|i| i as f32 / 24_000.0).collect()],
+        )
+        .unwrap(),
+    );
+    let heard = |region: Option<bl_model::SampleRegion>| {
+        let mut media = MediaMap::new();
+        media.insert(hash, Arc::clone(&ramp));
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let device_id = editor.new_id();
+        let mut device = Device::new(
+            device_id,
+            "Simpler",
+            DeviceKind::Native {
+                device_type: SAMPLER.to_owned(),
+            },
+        )
+        .with_role(DeviceRole::Instrument);
+        device.set_media(0, Some(hash));
+        device.params.insert(MODE, 1.0);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device,
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetDeviceRegion {
+                device: device_id,
+                region,
+            })
+            .unwrap();
+        let clip: bl_model::ClipId = editor.new_id();
+        let note = Note::new(60, Ticks::ZERO, Ticks(TICKS_PER_QUARTER * 4), 100);
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks(TICKS_PER_QUARTER * 4),
+                    ClipData::Midi(MidiData::new([note])),
+                ),
+            })
+            .unwrap();
+        let mut offline = Offline::new(
+            EngineConfig::new(RATE, 256),
+            registry().with_media(Arc::new(media)),
+        );
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        offline.render(60_000, |block| out.extend_from_slice(block.channel(0)));
+        out
+    };
+    // Frames 6,000 to 18,000 of the file are a quarter to three quarters of
+    // it: 12,000 to 36,000 of the engine's.
+    let out = heard(Some(bl_model::SampleRegion::Frames {
+        start: 6_000,
+        end: 18_000,
+    }));
+    assert!(
+        (out[100] - 0.25).abs() < 0.01,
+        "from the Start flag: {}",
+        out[100]
+    );
+    assert!((out[23_000] - 0.73).abs() < 0.01, "{}", out[23_000]);
+    assert!(
+        out[24_200..].iter().all(|s| s.abs() < 1e-3),
+        "to the End flag"
+    );
+    // Shares, as an older set holds them, are counted in the engine's frames.
+    let out = heard(Some(bl_model::SampleRegion::Shares {
+        start_share: 0.5,
+        end_share: 0.75,
+    }));
+    assert!((out[100] - 0.5).abs() < 0.01, "{}", out[100]);
+    assert!(
+        out[12_300..].iter().all(|s| s.abs() < 1e-3),
+        "a quarter long"
+    );
 }
 
 // Spec: sampler R12
@@ -1198,21 +1408,20 @@ fn slice_boundaries_are_what_the_device_cuts() {
     // A click every 4,800 frames, the transients Slice By finds.
     let clicks = sample(19_200, |i| if i % 4_800 < 20 { 1.0 } else { 0.0 });
     let value = |id: ParamId| match id {
-        START => 0.0,
-        LENGTH => 100.0,
         SLICE_BY => 0.0,
         SLICE_SENSITIVITY => 50.0,
         SLICE_DIVISION => 4.0,
         SLICE_REGIONS => 4.0,
         _ => 0.0,
     };
-    let bounds = slice_boundaries(&clicks, &value, 6_000.0, &[]);
+    let bounds = slice_boundaries(&clicks, (0, 19_200), &value, 6_000.0, &[]);
     assert_eq!(bounds.first(), Some(&0));
     assert_eq!(bounds, [0, 4_800, 9_600, 14_400, 19_200]);
     // Region slicing cuts four equal parts; Manual places none.
     let regions = |by: f64| {
         slice_boundaries(
             &clicks,
+            (0, 19_200),
             &|id| if id == SLICE_BY { by } else { value(id) },
             6_000.0,
             &[],
@@ -1223,11 +1432,15 @@ fn slice_boundaries_are_what_the_device_cuts() {
     // Manual slicing with manual slices provided.
     let manual = slice_boundaries(
         &clicks,
+        (0, 19_200),
         &|id| if id == SLICE_BY { 3.0 } else { value(id) },
         6_000.0,
         &[5_000, 10_000],
     );
     assert_eq!(manual, [0, 5_000, 10_000, 19_200]);
+    // The Start and End flags bound the cut (the sampler spec, R22).
+    let inside = slice_boundaries(&clicks, (4_800, 14_400), &value, 6_000.0, &[]);
+    assert_eq!(inside, [4_800, 9_600, 14_400]);
 }
 
 // Spec: sampler R18

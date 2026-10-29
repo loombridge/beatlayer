@@ -94,6 +94,13 @@ impl Shell {
         self.prefs.warp_recorded_audio.0
     }
 
+    /// Whether Start Transport With Tap Tempo is on (the control bar
+    /// transport spec, R20).
+    #[must_use]
+    pub fn start_transport_with_tap_tempo(&self) -> bool {
+        self.prefs.start_transport_with_tap_tempo.0
+    }
+
     /// Whether Create Fades on Clip Edges is on: new audio clips get 4 ms
     /// fades at their edges.
     #[must_use]
@@ -165,6 +172,7 @@ impl Shell {
             retune_on_tuning_load: self.retune_on_tuning_load(),
             snap_automation_to_grid: self.snap_automation_to_grid(),
             warp_recorded_audio: self.warp_recorded_audio(),
+            start_transport_with_tap_tempo: self.start_transport_with_tap_tempo(),
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
@@ -548,6 +556,12 @@ impl Shell {
             ids::SETTINGS_SET_WARP_RECORDED_AUDIO => {
                 let SwitchArgs { on } = Self::args(id, args)?;
                 self.prefs.warp_recorded_audio = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
+            ids::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.start_transport_with_tap_tempo = OnByDefault(on);
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }

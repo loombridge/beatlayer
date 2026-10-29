@@ -419,14 +419,14 @@ pub const D24: &str = "D24";
 /// next element's left edge, less a 2-point gap. The transport section
 /// (Tempo, the time signature, the Arrangement Position, Play, Stop, the
 /// loop fields, and the Loop switch) works from WP-1.18
-/// (the control bar transport spec); Tap Tempo waits for M2.
+/// (the control bar transport spec), and so does Tap Tempo (WP-7.31).
 #[rustfmt::skip]
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),
     p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, None),
     p(E::SyncLamps, "L-CTRL-028", "Sync Input and Output Indicators", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
     p(E::ResyncExternalHardware, "L-CTRL-029", "Resync External Hardware", CB, 54.0, RESYNC_WIDTH, Left, Button, None),
-    p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, Some("M2")),
+    p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, None),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
     p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Button, Some("M7")),
     p(E::NudgeUp, "L-CTRL-006", "Phase Nudge Up", CB, 145.0, 18.0, Left, Button, Some("M7")),

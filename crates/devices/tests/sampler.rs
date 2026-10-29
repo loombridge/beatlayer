@@ -232,8 +232,8 @@ fn classic_plays_s_start_and_s_length_inside_the_flags_and_loops_the_end_of_that
     let mut node = sampler(&[(START, 50.0), (LENGTH, 25.0)], 4800);
     give_region(node.as_mut(), &collector, &ramp, (1200, 3600));
     let out = run_notes(node.as_mut(), 4800, &[note(0, NoteKind::On, 60, 1.0)]);
-    for i in 0..600 {
-        assert!((out[0][i] - wanted(2400, i)).abs() < 1e-6, "frame {i}");
+    for (i, played) in out[0][..600].iter().enumerate() {
+        assert!((played - wanted(2400, i)).abs() < 1e-6, "frame {i}");
     }
     assert!(out[0][600..].iter().all(|s| *s == 0.0), "then it ends");
 

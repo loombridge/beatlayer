@@ -62,6 +62,9 @@ pub const CONVERT: &str = "device.convert";
 /// `device.audition_sample`: play a sample from a point through its device
 /// (R54).
 pub const AUDITION_SAMPLE: &str = "device.audition_sample";
+/// `device.set_sample_region`: move Simpler's Start and End flags (the
+/// sampler spec, R22).
+pub const SET_SAMPLE_REGION: &str = "device.set_sample_region";
 
 /// The undo step's name for adding layers from files: Live's name for
 /// dropping samples on its layer list is to observe.
@@ -87,6 +90,7 @@ pub const IDS: &[&str] = &[
     REVERSE_SAMPLE,
     CONVERT,
     AUDITION_SAMPLE,
+    SET_SAMPLE_REGION,
 ];
 
 /// The multisampler's layout as `tab` shows it (R1): its layout holds one
@@ -496,6 +500,35 @@ fn yes() -> bool {
     true
 }
 
+/// Arguments of `device.set_sample_region`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetSampleRegionArgs {
+    /// Simpler; the selected device if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The Start flag in frames of the edited sample at its own rate; it
+    /// stays where it is if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<u64>,
+    /// The End flag, in the same frames; it stays where it is if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<u64>,
+}
+
+/// What `device.set_sample_region` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SampleRegionSet {
+    /// Simpler.
+    pub device: DeviceId,
+    /// The Start flag now.
+    pub start: u64,
+    /// The End flag now.
+    pub end: u64,
+    /// The edited sample's length in frames at its own rate.
+    pub length: u64,
+}
+
 /// What `device.audition_sample` returns.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Auditioned {
@@ -768,6 +801,22 @@ fn register_sample_edits(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(DeviceView)
             .args::<AuditionArgs>()
             .result::<Auditioned>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SAMPLE_REGION, "Change Sample Region")
+            .description(
+                "Moves Simpler's Start and End flags, the part of the sample every mode plays \
+                 (the sampler spec, R22). `start` and `end` are frames of the edited sample at \
+                 its own rate; one left out stays where it is. An End past the sample's end \
+                 comes back to it, and a Start at or after End is refused. The flags that \
+                 cover the whole sample read back as no region. One undo step. The flags read \
+                 back as `region` in the query tool's `device` result; the result here also \
+                 holds the sample's `length`.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetSampleRegionArgs>()
+            .result::<SampleRegionSet>(),
     )?;
     Ok(())
 }

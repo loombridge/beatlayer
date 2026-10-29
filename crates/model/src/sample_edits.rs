@@ -118,6 +118,68 @@ impl SampleEdit {
     }
 }
 
+/// The part of a Simpler's sample between its Start and End flags (the
+/// sampler spec, R22). Absent from the device for the whole sample.
+///
+/// Flags are saved as frames of the edited sample at its own rate, as the
+/// slices and the edits' selections are. A set saved before the region
+/// existed (R24) holds the shares of the decoded sample its Start and Length
+/// parameters chose until the next edit of the region writes frames, because
+/// turning a share into a frame needs the sample's length, which the saved
+/// file doesn't hold.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum SampleRegion {
+    /// The Start and End flags, in frames; Start is before End.
+    Frames {
+        /// The first frame played.
+        start: u64,
+        /// The frame after the last one played.
+        end: u64,
+    },
+    /// An older set's region, as shares (0 to 1) of the decoded sample.
+    Shares {
+        /// Where the region starts.
+        start_share: f64,
+        /// Where it ends.
+        end_share: f64,
+    },
+}
+
+impl SampleRegion {
+    /// The flags as frames of a sample `length` frames long: shares round
+    /// down to a frame, as playback rounded them before the flags existed,
+    /// and a flag past the sample's end comes back to it.
+    #[must_use]
+    pub fn frames_in(&self, length: u64) -> (u64, u64) {
+        match *self {
+            Self::Frames { start, end } => (start.min(length), end.min(length)),
+            Self::Shares {
+                start_share,
+                end_share,
+            } => (
+                ((start_share * length as f64) as u64).min(length),
+                ((end_share * length as f64) as u64).min(length),
+            ),
+        }
+    }
+
+    /// Where the audio the flags mark is after `edit`, or `None` when the
+    /// edit leaves nothing between them (R22): the flags move as a
+    /// multisampler layer's markers do (the multisampler spec, R56). Shares
+    /// stay shares of the edited sample.
+    #[must_use]
+    pub fn after(self, edit: &SampleEdit) -> Option<Self> {
+        match self {
+            Self::Frames { start, end } => {
+                let (start, end) = (edit.follow(start), edit.follow(end));
+                (start < end).then_some(Self::Frames { start, end })
+            }
+            shares @ Self::Shares { .. } => Some(shares),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,5 +223,27 @@ mod tests {
         ] {
             assert!(bad.length_after(100).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_flags_follow_an_edit_and_shares_round_down_to_a_frame() {
+        let region = SampleRegion::Frames { start: 30, end: 80 };
+        let cut = edit(SampleEditKind::Cut, 10, 20);
+        assert_eq!(
+            region.after(&cut),
+            Some(SampleRegion::Frames { start: 20, end: 70 })
+        );
+        let trim = edit(SampleEditKind::Trim, 0, 30);
+        assert_eq!(region.after(&trim), None, "nothing is left between them");
+        let shares = SampleRegion::Shares {
+            start_share: 0.2,
+            end_share: 0.5,
+        };
+        assert_eq!(shares.frames_in(1001), (200, 500));
+        assert_eq!(
+            region.frames_in(60),
+            (30, 60),
+            "a flag past the end comes back"
+        );
     }
 }

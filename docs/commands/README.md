@@ -7887,6 +7887,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
+| `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
@@ -8068,6 +8069,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         "string",
         "null"
       ]
+    },
+    "region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SampleRegion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample."
     },
     "role": {
       "$ref": "#/$defs/DeviceRole",
@@ -25794,6 +25806,123 @@ A span of a sample, in frames at the sample's own rate: `from` inclusive to `to`
   "required": [
     "from",
     "to"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleRegion`
+
+The part of a Simpler's sample between its Start and End flags (the sampler spec, R22). Absent from the device for the whole sample.
+
+Flags are saved as frames of the edited sample at its own rate, as the slices and the edits' selections are. A set saved before the region existed (R24) holds the shares of the decoded sample its Start and Length parameters chose until the next edit of the region writes frames, because turning a share into a frame needs the sample's length, which the saved file doesn't hold.
+
+One of:
+
+- an object with `start` (integer, at least 0), `end` (integer, at least 0): The Start and End flags, in frames; Start is before End.
+- an object with `start_share` (number), `end_share` (number): An older set's region, as shares (0 to 1) of the decoded sample.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "description": "The Start and End flags, in frames; Start is before End.",
+      "properties": {
+        "end": {
+          "description": "The frame after the last one played.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "The first frame played.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An older set's region, as shares (0 to 1) of the decoded sample.",
+      "properties": {
+        "end_share": {
+          "description": "Where it ends.",
+          "format": "double",
+          "type": "number"
+        },
+        "start_share": {
+          "description": "Where the region starts.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start_share",
+        "end_share"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "The part of a Simpler's sample between its Start and End flags (the sampler spec, R22). Absent from the device for the whole sample.\n\nFlags are saved as frames of the edited sample at its own rate, as the slices and the edits' selections are. A set saved before the region existed (R24) holds the shares of the decoded sample its Start and Length parameters chose until the next edit of the region writes frames, because turning a share into a frame needs the sample's length, which the saved file doesn't hold."
+}
+```
+
+</details>
+
+### `SampleRegionSet`
+
+What `device.set_sample_region` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | Simpler. |
+| `start` | integer, at least 0 | yes | The Start flag now. |
+| `end` | integer, at least 0 | yes | The End flag now. |
+| `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_sample_region` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "Simpler."
+    },
+    "end": {
+      "description": "The End flag now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "description": "The edited sample's length in frames at its own rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start": {
+      "description": "The Start flag now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "start",
+    "end",
+    "length"
   ],
   "type": "object"
 }

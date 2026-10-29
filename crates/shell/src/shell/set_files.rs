@@ -739,6 +739,17 @@ impl Shell {
                         action: None,
                     });
                 }
+                if let Some(notice) = self.store.open_notice() {
+                    let text = match self.message.take() {
+                        Some(relinked) => format!("{}; {notice}", relinked.text),
+                        None => notice,
+                    };
+                    self.message = Some(Message {
+                        text,
+                        error: false,
+                        action: None,
+                    });
+                }
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();

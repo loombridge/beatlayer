@@ -720,6 +720,11 @@ pub struct DeviceFrame {
     /// device that isn't a plug-in.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mpe: Option<bl_model::PluginMpe>,
+    /// Whether the set has a tuning loaded, which shows a plug-in's Apply
+    /// Tuning to Per-Note Pitch Bend item in its title bar menu (the tunings
+    /// spec, R20, C-DEVICE-015).
+    #[serde(default)]
+    pub tuning_loaded: bool,
     /// Whether it's the selected device.
     pub selected: bool,
     /// Whether it's the device being hot-swapped.

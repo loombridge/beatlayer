@@ -139,24 +139,52 @@ impl MpeSettings {
     }
 }
 
-/// A plug-in device's MPE Mode and its settings (the MPE spec, R14, R18).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+/// A plug-in device's MPE Mode, its settings and its tuning switch (the MPE
+/// spec, R14, R18; the tunings spec, R20).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[schemars(
-    description = "A plug-in device's MPE: `on` (MPE Mode, off in a new device) and `settings` \
-                   (the MPE/Multi-channel Settings; left out while they are the new settings')."
+    description = "A plug-in device's MPE: `on` (MPE Mode, off in a new device), `settings` \
+                   (the MPE/Multi-channel Settings; left out while they are the new settings') \
+                   and `tuning` (Apply Tuning to Per-Note Pitch Bend, on in a new device; left \
+                   out while on)."
 )]
 pub struct PluginMpe {
     /// MPE Mode.
     pub on: bool,
+    /// Apply Tuning to Per-Note Pitch Bend (the tunings spec, R20): on in a
+    /// new device, so saved only when off. It reaches the plug-in only
+    /// while MPE Mode is on.
+    #[serde(default = "tuning_on", skip_serializing_if = "is_tuning_on")]
+    pub tuning: bool,
     /// The settings MPE MIDI goes out on, left out while they are the new
     /// settings'.
     #[serde(default, skip_serializing_if = "MpeSettings::is_default")]
     pub settings: MpeSettings,
 }
 
+const fn tuning_on() -> bool {
+    true
+}
+
+/// For serde's `skip_serializing_if`, which passes a reference.
+fn is_tuning_on(tuning: &bool) -> bool {
+    *tuning
+}
+
+impl Default for PluginMpe {
+    fn default() -> Self {
+        Self {
+            on: false,
+            tuning: true,
+            settings: MpeSettings::default(),
+        }
+    }
+}
+
 impl PluginMpe {
-    /// Whether it is a new device's: off, with the new settings.
+    /// Whether it is a new device's: off, with the new settings and the
+    /// tuning switch on.
     #[must_use]
     pub fn is_default(&self) -> bool {
         *self == Self::default()

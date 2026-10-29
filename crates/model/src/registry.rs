@@ -1250,6 +1250,27 @@ const ENTRIES: &[Entry] = &[
             each change is one undo step, named \"Bypass Tuning\".",
     },
     Entry {
+        id: "track.set_tuning_layout",
+        action: Action::Apply("set_tuning_layout"),
+        label: "Set MIDI Controller Layout",
+        permission: Permission::Edit,
+        contexts: MIXER,
+        keys: &[],
+        description: "Sets a MIDI track's MIDI Controller Layout, the chooser beside Bypass \
+            Tuning, and its custom table; what is left out stays. `layout` is `all_keys` (a new \
+            track's: each key plays the same key of the tuning), `black_keys_only` (C#3 plays \
+            key 60 of the tuning, each black key above or below the next key up or down; white \
+            keys play nothing), `white_keys_only` (the same from C3 over the white keys), \
+            `closest_in_pitch` (each key plays the key of the tuning nearest its twelve-step \
+            pitch) or `custom`. `keys` is the custom table, 128 entries, one for each incoming \
+            key 0 to 127: the key of the tuning it plays, or null for none; a key the tuning \
+            has none for plays nothing. It maps notes from MIDI inputs and the computer MIDI \
+            keyboard as they enter the track, and does nothing while Bypass Tuning is on. Only \
+            MIDI tracks have one. Saved with the set where it differs from a new track's; one \
+            undo step (Change MIDI Controller Layout). The query tool's `track` reads it as \
+            `tuning_layout`.",
+    },
+    Entry {
         id: "track.set_link_group",
         action: Action::Apply("set_track_links"),
         label: "Set Link Group",
@@ -3267,6 +3288,23 @@ const ENTRIES: &[Entry] = &[
             pressure. Off in a new device; saved with the set, the device's presets and its \
             default preset. One undo step (Change MPE Mode). `plugin.info` reports it. A device \
             that isn't a plug-in has no MPE Mode.",
+    },
+    Entry {
+        id: "plugin.set_tuning",
+        action: Action::Apply("set_plugin_tuning"),
+        label: "Apply Tuning to Per-Note Pitch Bend",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Switches a plug-in device's Apply Tuning to Per-Note Pitch Bend, the last \
+            item of its title bar menu, shown while the set has a tuning (`on`). On (a new \
+            device's), a plug-in with MPE Mode on gets each note on the twelve-step key nearest \
+            its tuned pitch, with a per-note pitch bend over 48 semitones carrying the rest; \
+            a clip's own per-note bends move the note by steps of the tuning. With MPE Mode \
+            off the switch has no effect: the plug-in gets plain keys. Off, the plug-in gets \
+            plain keys whatever the tuning. Saved with the device, only where off; one undo \
+            step (Apply Tuning to Per-Note Pitch Bend). `plugin.info` reports it in `mpe`. A \
+            device that isn't a plug-in has no such switch.",
     },
     Entry {
         id: "plugin.set_mpe_settings",

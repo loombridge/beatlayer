@@ -1804,6 +1804,16 @@ pub enum Command {
         /// Whether MPE Mode is on.
         on: bool,
     },
+    /// Switches a plug-in device's Apply Tuning to Per-Note Pitch Bend (the
+    /// tunings spec, R20): on, a plug-in with MPE Mode on gets each note on
+    /// the nearest twelve-step key of its tuned pitch with a per-note bend
+    /// for the rest.
+    SetPluginTuning {
+        /// The device, which must be a plug-in.
+        device: DeviceId,
+        /// Whether the switch is on.
+        on: bool,
+    },
     /// Sets the MPE/Multi-channel Settings a plug-in device's MPE MIDI goes
     /// out on (the MPE spec, R18).
     SetPluginMpeSettings {
@@ -2722,6 +2732,19 @@ pub enum Command {
         /// Whether it bypasses the tuning.
         bypass: bool,
     },
+    /// Sets a MIDI track's MIDI Controller Layout and its custom table (the
+    /// tunings spec, R22, R23); what is left out stays.
+    SetTuningLayout {
+        /// The MIDI track.
+        track: TrackId,
+        /// The mapping to use.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        layout: Option<crate::LayoutKind>,
+        /// The custom table: 128 entries, the key of the tuning each
+        /// incoming key plays or `null` for none.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        keys: Option<Vec<Option<u8>>>,
+    },
     /// Puts audio and MIDI tracks into the link group `group`, or takes them
     /// out of their groups when it is left out (the linked-track editing
     /// spec, R2, R3, R5). A track leaves the group it was in, and a group
@@ -2994,6 +3017,8 @@ impl Command {
             // Spec: mpe R14, R18. Beatlayer's own names.
             Self::SetPluginMpeMode { .. } => "Change MPE Mode",
             Self::SetPluginMpeSettings { .. } => "Change MPE Settings",
+            // Spec: tunings R20. The menu item's label.
+            Self::SetPluginTuning { .. } => "Apply Tuning to Per-Note Pitch Bend",
             Self::SetDeviceState { .. } => "Load Preset",
             Self::SetDeviceEnabled { .. } => "Change \"Device On\"",
             // IMP-14: Beatlayer's own, so Live has no name for them.
@@ -3128,6 +3153,8 @@ impl Command {
             Self::SetTuningReference { .. } => "Change Reference Pitch",
             Self::SetTuningRange { .. } => "Change Tuning Range",
             Self::SetTuningBypass { .. } => "Bypass Tuning",
+            // Spec: tunings R22. Beatlayer's own name.
+            Self::SetTuningLayout { .. } => "Change MIDI Controller Layout",
             Self::SetTrackLinks { group: None, .. } => "Unlink Tracks",
             Self::SetTrackLinks { .. } => "Link Tracks",
             // Spec: grooves R5, R16, R17, R32. Live's undo names for the
@@ -4095,6 +4122,40 @@ impl Document {
                 }
                 Ok(())
             }
+            Command::SetTuningLayout {
+                track,
+                layout,
+                keys,
+            } => {
+                if self.track_ref(*track)?.kind() != TrackKind::Midi {
+                    return Err(ModelError::InvalidInput(
+                        "only a MIDI track has a MIDI Controller Layout",
+                    ));
+                }
+                if let Some(keys) = keys {
+                    crate::TuningLayout::check_keys(keys)?;
+                }
+                let mut next = self.track_ref(*track)?.tuning_layout.clone();
+                if let Some(layout) = layout {
+                    next.layout = *layout;
+                }
+                if let Some(keys) = keys {
+                    // A table where every key plays itself is the new one.
+                    next.keys = if keys
+                        .iter()
+                        .enumerate()
+                        .all(|(at, &to)| to == Some(at as u8))
+                    {
+                        Vec::new()
+                    } else {
+                        keys.clone()
+                    };
+                }
+                if next != self.track_ref(*track)?.tuning_layout {
+                    self.track_mut(*track)?.tuning_layout = next;
+                }
+                Ok(())
+            }
             Command::SetTrackLinks { tracks, group } => {
                 for track in tracks {
                     if !matches!(
@@ -4629,6 +4690,9 @@ impl Document {
             }
             Command::SetPluginMpeMode { device, on } => {
                 self.edit_plugin_mpe(*device, |mpe| mpe.on = *on)
+            }
+            Command::SetPluginTuning { device, on } => {
+                self.edit_plugin_mpe(*device, |mpe| mpe.tuning = *on)
             }
             Command::SetPluginMpeSettings { device, settings } => {
                 settings.check()?;

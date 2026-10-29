@@ -104,6 +104,31 @@ fn an_agent_sets_mpe_for_a_plugin_and_a_tracks_midi_to_and_reads_both_back() {
         json!({ "on": true, "settings": { "zone": "upper", "channels": 7 } })
     );
 
+    // Spec: tunings R20, R24. `plugin.set_tuning` runs by ID, is one undo
+    // step, and reads back in `plugin.info`'s `mpe` and the device query's
+    // `tuning`.
+    assert_eq!(
+        call(&mut client, "query", json!({ "id": device }))["tuning"],
+        true
+    );
+    let steps = client.transport().shell.editor().undo_history().len();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "plugin.set_tuning", "args": { "device": device, "on": false } },
+        ] }),
+    );
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps + 1
+    );
+    assert_eq!(
+        call(&mut client, "query", json!({ "id": device }))["tuning"],
+        false
+    );
+    assert_eq!(info(&mut client)["tuning"], false);
+
     // A track's MIDI To: a port with MPE and its settings, read back in the
     // track query's routing.
     call(

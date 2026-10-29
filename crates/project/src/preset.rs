@@ -454,6 +454,7 @@ mod tests {
         );
         plugin.mpe = bl_model::PluginMpe {
             on: true,
+            tuning: true,
             settings: bl_model::MpeSettings {
                 zone: bl_model::MpeZone::Upper,
                 channels: 5,

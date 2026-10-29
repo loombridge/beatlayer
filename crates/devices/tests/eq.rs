@@ -428,6 +428,17 @@ fn mid_side_mode_leaves_the_other_curve_untouched() {
 
 // Spec: eq R8
 #[test]
+fn a_saved_oversample_reports_its_latency_before_the_first_block() {
+    let on = contour(&[(OVERSAMPLE, 1.0)], MAX_FRAMES);
+    assert_eq!(
+        on.latency(),
+        bl_dsp::Oversampler::new(1, 1, MAX_FRAMES).latency(),
+    );
+    assert_eq!(contour(&[], MAX_FRAMES).latency(), 0);
+}
+
+// Spec: eq R8
+#[test]
 fn the_oversampled_path_passes_its_bands_and_reports_its_latency() {
     let params = with_globals(&[(OVERSAMPLE, 1.0)], band0(PEAK, 1_000.0, 12.0, 0.71));
     let mut node = contour(&params, MAX_FRAMES);

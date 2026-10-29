@@ -640,3 +640,25 @@ fn the_layout_places_every_parameter_once() {
         .check(&description.params)
         .expect("every parameter is placed once");
 }
+
+// Spec: reverb R10
+#[test]
+fn a_frozen_tail_that_keeps_taking_input_stays_finite() {
+    let params = with(&[(FREEZE, 1.0), (FLAT, 1.0), (CUT, 0.0), (REFLECT, 0.0)]);
+    let mut node = reverb(&params, 4_800);
+    // A sustained offset, a minute of it: each pass adds to the lossless loop.
+    let dc = vec![0.5f32; 4_800 * 600];
+    let [left, right] = stream(node.as_mut(), &dc, 4_800);
+    let peak = left
+        .iter()
+        .chain(&right)
+        .fold(0.0f32, |m, s| m.max(s.abs()));
+    assert!(
+        peak.is_finite() && peak < 16.0,
+        "the tail stays bounded: {peak}"
+    );
+    // Lifting Freeze lets it decay: the loop is not poisoned.
+    let silent = vec![0.0f32; 4_800];
+    let out = run_stereo_with(node.as_mut(), &silent, &silent, &[set(0, FREEZE, 0.0)]);
+    assert!(out[0].iter().all(|s| s.is_finite()), "finite after Freeze");
+}

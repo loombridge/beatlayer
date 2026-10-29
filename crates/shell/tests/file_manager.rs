@@ -602,6 +602,86 @@ fn save_a_copy_leaves_the_open_set_alone() {
     );
 }
 
+// Spec: file-management R19. A file the set gained since it was saved is
+// listed in the copy by a path from the copy's folder, however deep it is.
+#[test]
+fn a_copy_lists_files_added_since_the_last_save_from_its_own_folder() {
+    let scratch = Scratch::new("copy-added");
+    let file = scratch.path("Music/Kick.wav");
+    wav(&file, 480);
+    let (mut shell, _song) = set_with_files(&scratch, "Song", &[]);
+    shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [text(&file)], "track": audio_track(&shell), "at": 0 }),
+        )
+        .unwrap();
+    let copy = scratch.path("Library/Templates/Deep/Copy.blset");
+    let saved = shell
+        .run("set.save_copy", json!({ "path": text(&copy) }))
+        .unwrap();
+    let written = PathBuf::from(saved["path"].as_str().unwrap());
+
+    let (_, project) = SetFile::open(&written).unwrap();
+    let folder = written.parent().unwrap();
+    let listed: Vec<PathBuf> = project
+        .media
+        .iter()
+        .filter_map(|media| media.path.resolve(folder))
+        .collect();
+    assert_eq!(listed.len(), 1, "the copy lists the file");
+    assert!(
+        listed[0].is_file(),
+        "the copy's path reaches the file: {}",
+        listed[0].display()
+    );
+}
+
+// Spec: file-management R15. Audio clips pasted into another set take their
+// files into its media table, so the set finds them when it's opened again.
+#[test]
+fn pasting_audio_clips_into_a_new_set_lists_their_files() {
+    let scratch = Scratch::new("paste-media");
+    let file = scratch.path("Music/Kick.wav");
+    wav(&file, 480);
+    let (mut shell, _song) = set_with_files(&scratch, "Song", std::slice::from_ref(&file));
+    let clip = shell
+        .editor()
+        .document()
+        .tracks()
+        .flat_map(|track| track.clips())
+        .find(|clip| clip.data.is_audio())
+        .map(|clip| clip.id)
+        .unwrap();
+    shell
+        .run("arrangement.copy", json!({ "clips": [clip] }))
+        .unwrap();
+    shell.run("set.new", json!({})).unwrap();
+    shell
+        .run(
+            "arrangement.paste",
+            json!({ "at": 0, "track": audio_track(&shell) }),
+        )
+        .unwrap();
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": text(&scratch.path("Other/Pasted.blset")) }),
+        )
+        .unwrap();
+    let written = PathBuf::from(saved["path"].as_str().unwrap());
+
+    let (_, project) = SetFile::open(&written).unwrap();
+    let folder = written.parent().unwrap();
+    let listed: Vec<PathBuf> = project
+        .media
+        .iter()
+        .filter_map(|media| media.path.resolve(folder))
+        .collect();
+    assert_eq!(listed.len(), 1, "the new set lists the pasted clip's file");
+    assert!(listed[0].is_file(), "{}", listed[0].display());
+}
+
 // Spec: file-management R14.
 #[test]
 fn the_search_folder_is_the_one_the_person_names() {

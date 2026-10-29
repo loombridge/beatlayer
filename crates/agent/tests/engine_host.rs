@@ -549,3 +549,31 @@ fn an_agent_launches_legato_swaps_and_nudges_by_command_id_and_reads_each_back()
         assert!(refused.ok().is_err(), "{steps} steps is refused");
     }
 }
+
+#[test]
+fn an_agent_s_scene_launch_moves_the_selection_as_the_person_s_does() {
+    // Spec: agent-permissions R10; launch-quantisation R9, R16. Select Next
+    // Scene on Launch is on by default.
+    let (mut client, control) = host();
+    let scenes: Vec<_> = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .scenes()
+        .map(|scene| scene.id)
+        .collect();
+    let (first, second) = (scenes[0], scenes[1]);
+    call(
+        &control,
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "session.launch_scene", "args": { "scene": first } }] }),
+    );
+    let state = client
+        .transport()
+        .shell
+        .run("session.state", json!({}))
+        .unwrap();
+    assert_eq!(state["scenes"], json!([second]), "{state}");
+}

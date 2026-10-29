@@ -314,7 +314,16 @@ fn layout() -> DeviceLayout {
 
 /// Adds EQ Eight to `registry`.
 pub fn register(registry: &mut Registry) {
-    add(registry, eq_type(), |_, config| make(config));
+    add(registry, eq_type(), |device, config| {
+        let mut contour = make(config);
+        // A saved Oversample reports its delay from the first compile, not
+        // only once the node has run a block.
+        if device.params.get(&OVERSAMPLE).is_some_and(|on| *on >= 0.5) {
+            contour.oversampled = true;
+            contour.latency = contour.oversamplers[0].latency();
+        }
+        contour
+    });
 }
 
 /// Makes an EQ Eight for `config`'s rate, channels, and block size. Every

@@ -2270,6 +2270,10 @@ impl Processor {
         if let Some(program) = &self.program {
             program.get().modulated(&mut state.modulated);
         }
+        state.latency_changes.clear();
+        if let Some(program) = &self.program {
+            program.get().latency_changes(&mut state.latency_changes);
+        }
         state.processing.clear();
         if let Some(program) = &self.program {
             program.get().processing(&mut state.processing);

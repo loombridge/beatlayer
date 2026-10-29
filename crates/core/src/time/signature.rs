@@ -121,6 +121,26 @@ pub struct TimeSignatureChange {
     pub signature: TimeSignature,
 }
 
+/// A bar a time-signature change cuts short: the last bar before the change
+/// that comes before the bar is full.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FragmentaryBar {
+    /// Where the short bar starts.
+    pub start: Ticks,
+    /// Where it ends: the position of the change that cuts it short.
+    pub end: Ticks,
+    /// The signature the bar would be whole in.
+    pub signature: TimeSignature,
+}
+
+impl FragmentaryBar {
+    /// The time the bar lacks of a whole bar.
+    #[must_use]
+    pub fn missing(self) -> Ticks {
+        self.signature.bar_length() - (self.end - self.start)
+    }
+}
+
 /// A change with the number of its first bar, worked out once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 struct Entry {
@@ -206,6 +226,26 @@ impl TimeSignatureMap {
     /// The changes, in order.
     pub fn changes(&self) -> impl ExactSizeIterator<Item = TimeSignatureChange> + '_ {
         self.entries.iter().map(|entry| entry.change)
+    }
+
+    /// Whether the map has a change after tick zero.
+    #[must_use]
+    pub fn has_changes(&self) -> bool {
+        self.entries.len() > 1
+    }
+
+    /// The bars the changes cut short, in order.
+    pub fn fragmentary_bars(&self) -> impl Iterator<Item = FragmentaryBar> + '_ {
+        self.entries.windows(2).filter_map(|pair| {
+            let signature = pair[0].change.signature;
+            let end = pair[1].change.at;
+            let rest = (end - pair[0].change.at).rem_euclid(signature.bar_length());
+            (rest != Ticks::ZERO).then_some(FragmentaryBar {
+                start: end - rest,
+                end,
+                signature,
+            })
+        })
     }
 
     /// The entry in force at `ticks`, which must not be negative.
@@ -426,6 +466,29 @@ mod tests {
         for text in ["", "6", "6/", "/8", "6/9", "x/8", "300/4"] {
             assert!(text.parse::<TimeSignature>().is_err(), "{text}");
         }
+    }
+
+    #[test]
+    fn a_change_inside_a_bar_leaves_a_fragmentary_bar() {
+        let change = |at, signature| TimeSignatureChange { at, signature };
+        let whole =
+            TimeSignatureMap::new([change(Ticks::ZERO, sig(4, 4)), change(q(8), sig(3, 4))]);
+        assert!(!TimeSignatureMap::default().has_changes());
+        assert!(whole.as_ref().unwrap().has_changes());
+        assert_eq!(whole.unwrap().fragmentary_bars().count(), 0);
+        let short =
+            TimeSignatureMap::new([change(Ticks::ZERO, sig(4, 4)), change(q(6), sig(3, 4))])
+                .unwrap();
+        let bars: Vec<_> = short.fragmentary_bars().collect();
+        assert_eq!(
+            bars,
+            [FragmentaryBar {
+                start: q(4),
+                end: q(6),
+                signature: sig(4, 4)
+            }]
+        );
+        assert_eq!(bars[0].missing(), q(2));
     }
 
     #[test]

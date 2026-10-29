@@ -201,12 +201,24 @@ impl Shell {
                     message: error.to_string(),
                 }
             })?;
-        self.audio
-            .send_session(command)
+        self.send_session(command)
             .map_err(|reason| ShellError::Unavailable {
                 command: id.to_owned(),
                 reason,
             })?;
+        Ok(Value::Null)
+    }
+
+    /// Sends a Session View launch or stop to the engine, as the grid's
+    /// buttons, keys and agents all do, with what a launch brings along:
+    /// the selection the Select on Launch preferences move, the automation
+    /// it re-enables, and the recording a scene launch starts.
+    ///
+    /// # Errors
+    ///
+    /// A message if no engine runs.
+    pub fn send_session(&mut self, command: engine_session::SessionCommand) -> Result<(), String> {
+        self.audio.send_session(command)?;
         if let engine_session::SessionCommand::Launch { scene, .. }
         | engine_session::SessionCommand::LaunchScene(scene) = command
         {
@@ -219,7 +231,7 @@ impl Shell {
             // Launch.
             self.record_on_scene_launch(scene);
         }
-        Ok(Value::Null)
+        Ok(())
     }
 
     /// Runs the Session View's clipboard and the copies between the views.

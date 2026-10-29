@@ -202,7 +202,10 @@ impl Shell {
         });
         if let Some(status) = slot {
             let rate = self.audio.sample_rate().and_then(SampleRate::new)?;
-            let origin = doc.settings().tempo.frames_to_ticks(status.started?, rate);
+            // Spec: launch-quantisation R29. The clip's own time counts
+            // from where a Legato start or a nudge put it.
+            let tempo = &doc.settings().tempo;
+            let origin = tempo.frames_to_ticks(status.origin(tempo, rate)?, rate);
             return Some(Played {
                 origin,
                 since: (transport.position - origin).max(Ticks::ZERO),

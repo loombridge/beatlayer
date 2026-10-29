@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
-use bl_model::{LaunchMode, LaunchSettings, ParamId, Scale, SceneId, TrackId};
+use bl_model::{LaunchSettings, ParamId, Scale, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
@@ -26,8 +26,8 @@ use crate::render::RenderPlan;
 use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool};
 use crate::session::{
-    Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
-    SlotState, SlotStatus,
+    Button, ClipOffset, Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher,
+    SessionPlayback, SlotState, SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 use crate::sync_out::{Beats, Part, SyncOut};
@@ -1335,6 +1335,11 @@ impl Processor {
             }
             SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
+            SessionCommand::Nudge {
+                track,
+                scene,
+                steps,
+            } => self.nudge_slot(track, scene, steps),
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
             SessionCommand::CancelSceneLaunch(scene) => {
                 let slots = self
@@ -1465,14 +1470,14 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        let mode = self.slot_mode(track, scene);
-        self.session.press(track, scene, mode, playhead);
+        let button = self.slot_button(track, scene);
+        self.session.press(track, scene, button, playhead);
     }
 
     /// Releases a slot's launch button: a Gate or Repeat clip stops on the
     /// grid (the launch quantisation spec, R18 and R21).
     fn release_slot(&mut self, track: TrackId, scene: SceneId) {
-        let mode = self.slot_mode(track, scene);
+        let button = self.slot_button(track, scene);
         let playhead = Self::playhead(
             self.program.as_ref().map(Program::get),
             &self.fallback_tempo,
@@ -1481,16 +1486,37 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        self.session.release(track, scene, mode, playhead);
+        self.session.release(track, scene, button, playhead);
     }
 
-    /// The launch mode of the clip in a slot, read when a button is pressed
-    /// or released; Trigger for a slot with no clip (R22).
-    fn slot_mode(&self, track: TrackId, scene: SceneId) -> LaunchMode {
+    /// Nudges the clip in a slot at once, on the frame this block part
+    /// starts at (the launch quantisation spec, R30).
+    fn nudge_slot(&mut self, track: TrackId, scene: SceneId, steps: i32) {
+        let looping = self
+            .program
+            .as_ref()
+            .and_then(|program| program.get().slot_row(track, scene))
+            .and_then(|row| row.looping);
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            self.playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.nudge(track, scene, steps, looping, playhead);
+    }
+
+    /// What a press or a release of a slot's launch button reads from its
+    /// clip: its mode, Legato and own quantisation; a Trigger on the global
+    /// grid for a slot with no clip (R22, R25).
+    fn slot_button(&self, track: TrackId, scene: SceneId) -> Button {
         self.program
             .as_ref()
-            .and_then(|program| program.get().launch_mode(track, scene))
-            .unwrap_or_default()
+            .map_or_else(Button::default, |program| {
+                program.get().launch_button(track, scene)
+            })
     }
 
     /// Launches a scene: its clips, all on one grid line, and the tempo and
@@ -1649,12 +1675,13 @@ impl Processor {
         else {
             return;
         };
-        for (track, scene, launched) in self.session.started() {
+        for (track, scene, launched, offset) in self.session.started() {
             log.push(SessionEvent {
                 track,
                 scene,
                 at,
                 launched: Some(launched),
+                offset,
             });
         }
     }
@@ -2279,6 +2306,7 @@ impl Processor {
                     scene: target.scene,
                     state: SlotState::Recording,
                     started: None,
+                    offset: ClipOffset::ZERO,
                 };
                 let found = self
                     .session_status

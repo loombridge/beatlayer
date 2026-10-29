@@ -92,6 +92,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "session.nudge",
+            Exception(Equivalent(
+                "the Launch Properties panel's Nudge Backward and Nudge Forward buttons, which \
+                 Tab reaches and Enter or Space presses, and which run it with -1 and 1 for the \
+                 slot of the clip the Clip View shows (the launch quantisation spec, R34, R36)",
+            )),
+        ),
+        (
             "session.launch_scene",
             Exception(LaterView(
                 "the Session View's scene launch buttons (WP-3.8)",

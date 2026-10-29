@@ -1,6 +1,6 @@
 //! MIDI input, MIDI learn, MIDI I/O and MIDI files.
 
-use super::{Effect, MIDI_LAMP, Shell, ShellError, midi_file_error, to_value};
+use super::{Effect, MIDI_LAMP, SYNC_LAMP, Shell, ShellError, midi_file_error, to_value};
 use crate::midi::MidiHost;
 use bl_commands::NoArgs;
 use bl_shell_spec::midi_files as midi_ids;
@@ -30,7 +30,64 @@ impl Shell {
             }
         }
         self.midi_seen = seen;
-        changed
+        // The lamp follows the test clock when a test paces the engine by
+        // hand.
+        changed | self.track_sync_activity(self.midi.now())
+    }
+
+    /// Lights the lower sync lamp when the engine has sent a quarter note of
+    /// MIDI clock since the last call, and darkens it 100 ms later (midi-clock
+    /// R12); returns whether it changed.
+    fn track_sync_activity(&mut self, now: std::time::Instant) -> bool {
+        let quarters = self.audio.sync_out_state().quarters;
+        let before = self.sync_lit.is_some();
+        if quarters != self.sync_seen {
+            self.sync_lit = Some(now);
+        } else if self
+            .sync_lit
+            .is_some_and(|since| now.duration_since(since) >= SYNC_LAMP)
+        {
+            self.sync_lit = None;
+        }
+        self.sync_seen = quarters;
+        before != self.sync_lit.is_some()
+    }
+
+    /// Whether the lower sync lamp is lit: a quarter note of MIDI clock left
+    /// for a port a moment ago (L-CTRL-028, the MIDI clock spec, R12).
+    #[must_use]
+    pub fn sync_output_lit(&self) -> bool {
+        self.sync_lit.is_some()
+    }
+
+    /// Whether the Control Bar shows the sync lamp pair: some input port has
+    /// Sync on (midi-clock R15).
+    #[must_use]
+    pub fn sync_lamps_shown(&self) -> bool {
+        self.midi.ports().iter().any(|p| {
+            p.direction == bl_shell_spec::midi_io::PortDirection::Input && p.sync && p.open
+        })
+    }
+
+    /// Whether the Control Bar shows the Resync External Hardware button:
+    /// Show Resync Button is on (midi-clock R10).
+    #[must_use]
+    pub fn resync_button_shown(&self) -> bool {
+        self.midi.show_resync_button()
+    }
+
+    /// Runs `sync.state`.
+    pub(super) fn run_sync(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        Self::args::<NoArgs>(id, args)?;
+        let engine = self.audio.sync_out_state();
+        Ok(to_value(&bl_shell_spec::sync::SyncState {
+            output_ports: self.midi.sync_outputs().len() as u32,
+            sending: engine.sending,
+            output_lamp: self.sync_output_lit(),
+            clocks_sent: engine.clocks,
+            clocks_late: engine.late,
+            clocks_dropped: engine.dropped,
+        }))
     }
 
     /// Whether the Control Bar's MIDI track input and output indicators are
@@ -47,7 +104,12 @@ impl Shell {
     pub fn use_midi_backend(&mut self, backend: Box<dyn bl_midi_io::MidiBackend>) {
         let sender = self.midi.sender().clone();
         let output = self.midi.output().clone();
+        let clock = self.midi.test_clock();
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
+        if let Some(clock) = clock {
+            self.midi.set_test_clock(clock);
+        }
+        self.send_sync_outputs();
     }
 
     /// Drives the shell's clocks from `clock`: the computer keyboard stamps
@@ -78,7 +140,17 @@ impl Shell {
         let before = self.midi.ports();
         self.midi.refresh();
         self.midi_listed = std::time::Instant::now();
-        before != self.midi.ports()
+        let changed = before != self.midi.ports();
+        if changed {
+            self.send_sync_outputs();
+        }
+        changed
+    }
+
+    /// Tells the audio engine which output ports have Sync on, and their
+    /// options (the MIDI clock spec, R3).
+    pub(super) fn send_sync_outputs(&mut self) {
+        self.audio.set_sync_outputs(self.midi.sync_outputs());
     }
 
     /// Spec: midi-chord R15 and midi-cc-sender R7. While a Chord device's
@@ -256,20 +328,18 @@ impl Shell {
             midi_io_ids::SET_PORT => {
                 let args = Self::args::<midi_io_ids::SetPortArgs>(id, args)?;
                 self.refresh_midi();
-                let port = self
-                    .midi
-                    .set_port(
-                        args.direction,
-                        &args.name,
-                        args.track,
-                        args.sync,
-                        args.remote,
-                        args.mpe,
-                    )
-                    .map_err(failed)?;
+                let port = self.midi.set_port(&args).map_err(failed)?;
                 self.prefs.midi = self.midi.prefs();
                 self.save_preferences();
+                self.send_sync_outputs();
                 to_value(&port)
+            }
+            midi_io_ids::SET_SHOW_RESYNC_BUTTON => {
+                let args = Self::args::<midi_io_ids::SetShowResyncButtonArgs>(id, args)?;
+                let on = self.midi.set_show_resync_button(args.on);
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                to_value(&midi_io_ids::SetShowResyncButtonResult { on })
             }
             midi_io_ids::TOGGLE_COMPUTER_KEYBOARD => {
                 let args = Self::args::<midi_io_ids::ToggleKeyboardArgs>(id, args)?;

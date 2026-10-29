@@ -789,7 +789,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.8 | todo |  |  |
 | 7.9 | todo |  |  |
 | 7.10 | todo |  |  |
-| 7.11 | todo |  |  |
+| 7.11 | done | 29 October 2026 | [#504](https://github.com/loombridge/beatlayer/pull/504); Sync on an output sends 24-ppqn clock, Start, Stop, Continue and Song Position Pointer stamped per frame through the tempo map and placed on the output bus ahead of time, with Song or Pattern clock type, a per-output sync delay that may be negative, Resync External Hardware and Show Resync Button, the lower sync lamp, the outputs' sync rows in Settings, and `sync.state` for agents |
 | 7.12 | todo |  |  |
 | 7.13 | todo |  |  |
 | 7.14 | todo |  |  |

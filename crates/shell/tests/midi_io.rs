@@ -176,6 +176,42 @@ fn switching_a_ports_track_off_stops_its_notes_reaching_tracks() {
     assert!(!rig.test.is_open(Direction::Input, "Keys A"));
 }
 
+// Spec: remote-mapping R7, R8. A message a mapping takes never reaches an
+// armed track's input, though the port's Track switch is on; an unmapped one
+// on the same port does.
+#[test]
+fn a_mapped_message_never_reaches_an_armed_tracks_input_and_an_unmapped_one_does() {
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("mixer.set_arm", json!({ "track": track, "arm": true }));
+    rig.sync();
+    rig.port("Keys A", json!({ "remote": true }));
+    rig.run(
+        "remote.map",
+        json!({
+            "source": { "type": "cc", "channel": 1, "controller": 20 },
+            "target": { "type": "mixer", "track": track, "param": "volume" },
+        }),
+    );
+    assert_eq!(
+        rig.play("Keys A", [0xB0, 20, 127]),
+        0,
+        "the mapped controller"
+    );
+    rig.shell.poll();
+    let volume = rig
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .mixer()
+        .volume;
+    assert!(volume > 1.9, "it moved the volume: {volume}");
+    assert_eq!(rig.play("Keys A", [0xB0, 21, 127]), 1, "an unmapped one");
+    assert_eq!(rig.play("Keys A", [0x90, 60, 100]), 1, "and a note");
+}
+
 // Spec: midi-io R7, R8, R9
 #[test]
 fn midi_from_one_port_ignores_another_and_a_channel_ignores_the_rest() {

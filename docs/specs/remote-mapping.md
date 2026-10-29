@@ -100,9 +100,9 @@ A control's value is read along its travel from 0 to 1 ([device framework](devic
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 to R6 | to be written in WP-7.1 | unit, project round trip |
-| R7 to R10 | to be written in WP-7.1 | integration, real-time trap |
-| R11 to R14 | to be written in WP-7.1 | integration, agent test |
+| R1 to R6 | `bl-model` `remote::tests::*`, `model_tests` `remote_mappings::*` (every source and control kind round-trips; a set without mappings writes none; a mapping to a missing device is dropped with a count; deleting a track, a scene or a device takes its mappings and undo brings them back); `bl-project` `round_trip::midi_and_key_mappings_survive_a_save_and_a_load`, `schemas::every_fixture_loads_as_the_fixture_song`; `bl-shell` `remote_mapping::deleting_a_track_takes_its_mappings_and_a_copy_has_none`, `remote_mapping::the_mapping_commands_read_back_through_remote_mappings` | unit, project round trip |
+| R7 to R10 | `bl-midi-io` `remote::tests::the_table_takes_the_messages_published_and_no_others`, `ports::tests::a_mapped_message_never_reaches_a_track_and_an_unmapped_one_does`, `ports::tests::remote_inputs_merge_and_an_unmapped_remote_only_message_is_counted`, `ports::tests::a_map_mode_sends_every_remote_message_across_and_a_full_queue_counts_drops`, `midi_io_tests` `remote_input::judging_a_message_against_the_table_allocates_nothing`; `bl-shell` `midi_io::a_mapped_message_never_reaches_an_armed_tracks_input_and_an_unmapped_one_does`, `remote_mapping::a_mapped_controller_moves_the_volume_and_stays_away_from_tracks`, `remote_mapping::a_remote_only_inputs_unmapped_note_reaches_no_track_and_is_counted`, `remote_mapping::two_remote_inputs_drive_one_mapping` | integration, real-time trap |
+| R11 to R14 | `bl-control` `tests::*`; `bl-shell` `remote_mapping::a_run_of_controller_messages_is_one_undo_step_and_a_pause_starts_another`, `remote_mapping::another_edit_ends_the_run`, `remote_mapping::a_mapped_note_launches_and_releases_a_gate_clip`, `remote_mapping::a_refused_control_changes_nothing_and_is_counted`, `remote_mapping::a_mapped_key_toggles_a_switch_and_no_mapping_acts_in_a_map_mode`; `bl-ui` `midi_input::a_mapped_key_wins_over_its_shortcut_and_yields_to_the_computer_keyboard`; `bl-cli` `agent_remote_mapping::an_agent_maps_reads_back_and_tries_a_mapping_by_id` | integration, agent test |
 | R15 to R27 | to be written in WP-7.2 | unit, property, integration |
 | R28 to R32 | to be written in WP-7.2 | unit, property, UI script |
 | R33 to R37 | to be written in WP-7.2b | engine, integration, real-time trap |

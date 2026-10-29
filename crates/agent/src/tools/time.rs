@@ -47,6 +47,7 @@ use bl_engine::{
 };
 use bl_model::registry as model;
 use bl_shell::Shell;
+use lspk_agent::permission::Decision;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -373,6 +374,10 @@ struct Entry {
     maker: bl_model::Maker,
     /// What the engine does on the frame.
     action: Action,
+    /// The most far-reaching class the agent was cleared to run when this
+    /// was scheduled: the person said yes to it, or the agent needs no
+    /// answer for it.
+    cleared: Permission,
     state: State,
 }
 
@@ -479,6 +484,19 @@ fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
         // The engine ran it on its frame, and it changes nothing in the
         // document.
         return Ok(());
+    }
+    // Spec: agent-permissions R1. What a command acts on can change between
+    // scheduling and firing (the clipboard, the selection, the insert
+    // marker), so it is judged again, and left alone when it now reaches
+    // further than the agent was cleared to.
+    if raised_by_arguments(&entry.command) {
+        let class = shell.call_permission(&entry.command, &entry.args).class();
+        if class > entry.cleared {
+            return Err(format!(
+                "not run: on the song as it is now it needs the person's say ({class:?}), which \
+                 was not asked when it was scheduled. Nothing changed"
+            ));
+        }
     }
     if is_edit(&entry.command) {
         let label = entry.label.clone();
@@ -647,6 +665,16 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                      `transport.locate` to jump"
                 ));
             }
+            // Spec: agent-permissions R10. The engine would record on the
+            // frame, but only `Shell::send_transport` sets up the files it
+            // writes, and a fired command doesn't pass through it.
+            if action == Action::Transport(TransportCommand::SetRecording(true)) {
+                return failed(format!(
+                    "a scheduled `{command}` can't start a recording, which needs files set up \
+                     first; schedule `transport.locate` to jump, and start the recording with \
+                     `transport` when the song is there"
+                ));
+            }
             // Try it on the song as it is now, so a mistake shows today
             // rather than when the song gets there.
             if is_edit(&command) {
@@ -675,6 +703,11 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 "At {position}: {}",
                 question_line(shell, &label, &call, &args)
             )));
+            let cleared = [Permission::External, Permission::Destructive]
+                .into_iter()
+                .find(|class| ctx.decide(*class, &[command.as_str()]) == Decision::Run)
+                .unwrap_or(Permission::Edit)
+                .max(call.class());
             ctx.session.refs = names;
             let maker = ctx.maker();
             let schedule = &mut ctx.state.schedule;
@@ -689,6 +722,7 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 label: format!("{}: {label} at {position}", ctx.session.client.label()),
                 maker,
                 action,
+                cleared,
                 state: State::Waiting,
             };
             schedule.entries.push(entry);

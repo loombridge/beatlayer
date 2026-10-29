@@ -176,8 +176,9 @@ pub struct PortInfo {
     /// Sync: an input's clock and transport messages are followed; an output
     /// sends clock. Kept now, acted on when sync is built.
     pub sync: bool,
-    /// Remote: an input controls Beatlayer through MIDI mapping; an output
-    /// sends feedback. Kept now, acted on when MIDI mapping is built.
+    /// Remote: an input controls Beatlayer through the set's MIDI mappings
+    /// (the remote mapping spec, R7 and R8); an output sends feedback, kept
+    /// now and acted on when feedback is built.
     pub remote: bool,
     /// MPE: an input's messages reach tracks as MPE, each note on a channel of
     /// its own; an output has no MPE switch, and reads false.
@@ -354,15 +355,17 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  are off; MPE opens nothing by itself. An input's notes and controllers reach \
                  tracks only while its Track switch is on, and as MPE, each note on a channel \
                  of its own with its own pitch, slide and pressure, while its MPE switch is on \
-                 too. An output with Sync on gets MIDI clock, Start, Continue, Stop and Song \
+                 too; an input with Remote on feeds the set's MIDI mappings, and a message one takes \
+                 never reaches a track (`remote.mappings`). An output with Sync on gets MIDI \
+                 clock, Start, Continue, Stop and Song \
                  Position Pointer while the song plays, whatever its Track switch, stamped for \
                  the moment each is heard: `sync_delay_ms` (-100 to 100) moves them earlier or \
                  later, `clock_type` is Song (Song Position Pointer and Continue whenever the \
                  play position changes) or Pattern (only Start, at the next bar line), and \
                  `hardware_resync` is what Resync External Hardware sends it: Stop and Start, \
                  Start Only or Don't Resync. Those three are kept while Sync is off; \
-                 `clock_type` and `hardware_resync` are refused on an input. Remote is kept and \
-                 acts when MIDI mapping is built. Output ports have no MPE switch, and `mpe` on \
+                 `clock_type` and `hardware_resync` are refused on an input. An output's Remote is \
+                 kept and acts when it's built. Output ports have no MPE switch, and `mpe` on \
                  one is refused. The port's \
                  switches are kept for the next start, and aren't part of the set or an undo \
                  step. Opens or closes a device outside Beatlayer. Fails if the computer \

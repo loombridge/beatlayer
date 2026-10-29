@@ -73,6 +73,7 @@ use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::remote as remote_ids;
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::scales as scales_ids;
 use bl_shell_spec::search as search_ids;
@@ -134,6 +135,7 @@ mod plugin_scan;
 mod plugin_windows;
 mod recording_takes;
 mod recovery;
+mod remote;
 mod search;
 mod session_launch;
 mod session_recording;
@@ -409,6 +411,11 @@ pub enum Effect {
     /// person types the new name; Return runs `locator.rename` with it
     /// (WP-6.24; the time editing spec, R8).
     RenameLocator(bl_model::LocatorId),
+    /// Start typing a new signature for the time-signature marker at this
+    /// position, in the lane under the beat-time ruler; Return runs
+    /// `arrangement.edit_time_signature` with it (WP-6.61; the time editing
+    /// spec, R31).
+    EditTimeSignature(Ticks),
     /// Turn the Info View into a text field for an item's info text, with
     /// the keyboard focus; Return runs the item's command with the text
     /// ([`Shell::info_text_invocation`]), Option-Return starts a new line
@@ -589,6 +596,8 @@ pub struct Shell {
     sync_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
+    /// The remote input and the set's MIDI and key mappings (WP-7.1).
+    remote: remote::RemoteState,
     /// The keys held on the MIDI input and the previews sounding, for the
     /// MIDI Note Editor's step recording and Preview (WP-6.5).
     step: step_input::StepInput,
@@ -714,6 +723,9 @@ pub struct Shell {
     /// What the MPE/Multi-channel Settings dialog edits, while it is open
     /// (the MPE spec, R18): never part of the set.
     mpe_dialog: Option<MpeDialogTarget>,
+    /// The MIDI track whose Configure MIDI Layout dialog is open (the
+    /// tunings spec, R23).
+    layout_dialog: Option<TrackId>,
     /// The autosampler at work (WP-5.16, IMP-27).
     autosample: Option<autosample::Job>,
     /// The autosampler's dialog, open for an instrument.
@@ -1224,6 +1236,7 @@ impl Shell {
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
+            layout_dialog: None,
             autosample: None,
             autosample_dialog: None,
             autosample_result_value: None,
@@ -1261,6 +1274,7 @@ impl Shell {
             sync_seen: 0,
             sync_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),
+            remote: remote::RemoteState::default(),
             step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
@@ -1538,6 +1552,9 @@ impl Shell {
     /// plays the set as it is now (its tempo, loop, and tracks).
     fn document_changed(&mut self) {
         self.document_revision = self.document_revision.wrapping_add(1);
+        // Spec: remote-mapping R9. The MIDI thread's table follows the set's
+        // mappings.
+        self.publish_remote();
         self.arrangement
             .forget_missing_tracks(self.editor.document());
         self.mixer
@@ -1587,6 +1604,9 @@ impl Shell {
     /// is unchanged when a command fails, except that a device that refuses
     /// new audio settings goes back to the previous ones.
     pub fn run(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        // Spec: remote-mapping R12. Any other edit ends a run of mapped
+        // messages that is one undo step.
+        self.remote_run_ends_for(id);
         self.poll_capture();
         self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
@@ -2108,6 +2128,9 @@ impl Shell {
         }
         if sync_ids::handles(id) {
             return self.run_sync(id, args);
+        }
+        if remote_ids::handles(id) {
+            return self.run_remote(id, args);
         }
         if file_manager_ids::handles(id) {
             // Spec: file-management R10 to R17. The File Manager's own

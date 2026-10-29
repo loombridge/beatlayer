@@ -804,6 +804,7 @@ dependencies = [
 name = "bl-control"
 version = "0.2.0"
 dependencies = [
+ "bl-core",
  "bl-midi-io",
  "bl-model",
 ]
@@ -1026,6 +1027,7 @@ dependencies = [
  "bl-assistant",
  "bl-audio-io",
  "bl-commands",
+ "bl-control",
  "bl-core",
  "bl-devices",
  "bl-engine",

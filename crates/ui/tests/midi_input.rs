@@ -94,6 +94,62 @@ fn m_switches_the_keyboard_on_and_its_letters_play_notes() {
     assert_eq!(played(&mut queue), [(0x90, 60, 120), (0x80, 60, 64)]);
 }
 
+// Spec: remote-mapping R13. A mapped key acts on its press and wins over the
+// key's shortcut; a letter the computer MIDI keyboard plays plays it instead.
+#[test]
+fn a_mapped_key_wins_over_its_shortcut_and_yields_to_the_computer_keyboard() {
+    let (mut h, mut queue) = keyboard_harness();
+    h.shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "T" }))
+        .unwrap();
+    let track = h.shell.editor().document().top_level().last().unwrap();
+    let solo = |h: &Harness| {
+        h.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .solo
+    };
+    let map = |h: &mut Harness, key: &str| {
+        h.shell
+            .run(
+                "remote.map",
+                json!({ "source": { "type": "key", "key": key },
+                        "target": { "type": "solo", "track": track } }),
+            )
+            .unwrap();
+    };
+
+    // B is Draw Mode's shortcut; mapped, it solos the track instead.
+    map(&mut h, "B");
+    let drawing = h.shell.clip_view().draw_mode();
+    h.key(Key::B, Modifiers::NONE);
+    assert!(solo(&h), "the mapping ran");
+    assert_eq!(
+        h.shell.clip_view().draw_mode(),
+        drawing,
+        "and B's shortcut didn't"
+    );
+    h.key(Key::B, Modifiers::NONE);
+    assert!(!solo(&h), "each press toggles");
+
+    // With the computer MIDI keyboard on, A plays a note and maps nothing.
+    map(&mut h, "A");
+    h.key(Key::M, Modifiers::NONE);
+    h.key(Key::A, Modifiers::NONE);
+    assert_eq!(played(&mut queue).len(), 2, "A played its note");
+    assert!(!solo(&h));
+    // With Shift it doesn't play, and the mapping acts again.
+    h.key(Key::A, Modifiers::SHIFT);
+    assert!(played(&mut queue).is_empty());
+    assert!(solo(&h));
+    // Cmd keeps its shortcuts: Cmd-A is never a key mapping's.
+    h.key(Key::A, Modifiers::COMMAND);
+    assert!(solo(&h));
+}
+
 // Spec: midi-io R17
 #[test]
 fn the_control_bars_switch_follows_and_changes_the_keyboard() {

@@ -7,10 +7,14 @@
 //! program. The table is of a fixed size, so nothing on the audio thread
 //! allocates; an instrument keeps a copy and reads it where it used the key.
 
-use bl_model::Tuning;
+use bl_model::{LayoutKind, Tuning, TuningLayout};
 
 /// How many keys the table holds: the MIDI keys.
 const KEYS: usize = 128;
+
+/// The key of the tuning each incoming key plays, or none (the tunings spec,
+/// R22).
+pub type KeyMap = [Option<u8>; KEYS];
 
 /// The pitch each key plays, in semitones as a twelve-step key counts them
 /// from A3 = 440 Hz at key 69 (the tunings spec, R12): with no tuning, the
@@ -75,6 +79,42 @@ impl KeyPitches {
     pub fn pitch(&self, key: u8) -> Option<f64> {
         let key = usize::from(key);
         (key < self.keys).then(|| self.pitches[key])
+    }
+
+    /// The key of the tuning each incoming key plays under `layout` (the
+    /// tunings spec, R22, R23), or none for All Keys, which maps each key to
+    /// itself. A key the tuning has none for plays nothing.
+    #[must_use]
+    pub fn layout_map(&self, layout: &TuningLayout) -> Option<Box<KeyMap>> {
+        // The black keys' and the white keys' positions along their own
+        // rows, from key 0; the centre key plays key 60.
+        const BLACK: [bool; 12] = [
+            false, true, false, true, false, false, true, false, true, false, true, false,
+        ];
+        let row = |key: usize, black: bool| {
+            let per_octave = if black { 5 } else { 7 };
+            (key / 12) * per_octave + (0..key % 12).filter(|&step| BLACK[step] == black).count()
+        };
+        let by_row = |black: bool, centre: usize, key: usize| {
+            (BLACK[key % 12] == black)
+                .then(|| (row(key, black) + 60).checked_sub(row(centre, black)))
+                .flatten()
+                .and_then(|to| u8::try_from(to).ok())
+        };
+        let to = |key: usize| -> Option<u8> {
+            match layout.layout {
+                LayoutKind::AllKeys => Some(key as u8),
+                LayoutKind::BlackKeysOnly => by_row(true, 61, key),
+                LayoutKind::WhiteKeysOnly => by_row(false, 60, key),
+                LayoutKind::ClosestInPitch => self.nearest(key as f64).map(|(near, _)| near),
+                LayoutKind::Custom => layout.custom(key as u8),
+            }
+        };
+        (layout.layout != LayoutKind::AllKeys).then(|| {
+            Box::new(std::array::from_fn(|key| {
+                to(key).filter(|&to| usize::from(to) < self.keys)
+            }))
+        })
     }
 
     /// The pitch of a key moved by `steps` keys, a fraction of a key
@@ -169,5 +209,87 @@ mod tests {
         // Beyond the first key the bend stops at its pitch.
         assert_eq!(table.bent(0, -3.0), table.pitch(0));
         assert_eq!(table.bent(127, 3.0), table.pitch(127));
+    }
+
+    fn layout(kind: LayoutKind) -> TuningLayout {
+        TuningLayout {
+            layout: kind,
+            keys: Vec::new(),
+        }
+    }
+
+    // Spec: tunings R22
+    #[test]
+    fn all_keys_needs_no_map() {
+        let table = KeyPitches::of(Some(&equal(19)));
+        assert!(table.layout_map(&layout(LayoutKind::AllKeys)).is_none());
+    }
+
+    // Spec: tunings R22
+    #[test]
+    fn black_keys_only_centres_c_sharp_3_on_key_60_and_silences_the_white_keys() {
+        let table = KeyPitches::of(Some(&equal(19)));
+        let map = table
+            .layout_map(&layout(LayoutKind::BlackKeysOnly))
+            .unwrap();
+        // C#3 is key 61: key 60 of the tuning; D#3 (63) the next up; F#3
+        // (66) the next; the black key below, A#2 (58), key 59.
+        assert_eq!(
+            (map[61], map[63], map[66], map[58]),
+            (Some(60), Some(61), Some(62), Some(59))
+        );
+        // The white keys play nothing.
+        assert_eq!((map[60], map[62], map[64]), (None, None, None));
+    }
+
+    // Spec: tunings R22
+    #[test]
+    fn white_keys_only_centres_c3_on_key_60_and_silences_the_black_keys() {
+        let table = KeyPitches::of(Some(&equal(19)));
+        let map = table
+            .layout_map(&layout(LayoutKind::WhiteKeysOnly))
+            .unwrap();
+        assert_eq!(
+            (map[60], map[62], map[64], map[65], map[59]),
+            (Some(60), Some(61), Some(62), Some(63), Some(59))
+        );
+        assert_eq!((map[61], map[63]), (None, None));
+    }
+
+    // Spec: tunings R22
+    #[test]
+    fn closest_in_pitch_plays_the_key_whose_pitch_is_nearest() {
+        let table = KeyPitches::of(Some(&equal(19)));
+        let map = table
+            .layout_map(&layout(LayoutKind::ClosestInPitch))
+            .unwrap();
+        assert_eq!(map[60], Some(60));
+        // 19 steps to the octave put key 62's pitch 1.26 semitones above
+        // key 60's, nearest to a twelve-step key 61.
+        assert_eq!(map[61], Some(62));
+    }
+
+    // Spec: tunings R23
+    #[test]
+    fn a_custom_layout_follows_its_table_and_a_value_the_tuning_cant_hold_plays_nothing() {
+        let tuning = equal(19);
+        let short = tuning
+            .with_range(tuning.key_note(0), tuning.key_note(99))
+            .unwrap();
+        let mut keys: Vec<Option<u8>> = (0..128).map(Some).collect();
+        keys[61] = Some(70);
+        keys[62] = Some(120);
+        keys[63] = None;
+        let custom = TuningLayout {
+            layout: LayoutKind::Custom,
+            keys,
+        };
+        let map = KeyPitches::of(Some(&short)).layout_map(&custom).unwrap();
+        assert_eq!(
+            (map[61], map[62], map[63], map[64]),
+            (Some(70), None, None, Some(64))
+        );
+        // Keys past the tuning's range play nothing.
+        assert_eq!(map[100], None);
     }
 }

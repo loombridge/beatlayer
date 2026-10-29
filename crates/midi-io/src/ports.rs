@@ -141,8 +141,10 @@ impl Entry {
 /// - with Track on, to the engine on the input queue, stamped with the
 ///   port's [`PortId`] and the time they arrived, to reach the tracks whose
 ///   input takes them (R5);
-/// - with Remote on, to MIDI mapping, and with Sync on, clock and transport
-///   messages to sync: both are counted until Phase 7 takes them.
+/// - with Remote on, to remote control when a mapping takes them, which
+///   keeps them from tracks (`docs/specs/remote-mapping.md`, R7 and R8),
+///   and with Sync on, clock and transport messages to sync, counted until
+///   Phase 7 takes them.
 ///
 /// System messages never go to tracks (R9), and system exclusive goes
 /// nowhere yet.
@@ -439,15 +441,26 @@ fn handler(name: &str, switches: Arc<AtomicU8>, sender: InputSender) -> InputHan
             counter.fetch_add(1, Relaxed);
             return;
         }
-        if on.track {
-            sender.send(MidiInputEvent {
-                source,
-                time,
-                message,
-            });
-        }
+        let event = MidiInputEvent {
+            source,
+            time,
+            message,
+        };
+        // Spec: remote-mapping R7 to R10. A message a mapping takes goes to
+        // remote control and never to a track; while a map mode is on every
+        // message from a Remote input also crosses, for learning.
+        let remote = sender.remote();
+        let taken = on.remote && remote.takes(&message);
         if on.remote {
             stats.to_remote.fetch_add(1, Relaxed);
+            if taken || remote.learning() {
+                sender.send_remote(event);
+            } else if !on.track {
+                stats.remote_unmapped.fetch_add(1, Relaxed);
+            }
+        }
+        if on.track && !taken {
+            sender.send(event);
         }
         if !on.track && !on.remote {
             stats.ignored.fetch_add(1, Relaxed);
@@ -630,5 +643,107 @@ mod tests {
             .set_switches(Direction::Input, "Roli", only_mpe)
             .unwrap();
         assert!(!state.open, "MPE alone leaves the port closed");
+    }
+
+    fn remote(track: bool) -> PortSwitches {
+        PortSwitches {
+            track,
+            remote: true,
+            ..PortSwitches::OFF
+        }
+    }
+
+    fn took(ports: &MidiPorts) -> Vec<MidiInputEvent> {
+        let mut into = Vec::new();
+        ports.sender().remote().drain(&mut into);
+        into
+    }
+
+    // Spec: remote-mapping R7, R8. A message a mapping takes goes to remote
+    // control and never to a track; one it doesn't take goes on as before.
+    #[test]
+    fn a_mapped_message_never_reaches_a_track_and_an_unmapped_one_does() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Pads");
+        let (mut ports, mut engine) = ports(&test);
+        ports
+            .set_switches(Direction::Input, "Pads", remote(true))
+            .unwrap();
+        let mut bits = crate::RemoteBits::default();
+        bits.controller(0, 20);
+        ports.sender().remote().publish(&bits);
+        let now = Instant::now();
+
+        assert!(test.send("Pads", now, &[0xB0, 20, 99]));
+        assert!(test.send("Pads", now, &[0xB0, 21, 99]));
+        assert_eq!(engine.pop().unwrap().message.data1(), 21);
+        assert!(engine.pop().is_err(), "the mapped controller stayed back");
+        let taken = took(&ports);
+        assert_eq!(taken.len(), 1);
+        assert_eq!(taken[0].message.bytes(), &[0xB0, 20, 99]);
+        assert_eq!(taken[0].time, now);
+    }
+
+    // Spec: remote-mapping R7, R8. Every Remote input feeds the one remote
+    // input; a Remote-only input's unmapped message reaches no track and is
+    // counted.
+    #[test]
+    fn remote_inputs_merge_and_an_unmapped_remote_only_message_is_counted() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "A");
+        test.add_port(Direction::Input, "B");
+        let (mut ports, mut engine) = ports(&test);
+        for name in ["A", "B"] {
+            ports
+                .set_switches(Direction::Input, name, remote(false))
+                .unwrap();
+        }
+        let mut bits = crate::RemoteBits::default();
+        bits.note(0, 60);
+        ports.sender().remote().publish(&bits);
+        let now = Instant::now();
+
+        assert!(test.send("A", now, &[0x90, 60, 100]));
+        assert!(test.send("B", now, &[0x90, 60, 90]));
+        assert!(test.send("A", now, &[0x90, 61, 100]));
+        let taken = took(&ports);
+        assert_eq!(
+            taken.iter().map(|e| e.message.data2()).collect::<Vec<_>>(),
+            [100, 90]
+        );
+        assert_ne!(taken[0].source, taken[1].source);
+        assert!(engine.pop().is_err());
+        let counts = ports.sender().stats().snapshot();
+        assert_eq!((counts.remote_taken, counts.remote_unmapped), (2, 1));
+    }
+
+    // Spec: remote-mapping R10. While a map mode is on every Remote message
+    // also crosses, and still reaches tracks as R8 says; a full queue drops
+    // and counts.
+    #[test]
+    fn a_map_mode_sends_every_remote_message_across_and_a_full_queue_counts_drops() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Pads");
+        let (mut ports, mut engine) = ports(&test);
+        ports
+            .set_switches(Direction::Input, "Pads", remote(true))
+            .unwrap();
+        ports.sender().remote().set_learning(true);
+        let now = Instant::now();
+        assert!(test.send("Pads", now, &[0x90, 60, 100]));
+        assert_eq!(took(&ports).len(), 1);
+        assert!(
+            engine.pop().is_ok(),
+            "an unmapped note still reaches tracks"
+        );
+
+        for _ in 0..1100 {
+            assert!(test.send("Pads", now, &[0xB0, 1, 1]));
+            let _ = engine.pop();
+        }
+        let counts = ports.sender().stats().snapshot();
+        assert_eq!(counts.remote_taken + counts.remote_dropped, 1101);
+        assert!(counts.remote_dropped > 0);
+        assert_eq!(took(&ports).len() as u64, counts.remote_taken - 1);
     }
 }

@@ -291,6 +291,21 @@ fn the_log_envelope_releases_faster_from_a_deeper_reduction() {
     assert!(log > lin + 0.2, "Lin {lin}, Log {log}");
 }
 
+// Spec: compressor R7
+#[test]
+fn the_log_envelope_expands_as_far_as_the_curve_asks() {
+    // Expand, ratio 4, threshold -20 dB, 0 dB in: the curve asks for +24 dB.
+    // Log used to stall the gain at +6 dB.
+    let params = [
+        (THRESHOLD, -20.0),
+        (RATIO, 4.0),
+        (KNEE, 0.0),
+        (MODE, 2.0),
+        (ENVELOPE, 1.0),
+    ];
+    assert!((level_of(&params, 0.0, None) - db_to_gain(24.0)).abs() < 0.1 * db_to_gain(24.0));
+}
+
 // Spec: compressor R8
 #[test]
 fn rms_mode_is_less_sensitive_to_a_short_peak() {

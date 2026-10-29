@@ -15,7 +15,7 @@ use bl_engine::testing::{self, Probe};
 use bl_engine::{EngineConfig, NoteExpression, NoteKind, Offline, TransportCommand};
 use bl_model::{
     Breakpoint, Clip, ClipData, Command, DeviceRole, Editor, MidiData, MpeMode, MpeSettings,
-    MpeZone, Note, PluginMpe, TrackKind,
+    MpeZone, Note, PluginMpe, TrackKind, Tuning,
 };
 use bl_plugin_host::clap::ClapHost;
 use bl_plugin_host::vst3::Vst3Host;
@@ -136,6 +136,17 @@ fn play(
     mpe: PluginMpe,
     role: DeviceRole,
 ) -> (Vec<Line>, Vec<(i64, NoteKind, u8)>) {
+    play_in(format, block, mpe, role, None)
+}
+
+/// [`play`] in a set whose tuning is `tuning`.
+fn play_in(
+    format: Format,
+    block: usize,
+    mpe: PluginMpe,
+    role: DeviceRole,
+    tuning: Option<&Tuning>,
+) -> (Vec<Line>, Vec<(i64, NoteKind, u8)>) {
     let _ = std::fs::remove_file(log_path(format));
     // SAFETY: the plug-in reads this when it is activated, and each test
     // runs in a process of its own.
@@ -172,6 +183,14 @@ fn play(
     let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
 
     let mut editor = Editor::new();
+    if let Some(tuning) = tuning {
+        editor
+            .apply(Command::SetTuning {
+                tuning: tuning.clone(),
+                retune: false,
+            })
+            .unwrap();
+    }
     let track = editor.new_id();
     editor
         .apply(Command::CreateTrack {
@@ -269,6 +288,7 @@ fn in_every_block_size(
 
 const ON: PluginMpe = PluginMpe {
     on: true,
+    tuning: true,
     settings: MpeSettings {
         mode: MpeMode::Zone,
         zone: MpeZone::Lower,
@@ -726,6 +746,7 @@ mod au {
     fn two_notes_bent_apart_by_their_pitch_envelopes_sound_within_five_cents_of_their_bends() {
         let on = PluginMpe {
             on: true,
+            tuning: true,
             settings: MpeSettings::default(),
         };
         let signal = render(512, on, chord(), 40_000);
@@ -753,6 +774,7 @@ mod au {
     fn the_unit_renders_the_same_in_any_block_size() {
         let on = PluginMpe {
             on: true,
+            tuning: true,
             settings: MpeSettings::default(),
         };
         let first = render(512, on, chord(), 12_000);
@@ -931,4 +953,122 @@ fn a_note_held_while_mpe_mode_goes_on_is_ended() {
         "{}",
         offs[0].frame
     );
+}
+
+/// 19 equal steps to the octave, key 60 at exactly C3.
+fn nineteen() -> Tuning {
+    let cents = (1..=19).map(|i| 1200.0 * f64::from(i) / 19.0).collect();
+    Tuning::new("19-edo".to_owned(), String::new(), cents)
+        .unwrap()
+        .with_reference(None, None, Some(440.0 * 2f64.powf(-9.0 / 12.0)))
+        .unwrap()
+}
+
+/// Runs the tuned scenario in every block size, which must log the same.
+fn tuned_in_every_block_size(format: Format, mpe: PluginMpe) -> Vec<Line> {
+    let tuning = nineteen();
+    let first = play_in(
+        format,
+        BLOCKS[0],
+        mpe,
+        DeviceRole::Instrument,
+        Some(&tuning),
+    )
+    .0;
+    for block in &BLOCKS[1..] {
+        assert!(
+            play_in(format, *block, mpe, DeviceRole::Instrument, Some(&tuning)).0 == first,
+            "{format:?}, block size {block}, plays other than block size {}",
+            BLOCKS[0]
+        );
+    }
+    first
+}
+
+/// The semitones above twelve-step key `to` that the tuning's step `key`
+/// plays: what the plug-in's per-note bend must carry.
+fn remainder(key: u8, to: u8) -> f64 {
+    nineteen().key_pitch(key).unwrap() - f64::from(to)
+}
+
+fn nearest(key: u8) -> u8 {
+    nineteen().key_pitch(key).unwrap().round() as u8
+}
+
+// Spec: tunings R20; clap-hosting R22
+#[test]
+fn a_clap_plugin_with_mpe_mode_and_the_tuning_switch_on_gets_each_note_on_its_nearest_key() {
+    let log = tuned_in_every_block_size(Format::Clap, ON);
+    // Note A: key 60 at exactly 60, then bent up 12 semitones, which is 12
+    // steps of the tuning: step 72's pitch.
+    let a = on(&log, nearest(60) as i32);
+    assert_eq!(a.frame, 0);
+    let bends = expressions(&log, "expression:tuning", i32::from(nearest(60)));
+    let (_, last) = *bends.last().unwrap();
+    assert!(
+        (last - remainder(72, nearest(60))).abs() < 0.02,
+        "{bends:?}"
+    );
+    // Note B: key 64 is step 64 of the tuning, a bend of -12 steps from the
+    // nearest key, on the note-on's frame.
+    let to = nearest(64);
+    assert_ne!(to, 64, "the tuning moves this key");
+    assert_eq!(on(&log, i32::from(to)).frame, BEAT_FRAMES / 2);
+    assert!(log.iter().all(|line| line.what != "on" || line.key != 64));
+    let bends = expressions(&log, "expression:tuning", i32::from(to));
+    assert_eq!(bends.first().map(|b| b.0), Some(BEAT_FRAMES / 2));
+    let (frame, last) = *bends.last().unwrap();
+    assert_eq!(frame, BEAT_FRAMES / 2);
+    assert!((last - remainder(52, to)).abs() < 1e-3, "{bends:?}");
+}
+
+// Spec: tunings R21; mpe R15
+#[test]
+fn a_clap_plugin_with_the_tuning_switch_off_or_mpe_mode_off_hears_plain_keys() {
+    let switched_off = PluginMpe {
+        tuning: false,
+        ..ON
+    };
+    let log = tuned_in_every_block_size(Format::Clap, switched_off);
+    on(&log, 60);
+    assert_eq!(on(&log, 64).frame, BEAT_FRAMES / 2);
+    let bends = expressions(&log, "expression:tuning", 64);
+    assert_eq!(bends, [(BEAT_FRAMES / 2, -12.0)]);
+    // Spec: tunings R20. With MPE Mode off the tuning doesn't reach the
+    // plug-in whatever the switch says.
+    let log = tuned_in_every_block_size(Format::Clap, PluginMpe::default());
+    on(&log, 60);
+    on(&log, 64);
+    assert!(log.iter().all(|line| !line.what.starts_with("expression")));
+}
+
+// Spec: tunings R20; vst3-hosting R20
+#[test]
+fn a_vst3_plugin_with_note_expression_gets_each_note_on_its_nearest_key() {
+    // SAFETY: the plug-in reads this when its controller is made, and this
+    // test runs in a process of its own.
+    unsafe { std::env::set_var(bl_test_vst3::EXPRESSIONS_VAR, "on") };
+    let log = tuned_in_every_block_size(Format::Vst3, ON);
+    let to = nearest(64);
+    assert_ne!(to, 64);
+    assert_eq!(on(&log, i32::from(to)).frame, BEAT_FRAMES / 2);
+    assert!(log.iter().all(|line| line.what != "on" || line.key != 64));
+    let id = on(&log, i32::from(to)).id;
+    let tuning = format!("expression:{}", bl_test_vst3::TUNING_TYPE);
+    let bends: Vec<f64> = log
+        .iter()
+        .filter(|line| line.what == tuning && line.id == id)
+        .map(|line| line.value)
+        .collect();
+    // The tuning type is 0.5 plus the semitones over 240. The note starts
+    // with the remainder of its own step, then the clip's bend of -12 steps
+    // follows on the same frame (the log sorts a frame's values).
+    let semitones: Vec<f64> = bends.iter().map(|v| (v - 0.5) * 240.0).collect();
+    for step in [64, 52] {
+        let wanted = remainder(step, to);
+        assert!(
+            semitones.iter().any(|s| (s - wanted).abs() < 1e-3),
+            "{semitones:?}"
+        );
+    }
 }

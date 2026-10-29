@@ -40,6 +40,7 @@ use crate::mpe::{MpeReader, MpeRole};
 use crate::mpe_layout::MpeLayout;
 use crate::node::{NoteBuffer, NoteEvent, NoteExpression, NoteKind};
 use crate::program::Task;
+use crate::tuned::{KeyMap, KeyPitches};
 
 /// The most messages a block takes from the queue. More wait for the next
 /// block, so the work per block is bounded (real-time rule 4).
@@ -157,6 +158,10 @@ struct Route {
     /// Whether the held notes must end: the program replaced one whose
     /// route took something else or didn't monitor.
     release: bool,
+    /// The key of the tuning each incoming key plays, for a track whose MIDI
+    /// Controller Layout isn't All Keys and that plays the tuning (Spec:
+    /// tunings R22).
+    keymap: Option<Box<KeyMap>>,
 }
 
 impl Route {
@@ -179,6 +184,25 @@ impl Route {
                 || self
                     .channel
                     .is_none_or(|channel| event.message.channel() == Some(channel)))
+    }
+
+    /// The event with its key mapped by the track's MIDI Controller Layout,
+    /// or none if the layout plays nothing for it (Spec: tunings R22).
+    /// Only notes and polyphonic key pressure carry a key.
+    fn mapped(&self, mut event: MidiEvent) -> Option<MidiEvent> {
+        let Some(map) = &self.keymap else {
+            return Some(event);
+        };
+        let message = event.message;
+        if matches!(message.status() & 0xF0, 0x80 | 0x90 | 0xA0) {
+            let to = map[usize::from(message.data1() & 0x7F)]?;
+            event.message = MidiMessage::from_bytes(&[message.status(), to, message.data2()])
+                .unwrap_or(message);
+        }
+        if let MpeRole::Expression { key, .. } = &mut event.mpe {
+            *key = map[usize::from(*key & 0x7F)]?;
+        }
+        Some(event)
     }
 
     /// Adds a message in order of offset, after any at the same offset.
@@ -333,6 +357,18 @@ fn mpe_offs(keys: [u8; 16]) -> impl Iterator<Item = MidiMessage> {
         .map(|(channel, key)| MidiMessage::note_off(channel as u8, key))
 }
 
+/// The key map of `track`'s MIDI Controller Layout under the set's tuning
+/// (Spec: tunings R22), or none while the track doesn't play the tuning or
+/// its layout is All Keys.
+pub(crate) fn key_map(document: &Document, track: TrackId) -> Option<Box<KeyMap>> {
+    let track = document.track(track)?;
+    let tuning = document.settings().tuning.as_ref()?;
+    if !track.plays_tuning() {
+        return None;
+    }
+    KeyPitches::of(Some(tuning)).layout_map(track.tuning_layout())
+}
+
 impl MidiRoutes {
     /// The routes for `document`'s MIDI tracks, whose tasks are among
     /// `tasks`. Off the audio thread: it reserves every buffer.
@@ -361,6 +397,7 @@ impl MidiRoutes {
                     previews: Vec::with_capacity(MIDI_PREVIEWS_PER_TRACK),
                     held: Vec::with_capacity(16 * 128),
                     release: false,
+                    keymap: key_map(document, entry.track),
                 })
             })
             .collect();
@@ -535,8 +572,10 @@ impl MidiRoutes {
                 continue;
             };
             std::mem::swap(&mut route.held, &mut was.held);
-            route.release =
-                !route.monitored || route.filter != was.filter || route.channel != was.channel;
+            route.release = !route.monitored
+                || route.filter != was.filter
+                || route.channel != was.channel
+                || route.keymap != was.keymap;
         }
         // Spec: external-devices R6. A route that sends where it sent keeps
         // the notes it holds; one that was removed or sends elsewhere ends
@@ -972,6 +1011,9 @@ impl MidiIn {
                             message: event.message,
                             source: event.source,
                             mpe,
+                        };
+                        let Some(placed) = route.mapped(placed) else {
+                            continue;
                         };
                         if route.push(placed) {
                             self.counters.delivered += 1;

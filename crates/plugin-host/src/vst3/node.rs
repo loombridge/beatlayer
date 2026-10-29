@@ -20,7 +20,7 @@ use bl_core::time::TICKS_PER_QUARTER;
 use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
     AutomationList, Block, Node, NodeData, NodeEvent, NoteEvent, NoteExpression, NoteKind,
-    ParamValue, PluginMpeData,
+    ParamValue, PluginMpeData, PluginTuningData, TunedNotes,
 };
 use bl_model::{ParamId, PluginMpe};
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -621,6 +621,9 @@ pub struct Vst3Node {
     /// MPE MIDI laid out for a controller without note expression (R17),
     /// made with the node.
     layout: MpeLayout,
+    /// Retunes the block's notes while the plug-in plays the set's tuning
+    /// (the tunings spec, R20).
+    tuned: TunedNotes,
     /// The notes it was given as plain notes, which MPE MIDI laid out through
     /// the MIDI mapping takes over from.
     plain: PlainNotes,
@@ -679,6 +682,7 @@ impl Vst3Node {
             mpe: PluginMpe::default(),
             pending_mpe: None,
             layout: MpeLayout::new(PluginMpe::default().settings),
+            tuned: TunedNotes::new(),
             plain: PlainNotes::default(),
             sent: [(-1, 0, 0); SENT_NOTES],
             sent_next: 0,
@@ -1004,6 +1008,8 @@ impl Node for Vst3Node {
             (&self.events_in, &self.incoming),
             (map, !expressions.controller),
         );
+        // Spec: tunings R20.
+        let notes = self.tuned.retune(block.notes());
         if self.mpe.on && !expressions.controller {
             // Spec: vst3-hosting R20. A controller without note expression
             // gets MPE MIDI: each note on its member channel, and that
@@ -1014,9 +1020,9 @@ impl Node for Vst3Node {
                 lay_in(events, incoming, map, offset, message);
             };
             self.layout.open(&mut sink);
-            self.layout.lay_out(block.notes(), &mut sink);
+            self.layout.lay_out(notes, &mut sink);
         } else {
-            for note in block.notes() {
+            for note in notes {
                 if note.kind.is_message() {
                     // Spec: vst3-hosting R18. A plug-in reads a channel
                     // message as the parameter its controller maps it to.
@@ -1152,6 +1158,8 @@ impl Node for Vst3Node {
             self.automation = Some(data);
         } else if let Some(PluginMpeData(mpe)) = data.downcast_ref() {
             self.pending_mpe = Some(*mpe);
+        } else if let Some(PluginTuningData(keys)) = data.downcast_ref() {
+            self.tuned.set(*keys);
         }
     }
 

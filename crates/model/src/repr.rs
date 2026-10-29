@@ -91,6 +91,10 @@ struct TrackRepr {
     /// writes it only when it's on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     tuning_bypass: bool,
+    /// The MIDI Controller Layout (the tunings spec, R22, R23). A new track
+    /// has all keys, so a set writes it only when it differs.
+    #[serde(default, skip_serializing_if = "crate::TuningLayout::is_default")]
+    tuning_layout: crate::TuningLayout,
     /// The group of linked tracks the track is in (WP-6.23). Sets saved
     /// before it have none, which loads unlinked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -238,6 +242,7 @@ impl TrackRepr {
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
             tuning_bypass: track.tuning_bypass(),
+            tuning_layout: track.tuning_layout().clone(),
             link: track.link(),
             colour: Some(track.colour()),
             info_text: track.info_text.clone(),
@@ -276,6 +281,7 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
             tuning.check()?;
         }
@@ -323,6 +329,7 @@ impl TryFrom<DocumentRepr> for Document {
             // the document's largest.
             scenes: Vector::new(),
             index: loader.index,
+            remote_dropped: 0,
         };
         document.scenes = match scenes {
             Some(scenes) => scenes.into_iter().collect(),
@@ -392,7 +399,11 @@ impl TryFrom<DocumentRepr> for Document {
         }
         // Spec: modulation R19. A mapping naming a parameter the set doesn't
         // have doesn't load.
+        // Spec: remote-mapping R6. A remote mapping whose control the set
+        // doesn't hold is dropped, and the load counts them.
+        let held = document.settings.remote.len();
         document.prune_mappings();
+        document.remote_dropped = held - document.settings.remote.len();
         Ok(document)
     }
 }
@@ -449,6 +460,10 @@ impl Loader {
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
         track.tuning_bypass = repr.tuning_bypass;
+        if !repr.tuning_layout.keys.is_empty() {
+            crate::TuningLayout::check_keys(&repr.tuning_layout.keys)?;
+        }
+        track.tuning_layout = repr.tuning_layout;
         track.link = repr.link;
         if let Some(colour) = repr.colour {
             crate::colour::check_swatch("track colour", colour)?;
@@ -2147,6 +2162,7 @@ mod tests {
             back.device(synth).unwrap().mpe,
             PluginMpe {
                 on: true,
+                tuning: true,
                 settings: upper
             }
         );

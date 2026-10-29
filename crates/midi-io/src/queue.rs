@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use rtrb::{Consumer, Producer, RingBuffer};
 
+use crate::remote::RemoteInput;
+
 /// Makes the queue that carries MIDI input to the engine: the sending end,
 /// for every input's handler and the computer keyboard, and the consuming
 /// end, for the engine's processor
@@ -31,6 +33,7 @@ pub fn input_queue(capacity: usize) -> (InputSender, Consumer<MidiInputEvent>) {
         producer: Arc::new(Mutex::new(producer)),
         stats: Arc::new(MidiStats::default()),
         tap: Arc::new(Tap::default()),
+        remote: Arc::new(RemoteInput::default()),
     };
     (sender, consumer)
 }
@@ -46,6 +49,7 @@ pub struct InputSender {
     producer: Arc<Mutex<Producer<MidiInputEvent>>>,
     stats: Arc<MidiStats>,
     tap: Arc<Tap>,
+    remote: Arc<RemoteInput>,
 }
 
 /// How many note messages the tap holds between two reads.
@@ -98,6 +102,24 @@ impl InputSender {
             self.stats.dropped.fetch_add(1, Relaxed);
         }
         pushed
+    }
+
+    /// The remote input: the table of mapped messages and the queue to the
+    /// main thread (`docs/specs/remote-mapping.md`, R7 to R10).
+    #[must_use]
+    pub fn remote(&self) -> &RemoteInput {
+        &self.remote
+    }
+
+    /// Queues a message for remote control, counting it taken, or dropped
+    /// if the queue is full.
+    pub(crate) fn send_remote(&self, event: MidiInputEvent) {
+        let counter = if self.remote.push(event) {
+            &self.stats.remote_taken
+        } else {
+            &self.stats.remote_dropped
+        };
+        counter.fetch_add(1, Relaxed);
     }
 
     /// Starts or stops copying note messages for the main thread to read
@@ -160,8 +182,16 @@ pub struct MidiStats {
     pub to_tracks: AtomicU64,
     /// Messages dropped because the queue was full.
     pub dropped: AtomicU64,
-    /// Messages from inputs with Remote on, for MIDI mapping (Phase 7).
+    /// Messages that arrived on inputs with Remote on.
     pub to_remote: AtomicU64,
+    /// Messages that crossed to remote control: those a mapping takes, and
+    /// every one while a map mode is on.
+    pub remote_taken: AtomicU64,
+    /// Messages for remote control dropped because its queue was full.
+    pub remote_dropped: AtomicU64,
+    /// Messages no mapping takes that arrived on an input whose only
+    /// switch on is Remote, so they went nowhere.
+    pub remote_unmapped: AtomicU64,
     /// Clock and transport messages from inputs with Sync on (Phase 7).
     pub to_sync: AtomicU64,
     /// Messages nothing takes: system exclusive, or from an input whose
@@ -178,6 +208,12 @@ pub struct StatsSnapshot {
     pub dropped: u64,
     /// See [`MidiStats::to_remote`].
     pub to_remote: u64,
+    /// See [`MidiStats::remote_taken`].
+    pub remote_taken: u64,
+    /// See [`MidiStats::remote_dropped`].
+    pub remote_dropped: u64,
+    /// See [`MidiStats::remote_unmapped`].
+    pub remote_unmapped: u64,
     /// See [`MidiStats::to_sync`].
     pub to_sync: u64,
     /// See [`MidiStats::ignored`].
@@ -192,6 +228,9 @@ impl MidiStats {
             to_tracks: self.to_tracks.load(Relaxed),
             dropped: self.dropped.load(Relaxed),
             to_remote: self.to_remote.load(Relaxed),
+            remote_taken: self.remote_taken.load(Relaxed),
+            remote_dropped: self.remote_dropped.load(Relaxed),
+            remote_unmapped: self.remote_unmapped.load(Relaxed),
             to_sync: self.to_sync.load(Relaxed),
             ignored: self.ignored.load(Relaxed),
         }

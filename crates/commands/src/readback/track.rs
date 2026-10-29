@@ -65,4 +65,5 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("track.set_devices_enabled", query(Track, "devices")),
     ("track.ungroup", query(Song, "tracks")),
     ("track.set_tuning_bypass", query(Track, "tuning_bypass")),
+    ("track.set_tuning_layout", query(Track, "tuning_layout")),
 ];

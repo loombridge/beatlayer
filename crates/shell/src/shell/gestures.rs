@@ -522,8 +522,10 @@ impl Shell {
     /// named `label` (such as "Change tempo"). A gesture already open
     /// carries on.
     pub fn begin_gesture(&mut self, label: &str) {
-        // A drag on a value ends the edit a selected breakpoint opened.
+        // A drag on a value ends the edit a selected breakpoint opened, and a
+        // run of mapped messages (remote mapping R12).
         self.end_key_edit();
+        self.remote_run_ends_for("");
         if !self.gesture {
             self.editor.begin(label.to_owned());
             self.gesture = true;

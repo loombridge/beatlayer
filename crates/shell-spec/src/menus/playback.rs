@@ -23,7 +23,7 @@ pub(super) const PLAYBACK: &[Row] = &[
     (
         "M-PLAY-006c",
         "Start Transport With Tap Tempo",
-        Pending(None),
+        Cmd(crate::commands::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO),
     ),
     ("M-PLAY-006d", "Link Start Stop Sync", Pending(None)),
     SEPARATOR,

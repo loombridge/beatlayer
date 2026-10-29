@@ -268,6 +268,33 @@ impl Editor {
         Ok(changes)
     }
 
+    /// Applies a command into the newest undo step, so that step ends with
+    /// its result instead of the command recording a step of its own: Tap
+    /// Tempo's taps make one step between them (the control bar transport
+    /// spec, R21). The caller makes sure the newest step is the one to
+    /// amend. If the document ends as that step began, the step goes.
+    ///
+    /// # Errors
+    ///
+    /// [`EditError::TransactionOpen`] during a transaction, and
+    /// [`EditError::Command`] if the document rejects the command, which
+    /// leaves it as it was.
+    pub fn apply_into_newest(&mut self, command: Command) -> Result<ChangeSet, EditError> {
+        if self.in_transaction() {
+            return Err(EditError::TransactionOpen);
+        }
+        let before = self.document.clone();
+        self.document.apply(&command)?;
+        if self
+            .undo
+            .back()
+            .is_some_and(|step| *step.document == self.document)
+        {
+            self.undo.pop_back();
+        }
+        Ok(ChangeSet::between(&before, &self.document))
+    }
+
     /// Records a plug-in device's own state in the document (WP-2.6)
     /// without an undo step: the running plug-in already has it, so it's a
     /// note for the set file, made when the set is saved or the device
@@ -738,6 +765,41 @@ mod tests {
 
     fn start_of(editor: &Editor, clip: ClipId) -> Ticks {
         editor.document().clip(clip).unwrap().start
+    }
+
+    #[test]
+    fn a_command_applied_into_the_newest_step_ends_that_step_with_its_result() {
+        use bl_core::time::{Bpm, TempoMap};
+        let tempo = |bpm| TempoMap::constant(Bpm::new(bpm).unwrap());
+        let mut editor = Editor::new();
+        let original = editor.document().settings().tempo.clone();
+        editor.begin("Tap Tempo");
+        editor
+            .apply(Command::SetTempo {
+                tempo: tempo(100.0),
+            })
+            .unwrap();
+        editor.commit().unwrap();
+        editor
+            .apply_into_newest(Command::SetTempo {
+                tempo: tempo(110.0),
+            })
+            .unwrap();
+        assert_eq!(editor.document().settings().tempo, tempo(110.0));
+        assert_eq!(editor.undo_history().collect::<Vec<_>>(), ["Tap Tempo"]);
+        // Back to where the step began: the step goes.
+        editor
+            .apply_into_newest(Command::SetTempo {
+                tempo: original.clone(),
+            })
+            .unwrap();
+        assert!(!editor.can_undo());
+        // During a transaction it refuses.
+        editor.begin("Open");
+        assert_eq!(
+            editor.apply_into_newest(Command::SetTempo { tempo: tempo(90.0) }),
+            Err(EditError::TransactionOpen)
+        );
     }
 
     #[test]

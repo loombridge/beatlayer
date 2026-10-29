@@ -27614,6 +27614,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `retune_on_tuning_load` | boolean | yes | Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15). |
 | `snap_automation_to_grid` | boolean | yes | Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31). |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
+| `start_transport_with_tap_tempo` | boolean | yes | Record, Warp & Launch: Start Transport With Tap Tempo, as `settings.set_start_transport_with_tap_tempo` sets it (the control bar transport spec, R20). |
 | `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
@@ -27691,6 +27692,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31).",
       "type": "boolean"
     },
+    "start_transport_with_tap_tempo": {
+      "description": "Record, Warp & Launch: Start Transport With Tap Tempo, as `settings.set_start_transport_with_tap_tempo` sets it (the control bar transport spec, R20).",
+      "type": "boolean"
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -27718,6 +27723,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "retune_on_tuning_load",
     "snap_automation_to_grid",
     "warp_recorded_audio",
+    "start_transport_with_tap_tempo",
     "warp",
     "launch",
     "record_session_automation_in",
@@ -29573,6 +29579,57 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `TapTempo`
+
+A run of taps, as `transport.tap_tempo` returns it and `transport.state` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `taps` | integer, at least 0 | yes | How many taps the run has; 0 once a new run would start. |
+| `tempo` | number or null | yes | The tempo the run set, in quarter notes per minute: none until its second tap. |
+| `start_at` | integer or null | yes | The engine-clock frame a tap start waits for, if one does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A run of taps, as `transport.tap_tempo` returns it and `transport.state` reports it.",
+  "properties": {
+    "start_at": {
+      "description": "The engine-clock frame a tap start waits for, if one does.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "taps": {
+      "description": "How many taps the run has; 0 once a new run would start.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tempo": {
+      "description": "The tempo the run set, in quarter notes per minute: none until its second tap.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "taps",
+    "tempo",
+    "start_at"
+  ],
+  "type": "object"
 }
 ```
 
@@ -31622,6 +31679,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `phase_nudge` | [`PhaseNudge`](#phasenudge) | yes | The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28). |
 | `waiting_start` | boolean | yes | Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25). |
 | `waiting_frame` | integer or null | yes | The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise. |
+| `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 
 <details><summary>JSON Schema</summary>
 
@@ -31737,6 +31795,15 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether a take is running: Arrangement Record is on and the armed tracks' input is being written, so playback is past the count-in and any punch-in point. It ends at the punch-out point or when recording does.",
       "type": "boolean"
     },
+    "tap_tempo": {
+      "$ref": "#/$defs/TapTempo",
+      "default": {
+        "start_at": null,
+        "taps": 0,
+        "tempo": null
+      },
+      "description": "The run of taps Tap Tempo has now (the control bar transport spec, R22)."
+    },
     "tempo": {
       "description": "The tempo where the Arrangement Position fields are, in quarter notes per minute, as the Tempo field shows it.",
       "format": "double",
@@ -31799,7 +31866,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "capture_midi_ready",
     "phase_nudge",
     "waiting_start",
-    "waiting_frame"
+    "waiting_frame",
+    "tap_tempo"
   ],
   "type": "object"
 }

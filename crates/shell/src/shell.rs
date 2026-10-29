@@ -144,6 +144,7 @@ mod set_files;
 mod slice;
 mod stems;
 mod step_input;
+mod tap_tempo;
 mod track_commands;
 mod tunings;
 mod view_commands;
@@ -707,6 +708,8 @@ pub struct Shell {
     plugin_list: plugin_list::PluginList,
     /// A number that changes whenever the document may have changed.
     document_revision: u64,
+    /// The run of taps Tap Tempo has (the control bar transport spec, R18).
+    tap: crate::tap_tempo::TapRun,
     /// The browser (WP-1.10).
     browser_view: BrowserView,
     /// The media the set's clips play, which the browser fills and the
@@ -1331,6 +1334,7 @@ impl Shell {
             search: crate::search::Field::default(),
             plugin_list: plugin_list::PluginList::default(),
             document_revision: 0,
+            tap: crate::tap_tempo::TapRun::default(),
             clipboard: None,
             envelope_clipboard: None,
             clip_drag: None,
@@ -1843,6 +1847,9 @@ impl Shell {
         if id == SETTINGS_STATE {
             Self::args::<NoArgs>(id, args)?;
             return Ok(to_value(&self.settings_state()));
+        }
+        if id == transport_ids::TAP_TEMPO {
+            return self.run_tap_tempo(args);
         }
         if transport_ids::handles(id) {
             Self::args::<NoArgs>(id, args)?;

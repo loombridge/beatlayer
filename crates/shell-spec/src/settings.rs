@@ -691,6 +691,10 @@ pub struct SettingsState {
     /// Record, Warp & Launch: Warp Recorded Audio, as
     /// `settings.set_warp_recorded_audio` sets it.
     pub warp_recorded_audio: bool,
+    /// Record, Warp & Launch: Start Transport With Tap Tempo, as
+    /// `settings.set_start_transport_with_tap_tempo` sets it (the control bar
+    /// transport spec, R20).
+    pub start_transport_with_tap_tempo: bool,
     /// Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long
     /// Samples and Default Warp Mode.
     pub warp: WarpPrefs,

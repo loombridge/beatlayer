@@ -17,6 +17,10 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, control_bar, "Stop", Key::Enter),
         ),
         (
+            "transport.tap_tempo",
+            main(nothing, control_bar, "Tap Tempo", Key::Enter),
+        ),
+        (
             "transport.resync_external_hardware",
             main(
                 the_resync_button_shown,

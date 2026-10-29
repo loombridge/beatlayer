@@ -1803,6 +1803,17 @@ fn every_command_runs_by_id() {
             .cv_calibration
             .is_some()
     );
+    // A line that doesn't rise is refused.
+    assert!(
+        registry::run(
+            &mut agent.editor,
+            "cv.set_calibration",
+            json!({ "device": cv, "calibration": {
+                "octaves_per_volt": 0.0, "hz_at_zero_volts": 130.0, "steps": [],
+            } }),
+        )
+        .is_err()
+    );
     // A plug-in's MPE Mode and settings (WP-6.17b): both are one undo step,
     // and the device keeps them.
     let synth: DeviceId = agent.new_id();

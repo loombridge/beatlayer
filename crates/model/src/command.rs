@@ -5125,6 +5125,15 @@ impl Document {
                 device,
                 calibration,
             } => {
+                // The node plays every pitch through the calibration on the
+                // audio thread, so only a rising line and a calibration's
+                // steps, by rising voltage, are taken.
+                if calibration.as_ref().is_some_and(|c| !c.is_valid()) {
+                    return Err(ModelError::InvalidInput(
+                        "a calibration rises by a positive number of octaves a volt from a \
+                         positive frequency, over at most eight steps by rising voltage",
+                    ));
+                }
                 let mut external = self
                     .device_ref(*device)?
                     .external

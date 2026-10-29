@@ -230,7 +230,7 @@ impl Run {
     fn result(&self) -> f32 {
         let mut seen = self.detections;
         let seen = &mut seen[..self.heard];
-        seen.sort_by(f64::total_cmp);
+        seen.sort_unstable_by(f64::total_cmp);
         let (Some(&low), Some(&high)) = (seen.first(), seen.last()) else {
             return 0.0;
         };

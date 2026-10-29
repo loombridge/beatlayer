@@ -245,6 +245,22 @@ impl CvCalibration {
         Self::fit(&measured).ok_or(0)
     }
 
+    /// Whether the calibration is one a CV Instrument can play through: a
+    /// rising line from a positive frequency, and at most eight steps (R14)
+    /// by rising voltage.
+    #[must_use]
+    pub fn is_valid(&self) -> bool {
+        let positive = |x: f64| x.is_finite() && x > 0.0;
+        positive(self.octaves_per_volt)
+            && positive(self.hz_at_zero_volts)
+            && self.steps.len() <= 8
+            && self
+                .steps
+                .iter()
+                .all(|s| s.volts.is_finite() && s.error_cents.is_finite())
+            && self.steps.windows(2).all(|pair| pair[0].volts < pair[1].volts)
+    }
+
     /// How far above the fitted line, in octaves, the oscillator sounds at
     /// `volts`: straight between the steps' errors, and none past them.
     fn residue(&self, volts: f64) -> f64 {

@@ -103,6 +103,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("midi.capture", query(Track, "slots")),
     ("midi.import_file", query(Track, "clips")),
     ("midi.set_port", read("midi.ports", "ports")),
+    ("midi.set_show_resync_button", read("midi.ports", "show_resync_button")),
     ("midi.toggle_computer_keyboard", read("midi.ports", "keyboard.on")),
     ("midi_tool.set_auto", read("midi_tool.state", "tools[].auto")),
     ("midi_tool.set", read("midi_tool.state", "tools[].values")),

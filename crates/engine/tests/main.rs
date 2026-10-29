@@ -32,6 +32,7 @@ mod live_complex;
 mod macros;
 mod metronome;
 mod midi_clips;
+mod midi_clock;
 mod midi_controllers;
 mod midi_input;
 mod midi_meters;

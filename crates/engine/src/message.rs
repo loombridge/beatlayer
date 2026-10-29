@@ -135,6 +135,11 @@ pub enum TransportCommand {
     SetRecording(bool),
     /// Sets where recording punches in and out (WP-2.13).
     SetPunch(Punch),
+    /// Resync External Hardware (`docs/specs/midi-clock.md`, R11): while the
+    /// song plays, sends each output with Sync on its Hardware Resync choice
+    /// before the clock of the next bar line. Does nothing while the
+    /// transport is stopped.
+    ResyncExternalHardware,
 }
 
 /// Where recording starts and stops, as the Arrangement loop brace and the
@@ -241,4 +246,11 @@ pub(crate) enum Message {
     /// The frames between the engine handing the device a sound and it
     /// coming out, as the device reports it now (WP-5.34).
     OutputLatency(u32),
+    /// Output `index` of the `count` output ports with Sync on and their
+    /// options (midi-clock R3); a `count` of 0 clears the list.
+    SyncOutput {
+        index: u8,
+        count: u8,
+        output: Option<bl_core::midi::SyncOutput>,
+    },
 }

@@ -122,6 +122,7 @@ pub mod session;
 pub mod sidechain;
 mod sources;
 mod state;
+mod sync_out;
 pub mod transport;
 mod tuned;
 mod tuned_notes;
@@ -180,6 +181,7 @@ pub use state::{
     ChainMeter, EngineCounters, EngineState, MeterOwner, MeterSite, Monitor, PlayedParam,
     PointReading, TrackMeter,
 };
+pub use sync_out::{MAX_SYNC_OUTPUTS, SyncOutState};
 pub use tuned::{KeyMap, KeyPitches};
 pub use tuned_notes::TunedNotes;
 

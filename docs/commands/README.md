@@ -71,6 +71,7 @@ The commands, by the part of their ID before its first dot:
 - [`slot`](slot.md)
 - [`song`](song.md)
 - [`stems`](stems.md)
+- [`sync`](sync.md)
 - [`take_lane`](take_lane.md)
 - [`track`](track.md)
 - [`transport`](transport.md)
@@ -6259,6 +6260,37 @@ What `arrangement.copy` put on the clipboard.
     "length"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `ClockTypeChoice`
+
+An output's MIDI Clock Type (the MIDI clock spec, R1, R5, R6).
+
+One of:
+
+- `"song"`: Song Position Pointer and Continue each time the play position changes.
+- `"pattern"`: Only Start, at the start of the next bar.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An output's MIDI Clock Type (the MIDI clock spec, R1, R5, R6).",
+  "oneOf": [
+    {
+      "const": "song",
+      "description": "Song Position Pointer and Continue each time the play position changes.",
+      "type": "string"
+    },
+    {
+      "const": "pattern",
+      "description": "Only Start, at the start of the next bar.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -13620,6 +13652,43 @@ One of:
 
 </details>
 
+### `HardwareResyncChoice`
+
+An output's Hardware Resync (the MIDI clock spec, R1, R11).
+
+One of:
+
+- `"stop_and_start"`: Stop, then Start.
+- `"start_only"`: Start.
+- `"dont_resync"`: Nothing.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An output's Hardware Resync (the MIDI clock spec, R1, R11).",
+  "oneOf": [
+    {
+      "const": "stop_and_start",
+      "description": "Stop, then Start.",
+      "type": "string"
+    },
+    {
+      "const": "start_only",
+      "description": "Start.",
+      "type": "string"
+    },
+    {
+      "const": "dont_resync",
+      "description": "Nothing.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `HeldKey`
 
 A key held on the track's MIDI input, with the velocity it was played at.
@@ -18152,6 +18221,7 @@ What `midi.ports` returns.
 | `system` | string | yes | The MIDI system in use: Core MIDI, ALSA, Windows Multimedia MIDI, or none. |
 | `ports` | array of [`PortInfo`](#portinfo) | yes | Every port the system offers, inputs first. |
 | `keyboard` | [`KeyboardInfo`](#keyboardinfo) | yes | The computer MIDI keyboard. |
+| `show_resync_button` | boolean | yes | Whether Show Resync Button is on, so the Control Bar shows the Resync External Hardware button. |
 
 <details><summary>JSON Schema</summary>
 
@@ -18170,6 +18240,11 @@ What `midi.ports` returns.
       },
       "type": "array"
     },
+    "show_resync_button": {
+      "default": false,
+      "description": "Whether Show Resync Button is on, so the Control Bar shows the Resync External Hardware button.",
+      "type": "boolean"
+    },
     "system": {
       "description": "The MIDI system in use: Core MIDI, ALSA, Windows Multimedia MIDI, or none.",
       "type": "string"
@@ -18178,7 +18253,8 @@ What `midi.ports` returns.
   "required": [
     "system",
     "ports",
-    "keyboard"
+    "keyboard",
+    "show_resync_button"
   ],
   "type": "object"
 }
@@ -22344,6 +22420,9 @@ One MIDI port as the Settings window's table shows it.
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
 | `remote` | boolean | yes | Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built. |
 | `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
+| `sync_delay_ms` | integer from -32768 to 32767 | yes | MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to the clock an output sends; kept while Sync is off. |
+| `clock_type` | [`ClockTypeChoice`](#clocktypechoice) | yes | An output's MIDI Clock Type: Song or Pattern. |
+| `hardware_resync` | [`HardwareResyncChoice`](#hardwareresyncchoice) | yes | An output's Hardware Resync: what Resync External Hardware sends it. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
 | `error` | string or null | no | Why it couldn't be opened, if it couldn't. |
@@ -22354,6 +22433,11 @@ One MIDI port as the Settings window's table shows it.
 {
   "description": "One MIDI port as the Settings window's table shows it.",
   "properties": {
+    "clock_type": {
+      "$ref": "#/$defs/ClockTypeChoice",
+      "default": "song",
+      "description": "An output's MIDI Clock Type: Song or Pattern."
+    },
     "direction": {
       "$ref": "#/$defs/PortDirection",
       "description": "Input or output."
@@ -22364,6 +22448,11 @@ One MIDI port as the Settings window's table shows it.
         "string",
         "null"
       ]
+    },
+    "hardware_resync": {
+      "$ref": "#/$defs/HardwareResyncChoice",
+      "default": "stop_and_start",
+      "description": "An output's Hardware Resync: what Resync External Hardware sends it."
     },
     "mpe": {
       "default": false,
@@ -22390,6 +22479,14 @@ One MIDI port as the Settings window's table shows it.
       "description": "Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built.",
       "type": "boolean"
     },
+    "sync_delay_ms": {
+      "default": 0,
+      "description": "MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to the clock an output sends; kept while Sync is off.",
+      "format": "int16",
+      "maximum": 32767,
+      "minimum": -32768,
+      "type": "integer"
+    },
     "track": {
       "description": "Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI.",
       "type": "boolean"
@@ -22402,6 +22499,9 @@ One MIDI port as the Settings window's table shows it.
     "sync",
     "remote",
     "mpe",
+    "sync_delay_ms",
+    "clock_type",
+    "hardware_resync",
     "present",
     "open"
   ],
@@ -27312,6 +27412,34 @@ What `set.open`, `set.save`, and `set.save_as` return.
 
 </details>
 
+### `SetShowResyncButtonResult`
+
+What `midi.set_show_resync_button` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether Show Resync Button is on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `midi.set_show_resync_button` returns.",
+  "properties": {
+    "on": {
+      "description": "Whether Show Resync Button is on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SettingsPage`
 
 A page of the Settings window, in Live's order (L-SET-002).
@@ -28922,6 +29050,72 @@ What a command that switches something returns: its new state.
   },
   "required": [
     "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SyncState`
+
+What `sync.state` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `output_ports` | integer, at least 0 | yes | How many output ports have Sync on, so MIDI clock goes to them while the song plays. |
+| `sending` | boolean | yes | Whether MIDI clock is going out now: the song plays, past any count-in, and some output has Sync on. |
+| `output_lamp` | boolean | yes | Whether the lower sync lamp is lit: a quarter note's clock left for a port in the last 100 ms. |
+| `clocks_sent` | integer, at least 0 | yes | Timing Clocks handed to the MIDI output thread since the audio engine started, one for each port. |
+| `clocks_late` | integer, at least 0 | yes | Timing Clocks stamped for a moment already past when the engine wrote them. |
+| `clocks_dropped` | integer, at least 0 | yes | Sync messages dropped because the queue to the MIDI output thread was full. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `sync.state` returns.",
+  "properties": {
+    "clocks_dropped": {
+      "description": "Sync messages dropped because the queue to the MIDI output thread was full.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "clocks_late": {
+      "description": "Timing Clocks stamped for a moment already past when the engine wrote them.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "clocks_sent": {
+      "description": "Timing Clocks handed to the MIDI output thread since the audio engine started, one for each port.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "output_lamp": {
+      "description": "Whether the lower sync lamp is lit: a quarter note's clock left for a port in the last 100 ms.",
+      "type": "boolean"
+    },
+    "output_ports": {
+      "description": "How many output ports have Sync on, so MIDI clock goes to them while the song plays.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "sending": {
+      "description": "Whether MIDI clock is going out now: the song plays, past any count-in, and some output has Sync on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "output_ports",
+    "sending",
+    "output_lamp",
+    "clocks_sent",
+    "clocks_late",
+    "clocks_dropped"
   ],
   "type": "object"
 }

@@ -91,19 +91,19 @@ This spec covers MIDI clock in both directions. The ports, their Track, Sync and
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-7.11 | shell test, UI script |
-| R3 | to be written in WP-7.11 | engine test under the allocation trap (block sizes 1, 61, 512 and 4,096; a constant tempo, a step and a ramp) |
-| R4 | to be written in WP-7.11 | engine test under the allocation trap; `bl-midi-io` scheduled-output test |
-| R5, R6, R7, R8 | to be written in WP-7.11 | engine test under the allocation trap |
+| R1, R2 | `bl-shell` `midi_io::the_sync_options_and_the_resync_button_persist_across_restarts`; `bl-ui` `midi_input::an_outputs_triangle_opens_its_sync_options_and_show_resync_button_is_a_switch` | shell test, UI script |
+| R3 | `bl-engine` `midi_clock::clocks_are_stamped_for_their_frames_whatever_the_block`, `midi_clock::clocks_follow_a_tempo_step_and_a_ramp_through_the_map` | engine test under the allocation trap (block sizes 1, 61, 512 and 4,096; a constant tempo, a step and a ramp) |
+| R4 | `bl-engine` `midi_clock::the_sync_delay_moves_every_stamp_by_exactly_itself`; `bl-midi-io` `scheduled_output::sync_messages_follow_the_sync_switch_and_notes_the_track_switch` | engine test under the allocation trap; `bl-midi-io` scheduled-output test |
+| R5, R6, R7, R8 | `bl-engine` `midi_clock::song_sends_start_then_a_pointer_and_continue_stop`, `song_sends_a_pointer_and_continue_on_the_frame_of_a_jump`, `pattern_sends_start_on_the_next_bar_line_only`, `a_count_in_sends_nothing_until_the_transport_moves` | engine test under the allocation trap |
 | R9 | to be written in WP-7.12 | engine test |
-| R10, R11 | to be written in WP-7.11 | shell test, UI script |
-| R12 | to be written in WP-7.11 | UI script |
-| R13 | to be written in WP-7.11 | real-time trap, RealtimeSanitizer; shell test (an export sends nothing) |
+| R10, R11 | `bl-shell` `midi_io::resync_sends_each_ports_choice_before_the_next_bar_line_and_nothing_while_stopped`; `bl-engine` `midi_clock::resync_sends_each_ports_choice_before_the_next_bar_lines_clock`; `bl-ui` `midi_input::the_resync_button_shows_while_the_setting_is_on_and_leaves_room_in_the_tempo_group` | shell test, UI script |
+| R12 | `bl-ui` `midi_input::the_lower_sync_lamp_lights_for_a_quarter_note_of_clock_sent` | UI script |
+| R13 | `bl-engine` `midi_clock::a_full_queue_drops_the_clock_and_counts_it`, `an_engine_without_a_queue_to_the_ports_sends_no_clock`; `rtsan/tests/midi_clock.rs`; `bl-shell` `midi_io::an_export_sends_no_clock` | real-time trap, RealtimeSanitizer; shell test (an export sends nothing) |
 | R14 | to be written in WP-7.12 | `bl-midi-io` test |
 | R15, R16 | to be written in WP-7.12 | shell test, UI script |
 | R17, R18, R19, R20, R21 | to be written in WP-7.12 | engine test under the allocation trap (clocks from a test port at test-clock times, with seeded jitter) |
 | R22, R23, R24 | to be written in WP-7.12 | engine test, shell test |
-| R25 | to be written in WP-7.11 and WP-7.12 | agent API, `cargo xtask commands` |
+| R25 | `bl-agent` `midi_clock::the_sync_options_and_the_resync_button_are_set_by_id_and_read_back` (WP-7.11's commands; WP-7.12 adds its own) | agent API, `cargo xtask commands` |
 | R26 | to be written in WP-7.12 | real-time trap, RealtimeSanitizer |
-| R27 | to be written in WP-7.11 and WP-7.12 | UI script |
+| R27 | `bl-ui` `midi_input::the_resync_button_shows_while_the_setting_is_on_and_leaves_room_in_the_tempo_group` (the Resync External Hardware button; WP-7.12 adds EXT and the two lamps' names) | UI script |
 | R28 | to be written with Tempo Follower | |

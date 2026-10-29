@@ -287,6 +287,8 @@ pub enum Anchor {
 pub enum Element {
     BrowserToggle,
     BrowserMenu,
+    SyncLamps,
+    ResyncExternalHardware,
     TapTempo,
     Tempo,
     NudgeDown,
@@ -422,6 +424,8 @@ pub const D24: &str = "D24";
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),
     p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, None),
+    p(E::SyncLamps, "L-CTRL-028", "Sync Input and Output Indicators", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
+    p(E::ResyncExternalHardware, "L-CTRL-029", "Resync External Hardware", CB, 54.0, RESYNC_WIDTH, Left, Button, None),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, None),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
     p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Button, Some("M7")),
@@ -492,6 +496,16 @@ pub fn placement(element: Element) -> &'static Placement {
 /// its right while it shows (L-CTRL-008).
 pub const GLOBAL_AMOUNT_WIDTH: f32 = 40.0;
 
+/// The width of the sync lamp pair (L-CTRL-028), when it shows.
+pub const SYNC_LAMPS_WIDTH: f32 = 7.0;
+
+/// The width of the Resync External Hardware button (L-CTRL-029), when it
+/// shows.
+pub const RESYNC_WIDTH: f32 = 40.0;
+
+/// The gap after each of those, in points.
+const SYNC_GAP: f32 = 2.0;
+
 /// The share of extra width that goes to the gap left of the Control Bar's
 /// middle groups: Live's two stretching gaps are 103 points (after the scale
 /// controls) and 177 points (before Draw Mode) at the reference width; the
@@ -520,6 +534,11 @@ pub struct DetailViews {
     /// moves what is to its right 40 points right (L-CTRL-008, the grooves
     /// spec R30).
     pub global_amount: bool,
+    /// Whether the Control Bar shows the sync lamp pair (L-CTRL-028), and
+    /// the Resync External Hardware button (L-CTRL-029): they sit at the
+    /// left of the tempo group and move what is to their right right by
+    /// their widths (the MIDI clock spec, R10, R15).
+    pub sync: (bool, bool),
 }
 
 impl DetailViews {
@@ -534,7 +553,16 @@ impl DetailViews {
             full_height_browser: false,
             browser_width: BROWSER_WIDTH,
             global_amount: false,
+            sync: (false, false),
         }
+    }
+
+    /// The same, with the sync lamp pair and the Resync External Hardware
+    /// button showing or not.
+    #[must_use]
+    pub const fn with_sync(mut self, lamps: bool, resync: bool) -> Self {
+        self.sync = (lamps, resync);
+        self
     }
 
     /// The same, with the Global Groove Amount field showing or not.
@@ -571,6 +599,7 @@ impl Default for DetailViews {
             full_height_browser: false,
             browser_width: BROWSER_WIDTH,
             global_amount: false,
+            sync: (false, false),
         }
     }
 }
@@ -852,12 +881,30 @@ impl ShellLayout {
         } else {
             0.0
         };
+        // Spec: midi-clock R10, R15. The sync lamp pair and the Resync
+        // External Hardware button open the tempo group, and what follows
+        // moves right by their widths, in the room the first gap has, as the
+        // Global Amount does; a narrower window, and the second window, hide
+        // them.
+        let (want_lamps, want_resync) = detail_views.sync;
+        let lamps_width = SYNC_LAMPS_WIDTH + SYNC_GAP;
+        let resync_width = RESYNC_WIDTH + SYNC_GAP;
+        let wanted = f32::from(u8::from(want_lamps)) * lamps_width
+            + f32::from(u8::from(want_resync)) * resync_width;
+        let room = w >= MINIMUM.x + groove_shift + wanted;
+        let (lamps_shown, resync_shown) = (
+            want_lamps && !second && room,
+            want_resync && !second && room,
+        );
+        let sync_shift = f32::from(u8::from(lamps_shown)) * lamps_width
+            + f32::from(u8::from(resync_shown)) * resync_width;
+        let sync_at = placement(Element::TapTempo).x;
         let middle_push = {
             let left_end = placement(Element::ScaleName);
             let middle = placement(Element::Follow);
             let gap = (middle.x + controls_extra * MIDDLE_SHARE)
-                - (left_end.x + left_end.width + groove_shift);
-            (-gap).clamp(0.0, groove_shift)
+                - (left_end.x + left_end.width + groove_shift + sync_shift);
+            (-gap).clamp(0.0, groove_shift + sync_shift)
         };
         let elements = ELEMENTS
             .iter()
@@ -867,12 +914,26 @@ impl ShellLayout {
                     Strip::StatusBar => extra,
                 };
                 let control_bar = placement.strip == Strip::ControlBar;
+                let own_sync = matches!(
+                    placement.element,
+                    Element::SyncLamps | Element::ResyncExternalHardware
+                );
                 let shift = match placement.anchor {
                     Left if control_bar
                         && placement.element != Element::GlobalAmount
-                        && placement.x >= groove_at =>
+                        && !own_sync =>
                     {
-                        groove_shift
+                        let groove = if placement.x >= groove_at {
+                            groove_shift
+                        } else {
+                            0.0
+                        };
+                        let sync = if placement.x >= sync_at {
+                            sync_shift
+                        } else {
+                            0.0
+                        };
+                        groove + sync
                     }
                     Left => 0.0,
                     Middle if control_bar => extra * MIDDLE_SHARE + middle_push,
@@ -887,11 +948,19 @@ impl ShellLayout {
                     // Bar has no room for it.
                     width = 0.0;
                 }
+                if (placement.element == Element::SyncLamps && !lamps_shown)
+                    || (placement.element == Element::ResyncExternalHardware && !resync_shown)
+                {
+                    width = 0.0;
+                }
                 if placement.element == Element::Message {
                     // The message area stretches to the Clip View toggle.
                     width += extra - taken;
                 }
-                let x = placement.x + shift;
+                let mut x = placement.x + shift;
+                if placement.element == Element::ResyncExternalHardware && lamps_shown {
+                    x += lamps_width;
+                }
                 let rect = match placement.strip {
                     Strip::ControlBar => Rect::from_min_size(pos2(x, y(28.0)), vec2(width, 18.0)),
                     Strip::StatusBar => Rect::from_min_size(
@@ -1685,6 +1754,8 @@ impl SettingsLayout {
     pub const OPTION_ROW: f32 = 22.0;
     /// A switch's width.
     pub const SWITCH: f32 = 54.0;
+    /// A disclosure triangle (a port's sync options, midi-clock R1).
+    pub const TRIANGLE: f32 = 18.0;
     /// A chooser's width.
     pub const CHOOSER: f32 = 108.0;
     /// An audio device chooser's width.

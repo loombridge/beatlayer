@@ -20,7 +20,7 @@ use bl_model::{
     LaunchQuantization, SceneId, TrackId,
 };
 
-use super::{Playhead, SceneRun, SessionLauncher};
+use super::{Button, Playhead, SceneRun, SessionLauncher};
 use crate::program::EngineProgram;
 
 /// How many follow actions one call fires at most, so a set whose actions
@@ -388,7 +388,11 @@ impl SessionLauncher {
                 let scene = table.scenes[target].scene;
                 let quantization = table.slot(slot.track, scene).and_then(|i| i.quantization);
                 let (line, at) = start_of(quantization, tick, playhead);
-                self.press_at(slot.track, scene, LaunchMode::Trigger, line, at);
+                let button = Button {
+                    mode: LaunchMode::Trigger,
+                    ..program.launch_button(slot.track, scene)
+                };
+                self.press_at(slot.track, scene, button, true, line, at);
                 // A target waiting for its own grid leaves the track silent
                 // from the follow time (observed in Live 12.4.3).
                 if scene != slot.scene
@@ -434,10 +438,14 @@ impl SessionLauncher {
             }
             Outcome::Launch(target) => {
                 let scene = table.scenes[target].scene;
-                for &(_, track, _) in program.scene_slots(scene) {
-                    let quantization = table.slot(track, scene).and_then(|i| i.quantization);
+                for row in program.scene_slots(scene) {
+                    let quantization = row.button.quantization;
                     let (line, at) = start_of(quantization, tick, playhead);
-                    self.press_at(track, scene, LaunchMode::Trigger, line, at);
+                    let button = Button {
+                        mode: LaunchMode::Trigger,
+                        ..row.button
+                    };
+                    self.press_at(row.track, scene, button, true, line, at);
                 }
                 self.start_scene_run(scene, tick);
                 if program.scene_maps.iter().any(|maps| maps.scene == scene) {

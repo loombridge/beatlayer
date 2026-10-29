@@ -153,12 +153,15 @@ jobs:
 
       # A pull request's check compares it with the merge base of its base
       # branch, so it needs the history; other runs need only the commit.
+      # The condition reads the other way round because 0 is false in an
+      # expression: `pull_request && 0 || 1` gave every run a depth of 1, so a
+      # pull request found no origin/main and tested every package.
       - name: Check out
         if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
+          fetch-depth: ${{ github.event_name != 'pull_request' && 1 || 0 }}
 
       # cpal's `asio` feature pulls in asio-sys, whose build script downloads
       # Steinberg's ASIO SDK when CPAL_ASIO_DIR is unset. ASIO goes through

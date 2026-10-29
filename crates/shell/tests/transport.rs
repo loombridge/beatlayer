@@ -70,6 +70,7 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.locate", "{\"position\": 2822400}"),
     ("transport.scrub", "{\"position\": 2822400}"),
     ("transport.return_to_start", "{}"),
+    ("transport.resync_external_hardware", "{}"),
     ("transport.insert_marker_to_playhead", "{}"),
     ("transport.stop_recording", "{}"),
     ("transport.set_recording", "{\"recording\": true}"),

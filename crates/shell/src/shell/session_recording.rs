@@ -349,7 +349,8 @@ impl Shell {
                 }
                 _ => continue,
             }
-            let started = playing(&self.session_states, pick.track, scene).and_then(|s| s.started);
+            let started = playing(&self.session_states, pick.track, scene)
+                .and_then(|s| s.origin(&document.settings().tempo, rate));
             slots.push(RunSlot {
                 slot: RecordingSlot {
                     track: pick.track,
@@ -779,7 +780,7 @@ impl Shell {
         // its clip launched on is the one the run kept.
         let started = match armed {
             Some(slot) => slot.started?,
-            None => playing(&self.session_states, track, scene)?.started?,
+            None => playing(&self.session_states, track, scene)?.origin(tempo, rate)?,
         };
         let since = now - tempo.frames_to_ticks(started, rate);
         let at = bl_engine::session_content_tick(clip, true, since.max(Ticks::ZERO))?;

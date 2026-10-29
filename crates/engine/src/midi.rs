@@ -854,6 +854,31 @@ impl TimeBase {
     }
 }
 
+impl Timing {
+    /// The moment `ns` nanoseconds after the epoch.
+    fn at(&self, ns: f64) -> Instant {
+        if ns >= 0.0 {
+            self.epoch + Duration::from_nanos(ns as u64)
+        } else {
+            self.epoch
+                .checked_sub(Duration::from_nanos((-ns) as u64))
+                .unwrap_or(self.epoch)
+        }
+    }
+}
+
+/// What became of a sync message handed to [`MidiIn::emit_sync`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Stamped {
+    /// There is no queue to the output ports (an offline render), or the
+    /// block has no timing: nothing is sent (external-devices R8).
+    Offline,
+    /// The queue was full: dropped and counted.
+    Dropped,
+    /// On the queue; `past` when its moment is before the block's start.
+    Queued { past: bool },
+}
+
 /// The audio thread's MIDI input: the queue's consuming end, the block
 /// clock, and the counts; and the producing end of the queue to the MIDI
 /// output thread.
@@ -1063,15 +1088,7 @@ impl MidiIn {
                 return;
             };
             let frames = f64::from(offset) + f64::from(output_latency);
-            let ns = timing.start + frames * timing.ns_per_frame;
-            let time = if ns >= 0.0 {
-                timing.epoch + Duration::from_nanos(ns as u64)
-            } else {
-                timing
-                    .epoch
-                    .checked_sub(Duration::from_nanos((-ns) as u64))
-                    .unwrap_or(timing.epoch)
-            };
+            let time = timing.at(timing.start + frames * timing.ns_per_frame);
             let event = MidiOutputEvent {
                 port,
                 time,
@@ -1109,6 +1126,50 @@ impl MidiIn {
             dropped += std::mem::take(&mut route.dropped);
         }
         self.counters.out_dropped += dropped;
+    }
+
+    /// Hands one sync message for `port` to the MIDI output thread, stamped
+    /// for the moment the frame `frames` after the block's start (the output
+    /// latency included) is heard, plus the port's sync delay of `delay_ms`
+    /// (midi-clock R4). Real-time safe.
+    pub(crate) fn emit_sync(
+        &mut self,
+        port: PortId,
+        frames: i64,
+        delay_ms: i16,
+        message: MidiMessage,
+    ) -> Stamped {
+        let (Some(out), Some(timing)) = (self.out.as_mut(), self.timing) else {
+            return Stamped::Offline;
+        };
+        let ns = timing.start + frames as f64 * timing.ns_per_frame + f64::from(delay_ms) * 1e6;
+        let event = MidiOutputEvent {
+            port,
+            time: timing.at(ns),
+            message,
+        };
+        if out.push(event).is_ok() {
+            self.counters.sent += 1;
+            Stamped::Queued {
+                // A nanosecond of float rounding isn't late.
+                past: ns < timing.start - 1.0,
+            }
+        } else {
+            self.counters.out_dropped += 1;
+            Stamped::Dropped
+        }
+    }
+
+    /// Sends `message` to `port` at once. Allocates nothing, but is for
+    /// off the audio thread, as [`release`](Self::release) is.
+    pub(crate) fn send_now(&mut self, port: PortId, message: MidiMessage) {
+        if let Some(out) = self.out.as_mut() {
+            let _ = out.push(MidiOutputEvent {
+                port,
+                time: Instant::now(),
+                message,
+            });
+        }
     }
 
     /// Sends the note-offs for everything `routes` still holds, at once:

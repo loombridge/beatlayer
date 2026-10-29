@@ -5,7 +5,7 @@
 
 use std::collections::BTreeSet;
 
-use bl_commands::{Registry, args_schema, tagged_variant, validate};
+use bl_commands::{Permission, Registry, args_schema, tagged_variant, validate};
 use bl_core::time::{Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::registry::{self, RunError};
 use bl_model::{
@@ -36,6 +36,20 @@ fn every_command_is_complete() {
     let commands = document_registry();
     if let Err(problems) = commands.check() {
         panic!("{problems}");
+    }
+}
+
+/// Clearing a clip's envelope deletes every breakpoint on it, as deleting a
+/// track's automation does, so both are destructive.
+#[test]
+fn clearing_a_clip_envelope_is_as_destructive_as_deleting_automation() {
+    // Spec: agent-permissions
+    let commands = document_registry();
+    for id in ["clip.delete_envelope", "automation.delete"] {
+        assert_eq!(
+            commands.get(id).unwrap().permission,
+            Some(Permission::Destructive)
+        );
     }
 }
 

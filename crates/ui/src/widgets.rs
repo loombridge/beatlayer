@@ -142,7 +142,11 @@ fn paint(
         if look.automated {
             led(&painter, rect, c.accent.0);
         }
-    } else if placement.element == Element::MidiIndicators && live {
+    } else if matches!(
+        placement.element,
+        Element::MidiIndicators | Element::SyncLamps
+    ) && live
+    {
         lamps(
             &painter,
             rect,
@@ -315,7 +319,10 @@ fn icon(
                 painter.line_segment([pos2(x, r.top()), pos2(x, r.center().y)], stroke);
             }
         }
-        Element::KeyIndicators | Element::MidiIndicators | Element::Overload => {
+        Element::KeyIndicators
+        | Element::MidiIndicators
+        | Element::SyncLamps
+        | Element::Overload => {
             let lamp = Rect::from_center_size(
                 pos2(c.x, c.y - 2.5),
                 vec2(rect.width().min(8.0) - 2.0, 3.0),

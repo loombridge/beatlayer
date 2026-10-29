@@ -7,13 +7,13 @@
 //! `clip.set_launch_mode`, `clip.set_legato`, `clip.set_launch_quantization`
 //! and `clip.set_velocity_amount`, the commands agents run, and read the
 //! clip's saved launch settings back. The follow-action controls above them
-//! edit through `clip.set_follow_actions` (WP-3.10). The nudge buttons are
-//! drawn in place and pending: what nudge does isn't recorded yet. The MIDI Bank, Sub and Pgm fields wait
-//! for an answer to what they do. The layout follows L-CLIP-005's order;
+//! edit through `clip.set_follow_actions` (WP-3.10). The two nudge buttons
+//! run `session.nudge` for the clip's slot, with -1 and 1 (WP-7.29). The
+//! MIDI Bank, Sub and Pgm fields wait for an answer to what they do. The layout follows L-CLIP-005's order;
 //! the reference didn't measure the tab, so the sizes are the manual's
 //! reading, not pixel parity.
 
-use bl_model::{ClipData, ClipId, LaunchMode, LaunchQuantization};
+use bl_model::{ClipData, ClipId, Document, LaunchMode, LaunchQuantization, SceneId, TrackId};
 use bl_shell::clip_properties_commands::Properties;
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::{self, Role};
@@ -84,6 +84,65 @@ pub(crate) fn pending(
         node.set_description(reason.to_owned());
         node.set_value(text.to_owned());
     });
+}
+
+/// The Session slot that holds the clip `clip`.
+fn slot_of(document: &Document, clip: ClipId) -> Option<(TrackId, SceneId)> {
+    document.track_order().into_iter().find_map(|track| {
+        let held = document
+            .track(track)?
+            .slots()
+            .find_map(|(scene, held)| (held.id == clip).then_some(scene))?;
+        Some((track, held))
+    })
+}
+
+/// A nudge button (the launch quantisation spec, R36): live while the Clip
+/// View shows a Session clip, whether or not it plays. A click runs
+/// `session.nudge` with `steps` for the clip's slot.
+fn nudge_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    (name, glyph, steps): (&str, &str, i32),
+    slot: Option<(TrackId, SceneId)>,
+    events: &mut Vec<UiEvent>,
+) {
+    let id = Id::new(("launch-nudge", name));
+    let response = ui.interact(rect, id, Sense::click());
+    let c = &theme.colors;
+    ui.painter().rect_filled(
+        rect,
+        theme.sizes.corner,
+        if response.is_pointer_button_down_on() {
+            c.control_pressed.0
+        } else if response.hovered() {
+            c.control_hover.0
+        } else {
+            c.control.0
+        },
+    );
+    ui.painter().text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        glyph,
+        theme.small_font(),
+        c.text.0,
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_description(format!(
+            "Moves the playing clip {} by one step of the global launch quantization.",
+            if steps < 0 { "back" } else { "forward" }
+        ));
+    });
+    crate::focus::register(ui.ctx(), id, Area::Detail, None);
+    if let (true, Some((track, scene))) = (response.clicked(), slot) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "session.nudge",
+            json!({ "track": track, "scene": scene, "steps": steps }),
+        )));
+    }
 }
 
 /// Draws the panel selector row of the left group in `rect` (L-CLIP-003):
@@ -266,22 +325,22 @@ pub fn show(
 
     // The nudge buttons.
     let at = row("Nudge");
-    let nudge = "Not built yet: what nudge does isn't recorded.";
-    pending(
+    let slot = slot_of(document, clip);
+    nudge_button(
         ui,
         theme,
-        "Nudge Back",
         Rect::from_min_size(at, vec2(26.0, SMALL.y)),
-        "«",
-        nudge,
+        ("Nudge Backward", "«", -1),
+        slot,
+        events,
     );
-    pending(
+    nudge_button(
         ui,
         theme,
-        "Nudge Forward",
         Rect::from_min_size(at + vec2(32.0, 0.0), vec2(26.0, SMALL.y)),
-        "»",
-        nudge,
+        ("Nudge Forward", "»", 1),
+        slot,
+        events,
     );
 
     // Quantize: Global, then the global menu's list.

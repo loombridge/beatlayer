@@ -5,7 +5,7 @@ use std::time::Instant;
 
 use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
-use bl_model::{LaunchMode, LaunchSettings, ParamId, Scale, SceneId, TrackId};
+use bl_model::{LaunchSettings, ParamId, Scale, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
 use rtrb::{Consumer, Producer};
@@ -26,10 +26,11 @@ use crate::render::RenderPlan;
 use crate::scales::ScaleRuns;
 use crate::sched::{Lane, Pool};
 use crate::session::{
-    Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher, SessionPlayback,
-    SlotState, SlotStatus,
+    Button, ClipOffset, Playhead, SceneOverride, SessionCommand, SessionEvent, SessionLauncher,
+    SessionPlayback, SlotState, SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
+use crate::sync_out::{Beats, Part, SyncOut};
 
 /// A parameter change waiting for its frame.
 #[derive(Clone, Copy, Debug)]
@@ -335,6 +336,8 @@ pub struct Processor {
     /// The frames MIDI to ports is sent after its block starts to be heard
     /// with the audio (WP-5.34): the device's reported output latency.
     output_latency: u32,
+    /// MIDI clock out to the ports with Sync on (WP-7.11).
+    sync_out: SyncOut,
     /// The notes monitoring MIDI tracks received, for Capture MIDI
     /// (WP-3.14).
     captured: Producer<CapturedMidi>,
@@ -398,6 +401,7 @@ impl Processor {
             log: Writer::new(),
             midi: MidiIn::new(config.sample_rate),
             output_latency: config.output_latency,
+            sync_out: SyncOut::new(),
             captured,
             config,
         }
@@ -619,6 +623,9 @@ impl Processor {
         if let Some(program) = self.program.as_mut() {
             self.midi.release(&mut program.get_mut().midi);
         }
+        // Spec: midi-clock R5. Hardware that was following stops with the
+        // stream.
+        self.sync_out.park(&mut self.midi);
         // The song stopped with the stream, so the Session View is at rest
         // too: nothing plays until a person launches again.
         self.session.clear();
@@ -742,6 +749,11 @@ impl Processor {
                     self.rendering = (!plan.get_mut().outputs.is_empty()).then_some(plan);
                 }
                 Message::OutputLatency(frames) => self.output_latency = frames,
+                Message::SyncOutput {
+                    index,
+                    count,
+                    output,
+                } => self.sync_out.set_output(index, count, output),
             }
         }
     }
@@ -1072,6 +1084,21 @@ impl Processor {
                 self.punch = punch;
                 self.update_loop_frames();
             }
+            // Spec: midi-clock R11
+            TransportCommand::ResyncExternalHardware => {
+                let position = self
+                    .tempo()
+                    .frames_to_ticks(self.position, self.config.sample_rate);
+                let signatures = match &self.program {
+                    Some(p) => &p.get().time_signatures,
+                    None => &self.fallback_time_signatures,
+                };
+                self.sync_out.resync(
+                    position,
+                    signatures,
+                    self.playing && !self.metronome.is_counting_in(),
+                );
+            }
             TransportCommand::SetRecording(recording) => {
                 self.metronome.set_recording(recording);
                 if recording {
@@ -1308,6 +1335,11 @@ impl Processor {
             }
             SessionCommand::Launch { track, scene } => self.launch_slot(track, scene),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
+            SessionCommand::Nudge {
+                track,
+                scene,
+                steps,
+            } => self.nudge_slot(track, scene, steps),
             SessionCommand::LaunchScene(scene) => self.launch_scene(scene),
             SessionCommand::CancelSceneLaunch(scene) => {
                 let slots = self
@@ -1438,14 +1470,14 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        let mode = self.slot_mode(track, scene);
-        self.session.press(track, scene, mode, playhead);
+        let button = self.slot_button(track, scene);
+        self.session.press(track, scene, button, playhead);
     }
 
     /// Releases a slot's launch button: a Gate or Repeat clip stops on the
     /// grid (the launch quantisation spec, R18 and R21).
     fn release_slot(&mut self, track: TrackId, scene: SceneId) {
-        let mode = self.slot_mode(track, scene);
+        let button = self.slot_button(track, scene);
         let playhead = Self::playhead(
             self.program.as_ref().map(Program::get),
             &self.fallback_tempo,
@@ -1454,16 +1486,37 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        self.session.release(track, scene, mode, playhead);
+        self.session.release(track, scene, button, playhead);
     }
 
-    /// The launch mode of the clip in a slot, read when a button is pressed
-    /// or released; Trigger for a slot with no clip (R22).
-    fn slot_mode(&self, track: TrackId, scene: SceneId) -> LaunchMode {
+    /// Nudges the clip in a slot at once, on the frame this block part
+    /// starts at (the launch quantisation spec, R30).
+    fn nudge_slot(&mut self, track: TrackId, scene: SceneId, steps: i32) {
+        let looping = self
+            .program
+            .as_ref()
+            .and_then(|program| program.get().slot_row(track, scene))
+            .and_then(|row| row.looping);
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            self.playing,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.nudge(track, scene, steps, looping, playhead);
+    }
+
+    /// What a press or a release of a slot's launch button reads from its
+    /// clip: its mode, Legato and own quantisation; a Trigger on the global
+    /// grid for a slot with no clip (R22, R25).
+    fn slot_button(&self, track: TrackId, scene: SceneId) -> Button {
         self.program
             .as_ref()
-            .and_then(|program| program.get().launch_mode(track, scene))
-            .unwrap_or_default()
+            .map_or_else(Button::default, |program| {
+                program.get().launch_button(track, scene)
+            })
     }
 
     /// Launches a scene: its clips, all on one grid line, and the tempo and
@@ -1622,12 +1675,13 @@ impl Processor {
         else {
             return;
         };
-        for (track, scene, launched) in self.session.started() {
+        for (track, scene, launched, offset) in self.session.started() {
             log.push(SessionEvent {
                 track,
                 scene,
                 at,
                 launched: Some(launched),
+                offset,
             });
         }
     }
@@ -1804,6 +1858,7 @@ impl Processor {
     /// the loop's end goes on from its start: the parts of a block end
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize) {
+        self.write_sync(offset, length);
         let stride = self.config.max_frames;
         // The song frame this part starts at, for a real-time render's
         // range (WP-5.35).
@@ -1935,6 +1990,40 @@ impl Processor {
         if self.rendering.is_some() {
             self.capture_render(song, length);
         }
+    }
+
+    /// Writes the MIDI clock and transport messages for the part of the
+    /// block that starts at `offset` and runs `length` frames (midi-clock R3
+    /// to R8, R11).
+    fn write_sync(&mut self, offset: usize, length: usize) {
+        let (tempo, signatures) = match &self.program {
+            Some(p) => (&p.get().tempo, &p.get().time_signatures),
+            None => (&self.fallback_tempo, &self.fallback_time_signatures),
+        };
+        let counting_in = self.metronome.is_counting_in();
+        let loop_end = self
+            .held_frames
+            .or(self.loop_frames)
+            .filter(|region| self.position < region.end)
+            .map(|region| region.end);
+        self.sync_out.part(
+            &Part {
+                offset: offset as u32,
+                length: length as u32,
+                output_latency: self.output_latency,
+                playing: self.playing && !counting_in,
+                counting_in,
+                position: self.position,
+                insert_marker: self.insert_marker,
+                loop_end,
+                beats: Beats {
+                    tempo,
+                    rate: self.config.sample_rate,
+                },
+                signatures,
+            },
+            &mut self.midi,
+        );
     }
 
     /// Copies the part of the block the real-time render's range covers
@@ -2205,6 +2294,9 @@ impl Processor {
         state.cpu_load = cpu_load;
         state.cpu_load_max = self.cpu_load_max;
         state.counters = self.counters;
+        state.sync_out = self
+            .sync_out
+            .state(self.playing, self.metronome.is_counting_in());
         self.session.status(&mut self.session_status);
         if self.session_take.is_some()
             && let Some(plan) = self.plan.as_mut()
@@ -2217,6 +2309,7 @@ impl Processor {
                     scene: target.scene,
                     state: SlotState::Recording,
                     started: None,
+                    offset: ClipOffset::ZERO,
                 };
                 let found = self
                     .session_status

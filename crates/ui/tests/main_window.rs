@@ -20,6 +20,14 @@ fn every_control_has_a_role_a_name_and_a_value_or_a_note() {
     let output = h.settle();
     let nodes = Harness::nodes(&output);
     for placement in ELEMENTS {
+        // The sync lamps and the Resync button show only when asked for
+        // (tests/midi_input.rs).
+        if matches!(
+            placement.element,
+            Element::SyncLamps | Element::ResyncExternalHardware
+        ) {
+            continue;
+        }
         let node = Harness::node(&nodes, placement.name);
         assert_ne!(node.role, Role::Unknown, "{}", placement.name);
         match placement.pending {
@@ -301,21 +309,40 @@ fn controls_are_drawn_where_the_layout_places_them() {
     let layout = common::layout(REFERENCE, true, true);
     println!("| Row | Element | x from | x to | y from | y to |");
     for placement in ELEMENTS {
-        let node = nodes
+        // The sync lamps and the Resync button show only when an input has
+        // Sync on or Show Resync Button is on (tests/midi_input.rs).
+        if matches!(
+            placement.element,
+            Element::SyncLamps | Element::ResyncExternalHardware
+        ) {
+            continue;
+        }
+        let rect = layout.rect(placement.element);
+        let laid_out = [rect.left(), rect.right(), rect.top(), rect.bottom()].map(f64::from);
+        let near = |bounds: &egui::accesskit::Rect| {
+            [bounds.x0, bounds.x1, bounds.y0, bounds.y1]
+                .iter()
+                .zip(laid_out)
+                .all(|(d, l)| (d - l).abs() < 0.5)
+        };
+        // A control can share its name with a pane (the view selector's
+        // Arrangement View), and the tree's order of nodes isn't fixed.
+        let named: Vec<_> = nodes
             .iter()
-            .find(|n| n.label == placement.name && n.bounds.is_some())
+            .filter(|n| n.label == placement.name && n.bounds.is_some())
+            .collect();
+        let node = named
+            .iter()
+            .find(|n| near(&n.bounds.unwrap()))
+            .or(named.first())
             .unwrap_or_else(|| panic!("{} isn't drawn", placement.name));
         let bounds = node.bounds.unwrap();
-        let rect = layout.rect(placement.element);
         let drawn = [bounds.x0, bounds.x1, bounds.y0, bounds.y1];
-        let laid_out = [rect.left(), rect.right(), rect.top(), rect.bottom()].map(f64::from);
-        for (d, l) in drawn.iter().zip(laid_out) {
-            assert!(
-                (d - l).abs() < 0.5,
-                "{}: drawn {drawn:?}, laid out {laid_out:?}",
-                placement.name
-            );
-        }
+        assert!(
+            near(&bounds),
+            "{}: drawn {drawn:?}, laid out {laid_out:?}",
+            placement.name
+        );
         println!(
             "| {} | {} | {:.0} | {:.0} | {:.0} | {:.0} |",
             placement.row,

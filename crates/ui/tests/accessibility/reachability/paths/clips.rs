@@ -44,6 +44,11 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("midi.ports", Exception(Query)),
         (
+            "midi.set_show_resync_button",
+            settings("tempo-midi", nothing, "Show Resync Button", Key::Enter),
+        ),
+        ("sync.state", Exception(Query)),
+        (
             "clip.stretch",
             Exception(Equivalent(
                 "a Shift-drag on a warped clip's edge (S-ARR-006); its length \

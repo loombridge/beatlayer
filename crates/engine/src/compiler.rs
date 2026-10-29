@@ -3,11 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bl_core::time::{TempoMap, TimeSignatureMap};
+use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{
     Chain, ChainId, Change, ChangeSet, ContentHash, Device, DeviceId, DeviceKind, DeviceOutput,
-    DeviceRole, Document, LaunchMode, Mixer, OrdMap, Output, ParamId, RackKind, SceneId, Tap,
-    Track, TrackId, TrackKind,
+    DeviceRole, Document, Mixer, OrdMap, Output, ParamId, RackKind, Tap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -33,7 +32,7 @@ use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
 use crate::sched::Sched;
 use crate::session::FollowTable;
-use crate::session::{SceneMaps, SceneOverride};
+use crate::session::{Button, LoopLength, SceneMaps, SceneOverride, SlotRow};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
 use crate::state::{MeterOwner, MeterSite};
@@ -253,21 +252,54 @@ fn inside_frozen_group(document: &bl_model::Document, track: TrackId) -> bool {
     false
 }
 
-/// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
-/// mode)` triples sorted by scene and then track: what a scene launch
-/// queues (WP-3.2) and where a press reads its clip's mode (WP-3.3).
-fn scene_slots(document: &Document) -> Vec<(SceneId, TrackId, LaunchMode)> {
+/// Every audio and MIDI slot that holds a clip, sorted by scene and then
+/// track: what a scene launch queues (WP-3.2) and where a press reads its
+/// clip's mode, Legato and own quantisation (WP-3.3, WP-7.29).
+fn scene_slots(document: &Document) -> Vec<SlotRow> {
     let mut slots = Vec::new();
     for track in document.track_order() {
         let Some(track) = document.track(track) else {
             continue;
         };
         for (scene, clip) in track.slots() {
-            slots.push((scene, track.id(), clip.launch.mode));
+            slots.push(SlotRow {
+                scene,
+                track: track.id(),
+                button: Button {
+                    mode: clip.launch.mode,
+                    legato: clip.launch.legato,
+                    quantization: clip.launch.quantization,
+                },
+                looping: loop_length(clip),
+            });
         }
     }
-    slots.sort_unstable_by_key(|&(scene, track, _)| (scene, track));
+    slots.sort_unstable_by_key(|row| (row.scene, row.track));
     slots
+}
+
+/// How long one pass of the clip's loop is while its Loop switch is on: what
+/// a nudge back before the clip's start goes round by (the launch
+/// quantisation spec, R32). `shortcut:` an audio clip with no loop end uses
+/// the clip's length, as its follow action does; read the file's length when
+/// the program can.
+fn loop_length(clip: &bl_model::Clip) -> Option<LoopLength> {
+    match &clip.data {
+        bl_model::ClipData::Midi(midi) if midi.looping => {
+            let end = midi.loop_end.unwrap_or_else(|| {
+                (midi.loop_start + clip.length).max(midi.loop_start + Ticks::QUARTER)
+            });
+            Some(LoopLength::Ticks(end - midi.loop_start))
+        }
+        bl_model::ClipData::Audio(audio) if audio.looping => Some(match audio.loop_end {
+            Some(end) if audio.warp => {
+                LoopLength::Ticks(Ticks((end - audio.loop_start).round() as i64))
+            }
+            Some(end) => LoopLength::Seconds(end - audio.loop_start),
+            None => LoopLength::Ticks(clip.length),
+        }),
+        _ => None,
+    }
 }
 
 impl Compiler {

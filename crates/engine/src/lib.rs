@@ -122,6 +122,7 @@ pub mod session;
 pub mod sidechain;
 mod sources;
 mod state;
+mod sync_out;
 pub mod transport;
 mod tuned;
 mod tuned_notes;
@@ -173,13 +174,14 @@ pub use registry::{DeviceType, NodeFactory, Registry};
 pub use render::{RenderOutput, RenderPlan};
 pub use sched::{Pool, PoolConfig, PoolMonitor};
 pub use session::{
-    SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState, SlotStatus,
-    StoppedClip,
+    ClipOffset, SceneOverride, SessionCommand, SessionEvent, SessionPlayback, SlotState,
+    SlotStatus, StoppedClip,
 };
 pub use state::{
     ChainMeter, EngineCounters, EngineState, MeterOwner, MeterSite, Monitor, PlayedParam,
     PointReading, TrackMeter,
 };
+pub use sync_out::{MAX_SYNC_OUTPUTS, SyncOutState};
 pub use tuned::{KeyMap, KeyPitches};
 pub use tuned_notes::TunedNotes;
 

@@ -140,6 +140,9 @@ pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// types (WP-6.25c).
 pub use bl_shell_spec::clip_envelope_editing as clip_envelope_commands;
 pub use bl_shell_spec::clip_properties as clip_properties_commands;
+/// The Control Surfaces table's command IDs and their argument and result
+/// types (WP-7.5).
+pub use bl_shell_spec::control_surface as control_surface_commands;
 /// The DAWproject commands' IDs and their argument and result types
 /// (WP-6.36, WP-6.37).
 pub use bl_shell_spec::dawproject as dawproject_commands;

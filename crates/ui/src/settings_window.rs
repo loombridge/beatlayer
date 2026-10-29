@@ -17,6 +17,7 @@ use bl_shell::audio::{
     AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
     TONE_MIN_DBFS, TONE_MIN_HZ,
 };
+use bl_shell::control_surface_commands as control_surface;
 use bl_shell::keymap::Origin;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
@@ -1947,10 +1948,10 @@ fn tempo_midi_page(
     events: &mut Vec<UiEvent>,
 ) {
     rows.heading(ui, "MIDI");
+    control_surfaces_table(ui, shell, theme, rows, events);
     rows.note(
         ui,
-        "The Tempo Follower, control surface, and Takeover Mode settings come with later \
-         packages.",
+        "The Tempo Follower and Takeover Mode settings come with later packages.",
     );
     rows.heading(ui, "MIDI Ports");
     let ports = shell.midi().ports();
@@ -1979,6 +1980,138 @@ fn tempo_midi_page(
         }
         if let Some(error) = &port.error {
             rows.note(ui, &format!("{label} couldn't be opened: {error}"));
+        }
+    }
+}
+
+/// The Control Surfaces table (L-SET-014; the control surfaces spec, R1, R2,
+/// R11 and R14): six numbered rows, each a Control Surface chooser, an Input
+/// chooser, an Output chooser and a Dump button, left to right. A port a row
+/// names that the system doesn't offer shows by its name, marked missing.
+/// Choosing runs `control_surface.set` and Dump runs `control_surface.dump`.
+fn control_surfaces_table(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let kinds = Shell::control_surface_choices();
+    let ports = shell.midi().ports();
+    let offered = |direction| {
+        ports
+            .iter()
+            .filter(move |port| port.direction == direction)
+            .map(|port| port.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let (inputs, outputs) = (
+        offered(midi_ids::PortDirection::Input),
+        offered(midi_ids::PortDirection::Output),
+    );
+    // None, then the offered names, then a name the row keeps that isn't
+    // offered, marked missing.
+    let port_choices = |offered: &[String], kept: Option<&str>| -> Vec<Choice<Option<String>>> {
+        let choice = |label: String, value: Option<String>| Choice {
+            label,
+            value,
+            leds: NO_LEDS,
+        };
+        let mut choices = vec![choice("None".to_owned(), None)];
+        choices.extend(offered.iter().map(|n| choice(n.clone(), Some(n.clone()))));
+        if let Some(kept) = kept.filter(|kept| !offered.iter().any(|n| n == kept)) {
+            choices.push(choice(format!("{kept} (missing)"), Some(kept.to_owned())));
+        }
+        choices
+    };
+    for row in shell.control_surface_rows() {
+        let n = row.row;
+        let rects = rows.table_row(ui, &n.to_string(), &[100.0, 100.0, 100.0, 44.0]);
+        let surface_id = row.surface.as_ref().map(|s| s.id.clone());
+        let mut surfaces = vec![Choice {
+            label: "None".to_owned(),
+            value: None,
+            leds: NO_LEDS,
+        }];
+        surfaces.extend(kinds.iter().map(|kind| Choice {
+            label: kind.name.clone(),
+            value: Some(kind.id.clone()),
+            leds: NO_LEDS,
+        }));
+        if let Some(id) = surface_id
+            .as_ref()
+            .filter(|id| !kinds.iter().any(|k| &k.id == *id))
+        {
+            surfaces.push(Choice {
+                label: id.clone(),
+                value: Some(id.clone()),
+                leds: NO_LEDS,
+            });
+        }
+        let current_input = row.input.as_ref().map(|p| p.name.clone());
+        let current_output = row.output.as_ref().map(|p| p.name.clone());
+        let mut set = |field: &str, value: Option<String>| {
+            events.push(UiEvent::Invoke(Invocation::new(
+                control_surface::SET,
+                json!({ "row": n, field: value }),
+            )));
+        };
+        let name = format!("Control Surface {n}");
+        if let Some(chosen) = chooser(
+            ui,
+            theme,
+            &name,
+            &name,
+            rects[0],
+            &surfaces,
+            Some(&surface_id),
+            true,
+        ) {
+            set("surface", chosen);
+        }
+        let name = format!("Input {n}");
+        if let Some(chosen) = chooser(
+            ui,
+            theme,
+            &name,
+            &name,
+            rects[1],
+            &port_choices(&inputs, current_input.as_deref()),
+            Some(&current_input),
+            true,
+        ) {
+            set("input", chosen);
+        }
+        let name = format!("Output {n}");
+        if let Some(chosen) = chooser(
+            ui,
+            theme,
+            &name,
+            &name,
+            rects[2],
+            &port_choices(&outputs, current_output.as_deref()),
+            Some(&current_output),
+            true,
+        ) {
+            set("output", chosen);
+        }
+        let dump = ui
+            .add_enabled_ui(row.can_dump, |ui| {
+                ui.put(rects[3], egui::Button::new("Dump"))
+            })
+            .inner;
+        let label = format!("Dump {n}");
+        ui.ctx().accesskit_node_builder(dump.id, |node| {
+            node.set_label(label);
+        });
+        if dump.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                control_surface::DUMP,
+                json!({ "row": n }),
+            )));
+        }
+        if let Some(error) = &row.error {
+            rows.note(ui, &format!("Row {n} stopped: {error}"));
         }
     }
 }
@@ -2487,6 +2620,25 @@ impl<'a> Rows<'a> {
     fn row_of(&mut self, ui: &Ui, label: &str, widths: &[f32]) -> Vec<Rect> {
         self.label(ui, label);
         let mut x = self.layout.control_x;
+        let rects = widths
+            .iter()
+            .map(|&width| {
+                let rect = Rect::from_min_size(pos2(x, self.y), vec2(width, 18.0));
+                x += width + 4.0;
+                rect
+            })
+            .collect();
+        self.y += SettingsLayout::OPTION_ROW;
+        rects
+    }
+
+    /// A row of a table: a short label in the label column, then controls
+    /// of these widths side by side right after it, where they fit the
+    /// window (the option column starts too far right for a row of three
+    /// choosers and a button).
+    fn table_row(&mut self, ui: &Ui, label: &str, widths: &[f32]) -> Vec<Rect> {
+        self.label(ui, label);
+        let mut x = self.layout.label_x + 18.0;
         let rects = widths
             .iter()
             .map(|&width| {

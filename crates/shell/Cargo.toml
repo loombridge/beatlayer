@@ -89,6 +89,9 @@ bl-devices = { workspace = true, features = ["kit-examples"] }
 lspk-example-gain.workspace = true
 # The test tools the MIDI Tools framework's tests use (WP-6.11).
 bl-midi-tools = { workspace = true, features = ["testing"] }
+# The test surface, so the Control Surfaces table has a surface to run
+# (WP-7.5).
+bl-control = { workspace = true, features = ["testing"] }
 
 # `au_editor` runs on the process's main thread, where Apple makes a unit's
 # view controller; the test harness runs a `#[test]` on a worker thread, so

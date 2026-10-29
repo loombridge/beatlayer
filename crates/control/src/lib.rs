@@ -8,6 +8,9 @@
 //! needed to test it. The window's side (running the control's command) is
 //! `bl-shell`'s.
 //!
+//! The control-surface host is [`Surfaces`] (`docs/specs/control-surfaces.md`,
+//! R1 to R16), with the [`ControlSurface`] trait a surface implements.
+//!
 //! The laws are those of WP-7.1's tests: a note or a key on a slot, a
 //! switch, a button, a radio button or a continuous control, and an absolute
 //! controller. WP-7.2 (relative controllers, Takeover Mode, chromatic slots)
@@ -16,6 +19,17 @@
 use bl_core::midi::MidiMessage;
 use bl_midi_io::RemoteBits;
 use bl_model::{ControlKind, RemoteMapping, RemoteMode, RemoteSource};
+
+mod host;
+mod surface;
+#[cfg(feature = "testing")]
+pub mod testing;
+
+pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, Traffic};
+pub use surface::{
+    ControlSurface, Cx, Gesture, Kind, Out, ReadModel, Request, Ring, Selection, SurfaceState,
+    TICK, Transport, kind, kinds,
+};
 
 /// The messages `mappings` take, for the MIDI system's thread to judge by
 /// (R9). Key mappings take no MIDI message.

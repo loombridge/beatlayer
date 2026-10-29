@@ -57,6 +57,7 @@ use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
 use bl_shell_spec::comping as comping_ids;
+use bl_shell_spec::control_surface as surface_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -117,6 +118,7 @@ mod assistant_ui;
 mod audio_device;
 mod browser_commands;
 mod clip_scale;
+mod control_surface;
 mod device_commands;
 mod document_edits;
 mod focus;
@@ -592,6 +594,9 @@ pub struct Shell {
     chord_learn: crate::chord_learn::ChordLearn,
     /// The remote input and the set's MIDI and key mappings (WP-7.1).
     remote: remote::RemoteState,
+    /// The control surfaces: what the host was last given and the gesture a
+    /// surface has open (WP-7.5).
+    surface: control_surface::SurfaceHost,
     /// The keys held on the MIDI input and the previews sounding, for the
     /// MIDI Note Editor's step recording and Preview (WP-6.5).
     step: step_input::StepInput,
@@ -1259,6 +1264,7 @@ impl Shell {
             midi_lit: [None; 2],
             chord_learn: crate::chord_learn::ChordLearn::default(),
             remote: remote::RemoteState::default(),
+            surface: control_surface::SurfaceHost::default(),
             step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
@@ -1591,6 +1597,8 @@ impl Shell {
         // Spec: remote-mapping R12. Any other edit ends a run of mapped
         // messages that is one undo step.
         self.remote_run_ends_for(id);
+        // Spec: control-surfaces R7. The same for a surface's gesture.
+        self.surface_gesture_ends_for(id);
         self.poll_capture();
         self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
@@ -2112,6 +2120,9 @@ impl Shell {
         }
         if remote_ids::handles(id) {
             return self.run_remote(id, args);
+        }
+        if surface_ids::handles(id) {
+            return self.run_control_surface(id, args);
         }
         if file_manager_ids::handles(id) {
             // Spec: file-management R10 to R17. The File Manager's own

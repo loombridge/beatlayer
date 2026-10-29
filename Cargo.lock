@@ -683,10 +683,12 @@ dependencies = [
  "bl-analysis",
  "bl-audio-io",
  "bl-commands",
+ "bl-control",
  "bl-core",
  "bl-devices",
  "bl-engine",
  "bl-media",
+ "bl-midi-io",
  "bl-midi-tools",
  "bl-model",
  "bl-plugin-host",
@@ -803,9 +805,14 @@ dependencies = [
 name = "bl-control"
 version = "0.2.0"
 dependencies = [
+ "bl-control",
  "bl-core",
+ "bl-engine",
  "bl-midi-io",
  "bl-model",
+ "bl-rt",
+ "rtrb",
+ "serde_json",
 ]
 
 [[package]]
@@ -1118,6 +1125,7 @@ dependencies = [
  "bl-assistant",
  "bl-audio-io",
  "bl-commands",
+ "bl-control",
  "bl-core",
  "bl-devices",
  "bl-engine",

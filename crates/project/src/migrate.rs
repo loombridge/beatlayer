@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -116,6 +116,12 @@ pub const MIGRATIONS: &[Migration] = &[
     },
     Migration {
         from: 11,
+        summary: "the set may hold MIDI and key mappings (the remote mapping spec, R6); a set \
+                  saved before them opens with none, so the saved JSON itself needs nothing",
+        apply: Ok,
+    },
+    Migration {
+        from: 12,
         summary: "a Simpler's sample has a region between Start and End flags, and its Start, \
                   Length and Loop Length are shares of that region that only Classic mode uses \
                   (the sampler spec, R22 and R24); a One-Shot or Slice Simpler's Start and \
@@ -137,7 +143,7 @@ const SIMPLER_MODE: u64 = 0;
 const SIMPLER_START: u64 = 1;
 const SIMPLER_LENGTH: u64 = 2;
 
-/// Version 11 to 12 (WP-7.33; the sampler spec, R24): every One-Shot or Slice
+/// Version 12 to 13 (WP-7.33; the sampler spec, R24): every One-Shot or Slice
 /// Simpler in the saved JSON `value` takes the part its Start and Length
 /// chose as its region, as the shares of the decoded sample they were, and
 /// has those two parameters at their defaults. A Classic Simpler is left as

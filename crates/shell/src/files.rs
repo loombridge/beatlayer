@@ -418,7 +418,7 @@ impl SetStore for ProjectFiles {
         }
         // Spec: sampler R24. A set from before the region says which Simplers
         // the flags can no longer follow.
-        self.notice = set.info().filter(|info| info.schema < 12).and_then(|_| {
+        self.notice = set.info().filter(|info| info.schema < 13).and_then(|_| {
             let named = bl_project::migrate::simplers_whose_start_was_driven(&project.document);
             (!named.is_empty()).then(|| {
                 format!(

@@ -597,6 +597,9 @@ impl Document {
     /// the modulators that held it (R19): the target's device or track was
     /// deleted. It runs in the same undo step as the deletion.
     pub(crate) fn prune_mappings(&mut self) {
+        // Spec: remote-mapping R6. The set's remote mappings go with their
+        // controls in the same undo step.
+        self.prune_remote();
         let stale: Vec<DeviceId> = self
             .tracks()
             .flat_map(|t| t.devices_deep())

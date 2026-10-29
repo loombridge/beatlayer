@@ -276,6 +276,7 @@ impl TryFrom<DocumentRepr> for Document {
         }
         check_crossfader(settings.crossfader)?;
         check_locators(&settings.locators)?;
+        crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
             tuning.check()?;
         }
@@ -323,6 +324,7 @@ impl TryFrom<DocumentRepr> for Document {
             // the document's largest.
             scenes: Vector::new(),
             index: loader.index,
+            remote_dropped: 0,
         };
         document.scenes = match scenes {
             Some(scenes) => scenes.into_iter().collect(),
@@ -392,7 +394,11 @@ impl TryFrom<DocumentRepr> for Document {
         }
         // Spec: modulation R19. A mapping naming a parameter the set doesn't
         // have doesn't load.
+        // Spec: remote-mapping R6. A remote mapping whose control the set
+        // doesn't hold is dropped, and the load counts them.
+        let held = document.settings.remote.len();
         document.prune_mappings();
+        document.remote_dropped = held - document.settings.remote.len();
         Ok(document)
     }
 }

@@ -21,9 +21,11 @@
 //! set saved before it opens with each pressure point a step. Version 10
 //! (T348) made Loop Back-and-Forth the default Transient Loop Mode; a set
 //! saved before it names Loop Forward on each audio clip that had it by default.
-//! Version 11 (T262) added colours. Version 12 (WP-7.33) gave Simpler's sample a
-//! region between Start and End flags; a set saved before it opens with a
-//! One-Shot or Slice Simpler's Start and Length as its region.
+//! Version 11 (T262) added colours. Version 12 (WP-7.1) added the set's MIDI
+//! and key mappings; a set saved before it opens with none. Version 13
+//! (WP-7.33) gave Simpler's sample a region between Start and End flags; a
+//! set saved before it opens with a One-Shot or Slice Simpler's Start and
+//! Length as its region.
 //! `schema-0-fake.json` is an invented version 0, with a migration to
 //! version 1 defined below, to show the scaffold carries an old file through
 //! to the current model.
@@ -544,6 +546,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[8],
     MIGRATIONS[9],
     MIGRATIONS[10],
+    MIGRATIONS[11],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

@@ -174,7 +174,8 @@ impl Shell {
                 // Spec: capture-midi R4. The clip that plays takes the notes.
                 let slot = scene.and_then(|scene| Some((scene, doc.slot(*track, scene)?.clone())));
                 let started = scene.and_then(|scene| {
-                    playing(&self.session_states, *track, scene).and_then(|s| s.started)
+                    playing(&self.session_states, *track, scene)
+                        .and_then(|s| s.origin(&tempo, rate))
                 });
                 let (Some((scene, clip)), Some(started)) = (slot, started) else {
                     continue;

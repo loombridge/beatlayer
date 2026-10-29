@@ -121,6 +121,35 @@ fn the_tuning_commands_run_by_id_and_read_back_through_tuning_state_and_the_quer
         true
     );
 
+    // Spec: tunings R22, R23, R24. The MIDI Controller Layout and its custom
+    // table run by ID and read back from the track query.
+    assert_eq!(
+        query(&mut client, json!({ "id": id }))["tuning_layout"],
+        json!({ "layout": "all_keys" })
+    );
+    run(
+        &mut client,
+        "track.set_tuning_layout",
+        json!({ "track": id, "layout": "closest_in_pitch" }),
+    );
+    assert_eq!(
+        query(&mut client, json!({ "id": id }))["tuning_layout"],
+        json!({ "layout": "closest_in_pitch" })
+    );
+    let mut keys: Vec<Value> = (0..128).map(|key| json!(key)).collect();
+    keys[61] = json!(70);
+    keys[62] = Value::Null;
+    run(
+        &mut client,
+        "track.set_tuning_layout",
+        json!({ "track": id, "layout": "custom", "keys": keys }),
+    );
+    let layout = query(&mut client, json!({ "id": id }))["tuning_layout"].clone();
+    assert_eq!(layout["layout"], "custom");
+    assert_eq!(layout["keys"][61], 70);
+    assert_eq!(layout["keys"][62], Value::Null);
+    assert_eq!(layout["keys"].as_array().unwrap().len(), 128);
+
     // Removing it puts the set back to twelve equal steps; undo brings it
     // back.
     run(&mut client, "tuning.remove", json!({}));

@@ -451,6 +451,13 @@ pub struct Articulations(pub bl_model::ArticulationList);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PluginMpeData(pub bl_model::PluginMpe);
 
+/// The pitches a plug-in plays through per-note pitch bend (the tunings
+/// spec, R20): the set's tuning's while the plug-in's MPE Mode and tuning
+/// switch are on and its track plays the tuning, twelve equal steps' (notes
+/// as they are) otherwise. A plug-in's node starts with twelve equal steps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PluginTuningData(pub crate::KeyPitches);
+
 /// A node: a device, a track's mixer, or anything else that processes audio
 /// in a program.
 ///

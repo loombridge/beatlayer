@@ -91,6 +91,10 @@ struct TrackRepr {
     /// writes it only when it's on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     tuning_bypass: bool,
+    /// The MIDI Controller Layout (the tunings spec, R22, R23). A new track
+    /// has all keys, so a set writes it only when it differs.
+    #[serde(default, skip_serializing_if = "crate::TuningLayout::is_default")]
+    tuning_layout: crate::TuningLayout,
     /// The group of linked tracks the track is in (WP-6.23). Sets saved
     /// before it have none, which loads unlinked.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -238,6 +242,7 @@ impl TrackRepr {
             delay: track.delay(),
             keep_monitoring_latency: track.keep_monitoring_latency(),
             tuning_bypass: track.tuning_bypass(),
+            tuning_layout: track.tuning_layout().clone(),
             link: track.link(),
             colour: Some(track.colour()),
             info_text: track.info_text.clone(),
@@ -275,6 +280,10 @@ impl TryFrom<DocumentRepr> for Document {
             return Err(ModelError::MainTrack);
         }
         check_crossfader(settings.crossfader)?;
+        check_extent(
+            settings.arrangement_loop.start,
+            settings.arrangement_loop.length,
+        )?;
         check_locators(&settings.locators)?;
         crate::remote::check_all(&settings.remote)?;
         if let Some(tuning) = &settings.tuning {
@@ -455,6 +464,10 @@ impl Loader {
         }
         track.keep_monitoring_latency = repr.keep_monitoring_latency;
         track.tuning_bypass = repr.tuning_bypass;
+        if !repr.tuning_layout.keys.is_empty() {
+            crate::TuningLayout::check_keys(&repr.tuning_layout.keys)?;
+        }
+        track.tuning_layout = repr.tuning_layout;
         track.link = repr.link;
         if let Some(colour) = repr.colour {
             crate::colour::check_swatch("track colour", colour)?;
@@ -1240,11 +1253,31 @@ mod tests {
         assert_eq!(loaded.scene(scene).unwrap().follow, follow);
 
         // The set as it was saved without them opens with the defaults.
-        let older = load(plain).unwrap();
+        let older = load(plain.clone()).unwrap();
         assert_eq!(
             older.slot(track, scene).unwrap().launch,
             crate::ClipLaunch::default()
         );
+
+        // A velocity amount past 0 to 1 is one no command can set.
+        let mut broken = plain;
+        broken["tracks"][0]["slots"][0]["clip"]["launch"] = json!({ "velocity_amount": 7.5 });
+        assert!(load(broken).is_err());
+    }
+
+    // Spec: transport R16, R17
+    #[test]
+    fn a_loop_brace_no_command_could_make_doesnt_load() {
+        let (doc, _) = song();
+        let saved = serde_json::to_value(&doc).unwrap();
+        for brace in [
+            serde_json::json!({ "start": -705_600, "length": 0, "enabled": true }),
+            serde_json::json!({ "start": 0, "length": 0, "enabled": false }),
+        ] {
+            let mut broken = saved.clone();
+            broken["settings"]["arrangement_loop"] = brace;
+            assert!(load(broken).is_err());
+        }
     }
 
     // Spec: session-view R14
@@ -2153,6 +2186,7 @@ mod tests {
             back.device(synth).unwrap().mpe,
             PluginMpe {
                 on: true,
+                tuning: true,
                 settings: upper
             }
         );

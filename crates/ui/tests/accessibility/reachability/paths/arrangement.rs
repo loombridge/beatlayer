@@ -30,6 +30,22 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  yet; the Arrangement's headers show it where they have the height (WP-6.9)",
             )),
         ),
+        // The MIDI Controller Layout and its dialog (WP-6.9b): in the same
+        // row of the In/Out section as Bypass Tuning.
+        (
+            "track.set_tuning_layout",
+            Exception(LaterView(
+                "the In/Out section's row for it, which the mixers' section has no room for \
+                 yet; the Arrangement's headers show it where they have the height (WP-6.9b)",
+            )),
+        ),
+        (
+            "tuning.show_layout",
+            Exception(LaterView(
+                "the \"…\" button beside the layout chooser, in the same row as the chooser \
+                 (WP-6.9b)",
+            )),
+        ),
         // Automation (WP-2.12): the Control Bar's Re-Enable Automation
         // button, and the arrangement's automation lanes, which aren't
         // drawn yet.

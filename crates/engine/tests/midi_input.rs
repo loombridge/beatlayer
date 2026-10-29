@@ -297,6 +297,109 @@ fn input_and_monitoring_edits_reach_the_engine_and_undo() {
     assert_eq!(midi.input(keys).0.len(), 2);
 }
 
+/// A 19-step tuning with key 60 at C3, as the set's tuning.
+fn nineteen() -> bl_model::Tuning {
+    let cents = (1..=19).map(|i| 1200.0 * f64::from(i) / 19.0).collect();
+    bl_model::Tuning::new("19-edo".to_owned(), String::new(), cents)
+        .unwrap()
+        .with_reference(None, None, Some(440.0 * 2f64.powf(-9.0 / 12.0)))
+        .unwrap()
+}
+
+/// The keys of the note-ons `track` received in one block, after notes of
+/// the keys `sent` came from the port and from the computer keyboard.
+fn keys_in(midi: &mut Midi, track: TrackId, sent: &[u8]) -> (Vec<u8>, Vec<u8>) {
+    let block = midi.blocks;
+    for (at, &key) in sent.iter().enumerate() {
+        let after = ms(1 + at as u64);
+        midi.send(block, after, port("Keys"), MidiMessage::note_on(0, key, 99));
+        midi.send(
+            block,
+            after,
+            MidiSource::ComputerKeyboard,
+            MidiMessage::note_on(0, key, 99),
+        );
+    }
+    midi.block();
+    midi.block();
+    let keys = |source| -> Vec<u8> {
+        midi.rig
+            .processor
+            .midi_input(track)
+            .unwrap()
+            .events
+            .iter()
+            .filter(|e| e.source == source)
+            .map(|e| e.message.data1())
+            .collect()
+    };
+    (keys(port("Keys")), keys(MidiSource::ComputerKeyboard))
+}
+
+// Spec: tunings R22, R23. Each layout maps the notes of MIDI inputs and the
+// computer MIDI keyboard as they enter the track, and Custom follows its
+// table; a key the tuning can't hold plays nothing.
+#[test]
+fn each_controller_layout_maps_midi_inputs_and_the_computer_keyboard() {
+    use bl_model::LayoutKind;
+    let mut midi = Midi::new();
+    let keys = track(&mut midi.rig.editor, TrackKind::Midi, None);
+    midi.rig.sync();
+    midi.rig.apply(Command::SetArm {
+        track: keys,
+        arm: true,
+    });
+    midi.rig.apply(Command::SetTuning {
+        tuning: nineteen(),
+        retune: false,
+    });
+    midi.block();
+    let layout = |midi: &mut Midi, layout, keys_table: Option<Vec<Option<u8>>>| {
+        midi.rig.apply(Command::SetTuningLayout {
+            track: keys,
+            layout: Some(layout),
+            keys: keys_table,
+        });
+    };
+    let sent = [60, 61, 62, 63];
+    // All Keys, the default: key for key.
+    let (port_keys, keyboard_keys) = keys_in(&mut midi, keys, &sent);
+    assert_eq!(
+        (port_keys, keyboard_keys),
+        (vec![60, 61, 62, 63], vec![60, 61, 62, 63])
+    );
+    // Black Keys Only: C#3 plays key 60, D#3 key 61; the white keys nothing.
+    layout(&mut midi, LayoutKind::BlackKeysOnly, None);
+    let (port_keys, keyboard_keys) = keys_in(&mut midi, keys, &sent);
+    assert_eq!((port_keys, keyboard_keys), (vec![60, 61], vec![60, 61]));
+    // White Keys Only: C3 plays key 60, D3 key 61.
+    layout(&mut midi, LayoutKind::WhiteKeysOnly, None);
+    let (port_keys, keyboard_keys) = keys_in(&mut midi, keys, &sent);
+    assert_eq!((port_keys, keyboard_keys), (vec![60, 61], vec![60, 61]));
+    // Closest in Pitch: C#3 (61) is nearest the tuning's key 62.
+    layout(&mut midi, LayoutKind::ClosestInPitch, None);
+    let (port_keys, _) = keys_in(&mut midi, keys, &[60, 61]);
+    assert_eq!(port_keys, vec![60, 62]);
+    // Custom: the table says, and none plays nothing.
+    let mut table: Vec<Option<u8>> = (0..128).map(Some).collect();
+    table[60] = Some(90);
+    table[61] = None;
+    table[62] = Some(127);
+    layout(&mut midi, LayoutKind::Custom, Some(table));
+    let (port_keys, keyboard_keys) = keys_in(&mut midi, keys, &sent);
+    assert_eq!(
+        (port_keys, keyboard_keys),
+        (vec![90, 127, 63], vec![90, 127, 63])
+    );
+    // Bypass Tuning plays the keys as they come.
+    midi.rig.apply(Command::SetTuningBypass {
+        track: keys,
+        bypass: true,
+    });
+    let (port_keys, _) = keys_in(&mut midi, keys, &sent);
+    assert_eq!(port_keys, vec![60, 61, 62, 63]);
+}
+
 /// A deterministic random sequence.
 struct Lcg(u64);
 

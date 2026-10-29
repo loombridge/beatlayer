@@ -15,6 +15,7 @@
 
 use bl_commands::Context::{Global, Session};
 use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_core::time::Ticks;
 use bl_model::{ChangeSet, ClipId, SceneId, TrackId};
 
 use crate::editing::Position;
@@ -138,6 +139,15 @@ pub struct SlotLaunch {
     pub slot: SlotRef,
     /// What its clip is doing.
     pub state: LaunchState,
+    /// The tick the clip launched on, while it plays or waits to restart
+    /// (launch-quantisation R34).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launched: Option<Ticks>,
+    /// The clip's own time now, in ticks: what a Legato start or a nudge
+    /// moves, and what time it has played since its launch adds to
+    /// (launch-quantisation R34). It stands still while the transport does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_time: Option<Ticks>,
 }
 
 /// How a click changes the selection (the Session View's own modifier

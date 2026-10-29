@@ -9,7 +9,7 @@ use crate::common;
 use bl_core::time::{Frames, TempoMap, Ticks};
 use bl_devices::testing::{self, UTILITY_GAIN};
 use bl_engine::{
-    Block, Collector, Compiler, EngineConfig, Node, NodeData, NodeKey, SessionPlayback,
+    Block, ClipOffset, Collector, Compiler, EngineConfig, Node, NodeData, NodeKey, SessionPlayback,
     StoppedClip, TransportInfo, Update,
 };
 use bl_model::{
@@ -149,6 +149,7 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         scene: Some(scene),
         frame: launched,
         velocity: 127,
+        offset: ClipOffset::ZERO,
         last: None,
     }];
     // The clip launched at the second bar line: from it, in blocks of any
@@ -186,9 +187,11 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         scene: None,
         frame: Frames::ZERO,
         velocity: 127,
+        offset: ClipOffset::ZERO,
         last: Some(StoppedClip {
             scene,
             launched,
+            offset: ClipOffset::ZERO,
             stopped: Frames(BAR as i64 * 4),
         }),
     }];
@@ -199,4 +202,68 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         "held at {held}: {:?}",
         &out[..4]
     );
+}
+
+// Spec: launch-quantisation R29. A linked envelope follows the clip time of
+// a clip that took over another's, and an unlinked one keeps counting from
+// the launch.
+#[test]
+fn a_linked_envelope_follows_the_clip_time_and_an_unlinked_one_counts_from_the_launch() {
+    let half = ClipOffset {
+        ticks: Ticks::WHOLE / 2,
+        frames: BAR as i64 / 2,
+    };
+    for linked in [true, false] {
+        let (mut editor, track, scene, device) = song();
+        if !linked {
+            let clip = editor
+                .document()
+                .track(track)
+                .unwrap()
+                .slot(scene)
+                .unwrap()
+                .id;
+            editor
+                .apply(Command::SetClipEnvelopeLinked {
+                    clip,
+                    target: AutomationTarget::Device {
+                        device,
+                        param: UTILITY_GAIN,
+                    },
+                    kind: EnvelopeKind::Automation,
+                    linked: false,
+                })
+                .unwrap();
+        }
+        let (tempo, data) = data(&editor, device);
+        let mut utility = node(
+            &testing::registry(),
+            &testing::utility_type().device(device),
+            2048,
+        );
+        utility.receive_data(data);
+        let playing = [SessionPlayback {
+            track,
+            scene: Some(scene),
+            frame: Frames(BAR as i64),
+            velocity: 127,
+            offset: half,
+            last: None,
+        }];
+        for block in [1, 64, 2_048] {
+            let at = BAR + 1_000;
+            let out = run(utility.as_mut(), &tempo, at, block, &playing);
+            let since = at - BAR;
+            let want = if linked {
+                gain(since + BAR / 2)
+            } else {
+                gain(since)
+            };
+            assert!(
+                (f64::from(out[0]) - want).abs() < 2e-5,
+                "linked {linked}, blocks of {block}: {} isn't {want}",
+                out[0]
+            );
+        }
+    }
 }

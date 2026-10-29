@@ -31,6 +31,9 @@ pub struct Run {
     /// Where the clip launched, which is `from` unless the clip was already
     /// playing when the take began.
     pub launched: Ticks,
+    /// The clip time it had where it launched: not zero for a Legato start
+    /// or after a nudge, which splits a stretch (launch-quantisation R33).
+    pub offset: Ticks,
 }
 
 /// Pairs a take's starts and ends into the stretches the clips played: a
@@ -38,31 +41,32 @@ pub struct Run {
 /// playing when the take ends at `end` plays up to it.
 #[must_use]
 pub fn runs(events: &[SessionEvent], end: Frames, tempo: &TempoMap, rate: SampleRate) -> Vec<Run> {
-    let mut open: BTreeMap<Slot, (Frames, Frames)> = BTreeMap::new();
+    let mut open: BTreeMap<Slot, (Frames, Frames, Ticks)> = BTreeMap::new();
     let mut played = Vec::new();
     for event in events {
         let slot = (event.track, event.scene);
-        if let Some((from, launched)) = open.remove(&slot) {
-            played.push((slot, from, event.at, launched));
+        if let Some((from, launched, offset)) = open.remove(&slot) {
+            played.push((slot, from, event.at, launched, offset));
         }
         if let Some(launched) = event.launched {
-            open.insert(slot, (event.at, launched));
+            open.insert(slot, (event.at, launched, event.offset.ticks));
         }
     }
     played.extend(
         open.into_iter()
-            .map(|(slot, (from, launched))| (slot, from, end, launched)),
+            .map(|(slot, (from, launched, offset))| (slot, from, end, launched, offset)),
     );
     let ticks = |frame: Frames| tempo.frames_to_ticks(frame, rate);
     let mut runs: Vec<Run> = played
         .into_iter()
-        .filter_map(|(slot, from, to, launched)| {
+        .filter_map(|(slot, from, to, launched, offset)| {
             let to = to.min(end);
             (to > from).then(|| Run {
                 slot,
                 from: ticks(from),
                 to: ticks(to),
                 launched: ticks(launched),
+                offset,
             })
         })
         .collect();
@@ -180,11 +184,12 @@ pub fn place(
             let Some(source) = source else {
                 continue;
             };
+            // A clip that took over another's time, or was nudged, played as
+            // if it had launched its offset earlier (launch-quantisation R33).
+            let launched = run.launched - run.offset;
             let data = match source.data {
-                ClipData::Midi(midi) => ClipData::Midi(midi.moved_by(run.launched, from)),
-                ClipData::Audio(audio) => {
-                    ClipData::Audio(audio.moved_by(run.launched, from, &tempo))
-                }
+                ClipData::Midi(midi) => ClipData::Midi(midi.moved_by(launched, from)),
+                ClipData::Audio(audio) => ClipData::Audio(audio.moved_by(launched, from, &tempo)),
             };
             let id = editor.new_id();
             let mut clip = Clip::new(id, from, to - from, data);
@@ -307,6 +312,7 @@ mod tests {
             scene,
             at: Frames(at),
             launched: Some(Frames(launched)),
+            offset: bl_engine::ClipOffset::ZERO,
         }
     }
 
@@ -316,6 +322,7 @@ mod tests {
             scene,
             at: Frames(at),
             launched: None,
+            offset: bl_engine::ClipOffset::ZERO,
         }
     }
 
@@ -387,6 +394,7 @@ mod tests {
             scene,
             state: SlotState::Playing,
             started: Some(Frames(BAR)),
+            offset: bl_engine::ClipOffset::ZERO,
         }];
         // A second set has the same IDs, and the clip as it was.
         let (before, same, ..) = set();
@@ -440,6 +448,79 @@ mod tests {
                 .iter()
                 .all(|&s| s == 0.0)
         );
+    }
+
+    // Spec: launch-quantisation R33. A nudge ends the stretch it falls in and
+    // starts the next, which carries the clip time it jumped to, so the
+    // second copy begins with its start marker where the clip then was in its
+    // loop; a stretch that began with a Legato start does so too.
+    #[test]
+    fn a_nudge_splits_the_copy_and_the_second_part_starts_where_the_clip_jumped_to() {
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: bl_model::TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let scene = editor.document().scenes().next().unwrap().id;
+        let data = bl_model::MidiData {
+            looping: true,
+            loop_end: Some(Ticks::WHOLE),
+            ..bl_model::MidiData::new([])
+        };
+        let id = editor.new_id();
+        let clip = Clip::new(id, Ticks::ZERO, Ticks::WHOLE, ClipData::Midi(data));
+        editor
+            .apply(Command::CreateSlotClip { track, scene, clip })
+            .unwrap();
+        // Launched at the bar line, nudged a half bar on at 1.2 bars, and
+        // the take ends at the third bar.
+        let jump = Ticks::WHOLE / 2;
+        let nudged = bl_engine::ClipOffset {
+            ticks: jump,
+            frames: 0,
+        };
+        let events = [
+            start(track, scene, BAR, BAR),
+            end(track, scene, BAR + BAR / 5),
+            SessionEvent {
+                offset: nudged,
+                ..start(track, scene, BAR + BAR / 5, BAR)
+            },
+        ];
+        let found = runs(&events, Frames(3 * BAR), &tempo(), RATE);
+        assert_eq!(found.len(), 2);
+        assert_eq!((found[0].offset, found[1].offset), (Ticks::ZERO, jump));
+        let mut target = editor;
+        target
+            .transact("Record", |editor| {
+                place(editor, &Watch::default(), &found, &[], Ticks::WHOLE * 3)
+            })
+            .unwrap();
+        let mut copies: Vec<_> = target
+            .document()
+            .track(track)
+            .unwrap()
+            .clips()
+            .map(|clip| match &clip.data {
+                ClipData::Midi(midi) => (clip.start, clip.end(), midi.start),
+                ClipData::Audio(_) => unreachable!("a MIDI clip"),
+            })
+            .collect();
+        copies.sort();
+        let split = ticks(BAR + BAR / 5);
+        // The first part is the clip as launched: it is a fifth of a bar in
+        // at the split. The second begins half a bar further on in its loop,
+        // as a clip launched half a bar earlier would be.
+        assert_eq!(copies[0], (ticks(BAR), split, Ticks::ZERO));
+        let fifth = split - ticks(BAR);
+        let expected = (fifth + jump).rem_euclid(Ticks::WHOLE);
+        assert_eq!(copies[1], (split, ticks(3 * BAR), expected));
     }
 
     // Spec: session-to-arrangement R4. An armed track's recorded input is

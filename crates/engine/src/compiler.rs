@@ -3,11 +3,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use bl_core::time::{TempoMap, TimeSignatureMap};
+use bl_core::time::{TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{
     Chain, ChainId, Change, ChangeSet, ContentHash, Device, DeviceId, DeviceKind, DeviceOutput,
-    DeviceRole, Document, LaunchMode, Mixer, OrdMap, Output, ParamId, RackKind, SceneId, Tap,
-    Track, TrackId, TrackKind,
+    DeviceRole, Document, Mixer, OrdMap, Output, ParamId, RackKind, Tap, Track, TrackId, TrackKind,
 };
 
 use crate::EngineConfig;
@@ -33,7 +32,7 @@ use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
 use crate::sched::Sched;
 use crate::session::FollowTable;
-use crate::session::{SceneMaps, SceneOverride};
+use crate::session::{Button, LoopLength, SceneMaps, SceneOverride, SlotRow};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
 use crate::state::{MeterOwner, MeterSite};
@@ -208,6 +207,21 @@ pub struct Compiler {
     hits: ChainHits,
 }
 
+/// The tuning a plug-in device plays through per-note pitch bend (the
+/// tunings spec, R20): the track's, while the device's MPE Mode and tuning
+/// switch are both on.
+fn plugin_tuning<'a>(
+    document: &'a Document,
+    track: TrackId,
+    device: &bl_model::Device,
+) -> Option<&'a bl_model::Tuning> {
+    (matches!(device.kind, bl_model::DeviceKind::Plugin { .. })
+        && device.mpe.on
+        && device.mpe.tuning)
+        .then(|| tuning_of(document, track))
+        .flatten()
+}
+
 /// Whether the set's tuning hides the scales (the tunings spec, R16): it
 /// holds other than twelve notes to its pseudo-octave.
 fn scales_hidden(document: &Document) -> bool {
@@ -237,21 +251,54 @@ fn inside_frozen_group(document: &bl_model::Document, track: TrackId) -> bool {
     false
 }
 
-/// Every audio and MIDI slot that holds a clip, as `(scene, track, launch
-/// mode)` triples sorted by scene and then track: what a scene launch
-/// queues (WP-3.2) and where a press reads its clip's mode (WP-3.3).
-fn scene_slots(document: &Document) -> Vec<(SceneId, TrackId, LaunchMode)> {
+/// Every audio and MIDI slot that holds a clip, sorted by scene and then
+/// track: what a scene launch queues (WP-3.2) and where a press reads its
+/// clip's mode, Legato and own quantisation (WP-3.3, WP-7.29).
+fn scene_slots(document: &Document) -> Vec<SlotRow> {
     let mut slots = Vec::new();
     for track in document.track_order() {
         let Some(track) = document.track(track) else {
             continue;
         };
         for (scene, clip) in track.slots() {
-            slots.push((scene, track.id(), clip.launch.mode));
+            slots.push(SlotRow {
+                scene,
+                track: track.id(),
+                button: Button {
+                    mode: clip.launch.mode,
+                    legato: clip.launch.legato,
+                    quantization: clip.launch.quantization,
+                },
+                looping: loop_length(clip),
+            });
         }
     }
-    slots.sort_unstable_by_key(|&(scene, track, _)| (scene, track));
+    slots.sort_unstable_by_key(|row| (row.scene, row.track));
     slots
+}
+
+/// How long one pass of the clip's loop is while its Loop switch is on: what
+/// a nudge back before the clip's start goes round by (the launch
+/// quantisation spec, R32). `shortcut:` an audio clip with no loop end uses
+/// the clip's length, as its follow action does; read the file's length when
+/// the program can.
+fn loop_length(clip: &bl_model::Clip) -> Option<LoopLength> {
+    match &clip.data {
+        bl_model::ClipData::Midi(midi) if midi.looping => {
+            let end = midi.loop_end.unwrap_or_else(|| {
+                (midi.loop_start + clip.length).max(midi.loop_start + Ticks::QUARTER)
+            });
+            Some(LoopLength::Ticks(end - midi.loop_start))
+        }
+        bl_model::ClipData::Audio(audio) if audio.looping => Some(match audio.loop_end {
+            Some(end) if audio.warp => {
+                LoopLength::Ticks(Ticks((end - audio.loop_start).round() as i64))
+            }
+            Some(end) => LoopLength::Seconds(end - audio.loop_start),
+            None => LoopLength::Ticks(clip.length),
+        }),
+        _ => None,
+    }
 }
 
 impl Compiler {
@@ -614,6 +661,26 @@ impl Compiler {
             let (before, after) = (tuning_of(&old, id), tuning_of(document, id));
             if before != after && (!recompile || after.is_none()) {
                 self.send_key_pitches(document, id, after.is_some(), &mut update);
+            }
+        }
+        // Spec: tunings R20. A plug-in's tuning switch or MPE Mode, the
+        // set's tuning, or its track's Bypass Tuning changed.
+        if !recompile {
+            for track in document.tracks() {
+                for device in track.devices_deep() {
+                    let before = old.device(device.id).and_then(|was| {
+                        let track = old.device_track(device.id)?;
+                        Some(plugin_tuning(&old, track, was))
+                    });
+                    let after = plugin_tuning(document, track.id(), device);
+                    if before.is_some_and(|before| before != after) {
+                        update.data.push((
+                            NodeKey::Device(device.id),
+                            self.gc
+                                .data(crate::node::PluginTuningData(crate::KeyPitches::of(after))),
+                        ));
+                    }
+                }
             }
         }
         for track in document.tracks() {
@@ -1428,6 +1495,23 @@ impl Compiler {
             // Spec: tunings R18. Every node is new too, so each instrument
             // on a track that plays the tuning is sent its pitches.
             self.send_key_pitches(document, id, true, &mut update);
+            // Spec: tunings R20. A plug-in's node starts with twelve equal
+            // steps, so each one that plays the tuning is sent it.
+            for device in document
+                .track(id)
+                .into_iter()
+                .flat_map(bl_model::Track::devices_deep)
+            {
+                if let Some(tuning) = plugin_tuning(document, id, device) {
+                    update.data.push((
+                        NodeKey::Device(device.id),
+                        self.gc
+                            .data(crate::node::PluginTuningData(crate::KeyPitches::of(Some(
+                                tuning,
+                            )))),
+                    ));
+                }
+            }
             // Spec: mpe R14. A plug-in's node starts with MPE Mode off, so
             // each one whose mode or settings differ is sent them.
             for device in document
@@ -3087,6 +3171,21 @@ fn needs_program(
         }
     }
     chain_events(changes, old, new, params);
+    // Spec: tunings R22. A MIDI track's route maps its keys by its MIDI
+    // Controller Layout under the set's tuning, so a change to the map is a
+    // change to the route.
+    if !recompile
+        && new.tracks().any(|track| {
+            track.kind() == TrackKind::Midi
+                && (!track.tuning_layout().is_default()
+                    || old
+                        .track(track.id())
+                        .is_some_and(|was| !was.tuning_layout().is_default()))
+                && crate::midi::key_map(old, track.id()) != crate::midi::key_map(new, track.id())
+        })
+    {
+        recompile = true;
+    }
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
     // player its clips as node data (the audio clips spec, R12). The Session
     // View's slots are the exception: which slots hold a clip travels in the

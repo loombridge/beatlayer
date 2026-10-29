@@ -214,6 +214,10 @@ pub struct MidiPrefs {
     pub ports: Vec<PortPrefs>,
     /// Whether the computer MIDI keyboard is on.
     pub keyboard_on: bool,
+    /// Show Resync Button (Tempo & MIDI, L-SET-014; the MIDI clock spec,
+    /// R10): the Control Bar shows Resync External Hardware. Off in a new
+    /// install.
+    pub show_resync_button: bool,
 }
 
 /// One MIDI port's switches in the preferences.
@@ -232,6 +236,16 @@ pub struct PortPrefs {
     /// MPE, for an input; a preferences file from before it has none.
     #[serde(default)]
     pub mpe: bool,
+    /// MIDI Clock Sync Delay in milliseconds (the MIDI clock spec, R2); a
+    /// preferences file from before it has 0.
+    #[serde(default)]
+    pub sync_delay_ms: i16,
+    /// An output's MIDI Clock Type.
+    #[serde(default)]
+    pub clock_type: bl_shell_spec::midi_io::ClockTypeChoice,
+    /// An output's Hardware Resync.
+    #[serde(default)]
+    pub hardware_resync: bl_shell_spec::midi_io::HardwareResyncChoice,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

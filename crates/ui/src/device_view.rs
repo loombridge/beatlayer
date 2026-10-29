@@ -1438,6 +1438,30 @@ impl DeviceViewUi {
                 );
                 ui.close();
             }
+            // Spec: tunings R20 (C-DEVICE-015). The last item, ticked while
+            // on and shown while the set has a tuning; with MPE Mode off it
+            // stays as it was but can't be chosen, as the tuning then
+            // doesn't reach the plug-in.
+            if frame.tuning_loaded {
+                let text = "Apply Tuning to Per-Note Pitch Bend";
+                let response = ui.add_enabled(
+                    mpe.on,
+                    egui::Button::new(if mpe.tuning {
+                        format!("✔ {text}")
+                    } else {
+                        text.to_owned()
+                    }),
+                );
+                crate::menus::register_item(ui.ctx(), &response);
+                if response.clicked() {
+                    invoke(
+                        events,
+                        "plugin.set_tuning",
+                        json!({ "device": frame.id, "on": !mpe.tuning }),
+                    );
+                    ui.close();
+                }
+            }
         }
         // Drum Sampler's own items after its switches (31.4.5): the swap to
         // Simpler, and Save as Default Pad, which the Drum Rack's pads

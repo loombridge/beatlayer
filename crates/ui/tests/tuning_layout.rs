@@ -234,6 +234,17 @@ fn the_configure_dialog_sets_each_keys_value_one_undo_step_each() {
         .clone();
     assert_eq!(layout.custom(0), None);
     assert_eq!(h.shell.editor().undo_history().len(), steps + 2);
+    // A key that plays nothing gets its own key back.
+    click_labelled(&mut h, "Increase the key C-2 plays");
+    let layout = h
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .tuning_layout()
+        .clone();
+    assert_eq!(layout.custom(0), Some(0));
     click_labelled(&mut h, "OK");
     assert!(!h.shell.tuning_layout_dialog().open);
 

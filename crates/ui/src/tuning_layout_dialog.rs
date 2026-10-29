@@ -95,7 +95,8 @@ fn row(ui: &mut Ui, key: usize, value: Option<u8>, tuning_keys: usize) -> Option
             Some(v) if usize::from(v) >= tuning_keys => format!("{v} (unavailable)"),
             Some(v) => v.to_string(),
         });
-        let up = ui.add_enabled(value.is_some_and(|v| v < 127), egui::Button::new("+"));
+        // A key that plays nothing gets a key back, its own, from "+".
+        let up = ui.add_enabled(value.is_none_or(|v| v < 127), egui::Button::new("+"));
         name_button(ui, &up, &format!("Increase the key {name} plays"));
         let none = ui.add_enabled(value.is_some(), egui::Button::new("None"));
         name_button(ui, &none, &format!("Play nothing on {name}"));
@@ -103,7 +104,7 @@ fn row(ui: &mut Ui, key: usize, value: Option<u8>, tuning_keys: usize) -> Option
             chosen = value.map(|v| Some(v.saturating_sub(1)));
         }
         if up.clicked() {
-            chosen = value.map(|v| Some((v + 1).min(127)));
+            chosen = Some(Some(value.map_or(key as u8, |v| (v + 1).min(127))));
         }
         if none.clicked() {
             chosen = Some(None);

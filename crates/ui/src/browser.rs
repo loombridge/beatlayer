@@ -3078,7 +3078,12 @@ impl BrowserUi {
         let view = shell.arrangement();
         let doc = shell.editor().document();
         let pinned = view.pinned_tracks(doc).count();
-        let lanes = ArrangementLayout::compute(main_view, view.overview(), pinned).lanes;
+        let layout = ArrangementLayout::compute(main_view, view.overview(), pinned);
+        let lanes = if doc.settings().time_signatures.has_changes() {
+            layout.with_signature_lane().lanes
+        } else {
+            layout.lanes
+        };
         // Cmd (macOS) or Alt (Windows) ignores the grid (I-DRAG-021).
         let ignore_snap = if cfg!(target_os = "macos") {
             modifiers.mac_cmd

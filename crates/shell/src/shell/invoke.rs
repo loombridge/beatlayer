@@ -502,6 +502,28 @@ impl Shell {
                 self.touch();
                 Ok(Value::Null)
             }
+            locator_ids::EDIT_SIGNATURE if !has("signature") => {
+                // Spec: time-editing R31. Cmd-R, Edit Time Signature and the
+                // marker's menu type the signature in the lane.
+                let at = self.arrangement.selected_signature().ok_or_else(|| {
+                    ShellError::Unavailable {
+                        command: id.to_owned(),
+                        reason: "select a time-signature change first".to_owned(),
+                    }
+                })?;
+                self.effects.push(Effect::EditTimeSignature(at));
+                self.touch();
+                Ok(Value::Null)
+            }
+            locator_ids::INSERT_SIGNATURE => {
+                // Spec: time-editing R30. The new marker's value opens for
+                // typing.
+                let result = self.run(id, args)?;
+                if let Some(at) = self.arrangement.selected_signature() {
+                    self.effects.push(Effect::EditTimeSignature(at));
+                }
+                Ok(result)
+            }
             "device.rename" if !has("name") => {
                 let args = self.filled_args(id, args)?;
                 // Spec: macros R29. With a variation selected, Rename names

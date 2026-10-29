@@ -47,7 +47,8 @@ or an observation of Live running, as the clean-room policy allows.
   repeat of a signal lands on the exact frame the division names at the
   current tempo, at any tempo, and it follows a tempo change: changing the
   tempo from 120 to 60 BPM moves a one-sixteenth repeat from 6,000 to 12,000
-  frames at 48 kHz. (S1, S5)
+  frames at 48 kHz. The delay lines hold sixteen sixteenths with a +50% Offset
+  at 20 BPM, the slowest tempo the transport allows. (S1, S5)
 - **R2.** Link gives both channels the left channel's delay time; with Link
   off each channel uses its own. Each channel's Offset stays its own even
   when Link is on, and moves its repeat earlier or later within the
@@ -57,8 +58,13 @@ or an observation of Live running, as the clean-room policy allows.
   Freeze cycles what is in the lines and ignores new input. A hundred per
   cent feedback with Freeze sustains a signal without decay and without
   growth. (S1)
-- **R4.** Ping Pong crosses the feedback between the channels, so a repeat
-  appears on one channel, the next on the other, and so on. (S1)
+- **R4.** Ping Pong sums both input channels into the left line, so the
+  first repeat is on the left only, the next on the right only, and so on,
+  every delay time; nothing lands on both channels at once. The left line's
+  output crosses into the right line at full level and the right line's
+  output returns to the left line through Feedback, so each left and right
+  pair is level and the pairs fall by the Feedback (measured in Live 12.4,
+  25 October 2026). (S1)
 - **R5.** The Filter toggle puts a band-pass filter in each delay loop, with
   a center frequency (Freq) and a bandwidth (Width); with it on, a repeat
   holds the band around the center frequency and not the rest. (S1)

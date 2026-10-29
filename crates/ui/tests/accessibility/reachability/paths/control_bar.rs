@@ -119,9 +119,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("transport.stop_recording", Exception(RECORDING)),
-        // Tempo breakpoints and time-signature markers (WP-2.20): the
-        // arrangement's tempo envelope and marker lane aren't drawn yet, so
-        // agents reach these through the agent API until they are.
+        // Tempo breakpoints (WP-2.20): the arrangement's tempo envelope isn't
+        // drawn yet, so agents reach these through the agent API until it is.
         (
             "song.set_tempo_breakpoint",
             Exception(LaterView("the arrangement's tempo envelope (WP-2.20)")),
@@ -136,20 +135,60 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "song.set_time_signature_change",
-            Exception(LaterView(
-                "the arrangement's time-signature marker lane (WP-2.20)",
+            Exception(Equivalent(
+                "the Control Bar's signature fields, which change the marker in force, and \
+                 Cmd-R, which types a selected marker's signature (the time editing spec, R31 \
+                 and R33)",
             )),
         ),
         (
             "song.move_time_signature_change",
-            Exception(LaterView(
-                "the arrangement's time-signature marker lane (WP-2.20)",
+            Exception(Equivalent(
+                "arrangement.move_time_signature_change, which the arrow keys and a drag run \
+                 (the time editing spec, R32)",
             )),
         ),
         (
             "song.delete_time_signature_change",
-            Exception(LaterView(
-                "the arrangement's time-signature marker lane (WP-2.20)",
+            Exception(Equivalent(
+                "the Delete key while a time-signature marker is selected, which the \
+                 Arrangement's keyboard runs directly (the time editing spec, R32)",
+            )),
+        ),
+        // The time-signature lane (WP-6.61).
+        (
+            "arrangement.select_time_signature_change",
+            Exception(Equivalent(
+                "clicking a marker selects it, and Tab reaches the markers in the Arrangement's \
+                 Tab order (the time editing spec, R31)",
+            )),
+        ),
+        (
+            "arrangement.edit_time_signature",
+            Exception(Equivalent(
+                "Cmd-R while a marker is selected, which the Arrangement's keyboard runs \
+                 directly (the time editing spec, R31)",
+            )),
+        ),
+        (
+            "arrangement.move_time_signature_change",
+            Exception(Equivalent(
+                "the arrow keys move the selected marker one grid step, and dragging one moves \
+                 it (the time editing spec, R32)",
+            )),
+        ),
+        (
+            "arrangement.delete_fragmentary_bar_time",
+            Exception(Unobserved(
+                "the short bar's context menu, which the pointer opens; Live's keyboard path \
+                 for it isn't observed yet (the time editing spec, R34)",
+            )),
+        ),
+        (
+            "arrangement.complete_fragmentary_bar",
+            Exception(Unobserved(
+                "the short bar's context menu, which the pointer opens; Live's keyboard path \
+                 for it isn't observed yet (the time editing spec, R34)",
             )),
         ),
         // The Arrangement's locator buttons (time-editing R3, R4, R6).

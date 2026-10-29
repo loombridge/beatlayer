@@ -1073,6 +1073,26 @@ impl ClipGestures {
                 return;
             }
         }
+        // Spec: time-editing R32. While a time-signature marker is selected,
+        // Left and Right move it one grid step.
+        if let Some(at) = lanes.view.selected_signature() {
+            let step = lanes.view.grid_ticks(lanes.doc);
+            let mut moved = false;
+            for (key, later) in [(Key::ArrowLeft, false), (Key::ArrowRight, true)] {
+                if pressed(key, false, false) {
+                    let to = if later { at + step } else { at - step };
+                    invoke(
+                        events,
+                        locator_ids::MOVE_SIGNATURE,
+                        json!({ "at": at, "to": to.max(Ticks::ZERO) }),
+                    );
+                    moved = true;
+                }
+            }
+            if moved {
+                return;
+            }
+        }
         if !title_bars {
             for (key, direction) in [(Key::ArrowLeft, "left"), (Key::ArrowRight, "right")] {
                 if pressed(key, false, false) {

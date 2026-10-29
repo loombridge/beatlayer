@@ -150,8 +150,33 @@ const TIME: &[Row] = &[
 /// The scrub area's menu (C-TIME-022).
 const SCRUB: &[Row] = &[
     ("C-TIME-022a", "Add Locator", Cmd(crate::locator::ADD)),
-    ("C-TIME-022b", "Insert Time Signature Change", Pending(None)),
+    (
+        "C-TIME-022b",
+        "Insert Time Signature Change",
+        Cmd(crate::locator::INSERT_SIGNATURE),
+    ),
 ];
+
+/// A fragmentary bar's menu (C-TIME-024).
+const FRAGMENTARY: &[Row] = &[
+    (
+        "C-TIME-024a",
+        "Delete Fragmentary Bar Time",
+        Cmd(crate::editing::DELETE_FRAGMENTARY_BAR_TIME),
+    ),
+    (
+        "C-TIME-024b",
+        "Complete Fragmentary Bar",
+        Cmd(crate::editing::COMPLETE_FRAGMENTARY_BAR),
+    ),
+];
+
+/// A time-signature marker's menu (C-TIME-027).
+const SIGNATURE: &[Row] = &[(
+    "C-TIME-027",
+    "Edit Time Signature",
+    Cmd(crate::locator::EDIT_SIGNATURE),
+)];
 
 /// A locator's menu (C-TIME-023 and C-TIME-025).
 const LOCATOR: &[Row] = &[
@@ -1161,6 +1186,18 @@ pub fn arrangement_scrub_in() -> Vec<MenuItem> {
 #[must_use]
 pub fn arrangement_locator_in() -> Vec<MenuItem> {
     items(LOCATOR)
+}
+
+/// A fragmentary bar's menu (C-TIME-024).
+#[must_use]
+pub fn arrangement_fragmentary_bar_in() -> Vec<MenuItem> {
+    items(FRAGMENTARY)
+}
+
+/// A time-signature marker's menu (C-TIME-027).
+#[must_use]
+pub fn arrangement_signature_in() -> Vec<MenuItem> {
+    items(SIGNATURE)
 }
 
 /// The loop brace's menu (C-TIME-023).

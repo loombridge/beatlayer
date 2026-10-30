@@ -549,7 +549,36 @@ impl MidiClipPlayer {
         self.seed = seed;
     }
 
+    /// Sends the block's messages and notes on. They are placed by the song
+    /// frames they fall on, counted from the block's first (`offset`); here
+    /// each moves to the frame of the block that song frame is nearest, which
+    /// differs when the song follows an outside tempo (the transport spec,
+    /// R24).
     fn send_scratch_notes(&mut self, block: &mut Block<'_>) {
+        let transport = block.transport();
+        let frames = block.frames();
+        if transport.speed != 1.0 {
+            let song = |note: &mut NoteEvent| {
+                let at = transport.position.get() + i64::from(note.offset);
+                note.offset = transport.offset(at, frames) as u32;
+            };
+            self.messages.iter_mut().for_each(song);
+            self.scratch_notes.iter_mut().for_each(song);
+            // Several song frames can land on one frame at a speed over 1: a
+            // note must not be let go before it begins.
+            for i in 0..self.scratch_notes.len() {
+                let off = self.scratch_notes[i];
+                if off.kind != NoteKind::Off || off.note_id.is_none() {
+                    continue;
+                }
+                let on = self.scratch_notes.iter().find(|n| {
+                    n.kind == NoteKind::On && n.note_id == off.note_id && n.offset >= off.offset
+                });
+                if let Some(on) = on {
+                    self.scratch_notes[i].offset = (on.offset + 1).min(frames as u32 - 1);
+                }
+            }
+        }
         for &message in &self.messages {
             block.insert_note(message);
         }
@@ -557,7 +586,7 @@ impl MidiClipPlayer {
         if self.scratch_notes.is_empty() {
             return;
         }
-        let frames = block.frames() as u32;
+        let frames = frames as u32;
         for note in &mut self.scratch_notes {
             if note.offset >= frames {
                 note.offset = frames.saturating_sub(1);
@@ -851,7 +880,11 @@ impl Node for MidiClipPlayer {
                     for active in self.sounding.drain(..) {
                         if self.scratch_notes.len() < self.scratch_notes.capacity() {
                             self.scratch_notes.push(NoteEvent {
-                                offset: event.offset,
+                                // The notes are placed by song frame and moved
+                                // to the block's frames when sent.
+                                offset: (block.transport().song_frame(event.offset as usize)
+                                    - block.transport().position.get())
+                                    as u32,
                                 kind: NoteKind::Off,
                                 channel: active.channel,
                                 key: active.key,
@@ -889,8 +922,7 @@ impl Node for MidiClipPlayer {
         }
 
         let from_frame = transport.position.get();
-        let frames = block.frames() as i64;
-        let to_frame = from_frame + frames;
+        let to_frame = transport.window_end(block.frames());
 
         // Check if playback located or jumped.
         if let Some(last) = self.last_position
@@ -989,7 +1021,7 @@ impl Node for MidiClipPlayer {
         // Note-offs for notes reaching their off_frame in this block.
         for i in (0..self.sounding.len()).rev() {
             let active = self.sounding[i];
-            if active.off_frame <= from_frame {
+            if active.off_frame < from_frame {
                 self.sounding.swap_remove(i);
                 if self.scratch_notes.len() < self.scratch_notes.capacity() {
                     self.scratch_notes.push(NoteEvent {

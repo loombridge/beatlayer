@@ -540,7 +540,9 @@ fn ui_view(parent: u32) -> Option<(x11rb::rust_connection::RustConnection, u32)>
     )
     .ok()?;
     conn.map_window(id).ok()?;
-    conn.flush().ok()?;
+    // A round trip, so the view exists before the host, on a connection of
+    // its own, asks the view's size.
+    conn.get_input_focus().ok()?.reply().ok()?;
     Some((conn, id))
 }
 

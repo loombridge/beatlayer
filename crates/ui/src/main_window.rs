@@ -1256,6 +1256,9 @@ impl MainWindowUi {
             {
                 self.transport.interact(ui, shell, field, &response, events);
             }
+            if placement.pending.is_none() {
+                self.transport.nudge(ui, shell, *el, &response, events);
+            }
             if response.has_focus() && strip == Strip::ControlBar {
                 self.last_control = *el;
             }

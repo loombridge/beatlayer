@@ -23,7 +23,7 @@
 
 use bl_core::time::{BarBeatSixteenth, Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::Document;
-use bl_shell_spec::transport::{self as ids, TransportState};
+use bl_shell_spec::transport::{self as ids, PhaseNudge, TransportState};
 use serde_json::json;
 
 use crate::audio::EngineTransport;
@@ -538,6 +538,13 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         recording: shell.running_recording(),
         last_recording: shell.last_recording().cloned(),
         capture_midi_ready: shell.capture_midi_ready(),
+        phase_nudge: match engine.phase_nudge {
+            None => PhaseNudge::None,
+            Some(bl_engine::NudgeDirection::Down) => PhaseNudge::Down,
+            Some(bl_engine::NudgeDirection::Up) => PhaseNudge::Up,
+        },
+        waiting_start: engine.waiting_start,
+        waiting_frame: engine.waiting_frame,
         tap_tempo,
     }
 }

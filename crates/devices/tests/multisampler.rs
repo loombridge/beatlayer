@@ -129,6 +129,7 @@ impl Rig {
                     TransportInfo {
                         playing: self.playing,
                         position: Frames(self.frame + start as i64),
+                        ..TransportInfo::default()
                     },
                     RATE,
                 )

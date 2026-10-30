@@ -20733,6 +20733,37 @@ One of:
 
 </details>
 
+### `NudgeDirection`
+
+Which Phase Nudge button (the transport spec, R27).
+
+One of:
+
+- `"down"`: Phase Nudge Down: 4 % slower.
+- `"up"`: Phase Nudge Up: 4 % faster.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which Phase Nudge button (the transport spec, R27).",
+  "oneOf": [
+    {
+      "const": "down",
+      "description": "Phase Nudge Down: 4 % slower.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "Phase Nudge Up: 4 % faster.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Origin`
 
 Where a shortcut's keys come from.
@@ -21966,6 +21997,43 @@ One of:
     {
       "const": "groove_pool",
       "description": "The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PhaseNudge`
+
+Which Phase Nudge button nudges the song, in `transport.state`.
+
+One of:
+
+- `"none"`: Neither button is held.
+- `"down"`: Phase Nudge Down is held: the song plays 4 % slower.
+- `"up"`: Phase Nudge Up is held: the song plays 4 % faster.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which Phase Nudge button nudges the song, in `transport.state`.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "Neither button is held.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "Phase Nudge Down is held: the song plays 4 % slower.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "Phase Nudge Up is held: the song plays 4 % faster.",
       "type": "string"
     }
   ]
@@ -32682,6 +32750,9 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
 | `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
+| `phase_nudge` | [`PhaseNudge`](#phasenudge) | yes | The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28). |
+| `waiting_start` | boolean | yes | Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25). |
+| `waiting_frame` | integer or null | yes | The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 
 <details><summary>JSON Schema</summary>
@@ -32762,6 +32833,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether MIDI Arrangement Overdub is on.",
       "type": "boolean"
     },
+    "phase_nudge": {
+      "$ref": "#/$defs/PhaseNudge",
+      "default": "none",
+      "description": "The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28)."
+    },
     "playing": {
       "description": "Whether the song is playing.",
       "type": "boolean"
@@ -32826,6 +32902,21 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "time_signature_editable": {
       "description": "Whether the song has one time signature throughout, so the time-signature fields can set it.",
       "type": "boolean"
+    },
+    "waiting_frame": {
+      "default": null,
+      "description": "The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "waiting_start": {
+      "default": false,
+      "description": "Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25).",
+      "type": "boolean"
     }
   },
   "required": [
@@ -32857,6 +32948,9 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "recording",
     "last_recording",
     "capture_midi_ready",
+    "phase_nudge",
+    "waiting_start",
+    "waiting_frame",
     "tap_tempo"
   ],
   "type": "object"

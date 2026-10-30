@@ -116,6 +116,7 @@ fn run(
             TransportInfo {
                 playing: true,
                 position: Frames(position as i64),
+                ..TransportInfo::default()
             },
             RATE,
         )

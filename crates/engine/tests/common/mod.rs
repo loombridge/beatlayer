@@ -349,6 +349,15 @@ impl Rig {
         rig
     }
 
+    /// Has the song follow `follower` from the next block on (the transport
+    /// spec, R24).
+    pub fn follow(&mut self, follower: impl bl_engine::Follower + 'static) {
+        let follower: Box<dyn bl_engine::Follower> = Box::new(follower);
+        let follower = self.collector.handle().wrap(follower);
+        self.sender.follower(Some(follower));
+        assert!(self.sender.flush(), "the queue is full");
+    }
+
     /// Syncs the document, sends the update, and says what it held.
     pub fn sync(&mut self) -> Synced {
         let update: Update = self.compiler.sync(self.editor.document());

@@ -206,6 +206,7 @@ impl Probe {
         let transport = TransportInfo {
             playing: self.playing,
             position: Frames(self.position),
+            ..TransportInfo::default()
         };
         {
             let mut block = Block::new(&mut data, CHANNELS, frames, frames, &[], transport, RATE)
@@ -830,6 +831,7 @@ fn render(params: &[(ParamId, f64)], block: usize) -> Vec<Vec<f32>> {
         let transport = TransportInfo {
             playing: true,
             position: Frames((n * block) as i64),
+            ..TransportInfo::default()
         };
         let done = common::run_at(node.as_mut(), &channels, &[], &tempo, transport);
         for (all, part) in out.iter_mut().zip(done) {

@@ -271,10 +271,7 @@ impl NativeDevice for StrikeMod {
         }
         let index = |id: ParamId| params.index(id).expect("the description holds it");
         let at = |id: ParamId, f: usize| f64::from(params.ramp(index(id))[f]);
-        let tempo = audio.tempo();
-        let bpm = tempo
-            .bpm_at(tempo.frames_to_ticks(audio.song_position(), audio.sample_rate()))
-            .get();
+        let bpm = audio.bpm();
         let ix = Indices::new(params, SLOTS);
         let mut notes = audio.notes().peekable();
         for f in 0..frames {

@@ -132,6 +132,7 @@ fn a_devices_parameter_takes_the_clip_envelopes_modulation_on_the_exact_frame() 
             TransportInfo {
                 playing: true,
                 position: Frames(position),
+                ..TransportInfo::default()
             },
         )
     };
@@ -216,6 +217,7 @@ fn the_sum_is_clamped_to_the_parameters_range() {
         TransportInfo {
             playing: true,
             position: Frames(0),
+            ..TransportInfo::default()
         },
     );
     let ceiling = bl_model::param::db_to_gain(12.0);

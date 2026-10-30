@@ -4,7 +4,7 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::time::Instant;
 
 use bl_core::midi::{MidiInputEvent, MidiOutputEvent};
-use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
+use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{LaunchSettings, ParamId, Scale, SceneId, TrackId};
 use bl_rt::log::{Level, Writer};
 use bl_rt::rt_log;
@@ -12,10 +12,11 @@ use rtrb::{Consumer, Producer};
 
 use crate::EngineConfig;
 use crate::capture::CapturedMidi;
+use crate::follower::{Ask, Follow, Follower};
 use crate::gc::{Owned, Program};
 use crate::message::{
-    Action, LoopRegion, Message, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand,
-    When,
+    Action, LoopRegion, Message, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
+    TransportCommand, When,
 };
 use crate::metronome::{Block, MetronomeEngine};
 use crate::midi::{MidiCounters, MidiIn, TrackMidiInput};
@@ -30,7 +31,7 @@ use crate::session::{
     SessionLauncher, SessionPlayback, SlotState, SlotStatus,
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
-use crate::sync_out::{Beats, Part, SyncOut};
+use crate::sync_out::{Beats, Part as SyncPart, SyncOut};
 
 /// A parameter change waiting for its frame.
 #[derive(Clone, Copy, Debug)]
@@ -55,6 +56,77 @@ struct Scheduled {
 struct Timed {
     frame: u64,
     command: TransportCommand,
+    /// Whether the follower gave it: a start of its own isn't held back by
+    /// the wait for one (the transport spec, R25).
+    by_follower: bool,
+}
+
+/// What a start that waits for the follower's frame holds (the transport
+/// spec, R25).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Held {
+    Transport(TransportCommand),
+    Session(SessionCommand),
+}
+
+/// How many starts can wait for the follower's frame at once.
+const MAX_HELD: usize = 8;
+
+/// The Phase Nudge buttons held (the transport spec, R27).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Nudge {
+    down: bool,
+    up: bool,
+    /// The one pressed last, for when both are held.
+    last: Option<NudgeDirection>,
+}
+
+impl Nudge {
+    /// The button that nudges: the only one held, or the last pressed of two.
+    fn active(self) -> Option<NudgeDirection> {
+        match (self.down, self.up) {
+            (false, false) => None,
+            (true, false) => Some(NudgeDirection::Down),
+            (false, true) => Some(NudgeDirection::Up),
+            (true, true) => self.last,
+        }
+    }
+
+    /// How much faster the song plays: 4 % either way (R27).
+    fn factor(self) -> f64 {
+        match self.active() {
+            None => 1.0,
+            Some(NudgeDirection::Down) => 0.96,
+            Some(NudgeDirection::Up) => 1.04,
+        }
+    }
+}
+
+/// How far, in frames, a part's song frames may bend away from a straight
+/// line against its frames before it is cut short (the transport spec, R24).
+const BEND_FRAMES: f64 = 0.25;
+
+/// A part of a block, with the song frames it covers worked out.
+struct Part {
+    /// Frames in the part: at most what was asked for.
+    length: usize,
+    transport: TransportInfo,
+    /// Where the song stands when the part ends, if it moves other than a
+    /// frame per frame.
+    end: Option<Exact>,
+}
+
+/// Where the song stood exactly when the last part ended, so the next picks
+/// up where it left off (the transport spec, R24): the song frame it
+/// started on, the fraction of a frame past that the song really was, and,
+/// while following, the song's exact position in ticks. The next part uses
+/// it only if the playhead is still on `position`; a locate or a loop's
+/// wrap moves it, and the part then starts afresh from the playhead.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Exact {
+    position: Frames,
+    phase: f64,
+    ticks: Option<f64>,
 }
 
 /// The Arrangement loop in song frames, under the running program's tempo
@@ -92,6 +164,10 @@ struct Take {
     written: u64,
     next: Frames,
     wrap: Option<LoopFrames>,
+    /// The song frames the take has covered, wraps of the loop included: the
+    /// song moves other than a frame per frame while it follows an outside
+    /// tempo (the transport spec, R24).
+    song: i64,
 }
 
 /// A Session recording asked for (WP-3.11): the grid frame its take starts
@@ -196,6 +272,18 @@ impl Carry {
         // A float-to-integer cast saturates.
         self.clock.saturating_add(ahead.round() as u64)
     }
+}
+
+/// The first frame, counted from a part starting at song frame `position`
+/// and `phase` past it, that song frame `target` is nearest, at `speed` song
+/// frames per frame: at least 1 (the transport spec, R24).
+fn frames_until(position: i64, phase: f64, speed: f64, target: i64) -> usize {
+    if speed == 1.0 && phase == 0.0 {
+        return usize::try_from(target - position).unwrap_or(1).max(1);
+    }
+    let here = position as f64 + phase;
+    let nearest = ((target as f64 - here + crate::node::TIE) / speed + 0.5).floor();
+    nearest.max(1.0) as usize
 }
 
 /// The frame `frame` of the song under `before` is, under `after`: the
@@ -308,6 +396,27 @@ pub struct Processor {
     last_take: Option<TakeBounds>,
     /// Transport commands waiting for their frames, in the order they came.
     timed: Vec<Timed>,
+    /// The outside tempo the song follows, if one is set (the transport
+    /// spec, R24).
+    follower: Option<Owned<Box<dyn Follower>>>,
+    /// What the follower answered for this block.
+    follow: Follow,
+    /// The tempo this block plays at, if the follower gave one.
+    followed: Option<f64>,
+    /// Whether the follower decides when a start happens (R25).
+    deciding: bool,
+    /// The clock frame of the block the follower was last asked about.
+    asked: Option<u64>,
+    /// Starts waiting for the follower's frame, and the frame it gave.
+    held: Vec<Held>,
+    release: Option<u64>,
+    /// Set while a held start or a follower's own command runs, so it isn't
+    /// held again.
+    releasing: bool,
+    /// The Phase Nudge buttons (R27).
+    nudge: Nudge,
+    /// Where the song exactly stood at the end of the last part.
+    exact: Option<Exact>,
     pending: Vec<Pending>,
     /// This block's parameter changes, sorted by slot, frame, and arrival.
     resolved: Vec<Resolved>,
@@ -385,6 +494,16 @@ impl Processor {
             session_take: None,
             last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
+            follower: None,
+            follow: Follow::with_capacity(config.max_scheduled),
+            followed: None,
+            deciding: false,
+            asked: None,
+            held: Vec::with_capacity(MAX_HELD),
+            release: None,
+            releasing: false,
+            nudge: Nudge::default(),
+            exact: None,
             pending: Vec::with_capacity(config.max_pending_events),
             resolved: Vec::with_capacity(config.max_pending_events),
             lane: Lane::new(&config),
@@ -566,7 +685,7 @@ impl Processor {
     ) -> Output<'_> {
         let began = Instant::now();
         let frames = frames.min(self.config.max_frames);
-        self.drain();
+        self.drain(frames);
         if let Some(program) = self.program.as_mut() {
             program.get_mut().copy_device_input(input, frames);
         }
@@ -574,9 +693,11 @@ impl Processor {
         let routes = self.program.as_mut().map(|p| &mut p.get_mut().midi);
         self.midi.take(now, self.clock, frames, routes);
         self.resolve_due(frames);
+        self.ask_follower(frames);
         let mut done = 0;
         while done < frames {
             self.apply_due_transport(done);
+            self.apply_due_release(done);
             // Spec: transport R22. A jump waiting for the next line of the
             // global launch quantisation.
             self.apply_due_locate();
@@ -584,9 +705,11 @@ impl Processor {
             self.session.playback(&mut self.session_playback);
             self.fire_due(done);
             let length = self.until_next_event(done, frames - done);
-            self.capture(done, length);
-            self.log_captured(done, length);
-            self.render(done, length);
+            let part = self.pace(length);
+            let length = part.length;
+            self.capture(done, length, part.transport);
+            self.log_captured(done, length, part.transport);
+            self.render(done, length, part);
             done += length;
         }
         self.clock += frames as u64;
@@ -600,7 +723,7 @@ impl Processor {
     /// and shows its program, position, and rate, before its first block.
     /// Called off the audio thread.
     pub(crate) fn prime(&mut self) {
-        self.drain();
+        self.drain(0);
         self.publish(0.0, 0);
     }
 
@@ -657,7 +780,8 @@ impl Processor {
             .timed
             .iter()
             .filter(|entry| {
-                !starts_playback(entry.command)
+                !entry.by_follower
+                    && !starts_playback(entry.command)
                     && !(self.playing && entry.command == TransportCommand::Stop)
             })
             .copied()
@@ -700,7 +824,7 @@ impl Processor {
             self.schedule(command);
         }
         for entry in &carry.timed {
-            self.queue_transport(entry.command, carry.frame_at(entry.frame, rate));
+            self.queue_transport(entry.command, carry.frame_at(entry.frame, rate), false);
         }
         self.publish(0.0, 0);
     }
@@ -720,7 +844,7 @@ impl Processor {
 
     /// Takes what's on the queue, up to its capacity, so the work is
     /// bounded even if the sender keeps sending.
-    fn drain(&mut self) {
+    fn drain(&mut self, frames: usize) {
         for _ in 0..self.config.queue_capacity {
             let Ok(message) = self.queue.pop() else {
                 break;
@@ -739,7 +863,16 @@ impl Processor {
                     self.transport(command);
                 }
                 Message::Transport(command, When::Frame(frame)) => {
-                    self.queue_transport(command, frame);
+                    self.queue_transport(command, frame, false);
+                }
+                Message::Follower(follower) => {
+                    // Dropping the old one only lets go of it: the drop
+                    // thread frees it.
+                    drop(std::mem::replace(&mut self.follower, follower));
+                    // Asked at once, so a start sent behind it already waits
+                    // for it (the transport spec, R25).
+                    self.asked = None;
+                    self.ask_follower(frames);
                 }
                 Message::Schedule(command) => self.schedule(command),
                 Message::Session(command) => self.session_command(command),
@@ -994,9 +1127,93 @@ impl Processor {
         self.tempo().ticks_to_frames(ticks, self.config.sample_rate)
     }
 
+    /// Runs a transport command that was waiting for its frame: the
+    /// follower's own isn't held back by a start waiting for the follower
+    /// (the transport spec, R25).
+    fn run_timed(&mut self, command: TransportCommand, by_follower: bool) {
+        let was = self.releasing;
+        self.releasing |= by_follower;
+        self.transport(command);
+        self.releasing = was;
+    }
+
+    /// Whether `command` starts the song from where it stands: what waits
+    /// for the follower's frame when the follower decides starts (R25).
+    fn starts_song(&self, command: TransportCommand) -> bool {
+        match command {
+            TransportCommand::Play | TransportCommand::PlayFromInsertMarker => true,
+            TransportCommand::Continue
+            | TransportCommand::PlayStop
+            | TransportCommand::Scrub { .. } => !self.playing,
+            _ => false,
+        }
+    }
+
+    /// Keeps a start for the follower's frame (R25). A second one the same
+    /// as one already waiting changes nothing: the wait stays.
+    fn hold(&mut self, held: Held) {
+        if !self.held.contains(&held) && self.held.len() < MAX_HELD {
+            self.held.push(held);
+        }
+    }
+
+    /// Runs the starts that waited, in the order they came, on this frame.
+    fn release_held(&mut self) {
+        self.release = None;
+        let was = std::mem::replace(&mut self.releasing, true);
+        while !self.held.is_empty() {
+            match self.held.remove(0) {
+                Held::Transport(command) => self.transport(command),
+                Held::Session(command) => self.session_command(command),
+            }
+        }
+        self.releasing = was;
+    }
+
+    /// Releases the waiting starts if their frame has come by `offset`
+    /// frames into the block.
+    fn apply_due_release(&mut self, offset: usize) {
+        if self.held.is_empty() {
+            return;
+        }
+        if self
+            .release
+            .is_some_and(|frame| frame <= self.clock + offset as u64)
+        {
+            self.release_held();
+        }
+    }
+
+    /// A Phase Nudge button pressed or released (R27). A press does nothing
+    /// while the song is stopped, and, since the follower keeps the phase,
+    /// while it leads (R29).
+    fn phase_nudge(&mut self, direction: NudgeDirection, held: bool) {
+        if held && (!self.playing || self.followed.is_some()) {
+            return;
+        }
+        match direction {
+            NudgeDirection::Down => self.nudge.down = held,
+            NudgeDirection::Up => self.nudge.up = held,
+        }
+        if held {
+            self.nudge.last = Some(direction);
+        }
+    }
+
     /// Runs a transport command now, at the playhead
     /// (the transport spec).
     fn transport(&mut self, command: TransportCommand) {
+        if command == TransportCommand::Stop && !self.releasing && !self.held.is_empty() {
+            // Spec: transport R25. Stop while a start waits cancels it.
+            self.held.clear();
+            self.release = None;
+            return;
+        }
+        if self.deciding && !self.releasing && self.starts_song(command) {
+            // Spec: transport R25. The follower decides when it starts.
+            self.hold(Held::Transport(command));
+            return;
+        }
         match command {
             // Spec: transport R1, R11, R21
             TransportCommand::Play => self.play(),
@@ -1114,6 +1331,8 @@ impl Processor {
                     self.end_recording();
                 }
             }
+            // Spec: transport R27, R29
+            TransportCommand::PhaseNudge { direction, held } => self.phase_nudge(direction, held),
         }
     }
 
@@ -1221,7 +1440,7 @@ impl Processor {
         let line = self.session.settings().next_line(playhead, signatures);
         let frame = self.frames_at(line);
         let to = self.frames_at(target);
-        if frame <= self.position {
+        if frame <= self.reached() {
             self.position = to;
             self.metronome.stop();
             self.end_recordings();
@@ -1271,7 +1490,7 @@ impl Processor {
     fn apply_due_locate(&mut self) {
         if let Some(pending) = self.pending_locate
             && self.playing
-            && self.position >= pending.frame
+            && self.reached() >= pending.frame
         {
             self.pending_locate = None;
             self.position = pending.to;
@@ -1305,11 +1524,15 @@ impl Processor {
 
     /// Holds a transport command for a frame of the engine clock, or runs it
     /// now if that frame has come.
-    fn queue_transport(&mut self, command: TransportCommand, frame: u64) {
+    fn queue_transport(&mut self, command: TransportCommand, frame: u64, by_follower: bool) {
         if frame <= self.clock {
-            self.transport(command);
+            self.run_timed(command, by_follower);
         } else if self.timed.len() < self.timed.capacity() {
-            self.timed.push(Timed { frame, command });
+            self.timed.push(Timed {
+                frame,
+                command,
+                by_follower,
+            });
         } else {
             self.counters.transport_overflowed += 1;
         }
@@ -1324,7 +1547,7 @@ impl Processor {
             if self.timed[i].frame <= now {
                 // `remove` keeps the rest in the order they came.
                 let due = self.timed.remove(i);
-                self.transport(due.command);
+                self.run_timed(due.command, due.by_follower);
             } else {
                 i += 1;
             }
@@ -1334,6 +1557,12 @@ impl Processor {
     /// Runs a Session View command (WP-3.2): a launch, a stop, or the
     /// global launch quantisation.
     fn session_command(&mut self, command: SessionCommand) {
+        if self.deciding && !self.releasing && !self.playing && self.session_starts_song(command) {
+            // Spec: transport R25. A launch that starts the song waits for
+            // the follower's frame.
+            self.hold(Held::Session(command));
+            return;
+        }
         match command {
             SessionCommand::Launch { track, scene } => {
                 self.launch_button(track, scene, Played::PLAIN);
@@ -1387,6 +1616,19 @@ impl Processor {
                 self.session.move_to_scene(scene, slots);
             }
             SessionCommand::ClearSceneOverride => self.clear_scene_override(),
+        }
+    }
+
+    /// Whether `command`, with the song stopped, starts it: a launch of a
+    /// clip, or a Session recording (the launch quantisation spec, R5).
+    fn session_starts_song(&self, command: SessionCommand) -> bool {
+        match command {
+            SessionCommand::Launch { .. } | SessionCommand::Record => true,
+            SessionCommand::LaunchScene(scene) => self
+                .program
+                .as_ref()
+                .is_some_and(|program| !program.get().scene_slots(scene).is_empty()),
+            _ => false,
         }
     }
 
@@ -1586,7 +1828,7 @@ impl Processor {
         if !holds_maps {
             return;
         }
-        if at <= self.position {
+        if at <= self.reached() {
             self.apply_scene(scene);
         } else {
             self.session.queue_scene(scene, at);
@@ -1651,7 +1893,8 @@ impl Processor {
     /// still, so a change queued for a frame waits for it (R4).
     fn apply_due_session(&mut self) {
         if self.playing {
-            self.session.apply_due(self.position);
+            let reached = self.reached();
+            self.session.apply_due(reached);
             // Spec: launch-quantisation R21
             let playhead = Self::playhead(
                 self.program.as_ref().map(Program::get),
@@ -1665,12 +1908,11 @@ impl Processor {
             // Spec: follow-actions R2. A follow due at this frame runs
             // before the scene maps and the clips below read the launcher.
             if let Some(program) = self.program.as_ref() {
-                self.session
-                    .run_follow(program.get(), playhead, self.position);
+                self.session.run_follow(program.get(), playhead, reached);
             }
             // Spec: session-view R22. A launched scene's tempo and signature
             // apply on its launch frame.
-            while let Some(scene) = self.session.take_due_scene(self.position) {
+            while let Some(scene) = self.session.take_due_scene(reached) {
                 self.apply_scene(scene);
             }
         }
@@ -1773,8 +2015,14 @@ impl Processor {
     /// frames into the block.
     fn fire_due(&mut self, offset: usize) {
         let mut i = 0;
+        // A part starts on the first song frame at or past the one a command
+        // is due on; at a speed over 1 that's up to a speed's worth past it
+        // (the transport spec, R24).
+        let slack = Frames(self.speed_estimate().ceil().max(1.0) as i64);
+        let reached = self.reached();
         while self.playing && i < self.scheduled.len() {
-            if self.scheduled[i].frame == self.position {
+            let due = self.scheduled[i].frame;
+            if due <= reached && due + slack > reached {
                 // `remove` keeps the rest in the order they arrived.
                 let due = self.scheduled.remove(i);
                 self.fire(due.command, offset);
@@ -1807,6 +2055,236 @@ impl Processor {
         });
     }
 
+    /// Asks the follower, once per block, for the tempo to play it at, the
+    /// jumps, starts and stops it decides, and whether it decides when a
+    /// start happens (the transport spec, R24, R25). Without one, nothing is
+    /// followed, and any start that waited goes ahead.
+    fn ask_follower(&mut self, frames: usize) {
+        if self.asked == Some(self.clock) {
+            return;
+        }
+        self.asked = Some(self.clock);
+        self.followed = None;
+        self.deciding = false;
+        // The ticks of where the song is now, not where the last part ended:
+        // a wrap or a locate moves the playhead after it.
+        let exact = self.exact_at_position().ticks;
+        if let Some(follower) = self.follower.as_mut() {
+            let rate = self.config.sample_rate.as_f64();
+            let ticks = match exact {
+                Some(ticks) if self.playing => ticks,
+                _ => {
+                    let tempo = self
+                        .program
+                        .as_ref()
+                        .map_or(&self.fallback_tempo, |p| &p.get().tempo);
+                    tempo.seconds_to_ticks_exact(self.position.get() as f64 / rate)
+                }
+            };
+            let ask = Ask {
+                clock: self.clock,
+                frames,
+                playing: self.playing,
+                position: ticks,
+                rate,
+            };
+            self.follow.clear();
+            follower.get_mut().block(&ask, &mut self.follow);
+            self.followed = self.follow.followed();
+            self.deciding = self.follow.deciding();
+            if self.deciding && !self.held.is_empty() && self.follow.release().is_some() {
+                self.release = self.follow.release();
+            }
+            for i in 0..self.follow.commands().len() {
+                let (frame, command) = self.follow.commands()[i];
+                self.queue_transport(command, frame, true);
+            }
+        }
+        // A follower that stops deciding, or goes, lets what waited start.
+        if !self.deciding && !self.held.is_empty() {
+            self.release_held();
+        }
+    }
+
+    /// How many song frames a frame of the block moves the song now, as the
+    /// block's blocks are planned: the followed tempo against the map's,
+    /// times the nudge.
+    fn speed_estimate(&self) -> f64 {
+        let factor = self.nudge.factor();
+        let Some(bpm) = self.followed else {
+            return factor;
+        };
+        let tempo = self.tempo();
+        let ticks = tempo.frames_to_ticks(self.position, self.config.sample_rate);
+        bpm * factor / tempo.bpm_at(ticks).get()
+    }
+
+    /// The last song frame that has come due by now: a command, a launch or
+    /// a loop's end placed on a song frame acts when the part that starts now
+    /// is the one it is nearest (the transport spec, R24). That is the
+    /// playhead while the song moves a frame per frame, and, while it moves
+    /// faster or slower, the song frames the part's first frame is nearer
+    /// than the second.
+    fn reached(&self) -> Frames {
+        let speed = self.speed_estimate();
+        let phase = self.exact_phase();
+        if speed == 1.0 && phase == 0.0 {
+            return self.position;
+        }
+        let here = self.position.get() as f64 + phase;
+        Frames((here + speed / 2.0 - crate::node::TIE).ceil() as i64 - 1)
+    }
+
+    /// Works out how the song moves over a part of at most `length` frames
+    /// that starts now (the transport spec, R24, R27): the part's speed
+    /// and where the song stands exactly. At a speed of one, nothing is
+    /// worked out. A followed tempo advances the song's ticks in a straight
+    /// line, so where the tempo map bends the song's frames against them
+    /// (a ramp, a change of tempo), the part is cut short until the bend
+    /// within it is a fraction of a frame, and every node can read the
+    /// part's frames at one speed.
+    fn pace(&mut self, length: usize) -> Part {
+        let mut info = TransportInfo::at(self.playing, self.position);
+        let steady = Part {
+            length,
+            transport: info,
+            end: None,
+        };
+        if !self.playing || self.metronome.is_counting_in() {
+            self.exact = None;
+            return steady;
+        }
+        let factor = self.nudge.factor();
+        let Some(bpm) = self.followed else {
+            if factor == 1.0 {
+                self.exact = None;
+                return steady;
+            }
+            let phase = self.exact_phase();
+            info.speed = factor;
+            info.phase = phase;
+            return self.part(length, info, None);
+        };
+        let rate = self.config.sample_rate.as_f64();
+        let start = self.exact_at_position();
+        let pos0 = self.position.get() as f64 + start.phase;
+        let tempo = self.tempo();
+        let ticks0 = start
+            .ticks
+            .unwrap_or_else(|| tempo.seconds_to_ticks_exact(pos0 / rate));
+        let per_frame = bpm * factor * TICKS_PER_QUARTER as f64 / (60.0 * rate);
+        let frame_of = |ticks: f64| tempo.ticks_to_seconds_exact(ticks) * rate;
+        let bent = tempo.segments().len() > 1;
+        let mut length = length;
+        let (ticks1, pos1) = loop {
+            let ticks1 = ticks0 + length as f64 * per_frame;
+            let pos1 = frame_of(ticks1);
+            if !bent || length == 1 {
+                break (ticks1, pos1);
+            }
+            let half = length / 2;
+            let linear = pos0 + (pos1 - pos0) * half as f64 / length as f64;
+            if (frame_of(ticks0 + half as f64 * per_frame) - linear).abs() <= BEND_FRAMES {
+                break (ticks1, pos1);
+            }
+            length = half;
+        };
+        info.speed = (pos1 - pos0) / length as f64;
+        info.phase = start.phase;
+        self.part(length, info, Some(ticks1))
+    }
+
+    /// Where the song exactly stands: what the last part left, if the
+    /// playhead is still where it left it, else the playhead itself.
+    fn exact_at_position(&self) -> Exact {
+        match self.exact {
+            Some(exact) if exact.position == self.position => exact,
+            _ => Exact {
+                position: self.position,
+                phase: 0.0,
+                ticks: None,
+            },
+        }
+    }
+
+    fn exact_phase(&self) -> f64 {
+        self.exact_at_position().phase
+    }
+
+    /// The part `info` describes: where the song is when it ends, the first
+    /// song frame past it, and the song frame no part may play past while a
+    /// boundary lies ahead (the loop's end, a jump's line).
+    fn part(&mut self, length: usize, mut info: TransportInfo, ticks: Option<f64>) -> Part {
+        info.until = self.next_boundary().unwrap_or(i64::MAX);
+        let end = info.window_end(length);
+        let exact = info.exact(length);
+        Part {
+            length,
+            transport: info,
+            end: Some(Exact {
+                position: Frames(end),
+                phase: exact - end as f64,
+                ticks,
+            }),
+        }
+    }
+
+    /// The nearest song frame ahead that the transport acts on: no part
+    /// plays past it. Playing a part up to the frame before it takes the
+    /// part's song frames to it exactly, whatever the speed.
+    fn next_boundary(&self) -> Option<i64> {
+        let mut nearest: Option<i64> = None;
+        self.song_boundaries(|frame| {
+            if frame > self.position {
+                let at = frame.get();
+                nearest = Some(nearest.map_or(at, |n| n.min(at)));
+            }
+        });
+        nearest
+    }
+
+    /// Calls `each` with every song frame the transport acts on: a scheduled
+    /// command, a Session launch or stop, a Session take's ends, the loop's
+    /// end, a jump waiting for a line, and the punch points.
+    fn song_boundaries(&self, mut each: impl FnMut(Frames)) {
+        for entry in &self.scheduled {
+            each(entry.frame);
+        }
+        // Spec: launch-quantisation R2. A launch or a stop lands on its
+        // grid frame, so the block splits there.
+        if let Some(due) = self.session.next_due(self.reached()) {
+            each(due);
+        }
+        // Spec: session-recording R3. A Session take starts and ends on its
+        // grid frames.
+        if let Some(take) = self.session_take {
+            each(take.start);
+            if let Some(stop) = take.stop {
+                each(stop);
+            }
+        }
+        // Spec: transport R13
+        if let Some(region) = self.active_loop() {
+            each(region.end);
+        }
+        // Spec: transport R22. A jump waiting for the next line of the
+        // global launch quantisation lands on that line's frame.
+        if let Some(pending) = self.pending_locate {
+            each(pending.frame);
+        }
+        // Spec: recording R6. A part of a block lies wholly inside the punch
+        // points or wholly outside them, so the take starts and ends on the
+        // frame.
+        if self.recording {
+            for frame in [self.punch_frames.start, self.punch_frames.end]
+                .into_iter()
+                .flatten()
+            {
+                each(frame);
+            }
+        }
+    }
+
     /// How many of the `remaining` frames from `offset` in the block to run
     /// before the transport next acts: a transport command's frame comes, a
     /// scheduled command fires, or the playhead reaches the loop's end. At
@@ -1816,7 +2294,12 @@ impl Processor {
         let timed = self
             .timed
             .iter()
-            .map(|entry| entry.frame.saturating_sub(now));
+            .map(|entry| entry.frame.saturating_sub(now))
+            .chain(
+                self.release
+                    .filter(|_| !self.held.is_empty())
+                    .map(|frame| frame.saturating_sub(now)),
+            );
         let mut next = timed
             .filter(|&ahead| ahead > 0 && ahead < remaining as u64)
             .min()
@@ -1838,48 +2321,17 @@ impl Processor {
             }
             return next;
         }
-        let mut song = |frame: Frames| {
-            let ahead = frame.saturating_sub(self.position).get();
-            if ahead > 0 && ahead < next as i64 {
-                next = ahead as usize;
+        // Distances to the transport's song frames are in song frames; a
+        // frame of the block moves the song by the speed (R24).
+        let speed = self.speed_estimate();
+        let phase = self.exact_phase();
+        let position = self.position.get();
+        self.song_boundaries(|frame| {
+            if frame.get() > position {
+                let frames = frames_until(position, phase, speed, frame.get());
+                next = next.min(frames);
             }
-        };
-        for entry in &self.scheduled {
-            song(entry.frame);
-        }
-        // Spec: launch-quantisation R2. A launch or a stop lands on its
-        // grid frame, so the block splits there.
-        if let Some(due) = self.session.next_due(self.position) {
-            song(due);
-        }
-        // Spec: session-recording R3. A Session take starts and ends on its
-        // grid frames.
-        if let Some(take) = self.session_take {
-            song(take.start);
-            if let Some(stop) = take.stop {
-                song(stop);
-            }
-        }
-        // Spec: transport R13
-        if let Some(region) = self.active_loop() {
-            song(region.end);
-        }
-        // Spec: transport R22. A jump waiting for the next line of the
-        // global launch quantisation lands on that line's frame.
-        if let Some(pending) = self.pending_locate {
-            song(pending.frame);
-        }
-        // Spec: recording R6. A part of a block lies wholly inside the punch
-        // points or wholly outside them, so the take starts and ends on the
-        // frame.
-        if self.recording {
-            for frame in [self.punch_frames.start, self.punch_frames.end]
-                .into_iter()
-                .flatten()
-            {
-                song(frame);
-            }
-        }
+        });
         next
     }
 
@@ -1887,9 +2339,10 @@ impl Processor {
     /// moves the playhead on if the song is playing. Playback that reaches
     /// the loop's end goes on from its start: the parts of a block end
     /// there, so the next part starts at the loop's start.
-    fn render(&mut self, offset: usize, length: usize) {
+    fn render(&mut self, offset: usize, length: usize, part: Part) {
         self.write_sync(offset, length);
         let stride = self.config.max_frames;
+        let transport = part.transport;
         // The song frame this part starts at, for a real-time render's
         // range (WP-5.35).
         let song = self.position;
@@ -1917,10 +2370,6 @@ impl Processor {
             return;
         }
 
-        let transport = TransportInfo {
-            playing: self.playing,
-            position: self.position,
-        };
         match self.program.as_mut() {
             Some(program) => {
                 let program = program.get_mut();
@@ -1977,7 +2426,11 @@ impl Processor {
             // Spec: metronome R7. With Punch-In on, "only while recording"
             // clicks start at the punch-in point, not at play start.
             self.metronome.set_recording(
-                (self.recording && self.punch_frames.start.is_none_or(|at| self.position >= at))
+                (self.recording
+                    && self
+                        .punch_frames
+                        .start
+                        .is_none_or(|at| self.reached() >= at))
                     || self.session_take.is_some(),
             );
             self.metronome.render_active(
@@ -1988,13 +2441,14 @@ impl Processor {
                     offset,
                     length,
                 },
-                self.position,
+                transport,
                 self.config.sample_rate,
                 tempo,
                 sigs,
             );
             let before = self.position;
-            self.position += Frames(length as i64);
+            self.position = Frames(transport.window_end(length));
+            self.exact = part.end;
             // Spec: transport R13, R14
             if let Some(region) = self.active_loop()
                 && before < region.end
@@ -2014,6 +2468,9 @@ impl Processor {
         // Spec: external-devices R24. A real-time render captures the
         // outputs it renders while the song plays the range, and the
         // transport stops at the range's end.
+        // shortcut: the range is counted in frames a song frame each, which
+        // holds unless the song follows an outside tempo or is nudged while
+        // it renders; upgrade by counting the part's song frames.
         if self.rendering.is_some() {
             self.capture_render(song, length);
         }
@@ -2034,7 +2491,7 @@ impl Processor {
             .filter(|region| self.position < region.end)
             .map(|region| region.end);
         self.sync_out.part(
-            &Part {
+            &SyncPart {
                 offset: offset as u32,
                 length: length as u32,
                 output_latency: self.output_latency,
@@ -2100,9 +2557,9 @@ impl Processor {
     /// from the take's next frame, ends the take before the part, so every
     /// file holds exactly the take's frames. Real-time safe: copies into
     /// rings made when the engine was, no locks.
-    fn capture(&mut self, offset: usize, frames: usize) {
+    fn capture(&mut self, offset: usize, frames: usize, transport: TransportInfo) {
         if self.session_take.is_some() {
-            self.capture_session(offset, frames);
+            self.capture_session(offset, frames, transport);
             return;
         }
         if !self.recording || !self.playing || self.metronome.is_counting_in() || frames == 0 {
@@ -2113,10 +2570,14 @@ impl Processor {
         }
         // Spec: recording R9. Nothing is written before the punch-in point,
         // and the take ends at the punch-out point; the transport carries on.
-        if self.punch_frames.start.is_some_and(|at| self.position < at) {
+        if self
+            .punch_frames
+            .start
+            .is_some_and(|at| self.reached() < at)
+        {
             return;
         }
-        if self.punch_frames.end.is_some_and(|at| self.position >= at) {
+        if self.punch_frames.end.is_some_and(|at| self.reached() >= at) {
             self.end_take();
             return;
         }
@@ -2155,6 +2616,7 @@ impl Processor {
                 written: 0,
                 next: self.position,
                 wrap: None,
+                song: 0,
             });
             self.log_playing_clips();
         }
@@ -2164,13 +2626,13 @@ impl Processor {
             .min(frames as u64) as usize;
         // The messages are stamped with the frame the take has run on to, not
         // the song frame, which a loop's wrap sets back (recording R12).
-        let stamp = self.take.map_or(self.position, |take| {
-            take.start + Frames(take.written as i64)
-        });
+        let stamp = self
+            .take
+            .map_or(self.position, |take| take.start + Frames(take.song));
         let captured = match (self.program.as_ref(), self.plan.as_mut()) {
             (Some(program), Some(plan)) => {
                 plan.get_mut()
-                    .capture(program.get(), stamp, offset, frames, skip)
+                    .capture(program.get(), stamp, offset, frames, skip, transport)
             }
             _ => false,
         };
@@ -2180,7 +2642,8 @@ impl Processor {
         }
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
-            take.next = self.position + Frames(frames as i64);
+            take.song += transport.span(frames);
+            take.next = Frames(transport.window_end(frames));
         }
     }
 
@@ -2188,7 +2651,7 @@ impl Processor {
     /// the frames `offset..offset + frames` of the block into Capture MIDI's ring,
     /// stamped with the engine clock and, while the song plays, the song
     /// frame (WP-3.14).
-    fn log_captured(&mut self, offset: usize, frames: usize) {
+    fn log_captured(&mut self, offset: usize, frames: usize, transport: TransportInfo) {
         let Some(program) = self.program.as_ref() else {
             return;
         };
@@ -2207,7 +2670,10 @@ impl Processor {
                 let logged = CapturedMidi {
                     track,
                     clock: self.clock + at as u64,
-                    song: song.map(|position| position + Frames(into)),
+                    song: song.map(|position| {
+                        position
+                            + Frames(transport.song_frame(into as usize) - transport.position.get())
+                    }),
                     message: event.message,
                     mpe: event.mpe,
                 };
@@ -2223,14 +2689,14 @@ impl Processor {
     /// one it was asked to end on; it ignores the Arrangement's loop and
     /// punch points, and stamps its MIDI with a frame count that runs on
     /// through the loop's wraps, so the shell lays the clip out from 0.
-    fn capture_session(&mut self, offset: usize, frames: usize) {
+    fn capture_session(&mut self, offset: usize, frames: usize, transport: TransportInfo) {
         let Some(session) = self.session_take else {
             return;
         };
         if !self.playing || self.metronome.is_counting_in() || frames == 0 {
             return;
         }
-        if self.plan.is_none() || self.program.is_none() || self.position < session.start {
+        if self.plan.is_none() || self.program.is_none() || self.reached() < session.start {
             return;
         }
         // The Arrangement loop wrapping the playhead moves it back, so a stop
@@ -2238,7 +2704,7 @@ impl Processor {
         // loop wraps instead.
         let wrapped = session.last.is_some_and(|last| self.position < last);
         if let Some(stop) = session.stop
-            && (wrapped || self.position >= stop)
+            && (wrapped || self.reached() >= stop)
         {
             self.end_session_take(session.launch, if wrapped { self.position } else { stop });
             return;
@@ -2250,6 +2716,7 @@ impl Processor {
                 written: 0,
                 next: self.position,
                 wrap: None,
+                song: 0,
             });
         }
         let Some(take) = self.take else {
@@ -2259,11 +2726,11 @@ impl Processor {
         let skip = (delay.max(0) as u64)
             .saturating_sub(take.written)
             .min(frames as u64) as usize;
-        let stamp = take.start + Frames(take.written as i64);
+        let stamp = take.start + Frames(take.song);
         let captured = match (self.program.as_ref(), self.plan.as_mut()) {
             (Some(program), Some(plan)) => {
                 plan.get_mut()
-                    .capture(program.get(), stamp, offset, frames, skip)
+                    .capture(program.get(), stamp, offset, frames, skip, transport)
             }
             _ => false,
         };
@@ -2273,7 +2740,8 @@ impl Processor {
         }
         if let Some(take) = &mut self.take {
             take.written += frames as u64;
-            take.next = stamp + Frames(frames as i64);
+            take.song += transport.span(frames);
+            take.next = stamp + Frames(transport.span(frames));
         }
         if let Some(session) = &mut self.session_take {
             session.last = Some(self.position);
@@ -2321,6 +2789,10 @@ impl Processor {
         state.swaps = self.swaps;
         state.cpu_load = cpu_load;
         state.cpu_load_max = self.cpu_load_max;
+        state.following = self.followed;
+        state.waiting_start = !self.held.is_empty();
+        state.waiting_frame = self.release.filter(|_| !self.held.is_empty());
+        state.phase_nudge = self.nudge.active();
         state.counters = self.counters;
         state.sync_out = self
             .sync_out

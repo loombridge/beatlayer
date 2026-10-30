@@ -505,7 +505,7 @@ fn an_aumi_unit_passes_its_notes_on() {
     );
 }
 
-// Spec: au-hosting R10. The editor query says what `status` says of the
+// Spec: au-hosting R13. The editor query says what `status` says of the
 // editor, without reading a single parameter.
 #[test]
 fn the_editor_query_reads_no_parameters() {

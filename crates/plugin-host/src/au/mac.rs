@@ -49,7 +49,9 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AllocAnyThread, MainThreadMarker, MainThreadOnly, msg_send};
-use objc2_app_kit::{NSBackingStoreType, NSViewController, NSWindow, NSWindowStyleMask};
+use objc2_app_kit::{
+    NSApplication, NSBackingStoreType, NSViewController, NSWindow, NSWindowStyleMask,
+};
 use objc2_audio_toolbox::{
     AUAudioUnit, AUAudioUnitBus, AUParameter, AUParameterAutomationEvent,
     AUParameterAutomationEventType, AUParameterObserverToken, AUParameterTree,
@@ -509,6 +511,9 @@ impl AuHost {
             NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.01));
         }
         let requests = std::mem::take(&mut *lock(&self.inner.requests));
+        // A hidden app has no window on screen, closed or not.
+        let app_hidden = MainThreadMarker::new()
+            .is_some_and(|mtm| NSApplication::sharedApplication(mtm).isHidden());
         let mut guard = lock(&self.inner.main);
         let Ok(main) = guard.get() else { return false };
         let mut changed = !requests.is_empty() || opening;
@@ -517,6 +522,18 @@ impl AuHost {
         }
         for instance in main.instances.values_mut() {
             changed |= pump(instance);
+            // A window that is not hidden by us, yet not on screen or
+            // minimised, is one the person closed.
+            if !app_hidden
+                && !instance.editor_hidden
+                && instance
+                    .editor
+                    .as_ref()
+                    .is_some_and(|e| !e.window.isVisible() && !e.window.isMiniaturized())
+            {
+                teardown_editor(instance);
+                changed = true;
+            }
         }
         for (_, instance) in &mut main.closing {
             pump(instance);
@@ -661,25 +678,7 @@ impl AuHost {
     /// [`AuError::NoInstance`] without a unit.
     pub fn close_editor(&self, device: DeviceId) -> Result<(), AuError> {
         let mut guard = lock(&self.inner.main);
-        let instance = instance(guard.get()?, device)?;
-        // A view controller still on its way is dropped when it arrives:
-        // `finish_editor` leaves a closed editor closed.
-        instance.opening = false;
-        instance.pending = None;
-        instance.editor_failure = None;
-        if let Some(editor) = instance.editor.take() {
-            if let Some(ends) = &instance.ends {
-                ends.status.observer.store(std::ptr::null_mut(), Relaxed);
-            }
-            // SAFETY: the unit's tree is alive; removing an observer blocks
-            // until in-flight callbacks finish, and ours never blocks.
-            unsafe { editor.tree.removeParameterObserver(editor.token) };
-            editor.window.orderOut(None);
-            // The window was made with releasedWhenClosed false, so this
-            // only orders it out; our own reference drops with the editor.
-            editor.window.close();
-        }
-        instance.editor_hidden = false;
+        teardown_editor(instance(guard.get()?, device)?);
         Ok(())
     }
 
@@ -695,21 +694,38 @@ impl AuHost {
     pub fn set_editor_visible(&self, device: DeviceId, shown: bool) -> Result<(), AuError> {
         let mut guard = lock(&self.inner.main);
         let instance = instance(guard.get()?, device)?;
-        let hidden = match &instance.editor {
-            Some(editor) => {
-                if editor.window.isVisible() != shown {
-                    if shown {
-                        editor.window.makeKeyAndOrderFront(None);
-                    } else {
-                        editor.window.orderOut(None);
-                    }
-                }
-                !shown
-            }
-            None => return Ok(()),
+        let Some(editor) = &instance.editor else {
+            return Ok(());
         };
-        instance.editor_hidden = hidden;
+        // The shell asks every frame: only a change touches the window, so
+        // one the person minimised stays minimised.
+        if instance.editor_hidden == shown {
+            if shown {
+                editor.window.makeKeyAndOrderFront(None);
+            } else {
+                editor.window.orderOut(None);
+            }
+            instance.editor_hidden = !shown;
+        }
         Ok(())
+    }
+
+    /// The editor windows the host holds, those of units being let go of
+    /// included, for tests of what the person sees.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn editor_windows(&self) -> Vec<Retained<NSWindow>> {
+        let mut guard = lock(&self.inner.main);
+        let Ok(main) = guard.get() else {
+            return Vec::new();
+        };
+        let closing = main.closing.iter().map(|(_, instance)| instance);
+        main.instances
+            .values()
+            .chain(closing)
+            .filter_map(|instance| Some(instance.editor.as_ref()?.window.clone()))
+            .collect()
     }
 
     /// The devices whose unit's editor window is open, hidden or shown.
@@ -1159,8 +1175,9 @@ fn make_window(controller: &NSViewController, title: &str) -> Retained<NSWindow>
         origin: objc2_foundation::NSPoint { x: 0.0, y: 0.0 },
         size,
     };
-    let style =
-        NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Miniaturizable;
+    // Not miniaturizable: a miniaturised window is not visible, which is how
+    // `idle` tells that the person closed it.
+    let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
     let mtm = MainThreadMarker::new().expect("a unit's editor opens on the main thread");
     // SAFETY: the window is made on the main thread, as AppKit requires.
     let window = unsafe {
@@ -1833,9 +1850,33 @@ fn take_back(instance: &mut Instance) -> bool {
     returned
 }
 
+/// Closes the unit's editor: its window goes and its parameter observer is
+/// removed. A unit let go of with its editor open keeps neither.
+fn teardown_editor(instance: &mut Instance) {
+    // A view controller still on its way is dropped when it arrives:
+    // `finish_editor` leaves a closed editor closed.
+    instance.opening = false;
+    instance.pending = None;
+    instance.editor_failure = None;
+    if let Some(editor) = instance.editor.take() {
+        for ends in instance.ends.iter().chain(&instance.retired) {
+            ends.status.observer.store(std::ptr::null_mut(), Relaxed);
+        }
+        // SAFETY: the unit's tree is alive; removing an observer blocks
+        // until in-flight callbacks finish, and ours never blocks.
+        unsafe { editor.tree.removeParameterObserver(editor.token) };
+        editor.window.orderOut(None);
+        // The window was made with releasedWhenClosed false, so this only
+        // orders it out; our own reference drops with the editor.
+        editor.window.close();
+    }
+    instance.editor_hidden = false;
+}
+
 /// Lets go of a unit: asks its nodes for their processors, keeping it until
 /// they're back.
 fn close(main: &mut Main, device: DeviceId, mut instance: Instance) {
+    teardown_editor(&mut instance);
     for ends in instance.ends.iter().chain(&instance.retired) {
         ends.status.hand_back.store(true, Relaxed);
     }

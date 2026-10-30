@@ -1099,6 +1099,8 @@ dependencies = [
  "getrandom 0.3.4",
  "lspk-example-gain",
  "midly",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
  "rtrb",
  "rusqlite",
  "rustix 1.1.5",

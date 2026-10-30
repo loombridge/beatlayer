@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use bl_model::{BarControl, ControlKind, CountIn, MetronomeRhythm, MetronomeSound, RemoteTarget};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
+use bl_shell::link_commands as link_ids;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::remote_commands::{self as remote_ids, MapMode};
 use bl_shell::settings::AutomationRecordMode;
@@ -591,6 +592,7 @@ impl MainWindowUi {
                 .with_browser_width(shell.browser_view().width())
                 .with_global_amount(shell.global_amount_shown())
                 .with_sync(shell.sync_lamps_shown(), shell.resync_button_shown())
+                .with_link(shell.link_toggle_shown())
                 .with_new_button(shell.map_mode() != MapMode::Off);
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
@@ -859,11 +861,16 @@ impl MainWindowUi {
         let metering = shell.meters().iter().any(|m| {
             m.peak.iter().chain(&m.rms).any(|level| *level > 0.0) || m.gain_reduction < 0.0
         });
-        if shell.playing() || metering || shell.chain_meters_lit() {
+        if shell.playing()
+            || metering
+            || shell.chain_meters_lit()
+            || shell.link_progress().is_some()
+        {
             // The playhead and the Arrangement Position fields move with
             // the engine every frame (control-bar-transport R14), and the
             // meters and the gain-reduction bars until they're silent
-            // (mixer-view R10, R40).
+            // (mixer-view R10, R40). Spec: link R22. So does the quantum's
+            // progress bar, until it goes.
             ctx.request_repaint();
         } else if shell.audio().engine_on() {
             // The CPU meter updates a few times a second.
@@ -1222,13 +1229,16 @@ impl MainWindowUi {
             }
             // Spec: midi-clock R10, R15. EXT and the sync lamps show while an
             // input has Sync on, the Resync button while Show Resync Button
-            // is on.
+            // is on. Spec: link R17. The Link toggle and its arrow show
+            // while Show Link Toggle is Show.
             if matches!(
                 el,
                 Element::ExternalSync
                     | Element::SyncInput
                     | Element::SyncOutput
                     | Element::ResyncExternalHardware
+                    | Element::LinkToggle
+                    | Element::LinkMenu
             ) && rect.width() <= 0.0
             {
                 continue;
@@ -1328,6 +1338,9 @@ impl MainWindowUi {
             if *el == Element::MetronomeMenu {
                 Self::metronome_menu(&response, shell, events);
             }
+            if *el == Element::LinkMenu {
+                egui::Popup::menu(&response).show(|ui| Self::link_menu_content(ui, shell, events));
+            }
             if *el == Element::Tempo {
                 // Spec: warping R46. The tempo field's context menu holds
                 // Unfollow Tempo Automation.
@@ -1368,6 +1381,36 @@ impl MainWindowUi {
         egui::Popup::menu(response).show(|ui| {
             Self::metronome_menu_content(ui, shell, events);
         });
+    }
+
+    /// The Link menu (the Link spec, R19): Link, Start Stop Sync, Link Audio,
+    /// the peers that have Link Audio on, and Configure Link…. Link Audio
+    /// comes with its own package: its item is off and no peer has it on.
+    fn link_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
+        let ticked = |on: bool, label: &str| {
+            if on {
+                format!("✔ {label}")
+            } else {
+                label.to_owned()
+            }
+        };
+        let mut run = |ui: &mut Ui, id: &str, args: serde_json::Value| {
+            events.push(UiEvent::Invoke(Invocation::new(id, args)));
+            ui.close();
+        };
+        let on = shell.link_enabled();
+        if ui.button(ticked(on, "Link")).clicked() {
+            run(ui, link_ids::SET_ENABLED, json!({ "on": !on }));
+        }
+        let sync = shell.link_start_stop_sync();
+        if ui.button(ticked(sync, "Start Stop Sync")).clicked() {
+            run(ui, link_ids::SET_START_STOP_SYNC, json!({ "on": !sync }));
+        }
+        ui.add_enabled(false, egui::Button::new("Link Audio"));
+        ui.separator();
+        if ui.button("Configure Link…").clicked() {
+            run(ui, ids::APP_SETTINGS, json!({ "page": "link" }));
+        }
     }
 
     /// The tempo field's context menu (the warping spec, R46): Unfollow
@@ -1580,9 +1623,44 @@ impl MainWindowUi {
             UiBuilder::new()
                 .max_rect(layout.control_bar)
                 .accessibility_parent(id),
-            |ui| self.strip(ui, shell, theme, layout, Strip::ControlBar, events),
+            |ui| {
+                self.strip(ui, shell, theme, layout, Strip::ControlBar, events);
+                Self::link_quantum(ui, shell, theme, layout);
+            },
         );
         self.transport.end_frame(ui);
+    }
+
+    /// The Link quantum's progress bar (the Link spec, R22, R23, R25): across
+    /// the Arrangement Position fields, filling left to right with the
+    /// session's phase within the quantum while the transport is stopped or
+    /// waits for a start with a peer in the session. The fields' numbers stay
+    /// readable through it.
+    fn link_quantum(ui: &mut Ui, shell: &Shell, theme: &Theme, layout: &ShellLayout) {
+        let Some(share) = shell.link_progress() else {
+            return;
+        };
+        let rect = layout
+            .rect(Element::PositionBars)
+            .union(layout.rect(Element::PositionSixteenths));
+        let fill = Rect::from_min_size(
+            rect.min,
+            egui::vec2(rect.width() * share as f32, rect.height()),
+        );
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(
+            fill,
+            theme.sizes.corner,
+            theme.colors.accent.0.gamma_multiply(0.4),
+        );
+        let response = ui.interact(rect, Id::new("link-quantum"), Sense::hover());
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::ProgressIndicator, true, "Link Quantum")
+        });
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_numeric_value(share);
+            node.set_value(format!("{:.0} %", share * 100.0));
+        });
     }
 
     fn status_bar(

@@ -28,6 +28,26 @@ pub fn rig() -> (Shell, NullControl) {
 /// [`rig`] with the audio settings `settings`, such as a buffer size.
 #[must_use]
 pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
+    rig_kept(settings, Preferences::default(), None)
+}
+
+/// [`rig`] on the preferences kept in `dir`, as the app starts: a second
+/// rig on the same directory is a relaunch.
+///
+/// # Panics
+///
+/// If the preferences in `dir` can't be read.
+#[must_use]
+pub fn rig_in(dir: &std::path::Path) -> (Shell, NullControl) {
+    let prefs = Preferences::load(dir).expect("readable preferences");
+    rig_kept(prefs.audio.clone(), prefs, Some(dir.to_owned()))
+}
+
+fn rig_kept(
+    settings: AudioSettings,
+    prefs: Preferences,
+    dir: Option<std::path::PathBuf>,
+) -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             pacing: Pacing::Manual,
@@ -35,32 +55,35 @@ pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
         },
         &[("null", "Null device")],
     );
-    rig_on_with(backend, control, settings)
+    rig_on_with(backend, control, settings, prefs, dir)
 }
 
 /// As [`rig`], on `backend` and the `control` it came with: a test gives the
 /// null device more channels or a cable (WP-7.17).
 #[must_use]
 pub fn rig_on(backend: NullBackend, control: NullControl) -> (Shell, NullControl) {
-    rig_on_with(backend, control, AudioSettings::default())
+    rig_on_with(
+        backend,
+        control,
+        AudioSettings::default(),
+        Preferences::default(),
+        None,
+    )
 }
 
 fn rig_on_with(
     backend: NullBackend,
     control: NullControl,
     settings: AudioSettings,
+    prefs: Preferences,
+    dir: Option<std::path::PathBuf>,
 ) -> (Shell, NullControl) {
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
         Box::new(move |_| Ok(Box::new(backend.clone()))),
         settings,
     );
-    let mut shell = Shell::new(
-        Preferences::default(),
-        None,
-        audio,
-        Box::new(ProjectFiles::new()),
-    );
+    let mut shell = Shell::new(prefs, dir, audio, Box::new(ProjectFiles::new()));
     // Headless runs and tests touch no real keychain.
     shell.use_keychain(std::sync::Arc::new(
         bl_assistant::keychain::MemoryKeychain::new(),

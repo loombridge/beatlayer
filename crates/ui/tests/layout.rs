@@ -118,6 +118,7 @@ fn each_control_starts_where_layout_md_measured_it() {
         (Element::SampleRate, 1369.0),
         (Element::Cpu, 1419.0),
         (Element::Overload, 1478.0),
+        (Element::RemoteIndicators, 1498.0),
         (Element::MidiIndicators, 1507.0),
         (Element::SessionView, 1529.0),
         (Element::AssistantToggle, 1572.0),

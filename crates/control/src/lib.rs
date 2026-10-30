@@ -105,6 +105,18 @@ pub struct Memory {
 }
 
 impl Memory {
+    /// Whether the control follows the controller (R29).
+    #[must_use]
+    pub fn following(&self) -> bool {
+        self.following
+    }
+
+    /// Where the controller last was, as a position in the mapping's range.
+    #[must_use]
+    pub fn last(&self) -> Option<f64> {
+        self.previous
+    }
+
     /// Tells the memory where the control really is after the mapping's last
     /// message moved it, which a stepped control rounds (R29). Without it
     /// the memory takes the control to be where the law asked.
@@ -540,6 +552,96 @@ pub fn guess(messages: &[MidiMessage]) -> RemoteMode {
         },
         None => RemoteMode::Absolute,
     }
+}
+
+/// What a mapped control is now, for the controller's lamps and faders
+/// (R38).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum State {
+    /// A switch, a slot that plays or is queued: on or off.
+    On(bool),
+    /// A continuous control's position on its travel, or a radio button's
+    /// option.
+    Value(f64),
+}
+
+/// The messages that tell the controller `mapping` is mapped to what its
+/// control is now, `state`, with `min` and `max` as [`Law::of`] takes them;
+/// none where the mapping has nothing to show (R38). Each is the inverse of
+/// the law that reads the controller (R20 to R22).
+// Spec: remote-mapping R38. The one place feedback is worked out.
+#[must_use]
+pub fn feedback(mapping: &RemoteMapping, min: f64, max: f64, state: State) -> Vec<MidiMessage> {
+    let kind = mapping.kind;
+    let (channel, full, controller) = match mapping.source {
+        RemoteSource::Note { channel, key } => {
+            let velocity = match (kind, state) {
+                (
+                    ControlKind::Slot | ControlKind::Switch | ControlKind::RangedSwitch,
+                    State::On(on),
+                ) => 127 * u8::from(on),
+                _ => return Vec::new(),
+            };
+            return vec![MidiMessage::note_on(channel - 1, key, velocity)];
+        }
+        RemoteSource::Cc {
+            channel,
+            controller,
+        } => (channel, 127.0, Some(controller)),
+        RemoteSource::Cc14 {
+            channel,
+            controller,
+        } => (channel, 16_383.0, Some(controller)),
+        RemoteSource::PitchBend { channel } => (channel, 16_383.0, None),
+        RemoteSource::NoteRange { .. } | RemoteSource::Key { .. } => return Vec::new(),
+    };
+    let share = |value: f64| {
+        if max == min {
+            0.0
+        } else {
+            ((value - min) / (max - min)).clamp(0.0, 1.0)
+        }
+    };
+    let value = match (kind, state) {
+        (ControlKind::Slot | ControlKind::Switch, State::On(on)) => full * f64::from(u8::from(on)),
+        (ControlKind::RangedSwitch, State::On(on)) => {
+            // Min and Max are controller values; a value inside Min to Max is
+            // on unless Min is above Max (R20).
+            let (low, high) = (min.min(max), min.max(max));
+            let inside = on == (min <= max);
+            let c = if inside {
+                max
+            } else if low > 0.0 {
+                0.0
+            } else {
+                (high + 1.0).min(127.0)
+            };
+            (c / 127.0 * full).round()
+        }
+        (ControlKind::Continuous | ControlKind::Radio { .. }, State::Value(value)) => {
+            (share(value) * full).round()
+        }
+        _ => return Vec::new(),
+    } as u16;
+    // A relative mapping shows the position as 0 to 127 on its controller
+    // (R38).
+    let relative = matches!(mapping.mode, RemoteMode::Relative { .. });
+    let (value, full) = if relative {
+        (((f64::from(value) / full) * 127.0).round() as u16, 127)
+    } else {
+        (value, full as u16)
+    };
+    let (high, low) = ((value >> 7) as u8, (value & 127) as u8);
+    let cc = |controller: u8, value: u8| {
+        MidiMessage::from_bytes(&[0xB0 | (channel - 1), controller, value])
+    };
+    let sent = match controller {
+        Some(controller) if full == 127 => vec![cc(controller, value as u8)],
+        Some(controller) => vec![cc(controller, high), cc(controller + 32, low)],
+        None if relative => Vec::new(),
+        None => vec![MidiMessage::from_bytes(&[0xE0 | (channel - 1), low, high])],
+    };
+    sent.into_iter().flatten().collect()
 }
 
 /// The option of a radio button of `options` nearest `position`.
@@ -1223,5 +1325,159 @@ mod tests {
         assert_eq!(bend(0x7F, 0x3F), Some(Action::Set(false)), "8191");
         assert_eq!(bend(0x7F, 0x7F), Some(Action::Set(true)), "top");
         assert_eq!(bend(0x00, 0x00), Some(Action::Set(false)), "bottom");
+    }
+    fn sent(m: &RemoteMapping, min: f64, max: f64, state: State) -> Vec<Vec<u8>> {
+        feedback(m, min, max, state)
+            .iter()
+            .map(|m| m.bytes().to_vec())
+            .collect()
+    }
+
+    // Spec: remote-mapping R21, R22, R38
+    #[test]
+    fn a_continuous_control_sends_the_inverse_of_its_law_on_each_encoding() {
+        let on = |source| mapping(source, RemoteTarget::Crossfader, Some((0.0, 1.0)));
+        let cc = on(RemoteSource::Cc {
+            channel: 1,
+            controller: 28,
+        });
+        assert_eq!(
+            sent(&cc, 0.0, 1.0, State::Value(0.5)),
+            [[0xB0, 28, 64]],
+            "0.5 of 127"
+        );
+        assert_eq!(
+            sent(&cc, 1.0, 0.0, State::Value(0.25)),
+            [[0xB0, 28, 95]],
+            "Min above Max sends the inverted value"
+        );
+        assert_eq!(
+            sent(&cc, 0.25, 0.75, State::Value(0.0)),
+            [[0xB0, 28, 0]],
+            "outside the range clamps"
+        );
+        let wide = on(RemoteSource::Cc14 {
+            channel: 2,
+            controller: 7,
+        });
+        assert_eq!(
+            sent(&wide, 0.0, 1.0, State::Value(0.5)),
+            [[0xB1, 7, 64], [0xB1, 39, 0]],
+            "a 14-bit pair, the high part then the low"
+        );
+        let bend = on(RemoteSource::PitchBend { channel: 3 });
+        assert_eq!(
+            sent(&bend, 0.0, 1.0, State::Value(0.5)),
+            [[0xE2, 0, 64]],
+            "8192, low then high"
+        );
+    }
+
+    // Spec: remote-mapping R38
+    #[test]
+    fn a_note_shows_a_switch_or_a_slot_with_velocity_127_or_0_and_nothing_else() {
+        let note = RemoteSource::Note {
+            channel: 1,
+            key: 36,
+        };
+        let solo = mapping(note.clone(), RemoteTarget::Solo { track: track() }, None);
+        assert_eq!(sent(&solo, 0.0, 1.0, State::On(true)), [[0x90, 36, 127]]);
+        assert_eq!(sent(&solo, 0.0, 1.0, State::On(false)), [[0x90, 36, 0]]);
+        let scene = bl_model::SceneId(Id::new(3).unwrap());
+        let slot = mapping(
+            note.clone(),
+            RemoteTarget::Slot {
+                track: track(),
+                scene,
+            },
+            None,
+        );
+        assert_eq!(sent(&slot, 0.0, 1.0, State::On(true)), [[0x90, 36, 127]]);
+        let fader = mapping(note, RemoteTarget::Crossfader, Some((0.0, 1.0)));
+        assert!(sent(&fader, 0.0, 1.0, State::Value(0.5)).is_empty());
+        let range = mapping(
+            RemoteSource::NoteRange {
+                channel: 1,
+                low: 36,
+                high: 40,
+                root: None,
+            },
+            RemoteTarget::Slot {
+                track: track(),
+                scene,
+            },
+            None,
+        );
+        assert!(sent(&range, 0.0, 1.0, State::On(true)).is_empty());
+        let key = mapping(
+            RemoteSource::Key { key: "q".into() },
+            RemoteTarget::Solo { track: track() },
+            None,
+        );
+        assert!(sent(&key, 0.0, 1.0, State::On(true)).is_empty());
+    }
+
+    // Spec: remote-mapping R20, R38
+    #[test]
+    fn a_controller_shows_a_switch_by_the_value_that_turns_it_on_or_off() {
+        let source = RemoteSource::Cc {
+            channel: 1,
+            controller: 23,
+        };
+        let activator = mapping(
+            source.clone(),
+            RemoteTarget::Mixer {
+                track: track(),
+                param: MixerParam::Mute,
+            },
+            Some((64.0, 100.0)),
+        );
+        assert_eq!(
+            sent(&activator, 64.0, 100.0, State::On(true)),
+            [[0xB0, 23, 100]]
+        );
+        assert_eq!(
+            sent(&activator, 64.0, 100.0, State::On(false)),
+            [[0xB0, 23, 0]]
+        );
+        assert_eq!(
+            sent(&activator, 100.0, 20.0, State::On(true)),
+            [[0xB0, 23, 0]],
+            "Min above Max: on is outside"
+        );
+        assert_eq!(
+            sent(&activator, 100.0, 20.0, State::On(false)),
+            [[0xB0, 23, 20]]
+        );
+        let solo = mapping(source, RemoteTarget::Solo { track: track() }, None);
+        assert_eq!(sent(&solo, 0.0, 1.0, State::On(true)), [[0xB0, 23, 127]]);
+        assert_eq!(sent(&solo, 0.0, 1.0, State::On(false)), [[0xB0, 23, 0]]);
+    }
+
+    // Spec: remote-mapping R38
+    #[test]
+    fn a_relative_mapping_shows_the_position_as_0_to_127_on_its_controller() {
+        let relative = RemoteMapping::new(
+            RemoteSource::Cc {
+                channel: 1,
+                controller: 29,
+            },
+            RemoteTarget::Crossfader,
+            ControlKind::Continuous,
+            Some((0.0, 1.0)),
+            Some(RemoteMode::Relative {
+                encoding: RelativeEncoding::SignedBit,
+                accelerated: false,
+            }),
+        )
+        .unwrap();
+        assert_eq!(
+            sent(&relative, 0.0, 1.0, State::Value(1.0)),
+            [[0xB0, 29, 127]]
+        );
+        assert_eq!(
+            sent(&relative, 0.0, 1.0, State::Value(0.0)),
+            [[0xB0, 29, 0]]
+        );
     }
 }

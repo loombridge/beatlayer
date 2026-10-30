@@ -149,7 +149,10 @@ fn paint(
         }
     } else if matches!(
         placement.element,
-        Element::MidiIndicators | Element::SyncLamps
+        Element::KeyIndicators
+            | Element::RemoteIndicators
+            | Element::MidiIndicators
+            | Element::SyncLamps
     ) && live
     {
         lamps(
@@ -325,6 +328,7 @@ fn icon(
             }
         }
         Element::KeyIndicators
+        | Element::RemoteIndicators
         | Element::MidiIndicators
         | Element::SyncLamps
         | Element::Overload => {

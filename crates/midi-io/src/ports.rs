@@ -23,7 +23,7 @@ pub struct PortSwitches {
     /// clock (Phase 7).
     pub sync: bool,
     /// An input controls Beatlayer through MIDI mapping; an output gets
-    /// feedback for mapped controls (Phase 7).
+    /// feedback for mapped controls (`docs/specs/remote-mapping.md`, R38).
     pub remote: bool,
     /// An input's messages are read as MPE, each note on a channel of its
     /// own (`docs/specs/midi-io.md`, R27); an output's has no meaning yet.

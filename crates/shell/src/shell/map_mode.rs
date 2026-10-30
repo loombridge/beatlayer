@@ -185,12 +185,16 @@ impl Shell {
 
     fn map_state(&self) -> StateResult {
         let map = &self.remote.map;
+        let (counts, lamps, takeover) = self.remote_report();
         StateResult {
             mode: map.mode,
             selected: map.selected,
             guess: map.guess,
             remote_input: self.remote_input_on(),
             rows: self.map_rows(),
+            counts,
+            lamps,
+            takeover,
         }
     }
 

@@ -488,6 +488,50 @@ fn an_offline_render_follows_a_latency_reported_after_the_first_block() {
     assert_null(&out, "aligned at the reported latency");
 }
 
+// Export R3 with delay-compensation R6. The compile a reported latency
+// brings changes nothing a render set: the set's metronome and loop stay out.
+#[test]
+fn a_latency_reported_during_a_render_brings_back_no_clicks_and_no_loop() {
+    const LATE: &str = "test.late";
+    let render = |editor: &Editor| {
+        let mut media = MediaMap::new();
+        media.insert(hash(1), impulse(1.0));
+        let mut registry = bl_engine::Registry::new();
+        registry.set_media(Arc::new(media));
+        registry.add_native(LATE, |_device, _config| Box::new(LateReport::new()));
+        let mut offline = bl_engine::Offline::new(
+            bl_engine::EngineConfig::new(bl_core::time::SampleRate::HZ_48000, 64),
+            registry,
+        );
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::SetLoop(None));
+        offline.sender().transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        offline.render(96_000, |block| out.extend_from_slice(block.channel(0)));
+        out.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+    };
+    let mut editor = Editor::new();
+    let a = track(&mut editor, TrackKind::Audio, None);
+    clip(&mut editor, a, hash(1));
+    device(&mut editor, a, LATE, &[]);
+    let quiet = render(&editor);
+    editor
+        .apply(Command::SetMetronomeEnabled { enabled: true })
+        .unwrap();
+    editor
+        .apply(Command::SetLoop {
+            start: Ticks::ZERO,
+            length: Ticks::QUARTER,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetLoopEnabled { enabled: true })
+        .unwrap();
+    let heard = render(&editor);
+    let first = quiet.iter().zip(&heard).position(|(a, b)| a != b);
+    assert_eq!(first, None, "the first frame that differs");
+}
+
 // Delay-compensation R10. Main's output lags song time by what its devices
 // and the slowest path into it add, which a render discards.
 #[test]

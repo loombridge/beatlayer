@@ -182,10 +182,13 @@ impl Offline {
         }
         // Spec: delay-compensation R6. What the shell does for an engine on a
         // device: each device whose node reports another latency than the
-        // compensated one is reported back, and compiled again.
+        // compensated one is reported back, and compiled again. The document
+        // is the same, so the transport keeps what the render set: its loop,
+        // and no metronome (export R3).
         let changes = self.monitor.state().latency_changes.clone();
         for (device, frames) in changes {
-            let update = self.compiler.latency(device, frames);
+            let mut update = self.compiler.latency(device, frames);
+            update.transport.clear();
             self.sender.send_update(update);
         }
         self.processor.output()

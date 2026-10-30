@@ -3,8 +3,8 @@
 //! log.
 //!
 //! The loop itself is `bl-assistant`'s ([`bl_assistant::agent`]): it sends
-//! the conversation and the commands to a provider and runs each tool call
-//! as the registry command it names, through a [`Commands`] host. This
+//! the conversation and its few tools to a provider and runs each `run`
+//! call as the registry command it names, through a [`Commands`] host. This
 //! module is that host, backed by the [`Shell`]: each turn's changes are one
 //! undo step, each call's permission class is decided from its arguments
 //! against the set as it is, and a destructive or external call the person
@@ -27,12 +27,14 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::SystemTime;
 
 use bl_assistant::agent::{Agent, Commands, Turn};
+use bl_assistant::keychain::Keychain;
 use bl_assistant::message::{Event, Message, Request};
-use bl_assistant::provider::{Error, Provider};
-use bl_assistant::tools::ToolSet;
-use bl_commands::Permission;
+use bl_assistant::provider::{Anthropic, Error, Gemini, OpenAi, Provider};
+use bl_assistant::tools::{DESCRIBE_COMMAND, LIST_COMMANDS, QUERY};
+use bl_commands::{CommandSpec, Permission, Registry};
 use bl_core::id::Id;
-use serde_json::Value;
+use serde::Deserialize;
+use serde_json::{Value, json};
 
 use crate::Shell;
 use crate::placeholders::resolve_placeholders;
@@ -142,8 +144,7 @@ pub fn run_turn(
     text: &str,
 ) -> Result<Turn, Error> {
     let (conversation, stop) = shell.assistant_handles();
-    let tools = ToolSet::new(shell.registry().iter());
-    let agent = Agent::new(shell.registry().iter());
+    let agent = Agent::new();
     let mut request = Request::new(shell.assistant_settings().model.clone());
     SYSTEM_PROMPT.clone_into(&mut request.system);
     {
@@ -169,13 +170,20 @@ pub fn run_turn(
                 let mut conversation = lock(&conversation);
                 match event {
                     Event::Text(text) => conversation.push_text(&text),
-                    Event::ToolCall(call) => conversation.rows.push(Row::Call {
-                        command: call.command(&tools).ok().map(|command| command.command),
-                        id: call.id,
-                        name: call.name,
-                        arguments: call.arguments,
-                        result: None,
-                    }),
+                    Event::ToolCall(call) => {
+                        // A `run` call shows the command it runs and that
+                        // command's arguments.
+                        let run = call.command().ok();
+                        conversation.rows.push(Row::Call {
+                            arguments: run
+                                .as_ref()
+                                .map_or_else(|| call.arguments.clone(), |run| run.args.clone()),
+                            command: run.map(|run| run.command),
+                            id: call.id,
+                            name: call.name,
+                            result: None,
+                        });
+                    }
                     Event::Usage(_) => {}
                 }
             },
@@ -335,8 +343,13 @@ impl Commands for AssistantCommands<'_> {
         self.shell.end_assistant_turn();
     }
 
-    fn permit(&mut self, command: &str, args: &Value, _class: Permission) -> Result<(), String> {
+    fn permit(&mut self, command: &str, args: &Value) -> Result<(), String> {
         self.resolved = None;
+        if self.shell.registry().get(command).is_none() {
+            return Err(format!(
+                "there is no command `{command}`; `{LIST_COMMANDS}` finds the right ID"
+            ));
+        }
         // The assistant is the person's own, but it never changes what the
         // person allows, any more than an agent may (agent-permissions R9).
         if bl_shell_spec::agent::handles(command) || handles(command) {
@@ -400,6 +413,151 @@ impl Commands for AssistantCommands<'_> {
         self.shell.assistant_finish_call(command, result.clone());
         result
     }
+
+    fn read(&mut self, tool: &str, args: Value) -> Result<Value, String> {
+        match tool {
+            LIST_COMMANDS => list_commands(self.shell.registry(), args),
+            DESCRIBE_COMMAND => describe_command(self.shell.registry(), args),
+            QUERY => match self.shell.assistant_query() {
+                Some(query) => query(self.shell, args),
+                None => Err("this app can't read the project for the assistant".to_owned()),
+            },
+            other => Err(format!("`{other}` isn't a tool that reads")),
+        }
+    }
+}
+
+/// How the host answers the assistant's `query` tool, which reads the
+/// project: the agent API's own query, which lives in a crate above the
+/// shell, so the host (the app, `bl-cli`) hands it over
+/// ([`Shell::set_assistant_query`]).
+pub type QueryFn = fn(&mut Shell, Value) -> Result<Value, String>;
+
+/// Arguments of `list_commands`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListArgs {
+    area: Option<String>,
+    search: Option<String>,
+}
+
+/// Arguments of `describe_command`.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DescribeArgs {
+    command: String,
+}
+
+/// `list_commands`: the registry's areas with their counts, or the commands
+/// of an area or matching words, best matches first.
+fn list_commands(registry: &Registry, args: Value) -> Result<Value, String> {
+    let ListArgs { area, search } =
+        serde_json::from_value(args).map_err(|error| error.to_string())?;
+    if area.is_none() && search.is_none() {
+        let mut areas: BTreeMap<&str, usize> = BTreeMap::new();
+        for spec in registry.iter() {
+            *areas.entry(spec.area()).or_default() += 1;
+        }
+        return Ok(json!({
+            "commands": registry.len(),
+            "areas": areas,
+            "next": "Call list_commands with an `area` or `search` to list commands.",
+        }));
+    }
+    let words: Vec<String> = search
+        .as_deref()
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect();
+    let mut found: Vec<(usize, &CommandSpec)> = registry
+        .iter()
+        .filter(|spec| area.as_deref().is_none_or(|area| spec.area() == area))
+        .filter_map(|spec| {
+            let named = format!("{} {}", spec.id, spec.label).to_lowercase();
+            let description = spec.description.to_lowercase();
+            let mut score = 0;
+            for word in &words {
+                if named.contains(word.as_str()) {
+                    score += 2;
+                } else if description.contains(word.as_str()) {
+                    score += 1;
+                } else {
+                    return None;
+                }
+            }
+            Some((score, spec))
+        })
+        .collect();
+    found.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    let commands: Vec<Value> = found
+        .into_iter()
+        .map(|(_, spec)| {
+            let description = &spec.description;
+            json!({
+                "command": spec.id,
+                "label": spec.label,
+                "permission": spec.permission.unwrap_or(Permission::External).id(),
+                "summary": description.find(". ").map_or(&**description, |end| &description[..=end]),
+            })
+        })
+        .collect();
+    Ok(json!({ "commands": commands }))
+}
+
+/// `describe_command`: one command's description, permission class and
+/// schemas.
+fn describe_command(registry: &Registry, args: Value) -> Result<Value, String> {
+    let DescribeArgs { command } =
+        serde_json::from_value(args).map_err(|error| error.to_string())?;
+    let spec = registry.get(&command).ok_or_else(|| {
+        format!("there is no command `{command}`; `{LIST_COMMANDS}` finds the right ID")
+    })?;
+    Ok(json!({
+        "command": spec.id,
+        "label": spec.label,
+        "description": spec.description,
+        "permission": spec.permission.unwrap_or(Permission::External).id(),
+        "arguments": spec.args.as_ref().and_then(|schema| serde_json::to_value(schema).ok()),
+        "result": spec.result.as_ref().and_then(|schema| serde_json::to_value(schema).ok()),
+    }))
+}
+
+/// The provider `kind` names, with its key read from `keychain` when a
+/// request is made. `base_url` points it elsewhere than the provider's own
+/// API unless it is empty.
+#[must_use]
+pub fn provider(
+    kind: AssistantProvider,
+    base_url: &str,
+    keychain: Arc<dyn Keychain>,
+) -> Box<dyn Provider> {
+    match kind {
+        AssistantProvider::OpenAi => {
+            let provider = OpenAi::new(keychain);
+            Box::new(if base_url.is_empty() {
+                provider
+            } else {
+                provider.base_url(base_url)
+            })
+        }
+        AssistantProvider::Anthropic => {
+            let provider = Anthropic::new(keychain);
+            Box::new(if base_url.is_empty() {
+                provider
+            } else {
+                provider.base_url(base_url)
+            })
+        }
+        AssistantProvider::Gemini => {
+            let provider = Gemini::new(keychain);
+            Box::new(if base_url.is_empty() {
+                provider
+            } else {
+                provider.base_url(base_url)
+            })
+        }
+    }
 }
 
 /// The provider's keychain account, as `bl-assistant` stores it: the same
@@ -407,8 +565,8 @@ impl Commands for AssistantCommands<'_> {
 #[must_use]
 pub fn keychain_account(provider: AssistantProvider) -> &'static str {
     match provider {
-        AssistantProvider::OpenAi => bl_assistant::provider::OpenAi::ACCOUNT,
-        AssistantProvider::Anthropic => bl_assistant::provider::Anthropic::ACCOUNT,
-        AssistantProvider::Gemini => bl_assistant::provider::Gemini::ACCOUNT,
+        AssistantProvider::OpenAi => OpenAi::ACCOUNT,
+        AssistantProvider::Anthropic => Anthropic::ACCOUNT,
+        AssistantProvider::Gemini => Gemini::ACCOUNT,
     }
 }

@@ -24,11 +24,11 @@ use std::process::ExitCode;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bl_assistant::agent::{Stopped, Turn};
-use bl_assistant::keychain::{Keychain, OsKeychain};
+use bl_assistant::keychain::OsKeychain;
 use bl_assistant::message::{Event, Message, Reply, Request};
-use bl_assistant::provider::{Anthropic, Error, Gemini, OpenAi, Provider};
+use bl_assistant::provider::{Error, Provider};
 use bl_shell::assistant::{
-    ASSISTANT_SET_MODEL, AssistantProvider, Decision, PromptRequest, Prompter, run_turn,
+    ASSISTANT_SET_MODEL, AssistantProvider, Decision, PromptRequest, Prompter, provider, run_turn,
 };
 use bl_shell::{Shell, commands as ids};
 use serde::{Deserialize, Serialize};
@@ -83,43 +83,6 @@ fn parse_provider(name: &str) -> Result<AssistantProvider, String> {
         })
 }
 
-/// The provider `kind` names, with its key read from `keychain` when a
-/// request is made. `base_url` points it elsewhere than the provider's own
-/// API unless it is empty.
-#[must_use]
-pub fn provider(
-    kind: AssistantProvider,
-    base_url: &str,
-    keychain: Arc<dyn Keychain>,
-) -> Box<dyn Provider> {
-    match kind {
-        AssistantProvider::OpenAi => {
-            let provider = OpenAi::new(keychain);
-            Box::new(if base_url.is_empty() {
-                provider
-            } else {
-                provider.base_url(base_url)
-            })
-        }
-        AssistantProvider::Anthropic => {
-            let provider = Anthropic::new(keychain);
-            Box::new(if base_url.is_empty() {
-                provider
-            } else {
-                provider.base_url(base_url)
-            })
-        }
-        AssistantProvider::Gemini => {
-            let provider = Gemini::new(keychain);
-            Box::new(if base_url.is_empty() {
-                provider
-            } else {
-                provider.base_url(base_url)
-            })
-        }
-    }
-}
-
 /// Answers the assistant's questions with no one there: yes to all of them
 /// when autonomous, no to all of them otherwise.
 pub struct Headless {
@@ -152,6 +115,7 @@ pub fn run_headless(
     shell
         .run(ASSISTANT_SET_MODEL, json!({ "model": model }))
         .expect("the model setting takes any name");
+    shell.set_assistant_query(bl_agent::assistant_query);
     run_turn(shell, provider, &mut Headless { autonomous }, prompt)
 }
 

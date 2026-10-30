@@ -290,6 +290,24 @@ pub(crate) fn call(ctx: &mut Ctx<'_>, name: &str, args: Value) -> Result<ToolOut
     })
 }
 
+/// The `query` tool for the built-in assistant, which reads the project as
+/// an agent does. It has no checkpoints or scheduled commands of its own to
+/// report: those belong to the agent server.
+pub fn assistant_query(shell: &mut Shell, args: Value) -> Result<Value, String> {
+    let mut ctx = Ctx {
+        mode: Mode::App,
+        shell,
+        session: &mut Session::default(),
+        state: &mut State::default(),
+        confirmed: false,
+        view_capture: false,
+    };
+    match query::query(&mut ctx, args) {
+        ToolOutcome::Done(result) => result,
+        _ => Err("the query couldn't be answered".to_owned()),
+    }
+}
+
 /// A tool's arguments, read into `T`. Missing arguments read as `{}`.
 fn args<T: DeserializeOwned>(args: Value) -> Result<T, ToolOutcome> {
     let args = if args.is_null() { json!({}) } else { args };

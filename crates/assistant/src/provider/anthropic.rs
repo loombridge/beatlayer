@@ -122,7 +122,7 @@ impl Provider for Anthropic {
                         arguments,
                     }) = blocks.get_mut(index(&value))
                     {
-                        let call = finished(id, name, input, arguments)?;
+                        let call = finished(id, name, input, arguments);
                         on_event(Event::ToolCall(call.clone()));
                         reply.tool_calls.push(call);
                     }
@@ -196,19 +196,23 @@ fn started(value: &Value, reply: &mut Reply, on_event: &mut dyn FnMut(Event)) ->
 
 /// The call a `content_block_stop` finishes: its deltas' JSON when it
 /// streamed some, and its opening input when it didn't.
-fn finished(id: &str, name: &str, input: &Value, arguments: &str) -> Result<ToolCall, Error> {
-    let arguments = if arguments.trim().is_empty() {
-        input.clone()
-    } else {
-        serde_json::from_str(arguments).map_err(|error| {
-            Error::Protocol(format!("the arguments of `{name}` aren't JSON: {error}"))
-        })?
-    };
-    Ok(ToolCall {
-        id: id.to_owned(),
-        name: name.to_owned(),
-        arguments,
-    })
+fn finished(id: &str, name: &str, input: &Value, arguments: &str) -> ToolCall {
+    let (id, name) = (id.to_owned(), name.to_owned());
+    if arguments.trim().is_empty() {
+        return ToolCall {
+            id,
+            name,
+            arguments: input.clone(),
+        };
+    }
+    match serde_json::from_str(arguments) {
+        Ok(arguments) => ToolCall {
+            id,
+            name,
+            arguments,
+        },
+        Err(error) => ToolCall::unparsed(id, name, arguments, &error.to_string()),
+    }
 }
 
 /// Why the model stopped, in Anthropic's words.

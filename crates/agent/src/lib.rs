@@ -118,4 +118,4 @@ pub use server::{
     Agent, CaptureRequest, Captured, PreviewOutcome, Render, RenderKind, RenderOutcome,
     RenderRequest,
 };
-pub use tools::EngineMessage;
+pub use tools::{EngineMessage, assistant_query};

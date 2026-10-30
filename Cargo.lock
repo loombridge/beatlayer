@@ -597,6 +597,7 @@ version = "0.2.0"
 dependencies = [
  "bl-agent",
  "bl-analysis",
+ "bl-assistant",
  "bl-audio-io",
  "bl-control",
  "bl-core",

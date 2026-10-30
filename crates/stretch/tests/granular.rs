@@ -38,6 +38,8 @@ fn a_pitch_change_resamples_the_next_grain() {
         transient_envelope: 100.0,
         pitch: 1.0,
         clip: 1,
+        step: 1.0,
+        song: f64::NAN,
     };
     let mut out1 = vec![0.0f32; 4096];
     tones1.render(&req1, &window, &mut out1, 4096);
@@ -58,6 +60,8 @@ fn a_pitch_change_resamples_the_next_grain() {
         transient_envelope: 100.0,
         pitch: 2.0,
         clip: 1,
+        step: 1.0,
+        song: f64::NAN,
     };
     let mut out2 = vec![0.0f32; 4096];
     tones2.render(&req2, &window, &mut out2, 4096);

@@ -23,7 +23,7 @@ use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
 use crate::document::Document;
 use crate::error::ModelError;
-use crate::external::{ExternalPort, HardwareLatency};
+use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
 use crate::follow::FollowPatch;
 use crate::groove::{GLOBAL_AMOUNT_MAX, Groove, GrooveBase, check_percent};
 use crate::ids::{
@@ -40,6 +40,7 @@ use crate::rack::{
     CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
     MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
+use crate::record_quantization::RecordQuantization;
 use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
@@ -346,6 +347,19 @@ pub enum Command {
         /// When on, MIDI recorded into the Arrangement merges into the clips
         /// already there instead of replacing them.
         enabled: bool,
+    },
+
+    /// Sets Record Quantization, the grid recorded notes are moved onto
+    /// (the recording spec, R17): `quantization` chooses a value, `on` turns
+    /// record quantising off, or back on at the last value chosen other than
+    /// No Quantization. Exactly one of the two is given.
+    SetRecordQuantization {
+        /// The value to choose.
+        #[serde(default)]
+        quantization: Option<RecordQuantization>,
+        /// Whether record quantising is on.
+        #[serde(default)]
+        on: Option<bool>,
     },
 
     /// Creates an empty track with default mixer settings.
@@ -2301,6 +2315,23 @@ pub enum Command {
         /// given, so switching the unit sends the converted value.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         hardware_latency: Option<HardwareLatency>,
+        /// A CV device's outputs (`docs/specs/cv-tools.md`, R4): each named
+        /// by its name in the device (Pitch, Gate, Mod 1 and so on) and set
+        /// to an interface channel, counted from 1, or to `null` for No
+        /// Output. The outputs left out stay as they are.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cv_outputs: Option<Vec<crate::external::CvPort>>,
+        /// A CV device's inputs, as `cv_outputs`; `null` is No Input.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cv_inputs: Option<Vec<crate::external::CvPort>>,
+    },
+    /// Stores a CV Instrument's calibration, or takes it away with `null`
+    /// (`docs/specs/cv-tools.md`, R14).
+    SetCvCalibration {
+        /// The device.
+        device: DeviceId,
+        /// The calibration, or none to clear it.
+        calibration: Option<CvCalibration>,
     },
 
     /// Inserts a new device at `index` in a rack's chain, keeping the chain
@@ -2866,6 +2897,7 @@ impl Command {
             Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
             Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
             Self::SetMidiOverdub { .. } => "MIDI Arrangement Overdub",
+            Self::SetRecordQuantization { .. } => "Record Quantization",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -3109,9 +3141,17 @@ impl Command {
                 channel: None,
                 mpe: None,
                 audio_from: None,
+                cv_outputs: None,
+                cv_inputs: None,
                 ..
             } => "Change \"Hardware Latency\"",
             Self::SetExternal { .. } => "Change \"Routing\"",
+            // WP-7.17: Beatlayer's own names.
+            Self::SetCvCalibration {
+                calibration: Some(_),
+                ..
+            } => "Calibrate CV Instrument",
+            Self::SetCvCalibration { .. } => "Clear CV Calibration",
             // WP-5.1. Beatlayer's own names, after the device ones.
             Self::InsertChainDevice { .. } => "Insert Device",
             Self::MoveDeviceToChain { .. } => "Move Device",
@@ -3417,6 +3457,27 @@ impl Document {
             }
             Command::SetMidiOverdub { enabled } => {
                 self.settings.midi_overdub = *enabled;
+                Ok(())
+            }
+            Command::SetRecordQuantization { quantization, on } => {
+                let settings = &mut self.settings;
+                let value = match (quantization, on) {
+                    (Some(value), None) => *value,
+                    (None, Some(true)) if settings.record_quantization.is_none() => {
+                        settings.record_quantization_last
+                    }
+                    (None, Some(true)) => settings.record_quantization,
+                    (None, Some(false)) => RecordQuantization::None,
+                    _ => {
+                        return Err(ModelError::InvalidInput(
+                            "give either `quantization` or `on`",
+                        ));
+                    }
+                };
+                settings.record_quantization = value;
+                if !value.is_none() {
+                    settings.record_quantization_last = value;
+                }
                 Ok(())
             }
             Command::CreateTrack {
@@ -5053,6 +5114,8 @@ impl Document {
                 audio_from,
                 audio_to,
                 hardware_latency,
+                cv_outputs,
+                cv_inputs,
             } => {
                 let mut external = self
                     .device_ref(*device)?
@@ -5096,6 +5159,26 @@ impl Document {
                     )?;
                     external.hardware_latency = *latency;
                 }
+                // Spec: cv-tools R4. Each port is named as the device names
+                // it; the ones given change, the others stay.
+                for (given, kept) in [
+                    (cv_outputs, &mut external.cv_outputs),
+                    (cv_inputs, &mut external.cv_inputs),
+                ] {
+                    for port in given.iter().flatten() {
+                        if port.channel == Some(0) {
+                            return Err(ModelError::InvalidInput(
+                                "interface channels count from 1",
+                            ));
+                        }
+                        let Some(held) = kept.iter_mut().find(|p| p.name == port.name) else {
+                            return Err(ModelError::InvalidInput(
+                                "the device has no CV port of that name",
+                            ));
+                        };
+                        held.channel = port.channel;
+                    }
+                }
                 crate::routing::check_port(
                     external.port.as_deref().unwrap_or("-"),
                     external.channel,
@@ -5103,6 +5186,28 @@ impl Document {
                 if Some(&external) != self.device_ref(*device)?.external.as_ref() {
                     self.device_mut(*device)?.external = Some(external);
                 }
+                Ok(())
+            }
+            Command::SetCvCalibration {
+                device,
+                calibration,
+            } => {
+                // The node plays every pitch through the calibration on the
+                // audio thread, so only a rising line and a calibration's
+                // steps, by rising voltage, are taken.
+                if calibration.as_ref().is_some_and(|c| !c.is_valid()) {
+                    return Err(ModelError::InvalidInput(
+                        "a calibration rises by a positive number of octaves a volt from a \
+                         positive frequency, over at most eight steps by rising voltage",
+                    ));
+                }
+                let mut external = self
+                    .device_ref(*device)?
+                    .external
+                    .clone()
+                    .ok_or(ModelError::NoExternal(*device))?;
+                external.cv_calibration.clone_from(calibration);
+                self.device_mut(*device)?.external = Some(external);
                 Ok(())
             }
             Command::InsertChainDevice {

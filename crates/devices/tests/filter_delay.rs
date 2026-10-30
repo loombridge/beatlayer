@@ -117,6 +117,7 @@ fn an_echo_follows_a_tempo_change() {
         TransportInfo {
             playing: true,
             position: Frames(3_000),
+            ..TransportInfo::default()
         },
     );
     // The tempo halves, so the echo moves from 6,000 to 12,000.

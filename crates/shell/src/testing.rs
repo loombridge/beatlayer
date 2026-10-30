@@ -2,9 +2,11 @@
 //! (T199): advance the set by milliseconds or blocks, and poll the engine
 //! while doing it, so a test never waits on the wall clock for a result.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
+use bl_audio_io::{BackendKind, Cable, NullBackend, NullControl, NullOptions, Pacing};
 
 use crate::Shell;
 use crate::audio::{AudioHost, AudioSettings};
@@ -26,6 +28,26 @@ pub fn rig() -> (Shell, NullControl) {
 /// [`rig`] with the audio settings `settings`, such as a buffer size.
 #[must_use]
 pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
+    rig_kept(settings, Preferences::default(), None)
+}
+
+/// [`rig`] on the preferences kept in `dir`, as the app starts: a second
+/// rig on the same directory is a relaunch.
+///
+/// # Panics
+///
+/// If the preferences in `dir` can't be read.
+#[must_use]
+pub fn rig_in(dir: &std::path::Path) -> (Shell, NullControl) {
+    let prefs = Preferences::load(dir).expect("readable preferences");
+    rig_kept(prefs.audio.clone(), prefs, Some(dir.to_owned()))
+}
+
+fn rig_kept(
+    settings: AudioSettings,
+    prefs: Preferences,
+    dir: Option<std::path::PathBuf>,
+) -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             pacing: Pacing::Manual,
@@ -33,23 +55,74 @@ pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
         },
         &[("null", "Null device")],
     );
+    rig_on_with(backend, control, settings, prefs, dir)
+}
+
+/// As [`rig`], on `backend` and the `control` it came with: a test gives the
+/// null device more channels or a cable (WP-7.17).
+#[must_use]
+pub fn rig_on(backend: NullBackend, control: NullControl) -> (Shell, NullControl) {
+    rig_on_with(
+        backend,
+        control,
+        AudioSettings::default(),
+        Preferences::default(),
+        None,
+    )
+}
+
+fn rig_on_with(
+    backend: NullBackend,
+    control: NullControl,
+    settings: AudioSettings,
+    prefs: Preferences,
+    dir: Option<std::path::PathBuf>,
+) -> (Shell, NullControl) {
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
         Box::new(move |_| Ok(Box::new(backend.clone()))),
         settings,
     );
-    let mut shell = Shell::new(
-        Preferences::default(),
-        None,
-        audio,
-        Box::new(ProjectFiles::new()),
-    );
+    let mut shell = Shell::new(prefs, dir, audio, Box::new(ProjectFiles::new()));
     // Headless runs and tests touch no real keychain.
     shell.use_keychain(std::sync::Arc::new(
         bl_assistant::keychain::MemoryKeychain::new(),
     ));
     shell.use_test_clock(control.clock().expect("manual pacing"));
     (shell, control)
+}
+
+/// An oscillator patched to the null device's cable (WP-7.17): it follows the
+/// voltage output channel 3 played the block before, at 0.97 octaves a volt
+/// from 164 Hz at −0.13 V with a slight bow, and sounds a sine on input
+/// channel 4. `heard` collects what it sounded while `record` is set, and
+/// `silent` takes the sound away. A test gives the device 4 channels.
+#[must_use]
+pub fn oscillator(
+    heard: &Arc<Mutex<Vec<f32>>>,
+    record: &Arc<AtomicBool>,
+    silent: &Arc<AtomicBool>,
+) -> Cable {
+    let (heard, record, silent) = (heard.clone(), record.clone(), silent.clone());
+    let mut phase = 0.0f64;
+    Cable::new(move |played, next| {
+        let volts = f64::from(played[2].last().copied().unwrap_or(0.0)) * 10.0;
+        let hz = 164.0 * (0.97 * (volts + 0.13) + 0.00005 * (volts * volts - 3.0 * volts)).exp2();
+        let silent = silent.load(Ordering::Relaxed);
+        for (c, channel) in next.iter_mut().enumerate() {
+            for sample in channel.iter_mut() {
+                *sample = if c == 3 && !silent {
+                    phase = (phase + hz / 48_000.0).fract();
+                    (phase * std::f64::consts::TAU).sin() as f32 * 0.5
+                } else {
+                    0.0
+                };
+            }
+        }
+        if record.load(Ordering::Relaxed) {
+            heard.lock().unwrap().extend_from_slice(&next[3]);
+        }
+    })
 }
 
 /// Runs `blocks` blocks on the null stream and lets the shell read what the

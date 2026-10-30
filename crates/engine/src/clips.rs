@@ -48,8 +48,8 @@ use crate::scales::{ScaleRuns, Span, TrackScale};
 use crate::session::ClipOffset;
 use crate::sources::{Bank, ClipSources, Handoff, Supply};
 use crate::warped::{
-    BeatsMedia, CUE_BACK, Flat, Histories, History, Past, Playing, PoolSpec, Positions, Stretchers,
-    WarpScratch, Warped, WindowBuf, window_of,
+    BeatsMedia, CUE_BACK, Flat, Histories, History, Pace, Past, Playing, PoolSpec, Positions,
+    Stretchers, WarpScratch, Warped, WindowBuf, window_of,
 };
 
 /// A clip's source, as a [`MediaLibrary`] opens it.
@@ -680,10 +680,12 @@ impl Geometry {
 
     /// Where an unwarped clip transposed reads (the warp modes spec, R27):
     /// its file at the pitch ratio, from the song frame `origin` it starts
-    /// playing at. `None` where it isn't transposed, and then it plays the
-    /// file frame for frame.
-    pub(crate) fn transposed(&self, origin: i64) -> Option<Positions<'_>> {
-        (self.pitch != 1.0).then(|| {
+    /// playing at, with a launch's `transpose` in semitones added (remote-mapping
+    /// R35). `None` where it isn't transposed, and then it plays the file
+    /// frame for frame.
+    pub(crate) fn transposed(&self, origin: i64, transpose: i8) -> Option<Positions<'_>> {
+        let ratio = launch_pitch(self.pitch, transpose);
+        (ratio != 1.0).then(|| {
             Positions::Flat(Flat {
                 origin,
                 start: self.region_start as f64,
@@ -691,7 +693,7 @@ impl Geometry {
                 loop_brace: self
                     .looping
                     .then_some((self.loop_start as f64, self.loop_end as f64)),
-                ratio: self.pitch,
+                ratio,
             })
         })
     }
@@ -748,6 +750,9 @@ pub(crate) struct PlacedClip {
     /// only an Arrangement clip has it, and only when something does.
     sound: Option<Box<ClipSound>>,
     gain: f64,
+    /// How much a launch's velocity changes the gain of a Session slot clip,
+    /// from 0 to 1 (the remote mapping spec, R16); 0 for an Arrangement clip.
+    velocity_amount: f64,
     fade_in: u64,
     fade_out: u64,
     /// The fades' shape and reach past the clip's own edges (the audio clips
@@ -1209,6 +1214,7 @@ impl ClipList {
                     carry,
                     sound: sound.map(Box::new),
                     gain: audio.gain,
+                    velocity_amount: 0.0,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
                     playing: Playing::of(clip.id.0.get(), audio),
@@ -1293,6 +1299,7 @@ impl ClipList {
                     carry,
                     sound: None,
                     gain: audio.gain,
+                    velocity_amount: clip.launch.velocity_amount,
                     fade_in: frames(audio.fade_in),
                     fade_out: frames(audio.fade_out),
                     playing: Playing::of(clip.id.0.get(), audio),
@@ -1444,6 +1451,56 @@ pub struct ClipPlayer {
     /// jump (a nudge or a Legato restart), which a streamed file crossfades
     /// (the launch quantisation spec, R29).
     session_seen: Option<(SceneId, i64, ClipOffset)>,
+    /// The clips that play at their own speed while the song doesn't (the
+    /// transport spec, R24): how far each has played.
+    own: Vec<Own>,
+    /// Counts the blocks played, so an entry of `own` tells whether the block
+    /// before was one it played in.
+    blocks: u64,
+    /// A frame count that goes on by one per frame of the blocks played
+    /// without a jump (see `Request::first`).
+    key: i64,
+    /// The song frame the last block played up to, where an unbroken run
+    /// goes on from.
+    last_end: i64,
+}
+
+/// A clip that plays at its own speed (R24): the frames of it played so far,
+/// as of the block that `stamp` counts.
+#[derive(Clone, Copy, Debug)]
+struct Own {
+    id: ClipId,
+    stamp: u64,
+    elapsed: u64,
+}
+
+/// How many clips of a track can play at their own speed while the song
+/// follows an outside tempo and keep their place across blocks.
+const OWN: usize = 64;
+
+/// How many frames of clip `id` have played at its own speed, if it played in
+/// the block before block number `blocks`.
+fn own_played(own: &[Own], blocks: u64, id: ClipId) -> Option<u64> {
+    own.iter()
+        .find(|entry| entry.id == id && entry.stamp + 1 == blocks)
+        .map(|entry| entry.elapsed)
+}
+
+/// Notes that clip `id` has played `elapsed` frames of itself as of block
+/// number `blocks`. Without room for it, the clip is placed by the song.
+fn own_note(own: &mut Vec<Own>, blocks: u64, id: ClipId, elapsed: u64) {
+    let entry = Own {
+        id,
+        stamp: blocks,
+        elapsed,
+    };
+    if let Some(held) = own.iter_mut().find(|held| held.id == id) {
+        *held = entry;
+    } else if own.len() < own.capacity() {
+        own.push(entry);
+    } else if let Some(stale) = own.iter_mut().find(|held| held.stamp + 1 < blocks) {
+        *stale = entry;
+    }
 }
 
 /// A clip player's parameters.
@@ -1476,6 +1533,10 @@ impl ClipPlayer {
             smoothing: smoothing_frames(config.sample_rate),
             scale: TrackScale::default(),
             runs: None,
+            own: Vec::with_capacity(OWN),
+            blocks: 0,
+            key: 0,
+            last_end: i64::MIN,
             session_seen: None,
         }
     }
@@ -1647,6 +1708,26 @@ fn render(
     }
 }
 
+/// The pitch ratio of a clip whose own is `pitch` once a launch moves it by
+/// `transpose` semitones, the sum held to the 48 either way that Transpose
+/// allows (remote-mapping R35).
+// shortcut: the clip's Detune and envelopes count in the 48, a cent or two at
+// the limit; upgrade if a chromatic slot is heard to miss there.
+fn launch_pitch(pitch: f64, transpose: i8) -> f64 {
+    if transpose == 0 {
+        return pitch;
+    }
+    let semitones = 12.0 * pitch.log2() + f64::from(transpose);
+    2f64.powf(semitones.clamp(-48.0, 48.0) / 12.0)
+}
+
+/// The gain a launch of `velocity` gives a clip whose velocity amount is
+/// `amount`: full at 127, and silent at 1 with the amount at 1 (the remote
+/// mapping spec, R16).
+fn velocity_gain(amount: f64, velocity: u8) -> f64 {
+    1.0 - amount * f64::from(127 - velocity.clamp(1, 127)) / 126.0
+}
+
 /// A clip's level with the gain its groove's Velocity gives it (the grooves
 /// spec, R13): `level` is the clip's own, `elapsed` frames after the song
 /// frame `origin` where its contents began.
@@ -1656,7 +1737,7 @@ fn with_groove<'a>(
     rate: f64,
     origin: i64,
     offset: f64,
-    level: fn(&PlacedClip, u64) -> f64,
+    level: impl Fn(&PlacedClip, u64) -> f64 + 'a,
 ) -> impl Fn(&PlacedClip, u64) -> f64 + 'a {
     // A clip `offset` ticks into its own time has played that much longer.
     let ticks = tempo.seconds_to_ticks_exact(origin as f64 / rate) - offset;
@@ -1665,9 +1746,11 @@ fn with_groove<'a>(
     }
 }
 
-/// Adds the frames `range` of the block, which are `elapsed` frames into the
-/// warped `clip` and start at song frame `frame`, read from `source` through
-/// the clip's positions and warp mode, to the block, through `level`.
+/// Adds the frames `range` of the block, which are `elapsed` song frames into
+/// the warped `clip` and play the song as `pace` says, read from `source`
+/// through the clip's positions and warp mode, to the block, through `level`.
+/// `key` counts frames on from one run to the next, so a mode that keeps
+/// state can tell a run that goes on from a jump.
 #[allow(clippy::too_many_arguments)]
 fn render_warped(
     clip: &PlacedClip,
@@ -1677,12 +1760,13 @@ fn render_warped(
     window: &mut WindowBuf,
     block: &mut Block<'_>,
     range: core::ops::Range<usize>,
-    (elapsed, frame): (u64, i64),
+    (elapsed, key, pace): (u64, i64, Pace),
     warp: &mut WarpScratch,
     mut history: Option<&mut History>,
     level: impl Fn(&PlacedClip, u64) -> f64,
     stretchers: &mut Stretchers,
     lane: usize,
+    transpose: i8,
 ) {
     let channels = block.channels();
     // A plan's segments lie on the Arrangement's song frames, so a launched
@@ -1694,16 +1778,28 @@ fn render_warped(
         .as_ref()
         .filter(|_| launched.is_none())
         .map(|warped| warped.plan());
-    let (mut at, mut elapsed, mut frame) = (range.start, elapsed, frame);
+    // The song frame the clip's contents began on, so a frame's level reads
+    // the song frames since, whatever the pace.
+    let origin = pace.song - elapsed as f64;
+    let (mut at, mut key, mut pace) = (range.start, key, pace);
     while at < range.end {
         // Spec: warp-modes R29, R33. A clip whose settings move reads them
         // on a grid of song frames, so each run stays inside one step.
+        let frame = pace.song.round() as i64;
         let (playing, want) = match &clip.sound {
             Some(moving) => (
                 moving.playing(clip.playing, frame, clip.geometry.start),
-                (range.end - at).min(ClipSound::step_left(frame)),
+                (range.end - at).min(
+                    (ClipSound::step_left(frame) as f64 / pace.step)
+                        .ceil()
+                        .max(1.0) as usize,
+                ),
             ),
             None => (clip.playing, range.end - at),
+        };
+        let playing = Playing {
+            pitch: launch_pitch(playing.pitch, transpose),
+            ..playing
         };
         // Spec: warping R12, warp-modes R9, R14
         let (n, sound) = warp.render(
@@ -1712,7 +1808,8 @@ fn render_warped(
             window,
             positions,
             launched,
-            frame,
+            key,
+            pace,
             want,
             playing,
             plan,
@@ -1725,13 +1822,15 @@ fn render_warped(
             for c in 0..channels {
                 let out = &mut block.channel_mut(c)[at..at + n];
                 for (i, (sum, &sample)) in out.iter_mut().zip(warp.rendered(c, n)).enumerate() {
-                    *sum += (f64::from(sample) * level(clip, elapsed + i as u64)) as f32;
+                    let song = pace.song + i as f64 * pace.step;
+                    let elapsed = (song - origin).round().max(0.0) as u64;
+                    *sum += (f64::from(sample) * level(clip, elapsed)) as f32;
                 }
             }
         }
         at += n;
-        elapsed += n as u64;
-        frame += n as i64;
+        key += n as i64;
+        pace = pace.after(n);
     }
 }
 
@@ -1749,14 +1848,29 @@ impl Node for ClipPlayer {
                 self.stop();
             }
             self.playing_clip = false;
+            self.last_end = i64::MIN;
+            self.own.clear();
             self.ready_at(transport.position.get());
             return;
         }
         self.sounding = true;
         self.readied = None;
         let seen = self.session_seen.take();
-        // Spec: launch-quantisation R9. The launched slot clip plays from
-        // its launch frame. Spec: session-view R20. While
+        // Spec: transport R24. A jump (a start, a locate, the loop's wrap) ends
+        // the run of frames a stretcher goes on with, and the place the clips
+        // that play at their own speed had reached.
+        let frames = block.frames();
+        let position = transport.position.get();
+        if position != self.last_end {
+            self.key = position;
+            self.own.clear();
+        }
+        let key = self.key;
+        self.blocks += 1;
+        self.key += frames as i64;
+        self.last_end = transport.window_end(frames);
+        // Spec: launch-quantisation R9. The launched slot clip plays from its
+        // launch frame. Spec: session-view R20. While
         // the track is taken over, the Arrangement's clips below stay silent.
         if let (Some(list), Some(bank), Some(histories), Some(window), Some(stretchers)) = (
             self.clips
@@ -1776,17 +1890,18 @@ impl Node for ClipPlayer {
             // frame (after a stop, a locate or a loop wrap), as a launched
             // MIDI clip is, and plays on from its start when the playhead
             // reaches that frame again.
-            && transport.position >= entry.frame
+            && entry.frame.get() < transport.window_end(frames)
         {
             let launch = entry.frame.get();
-            let from = transport.position.get();
             // Spec: launch-quantisation R29. A Legato start or a nudge puts
             // the clip `entry.offset` into its own time on the launch frame.
             let offset = entry.offset;
-            let elapsed = (from - launch + offset.frames).max(0) as u64;
             let jumped = seen
                 .is_some_and(|seen| seen.0 == scene && seen != (scene, launch, offset))
                 && offset != ClipOffset::ZERO;
+            // The same launch and offset as the block before: a clip that
+            // plays at its own speed goes on from where it had reached.
+            let unbroken = seen == Some((scene, launch, offset));
             self.session_seen = Some((scene, launch, offset));
             let first = if jumped {
                 Transition::Crossfade
@@ -1794,6 +1909,19 @@ impl Node for ClipPlayer {
                 Transition::Cut
             };
             let clip = &list.clips[at];
+            // Spec: transport R24. A launch inside the block starts on the
+            // frame its song frame is nearest.
+            let begin = if launch > position {
+                transport.offset(launch, frames)
+            } else {
+                0
+            };
+            let song = transport.exact(begin);
+            let since = |song: f64| (song - launch as f64).round().max(0.0) as u64;
+            // Spec: remote-mapping R16. The launch's velocity holds as a gain
+            // until the clip stops or launches again.
+            let gain = velocity_gain(clip.velocity_amount, entry.velocity);
+            let launch_level = move |clip: &PlacedClip, elapsed| clip.launch_level(elapsed) * gain;
             if let (Some(source), Some(warped)) = (bank[at].as_mut(), clip.geometry.warped.as_ref())
             {
                 // Spec: warping R15. A launched warped clip follows the
@@ -1801,8 +1929,19 @@ impl Node for ClipPlayer {
                 let tempo = block.tempo();
                 let rate = block.sample_rate().as_f64();
                 let ticks = offset.ticks.get() as f64;
-                let positions = warped.launched(tempo, launch, rate, ticks);
-                let frames = block.frames();
+                // Spec: remote-mapping R35, warp-modes R10. Re-Pitch ignores the
+                // clip's pitch, so a transposed launch reads its file faster or
+                // slower, as the tape of an unwarped clip does.
+                let speed = if clip.playing.mode == WarpMode::RePitch {
+                    launch_pitch(1.0, entry.transpose)
+                } else {
+                    1.0
+                };
+                let positions = warped.launched(tempo, launch, rate, ticks, speed);
+                let pace = Pace {
+                    song,
+                    step: transport.speed,
+                };
                 render_warped(
                     clip,
                     &positions,
@@ -1810,21 +1949,31 @@ impl Node for ClipPlayer {
                     source.as_mut(),
                     window,
                     block,
-                    0..frames,
-                    // The groove counts from the clip time already (its origin
-                    // is moved back by the offset), so this is the time since
-                    // the launch frame alone.
-                    ((from - launch) as u64, from),
+                    begin..frames,
+                    (since(song), key, pace),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
-                    with_groove(warped, tempo, rate, launch, ticks, PlacedClip::launch_level),
+                    with_groove(warped, tempo, rate, launch, ticks, launch_level),
                     stretchers,
                     clip.lane as usize,
+                    entry.transpose,
                 );
             } else if let Some(source) = bank[at].as_mut() {
+                // Spec: transport R24. A clip that isn't warped plays at its own
+                // speed, from its launch frame.
+                let seed = (since(song) as i64 + offset.frames).max(0) as u64;
+                let before = own_played(&self.own, self.blocks, clip.id).filter(|_| unbroken);
+                let elapsed = before.unwrap_or(seed);
                 // Spec: warp-modes R27. An unwarped clip transposed reads
                 // its file at the pitch ratio, from its launch frame.
-                if let Some(positions) = clip.geometry.transposed(launch - offset.frames) {
+                if let Some(positions) = clip
+                    .geometry
+                    .transposed(launch - offset.frames, entry.transpose)
+                {
+                    let pace = Pace {
+                        song: (launch - offset.frames) as f64 + elapsed as f64,
+                        step: 1.0,
+                    };
                     render_warped(
                         clip,
                         &positions,
@@ -1832,25 +1981,34 @@ impl Node for ClipPlayer {
                         source.as_mut(),
                         window,
                         block,
-                        0..block.frames(),
-                        (elapsed, from),
+                        begin..frames,
+                        (elapsed, key, pace),
                         &mut self.warp,
                         histories[at].as_deref_mut(),
-                        PlacedClip::launch_level,
+                        launch_level,
                         stretchers,
                         clip.lane as usize,
+                        entry.transpose,
                     );
                 } else {
                     render(
                         clip,
                         source.as_mut(),
                         block,
-                        0..block.frames(),
+                        begin..frames,
                         elapsed,
                         &mut self.scratch,
                         self.max_frames,
-                        PlacedClip::launch_level,
+                        launch_level,
                         first,
+                    );
+                }
+                if before.is_some() || transport.speed != 1.0 {
+                    own_note(
+                        &mut self.own,
+                        self.blocks,
+                        clip.id,
+                        elapsed + (frames - begin) as u64,
                     );
                 }
             }
@@ -1883,13 +2041,21 @@ impl Node for ClipPlayer {
             .find(|entry| entry.track == list.track);
         if let Some(entry) = launched {
             // Spec: routing R11. A launched slot clip is playing too.
-            self.playing_clip = entry.scene.is_some() && transport.position >= entry.frame;
+            self.playing_clip =
+                entry.scene.is_some() && entry.frame.get() < transport.window_end(frames);
             self.apply_gate(block);
             return;
         }
-        let from = transport.position.get();
-        let to = from + block.frames() as i64;
-        let first = list.reach.partition_point(|&reach| reach <= from);
+        let from = position;
+        let to = transport.window_end(frames);
+        // A clip at its own speed can outlast the song frames it was placed
+        // on, so while the song moves at another speed, or one has begun, all
+        // the track's clips are looked at.
+        let first = if transport.speed != 1.0 || !self.own.is_empty() {
+            0
+        } else {
+            list.reach.partition_point(|&reach| reach <= from)
+        };
         // Spec: routing R11. A clip that covers this block is playing, so
         // the track's input closes under Monitor Auto.
         self.playing_clip = list.clips[first..]
@@ -1907,18 +2073,61 @@ impl Node for ClipPlayer {
             if clip.geometry.start >= to {
                 break;
             }
-            if clip.geometry.end <= from {
+            let own_speed = clip.geometry.warped.is_none();
+            let before = own_speed
+                .then(|| own_played(&self.own, self.blocks, clip.id))
+                .flatten();
+            if clip.geometry.end <= from && before.is_none() {
                 continue;
             }
             let Some(source) = slot else {
                 continue;
             };
-            let start = clip.geometry.start.max(from);
-            let end = clip.geometry.end.min(to);
-            let range = (start - from) as usize..(end - from) as usize;
-            let elapsed = (start - clip.geometry.start) as u64;
+            let starts = clip.geometry.start >= from;
+            let begin = if starts {
+                transport.offset(clip.geometry.start, frames)
+            } else {
+                0
+            };
+            let (range, elapsed) = if own_speed {
+                // Spec: transport R24. An unwarped clip plays at its own speed:
+                // it starts on the frame the song reaches its start, and lasts
+                // as many frames as it is long.
+                let elapsed = if starts {
+                    0
+                } else {
+                    before.unwrap_or((from - clip.geometry.start) as u64)
+                };
+                let length = (clip.geometry.end - clip.geometry.start) as u64;
+                let left = usize::try_from(length.saturating_sub(elapsed)).unwrap_or(usize::MAX);
+                (begin..frames.min(begin.saturating_add(left)), elapsed)
+            } else {
+                let finish = if clip.geometry.end < to {
+                    transport.offset(clip.geometry.end, frames)
+                } else {
+                    frames
+                };
+                let song = transport.exact(begin);
+                let elapsed = (song - clip.geometry.start as f64).round().max(0.0) as u64;
+                (begin..finish, elapsed)
+            };
+            // The clip is noted even when it has played out, so it isn't taken
+            // for a new one while the song is still over it; once the song has
+            // passed it too, its entry is let go.
+            let passed = clip.geometry.end <= from && range.is_empty();
+            if own_speed && !passed && (before.is_some() || transport.speed != 1.0) {
+                let played = elapsed + range.len() as u64;
+                own_note(&mut self.own, self.blocks, clip.id, played);
+            }
+            if range.is_empty() {
+                continue;
+            }
             if let Some(warped) = &clip.geometry.warped {
                 let (tempo, rate) = (block.tempo(), block.sample_rate().as_f64());
+                let pace = Pace {
+                    song: transport.exact(range.start),
+                    step: transport.speed,
+                };
                 render_warped(
                     clip,
                     &warped.positions(),
@@ -1926,8 +2135,8 @@ impl Node for ClipPlayer {
                     source.as_mut(),
                     window,
                     block,
-                    range,
-                    (elapsed, start),
+                    range.clone(),
+                    (elapsed, key + range.start as i64, pace),
                     warp,
                     history.as_deref_mut(),
                     with_groove(
@@ -1940,12 +2149,17 @@ impl Node for ClipPlayer {
                     ),
                     stretchers,
                     clip.lane as usize,
+                    0,
                 );
                 continue;
             }
             // Spec: warp-modes R27. An unwarped clip transposed reads its
             // file at the pitch ratio.
-            if let Some(positions) = clip.geometry.transposed(clip.geometry.start) {
+            if let Some(positions) = clip.geometry.transposed(clip.geometry.start, 0) {
+                let pace = Pace {
+                    song: (clip.geometry.start as u64 + elapsed) as f64,
+                    step: 1.0,
+                };
                 render_warped(
                     clip,
                     &positions,
@@ -1953,13 +2167,14 @@ impl Node for ClipPlayer {
                     source.as_mut(),
                     window,
                     block,
-                    range,
-                    (elapsed, start),
+                    range.clone(),
+                    (elapsed, key + range.start as i64, pace),
                     warp,
                     history.as_deref_mut(),
                     PlacedClip::level,
                     stretchers,
                     clip.lane as usize,
+                    0,
                 );
                 continue;
             }
@@ -2191,6 +2406,7 @@ mod tests {
             carry: false,
             sound: None,
             gain: 0.5,
+            velocity_amount: 0.0,
             fade_in: 10,
             fade_out: 20,
             shape: FadeShape::straight(),

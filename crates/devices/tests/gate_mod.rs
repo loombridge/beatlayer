@@ -26,6 +26,7 @@ fn playing(at: usize) -> TransportInfo {
     TransportInfo {
         playing: true,
         position: Frames(at as i64),
+        ..TransportInfo::default()
     }
 }
 

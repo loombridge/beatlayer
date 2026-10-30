@@ -66,12 +66,17 @@
 //!   (`midi.import_file`, `midi.export_clip`, WP-2.21).
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
+//! - [`link`]: Link's state and switches (`link.*`, WP-7.14).
 //! - [`sync`]: the state of MIDI clock (`sync.state`, WP-7.11).
 //! - [`midi_tools`]: the MIDI Tools' commands (`midi_tool.*`, WP-6.11): the
 //!   Transform and Generate panels, choosing a tool, its settings, applying
 //!   it and the seed.
 //! - [`modulation`]: what a track's clips modulate (`modulation.state`,
 //!   WP-5.9).
+//! - [`control_surface`]: the Control Surfaces table (`control_surface.*`,
+//!   WP-7.5).
+//! - [`push`]: Push 2 for agents (`push.state`, `push.set_mode`,
+//!   `push.set_setup`, `push.display_frame`, WP-7.19).
 //! - [`remote`]: the set's MIDI and key mappings and the remote input
 //!   (`remote.*`, WP-7.1).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
@@ -110,6 +115,8 @@ pub mod clip_properties;
 pub mod commands;
 pub mod comping;
 pub mod context_menus;
+pub mod control_surface;
+pub mod cv;
 pub mod dawproject;
 pub mod devices;
 pub mod editing;
@@ -119,6 +126,7 @@ pub mod file_manager;
 pub mod freeze;
 pub mod groove;
 pub mod keymap;
+pub mod link;
 pub mod locator;
 pub mod menus;
 pub mod midi_files;
@@ -132,12 +140,14 @@ pub mod notes;
 pub mod pads;
 pub mod perception;
 pub mod plugins;
+pub mod push;
 pub mod remote;
 pub mod sample_editor;
 pub mod scales;
 pub mod search;
 pub mod session_launch;
 pub mod session_record;
+pub mod session_strip;
 pub mod session_view;
 pub mod set_exchange;
 pub mod settings;
@@ -178,14 +188,18 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     dawproject::register(registry)?;
     midi_io::register(registry)?;
     remote::register(registry)?;
+    control_surface::register(registry)?;
+    push::register(registry)?;
     midi_tools::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;
     autosampler::register(registry)?;
+    cv::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;
     session_record::register(registry)?;
+    session_strip::register(registry)?;
     capture_midi::register(registry)?;
     plugins::register(registry)?;
     settings::register(registry)?;
@@ -203,6 +217,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     warping::register(registry)?;
     scales::register(registry)?;
     tunings::register(registry)?;
+    link::register(registry)?;
     sync::register(registry)?;
     search::register(registry)
 }

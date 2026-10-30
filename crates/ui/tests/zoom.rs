@@ -231,7 +231,12 @@ fn controls_keep_their_live_size_times_the_zoom() {
         let window = minimum_window(zoom, false, false);
         let layout = ShellLayout::compute(layout_size(window, zoom), true, true).scale(zoom);
         for (placement, (_, rect)) in ELEMENTS.iter().zip(&layout.elements) {
-            if placement.strip == Strip::ControlBar {
+            // The sync lamps are 8 points tall, one above the other.
+            let lamp = matches!(
+                placement.element,
+                bl_ui::layout::Element::SyncInput | bl_ui::layout::Element::SyncOutput
+            );
+            if placement.strip == Strip::ControlBar && !lamp {
                 assert!((rect.height() - 18.0 * zoom).abs() < EPS * 10.0);
             }
             // The Global Amount is hidden unless the pool holds a groove, and the
@@ -241,8 +246,13 @@ fn controls_keep_their_live_size_times_the_zoom() {
                 placement.element,
                 bl_ui::layout::Element::Message
                     | bl_ui::layout::Element::GlobalAmount
-                    | bl_ui::layout::Element::SyncLamps
+                    | bl_ui::layout::Element::ExternalSync
+                    | bl_ui::layout::Element::SyncInput
+                    | bl_ui::layout::Element::SyncOutput
                     | bl_ui::layout::Element::ResyncExternalHardware
+                    | bl_ui::layout::Element::LinkToggle
+                    | bl_ui::layout::Element::LinkMenu
+                    | bl_ui::layout::Element::New
             ) {
                 assert!(
                     (rect.width() - placement.width * zoom).abs() < EPS * 10.0,
@@ -450,9 +460,10 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
                 }
                 // Every row but the Global Amount, which the Control Bar hides
                 // where it has no room for it, and the sync lamps and the
-                // Resync button, which show only when asked for.
+                // Resync button and the Link toggle with its arrow, which show
+                // only when asked for.
                 assert!(
-                    checked >= ELEMENTS.len() - 2 + 16,
+                    checked >= ELEMENTS.len() - 4 + 16,
                     "{what}: only {checked} rows drawn"
                 );
 

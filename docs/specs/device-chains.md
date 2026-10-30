@@ -1,6 +1,6 @@
 # Device chains and the device frame
 
-- **Status:** partial (R41 and R42 have no tests yet)
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-2.4 (this spec); WP-2.5b, floating device windows (IMP-14), R26 to R33; WP-5.42, the expand toggle and a device's own menu items, R34 and R35; WP-5.30, a note's path through the chain and MIDI effects in it, R36 and R37; WP-5.44, the channel messages along it, R38; WP-5.29, Deactivate All Devices and Close All Plug-in Windows, R39 and R40 (IMP-25); WP-7.6, Lock to and the hand icon, R41 and R42 ([control surfaces](control-surfaces.md) R23 to R27). Native devices, their parameter descriptors, and their generic panels are WP-2.5's; CLAP hosting and plug-in state are WP-2.6's (VST3 2.7, Audio Units 2.8); latency and delay compensation are WP-2.11's; racks, chains inside racks, Group, and A/B compare are milestone M5's; the Info View and Edit Info Text are WP-2.24's; the browser's device labels arrive with the first devices (WP-2.5)
 - **Parity-matrix row:** Devices: Device chains, device activator, fold; Rename devices, device presets
 - **Checked against:** Live 12.4.6 on macOS, 12 October 2026, [layout.md](../ui-parity/layout.md) rows L-DEV-001 to L-DEV-009 and L-WIN-006, [menus.md](../ui-parity/menus.md) C-DEVICE, and the Live 12 reference manual, chapter 23, read 12 October 2026; for R41 and R42, chapter 34 section 34.1.1.1 and [menus.md](../ui-parity/menus.md) C-DEVICE-014, read 23 October 2026
@@ -123,8 +123,8 @@ Beatlayer ships no device in WP-2.4. The engine's device interface (a factory th
 | R38 | `crates/devices/tests/channel_messages.rs`, `a_message_one_device_sends_reaches_the_next_on_its_frame`, `a_switched_off_device_passes_messages_through`; `crates/shell/tests/midi_io.rs`, `a_ports_channel_messages_reach_the_instrument_through_a_midi_effect` | real-time trap; unit |
 | R39 | `crates/shell/tests/track_devices.rs`, `deactivate_all_devices_switches_off_every_top_level_device_in_one_step`, `deactivate_all_devices_reaches_no_racks_contents`; `crates/ui/tests/track_menu.rs`, `deactivate_all_devices_switches_the_selected_tracks_devices`; `crates/cli/tests/agent.rs`, `deactivate_all_devices_switches_a_tracks_devices_through_the_agent_api` | unit; UI script; MCP script |
 | R40 | `crates/shell/tests/plugins.rs`, `close_all_plug_in_windows_closes_every_editor_without_an_undo_step`; `crates/cli/tests/agent.rs`, `close_all_plug_in_windows_closes_the_editors_through_the_agent_api` | unit; MCP script |
-| R41 | to be written in WP-7.6 | UI script |
-| R42 | to be written in WP-7.6 | UI script, agent |
+| R41 | `bl-ui` `instant_mappings::lock_to_items_follow_save_as_default_preset_and_tick_while_locked` | UI script |
+| R42 | `bl-ui` `instant_mappings::a_locked_device_shows_the_hand_icon_in_its_title_bar_and_folded`; `bl-agent` `control_surfaces::an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back` | UI script, agent |
 | R43 | `crates/ui/tests/keymap_sweep.rs`, `left_and_right_move_between_devices`, `enter_in_the_browser_loads_the_selected_item` | UI script |
 | R44 | `crates/ui/tests/device_view.rs`, `an_agent_scrolls_the_device_chain_and_reads_where_it_is`, `the_middle_button_pans_the_device_chain` | UI script, agent |
 

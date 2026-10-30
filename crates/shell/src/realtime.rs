@@ -330,15 +330,15 @@ fn path_devices(document: &Document, track: TrackId) -> Vec<&Device> {
 
 /// Whether a device's routing reaches the audio interface: an external
 /// instrument with a MIDI To port, or an external effect with an Audio To
-/// (R22).
+/// (R22), or a CV device with an output, an input or an Audio From chosen
+/// (the CV tools spec, R7).
 fn reaches_interface(device: &Device) -> bool {
     if !device.enabled {
         return false;
     }
-    device
-        .external
-        .as_ref()
-        .is_some_and(|external| external.port.is_some() || external.audio_to.is_some())
+    device.external.as_ref().is_some_and(|external| {
+        external.port.is_some() || external.audio_to.is_some() || external.cv_routed()
+    })
 }
 
 /// Renders the outputs that need the hardware, in one pass on the running

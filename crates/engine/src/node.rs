@@ -404,13 +404,109 @@ pub struct NodeConfig {
     pub round_trip_latency: u32,
 }
 
+/// How far, in song frames, a position may sit short of a half frame and still
+/// round up. The arithmetic of a position that falls exactly between two
+/// frames differs in its last bits with how the blocks fall; this puts it
+/// on the same side whatever they are (the transport spec, R24).
+pub const TIE: f64 = 1e-6;
+
 /// The transport as a block starts.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+///
+/// A block normally covers as many song frames as it has frames. While the
+/// song follows an outside tempo or a Phase Nudge is held, it covers
+/// `speed` song frames per frame instead (the transport spec, R24, R27), and
+/// a node that places anything in song time reads the song through
+/// [`song_frame`](Self::song_frame), [`window_end`](Self::window_end) and
+/// [`offset`](Self::offset) rather than adding the frame number to
+/// `position`.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TransportInfo {
     /// Whether the song is playing.
     pub playing: bool,
-    /// The song position of the block's first frame.
+    /// The song position of the block's first frame: the first song frame
+    /// that belongs to it.
     pub position: Frames,
+    /// Song frames per frame of the block: 1 unless the song follows an
+    /// outside tempo or is nudged (the transport spec, R24). Always
+    /// positive.
+    pub speed: f64,
+    /// The exact song position of the block's first frame, less `position`:
+    /// 0 at a speed of 1.
+    pub phase: f64,
+    /// The song frame the block doesn't play past: the loop's end or a
+    /// jump's line, where the transport acts. `i64::MAX` when none lies in
+    /// the block.
+    pub until: i64,
+}
+
+impl Default for TransportInfo {
+    fn default() -> Self {
+        Self::at(false, Frames::ZERO)
+    }
+}
+
+impl TransportInfo {
+    /// A block that starts at song frame `position` and plays the song at
+    /// its own speed.
+    #[must_use]
+    pub const fn at(playing: bool, position: Frames) -> Self {
+        Self {
+            playing,
+            position,
+            speed: 1.0,
+            phase: 0.0,
+            until: i64::MAX,
+        }
+    }
+
+    /// The song frames that frame `frame` of the block is at, unrounded.
+    #[must_use]
+    pub fn exact(&self, frame: usize) -> f64 {
+        self.position.get() as f64 + self.phase + frame as f64 * self.speed
+    }
+
+    /// The song frame that frame `frame` of the block plays, for a node that
+    /// reads the song once per frame: automation, a clip's gain.
+    #[must_use]
+    pub fn song_frame(&self, frame: usize) -> i64 {
+        if self.speed == 1.0 {
+            self.position.get() + frame as i64
+        } else {
+            (self.exact(frame) + TIE).round() as i64
+        }
+    }
+
+    /// The first song frame after the block's: the song frames
+    /// `position..window_end(frames)` belong to a block of `frames` frames,
+    /// and the next block's `position` is this.
+    #[must_use]
+    pub fn window_end(&self, frames: usize) -> i64 {
+        if self.speed == 1.0 {
+            self.position.get() + frames as i64
+        } else {
+            ((self.exact(frames) - self.speed / 2.0 - TIE).ceil() as i64).min(self.until)
+        }
+    }
+
+    /// The frame of a block of `frames` frames that song frame `song`, one of
+    /// those from `position` to [`window_end`](Self::window_end), falls on:
+    /// the one it is nearest to.
+    #[must_use]
+    pub fn offset(&self, song: i64, frames: usize) -> usize {
+        let at = if self.speed == 1.0 {
+            song - self.position.get()
+        } else {
+            ((song as f64 - self.exact(0) + TIE) / self.speed + 0.5).floor() as i64
+        };
+        at.min(frames as i64 - 1).max(0) as usize
+    }
+
+    /// The song frames `frames` frames of the block cover, rounded: how far
+    /// a node that advances by the block's frames moves in the song.
+    #[must_use]
+    pub fn span(&self, frames: usize) -> i64 {
+        self.window_end(frames) - self.position.get()
+    }
 }
 
 /// Data the compiler made off the audio thread for one node, such as a clip's
@@ -483,6 +579,20 @@ pub trait Node: Send + 'static {
     fn control(&mut self, ctl: &mut Control<'_>) -> bool {
         let _ = ctl;
         false
+    }
+
+    /// Follows a clock on the node's CV input for a block, before any track
+    /// runs (`docs/specs/cv-tools.md`, R24): the node answers `answer` with
+    /// the tempo it leads with and returns that tempo in BPM, or returns
+    /// `None` while it leads nothing. The default is no clock, and does
+    /// nothing.
+    fn follow_cv(
+        &mut self,
+        cx: &crate::cv_clock::Cx<'_>,
+        answer: &mut crate::follower::Follow,
+    ) -> Option<f64> {
+        let _ = (cx, answer);
+        None
     }
 
     /// Takes parameter changes while the node is switched off and doesn't
@@ -585,6 +695,16 @@ pub struct Block<'a> {
     /// interface's outputs (WP-5.35): planar with the block's channels and
     /// stride. `None` for every other device.
     pub(crate) external_out: Option<&'a mut [f32]>,
+    /// Where a CV device writes its CV outputs (`docs/specs/cv-tools.md`,
+    /// R3, R8): one buffer per output the device declares, in its order,
+    /// each `channels * stride` samples apart and `frames` long. `None` for
+    /// every other device.
+    pub(crate) cv_out: Option<&'a mut [f32]>,
+    /// What a CV device reads on its CV inputs (R6): one buffer per input
+    /// the device declares, laid out as `cv_out` is; an input set to no
+    /// channel, or to one the interface lacks, reads 0 V. `None` for every
+    /// other device.
+    pub(crate) cv_in: Option<&'a [f32]>,
     /// Where a device with extra audio outputs past its main one writes
     /// them (WP-5.45): one buffer per output, in the order the device
     /// declares them, each planar with the block's channels and stride, at
@@ -672,6 +792,8 @@ impl<'a> Block<'a> {
             sidechain: None,
             external: None,
             external_out: None,
+            cv_out: None,
+            cv_in: None,
             outputs: None,
             notes: &[],
             notes_out: None,
@@ -831,6 +953,28 @@ impl<'a> Block<'a> {
         );
         Self {
             external_out: Some(external_out),
+            ..self
+        }
+    }
+
+    /// The same block with the buffers a CV device writes its CV outputs
+    /// into: one per output, `channels * stride` samples apart. For tests of
+    /// nodes outside a program.
+    #[must_use]
+    pub fn with_cv_out(self, cv_out: &'a mut [f32]) -> Self {
+        Self {
+            cv_out: Some(cv_out),
+            ..self
+        }
+    }
+
+    /// The same block with what a CV device reads on its CV inputs: one
+    /// buffer per input, `channels * stride` samples apart. For tests of
+    /// nodes outside a program.
+    #[must_use]
+    pub fn with_cv_in(self, cv_in: &'a [f32]) -> Self {
+        Self {
+            cv_in: Some(cv_in),
             ..self
         }
     }
@@ -1019,6 +1163,25 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.external.map(|data| &data[start..start + self.frames])
+    }
+
+    /// Where a CV device writes its CV output `output`, in sample values
+    /// (1.0 is +10 V), for the block's frames. `None` for a device without
+    /// that output.
+    pub fn cv_out_mut(&mut self, output: usize) -> Option<&mut [f32]> {
+        let start = output * self.channels * self.stride;
+        let frames = self.frames;
+        self.cv_out
+            .as_deref_mut()
+            .and_then(|data| data.get_mut(start..start + frames))
+    }
+
+    /// What a CV device reads on its CV input `input`, for the block's
+    /// frames. `None` for a device without that input.
+    pub fn cv_in(&self, input: usize) -> Option<&'a [f32]> {
+        let start = input * self.channels * self.stride;
+        self.cv_in
+            .and_then(|data| data.get(start..start + self.frames))
     }
 
     /// The block's samples on `channel`, and the buffer an external effect

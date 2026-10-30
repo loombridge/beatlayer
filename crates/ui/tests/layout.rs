@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use bl_ui::layout::mixer::Sections;
 use bl_ui::layout::{
-    ArrangementLayout, D24, ELEMENTS, Element, MINIMUM, REFERENCE, ShellLayout, Strip, TITLE_BAR,
-    placement,
+    ArrangementLayout, D24, ELEMENTS, Element, LINK_MENU_WIDTH, LINK_WIDTH, MINIMUM, REFERENCE,
+    ShellLayout, Strip, TITLE_BAR, layout_size, placement,
 };
 use egui::{Rect, Vec2, pos2, vec2};
 
@@ -118,6 +118,7 @@ fn each_control_starts_where_layout_md_measured_it() {
         (Element::SampleRate, 1369.0),
         (Element::Cpu, 1419.0),
         (Element::Overload, 1478.0),
+        (Element::RemoteIndicators, 1498.0),
         (Element::MidiIndicators, 1507.0),
         (Element::SessionView, 1529.0),
         (Element::AssistantToggle, 1572.0),
@@ -171,10 +172,18 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
     for (placement, (_, rect)) in ELEMENTS.iter().zip(&wide.elements) {
         // The Global Amount is hidden unless the pool holds a groove, and the
         // sync lamps and the Resync button unless an input has Sync on or
-        // Show Resync Button is on.
+        // Show Resync Button is on, the Link toggle unless Show Link Toggle
+        // is Show, and New unless a map mode is on.
         let hidden = matches!(
             placement.element,
-            Element::GlobalAmount | Element::SyncLamps | Element::ResyncExternalHardware
+            Element::GlobalAmount
+                | Element::ExternalSync
+                | Element::SyncInput
+                | Element::SyncOutput
+                | Element::ResyncExternalHardware
+                | Element::LinkToggle
+                | Element::LinkMenu
+                | Element::New
         );
         if placement.element != Element::Message && !hidden {
             assert_eq!(rect.width(), placement.width, "{:?}", placement.element);
@@ -382,4 +391,103 @@ fn a_short_arrangement_keeps_its_parts_inside_its_view() {
             mixer.top()
         );
     }
+}
+
+/// The main window's layout with the Link toggle shown or hidden, on a set
+/// whose pool holds the factory default groove (the Global Amount shows).
+fn with_link(size: Vec2, link: bool) -> ShellLayout {
+    ShellLayout::compute_with_detail(
+        size,
+        true,
+        true,
+        None,
+        None,
+        bl_ui::layout::DetailViews::default()
+            .with_global_amount(true)
+            .with_link(link),
+    )
+}
+
+// Spec: link R17; L-CTRL-002. The Link toggle and its arrow sit in the tempo
+// group before Tap, 2 points apart, and everything after them in the left
+// group moves right by their widths and gaps; nothing in the Control Bar
+// overlaps another, at 1600 × 1000 and at 50 %, 100 % and 200 % zoom, and
+// with the toggle hidden the group is back where Live measured it.
+#[test]
+fn the_link_toggle_sits_before_tap_and_moves_the_tempo_group_right() {
+    let taken = LINK_WIDTH + 2.0 + LINK_MENU_WIDTH + 2.0;
+    for zoom in [0.5_f32, 1.0, 2.0] {
+        let size = layout_size(REFERENCE * zoom, zoom);
+        let (shown, hidden) = (with_link(size, true), with_link(size, false));
+        let what = format!("at {:.0} %", zoom * 100.0);
+        let toggle = shown.rect(Element::LinkToggle);
+        let arrow = shown.rect(Element::LinkMenu);
+        let tap = shown.rect(Element::TapTempo);
+        assert_eq!(
+            (toggle.left(), toggle.width()),
+            (54.0, LINK_WIDTH),
+            "{what}"
+        );
+        assert_eq!(arrow.left(), toggle.right() + 2.0, "{what}");
+        assert_eq!(arrow.width(), LINK_MENU_WIDTH, "{what}");
+        assert_eq!(tap.left(), arrow.right() + 2.0, "{what}: before Tap");
+        assert_eq!(tap.left(), hidden.rect(Element::TapTempo).left() + taken);
+        for element in [
+            Element::Tempo,
+            Element::NudgeDown,
+            Element::NudgeUp,
+            Element::SignatureNumerator,
+            Element::SignatureDenominator,
+            Element::GlobalAmount,
+            Element::Metronome,
+            Element::Quantization,
+            Element::ScaleName,
+        ] {
+            assert_eq!(
+                shown.rect(element).left(),
+                hidden.rect(element).left() + taken,
+                "{what}: {element:?} moves right"
+            );
+        }
+        for element in [Element::Follow, Element::Play, Element::DrawMode] {
+            assert_eq!(
+                shown.rect(element),
+                hidden.rect(element),
+                "{what}: {element:?}"
+            );
+        }
+        // Nothing overlaps, in Live's order.
+        let rects: Vec<Rect> = ELEMENTS
+            .iter()
+            .zip(&shown.elements)
+            .filter(|(p, _)| p.strip == Strip::ControlBar && p.element != Element::SyncOutput)
+            .map(|(_, (_, rect))| *rect)
+            .collect();
+        for pair in rects.windows(2) {
+            assert!(pair[0].right() <= pair[1].left() + 0.01, "{what}: {pair:?}");
+        }
+        // Hidden, the group is where Live measured it.
+        assert_eq!(hidden.rect(Element::LinkToggle).width(), 0.0, "{what}");
+        assert_eq!(hidden.rect(Element::LinkMenu).width(), 0.0, "{what}");
+        assert_eq!(hidden.rect(Element::TapTempo).left(), 54.0, "{what}");
+        assert_eq!(hidden.rect(Element::Tempo).left(), 82.0, "{what}");
+    }
+}
+
+// Spec: link R17. Where the Control Bar has no room for the toggle, in the
+// smallest window and in the second window, it hides and the tempo group
+// keeps Live's order.
+#[test]
+fn the_link_toggle_hides_where_the_gaps_have_no_room_for_it() {
+    let narrow = with_link(MINIMUM, true);
+    assert_eq!(narrow.rect(Element::LinkToggle).width(), 0.0);
+    assert_eq!(narrow.rect(Element::LinkMenu).width(), 0.0);
+    assert_eq!(narrow.rect(Element::TapTempo).left(), 54.0);
+    let second = ShellLayout::compute_second(
+        REFERENCE,
+        true,
+        bl_ui::layout::DetailViews::default().with_link(true),
+    );
+    assert_eq!(second.rect(Element::LinkToggle).width(), 0.0);
+    assert_eq!(second.rect(Element::TapTempo).left(), 54.0);
 }

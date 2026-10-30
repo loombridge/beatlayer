@@ -83,7 +83,7 @@ pub use keyboard::{ComputerKeyboard, KeyboardKey, MAX_OCTAVE, MIN_OCTAVE, VELOCI
 pub use midir_backend::MidirBackend;
 pub use null::NullBackend;
 pub use output::{OutputBus, OutputSnapshot, OutputStats};
-pub use ports::{MidiPorts, PortState, PortSwitches};
+pub use ports::{InputLive, MidiPorts, PortState, PortSwitches, SurfaceSink};
 pub use queue::{InputSender, MidiStats, StatsSnapshot, input_queue};
 pub use remote::{RemoteBits, RemoteInput};
 pub use stamp::StampClock;

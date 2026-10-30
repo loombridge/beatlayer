@@ -23,7 +23,7 @@
 
 use bl_core::time::{BarBeatSixteenth, Bpm, TempoMap, Ticks, TimeSignature, TimeSignatureMap};
 use bl_model::Document;
-use bl_shell_spec::transport::{self as ids, TransportState};
+use bl_shell_spec::transport::{self as ids, PhaseNudge, TransportState};
 use serde_json::json;
 
 use crate::audio::EngineTransport;
@@ -171,6 +171,16 @@ pub(crate) fn signature(doc: &Document, shell: &Shell) -> TimeSignature {
 /// The tempo where the Arrangement Position fields are, in BPM.
 #[must_use]
 pub fn tempo(shell: &Shell) -> f64 {
+    // Spec: midi-clock R17. With EXT on, the Tempo field shows the tempo of
+    // the clock the song follows.
+    if let Some(followed) = shell.external_tempo() {
+        return followed;
+    }
+    // Spec: link R4. While a peer's change took the tempo envelope's place,
+    // the field shows the session's tempo.
+    if let Some(session) = shell.link_override_tempo() {
+        return session;
+    }
     shell
         .editor()
         .document()
@@ -189,6 +199,11 @@ pub fn editable(shell: &Shell, group: Group) -> bool {
     let settings = shell.editor().document().settings();
     match group {
         Group::Tempo => {
+            // Spec: midi-clock R17. The clock sets the tempo while it
+            // arrives.
+            if shell.external_tempo().is_some() {
+                return false;
+            }
             // Spec: warping R45. While a clip leads the tempo the field is
             // off: the clips set the tempo, and the commands refuse it.
             if shell.editor().document().any_tempo_leader() {
@@ -438,7 +453,7 @@ fn set_loop(doc: &Document, start: Ticks, length: Ticks) -> Option<Invocation> {
 
 /// `song.set_tempo` with one constant tempo, brought within the field's
 /// range and to hundredths, if it changes the tempo.
-fn set_tempo(shell: &Shell, bpm: f64) -> Option<Invocation> {
+pub(crate) fn set_tempo(shell: &Shell, bpm: f64) -> Option<Invocation> {
     if !bpm.is_finite() {
         return None;
     }
@@ -531,12 +546,24 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         punch_in: doc.settings().punch_in,
         punch_out: doc.settings().punch_out,
         midi_overdub: doc.settings().midi_overdub,
+        record_quantization: doc.settings().record_quantization,
+        record_quantization_last: doc.settings().record_quantization_last,
         automation_arm: shell.arrangement().automation_arm(),
         automation_record_mode: shell.automation_record_mode(),
         recording: shell.running_recording(),
         last_recording: shell.last_recording().cloned(),
         capture_midi_ready: shell.capture_midi_ready(),
+        phase_nudge: match engine.phase_nudge {
+            None => PhaseNudge::None,
+            Some(bl_engine::NudgeDirection::Down) => PhaseNudge::Down,
+            Some(bl_engine::NudgeDirection::Up) => PhaseNudge::Up,
+        },
+        waiting_start: engine.waiting_start,
+        waiting_frame: engine.waiting_frame,
+        waiting_for_link: shell.link_waiting(&engine),
         tap_tempo,
+        external_sync: shell.external_sync(),
+        cv_clock_leader: shell.cv_clock_leader(),
     }
 }
 

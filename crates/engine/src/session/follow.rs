@@ -392,7 +392,14 @@ impl SessionLauncher {
                     mode: LaunchMode::Trigger,
                     ..program.launch_button(slot.track, scene)
                 };
-                self.press_at(slot.track, scene, button, true, line, at);
+                self.press_at(
+                    slot.track,
+                    scene,
+                    button,
+                    true,
+                    super::Played::PLAIN,
+                    (line, at),
+                );
                 // A target waiting for its own grid leaves the track silent
                 // from the follow time (observed in Live 12.4.3).
                 if scene != slot.scene
@@ -445,7 +452,14 @@ impl SessionLauncher {
                         mode: LaunchMode::Trigger,
                         ..row.button
                     };
-                    self.press_at(row.track, scene, button, true, line, at);
+                    self.press_at(
+                        row.track,
+                        scene,
+                        button,
+                        true,
+                        super::Played::PLAIN,
+                        (line, at),
+                    );
                 }
                 self.start_scene_run(scene, tick);
                 if program.scene_maps.iter().any(|maps| maps.scene == scene) {

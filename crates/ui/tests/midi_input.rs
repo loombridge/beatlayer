@@ -220,6 +220,48 @@ fn the_tempo_and_midi_page_lists_each_port_with_its_switches() {
     assert!(test.is_open(Direction::Output, "Synth"));
 }
 
+// Spec: remote-mapping R28 (L-SET-014). Takeover Mode is a chooser on the
+// Tempo & MIDI page, before the MIDI ports table, None in a new install; the
+// keyboard picks another and the command runs.
+#[test]
+fn the_tempo_and_midi_page_has_the_takeover_mode_chooser_before_the_ports() {
+    use egui::Id;
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Keys A");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let chooser = Harness::node(&nodes, "Takeover Mode");
+    assert_eq!(chooser.value, "None", "a new install's choice");
+    assert!(
+        bounds(chooser).bottom() <= bounds(Harness::node(&nodes, "In: Keys A Track")).top(),
+        "before the ports"
+    );
+
+    h.accesskit(
+        Id::new(("chooser", "takeover-mode")),
+        egui::accesskit::Action::Focus,
+    );
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    assert_eq!(
+        h.shell.takeover_mode(),
+        bl_shell::settings::TakeoverMode::PickUp
+    );
+    assert!(
+        h.events.iter().any(|e| matches!(
+            e,
+            bl_ui::main_window::UiEvent::Invoke(i) if i.id == "settings.set_takeover_mode"
+        )),
+        "the chooser runs its command"
+    );
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Takeover Mode").value, "Pick-Up");
+}
+
 // Spec: midi-io R27. An input's row has a fourth switch, MPE, after Remote,
 // off for a port seen for the first time; clicking it sets it, and an output
 // has none.
@@ -324,6 +366,87 @@ fn the_output_indicator_lights_when_a_message_leaves() {
     // A moment later it goes dark again.
     std::thread::sleep(Duration::from_millis(200));
     assert_eq!(indicators(&mut h), "");
+}
+
+// Spec: remote-mapping R41 (L-CTRL-026). The remote pair's upper lamp lights
+// for a message a mapping takes and its lower for feedback.
+#[test]
+fn the_remote_pair_lights_for_a_mapped_message_and_for_feedback() {
+    use std::time::Instant;
+
+    let mut h = Harness::new(Window::Main);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Pads");
+    test.add_port(Direction::Output, "Lamps");
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    for (direction, name) in [("input", "Pads"), ("output", "Lamps")] {
+        h.shell
+            .run(
+                "midi.set_port",
+                json!({ "direction": direction, "name": name, "remote": true, "track": false }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "T" }))
+        .unwrap();
+    let track = h.shell.editor().document().top_level().last().unwrap();
+    h.settle();
+    let lamps = |h: &mut Harness| {
+        h.shell.poll();
+        let nodes = Harness::nodes(&h.settle());
+        Harness::node(&nodes, "Remote Input and Output Indicators")
+            .value
+            .clone()
+    };
+    assert_eq!(lamps(&mut h), "", "dark until something crosses");
+
+    // Making a mapping sends its value to the output: the lower lamp.
+    h.shell
+        .run(
+            "remote.map",
+            json!({ "source": { "type": "cc", "channel": 1, "controller": 20 },
+                    "target": { "type": "mixer", "track": track, "param": "volume" } }),
+        )
+        .unwrap();
+    assert_eq!(lamps(&mut h), "sending");
+    assert_eq!(test.sent("Lamps").len(), 1);
+
+    // A message the mapping takes: the upper lamp.
+    assert!(test.send("Pads", Instant::now(), &[0xB0, 20, 100]));
+    let value = lamps(&mut h);
+    assert!(value.contains("receiving"), "{value:?}");
+}
+
+// Spec: remote-mapping R41 (L-CTRL-021). The key indicators' upper lamp
+// lights for a key a key mapping takes; a key that is not mapped leaves it
+// dark.
+#[test]
+fn the_key_indicator_lights_for_a_mapped_key() {
+    let mut h = Harness::new(Window::Main);
+    h.shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "T" }))
+        .unwrap();
+    let track = h.shell.editor().document().top_level().last().unwrap();
+    h.shell
+        .run(
+            "remote.map",
+            json!({ "source": { "type": "key", "key": "B" },
+                    "target": { "type": "solo", "track": track } }),
+        )
+        .unwrap();
+    h.settle();
+    let lamp = |h: &mut Harness| {
+        h.shell.poll();
+        let nodes = Harness::nodes(&h.settle());
+        Harness::node(&nodes, "Key Input and Output Indicators")
+            .value
+            .clone()
+    };
+    h.key(Key::X, Modifiers::NONE);
+    assert_eq!(lamp(&mut h), "", "an unmapped key");
+    h.key(Key::B, Modifiers::NONE);
+    assert_eq!(lamp(&mut h), "receiving");
 }
 
 fn labelled(nodes: &[Node], label: &str) -> bool {
@@ -442,7 +565,7 @@ fn the_resync_button_shows_while_the_setting_is_on_and_leaves_room_in_the_tempo_
     );
 }
 
-// Spec: midi-clock R12, R15, R27
+// Spec: midi-clock R12, R27
 #[test]
 fn the_lower_sync_lamp_lights_for_a_quarter_note_of_clock_sent() {
     let mut h = Harness::manual(Window::Main);
@@ -450,7 +573,7 @@ fn the_lower_sync_lamp_lights_for_a_quarter_note_of_clock_sent() {
     test.add_port(Direction::Input, "Clock in");
     test.add_port(Direction::Output, "Drum machine");
     h.shell.use_midi_backend(Box::new(test));
-    let name = "Sync Input and Output Indicators";
+    let name = "Sync Output";
     let nodes = Harness::nodes(&h.settle());
     assert!(!labelled(&nodes, name), "hidden while no input has Sync on");
 
@@ -467,16 +590,231 @@ fn the_lower_sync_lamp_lights_for_a_quarter_note_of_clock_sent() {
         )
         .unwrap();
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, name).value, "", "dark while stopped");
+    assert_eq!(
+        Harness::node(&nodes, name).value,
+        "dark",
+        "dark while stopped"
+    );
 
     h.shell.run("transport.play", json!({})).unwrap();
     h.wait("the lower sync lamp to light", |h| {
         h.shell.sync_output_lit()
     });
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, name).value, "sending");
+    assert_eq!(Harness::node(&nodes, name).value, "lit");
     let state = h.shell.run("sync.state", json!({})).unwrap();
     assert_eq!(state["sending"], true);
     assert_eq!(state["output_ports"], 1);
     assert!(state["clocks_sent"].as_u64().unwrap() >= 1);
+}
+
+/// A main window on a null stream paced by hand, with an input called
+/// "Clock in" the test plays clock into.
+fn clock_harness() -> (Harness, TestBackend) {
+    let mut h = Harness::manual(Window::Main);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Clock in");
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    (h, test)
+}
+
+fn sync_input(h: &mut Harness, on: bool) {
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Clock in", "sync": on }),
+        )
+        .unwrap();
+}
+
+// Spec: midi-clock R15, R27. EXT shows while an input has Sync on, in the
+// tempo group before the lamps, a switch named External Sync.
+#[test]
+fn the_ext_switch_shows_while_an_input_has_sync_on_and_switches_the_song_to_the_clock() {
+    let (mut h, _) = clock_harness();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!labelled(&nodes, "External Sync"), "hidden at first");
+    let tap_before = bounds(Harness::node(&nodes, "Tap Tempo")).left();
+
+    sync_input(&mut h, true);
+    let nodes = Harness::nodes(&h.settle());
+    let ext = Harness::node(&nodes, "External Sync");
+    assert_eq!(ext.toggled, Some(false));
+    let (input, output) = (
+        Harness::node(&nodes, "Sync Input"),
+        Harness::node(&nodes, "Sync Output"),
+    );
+    assert_eq!(
+        (input.value.as_str(), output.value.as_str()),
+        ("dark", "dark")
+    );
+    assert!(
+        bounds(ext).right() <= bounds(input).left(),
+        "the lamps are beside EXT"
+    );
+    assert!(
+        bounds(input).bottom() <= bounds(output).top(),
+        "upper and lower"
+    );
+    assert!(
+        bounds(output).right() <= bounds(Harness::node(&nodes, "Tap Tempo")).left(),
+        "before the tempo controls"
+    );
+    assert!(bounds(Harness::node(&nodes, "Tap Tempo")).left() > tap_before);
+
+    h.click(bounds(ext).center());
+    assert!(h.shell.external_sync());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "External Sync").toggled, Some(true));
+
+    // The last Sync input off hides EXT again, and EXT is off.
+    sync_input(&mut h, false);
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!labelled(&nodes, "External Sync"));
+    assert!(!h.shell.external_sync());
+}
+
+// Spec: midi-clock R15, R16, R17. The upper lamp lights for a quarter note
+// of clock arriving, and with EXT on the Tempo field shows the followed
+// tempo and is disabled.
+#[test]
+fn clock_arriving_lights_the_upper_lamp_and_the_tempo_field_follows_it() {
+    let (mut h, test) = clock_harness();
+    sync_input(&mut h, true);
+    h.shell
+        .run("transport.set_external_sync", json!({ "on": true }))
+        .unwrap();
+    h.settle();
+    let now = h.shell.midi().now();
+    let period = std::time::Duration::from_secs_f64(60.0 / (150.0 * 24.0));
+    for k in 0..240 {
+        assert!(test.send("Clock in", now + period * k, &[0xF8]));
+    }
+    h.wait("the upper sync lamp to light", |h| h.shell.sync_input_lit());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Sync Input").value, "lit");
+    assert_eq!(Harness::node(&nodes, "Sync Output").value, "dark");
+
+    h.wait("the Tempo field to show 150", |h| {
+        bl_shell::transport::text(
+            &h.shell,
+            bl_shell::transport::Field::new(bl_shell::transport::Group::Tempo, 0),
+        ) == "150.00"
+    });
+    let nodes = Harness::nodes(&h.settle());
+    let tempo = Harness::node(&nodes, "Tempo");
+    assert!(tempo.disabled, "the clock sets the tempo");
+    assert!((tempo.numeric.unwrap() - 150.0).abs() < 0.01);
+    assert!(
+        Harness::node(&nodes, "Phase Nudge Up").disabled,
+        "the clock keeps the phase"
+    );
+
+    // EXT off: the field is the song's again.
+    h.shell
+        .run("transport.set_external_sync", json!({ "on": false }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!Harness::node(&nodes, "Tempo").disabled);
+    assert!((Harness::node(&nodes, "Tempo").numeric.unwrap() - 120.0).abs() < 0.01);
+}
+
+// Spec: midi-clock R14. An input with Sync on has a triangle with its Sync
+// Delay alone, kept as an output's is.
+#[test]
+fn an_inputs_triangle_opens_its_sync_delay() {
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Clock in");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert!(!labelled(&nodes, "In: Clock in Sync Options"));
+    h.click(bounds(Harness::node(&nodes, "In: Clock in Sync")).center());
+    let nodes = Harness::nodes(&h.settle());
+    let triangle = Harness::node(&nodes, "In: Clock in Sync Options");
+    h.click(bounds(triangle).center());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "In: Clock in Sync Delay").value,
+        "0 ms"
+    );
+    assert!(
+        !labelled(&nodes, "In: Clock in MIDI Clock Type"),
+        "an output's"
+    );
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Clock in", "sync_delay_ms": -12 }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "In: Clock in Sync Delay").value,
+        "-12 ms"
+    );
+}
+
+// Spec: midi-timecode R1, R11. An input's sync options start with MIDI Sync
+// Type, and with MIDI Timecode chosen add a frame rate and an offset; an
+// output's have no timecode rows.
+#[test]
+fn an_inputs_sync_type_adds_timecode_rows_and_an_output_has_none() {
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Tape");
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    for (direction, name) in [("input", "Tape"), ("output", "Synth")] {
+        h.shell
+            .run(
+                "midi.set_port",
+                json!({ "direction": direction, "name": name, "sync": true }),
+            )
+            .unwrap();
+    }
+    let nodes = Harness::nodes(&h.settle());
+    h.click(bounds(Harness::node(&nodes, "In: Tape Sync Options")).center());
+    let nodes = Harness::nodes(&h.settle());
+    h.click(bounds(Harness::node(&nodes, "Out: Synth Sync Options")).center());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Sync Type").value,
+        "MIDI Clock"
+    );
+    assert!(!labelled(&nodes, "In: Tape MIDI Timecode Frame Rate"));
+    assert!(!labelled(&nodes, "Out: Synth MIDI Sync Type"));
+
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Tape", "sync_type": "midi_timecode",
+                    "timecode_rate": "fps_25", "timecode_offset": "01:02:03:04" }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Sync Type").value,
+        "MIDI Timecode"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Timecode Frame Rate").value,
+        "25 fps"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Timecode Offset").value,
+        "01:02:03:04"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape Sync Delay").value,
+        "0 ms",
+        "the delay is still there"
+    );
+    assert!(!labelled(&nodes, "Out: Synth MIDI Timecode Frame Rate"));
 }

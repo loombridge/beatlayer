@@ -662,12 +662,25 @@ fn every_transport_command_runs_by_id() {
     );
     run(
         &mut rig,
+        "transport.set_record_quantization",
+        json!({ "quantization": "1/16" }),
+    );
+    run(
+        &mut rig,
         "transport.set_recording",
         json!({ "recording": true }),
     );
     run(&mut rig, "transport.stop_recording", json!({}));
     // Spec: transport R23
     run(&mut rig, "transport.scrub", json!({ "position": 0 }));
+    // Spec: transport R28
+    for held in [true, false] {
+        run(
+            &mut rig,
+            "transport.phase_nudge",
+            json!({ "direction": "up", "held": held }),
+        );
+    }
     // Spec: midi-clock R11. With no output port on, it changes nothing.
     run(&mut rig, "transport.resync_external_hardware", json!({}));
 

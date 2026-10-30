@@ -17,6 +17,7 @@ use crate::capture::{CAPTURE_RING, CapturedMidi};
 use crate::compiler::{Compiler, Update};
 use crate::display::Displays;
 use crate::drum::ChainHits;
+use crate::follower::Follower;
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
@@ -101,6 +102,12 @@ impl Sender {
         self.push(Message::OutputLatency(frames));
     }
 
+    /// Sends the outside tempo the song follows from the next block on, or
+    /// `None` to follow none (the transport spec, R24).
+    pub fn follower(&mut self, follower: Option<Owned<Box<dyn Follower>>>) {
+        self.push(Message::Follower(follower));
+    }
+
     /// Sends the output ports with Sync on and their options, which clock
     /// out sends to (`docs/specs/midi-clock.md`, R3). The engine keeps the
     /// first [`MAX_SYNC_OUTPUTS`](crate::MAX_SYNC_OUTPUTS).
@@ -120,6 +127,33 @@ impl Sender {
                 output: Some(output),
             });
         }
+    }
+
+    /// Sends the input ports with Sync on and their Sync Delay, which the
+    /// clock follower reads (`docs/specs/midi-clock.md`, R14). The engine
+    /// keeps the first [`MAX_SYNC_INPUTS`](crate::MAX_SYNC_INPUTS).
+    pub fn sync_inputs(&mut self, inputs: &[bl_core::midi::SyncInput]) {
+        let count = inputs.len().min(crate::MAX_SYNC_INPUTS) as u8;
+        if count == 0 {
+            self.push(Message::SyncInput {
+                index: 0,
+                count,
+                input: None,
+            });
+        }
+        for (index, &input) in inputs.iter().take(usize::from(count)).enumerate() {
+            self.push(Message::SyncInput {
+                index: index as u8,
+                count,
+                input: Some(input),
+            });
+        }
+    }
+
+    /// Switches EXT: whether the song follows the incoming clock
+    /// (`docs/specs/midi-clock.md`, R17).
+    pub fn external_sync(&mut self, on: bool) {
+        self.push(Message::ExternalSync(on));
     }
 
     /// Sends a parameter change.
@@ -267,6 +301,8 @@ enum Request {
     /// The output ports with Sync on and their options (WP-7.11), kept for
     /// every processor that follows.
     SyncOutputs(Vec<bl_core::midi::SyncOutput>),
+    SyncInputs(Vec<bl_core::midi::SyncInput>),
+    ExternalSync(bool),
     /// A Session View command (WP-3.2).
     Session(SessionCommand),
     /// What the audio thread says a launched scene put in place: compile
@@ -277,6 +313,8 @@ enum Request {
     Record(Box<Owned<RecordingPlan>>),
     /// What to capture while the song plays a range in real time (WP-5.35).
     Render(Box<Owned<crate::render::RenderPlan>>),
+    /// The outside tempo the song follows (the transport spec, R24).
+    Follower(Box<Option<Owned<Box<dyn Follower>>>>),
     /// No processor runs any more: stop sending to it.
     Detach,
     /// Make a processor for these settings.
@@ -375,11 +413,14 @@ impl std::fmt::Debug for Request {
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
             Self::SyncOutputs(_) => "SyncOutputs",
+            Self::SyncInputs(_) => "SyncInputs",
+            Self::ExternalSync(_) => "ExternalSync",
             Self::Session(_) => "Session",
             Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
             Self::Record(_) => "Record",
             Self::Render(_) => "Render",
+            Self::Follower(_) => "Follower",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
             Self::Loaded(_) => "Loaded",
@@ -572,6 +613,15 @@ impl Engine {
         self.request(Request::Render(Box::new(self.gc.wrap(plan))));
     }
 
+    /// Sets the outside tempo the song follows (the transport spec, R24 to
+    /// R26), or with `None` stops following. The audio thread asks it once
+    /// per block and hands the one it replaces to the drop thread. An engine
+    /// restarted on another device starts with none.
+    pub fn set_follower(&self, follower: Option<Box<dyn Follower>>) {
+        let follower = follower.map(|follower| self.gc.wrap(follower));
+        self.request(Request::Follower(Box::new(follower)));
+    }
+
     /// Reports `device`'s node's latency now, as a plug-in that restarted
     /// for a new one does: the compiler compiles a program whose delay
     /// compensation uses it, so a latency change reaches the running song
@@ -638,6 +688,20 @@ impl Engine {
     /// processor running now and to every one after it.
     pub fn sync_outputs(&self, outputs: &[bl_core::midi::SyncOutput]) {
         self.request(Request::SyncOutputs(outputs.to_vec()));
+    }
+
+    /// Sets the input ports with Sync on and their Sync Delay, which the
+    /// clock follower reads (`docs/specs/midi-clock.md`, R14). They go to
+    /// the processor running now and to every one after it.
+    pub fn sync_inputs(&self, inputs: &[bl_core::midi::SyncInput]) {
+        self.request(Request::SyncInputs(inputs.to_vec()));
+    }
+
+    /// Switches EXT: whether the song follows the incoming clock
+    /// (`docs/specs/midi-clock.md`, R17). It goes to the processor running
+    /// now and to every one after it.
+    pub fn set_external_sync(&self, on: bool) {
+        self.request(Request::ExternalSync(on));
     }
 
     /// Schedules a command at a musical position (D17).
@@ -774,6 +838,8 @@ fn compile_loop(
     let mut flushes: Vec<mpsc::Sender<()>> = Vec::new();
     let mut detached = Detached::new();
     let mut sync_outputs = Vec::new();
+    let mut sync_inputs = Vec::new();
+    let mut external_sync = false;
     loop {
         // While messages wait for room, look again every millisecond.
         let first = if sender.as_ref().is_some_and(|s| s.backlog() > 0) {
@@ -887,6 +953,18 @@ fn compile_loop(
                     }
                     sync_outputs = outputs;
                 }
+                Request::SyncInputs(inputs) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.sync_inputs(&inputs);
+                    }
+                    sync_inputs = inputs;
+                }
+                Request::ExternalSync(on) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.external_sync(on);
+                    }
+                    external_sync = on;
+                }
                 Request::Session(command) => match sender.as_mut() {
                     Some(sender) => sender.session(command),
                     // Spec: device-changes R7. Nothing plays while no device
@@ -922,6 +1000,13 @@ fn compile_loop(
                         sender.render(*plan);
                     }
                 }
+                Request::Follower(follower) => {
+                    // While no processor runs, nothing follows; the one that
+                    // takes over starts with none.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.follower(*follower);
+                    }
+                }
                 Request::Detach => {
                     // Frees the queue to the processor that stopped, and
                     // anything still waiting for room in it. What's held
@@ -947,6 +1032,8 @@ fn compile_loop(
                     if reply.send(processor).is_ok() {
                         let mut next = next;
                         next.sync_outputs(&sync_outputs);
+                        next.sync_inputs(&sync_inputs);
+                        next.external_sync(external_sync);
                         sender = Some(next);
                     } else {
                         // Nobody waits for it any more, so nothing runs it,

@@ -47,6 +47,7 @@ fn render(
         let transport = TransportInfo {
             playing,
             position: Frames((n * block) as i64),
+            ..TransportInfo::default()
         };
         let events: [NodeEvent; 0] = [];
         let done = common::run_at(node.as_mut(), &channels, &events, tempo, transport);

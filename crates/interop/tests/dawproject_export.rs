@@ -1320,6 +1320,39 @@ fn default_spec() -> Spec {
     }
 }
 
+/// Spec: dawproject R65 to R82. The set the property test shrank a failure
+/// to: a 1/2 signature at 60 bpm, a two-beat loop, no fade, a 20 ms
+/// crossfade and a detune of -50 cents.
+#[test]
+fn a_set_with_a_half_beat_bar_and_a_detune_of_minus_fifty_cents_round_trips() {
+    let spec = Spec {
+        bpm: (60, 60),
+        signature: (1, 2),
+        volume: 10,
+        pan: 0,
+        send: 5,
+        bend: 0,
+        fade: 0,
+        crossfade: 20,
+        gain: 10,
+        transpose: 0,
+        detune: -50,
+        notes: vec![(0, 0, 1, 1, 1)],
+        swatches: (0, 0, 0, 0),
+        loop_beats: 2,
+        label: "A".to_owned(),
+    };
+    let folder = TempDir::new("shrunk-seed");
+    let (document, files) = build(&spec, &folder.0);
+    let machine = Machine::new();
+    let first = export_of(&document, &files, &machine, true);
+    let second = export_of(&document, &files, &machine, true);
+    assert!(first.bytes == second.bytes, "two exports differ");
+    let imported = import_of(&first.bytes, &folder.0, &machine);
+    let found = differences(&document, &imported.project.document);
+    assert!(found.is_empty(), "{found:#?}");
+}
+
 /// Spec: dawproject R66. The container holds `metadata.xml`, `project.xml`,
 /// the plug-ins' states and the media in that order, every entry with the
 /// time stamp 1 January 1980, the XML deflated and the rest stored.

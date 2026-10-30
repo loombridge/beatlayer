@@ -267,6 +267,8 @@ pub struct Lfo {
     /// plays.
     start: i64,
     playing: bool,
+    /// Song frames per frame of the stretch (the transport spec, R24).
+    speed: f64,
     /// Cycles per frame, free-running.
     step: f64,
     /// Cycles per second, free-running.
@@ -292,6 +294,7 @@ impl Lfo {
             offset: 0.0,
             start: 0,
             playing: false,
+            speed: 1.0,
             step: 1.0 / rate,
             hz: 1.0,
             analog: 1.0 - (-1.0 / (ANALOG_SECONDS * rate)).exp(),
@@ -304,10 +307,15 @@ impl Lfo {
     /// rate takes the tempo at the stretch's first frame, from the song's
     /// tempo map, for the stretch's free-running steps.
     pub fn set(&mut self, audio: &Audio<'_, '_>, rate: Rate, stereo: Stereo, offset_degrees: f64) {
-        let start = audio.song_position();
-        let ticks = audio.tempo().frames_to_ticks(start, self.sample_rate);
-        let bpm = audio.tempo().bpm_at(ticks).get();
-        self.configure(start.0, audio.playing(), bpm, rate, stereo, offset_degrees);
+        self.configure(
+            audio.song_position().0,
+            audio.playing(),
+            audio.bpm(),
+            rate,
+            stereo,
+            offset_degrees,
+        );
+        self.speed = audio.speed();
     }
 
     fn configure(
@@ -368,7 +376,7 @@ impl Lfo {
         let mut phases = if let Some(beats) = synced {
             // Locked to the song: the phase is a function of the frame, so
             // a tempo change and a jump of the playhead keep the grid.
-            let at = Frames(self.start + frame as i64);
+            let at = Frames(self.start + (frame as f64 * self.speed).round() as i64);
             let quarters = tempo.frames_to_ticks(at, self.sample_rate).as_quarters();
             let cycles = quarters / beats;
             if (multiplier - 1.0).abs() < 1e-9 {
@@ -377,7 +385,8 @@ impl Lfo {
             } else {
                 let bpm = tempo
                     .bpm_at(tempo.frames_to_ticks(at, self.sample_rate))
-                    .get();
+                    .get()
+                    * self.speed;
                 let step = (bpm / 60.0 / beats.max(1e-9) / self.sample_rate.as_f64()) * multiplier;
                 let now = self.free;
                 self.free = [

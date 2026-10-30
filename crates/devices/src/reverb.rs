@@ -262,8 +262,35 @@ pub fn reverb_type() -> DeviceType {
         ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("The balance between the dry and the reverberated signal."),
     ];
-    DeviceType::native(REVERB, "Reverb", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(REVERB, "Reverb", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Reverb",
+                    &[
+                        "Dry/Wet", "Decay", "Size", "Predelay", "Stereo", "Freeze", "Smooth",
+                        "Density",
+                    ],
+                ),
+                (
+                    "Input Filter",
+                    &[
+                        "Low Cut",
+                        "Low Cut Frequency",
+                        "High Cut",
+                        "High Cut Frequency",
+                    ],
+                ),
+                (
+                    "Early",
+                    &["Reflect", "Diffuse", "Diffusion", "Scale", "Flat", "Cut"],
+                ),
+                ("Tail", &["High", "High Amount", "Low", "Low Amount"]),
+                ("Spin", &["Spin", "Spin Amount", "Spin Rate", "Shape"]),
+                ("Chorus", &["Chorus", "Chorus Amount", "Chorus Rate"]),
+            ]),
+    )
 }
 
 /// A layout of fixed control bands, in the device's sections.

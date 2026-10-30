@@ -97,6 +97,7 @@ pub mod note_expression;
 pub mod note_ops;
 pub mod param;
 pub mod rack;
+mod record_quantization;
 pub mod registry;
 pub mod remote;
 mod repr;
@@ -155,7 +156,8 @@ pub use note_expression::Expression;
 pub mod freeze;
 pub use colour::{DEFAULT_TRACK_PALETTE, SWATCHES, TRACK_COLOURS, id_swatch, swatch_rgb};
 pub use external::{
-    External, ExternalPort, HardwareLatency, MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
+    CvCalibration, CvPort, CvStep, External, ExternalPort, HardwareLatency, MAX_CV_PORTS,
+    MAX_HARDWARE_LATENCY_MS, MAX_HARDWARE_LATENCY_SAMPLES,
 };
 pub use follow::{
     FOLLOW_MULTIPLIER_MAX, FOLLOW_TIME_MAX, FOLLOW_TIME_MIN, FollowAction, FollowActions,
@@ -180,7 +182,9 @@ pub use layers::{
 };
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
-pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
+pub use param::{
+    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
+};
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,
     DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MACRO_BASE, MACRO_STEPS_DEFAULT, MACRO_STEPS_MAX,
@@ -189,8 +193,10 @@ pub use rack::{
     default_macro_name, description as rack_description, general_midi_drum, macro_number,
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
+pub use record_quantization::RecordQuantization;
 pub use remote::{
-    ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
+    BarControl, ClipControl, ControlKind, CrossfaderField, RelativeEncoding, RemoteMapping,
+    RemoteMode, RemoteSource, RemoteTarget, StripControl, TakeoverMode, ToolControl, ToolId,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};

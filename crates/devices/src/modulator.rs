@@ -114,8 +114,45 @@ pub fn wave_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(WAVE_MOD, "LFO", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(wave_layout()))
+    DeviceType::native(WAVE_MOD, "LFO", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(wave_layout())
+            .with_banks(&[
+                (
+                    "Wave",
+                    &["Wave", "Shape", "Steps", "Hold", "Jitter", "Smooth"],
+                ),
+                (
+                    "Timing",
+                    &[
+                        "Time Mode",
+                        "Rate",
+                        "x10",
+                        "Beat Rate",
+                        "Offset",
+                        "Phase",
+                        "R",
+                    ],
+                ),
+                ("Mapping", &["Mod", "Polarity", "Depth"]),
+                (
+                    "Targets 1-2",
+                    &["Amount 1", "Min 1", "Max 1", "Amount 2", "Min 2", "Max 2"],
+                ),
+                (
+                    "Targets 3-4",
+                    &["Amount 3", "Min 3", "Max 3", "Amount 4", "Min 4", "Max 4"],
+                ),
+                (
+                    "Targets 5-6",
+                    &["Amount 5", "Min 5", "Max 5", "Amount 6", "Min 6", "Max 6"],
+                ),
+                (
+                    "Targets 7-8",
+                    &["Amount 7", "Min 7", "Max 7", "Amount 8", "Min 8", "Max 8"],
+                ),
+            ]),
+    )
 }
 
 /// The Shaper's type.
@@ -148,8 +185,53 @@ pub fn curve_mod_type() -> DeviceType {
             "How far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(CURVE_MOD, "Shaper", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(curve_layout()))
+    DeviceType::native(CURVE_MOD, "Shaper", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(curve_layout())
+            .with_banks(&[
+                (
+                    "Shape",
+                    &[
+                        "Trigger Mode",
+                        "T",
+                        "Manual",
+                        "Grid",
+                        "Snap",
+                        "Jitter",
+                        "Smooth",
+                    ],
+                ),
+                (
+                    "Timing",
+                    &[
+                        "Time Mode",
+                        "Rate",
+                        "x10",
+                        "Beat Rate",
+                        "Offset",
+                        "Phase",
+                        "R",
+                    ],
+                ),
+                ("Mapping", &["Mod", "Polarity", "Depth"]),
+                (
+                    "Targets 1-2",
+                    &["Amount 1", "Min 1", "Max 1", "Amount 2", "Min 2", "Max 2"],
+                ),
+                (
+                    "Targets 3-4",
+                    &["Amount 3", "Min 3", "Max 3", "Amount 4", "Min 4", "Max 4"],
+                ),
+                (
+                    "Targets 5-6",
+                    &["Amount 5", "Min 5", "Max 5", "Amount 6", "Min 6", "Max 6"],
+                ),
+                (
+                    "Targets 7-8",
+                    &["Amount 7", "Min 7", "Max 7", "Amount 8", "Min 8", "Max 8"],
+                ),
+            ]),
+    )
 }
 
 /// The parameters both modulators share.
@@ -377,6 +459,8 @@ struct Eval<'a> {
     /// The song frame of the instant while the song plays; its position
     /// otherwise.
     song: i64,
+    /// Song frames per frame of the stretch (the transport spec, R24).
+    speed: f64,
     /// The frame of the stretch whose parameters the instant is worked out
     /// from.
     f: usize,
@@ -421,6 +505,58 @@ fn at(params: &ParamBank, id: ParamId, f: usize) -> f64 {
     params
         .index(id)
         .map_or(0.0, |index| f64::from(params.ramp(index)[f]))
+}
+
+/// The parameters of a modulator's mappings, looked up once, and the rows it
+/// writes from its output (R13, R14, R16).
+pub(crate) struct Mapper {
+    depth: usize,
+    mode: usize,
+    polarity: usize,
+    amounts: [usize; SLOTS as usize],
+    mins: [usize; SLOTS as usize],
+    maxes: [usize; SLOTS as usize],
+}
+
+impl Mapper {
+    pub(crate) fn new(params: &ParamBank) -> Self {
+        let index = |id: ParamId| params.index(id).expect("the description holds it");
+        Self {
+            depth: index(DEPTH),
+            mode: index(MODE),
+            polarity: index(POLARITY),
+            amounts: std::array::from_fn(|s| index(modulator::amount(s as u8))),
+            mins: std::array::from_fn(|s| index(modulator::min(s as u8))),
+            maxes: std::array::from_fn(|s| index(modulator::max(s as u8))),
+        }
+    }
+
+    /// Writes every slot's two rows for frame `f` of the stretch, from the
+    /// output `u` (0 to 1) of the modulator on that frame.
+    pub(crate) fn write(
+        &self,
+        modulation: &mut Modulation<'_, '_>,
+        params: &ParamBank,
+        f: usize,
+        u: f64,
+    ) {
+        let depth = f64::from(params.ramp(self.depth)[f]) / 100.0;
+        let remote = params.ramp(self.mode)[f] >= 0.5;
+        let unipolar = params.ramp(self.polarity)[f] >= 0.5;
+        for slot in 0..SLOTS as usize {
+            let amount = f64::from(params.ramp(self.amounts[slot])[f]) / 100.0;
+            let (contribution, hold) = if remote {
+                let low = f64::from(params.ramp(self.mins[slot])[f]) / 100.0;
+                let high = f64::from(params.ramp(self.maxes[slot])[f]) / 100.0;
+                (0.0, (low + depth * u * (high - low)).clamp(0.0, 1.0) as f32)
+            } else {
+                let swing = if unipolar { u } else { 2.0 * u - 1.0 };
+                ((depth * amount * swing) as f32, NOT_HELD)
+            };
+            modulation.row_mut(slot * 2)[f] = contribution;
+            modulation.row_mut(slot * 2 + 1)[f] = hold;
+        }
+    }
 }
 
 /// A modulator: a source, with the clock that places its output on the grid
@@ -487,10 +623,11 @@ impl<S: Source> Modulator<S> {
             rate: self.rate,
             tempo: modulation.tempo(),
             song: if modulation.playing() {
-                song + f as i64 + lookahead
+                song + ((f as i64 + lookahead) as f64 * modulation.speed()).round() as i64
             } else {
                 song
             },
+            speed: modulation.speed(),
             f,
         };
         let hz = e.param(params, RATE_HZ)
@@ -544,13 +681,7 @@ impl<S: Source> NativeDevice for Modulator<S> {
             self.restart();
         }
         self.was_playing = playing;
-        let index = |id: ParamId| params.index(id).expect("the description holds it");
-        let (depth, mode, polarity) = (index(DEPTH), index(MODE), index(POLARITY));
-        let amounts: [usize; SLOTS as usize] =
-            std::array::from_fn(|s| index(modulator::amount(s as u8)));
-        let mins: [usize; SLOTS as usize] = std::array::from_fn(|s| index(modulator::min(s as u8)));
-        let maxes: [usize; SLOTS as usize] =
-            std::array::from_fn(|s| index(modulator::max(s as u8)));
+        let mapper = Mapper::new(params);
         for f in 0..modulation.frames() {
             if self.clock.is_multiple_of(GRID) {
                 if self.primed {
@@ -563,22 +694,7 @@ impl<S: Source> NativeDevice for Modulator<S> {
             }
             let t = (self.clock % GRID) as f64 / GRID as f64;
             let u = self.from + (self.to - self.from) * t;
-            let depth = f64::from(params.ramp(depth)[f]) / 100.0;
-            let remote = params.ramp(mode)[f] >= 0.5;
-            let unipolar = params.ramp(polarity)[f] >= 0.5;
-            for slot in 0..SLOTS as usize {
-                let amount = f64::from(params.ramp(amounts[slot])[f]) / 100.0;
-                let (contribution, hold) = if remote {
-                    let low = f64::from(params.ramp(mins[slot])[f]) / 100.0;
-                    let high = f64::from(params.ramp(maxes[slot])[f]) / 100.0;
-                    (0.0, (low + depth * u * (high - low)).clamp(0.0, 1.0) as f32)
-                } else {
-                    let swing = if unipolar { u } else { 2.0 * u - 1.0 };
-                    ((depth * amount * swing) as f32, NOT_HELD)
-                };
-                modulation.row_mut(slot * 2)[f] = contribution;
-                modulation.row_mut(slot * 2 + 1)[f] = hold;
-            }
+            mapper.write(modulation, params, f, u);
             self.clock += 1;
         }
     }
@@ -813,7 +929,9 @@ impl Source for CurveSource {
                 let step = match c.rate {
                     Rate::Hz(hz) => hz * GRID as f64 / e.rate.as_f64(),
                     Rate::Beats(beats) => {
-                        (e.quarters(e.song + GRID as i64) - e.quarters(e.song)) / beats
+                        (e.quarters(e.song + (GRID as f64 * e.speed).round() as i64)
+                            - e.quarters(e.song))
+                            / beats
                     }
                 };
                 if self.running {

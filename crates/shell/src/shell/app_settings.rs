@@ -21,7 +21,6 @@ use super::{ShellError, to_value};
 use crate::browser;
 use crate::commands as ids;
 use crate::commands::AppearanceArgs;
-use crate::commands::AutomationRecordModeArgs;
 use crate::commands::BrightnessArgs;
 use crate::commands::CollectFilesArgs;
 use crate::commands::DefaultLaunchModeArgs;
@@ -40,6 +39,7 @@ use crate::commands::TemporaryFolderResult;
 use crate::commands::ThemeArgs;
 use crate::commands::UserLibraryArgs;
 use crate::commands::UserLibraryResult;
+use crate::commands::{AutomationRecordModeArgs, TakeoverModeArgs};
 use crate::commands::{ClipColourArgs, SwatchArgs, ToneArgs};
 use crate::settings::OnByDefault;
 use bl_commands::NoArgs;
@@ -68,8 +68,17 @@ impl Shell {
     pub fn show_settings_page(&mut self, page: SettingsPage) {
         if self.prefs.settings_page != page {
             self.prefs.settings_page = page;
+            self.templates_for_page();
             self.save_preferences();
             self.touch();
+        }
+    }
+
+    /// Reads the controller templates again when the Tempo & MIDI page is
+    /// the one showing (control surfaces R43).
+    pub(super) fn templates_for_page(&mut self) {
+        if self.prefs.settings_page == SettingsPage::TempoMidi {
+            self.refresh_templates();
         }
     }
 
@@ -128,6 +137,12 @@ impl Shell {
         self.prefs.warp
     }
 
+    /// Takeover Mode (the remote mapping spec, R28).
+    #[must_use]
+    pub fn takeover_mode(&self) -> crate::settings::TakeoverMode {
+        self.prefs.takeover_mode
+    }
+
     /// The Launch section of Record, Warp & Launch (WP-3.4).
     #[must_use]
     pub fn launch_prefs(&self) -> LaunchPrefs {
@@ -168,6 +183,7 @@ impl Shell {
                 tone: self.audio.tone(),
             },
             tempo_midi: self.midi.report(),
+            takeover_mode: self.prefs.takeover_mode,
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             retune_on_tuning_load: self.retune_on_tuning_load(),
             snap_automation_to_grid: self.snap_automation_to_grid(),
@@ -220,6 +236,8 @@ impl Shell {
     /// sees (the DAWproject spec, R23).
     pub fn set_track_palette(&mut self, colours: Vec<[u8; 3]>) {
         if !colours.is_empty() {
+            // Push 2's palette is made from the same colours (push-2 R14).
+            self.midi.push().set_track_colours(colours.clone());
             self.track_palette = colours;
         }
     }
@@ -294,6 +312,7 @@ impl Shell {
     /// start-up with the preference or the default place (browser R3).
     pub fn set_user_library(&mut self, path: Option<PathBuf>) {
         self.browser_view.set_user_library(path);
+        self.refresh_templates();
         self.touch();
     }
 
@@ -359,6 +378,7 @@ impl Shell {
                 }
                 let step = if id == ids::SETTINGS_NEXT_PAGE { 1 } else { -1 };
                 self.prefs.settings_page = self.prefs.settings_page.step(step);
+                self.templates_for_page();
                 self.save_preferences();
                 Ok(Value::Null)
             }
@@ -517,6 +537,7 @@ impl Shell {
                 }
                 self.prefs.browser.user_library = chosen;
                 self.browser_view.set_user_library(library.clone());
+                self.refresh_templates();
                 self.save_preferences();
                 Ok(to_value(&UserLibraryResult {
                     path: library
@@ -598,6 +619,12 @@ impl Shell {
             ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
                 let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
                 self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_TAKEOVER_MODE => {
+                let TakeoverModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.takeover_mode = mode;
                 self.save_preferences();
                 Ok(Value::Null)
             }

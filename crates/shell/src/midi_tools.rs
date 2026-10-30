@@ -278,6 +278,13 @@ impl MidiTools {
         }
     }
 
+    /// What a panel draws about the native tool with this ID, if there is
+    /// one (map modes R23).
+    #[must_use]
+    pub fn view_by_id(&self, id: &str) -> Option<ToolView<'static>> {
+        Registry::native().find(id).map(|tool| self.view_of(tool))
+    }
+
     /// A tool's settings, which are its defaults until they are changed.
     fn settings_of(&self, descriptor: &ToolDescriptor) -> Settings {
         self.settings

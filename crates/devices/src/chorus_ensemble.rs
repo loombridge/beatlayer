@@ -105,7 +105,29 @@ pub fn chorus_ensemble_type() -> DeviceType {
     ];
 
     DeviceType::native(CHORUS_ENSEMBLE, "Chorus-Ensemble", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&[
+                    (
+                        "Main",
+                        &[
+                            "Mode",
+                            "Rate",
+                            "Amount",
+                            "Feedback",
+                            "Feedback Invert",
+                            "Width",
+                            "Output",
+                            "Dry/Wet",
+                        ],
+                    ),
+                    (
+                        "Shape",
+                        &["High-Pass", "Warmth", "Time", "Taps", "Offset", "Shape"],
+                    ),
+                ]),
+        )
 }
 
 fn layout() -> DeviceLayout {

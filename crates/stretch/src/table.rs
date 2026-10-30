@@ -28,7 +28,14 @@ impl Piece {
     /// The file position at song frame `frame`: NaN where nothing plays.
     #[must_use]
     pub fn position_at(&self, frame: i64) -> f64 {
-        self.position + (frame as f64 - self.frame) * self.slope
+        self.position_by(frame as f64)
+    }
+
+    /// The file position at the unrounded song frame `frame`: NaN where
+    /// nothing plays.
+    #[must_use]
+    pub fn position_by(&self, frame: f64) -> f64 {
+        self.position + (frame - self.frame) * self.slope
     }
 
     /// Whether the clip plays nothing over this piece.
@@ -74,13 +81,21 @@ impl WarpTable {
     /// the last piece runs on.
     #[must_use]
     pub fn run(&self, frame: i64, want: usize) -> Option<(Piece, usize)> {
-        let at = frame as f64;
-        let after = self.pieces.partition_point(|piece| piece.frame <= at);
+        self.run_by(frame as f64, 1.0, want)
+    }
+
+    /// As [`run`](Self::run) for output frames that play the song `step`
+    /// frames apart from song frame `frame` (the transport spec, R24): the
+    /// piece that covers `frame`, and how many of the next `want` output
+    /// frames it covers.
+    #[must_use]
+    pub fn run_by(&self, frame: f64, step: f64, want: usize) -> Option<(Piece, usize)> {
+        let after = self.pieces.partition_point(|piece| piece.frame <= frame);
         let current = after.saturating_sub(1);
         let piece = *self.pieces.get(current)?;
         let frames = self.pieces.get(current + 1).map_or(want, |next| {
             // The frames before the next piece's start.
-            let left = (next.frame - at).ceil();
+            let left = ((next.frame - frame) / step).ceil();
             if left >= want as f64 {
                 want
             } else {

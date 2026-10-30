@@ -100,7 +100,19 @@ pub fn articulation_map_type() -> DeviceType {
         )),
     ]));
     DeviceType::native(ARTICULATION_MAP, "Articulation Map", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout)
+                .with_banks(&[(
+                    "Articulation",
+                    &[
+                        "Articulation",
+                        "Pass Triggers",
+                        "Keyswitch Length",
+                        "Resend on Start",
+                    ],
+                )]),
+        )
 }
 
 /// Adds Articulation Map to `registry`.

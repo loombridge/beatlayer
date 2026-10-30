@@ -128,6 +128,7 @@ impl SettingsPage {
                 | Self::Agents
                 | Self::TempoMidi
                 | Self::FileFolder
+                | Self::Link
         )
     }
 
@@ -607,6 +608,8 @@ impl AutomationRecordMode {
     }
 }
 
+pub use bl_model::TakeoverMode;
+
 /// The Agents page's settings. The server's token and each allowed agent's
 /// are never reported, only whether the server has one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -678,6 +681,9 @@ pub struct SettingsState {
     /// Tempo & MIDI: the MIDI ports' switches and the computer MIDI
     /// keyboard, the same as `midi.ports` reports.
     pub tempo_midi: MidiPortsResult,
+    /// Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it
+    /// (the remote mapping spec, R28).
+    pub takeover_mode: TakeoverMode,
     /// Record, Warp & Launch: Create Fades on Clip Edges, as
     /// `settings.set_create_fades_on_clip_edges` sets it.
     pub create_fades_on_clip_edges: bool,
@@ -741,7 +747,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  the form its own command takes it: Theme & Colors (`settings.set_theme`), Display & \
                  Input (zoom, Outline View in Focus, the Tab key settings), the audio device \
                  settings with Driver Error Compensation and the test tone (`audio.configure`, \
-                 `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), \
+                 `audio.set_test_tone`), the MIDI ports and computer keyboard (`midi.set_port`), Takeover Mode \
+                 (`settings.set_takeover_mode`), \
                  Create Fades on Clip Edges, Warp Recorded Audio, the Launch section, the \
                  automation recording mode (`settings.set_automation_record_mode`), the File & \
                  Folder page's Temporary Folder, sample editor and Save Continuously \

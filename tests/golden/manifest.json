@@ -297,6 +297,30 @@
       "bits": 24,
       "render_hash": "fnv1a64:953624a4115faf85"
     },
+    "cv-clock-out-tempo-ramp": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 3,
+      "frames": 288000,
+      "bits": 24,
+      "render_hash": "fnv1a64:430cd3c731a0bca8"
+    },
+    "cv-instrument-and-triggers": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 8,
+      "frames": 168000,
+      "bits": 24,
+      "render_hash": "fnv1a64:51194da2bdab6760"
+    },
+    "cv-utility-track": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 3,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:e9d862fd4611dce5"
+    },
     "device-modulation": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

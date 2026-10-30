@@ -118,6 +118,7 @@ pub fn run_blocks(
         let transport = TransportInfo {
             playing: true,
             position: Frames(done as i64),
+            ..TransportInfo::default()
         };
         for (all, chunk) in out
             .iter_mut()
@@ -171,6 +172,20 @@ pub fn control(
     tempo: &TempoMap,
     transport: TransportInfo,
 ) -> Rows {
+    control_with_cv(node, frames, block, events, tempo, transport, None)
+}
+
+/// As [`control`], for a modulator with a CV input that reads `cv_in`, one
+/// sample value per frame of the run.
+pub fn control_with_cv(
+    node: &mut dyn Node,
+    frames: usize,
+    block: usize,
+    events: &[NodeEvent],
+    tempo: &TempoMap,
+    transport: TransportInfo,
+    cv_in: Option<&[f32]>,
+) -> Rows {
     use bl_engine::modbus::{Bus, Control, ROWS};
 
     let mut rows: Vec<Vec<f32>> = (0..ROWS).map(|_| Vec::with_capacity(frames)).collect();
@@ -195,9 +210,12 @@ pub fn control(
                     position: Frames(
                         transport.position.get() + if transport.playing { done as i64 } else { 0 },
                     ),
+                    speed: transport.speed,
+                    ..TransportInfo::default()
                 },
                 sample_rate: RATE,
                 tempo,
+                cv_in: cv_in.map(|data| &data[done..done + length]),
                 earlier: Bus::EMPTY,
                 out: &mut out,
                 stride: length,
@@ -342,6 +360,7 @@ pub fn signal(
                 transport: at,
                 sample_rate: RATE,
                 tempo,
+                cv_in: None,
                 earlier: Bus::EMPTY,
                 out: &mut out,
                 stride: length,

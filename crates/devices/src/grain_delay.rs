@@ -110,8 +110,26 @@ pub fn grain_delay_type() -> DeviceType {
         ParamDescriptor::choice(Y_AXIS, "Y Axis", &names, AXES.len() - 1)
             .describe("The parameter the X–Y display's vertical axis moves."),
     ];
-    DeviceType::native(GRAIN_DELAY, "Grain Delay", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(GRAIN_DELAY, "Grain Delay", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Grains",
+                    &[
+                        "Frequency",
+                        "Spray",
+                        "Pitch",
+                        "Random Pitch",
+                        "Feedback",
+                        "Dry/Wet",
+                        "X Axis",
+                        "Y Axis",
+                    ],
+                ),
+                ("Time", &["Sync", "Division", "Time %", "Time"]),
+            ]),
+    )
 }
 
 fn layout() -> DeviceLayout {

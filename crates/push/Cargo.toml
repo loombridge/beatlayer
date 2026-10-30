@@ -1,0 +1,39 @@
+[package]
+autotests = false
+name = "bl-push"
+description = "Push 2 as a control surface: its controls, LEDs and display, and its modes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+bl-core.workspace = true
+bl-model.workspace = true
+bl-midi-io.workspace = true
+bl-control.workspace = true
+# The commands a surface asks for are JSON, as the host takes them.
+serde_json = "1"
+# The display's USB interface (R17). Pure Rust, Apache-2.0 or MIT.
+nusb = "0.2.9"
+# The display's rasteriser and font (R17, R18): the same crates the UI's
+# stack already brings, never the UI crate itself.
+tiny-skia = { version = "0.11.4", default-features = false, features = ["std"] }
+skrifa = "0.44"
+# Frames as PNG, for `push.display_frame` and the golden frames (R34).
+png = "0.18"
+
+[dev-dependencies]
+bl-engine.workspace = true
+# The simulated Push 2 (R36) is this crate's own public `sim` module.
+rtrb = "0.4.0"
+bl-rt.workspace = true
+proptest = { version = "1.11", default-features = false, features = ["std"] }
+
+[[test]]
+name = "push_tests"
+path = "tests/main.rs"
+
+[lints]
+workspace = true

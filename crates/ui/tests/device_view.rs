@@ -1582,3 +1582,169 @@ fn simplers_menu_offers_the_slicing_commands_in_slice_mode_only() {
     );
     assert_eq!(last_step(&h), "Slice to Drum Rack");
 }
+
+// Spec: cv-tools R3, R9, R14; L-DEV-026. A CV Instrument's section has a
+// chooser per CV output under its name, listing No Output and the interface's
+// single channels, shows a channel the interface lacks dimmed, and its
+// Calibrate runs against the oscillator on the null device's cable and shows
+// the fit; Clear takes it away.
+#[test]
+fn a_cv_instruments_section_routes_it_and_calibrate_runs() {
+    use bl_audio_io::{NullBackend, NullOptions, Pacing};
+    use bl_ui::external::cv_row;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    // An oscillator on Pitch (output 3) whose sound comes back on input 4.
+    let cable = bl_shell::testing::oscillator(&Arc::default(), &Arc::default(), &Arc::default());
+    let (backend, control) = NullBackend::with_devices(
+        NullOptions {
+            pacing: Pacing::Manual,
+            channels: 4,
+            ..NullOptions::default()
+        },
+        &[("null", "Null")],
+    );
+    let (mut shell, control) = bl_shell::testing::rig_on(backend.with_cable(cable), control);
+    shell
+        .run("audio.configure", json!({ "input_device": "null:null" }))
+        .unwrap();
+    let mut h = Harness::on_rig(Window::Main, shell, control.clone());
+    h.settle();
+    let tracks: Vec<TrackId> = h.shell.editor().document().top_level().collect();
+    h.shell
+        .invoke(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
+        .unwrap();
+    let t = bl_devices::cv_instrument_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let frame = frame_of(&mut h, device);
+
+    // A new device: every output at No Output, Audio From at No Input.
+    let nodes = Harness::nodes(&h.settle());
+    for (name, value) in [
+        ("CV Output Pitch", "No Output"),
+        ("CV Output Gate", "No Output"),
+        ("CV Output Mod 1", "No Output"),
+        ("CV Output Mod 2", "No Output"),
+        ("External Audio From", "No Input"),
+    ] {
+        assert_eq!(Harness::node(&nodes, name).value, value, "{name}");
+    }
+
+    // Pitch's list: No Output, the four channels, Configure….
+    h.click(cv_row(frame, 0).1.center());
+    let nodes = Harness::nodes(&h.settle());
+    for label in ["No Output", "1", "4", "Configure…"] {
+        assert!(
+            nodes.iter().any(|n| n.label == label && n.bounds.is_some()),
+            "the list holds {label}"
+        );
+    }
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == "3" && n.bounds.is_some_and(|b| b.y1 - b.y0 > 8.0))
+        .expect("the list is open");
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "CV Output Pitch").value, "3");
+
+    // A channel the interface lacks stays, dimmed: nothing to choose.
+    h.shell
+        .run(
+            "device.set_external",
+            json!({ "device": device, "cv_outputs": [{ "name": "Gate", "channel": 9 }],
+                    "audio_from": { "type": "mono", "channel": 4 } }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "CV Output Gate").value, "9");
+    assert_eq!(Harness::node(&nodes, "Calibration").value, "Not calibrated");
+
+    // Calibrate runs against the oscillator and shows the fit.
+    let stop = Arc::new(AtomicBool::new(false));
+    let driver = {
+        let (stop, control) = (stop.clone(), control);
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                control.run_blocks(8);
+                std::thread::yield_now();
+            }
+        })
+    };
+    let (_, row) = cv_row(frame, 6);
+    h.click(pos2(row.left() - 20.0, row.center().y));
+    h.settle();
+    stop.store(true, Ordering::Relaxed);
+    driver.join().unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let readout = Harness::node(&nodes, "Calibration").value.clone();
+    assert!(readout.contains("oct/V"), "{readout}");
+    assert_eq!(last_step(&h), "Calibrate CV Instrument");
+
+    // Clear takes it away.
+    h.click(pos2(row.right() - 10.0, row.center().y));
+    h.settle();
+    assert_eq!(last_step(&h), "Clear CV Calibration");
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Calibration").value, "Not calibrated");
+}
+
+// Spec: cv-tools R3, R24, R30 (WP-7.18); L-DEV-026. The CV effects and CV In
+// have a section of choosers for their ports and no Audio From or Hardware
+// Latency; CV Clock In's shows the tempo it measures and what leads.
+#[test]
+fn the_cv_effects_sections_list_their_ports_and_clock_in_shows_what_leads() {
+    let mut h = harness();
+    for (t, port, kind) in [
+        (bl_devices::cv_clock_out_type(), "CV Output Clock", "output"),
+        (bl_devices::cv_clock_in_type(), "CV Input Clock", "input"),
+        (bl_devices::cv_utility_type(), "CV Output CV", "output"),
+        (bl_devices::cv_in_type(), "CV Input CV", "input"),
+    ] {
+        let device = add(
+            &mut h,
+            json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+        );
+        let nodes = Harness::nodes(&h.settle());
+        let chooser = Harness::node(&nodes, port);
+        assert_eq!(
+            chooser.value,
+            if kind == "output" {
+                "No Output"
+            } else {
+                "No Input"
+            },
+            "{}",
+            t.name
+        );
+        assert!(
+            !nodes.iter().any(|n| n.label == "External Audio From"),
+            "{} brings no sound back",
+            t.name
+        );
+        if t.name == "CV Clock In" {
+            let readout = Harness::node(&nodes, "Clock");
+            assert!(
+                readout.value.contains("No tempo") && readout.value.contains("Leader: Nothing"),
+                "{}",
+                readout.value
+            );
+        }
+        h.shell
+            .run("device.remove", json!({ "device": device }))
+            .unwrap();
+        h.settle();
+    }
+}

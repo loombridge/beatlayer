@@ -202,6 +202,7 @@ fn render(document: &Document, media: &MediaMap, block: usize) -> Vec<f32> {
         schedule: &[],
         cues: &[Cue::PLAY],
         launches: &[],
+        device_channels: 0,
     };
     let mut samples = Vec::new();
     render::render_launching_with_workers(

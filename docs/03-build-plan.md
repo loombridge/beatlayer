@@ -778,28 +778,28 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.75 | todo |  |  |
 | 6.76 | todo |  |  |
 | 7.1 | done | 29 October 2026 | [#501](https://github.com/loombridge/beatlayer/pull/501): MIDI and key mappings are saved with the set and leave with a deleted target, the remote input keeps mapped messages off tracks through a lock-free table on the MIDI thread, mapped messages are applied on the main thread as hand moves with placeholder value laws for WP-7.2 to replace, and the `remote.*` commands read back |
-| 7.2 | todo |  |  |
-| 7.2b | todo |  |  |
-| 7.3 | todo |  |  |
-| 7.3b | todo |  |  |
-| 7.4 | todo |  |  |
-| 7.5 | todo |  |  |
-| 7.6 | todo |  |  |
-| 7.7 | todo |  |  |
-| 7.8 | todo |  |  |
+| 7.2 | done | 29 October 2026 | [#514](https://github.com/loombridge/beatlayer/pull/514): the value laws replace WP-7.1's placeholders: notes carry their velocity to a clip launch, absolute and relative controllers with the relative encodings and the mode guess, and Takeover Mode with its preference, command and readback |
+| 7.2b | done | 30 October 2026 | [#526](https://github.com/loombridge/beatlayer/pull/526): a Session slot mapped to a note range launches its clip transposed by the key minus the root at the key's velocity, MIDI notes moved and audio pitched through its warp mode, a later key relaunching and an earlier key's release ignored, and `session.launch` takes `transpose` |
+| 7.3 | done | 30 October 2026 | [#527](https://github.com/loombridge/beatlayer/pull/527): MIDI Map Mode and Key Map Mode with their switches, shortcuts and overlays, select then learn for MIDI and keys, the Mapping Browser, the Status Bar mode chooser, and `remote.map_mode`, `remote.select` and `remote.state`; the remaining mappable controls come with WP-7.3b |
+| 7.3b | done | 30 October 2026 | [#534](https://github.com/loombridge/beatlayer/pull/534): the relative Session mapping strip with the highlighted scene kept central, the New button, the crossfader's three fields, the step buttons, the Phase Nudge buttons, the Clip View's controls with the scrub, radio-button macros and MIDI Tools' controls are mappable, with `remote.targets` listing every mappable control |
+| 7.4 | done | 30 October 2026 | [#528](https://github.com/loombridge/beatlayer/pull/528): feedback to Remote outputs through each law's inverse, once per poll with no echo and a full send on load, on a new mapping and when Remote turns on, the Control Bar's remote and key indicator lamps, and mapped record and slot controls acting as clicks, with the lamps in `remote.state` |
+| 7.5 | done | 30 October 2026 | [#516](https://github.com/loombridge/beatlayer/pull/516): the `ControlSurface` trait and its host thread in `bl-control`, the Control Surfaces table with Dump on the Tempo & MIDI page kept in the preferences, surfaces owning their ports after manual mappings, surface notes reaching tracks, a test surface, and the `control_surface.*` commands |
+| 7.6 | done | 30 October 2026 | [#531](https://github.com/loombridge/beatlayer/pull/531): instant mappings in the shell, with named banks of eight for every native device, rack macros and plug-in configured lists, Lock to Control Surface with the hand icon and the armed instrument locked, session rings drawn over the Session View, track banks, and the `control_surface.lock`, `unlock`, `move_ring`, `banks` and `set_bank` commands |
+| 7.7 | done | 30 October 2026 | [#537](https://github.com/loombridge/beatlayer/pull/537): controller templates, with Beatlayer's TOML surface files and their line-numbered errors, the template surface, the bundled Generic 8 + 8, the User Library's Controller Templates folder, `template:<name>` surface IDs and the `control_surface.templates` command |
+| 7.8 | done | 30 October 2026 | [#538](https://github.com/loombridge/beatlayer/pull/538): the grid surface and Novation's Launchpad X, Mini MK3 and Pro MK3, recognised by port name and identity reply and put into DAW mode, with pads in the nearest palette colour, scene launch, arrows, track rows, grid faders, a drum layout following the pad view, and a simulated device for each |
 | 7.9 | todo |  |  |
-| 7.10 | todo |  |  |
+| 7.10 | done | 30 October 2026 | [#551](https://github.com/loombridge/beatlayer/pull/551): the Launchkey MK3 and MK4 enter DAW mode with simulated devices; the pads play a two-row ring moved by the track buttons, pots and encoders follow the reported mode under Takeover Mode, faders and fader buttons arm and select, the transport buttons run their commands, the display shows names and values, and the MK4 gets the set's scale ([supported controllers](specs/supported-controllers.md) R51 to R71) |
 | 7.11 | done | 29 October 2026 | [#504](https://github.com/loombridge/beatlayer/pull/504); Sync on an output sends 24-ppqn clock, Start, Stop, Continue and Song Position Pointer stamped per frame through the tempo map and placed on the output bus ahead of time, with Song or Pattern clock type, a per-output sync delay that may be negative, Resync External Hardware and Show Resync Button, the lower sync lamp, the outputs' sync rows in Settings, and `sync.state` for agents |
-| 7.12 | todo |  |  |
-| 7.13 | todo |  |  |
-| 7.14 | todo |  |  |
-| 7.15 | todo |  |  |
+| 7.12 | done | 30 October 2026 | [#536](https://github.com/loombridge/beatlayer/pull/536): Sync on an input feeds a clock follower that plays at the incoming tempo, smoothed against jitter, ignores glitches and silence, and obeys Start, Continue, Stop and Song Position Pointer on their frames wrapped into the loop; the EXT switch, Options ▸ External Sync and the upper lamp; clock out follows the incoming tempo |
+| 7.13 | done | 30 October 2026 | [#543](https://github.com/loombridge/beatlayer/pull/543): an input's Sync Type, frame rate (24, 25, 29.97 drop frame, 30, SMPTE All) and offset; quarter and full frames assembled on the audio thread without allocating; the Arrangement starts on the first whole time, relocates past one frame, jumps on a full frame and stops after 100 ms while the tempo stays Beatlayer's; the upper lamp and `sync.state` report timecode |
+| 7.14 | done | 30 October 2026 | [#540](https://github.com/loombridge/beatlayer/pull/540): `bl-link` builds the vendored Link 4.1.1; the engine joins and leaves without jumps, shares tempo both ways with a peer overriding tempo automation, keeps phase on the global quantum, waits for it to start, follows Start Stop Sync, lets EXT lead the session and skips the count-in; `link.set_enabled`, `link.set_start_stop_sync` and `link.state` |
+| 7.15 | done | 30 October 2026 | [#552](https://github.com/loombridge/beatlayer/pull/552): the Control Bar's Link toggle before Tap with its peer count and menu, Settings ▸ Link's Show Link Toggle and Start Stop Sync, Playback ▸ Options ▸ Link Start Stop Sync, and the quantum's progress bar over the Position fields; `link.set_show_toggle` and `link.state.show_toggle` |
 | 7.16 | todo |  |  |
-| 7.17 | todo |  |  |
-| 7.18 | todo |  |  |
+| 7.17 | done | 30 October 2026 | [#506](https://github.com/loombridge/beatlayer/pull/506): CV in the engine as DC samples on the interface's channels with output and input choosers, timed against Main and exported in real time; CV Instrument (pitch under the set's tuning, gate with Retrigger, two Mod outputs, calibration against the returning oscillator kept as one undo step) and CV Triggers; `cv.calibrate`, `cv.clear_calibration` and `cv.set_calibration` |
+| 7.18 | done | 30 October 2026 | [#556](https://github.com/loombridge/beatlayer/pull/556): CV Clock Out (pulses on the tempo map's frames through ramps and loop jumps), CV Clock In (a modular clock leads the tempo through MIDI clock's follower and holds the last tempo when it stops), CV In (a modulator worked out before any track runs) and CV Utility (adds and multiplies two signals), matching at any block size |
 | 7.18b | todo |  |  |
-| 7.19 | todo |  |  |
-| 7.20 | todo |  |  |
+| 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
+| 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
 | 7.21 | todo |  |  |
 | 7.22 | todo |  |  |
 | 7.23 | todo |  |  |
@@ -809,8 +809,8 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.27 | todo |  |  |
 | 7.28 | todo |  |  |
 | 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |
-| 7.30 | todo |  |  |
+| 7.30 | done | 30 October 2026 | [#509](https://github.com/loombridge/beatlayer/pull/509): a `Follower` asked once per block gives a per-block song speed that clips, warped audio, notes, the metronome, automation, the loop, launch lines, scheduled commands, recording and tempo-synced devices honour, starts wait for the follower's frame and Stop cancels them, and the Control Bar's Phase Nudge Down and Up run `transport.phase_nudge`; the followers come with WP-7.12, 7.14 and 7.18, and mapping the buttons with WP-7.3b |
 | 7.31 | done | 29 October 2026 | [#508](https://github.com/loombridge/beatlayer/pull/508): the Control Bar's Tap button runs `transport.tap_tempo` with the tap law on the engine's time base, a run of taps is one undo step, and Start Transport With Tap Tempo is in Settings and Playback ▸ Options; Link, EXT and mapping the button come with WP-7.14, 7.12 and 7.3b |
-| 7.32 | todo |  |  |
+| 7.32 | done | 30 October 2026 | [#510](https://github.com/loombridge/beatlayer/pull/510): Edit ▸ Record Quantization has its nine values, saved with the set and set by `transport.set_record_quantization`; recorded notes are quantised in Arrangement takes as their own undo step, inside Session slot takes, and note by note in looping overdubs, with the menu locked during a take |
 | 7.33 | done | 29 October 2026 | [#512](https://github.com/loombridge/beatlayer/pull/512): Simpler's region is the Start and End flags in the sample's own frames, set by `device.set_sample_region` as one undo step; Classic plays S Start, S Length and S Loop Length inside the flags and One-Shot and Slice play flag to flag; the display, Crop, Normalize, the conversions and Slice to New MIDI Track read the flags, and schema 13 moves older sets over |
 | 7.33b | todo |  |  |

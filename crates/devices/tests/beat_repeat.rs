@@ -76,6 +76,7 @@ fn render(
         let transport = TransportInfo {
             playing,
             position: Frames(if playing { done as i64 } else { 0 }),
+            ..TransportInfo::default()
         };
         let blocks = run_at(
             stutter.as_mut(),
@@ -193,6 +194,7 @@ fn a_span_ends_when_the_song_stops() {
             TransportInfo {
                 playing,
                 position: Frames(position),
+                ..TransportInfo::default()
             },
         )
     };

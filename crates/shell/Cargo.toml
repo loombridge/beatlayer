@@ -19,6 +19,8 @@ bl-audio-io.workspace = true
 bl-commands.workspace = true
 # What a mapped MIDI message or key does to its control (WP-7.1).
 bl-control.workspace = true
+# Push 2 as a control surface, offered in the Control Surfaces table (WP-7.19).
+bl-push.workspace = true
 # IDs for objects a command will create, which the agent API hands out.
 bl-core.workspace = true
 # Beatlayer's native devices, for the engines it runs and the Device View
@@ -31,6 +33,9 @@ bl-devices.workspace = true
 bl-engine.workspace = true
 # Standard MIDI File import and export (WP-2.21).
 bl-interop.workspace = true
+# Link 4.1.1: the audio host gives the engine a Link session to follow, and
+# the shell switches it (WP-7.14).
+bl-link.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
 bl-media.workspace = true
@@ -89,6 +94,9 @@ bl-devices = { workspace = true, features = ["kit-examples"] }
 lspk-example-gain.workspace = true
 # The test tools the MIDI Tools framework's tests use (WP-6.11).
 bl-midi-tools = { workspace = true, features = ["testing"] }
+# The test surface, so the Control Surfaces table has a surface to run
+# (WP-7.5).
+bl-control = { workspace = true, features = ["testing"] }
 
 # `au_editor` runs on the process's main thread, where Apple makes a unit's
 # view controller; the test harness runs a `#[test]` on a worker thread, so

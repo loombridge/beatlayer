@@ -159,6 +159,134 @@ impl From<bl_core::midi::HardwareResync> for HardwareResyncChoice {
     }
 }
 
+/// An input's MIDI Sync Type: what its Sync follows (the MIDI Timecode spec,
+/// R1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum SyncTypeChoice {
+    /// Timing Clock, Start, Continue, Stop and Song Position Pointer.
+    #[default]
+    #[serde(rename = "midi_clock")]
+    MidiClock,
+    /// Quarter-frame and full-frame time code.
+    #[serde(rename = "midi_timecode")]
+    MidiTimecode,
+}
+
+impl SyncTypeChoice {
+    /// Every choice, in the order the chooser lists them.
+    pub const ALL: [Self; 2] = [Self::MidiClock, Self::MidiTimecode];
+
+    /// The chooser's text.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::MidiClock => "MIDI Clock",
+            Self::MidiTimecode => "MIDI Timecode",
+        }
+    }
+}
+
+impl From<SyncTypeChoice> for bl_core::midi::SyncType {
+    fn from(choice: SyncTypeChoice) -> Self {
+        match choice {
+            SyncTypeChoice::MidiClock => Self::Clock,
+            SyncTypeChoice::MidiTimecode => Self::Timecode,
+        }
+    }
+}
+
+impl From<bl_core::midi::SyncType> for SyncTypeChoice {
+    fn from(sync_type: bl_core::midi::SyncType) -> Self {
+        match sync_type {
+            bl_core::midi::SyncType::Clock => Self::MidiClock,
+            bl_core::midi::SyncType::Timecode => Self::MidiTimecode,
+        }
+    }
+}
+
+/// An input's MIDI Timecode Frame Rate (the MIDI Timecode spec, R1, R3).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum TimecodeRateChoice {
+    /// 24 frames a second.
+    #[serde(rename = "fps_24")]
+    Fps24,
+    /// 25 frames a second.
+    #[serde(rename = "fps_25")]
+    Fps25,
+    /// 29.97 frames a second, drop frame.
+    #[serde(rename = "fps_29_97_drop")]
+    Fps2997Drop,
+    /// 30 frames a second.
+    #[serde(rename = "fps_30")]
+    Fps30,
+    /// Each time at the rate its own message names.
+    #[default]
+    #[serde(rename = "smpte_all")]
+    SmpteAll,
+}
+
+impl TimecodeRateChoice {
+    /// Every choice, in the order the chooser lists them.
+    pub const ALL: [Self; 5] = [
+        Self::Fps24,
+        Self::Fps25,
+        Self::Fps2997Drop,
+        Self::Fps30,
+        Self::SmpteAll,
+    ];
+
+    /// The chooser's text.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Fps24 => "24 fps",
+            Self::Fps25 => "25 fps",
+            Self::Fps2997Drop => "29.97 fps (drop frame)",
+            Self::Fps30 => "30 fps",
+            Self::SmpteAll => "SMPTE All",
+        }
+    }
+}
+
+impl From<TimecodeRateChoice> for bl_core::timecode::TimecodeRate {
+    fn from(choice: TimecodeRateChoice) -> Self {
+        use bl_core::timecode::FrameRate;
+        match choice {
+            TimecodeRateChoice::Fps24 => Self::Fixed(FrameRate::Fps24),
+            TimecodeRateChoice::Fps25 => Self::Fixed(FrameRate::Fps25),
+            TimecodeRateChoice::Fps2997Drop => Self::Fixed(FrameRate::Fps2997Drop),
+            TimecodeRateChoice::Fps30 => Self::Fixed(FrameRate::Fps30),
+            TimecodeRateChoice::SmpteAll => Self::All,
+        }
+    }
+}
+
+impl From<bl_core::timecode::TimecodeRate> for TimecodeRateChoice {
+    fn from(rate: bl_core::timecode::TimecodeRate) -> Self {
+        use bl_core::timecode::{FrameRate, TimecodeRate};
+        match rate {
+            TimecodeRate::Fixed(FrameRate::Fps24) => Self::Fps24,
+            TimecodeRate::Fixed(FrameRate::Fps25) => Self::Fps25,
+            TimecodeRate::Fixed(FrameRate::Fps2997Drop) => Self::Fps2997Drop,
+            TimecodeRate::Fixed(FrameRate::Fps30) => Self::Fps30,
+            TimecodeRate::All => Self::SmpteAll,
+        }
+    }
+}
+
+impl From<bl_core::timecode::FrameRate> for TimecodeRateChoice {
+    fn from(rate: bl_core::timecode::FrameRate) -> Self {
+        bl_core::timecode::TimecodeRate::Fixed(rate).into()
+    }
+}
+
+/// The MIDI Timecode Offset a port starts with, as its field shows it.
+pub const ZERO_OFFSET: &str = "00:00:00:00";
+
+fn zero_offset() -> String {
+    ZERO_OFFSET.to_owned()
+}
+
 /// The range of a port's MIDI Clock Sync Delay in milliseconds (the MIDI
 /// clock spec, R2).
 pub const SYNC_DELAY_RANGE: core::ops::RangeInclusive<i16> = -100..=100;
@@ -177,8 +305,8 @@ pub struct PortInfo {
     /// sends clock. Kept now, acted on when sync is built.
     pub sync: bool,
     /// Remote: an input controls Beatlayer through the set's MIDI mappings
-    /// (the remote mapping spec, R7 and R8); an output sends feedback, kept
-    /// now and acted on when feedback is built.
+    /// (the remote mapping spec, R7 and R8); an output gets the values of
+    /// the mapped controls as feedback (R38 to R40).
     pub remote: bool,
     /// MPE: an input's messages reach tracks as MPE, each note on a channel of
     /// its own; an output has no MPE switch, and reads false.
@@ -194,6 +322,17 @@ pub struct PortInfo {
     /// An output's Hardware Resync: what Resync External Hardware sends it.
     #[serde(default)]
     pub hardware_resync: HardwareResyncChoice,
+    /// An input's MIDI Sync Type: whether its Sync follows clock or
+    /// timecode. An output's reads MIDI Clock.
+    #[serde(default)]
+    pub sync_type: SyncTypeChoice,
+    /// An input's MIDI Timecode Frame Rate, kept while its type is clock.
+    #[serde(default)]
+    pub timecode_rate: TimecodeRateChoice,
+    /// An input's MIDI Timecode Offset, as `hh:mm:ss:ff`: the time at which
+    /// the Arrangement starts. Kept while its type is clock.
+    #[serde(default = "zero_offset")]
+    pub timecode_offset: String,
     /// Whether the MIDI system offers the port now.
     pub present: bool,
     /// Whether it is open: any of its switches is on.
@@ -265,6 +404,17 @@ pub struct SetPortArgs {
     /// An output's Hardware Resync. Left out, it stays as it is.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hardware_resync: Option<HardwareResyncChoice>,
+    /// An input's MIDI Sync Type. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_type: Option<SyncTypeChoice>,
+    /// An input's MIDI Timecode Frame Rate. Left out, it stays as it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timecode_rate: Option<TimecodeRateChoice>,
+    /// An input's MIDI Timecode Offset as `hh:mm:ss:ff`: hours below 24,
+    /// minutes and seconds below 60, frames below 30. Left out, it stays as
+    /// it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timecode_offset: Option<String>,
 }
 
 /// What `midi.set_show_resync_button` returns.
@@ -364,7 +514,15 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  play position changes) or Pattern (only Start, at the next bar line), and \
                  `hardware_resync` is what Resync External Hardware sends it: Stop and Start, \
                  Start Only or Don't Resync. Those three are kept while Sync is off; \
-                 `clock_type` and `hardware_resync` are refused on an input. An output's Remote is \
+                 `clock_type` and `hardware_resync` are refused on an input. An input with Sync \
+                 on follows what its `sync_type` says: `midi_clock` (its Timing Clock, Start, \
+                 Continue, Stop and Song Position Pointer) or `midi_timecode` (its quarter \
+                 frames and full frames, which locate, start and stop the song without \
+                 changing its tempo); with `midi_timecode`, `timecode_rate` (`fps_24`, `fps_25`, \
+                 `fps_29_97_drop`, `fps_30` or `smpte_all`, which takes each time at the rate \
+                 its message names) and `timecode_offset` (`hh:mm:ss:ff`, the time at which the \
+                 Arrangement starts) apply. Those three are kept while the type is clock, and \
+                 are refused on an output, which never sends timecode. An output's Remote is \
                  kept and acts when it's built. Output ports have no MPE switch, and `mpe` on \
                  one is refused. The port's \
                  switches are kept for the next start, and aren't part of the set or an undo \

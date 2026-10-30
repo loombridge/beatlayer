@@ -34,6 +34,13 @@ pub mod channel_eq;
 pub mod chorus_ensemble;
 pub mod compressor;
 pub mod crusher;
+mod cv;
+pub mod cv_clock_in;
+pub mod cv_clock_out;
+pub mod cv_in;
+pub mod cv_instrument;
+pub mod cv_triggers;
+pub mod cv_utility;
 pub mod degrade;
 pub mod delay;
 pub mod dice;
@@ -98,6 +105,12 @@ pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use chorus_ensemble::{CHORUS_ENSEMBLE, chorus_ensemble_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
+pub use cv_clock_in::{CV_CLOCK_IN, cv_clock_in_type};
+pub use cv_clock_out::{CV_CLOCK_OUT, cv_clock_out_type};
+pub use cv_in::cv_in_type;
+pub use cv_instrument::{CV_INSTRUMENT, CvCommand, cv_instrument_type};
+pub use cv_triggers::{CV_TRIGGERS, cv_triggers_type};
+pub use cv_utility::{CV_UTILITY, cv_utility_type};
 pub use degrade::{DEGRADE, degrade_type};
 pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
@@ -232,6 +245,12 @@ pub fn display_in(
         )),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
+        CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
+        CV_TRIGGERS => Some(cv_triggers::display(device, data)),
+        CV_CLOCK_OUT => Some(cv_clock_out::display(device, data)),
+        CV_CLOCK_IN => Some(cv_clock_in::display(device, data)),
+        CV_UTILITY => Some(cv_utility::display(device, data)),
+        bl_model::modulator::CV_IN => Some(cv_in::display(device, data)),
         _ => None,
     }
 }
@@ -275,6 +294,12 @@ pub fn register(registry: &mut Registry) {
     articulation_map::register(registry);
     hardware::register(registry);
     hardware_effect::register(registry);
+    cv_instrument::register(registry);
+    cv_triggers::register(registry);
+    cv_clock_out::register(registry);
+    cv_clock_in::register(registry);
+    cv_utility::register(registry);
+    cv_in::register(registry);
     degrade::register(registry);
     crusher::register(registry);
     wax::register(registry);

@@ -13,8 +13,9 @@ pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
     ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
-    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs,
-    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
+    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
+    WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
+    zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -144,6 +145,11 @@ pub struct Preferences {
     /// automation spec, R18): Touch, Latch or Write. It's kept between
     /// launches, and isn't part of the set.
     pub automation_record_mode: AutomationRecordMode,
+    /// Takeover Mode (Tempo & MIDI, L-SET-014; the remote mapping spec, R28):
+    /// what an absolute controller does when it and its control disagree.
+    /// It's kept between launches, is the same for every set, and is None in
+    /// a new install.
+    pub takeover_mode: TakeoverMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -200,6 +206,22 @@ pub struct Preferences {
     pub default_set: Option<PathBuf>,
     /// The MIDI ports' switches and the computer MIDI keyboard (WP-2.2).
     pub midi: MidiPrefs,
+    /// Link's switches (the Link spec, R1 and R8).
+    pub link: LinkPrefs,
+}
+
+/// What the app keeps of Link between starts (the Link spec, R1, R8 and
+/// R17): Link and Start Stop Sync off in a new install, the toggle shown.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LinkPrefs {
+    /// Whether Link is on: the app joins the Link session on its networks.
+    pub enabled: bool,
+    /// Whether starts and stops are shared with the peers that share them.
+    pub start_stop_sync: bool,
+    /// Show Link Toggle (Settings ▸ Link): whether the Control Bar shows the
+    /// Link toggle and its menu.
+    pub show_toggle: OnByDefault,
 }
 
 /// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3
@@ -216,6 +238,102 @@ pub struct MidiPrefs {
     /// R10): the Control Bar shows Resync External Hardware. Off in a new
     /// install.
     pub show_resync_button: bool,
+    /// Whether EXT is on: the song follows the incoming MIDI clock (the MIDI
+    /// clock spec, R15). Off in a new install.
+    pub external_sync: bool,
+    /// The Control Surfaces table's rows, by the surface's ID and the ports'
+    /// names, so they apply again whatever set is open (control surfaces
+    /// R2). A file from before the table has none, which reads as six empty
+    /// rows.
+    pub surfaces: Vec<SurfaceRowPrefs>,
+    /// The Live ports of the Push 2 whose row the user set to None: Beatlayer
+    /// doesn't take a row for that Push 2 again until the user chooses it
+    /// (push-2 R2).
+    pub push_declined: Vec<String>,
+    /// Push 2's Setup values and swing amount (push-2 R10, R31).
+    pub push: PushPrefs,
+}
+
+/// What the app keeps of Push 2's Setup menu and swing encoder (push-2 R10,
+/// R31): the same for every set.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PushPrefs {
+    /// Pad Sensitivity, 0 to 10.
+    pub pad_sensitivity: u8,
+    /// Pad Gain, 0 to 10.
+    pub pad_gain: u8,
+    /// Pad Dynamics, 0 to 10.
+    pub pad_dynamics: u8,
+    /// Display Light, 0 to 100 %.
+    pub display_light: u8,
+    /// LED Brightness, 0 to 100 %.
+    pub led_brightness: u8,
+    /// Whether Workflow is Clip rather than Scene.
+    pub workflow_clip: bool,
+    /// The swing amount in thousandths, 0 to 1,000.
+    pub swing: u16,
+}
+
+impl Default for PushPrefs {
+    fn default() -> Self {
+        let setup = bl_push::curve::Setup::default();
+        Self {
+            pad_sensitivity: setup.sensitivity,
+            pad_gain: setup.gain,
+            pad_dynamics: setup.dynamics,
+            display_light: setup.display_light,
+            led_brightness: setup.led_brightness,
+            workflow_clip: false,
+            swing: 0,
+        }
+    }
+}
+
+impl PushPrefs {
+    /// The Setup values these preferences keep.
+    #[must_use]
+    pub fn setup(&self) -> bl_push::curve::Setup {
+        bl_push::curve::Setup {
+            sensitivity: self.pad_sensitivity,
+            gain: self.pad_gain,
+            dynamics: self.pad_dynamics,
+            display_light: self.display_light,
+            led_brightness: self.led_brightness,
+            workflow: if self.workflow_clip {
+                bl_push::curve::Workflow::Clip
+            } else {
+                bl_push::curve::Workflow::Scene
+            },
+        }
+        .clamped()
+    }
+
+    /// The preferences that keep `setup` and `swing` (0 to 1).
+    #[must_use]
+    pub fn of(setup: bl_push::curve::Setup, swing: f64) -> Self {
+        Self {
+            pad_sensitivity: setup.sensitivity,
+            pad_gain: setup.gain,
+            pad_dynamics: setup.dynamics,
+            display_light: setup.display_light,
+            led_brightness: setup.led_brightness,
+            workflow_clip: setup.workflow == bl_push::curve::Workflow::Clip,
+            swing: (swing.clamp(0.0, 1.0) * 1000.0).round() as u16,
+        }
+    }
+}
+
+/// One row of the Control Surfaces table in the preferences.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SurfaceRowPrefs {
+    /// The surface's ID.
+    pub surface: Option<String>,
+    /// The input's name.
+    pub input: Option<String>,
+    /// The output's name.
+    pub output: Option<String>,
 }
 
 /// One MIDI port's switches in the preferences.
@@ -244,6 +362,16 @@ pub struct PortPrefs {
     /// An output's Hardware Resync.
     #[serde(default)]
     pub hardware_resync: bl_shell_spec::midi_io::HardwareResyncChoice,
+    /// An input's MIDI Sync Type (the MIDI Timecode spec, R1).
+    #[serde(default)]
+    pub sync_type: bl_shell_spec::midi_io::SyncTypeChoice,
+    /// An input's MIDI Timecode Frame Rate.
+    #[serde(default)]
+    pub timecode_rate: bl_shell_spec::midi_io::TimecodeRateChoice,
+    /// An input's MIDI Timecode Offset, as `hh:mm:ss:ff`; a preferences file
+    /// from before it has none, which is 00:00:00:00.
+    #[serde(default)]
+    pub timecode_offset: String,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

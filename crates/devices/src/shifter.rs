@@ -363,7 +363,55 @@ pub fn shifter_type() -> DeviceType {
     ];
     DeviceType::native(SHIFTER, "Shifter", DeviceRole::AudioEffect)
         .with_midi_sidechain()
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&[
+                    (
+                        "Shift",
+                        &[
+                            "Mode", "Coarse", "Fine", "Window", "Shift", "Drive", "Spread", "Wide",
+                        ],
+                    ),
+                    (
+                        "Delay",
+                        &[
+                            "Delay",
+                            "Delay Mode",
+                            "Delay Time",
+                            "Delay Beats",
+                            "Feedback",
+                            "Tone",
+                            "Dry/Wet",
+                        ],
+                    ),
+                    (
+                        "LFO",
+                        &[
+                            "LFO Amount",
+                            "LFO Wave",
+                            "LFO Mode",
+                            "LFO Rate",
+                            "LFO Beats",
+                            "LFO Stereo",
+                            "LFO Phase",
+                            "LFO Spin",
+                        ],
+                    ),
+                    ("LFO Shape", &["LFO Offset", "LFO Duty Cycle", "LFO Width"]),
+                    (
+                        "Envelope",
+                        &[
+                            "Env Fol",
+                            "Env Attack",
+                            "Env Release",
+                            "Env Amount",
+                            "Env Amount Hz",
+                        ],
+                    ),
+                    ("Pitch", &["Pitch Source", "Glide", "PB"]),
+                ]),
+        )
 }
 
 /// The device's layout: the shift, the delay, the LFO and the envelope
@@ -941,8 +989,7 @@ impl NativeDevice for Shifter {
             );
         }
         let tempo = audio.tempo();
-        let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
-        let bpm = tempo.bpm_at(ticks).get();
+        let bpm = audio.bpm();
         let delay_time = if choice(DELAY_MODE) == 0 {
             rate / target(DELAY_HZ).max(1e-3)
         } else {

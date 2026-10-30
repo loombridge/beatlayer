@@ -5,12 +5,14 @@
 
 mod clip_edge_fades;
 mod comping;
+mod control_surfaces;
 mod engine_host;
 mod export;
 mod fades;
 mod grooves;
 mod http;
 mod kit_devices;
+mod link;
 mod linked_tracks;
 mod midi_clock;
 mod midi_effects;
@@ -22,6 +24,7 @@ mod plugin_midi_effect;
 mod plugin_mpe;
 mod plugin_vst3;
 mod polysynth;
+mod push;
 mod readback;
 mod readback_runtime;
 mod recording;

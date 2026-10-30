@@ -250,6 +250,30 @@ fn right_with_nothing_held_leaves_a_rest() {
     assert_eq!(s.notes(), [(60, step, step, 100)]);
 }
 
+// Spec: recording R23; step-recording R7. Step recording is never
+// record-quantised: with 1/4 on, a note after a rest starts where the
+// marker was.
+#[test]
+fn step_recording_is_not_record_quantised() {
+    let mut s = stepper();
+    s.run("arrangement.set_grid", json!({ "fixed": "sixteenth" }));
+    s.step = s.shell.arrangement().grid_ticks(s.doc()).get();
+    let step = s.step;
+    assert_eq!(
+        step,
+        Ticks::QUARTER.get() / 4,
+        "a step off the quarter grid"
+    );
+    s.run(
+        "transport.set_record_quantization",
+        json!({ "quantization": "1/4" }),
+    );
+    s.right();
+    s.key("A", true);
+    s.right();
+    assert_eq!(s.notes(), [(60, step, step, 100)]);
+}
+
 // Spec: step-recording R3, R7
 #[test]
 fn nothing_step_records_with_the_transport_running_preview_off_or_the_track_disarmed() {

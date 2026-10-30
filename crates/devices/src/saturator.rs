@@ -353,7 +353,35 @@ pub fn saturator_type() -> DeviceType {
     DeviceType::native(SATURATOR, "Saturator", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
-            .with_menu_options(&[HI_QUALITY, PRE_DC]),
+            .with_menu_options(&[HI_QUALITY, PRE_DC])
+            .with_banks(&[
+                (
+                    "Shaper",
+                    &[
+                        "Curve",
+                        "Drive",
+                        "Threshold",
+                        "Post Clip",
+                        "Output",
+                        "Dry/Wet",
+                    ],
+                ),
+                (
+                    "Color",
+                    &["Color", "Amt Lo", "Amt Hi", "Frequency", "Width"],
+                ),
+                (
+                    "Waveshaper",
+                    &[
+                        "Waveshaper Drive",
+                        "Waveshaper Curve",
+                        "Waveshaper Depth",
+                        "Waveshaper Linear",
+                        "Waveshaper Damp",
+                        "Waveshaper Period",
+                    ],
+                ),
+            ]),
     )
 }
 

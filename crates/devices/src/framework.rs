@@ -10,7 +10,8 @@ use bl_dsp::smooth::DEFAULT_SMOOTHING_SECONDS;
 use bl_engine::modbus::{Bus, Control};
 use bl_engine::{
     AutomationList, Block, DeviceType, DisplayReader, DisplayWriter, Node, NodeConfig, NodeData,
-    NodeEvent, NoteBuffer, NoteEvent, ParamValue, Registry, SessionNow, display_channel, segments,
+    NodeEvent, NoteBuffer, NoteEvent, ParamValue, Registry, SessionNow, TransportInfo,
+    display_channel, segments,
 };
 use bl_model::modulation::Travel;
 use bl_model::{Device, DeviceDescription, DeviceKind, ParamDescriptor, ParamId};
@@ -89,6 +90,21 @@ pub trait NativeDevice: Send + 'static {
         let _ = (modulation, params);
     }
 
+    /// Follows a clock on the device's CV input for a block, before any
+    /// track runs (`docs/specs/cv-tools.md`, R24): answers `answer` and
+    /// returns the tempo the device leads with, or `None` while it leads
+    /// nothing. `params` hold the controls as they stand at the block's
+    /// start. The default follows nothing.
+    fn follow_cv(
+        &mut self,
+        params: &ParamBank,
+        cx: &bl_engine::cv_clock::Cx<'_>,
+        answer: &mut bl_engine::Follow,
+    ) -> Option<f64> {
+        let _ = (params, cx, answer);
+        None
+    }
+
     /// Whether the device is a modulator driven by the audio, notes or MIDI
     /// it hears at its place in the chain (WP-5.11): it writes its rows in
     /// [`process`](Self::process), with [`Audio::row_mut`], while its track
@@ -131,6 +147,16 @@ pub struct Modulation<'c, 'a> {
     range: Range<usize>,
 }
 
+impl<'a> Modulation<'_, 'a> {
+    /// What the modulator's CV input reads over the stretch, in sample
+    /// values (1.0 is +10 V), or `None` for 0 V: an input at no channel, or
+    /// at one the interface lacks (`docs/specs/cv-tools.md`, R27).
+    #[must_use]
+    pub fn cv_in(&self) -> Option<&'a [f32]> {
+        self.ctl.cv_in.map(|data| &data[self.range.clone()])
+    }
+}
+
 impl Modulation<'_, '_> {
     /// Frames in the stretch.
     #[must_use]
@@ -153,7 +179,25 @@ impl Modulation<'_, '_> {
     /// The song position of the stretch's first frame.
     #[must_use]
     pub fn song_position(&self) -> Frames {
-        Frames(self.ctl.transport.position.get() + self.range.start as i64)
+        Frames(self.ctl.transport.song_frame(self.range.start))
+    }
+
+    /// The tempo the song plays at here, in BPM: the tempo map's at the
+    /// song position, times how fast the song moves against the map while it
+    /// follows an outside tempo or is nudged (the transport spec, R24, R27).
+    /// A tempo-synced modulator turns beats into frames by this.
+    #[must_use]
+    pub fn bpm(&self) -> f64 {
+        let tempo = self.ctl.tempo;
+        let ticks = tempo.frames_to_ticks(self.song_position(), self.ctl.sample_rate);
+        tempo.bpm_at(ticks).get() * self.ctl.transport.speed
+    }
+
+    /// Song frames per frame of this block: 1 unless the song follows an
+    /// outside tempo or is nudged (the transport spec, R24, R27).
+    #[must_use]
+    pub fn speed(&self) -> f64 {
+        self.ctl.transport.speed
     }
 
     /// Whether the song is playing.
@@ -258,6 +302,22 @@ impl<'a> Audio<'_, 'a> {
         (&mut data[range.clone()], out.map(|out| &mut out[range]))
     }
 
+    /// Where a CV device writes its CV output `output` over the stretch, in
+    /// sample values (1.0 is +10 V): `None` for a device without it
+    /// (`docs/specs/cv-tools.md`, R3).
+    pub fn cv_out(&mut self, output: usize) -> Option<&mut [f32]> {
+        let range = self.range.clone();
+        self.block.cv_out_mut(output).map(|data| &mut data[range])
+    }
+
+    /// What a CV device reads on its CV input `input` over the stretch, in
+    /// sample values; `None` for a device without it (R6).
+    #[must_use]
+    pub fn cv_in(&self, input: usize) -> Option<&'a [f32]> {
+        let range = self.range.clone();
+        self.block.cv_in(input).map(|data| &data[range])
+    }
+
     /// Sends a note on from the stretch, at `note.offset` frames after its
     /// first frame (clamped into it): the notes go out in order of offset,
     /// note-offs before note-ons on one frame (spec: device-framework R30).
@@ -308,7 +368,25 @@ impl<'a> Audio<'_, 'a> {
     /// The song position of the stretch's first frame.
     #[must_use]
     pub fn song_position(&self) -> Frames {
-        Frames(self.block.transport().position.get() + self.range.start as i64)
+        Frames(self.block.transport().song_frame(self.range.start))
+    }
+
+    /// The tempo the song plays at here, in BPM: the tempo map's at the
+    /// song position, times how fast the song moves against the map while it
+    /// follows an outside tempo or is nudged (the transport spec, R24, R27).
+    /// A tempo-synced device turns beats into frames by this.
+    #[must_use]
+    pub fn bpm(&self) -> f64 {
+        let tempo = self.block.tempo();
+        let ticks = tempo.frames_to_ticks(self.song_position(), self.block.sample_rate());
+        tempo.bpm_at(ticks).get() * self.block.transport().speed
+    }
+
+    /// Song frames per frame of this block: 1 unless the song follows an
+    /// outside tempo or is nudged (the transport spec, R24, R27).
+    #[must_use]
+    pub fn speed(&self) -> f64 {
+        self.block.transport().speed
     }
 
     /// The song's time-signature map, which places bar lines on ticks: the
@@ -323,6 +401,13 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn playing(&self) -> bool {
         self.block.transport().playing
+    }
+
+    /// The song frame that frame `frame` of the stretch plays
+    /// ([`TransportInfo::song_frame`]).
+    #[must_use]
+    pub fn song_frame(&self, frame: usize) -> i64 {
+        self.block.transport().song_frame(self.range.start + frame)
     }
 
     /// Row `index` of the rows a signal modulator writes ([`bl_engine::modbus::ROWS`] of them,
@@ -465,7 +550,8 @@ impl ParamBank {
 
     /// Works out every parameter's value for the next `frames` frames: an
     /// automated one from its envelope, on the exact frame, when the song
-    /// plays at song frame `from`, or from the automation envelope of the
+    /// plays as `from` says (the song frame of each of the block's frames),
+    /// or from the automation envelope of the
     /// Session clip playing on the track (WP-3.12); a held one at the
     /// position a modulator in Remote Control holds it at; then the clips'
     /// and the modulators' modulation on top of that base (the modulation
@@ -477,7 +563,7 @@ impl ParamBank {
     fn advance(
         &mut self,
         frames: usize,
-        from: Option<i64>,
+        from: Option<TransportInfo>,
         bus: Bus<'_>,
         offset: usize,
         block: Option<&Block<'_>>,
@@ -516,8 +602,8 @@ impl ParamBank {
             let mut held = false;
             let mut set = false;
             for (i, value) in slot.ramp[..frames].iter_mut().enumerate() {
-                let song = from.map(|from| from + i as i64);
                 let at = offset + i;
+                let song = from.map(|transport| transport.song_frame(at));
                 let driven = song.and_then(|frame| list.driven(id, frame, &now));
                 set = driven.is_some();
                 let control = if set { 0.0 } else { slot.smoother.step() };
@@ -734,9 +820,7 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             // Spec: automation R2. While the song plays, an automated
             // parameter takes its value from its envelope on the exact
             // frame.
-            let from = transport
-                .playing
-                .then(|| transport.position.get() + segment.range.start as i64);
+            let from = transport.playing.then_some(transport);
             self.params.advance(
                 segment.range.len(),
                 from,
@@ -775,9 +859,7 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             for event in segment.events {
                 self.params.apply(event);
             }
-            let from = transport
-                .playing
-                .then(|| transport.position.get() + segment.range.start as i64);
+            let from = transport.playing.then_some(transport);
             self.params.advance(
                 segment.range.len(),
                 from,
@@ -791,7 +873,20 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             };
             self.device.control(&mut modulation, &self.params);
         }
+        // Spec: cv-tools R30. A modulator with display data publishes it
+        // after each part, as `process` does for any other device.
+        if let Some((writer, _)) = &mut self.display {
+            writer.publish(|out| self.device.display(out));
+        }
         true
+    }
+
+    fn follow_cv(
+        &mut self,
+        cx: &bl_engine::cv_clock::Cx<'_>,
+        answer: &mut bl_engine::Follow,
+    ) -> Option<f64> {
+        self.device.follow_cv(&self.params, cx, answer)
     }
 
     fn flush(&mut self, events: &[NodeEvent]) {

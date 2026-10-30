@@ -120,6 +120,51 @@ impl RemoteSource {
         }
     }
 
+    /// The source as the map modes write it (map modes R3, R8): a MIDI
+    /// source's channel then its note, note range or controller, and a
+    /// key's name.
+    #[must_use]
+    pub fn label(&self) -> String {
+        use crate::rack::note_name;
+        match self {
+            Self::Note { channel, key } => format!("{channel} · {}", note_name(*key)),
+            Self::NoteRange {
+                channel, low, high, ..
+            } => format!("{channel} · {}–{}", note_name(*low), note_name(*high)),
+            Self::Cc {
+                channel,
+                controller,
+            } => format!("{channel} · CC {controller}"),
+            Self::Cc14 {
+                channel,
+                controller,
+            } => format!("{channel} · CC {controller} (14-bit)"),
+            Self::PitchBend { channel } => format!("{channel} · Pitch Bend"),
+            Self::Key { key } => key.clone(),
+        }
+    }
+
+    /// Where the source sorts in the Mapping Browser (map modes R8): MIDI
+    /// by channel, then notes, controllers and pitch bend, then the number;
+    /// keys by name.
+    #[must_use]
+    pub fn sort_key(&self) -> (u8, u8, u8, &str) {
+        match self {
+            Self::Note { channel, key } => (*channel, 0, *key, ""),
+            Self::NoteRange { channel, low, .. } => (*channel, 0, *low, ""),
+            Self::Cc {
+                channel,
+                controller,
+            }
+            | Self::Cc14 {
+                channel,
+                controller,
+            } => (*channel, 1, *controller, ""),
+            Self::PitchBend { channel } => (*channel, 2, 0, ""),
+            Self::Key { key } => (0, 0, 0, key),
+        }
+    }
+
     fn check(&self) -> Result<(), ModelError> {
         let channel = |c: u8| {
             if (1..=16).contains(&c) {
@@ -241,6 +286,325 @@ pub enum RemoteMode {
     },
 }
 
+impl RelativeEncoding {
+    /// The four encodings, in the order the Status Bar's chooser lists them.
+    pub const ALL: [Self; 4] = [
+        Self::SignedBit,
+        Self::SignedBit2,
+        Self::BinOffset,
+        Self::TwosComplement,
+    ];
+
+    /// The encoding's name.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::SignedBit => "Signed Bit",
+            Self::SignedBit2 => "Signed Bit 2",
+            Self::BinOffset => "Bin Offset",
+            Self::TwosComplement => "Twos Complement",
+        }
+    }
+}
+
+impl RemoteMode {
+    /// The modes a controller source reads, in the order the Status Bar's
+    /// chooser lists them (map modes R10): a 14-bit pair reads Absolute
+    /// (14-bit); a controller Absolute, then each relative encoding
+    /// accelerated and linear.
+    #[must_use]
+    pub fn choices(source: &RemoteSource) -> Vec<Self> {
+        match source {
+            RemoteSource::Cc14 { .. } => vec![Self::Absolute14],
+            RemoteSource::Cc { .. } => std::iter::once(Self::Absolute)
+                .chain(RelativeEncoding::ALL.into_iter().flat_map(|encoding| {
+                    [true, false].map(|accelerated| Self::Relative {
+                        encoding,
+                        accelerated,
+                    })
+                }))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The mode's name in the chooser: Linear marks the relative modes that
+    /// aren't accelerated.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Absolute => "Absolute".to_owned(),
+            Self::Absolute14 => "Absolute (14-bit)".to_owned(),
+            Self::Relative {
+                encoding,
+                accelerated: true,
+            } => encoding.label().to_owned(),
+            Self::Relative {
+                encoding,
+                accelerated: false,
+            } => format!("{} Linear", encoding.label()),
+        }
+    }
+}
+
+/// What an absolute controller does when it and its control disagree (R28):
+/// the preference Takeover Mode. It isn't saved with a set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TakeoverMode {
+    /// The control jumps to the controller's value at once.
+    #[default]
+    None,
+    /// The control waits until the controller reaches its value, then follows.
+    PickUp,
+    /// The control and the controller converge as the controller moves.
+    ValueScaling,
+}
+
+impl TakeoverMode {
+    /// Every mode, in the order the chooser lists them.
+    pub const ALL: [Self; 3] = [Self::None, Self::PickUp, Self::ValueScaling];
+
+    /// The mode's name in the chooser.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::PickUp => "Pick-Up",
+            Self::ValueScaling => "Value Scaling",
+        }
+    }
+}
+
+/// A control of the relative Session mapping strip (map modes R14): its
+/// Launch buttons, one for each track, are [`RemoteTarget::TrackLaunch`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StripControl {
+    /// Highlights the scene before the highlighted one.
+    SceneUp,
+    /// Highlights the scene after the highlighted one.
+    SceneDown,
+    /// The scene number box: highlights the scene of its number.
+    SceneNumber,
+    /// Launches the highlighted scene.
+    LaunchScene,
+    /// Cancels the launch of a scene that is queued.
+    CancelLaunch,
+}
+
+/// One of the crossfader's three mapping fields (map modes R19).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CrossfaderField {
+    /// The crossfader's left end.
+    Left,
+    /// Its centre.
+    Centre,
+    /// Its right end.
+    Right,
+}
+
+impl CrossfaderField {
+    /// The crossfader's position at the field.
+    #[must_use]
+    pub const fn position(self) -> f64 {
+        match self {
+            Self::Left => 0.0,
+            Self::Centre => 0.5,
+            Self::Right => 1.0,
+        }
+    }
+}
+
+/// A control of the Control Bar that isn't a track's or a device's (map
+/// modes R11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BarControl {
+    /// Tap Tempo.
+    TapTempo,
+    /// Phase Nudge Down, which nudges while it is held.
+    PhaseNudgeDown,
+    /// Phase Nudge Up, which nudges while it is held.
+    PhaseNudgeUp,
+    /// Play.
+    Play,
+    /// Stop.
+    Stop,
+    /// Re-Enable Automation.
+    ReEnableAutomation,
+    /// Capture MIDI.
+    CaptureMidi,
+    /// New, which shows only in the map modes (map modes R20).
+    New,
+    /// The Tempo field.
+    Tempo,
+    /// The Metronome switch.
+    Metronome,
+    /// Follow.
+    Follow,
+    /// Arrangement Record.
+    ArrangementRecord,
+    /// MIDI Arrangement Overdub.
+    MidiOverdub,
+    /// Automation Arm.
+    AutomationArm,
+    /// Session Record.
+    SessionRecord,
+    /// Punch-In.
+    PunchIn,
+    /// The Arrangement Loop switch.
+    ArrangementLoop,
+    /// Punch-Out.
+    PunchOut,
+    /// Draw Mode.
+    DrawMode,
+    /// The Quantization Menu: the global launch quantisation.
+    Quantization,
+}
+
+/// A control of the Clip View's panels (map modes R11, R17): the Audio
+/// Utilities panel's, which act on the audio clips it shows, and the Launch
+/// Properties panel's, which act on the clip it shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipControl {
+    /// The Warp switch.
+    Warp,
+    /// The Warp Mode chooser.
+    WarpMode,
+    /// The High Quality switch.
+    HighQuality,
+    /// The RAM switch.
+    Ram,
+    /// Gain, in decibels.
+    Gain,
+    /// Transpose, in semitones.
+    Transpose,
+    /// Detune, in cents.
+    Detune,
+    /// The Launch Mode chooser.
+    LaunchMode,
+    /// The Legato switch.
+    Legato,
+    /// The clip's Quantization chooser: Global, then the global menu's list.
+    LaunchQuantization,
+    /// The Velocity amount.
+    Velocity,
+    /// The nudge button that moves the playing clip back.
+    NudgeDown,
+    /// The nudge button that moves the playing clip forward.
+    NudgeUp,
+    /// The scrub control between the nudge buttons, which shows in MIDI Map
+    /// Mode only: a relative controller's increments nudge the clip.
+    Scrub,
+}
+
+/// How long the ID of a MIDI Tool or one of its parameters may be.
+pub const TOOL_ID_MAX: usize = 32;
+
+/// The ID of a MIDI Tool or of one of its parameters, kept inline so that a
+/// [`RemoteTarget`] stays `Copy`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ToolId {
+    bytes: [u8; TOOL_ID_MAX],
+    len: u8,
+}
+
+impl ToolId {
+    /// The ID `id`, or `None` if it is empty or longer than [`TOOL_ID_MAX`].
+    #[must_use]
+    pub fn new(id: &str) -> Option<Self> {
+        let source = id.as_bytes();
+        if source.is_empty() || source.len() > TOOL_ID_MAX {
+            return None;
+        }
+        let mut bytes = [0; TOOL_ID_MAX];
+        bytes[..source.len()].copy_from_slice(source);
+        Some(Self {
+            bytes,
+            len: u8::try_from(source.len()).ok()?,
+        })
+    }
+
+    /// The ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+impl std::fmt::Debug for ToolId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_str())
+    }
+}
+
+impl Serialize for ToolId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let id = String::deserialize(deserializer)?;
+        Self::new(&id).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "a MIDI Tool's or parameter's ID is 1 to {TOOL_ID_MAX} bytes"
+            ))
+        })
+    }
+}
+
+impl JsonSchema for ToolId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ToolId".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": TOOL_ID_MAX,
+            "description": "The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it."
+        })
+    }
+}
+
+/// A control of a MIDI Tool's panel (map modes R23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolControl {
+    /// The Auto switch.
+    Auto,
+    /// The Transform or Generate button.
+    Apply,
+    /// The Reset button.
+    Reset,
+    /// One of the tool's parameters, whose kind its description gives.
+    Param {
+        /// Its ID.
+        param: ToolId,
+    },
+}
+
+/// How many options the Quantization Menu has; a clip's Quantization chooser
+/// has one more, Global, first.
+pub const QUANTIZATION_OPTIONS: u32 = 14;
+/// The Warp Mode chooser's options.
+pub const WARP_MODE_OPTIONS: u32 = 6;
+/// The Launch Mode chooser's options.
+pub const LAUNCH_MODE_OPTIONS: u32 = 4;
+/// The range of the Tempo field, in BPM (map modes R11).
+pub const TEMPO_RANGE: (f64, f64) = (20.0, 999.0);
+/// The range of the scene number box: a controller's value plus one is the
+/// scene it highlights, as far as the set has scenes.
+pub const SCENE_NUMBER_RANGE: (f64, f64) = (1.0, 128.0);
+/// The range of a clip's Gain, in decibels.
+pub const GAIN_RANGE: (f64, f64) = (-96.0, 24.0);
+
 /// The control a mapping drives, named by the IDs of what it belongs to
 /// (R3). The kinds the window's other controls take are added with the map
 /// modes that show them.
@@ -252,8 +616,14 @@ pub enum RemoteMode {
                    mixer `param`: volume, pan, mute for the track activator), `send` (a \
                    `track` and the return `to`), `solo` or `arm` (a `track`), \
                    `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its \
-                   `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer \
-                   `param`)."
+                   `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer \
+                   `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s \
+                   Launch button in the relative Session mapping strip), `strip` (one of the \
+                   strip's `control`s: scene_up, scene_down, scene_number, launch_scene, \
+                   cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre \
+                   or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, \
+                   `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: \
+                   auto, apply, reset, or a `param`)."
 )]
 pub enum RemoteTarget {
     /// A Session slot of a track at a scene, not its clip.
@@ -325,10 +695,56 @@ pub enum RemoteTarget {
         /// The control.
         param: MixerParam,
     },
+    /// A track's Monitor switch: In, Auto, Off.
+    Monitor {
+        /// The track.
+        track: TrackId,
+    },
+    /// The Cue Volume knob of Main's strip.
+    CueVolume,
+    /// A track's Launch button in the relative Session mapping strip.
+    TrackLaunch {
+        /// The track.
+        track: TrackId,
+    },
+    /// A control of the relative Session mapping strip.
+    Strip {
+        /// The control.
+        control: StripControl,
+    },
+    /// One of the crossfader's three mapping fields.
+    CrossfaderField {
+        /// The field.
+        field: CrossfaderField,
+    },
+    /// A control of the Control Bar.
+    Bar {
+        /// The control.
+        control: BarControl,
+    },
+    /// The note editor's Step Back button.
+    StepBack,
+    /// The note editor's Step Forward button.
+    StepForward,
+    /// A control of the Clip View's panels.
+    Clip {
+        /// The control.
+        control: ClipControl,
+    },
+    /// A control of a MIDI Tool's panel, named by the tool and the control so
+    /// one mapping acts whichever clip the Clip View shows.
+    MidiTool {
+        /// The tool.
+        tool: ToolId,
+        /// The control.
+        control: ToolControl,
+    },
 }
 
 /// The values a crossfade assignment's radio button takes: A, off, B.
 pub const CROSSFADE_OPTIONS: u32 = 3;
+/// The values a Monitor radio button takes: In, Auto, Off.
+pub const MONITOR_OPTIONS: u32 = 3;
 
 impl RemoteTarget {
     /// The kind of control it is, or `None` for a device parameter, whose
@@ -356,6 +772,25 @@ impl RemoteTarget {
             Self::CrossfadeAssign { .. } => ControlKind::Radio {
                 options: CROSSFADE_OPTIONS,
             },
+            Self::Monitor { .. } => ControlKind::Radio {
+                options: MONITOR_OPTIONS,
+            },
+            Self::CueVolume => ControlKind::Continuous,
+            Self::TrackLaunch { .. }
+            | Self::CrossfaderField { .. }
+            | Self::StepBack
+            | Self::StepForward => ControlKind::Button,
+            Self::Strip { control } => match control {
+                StripControl::SceneNumber => ControlKind::Continuous,
+                _ => ControlKind::Button,
+            },
+            Self::Bar { control } => control.kind(),
+            Self::Clip { control } => control.kind(),
+            Self::MidiTool { control, .. } => match control {
+                ToolControl::Auto => ControlKind::Switch,
+                ToolControl::Apply | ToolControl::Reset => ControlKind::Button,
+                ToolControl::Param { .. } => return None,
+            },
             Self::Device { .. } => return None,
         })
     }
@@ -373,6 +808,72 @@ impl RemoteTarget {
                 MixerParam::Mute => None,
             },
             Self::Send { .. } | Self::Crossfader => Some((0.0, 1.0)),
+            Self::CueVolume => Some((0.0, db_gain(TOP_DB))),
+            Self::Strip {
+                control: StripControl::SceneNumber,
+            } => Some(SCENE_NUMBER_RANGE),
+            Self::Bar {
+                control: BarControl::Tempo,
+            } => Some(TEMPO_RANGE),
+            Self::Clip { control } => control.range(),
+            _ => None,
+        }
+    }
+}
+
+impl BarControl {
+    /// The kind of control it is.
+    #[must_use]
+    pub const fn kind(self) -> ControlKind {
+        match self {
+            Self::TapTempo
+            | Self::PhaseNudgeDown
+            | Self::PhaseNudgeUp
+            | Self::Play
+            | Self::Stop
+            | Self::ReEnableAutomation
+            | Self::CaptureMidi
+            | Self::New => ControlKind::Button,
+            Self::Tempo => ControlKind::Continuous,
+            Self::Quantization => ControlKind::Radio {
+                options: QUANTIZATION_OPTIONS,
+            },
+            _ => ControlKind::Switch,
+        }
+    }
+}
+
+impl ClipControl {
+    /// The kind of control it is.
+    #[must_use]
+    pub const fn kind(self) -> ControlKind {
+        match self {
+            Self::Warp | Self::HighQuality | Self::Ram | Self::Legato => ControlKind::RangedSwitch,
+            Self::WarpMode => ControlKind::Radio {
+                options: WARP_MODE_OPTIONS,
+            },
+            Self::LaunchMode => ControlKind::Radio {
+                options: LAUNCH_MODE_OPTIONS,
+            },
+            Self::LaunchQuantization => ControlKind::Radio {
+                options: QUANTIZATION_OPTIONS + 1,
+            },
+            Self::NudgeDown | Self::NudgeUp => ControlKind::Button,
+            Self::Gain | Self::Transpose | Self::Detune | Self::Velocity | Self::Scrub => {
+                ControlKind::Continuous
+            }
+        }
+    }
+
+    /// The range of a continuous control's values, in the units its field
+    /// shows.
+    #[must_use]
+    pub const fn range(self) -> Option<(f64, f64)> {
+        match self {
+            Self::Gain => Some(GAIN_RANGE),
+            Self::Transpose => Some((-48.0, 48.0)),
+            Self::Detune => Some((-50.0, 50.0)),
+            Self::Velocity | Self::Scrub => Some((0.0, 1.0)),
             _ => None,
         }
     }
@@ -578,7 +1079,22 @@ impl Document {
             | RemoteTarget::CrossfadeAssign { track }
             | RemoteTarget::Mixer { track, .. } => self.track(track).is_some(),
             RemoteTarget::Send { track, to } => sends(track) && self.returns().any(|r| r == to),
-            RemoteTarget::StopAll | RemoteTarget::Crossfader => true,
+            RemoteTarget::StopAll
+            | RemoteTarget::Crossfader
+            | RemoteTarget::CueVolume
+            | RemoteTarget::Strip { .. }
+            | RemoteTarget::CrossfaderField { .. }
+            | RemoteTarget::Bar { .. }
+            | RemoteTarget::StepBack
+            | RemoteTarget::StepForward
+            | RemoteTarget::Clip { .. }
+            | RemoteTarget::MidiTool { .. } => true,
+            RemoteTarget::TrackLaunch { track } => self
+                .track(track)
+                .is_some_and(|t| matches!(t.kind(), TrackKind::Audio | TrackKind::Midi)),
+            RemoteTarget::Monitor { track } => {
+                self.track(track).is_some_and(|t| t.kind().has_arm())
+            }
             RemoteTarget::Device { device, .. } | RemoteTarget::DeviceOn { device } => {
                 self.device(device).is_some()
             }

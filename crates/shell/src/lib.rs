@@ -86,6 +86,7 @@ pub mod devices;
 pub mod export;
 pub mod export_dialog;
 pub mod files;
+pub mod link;
 pub mod midi;
 pub mod midi_files;
 pub mod midi_tools;
@@ -100,6 +101,7 @@ pub mod placeholders;
 pub mod plugins;
 pub mod processed;
 pub mod realtime;
+pub mod record_quantize;
 pub mod recording;
 pub mod resources;
 pub mod routing;
@@ -141,6 +143,9 @@ pub use bl_shell_spec::capture_midi as capture_midi_commands;
 /// types (WP-6.25c).
 pub use bl_shell_spec::clip_envelope_editing as clip_envelope_commands;
 pub use bl_shell_spec::clip_properties as clip_properties_commands;
+/// The Control Surfaces table's command IDs and their argument and result
+/// types (WP-7.5).
+pub use bl_shell_spec::control_surface as control_surface_commands;
 /// The DAWproject commands' IDs and their argument and result types
 /// (WP-6.36, WP-6.37).
 pub use bl_shell_spec::dawproject as dawproject_commands;
@@ -150,6 +155,9 @@ pub use bl_shell_spec::devices as device_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The Link commands' IDs and their argument and result types (WP-7.14,
+/// WP-7.15).
+pub use bl_shell_spec::link as link_commands;
 
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).

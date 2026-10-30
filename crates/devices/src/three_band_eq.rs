@@ -113,8 +113,24 @@ pub fn three_band_eq_type() -> DeviceType {
         ParamDescriptor::choice(SLOPE, "Slope", &SLOPES, 0)
             .describe("How steeply the bands part: 24 or 48 dB per octave."),
     ];
-    DeviceType::native(THREE_BAND_EQ, "EQ Three", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(THREE_BAND_EQ, "EQ Three", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Bands",
+                    &[
+                        "Gain Low",
+                        "Gain Mid",
+                        "Gain High",
+                        "On Low",
+                        "On Mid",
+                        "On High",
+                    ],
+                ),
+                ("Crossover", &["FreqLo", "FreqHi", "Slope"]),
+            ]),
+    )
 }
 
 /// The three bands as columns, low to high, and the crossovers beside them.

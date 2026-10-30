@@ -35,6 +35,7 @@ use bl_core::time::SampleRate;
 use bl_model::{DeviceId, Document, Expression, Input, MidiTo, MpeSettings, TrackId, TrackKind};
 use rtrb::{Consumer, Producer};
 
+use crate::clock_in::{ClockIn, Timing as ClockTiming};
 use crate::disjoint::Shared;
 use crate::mpe::{MpeReader, MpeRole};
 use crate::mpe_layout::MpeLayout;
@@ -895,6 +896,8 @@ pub(crate) struct MidiIn {
     mpe: MpeReader,
     /// The previous block's filtered start, and when its callback ran.
     previous: Option<(f64, f64)>,
+    /// The clock follower the input's sync messages go to (R14).
+    pub(crate) sync_in: ClockIn,
     pub(crate) counters: MidiCounters,
 }
 
@@ -908,6 +911,7 @@ impl MidiIn {
             epoch: None,
             mpe: MpeReader::new(),
             previous: None,
+            sync_in: ClockIn::new(),
             counters: MidiCounters::default(),
         }
     }
@@ -987,6 +991,12 @@ impl MidiIn {
                 break;
             };
             self.counters.received += 1;
+            // Spec: midi-clock R14. Sync messages go to the clock follower,
+            // never to a track.
+            if let MidiSource::Sync(port) = event.source {
+                self.sync_in.push(port, time, &event.message);
+                continue;
+            }
             let ahead = (time - from) * per_ns;
             let offset = if ahead < 0.0 {
                 // Stamped before the previous block's start. If the
@@ -1058,6 +1068,25 @@ impl MidiIn {
 }
 
 impl MidiIn {
+    /// Lets the clock follower read this block's sync messages and answer
+    /// for it (R17 to R24). Real-time safe.
+    pub(crate) fn follow_clock(
+        &mut self,
+        ask: &crate::follower::Ask,
+        output_latency: u32,
+        ext: bool,
+        looped: Option<(f64, f64)>,
+        tempo: &bl_core::time::TempoMap,
+        answer: &mut crate::follower::Follow,
+    ) {
+        let timing = self.timing.map(|t| ClockTiming {
+            start: t.start,
+            ns_per_frame: t.ns_per_frame,
+            latency: output_latency,
+        });
+        self.sync_in.block(ask, timing, ext, looped, tempo, answer);
+    }
+
     /// Where the last block started on the engine clock and on the
     /// monotonic clock, for [`TimeBase::frame_at`]; `None` before the first
     /// block. Real-time safe.

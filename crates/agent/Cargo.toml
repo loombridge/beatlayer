@@ -25,7 +25,8 @@ serde = { version = "1.0.228", default-features = false, features = ["std", "der
 serde_json = "1"
 
 [dev-dependencies]
-# The test MIDI backend the MIDI clock test plugs ports in with (WP-7.11).
+# The test MIDI backend the MIDI clock test plugs ports in with (WP-7.11),
+# and the Control Surfaces table's tests use (WP-7.5).
 bl-midi-io.workspace = true
 # The tests that drive the null device by hand (T199).
 bl-audio-io.workspace = true
@@ -38,6 +39,11 @@ bl-project.workspace = true
 hound = "3.5.1"
 # The test tools the MIDI Tools' agent tests apply (WP-6.11).
 bl-midi-tools = { workspace = true, features = ["testing"] }
+# The test surface, so the Control Surfaces table has a surface to run
+# (WP-7.5).
+bl-control = { workspace = true, features = ["testing"] }
+# The simulated Push 2, which the Push 2 tests plug in (WP-7.19).
+bl-push.workspace = true
 # The kit's plug-ins through both routes: the kit's examples compiled in as native
 # devices, and Example Gain hosted as a CLAP plug-in with the agent interface
 # its own build exports, built into the test binary.

@@ -1,12 +1,15 @@
 //! The ports in use: their switches, opening and closing them, and where an
 //! input's messages go (`docs/specs/midi-io.md`, R1 to R5).
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::time::Instant;
 
 use bl_core::midi::{
-    ClockType, HardwareResync, MidiInputEvent, MidiMessage, MidiSource, PortId, SyncOutput,
+    ClockType, HardwareResync, MidiInputEvent, MidiMessage, MidiSource, PortId, SyncInput,
+    SyncOutput, SyncType, TimecodeSettings,
 };
+use bl_core::timecode::{Timecode, TimecodeRate};
 
 use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
 use crate::output::{OutputBus, OutputStats};
@@ -22,7 +25,7 @@ pub struct PortSwitches {
     /// clock (Phase 7).
     pub sync: bool,
     /// An input controls Beatlayer through MIDI mapping; an output gets
-    /// feedback for mapped controls (Phase 7).
+    /// feedback for mapped controls (`docs/specs/remote-mapping.md`, R38).
     pub remote: bool,
     /// An input's messages are read as MPE, each note on a channel of its
     /// own (`docs/specs/midi-io.md`, R27); an output's has no meaning yet.
@@ -34,6 +37,13 @@ pub struct PortSwitches {
     pub clock_type: ClockType,
     /// An output's Hardware Resync.
     pub resync: HardwareResync,
+    /// An input's MIDI Sync Type: whether Sync follows its clock or its
+    /// MIDI Timecode (`docs/specs/midi-timecode.md`, R1).
+    pub sync_type: SyncType,
+    /// An input's MIDI Timecode Frame Rate. Kept while the type is clock.
+    pub timecode_rate: TimecodeRate,
+    /// An input's MIDI Timecode Offset. Kept while the type is clock.
+    pub timecode_offset: Timecode,
 }
 
 impl PortSwitches {
@@ -46,6 +56,9 @@ impl PortSwitches {
         delay_ms: 0,
         clock_type: ClockType::Song,
         resync: HardwareResync::StopAndStart,
+        sync_type: SyncType::Clock,
+        timecode_rate: TimecodeRate::All,
+        timecode_offset: Timecode::ZERO,
     };
 
     /// Whether any switch is on, so the port is open (R4).
@@ -68,7 +81,11 @@ impl PortSwitches {
     }
 
     const fn bits(self) -> u8 {
-        self.track as u8 | (self.sync as u8) << 1 | (self.remote as u8) << 2 | (self.mpe as u8) << 3
+        self.track as u8
+            | (self.sync as u8) << 1
+            | (self.remote as u8) << 2
+            | (self.mpe as u8) << 3
+            | (matches!(self.sync_type, SyncType::Timecode) as u8) << 4
     }
 
     const fn from_bits(bits: u8) -> Self {
@@ -77,8 +94,52 @@ impl PortSwitches {
             sync: bits & 2 != 0,
             remote: bits & 4 != 0,
             mpe: bits & 8 != 0,
+            sync_type: if bits & 16 != 0 {
+                SyncType::Timecode
+            } else {
+                SyncType::Clock
+            },
             ..Self::OFF
         }
+    }
+}
+
+/// What a control surface takes from its input, called on the MIDI system's
+/// thread with each message's arrival time and whole bytes (a system
+/// exclusive message included).
+pub type SurfaceSink = Box<dyn Fn(Instant, &[u8]) + Send + Sync>;
+
+/// What an input's handler and the main thread share: the switches the
+/// handler reads, so a switch takes effect without reopening, and the
+/// control surface that holds the input, if one does.
+#[derive(Default)]
+pub struct InputLive {
+    switches: AtomicU8,
+    surface: Mutex<Option<SurfaceSink>>,
+}
+
+impl InputLive {
+    /// The port's switches now.
+    #[must_use]
+    pub fn switches(&self) -> PortSwitches {
+        PortSwitches::from_bits(self.switches.load(Relaxed))
+    }
+
+    /// Sets where the input's messages go that no mapping takes (control
+    /// surfaces R4): to `sink`, and to no track, or the way the switches say
+    /// with `None`.
+    pub fn hold(&self, sink: Option<SurfaceSink>) {
+        *self.surface.lock().unwrap_or_else(PoisonError::into_inner) = sink;
+    }
+
+    /// Hands a message to the surface that holds the input; whether one
+    /// does.
+    fn to_surface(&self, time: Instant, bytes: &[u8]) -> bool {
+        let surface = self.surface.lock().unwrap_or_else(PoisonError::into_inner);
+        surface.as_ref().is_some_and(|sink| {
+            sink(time, bytes);
+            true
+        })
     }
 }
 
@@ -106,15 +167,35 @@ struct Entry {
     switches: PortSwitches,
     present: bool,
     error: Option<String>,
-    /// While open: the input's connection and the switches its handler
-    /// reads, so a switch takes effect without reopening.
-    input: Option<(Box<dyn InputConnection>, Arc<AtomicU8>)>,
+    /// While open: the input's connection.
+    input: Option<Box<dyn InputConnection>>,
+    /// The switches its handler reads and the surface that holds it.
+    live: Arc<InputLive>,
+    /// Whether a control surface holds the port, which keeps it open
+    /// whatever its switches say (control surfaces R3).
+    claimed: bool,
     /// Whether the output is open; its connection is in the output
     /// thread's table.
     output: bool,
 }
 
 impl Entry {
+    fn new(direction: Direction, name: &str, switches: PortSwitches, present: bool) -> Self {
+        let live = InputLive::default();
+        live.switches.store(switches.bits(), Relaxed);
+        Self {
+            direction,
+            name: name.to_owned(),
+            switches,
+            present,
+            error: None,
+            input: None,
+            live: Arc::new(live),
+            claimed: false,
+            output: false,
+        }
+    }
+
     fn is_open(&self) -> bool {
         self.input.is_some() || self.output
     }
@@ -143,11 +224,11 @@ impl Entry {
 ///   input takes them (R5);
 /// - with Remote on, to remote control when a mapping takes them, which
 ///   keeps them from tracks (`docs/specs/remote-mapping.md`, R7 and R8),
-///   and with Sync on, clock and transport messages to sync, counted until
-///   Phase 7 takes them.
+///   and with Sync on, clock and transport messages to the engine on the
+///   same queue, stamped as sync's own (R14 of the MIDI clock spec).
 ///
 /// System messages never go to tracks (R9), and system exclusive goes
-/// nowhere yet.
+/// to a control surface that holds the input, and nowhere else.
 pub struct MidiPorts {
     backend: Box<dyn MidiBackend>,
     sender: InputSender,
@@ -214,15 +295,9 @@ impl MidiPorts {
     pub fn remember(&mut self, direction: Direction, name: &str, switches: PortSwitches) {
         match self.entry_mut(direction, name) {
             Some(entry) => entry.switches = switches,
-            None => self.ports.push(Entry {
-                direction,
-                name: name.to_owned(),
-                switches,
-                present: false,
-                error: None,
-                input: None,
-                output: false,
-            }),
+            None => self
+                .ports
+                .push(Entry::new(direction, name, switches, false)),
         }
     }
 
@@ -253,15 +328,9 @@ impl MidiPorts {
         for (direction, listed) in [(Direction::Input, inputs), (Direction::Output, outputs)] {
             for name in listed {
                 if self.entry_mut(direction, &name).is_none() {
-                    self.ports.push(Entry {
-                        direction,
-                        switches: PortSwitches::first_seen(direction),
-                        name,
-                        present: true,
-                        error: None,
-                        input: None,
-                        output: false,
-                    });
+                    let switches = PortSwitches::first_seen(direction);
+                    self.ports
+                        .push(Entry::new(direction, &name, switches, true));
                 }
             }
         }
@@ -275,7 +344,7 @@ impl MidiPorts {
     /// input's handler the switches.
     fn apply(&mut self, index: usize) {
         let entry = &mut self.ports[index];
-        let wanted = entry.present && entry.switches.any();
+        let wanted = entry.present && (entry.switches.any() || entry.claimed);
         let port = PortId::from_name(&entry.name);
         if !wanted {
             entry.input = None;
@@ -287,8 +356,8 @@ impl MidiPorts {
             }
             return;
         }
-        if let Some((_, switches)) = &entry.input {
-            switches.store(entry.switches.bits(), Relaxed);
+        entry.live.switches.store(entry.switches.bits(), Relaxed);
+        if entry.input.is_some() {
             return;
         }
         if entry.output {
@@ -298,11 +367,10 @@ impl MidiPorts {
         }
         let opened = match entry.direction {
             Direction::Input => {
-                let switches = Arc::new(AtomicU8::new(entry.switches.bits()));
-                let handler = handler(&entry.name, Arc::clone(&switches), self.sender.clone());
+                let handler = handler(&entry.name, Arc::clone(&entry.live), self.sender.clone());
                 self.backend
                     .open_input(&entry.name, handler)
-                    .map(|connection| entry.input = Some((connection, switches)))
+                    .map(|connection| entry.input = Some(connection))
             }
             Direction::Output => self.backend.open_output(&entry.name).map(|connection| {
                 self.output.insert(
@@ -358,6 +426,27 @@ impl MidiPorts {
             .collect()
     }
 
+    /// The open inputs with Sync on and their Sync Delay: what the engine's
+    /// clock follower reads their messages with (`docs/specs/midi-clock.md`,
+    /// R14).
+    #[must_use]
+    pub fn sync_inputs(&self) -> Vec<SyncInput> {
+        self.ports
+            .iter()
+            .filter(|e| e.direction == Direction::Input && e.input.is_some() && e.switches.sync)
+            .map(|e| SyncInput {
+                port: PortId::from_name(&e.name),
+                delay_ms: e.switches.delay_ms,
+                timecode: (e.switches.sync_type == SyncType::Timecode).then_some(
+                    TimecodeSettings {
+                        rate: e.switches.timecode_rate,
+                        offset: e.switches.timecode_offset,
+                    },
+                ),
+            })
+            .collect()
+    }
+
     /// Sets a port's switches, opening or closing it as they say (R4).
     ///
     /// # Errors
@@ -378,6 +467,47 @@ impl MidiPorts {
         self.ports[index].switches = switches;
         self.apply(index);
         Ok(self.ports[index].state())
+    }
+
+    /// Holds the port for a control surface (`docs/specs/control-surfaces.md`,
+    /// R3): it opens whatever its switches say, and stays open while held.
+    /// The port needn't be present yet; it opens when it appears. Returns
+    /// what the input's handler shares: the surface sets
+    /// [`InputLive::hold`] on it, and its switches say whether a message
+    /// handed back reaches tracks.
+    pub fn claim(&mut self, direction: Direction, name: &str) -> Arc<InputLive> {
+        let index = self.index_or_new(direction, name);
+        self.ports[index].claimed = true;
+        self.apply(index);
+        Arc::clone(&self.ports[index].live)
+    }
+
+    /// Lets go of a port a control surface held: the port closes if no
+    /// switch is on, and an input's messages go the way its switches say.
+    pub fn release(&mut self, direction: Direction, name: &str) {
+        let Some(index) = self
+            .ports
+            .iter()
+            .position(|e| e.direction == direction && e.name == name)
+        else {
+            return;
+        };
+        let entry = &mut self.ports[index];
+        entry.claimed = false;
+        entry.live.hold(None);
+        self.apply(index);
+    }
+
+    fn index_or_new(&mut self, direction: Direction, name: &str) -> usize {
+        self.ports
+            .iter()
+            .position(|e| e.direction == direction && e.name == name)
+            .unwrap_or_else(|| {
+                let switches = PortSwitches::first_seen(direction);
+                self.ports
+                    .push(Entry::new(direction, name, switches, false));
+                self.ports.len() - 1
+            })
     }
 
     /// A port's state, if the system offers it or its switches are kept.
@@ -415,30 +545,82 @@ const fn is_sync(message: &MidiMessage) -> bool {
     matches!(message.status(), 0xF1 | 0xF2 | 0xF8 | 0xFA | 0xFB | 0xFC)
 }
 
+/// The time of a MIDI Time Code full-frame message, F0 7F (device) 01 01
+/// hours-and-rate minutes seconds frames F7.
+fn full_frame(bytes: &[u8]) -> Option<MidiMessage> {
+    let &[
+        0xF0,
+        0x7F,
+        _,
+        0x01,
+        0x01,
+        hours,
+        minutes,
+        seconds,
+        frames,
+        0xF7,
+    ] = bytes
+    else {
+        return None;
+    };
+    MidiMessage::full_frame(hours, minutes, seconds, frames)
+}
+
 /// The handler for an open input: it routes each message by the port's
 /// switches, on the MIDI system's thread.
-fn handler(name: &str, switches: Arc<AtomicU8>, sender: InputSender) -> InputHandler {
+fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandler {
     let port = PortId::from_name(name);
     Box::new(move |time, bytes| {
-        let on = PortSwitches::from_bits(switches.load(Relaxed));
+        let on = live.switches();
         let source = if on.mpe {
             MidiSource::MpePort(port)
         } else {
             MidiSource::Port(port)
         };
         let stats = sender.stats();
+        let timecode = on.sync && on.sync_type == SyncType::Timecode;
         let Some(message) = MidiMessage::from_bytes(bytes) else {
-            stats.ignored.fetch_add(1, Relaxed);
+            // Spec: midi-timecode R2. A full-frame message is read before
+            // anything is refused as too long, and goes to sync as a
+            // message of fixed size.
+            if timecode && let Some(full) = full_frame(bytes) {
+                sender.send_sync(MidiInputEvent {
+                    source: MidiSource::Sync(port),
+                    time,
+                    message: full,
+                });
+                return;
+            }
+            // Spec: control-surfaces R6. A system exclusive message goes
+            // whole to the surface that holds the input.
+            if !live.to_surface(time, bytes) {
+                stats.ignored.fetch_add(1, Relaxed);
+            }
             return;
         };
         if message.is_system() {
             // Spec: midi-io R5, R9
-            let counter = if on.sync && is_sync(&message) {
-                &stats.to_sync
-            } else {
-                &stats.ignored
-            };
-            counter.fetch_add(1, Relaxed);
+            if on.sync && is_sync(&message) {
+                // Spec: midi-clock R14, midi-timecode R2. An input follows
+                // its clock or its time code: what its sync type doesn't
+                // name is counted and set aside.
+                let wanted = if timecode {
+                    message.status() == 0xF1
+                } else {
+                    matches!(message.status(), 0xF2 | 0xF8 | 0xFA..=0xFC)
+                };
+                if wanted {
+                    sender.send_sync(MidiInputEvent {
+                        source: MidiSource::Sync(port),
+                        time,
+                        message,
+                    });
+                } else {
+                    stats.to_sync.fetch_add(1, Relaxed);
+                }
+            } else if !live.to_surface(time, bytes) {
+                stats.ignored.fetch_add(1, Relaxed);
+            }
             return;
         }
         let event = MidiInputEvent {
@@ -455,14 +637,23 @@ fn handler(name: &str, switches: Arc<AtomicU8>, sender: InputSender) -> InputHan
             stats.to_remote.fetch_add(1, Relaxed);
             if taken || remote.learning() {
                 sender.send_remote(event);
-            } else if !on.track {
-                stats.remote_unmapped.fetch_add(1, Relaxed);
             }
         }
-        if on.track && !taken {
-            sender.send(event);
+        if taken {
+            return;
         }
-        if !on.track && !on.remote {
+        // Spec: control-surfaces R4. What no mapping took goes to the
+        // surface that holds the input, and to no track.
+        if live.to_surface(time, bytes) {
+            return;
+        }
+        if on.track {
+            sender.send(event);
+        } else if on.remote {
+            if !remote.learning() {
+                stats.remote_unmapped.fetch_add(1, Relaxed);
+            }
+        } else {
             stats.ignored.fetch_add(1, Relaxed);
         }
     })
@@ -586,7 +777,8 @@ mod tests {
         assert_eq!(event.message.bytes(), &note);
         assert!(engine.pop().is_err());
 
-        // Remote and Sync only: nothing reaches the engine.
+        // Remote and Sync only: no track's message reaches the engine, and
+        // the clock goes to it stamped as sync's own (midi-clock R14).
         ports
             .set_switches(
                 Direction::Input,
@@ -602,6 +794,9 @@ mod tests {
             .unwrap();
         assert!(test.send("Keys", now, &note));
         assert!(test.send("Keys", now, &[0xF8]));
+        let clock = engine.pop().unwrap();
+        assert_eq!(clock.source, MidiSource::Sync(PortId::from_name("Keys")));
+        assert_eq!((clock.time, clock.message), (now, MidiMessage::CLOCK));
         assert!(engine.pop().is_err());
         let counts = stats.snapshot();
         assert_eq!(
@@ -613,6 +808,57 @@ mod tests {
             ),
             (1, 1, 1, 2)
         );
+    }
+
+    // Spec: midi-timecode R2
+    #[test]
+    fn timecode_reaches_sync_as_fixed_size_messages_and_never_a_track() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Tape");
+        let (mut ports, mut engine) = ports(&test);
+        let stats = Arc::clone(ports.sender().stats());
+        let id = PortId::from_name("Tape");
+        let now = Instant::now();
+        let full = [0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x21, 0x02, 0x03, 0x04, 0xF7];
+        let timecode = PortSwitches {
+            track: true,
+            sync: true,
+            sync_type: SyncType::Timecode,
+            ..PortSwitches::OFF
+        };
+        ports
+            .set_switches(Direction::Input, "Tape", timecode)
+            .unwrap();
+        assert!(test.send("Tape", now, &full));
+        assert!(test.send("Tape", now, &[0xF1, 0x35]));
+        // The clock and a note: clock is another type's, and the note is the
+        // track's.
+        assert!(test.send("Tape", now, &[0xF8]));
+        assert!(test.send("Tape", now, &[0x90, 60, 100]));
+        let frame = engine.pop().unwrap();
+        assert_eq!((frame.source, frame.time), (MidiSource::Sync(id), now));
+        assert_eq!(
+            frame.message,
+            MidiMessage::full_frame(0x21, 2, 3, 4).unwrap()
+        );
+        let quarter = engine.pop().unwrap();
+        assert_eq!(quarter.source, MidiSource::Sync(id));
+        assert_eq!(quarter.message.bytes(), &[0xF1, 0x35]);
+        assert_eq!(engine.pop().unwrap().source, MidiSource::Port(id));
+        assert!(engine.pop().is_err());
+        assert_eq!((stats.snapshot().to_sync, stats.snapshot().ignored), (3, 0));
+
+        // A port set to clock sets timecode aside, and a full frame is the
+        // system exclusive message it was before: nothing holds it.
+        let clock = PortSwitches {
+            sync_type: SyncType::Clock,
+            ..timecode
+        };
+        ports.set_switches(Direction::Input, "Tape", clock).unwrap();
+        assert!(test.send("Tape", now, &full));
+        assert!(test.send("Tape", now, &[0xF1, 0x35]));
+        assert!(engine.pop().is_err());
+        assert_eq!(stats.snapshot().ignored, 1);
     }
 
     // Spec: midi-io R27. With MPE on, an input's messages are stamped as an

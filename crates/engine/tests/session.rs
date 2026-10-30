@@ -13,8 +13,8 @@ use bl_engine::{
 };
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Clip, ClipData, Command, ContentHash, Editor, LaunchMode, LaunchQuantization,
-    LaunchSettings, MidiData, Note, SceneId, TrackId, TrackKind,
+    AudioData, Clip, ClipData, ClipLaunch, Command, ContentHash, Editor, LaunchMode,
+    LaunchQuantization, LaunchSettings, MidiData, Note, SceneId, TrackId, TrackKind,
 };
 use common::{RATE, Rig, device, track};
 
@@ -485,6 +485,18 @@ fn render_session_file(
     block: usize,
     cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
 ) -> Vec<f32> {
+    render_session_launch(file, ClipLaunch::default(), audio, frames, block, cues)
+}
+
+/// As [`render_session_file`], for a slot clip with `launch`'s settings.
+fn render_session_launch(
+    file: Arc<SampleData>,
+    launch: ClipLaunch,
+    audio: AudioData,
+    frames: u64,
+    block: usize,
+    cues: impl FnOnce(TrackId, SceneId) -> Vec<(u64, Cue)>,
+) -> Vec<f32> {
     let mut media = MediaMap::new();
     media.insert(ContentHash([7; 32]), file);
     let registry = Registry::new().with_media(Arc::new(media));
@@ -492,12 +504,13 @@ fn render_session_file(
     let mut editor = Editor::new();
     let track = track(&mut editor, TrackKind::Audio, None);
     let scene = editor.document().scenes().next().unwrap().id;
-    let clip = Clip::new(
+    let mut clip = Clip::new(
         editor.new_id(),
         Ticks::ZERO,
         Ticks::WHOLE,
         ClipData::Audio(audio),
     );
+    clip.launch = launch;
     editor
         .apply(Command::CreateSlotClip { track, scene, clip })
         .unwrap();
@@ -554,6 +567,374 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     assert_eq!(out[95_999], 0.0);
     for (i, sample) in out[96_000..].iter().enumerate().take(600) {
         assert_eq!(*sample, at(i as i64), "frame {i} of the launch");
+    }
+}
+
+// Spec: remote-mapping R16. A launch at velocity v plays the clip at a gain of
+// 1 - a * (127 - v) / 126: silent at velocity 1 with the amount at 100 %,
+// unchanged at 127 and with the amount at 0, and the gain holds until the clip
+// launches again, which restarts it at the next launch's velocity.
+#[test]
+fn a_launch_velocity_scales_the_clip_by_its_velocity_amount_at_any_block_size() {
+    let launch = |amount: f64| ClipLaunch {
+        velocity_amount: amount,
+        ..ClipLaunch::default()
+    };
+    // The unlaunched-velocity ramp gives the reference.
+    let render = |amount: f64, command: &dyn Fn(TrackId, SceneId) -> SessionCommand, block| {
+        render_session_launch(
+            ramp(96_000),
+            launch(amount),
+            AudioData::new(ContentHash([7; 32])),
+            2_000,
+            block,
+            |track, scene| vec![(0, Cue::Session(command(track, scene)))],
+        )
+    };
+    for block in [37, 64, 512] {
+        let at_velocity = |amount, velocity| {
+            render(
+                amount,
+                &|track, scene| SessionCommand::LaunchAt {
+                    track,
+                    scene,
+                    velocity,
+                    transpose: 0,
+                },
+                block,
+            )
+        };
+        let silent = at_velocity(1.0, 1);
+        assert!(
+            silent[..1_500].iter().all(|&s| s == 0.0),
+            "blocks of {block}: velocity 1 at 100 % is silent"
+        );
+        for (amount, velocity) in [(1.0, 127), (0.0, 1), (0.5, 127), (0.0, 64)] {
+            let out = at_velocity(amount, velocity);
+            for (i, sample) in out.iter().enumerate().take(1_500) {
+                assert_eq!(*sample, at(i as i64), "frame {i}, blocks of {block}");
+            }
+        }
+        // A plain launch is velocity 127.
+        let plain = render(
+            1.0,
+            &|track, scene| SessionCommand::Launch { track, scene },
+            block,
+        );
+        assert_eq!(plain[..1_500], at_velocity(1.0, 127)[..1_500]);
+        // Half way: 1 - 0.5 * (127 - 64) / 126 = 0.75.
+        let half = at_velocity(0.5, 64);
+        for (i, sample) in half.iter().enumerate().take(1_500) {
+            let want = f64::from(at(i as i64)) * 0.75;
+            assert!(
+                (f64::from(*sample) - want).abs() < 1e-7,
+                "frame {i}, blocks of {block}: {sample} vs {want}"
+            );
+        }
+    }
+}
+
+// Spec: remote-mapping R16. A restart at another velocity plays at the new
+// gain from the restart's frame, and the gain before it is the first's.
+#[test]
+fn a_restart_takes_the_gain_of_its_own_launch() {
+    let out = render_session_launch(
+        ramp(96_000),
+        ClipLaunch {
+            velocity_amount: 1.0,
+            ..ClipLaunch::default()
+        },
+        AudioData::new(ContentHash([7; 32])),
+        194_000,
+        512,
+        |track, scene| {
+            let launch = |velocity| {
+                Cue::Session(SessionCommand::LaunchAt {
+                    track,
+                    scene,
+                    velocity,
+                    transpose: 0,
+                })
+            };
+            vec![
+                (0, Cue::Transport(TransportCommand::Play)),
+                (1, launch(127)),
+                (150_000, launch(64)),
+            ]
+        },
+    );
+    // The first launch lands on the 2.1.1 line (96,000) and the restart on
+    // the 3.1.1 line (192,000), at 1 - 63 / 126 = half the gain.
+    assert!(out[..96_000].iter().all(|&s| s == 0.0));
+    for (i, sample) in out[96_000..97_500].iter().enumerate() {
+        assert_eq!(*sample, at(i as i64), "frame {i} of the first launch");
+    }
+    for (i, sample) in out[192_000..].iter().enumerate() {
+        let want = at(i as i64) * 0.5;
+        assert!((sample - want).abs() < 1e-9, "frame {i} of the restart");
+    }
+}
+
+/// A launch at velocity 127 that transposes by `transpose` semitones.
+fn transposed(track: TrackId, scene: SceneId, transpose: i8) -> SessionCommand {
+    SessionCommand::LaunchAt {
+        track,
+        scene,
+        velocity: 127,
+        transpose,
+    }
+}
+
+// Spec: remote-mapping R35, R37. A MIDI clip launched with a transposition
+// plays every note that many semitones up from the launch frame, at any block
+// size, a note pushed past 127 or below 0 doesn't play, a relaunch at another
+// transposition replaces the first on its grid line, and the clip in the set
+// is unchanged.
+#[test]
+fn a_transposed_launch_moves_a_midi_clips_notes_and_drops_those_outside_the_keys() {
+    for block in [1, 64, 513] {
+        let mut rig = Rig::new(4096);
+        rig.editor
+            .apply(Command::SetTempo { tempo: tempo() })
+            .unwrap();
+        let track = midi_track(&mut rig);
+        let scene = scene(&rig);
+        let quarter = |key, beat: i64| Note::new(key, Ticks::QUARTER * beat, Ticks::QUARTER, 100);
+        slot_clip(
+            &mut rig.editor,
+            track,
+            scene,
+            &[
+                quarter(60, 0),
+                quarter(64, 1),
+                quarter(122, 2),
+                quarter(3, 3),
+            ],
+        );
+        let before = rig.editor.document().clone();
+        rig.sync();
+        rig.sender.session(transposed(track, scene, 7));
+        play(&mut rig, 48_000, block);
+        let ons = |rig: &mut Rig| {
+            notes(rig)
+                .into_iter()
+                .filter(|&(_, _, on)| on)
+                .map(|(frame, key, _)| (frame, key))
+                .collect::<Vec<_>>()
+        };
+        // Beats are 24,000 frames apart: 60 and 64 move up seven, 122 would
+        // be 129 and doesn't play. Offsets are the launch frame's, which is 0
+        // with the transport stopped; each note-off is of the moved key.
+        let mut heard = notes(&mut rig);
+        heard.sort_unstable();
+        assert_eq!(
+            heard,
+            [(0, 67, true), (24_000, 67, false), (24_000, 71, true)],
+            "blocks of {block}: the notes up seven and 122 dropped"
+        );
+        // The first launch's last note, 3 up seven, is 10. Then down seven
+        // from the next bar line, where the relaunch replaces the first
+        // transposition: 3 would be -4 and doesn't play.
+        rig.sender.session(transposed(track, scene, -7));
+        play(&mut rig, 130_000, block);
+        assert_eq!(
+            ons(&mut rig),
+            [(72_000, 10), (96_000, 53), (120_000, 57), (144_000, 115)],
+            "blocks of {block}: the relaunch's notes down seven, 3 dropped"
+        );
+        assert_eq!(
+            rig.editor.document(),
+            &before,
+            "a transposed launch changes nothing in the set"
+        );
+    }
+}
+
+// Spec: remote-mapping R36. A second key pressed before the first launch, or
+// a relaunch, has started launches at its own transposition on the same grid
+// line.
+#[test]
+fn a_second_key_before_the_grid_line_launches_at_its_own_transposition() {
+    for block in [1, 64, 513] {
+        let mut rig = Rig::new(4096);
+        rig.editor
+            .apply(Command::SetTempo { tempo: tempo() })
+            .unwrap();
+        let track = midi_track(&mut rig);
+        let scene = scene(&rig);
+        slot_clip(
+            &mut rig.editor,
+            track,
+            scene,
+            &[Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100)],
+        );
+        rig.sync();
+        rig.sender.transport(TransportCommand::Play);
+        play(&mut rig, 1, block);
+        rig.sender.session(transposed(track, scene, 7));
+        play(&mut rig, 10_000, block);
+        rig.sender.session(transposed(track, scene, 2));
+        play(&mut rig, BAR_FRAMES as usize, block);
+        let on = notes(&mut rig)
+            .into_iter()
+            .find(|&(_, _, on)| on)
+            .map(|(frame, key, _)| (frame, key));
+        assert_eq!(on, Some((BAR_FRAMES, 62)), "blocks of {block}");
+        // So does a second key while the clip plays and its relaunch waits.
+        rig.sender.session(transposed(track, scene, 5));
+        play(&mut rig, 10_000, block);
+        rig.sender.session(transposed(track, scene, 9));
+        play(&mut rig, BAR_FRAMES as usize, block);
+        let relaunched = notes(&mut rig)
+            .into_iter()
+            .find(|&(frame, _, on)| on && frame >= 2 * BAR_FRAMES)
+            .map(|(frame, key, _)| (frame, key));
+        assert_eq!(relaunched, Some((2 * BAR_FRAMES, 69)), "blocks of {block}");
+    }
+}
+
+/// The settings of a warped slot clip in `mode`, with its file at the set's
+/// tempo so that it plays at speed 1.
+fn warped(mode: bl_model::WarpMode) -> AudioData {
+    AudioData {
+        warp: true,
+        warp_markers: vec![bl_model::WarpMarker {
+            time: 0.0,
+            beat: Ticks::ZERO,
+        }],
+        tempo: Some(120.0),
+        warp_mode: mode,
+        high_quality: false,
+        ..AudioData::new(ContentHash([7; 32]))
+    }
+}
+
+// Spec: remote-mapping R35, R37, warp-modes R10. An audio clip in Re-Pitch
+// launched an octave down reads its file at half speed, as the tape of a
+// transposed clip does, from the launch frame, at any block size; a
+// relaunch at another transposition replaces the first on its grid line, and
+// a plain launch is untouched.
+#[test]
+fn a_transposed_launch_plays_a_re_pitch_clip_at_the_pitch_ratio() {
+    let position = |sample: f32| f64::from(sample) / f64::from(STEP) - 1.0;
+    for block in [37, 512] {
+        let out = render_session_clip(
+            warped(bl_model::WarpMode::RePitch),
+            2_000,
+            block,
+            |track, scene| vec![(0, Cue::Session(transposed(track, scene, -12)))],
+        );
+        for frame in [0, 1, 100, 1_000, 1_900] {
+            let got = position(out[frame]);
+            let want = frame as f64 / 2.0;
+            assert!(
+                (got - want).abs() < 0.05,
+                "blocks of {block}, frame {frame}: {got} vs {want}"
+            );
+        }
+        // Up an octave doubles it.
+        let up = render_session_clip(
+            warped(bl_model::WarpMode::RePitch),
+            2_000,
+            block,
+            |track, scene| vec![(0, Cue::Session(transposed(track, scene, 12)))],
+        );
+        assert!((position(up[1_000]) - 2_000.0).abs() < 0.05);
+        // A plain launch reads frame for frame.
+        let plain = render_session_clip(
+            warped(bl_model::WarpMode::RePitch),
+            2_000,
+            block,
+            |track, scene| vec![(0, Cue::Session(SessionCommand::Launch { track, scene }))],
+        );
+        assert!((position(plain[1_000]) - 1_000.0).abs() < 0.05);
+    }
+    // Launched at -12, then at +12 on the next bar line (192,000).
+    let out = render_session_clip(
+        warped(bl_model::WarpMode::RePitch),
+        194_000,
+        512,
+        |track, scene| {
+            vec![
+                (0, Cue::Transport(TransportCommand::Play)),
+                (1, Cue::Session(transposed(track, scene, -12))),
+                (150_000, Cue::Session(transposed(track, scene, 12))),
+            ]
+        },
+    );
+    assert!(
+        (position(out[96_000 + 1_000]) - 500.0).abs() < 0.05,
+        "the first launch"
+    );
+    assert!(
+        (position(out[192_000 + 500]) - 1_000.0).abs() < 0.05,
+        "the relaunch"
+    );
+}
+
+// Spec: remote-mapping R35, warp-modes R27. An unwarped clip reads its file
+// at the pitch ratio, and a transposition past the 48 semitones Transpose
+// allows stops there.
+#[test]
+fn a_transposed_launch_reads_an_unwarped_clip_at_the_ratio_to_48_semitones() {
+    let position = |sample: f32| f64::from(sample) / f64::from(STEP) - 1.0;
+    let read = |transpose: i8| {
+        let audio = AudioData {
+            high_quality: false,
+            ..AudioData::new(ContentHash([7; 32]))
+        };
+        render_session_clip(audio, 400, 64, |track, scene| {
+            vec![(0, Cue::Session(transposed(track, scene, transpose)))]
+        })
+    };
+    assert!((position(read(-12)[200]) - 100.0).abs() < 0.05);
+    // 100 semitones is held to 48: sixteen times the speed.
+    assert!((position(read(100)[100]) - 1_600.0).abs() < 0.5);
+}
+
+// Spec: remote-mapping R35, R37, warp-modes R26. In Complex an octave down
+// halves the pitch of a steady tone.
+#[test]
+fn a_transposed_launch_moves_a_complex_clips_pitch() {
+    // A 1 kHz sine, long enough for the clip's whole bar.
+    let sine = Arc::new(
+        SampleData::new(
+            48_000,
+            vec![
+                (0..96_000)
+                    .map(|i| (std::f64::consts::TAU * 1_000.0 * i as f64 / 48_000.0).sin() as f32)
+                    .collect(),
+            ],
+        )
+        .unwrap(),
+    );
+    // The crossings of zero between frames 20,000 and 50,000: twice the
+    // frequency over the 0.625 s it spans.
+    let crossings = |out: &[f32]| {
+        out[20_000..50_000]
+            .windows(2)
+            .filter(|pair| (pair[0] < 0.0) != (pair[1] < 0.0))
+            .count()
+    };
+    for block in [64, 512] {
+        let play = |transpose: i8| {
+            render_session_file(
+                sine.clone(),
+                warped(bl_model::WarpMode::Complex),
+                60_000,
+                block,
+                |track, scene| vec![(0, Cue::Session(transposed(track, scene, transpose)))],
+            )
+        };
+        let (plain, down) = (crossings(&play(0)), crossings(&play(-12)));
+        assert!(
+            plain.abs_diff(1_250) <= 25,
+            "blocks of {block}: untransposed {plain} crossings"
+        );
+        assert!(
+            down.abs_diff(625) <= 15,
+            "blocks of {block}: an octave down {down} crossings"
+        );
     }
 }
 

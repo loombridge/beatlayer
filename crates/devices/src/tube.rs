@@ -134,7 +134,11 @@ pub fn tube_type() -> DeviceType {
     DeviceType::native(TUBE, "Dynamic Tube", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
-            .with_menu_options(&[HI_QUALITY]),
+            .with_menu_options(&[HI_QUALITY])
+            .with_banks(&[
+                ("Valve", &["Tube", "Tone", "Drive", "Bias", "Output"]),
+                ("Envelope", &["Envelope", "Attack", "Release"]),
+            ]),
     )
 }
 

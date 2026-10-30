@@ -44,6 +44,27 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: single_tone,
     },
     Fixture {
+        name: "cv-instrument-and-triggers",
+        about: "The device channels after Main's two, of a phrase played through CV Instrument \
+                (Pitch, Gate and Mod 1, with a 50 ms glide) and CV Triggers (a pulse, a held \
+                gate and a velocity-scaled pulse): the voltages as sample values, on their frames.",
+        build: cv_instrument_and_triggers,
+    },
+    Fixture {
+        name: "cv-clock-out-tempo-ramp",
+        about: "CV Clock Out's channel over a tempo ramp from 90 to 150 BPM and back: a pulse \
+                on every sixteenth note of the song, 4 to the quarter, on the frames the tempo \
+                map gives them.",
+        build: cv_clock_out_tempo_ramp,
+    },
+    Fixture {
+        name: "cv-utility-track",
+        about: "A CV Utility that multiplies a track's tone by a slower one it takes from a \
+                sidechain, with its gains and a volt of offset: the track's signal after it \
+                in Main, and the same voltages on its CV output channel.",
+        build: cv_utility_track,
+    },
+    Fixture {
         name: "summed-tracks",
         about: "Four tracks summed into Main through their faders, at three volumes, one muted.",
         build: summed_tracks,
@@ -525,11 +546,14 @@ struct Song {
     schedule: Vec<ScheduledCommand>,
     cues: Vec<Cue>,
     launches: Vec<Launch>,
+    /// The interface channels the render keeps after Main's.
+    device_channels: usize,
 }
 
 impl Song {
     fn new() -> Self {
         Self {
+            device_channels: 0,
             editor: Editor::new(),
             files: Vec::new(),
             media: MediaMap::new(),
@@ -778,6 +802,7 @@ impl Song {
             },
             launches: self.launches,
             frames: SAMPLE_RATE.seconds_to_frames(seconds).get() as u64,
+            device_channels: self.device_channels,
         }
     }
 }
@@ -893,6 +918,168 @@ fn beat_repeat() -> Scene {
         device,
     });
     song.finish(4.25)
+}
+
+/// A phrase through CV Instrument and CV Triggers, captured on the device
+/// channels after Main's two (WP-7.17; the CV tools spec, R12, R17).
+fn cv_instrument_and_triggers() -> Scene {
+    use bl_devices::cv_instrument::{GLIDE, cv_instrument_type};
+    use bl_devices::cv_triggers::{Field, cv_triggers_type, param};
+
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let notes = |played: &[(u8, i64, i64, u8)]| {
+        played
+            .iter()
+            .map(|&(key, start, length, velocity)| {
+                bl_model::Note::new(
+                    key,
+                    Ticks(start * beat / 4),
+                    Ticks(length * beat / 4),
+                    velocity,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    // The instrument: Pitch, Gate and Mod 1 on device channels 1 to 3, with a
+    // legato line that glides.
+    let keys = song.track(TrackKind::Midi, "Keys", None);
+    let id = song.editor.new_id();
+    let mut instrument = cv_instrument_type().device(id);
+    instrument.params.insert(GLIDE, 50.0);
+    let external = instrument.external.as_mut().expect("it has routing");
+    for (port, channel) in external.cv_outputs.iter_mut().zip([1, 2, 3]) {
+        port.channel = Some(channel);
+    }
+    song.apply(Command::InsertDevice {
+        track: keys,
+        index: 0,
+        device: instrument,
+    });
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(notes(&[
+                (60, 0, 8, 100),
+                (64, 6, 6, 40),
+                (67, 14, 4, 127),
+                (72, 20, 6, 80),
+            ]))),
+        ),
+    });
+    // The triggers: a pulse, a held gate, and a pulse scaled by velocity, on
+    // device channels 4 to 6.
+    let drums = song.track(TrackKind::Midi, "Drums", None);
+    let id = song.editor.new_id();
+    let mut triggers = cv_triggers_type().device(id);
+    triggers.params.insert(param(1, Field::Mode), 1.0);
+    triggers.params.insert(param(2, Field::Velocity), 1.0);
+    let external = triggers.external.as_mut().expect("it has routing");
+    for (port, channel) in external.cv_outputs.iter_mut().zip([4, 5, 6]) {
+        port.channel = Some(channel);
+    }
+    song.apply(Command::InsertDevice {
+        track: drums,
+        index: 0,
+        device: triggers,
+    });
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track: drums,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(notes(&[
+                (36, 0, 1, 100),
+                (36, 4, 1, 100),
+                (36, 5, 1, 100),
+                (37, 2, 6, 100),
+                (38, 8, 1, 127),
+                (38, 12, 1, 50),
+            ]))),
+        ),
+    });
+    song.device_channels = 6;
+    song.finish(3.5)
+}
+
+/// CV Clock Out over a tempo ramp, captured on its device channel after
+/// Main's two (WP-7.18; the CV tools spec, R22).
+fn cv_clock_out_tempo_ramp() -> Scene {
+    use bl_devices::cv_clock_out::cv_clock_out_type;
+
+    let mut song = Song::new();
+    let beats = |n: i64| Ticks::QUARTER * n;
+    let tempo = TempoMap::from_breakpoints([
+        (beats(0), bpm(90.0)),
+        (beats(4), bpm(150.0)),
+        (beats(8), bpm(90.0)),
+        (beats(12), bpm(90.0)),
+    ])
+    .expect("the tempo map is valid");
+    song.apply(Command::SetTempo { tempo });
+    let track = song.track(TrackKind::Audio, "Clock", None);
+    let id = song.editor.new_id();
+    let mut clock = cv_clock_out_type().device(id);
+    clock.external.as_mut().expect("it has routing").cv_outputs[0].channel = Some(1);
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device: clock,
+    });
+    song.device_channels = 1;
+    song.finish(6.0)
+}
+
+/// A track's tone multiplied by a slower one through CV Utility, on the track
+/// and its CV output (WP-7.18; the CV tools spec, R28).
+fn cv_utility_track() -> Scene {
+    use bl_devices::cv_utility::{GAIN_A, GAIN_B, MODE, OFFSET, cv_utility_type};
+    use bl_model::{Input, Tap};
+
+    let mut song = Song::new();
+    let slow = song.track(TrackKind::Audio, "Slow", None);
+    song.tone(slow, 20.0, -6.0);
+    // Heard only through the sidechain.
+    song.volume(slow, 0.0);
+    let track = song.track(TrackKind::Audio, "Carrier", None);
+    song.tone(track, 220.0, -6.0);
+    let id = song.editor.new_id();
+    let mut utility = cv_utility_type().device(id);
+    for (param, value) in [(MODE, 1.0), (GAIN_A, 150.0), (GAIN_B, 200.0), (OFFSET, 1.0)] {
+        utility.params.insert(param, value);
+    }
+    utility
+        .external
+        .as_mut()
+        .expect("it has routing")
+        .cv_outputs[0]
+        .channel = Some(1);
+    song.apply(Command::InsertDevice {
+        track,
+        index: 1,
+        device: utility,
+    });
+    song.apply(Command::SetSidechainInput {
+        device: id,
+        input: Input::Track {
+            track: slow,
+            tap: Tap::PostFx,
+            chain: None,
+            output: None,
+        },
+    });
+    song.apply(Command::SetSidechainEnabled {
+        device: id,
+        enabled: true,
+    });
+    song.device_channels = 1;
+    song.finish(2.0)
 }
 
 fn single_tone() -> Scene {

@@ -17,6 +17,7 @@
 //! | [`KEY`] | multiplies its input by what its detector hears, while its sidechain is on (WP-2.19b) | none |
 //! | [`DELAY`] | delays every sample by its frames, and reports that latency (WP-2.11) | the frames |
 //! | [`EXTERNAL`] | replaces its input with what an external device brings back from the interface (WP-5.34) | none |
+//! | [`CV_PROBE`] | writes 0.25 on its first CV output, an impulse of 1.0 at song frame [`CV_IMPULSE_AT`] on its second, and its CV input on its third (WP-7.17) | none |
 //! | [`HEAR`] | writes the last key its block's notes played, over 127, from the frame it played on (WP-5.27) | none |
 //! | [`SPIN`] | passes its input through after busy-waiting, and notes which thread ran it (WP-5.37) | the microseconds to wait |
 //!
@@ -35,7 +36,9 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
-use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, ParamValue, segments};
+use crate::node::{
+    Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue, segments,
+};
 use crate::registry::{DeviceType, Registry};
 
 /// The DC node's device type.
@@ -64,10 +67,18 @@ pub const KEY: &str = "test.key";
 pub const HEAR: &str = "test.hear";
 /// The test instrument device type (WP-2.1).
 pub const INSTRUMENT: &str = "test.instrument";
+/// The note pulse instrument's device type: it writes a pulse on the frame of
+/// each note, so a test hears when the notes played.
+pub const NOTE_PULSE: &str = "test.note_pulse";
 /// The delay node's device type (WP-2.11).
 pub const DELAY: &str = "test.delay";
 /// The external instrument stand-in's device type (WP-5.34).
 pub const EXTERNAL: &str = "test.external";
+/// The CV probe's device type (WP-7.17): an audio effect with three CV outputs
+/// and one CV input.
+pub const CV_PROBE: &str = "test.cv_probe";
+/// The song frame the CV probe's impulse falls on.
+pub const CV_IMPULSE_AT: i64 = 1_000;
 /// The transposing MIDI effect's device type (WP-5.1).
 pub const TRANSPOSE: &str = "test.transpose";
 /// The busy-waiting node's device type (WP-5.37).
@@ -141,6 +152,14 @@ pub fn key_type() -> DeviceType {
 #[must_use]
 pub fn external_type() -> DeviceType {
     DeviceType::native(EXTERNAL, "Test External", DeviceRole::Instrument).with_external()
+}
+
+/// The CV probe as a device type: an audio effect named "Test CV" with the
+/// CV outputs Constant, Impulse and Through and the CV input In.
+#[must_use]
+pub fn cv_probe_type() -> DeviceType {
+    DeviceType::native(CV_PROBE, "Test CV", DeviceRole::AudioEffect)
+        .with_cv(&["Constant", "Impulse", "Through"], &["In"])
 }
 
 /// The MIDI sidechain probe as a device type: an audio effect named "Test
@@ -288,6 +307,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         })
     });
     let p = Arc::clone(probe);
+    registry.add_native(NOTE_PULSE, move |_, _| {
+        Box::new(NotePulse {
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
     registry.add_native_with_outputs(MULTI, &MULTI_OUTPUT_NAMES, move |device, _| {
         Box::new(Multi::new(device, &p))
     });
@@ -300,6 +325,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_native(TRANSPOSE, move |device, _| {
         Box::new(Transpose::new(device, &p))
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(CV_PROBE, move |_, _| {
+        Box::new(CvProbe {
+            _tracked: Tracked::new(&p),
+        })
     });
     let p = Arc::clone(probe);
     registry.add_native(SPIN, move |device, _| Box::new(Spin::new(device, &p)));
@@ -509,7 +540,7 @@ impl Node for PositionProbe {
         for channel in block.channels_mut() {
             for (i, sample) in channel.iter_mut().enumerate() {
                 *sample += if transport.playing {
-                    (transport.position.get() + i as i64) as f32
+                    transport.song_frame(i) as f32
                 } else {
                     -1.0
                 };
@@ -648,6 +679,34 @@ impl Node for External {
     }
 }
 
+/// Writes its CV outputs: 0.25, an impulse on a song frame, and what its CV
+/// input reads.
+#[derive(Debug)]
+struct CvProbe {
+    _tracked: Tracked,
+}
+
+impl Node for CvProbe {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let position = block.transport().position.get();
+        if let Some(out) = block.cv_out_mut(0) {
+            out.fill(0.25);
+        }
+        if let Some(out) = block.cv_out_mut(1) {
+            for (frame, sample) in out.iter_mut().enumerate() {
+                *sample = f32::from(position + frame as i64 == CV_IMPULSE_AT);
+            }
+        }
+        let through = block.cv_in(0);
+        if let Some(out) = block.cv_out_mut(2) {
+            match through {
+                Some(heard) => out.copy_from_slice(heard),
+                None => out.fill(0.0),
+            }
+        }
+    }
+}
+
 /// Multiplies its input by what its detector hears while its sidechain is
 /// on, as a gate keyed by its sidechain; passes its input through while
 /// it's off.
@@ -666,6 +725,31 @@ impl Node for Key {
             let at = c * stride..c * stride + frames;
             for (sample, key) in block.data[at.clone()].iter_mut().zip(&heard[at]) {
                 *sample *= key;
+            }
+        }
+    }
+}
+
+/// Writes, on the frame of each note it receives, the key plus one: positive
+/// for a note-on, negative for a note-off.
+#[derive(Debug)]
+struct NotePulse {
+    _tracked: Tracked,
+}
+
+impl Node for NotePulse {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for i in 0..block.notes().len() {
+            let event = block.notes()[i];
+            let pulse = f32::from(event.key) + 1.0;
+            let pulse = match event.kind {
+                NoteKind::On => pulse,
+                NoteKind::Off => -pulse,
+                _ => continue,
+            };
+            let at = event.offset as usize;
+            for channel in block.channels_mut() {
+                channel[at] += pulse;
             }
         }
     }
@@ -808,3 +892,359 @@ impl Node for DelayNode {
         self.frames as u32
     }
 }
+
+/// A stand-in follower for tests (the transport spec, R24, R25): `answer`
+/// says, for each block it is asked about, what an incoming clock or a Link
+/// session would.
+pub struct StandIn<F>(F);
+
+/// A stand-in follower that answers each block as `answer` says.
+pub fn stand_in<F>(answer: F) -> StandIn<F>
+where
+    F: FnMut(&crate::Ask, &mut crate::Follow) + Send,
+{
+    StandIn(answer)
+}
+
+impl<F> crate::Follower for StandIn<F>
+where
+    F: FnMut(&crate::Ask, &mut crate::Follow) + Send,
+{
+    fn block(&mut self, ask: &crate::Ask, answer: &mut crate::Follow) {
+        (self.0)(ask, answer);
+    }
+}
+
+/// A stand-in follower that plays every block at `bpm`.
+#[must_use]
+pub fn following(bpm: f64) -> impl crate::Follower {
+    stand_in(move |_, answer| answer.tempo(bpm))
+}
+
+/// A stand-in for a Link session (the Link spec, R16): the timeline, the
+/// start and stop state and the peers of one session, which a test acts on
+/// through [`LinkPeers`] as another app in it would, and a
+/// [`crate::LinkFollower`] reads as the audio host's real session. Its
+/// clock is a number the test sets, so a test never waits for time. The
+/// session is a set of atomics, so reading it allocates and locks nothing.
+mod link_session {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, AtomicUsize, Ordering::Relaxed};
+
+    use crate::link::Session;
+
+    /// How many tempos the follower told the main thread a test can read.
+    const TOLD: usize = 256;
+
+    struct Real(AtomicU64);
+
+    impl Real {
+        fn new(value: f64) -> Self {
+            Self(AtomicU64::new(value.to_bits()))
+        }
+
+        fn get(&self) -> f64 {
+            f64::from_bits(self.0.load(Relaxed))
+        }
+
+        fn set(&self, value: f64) {
+            self.0.store(value.to_bits(), Relaxed);
+        }
+    }
+
+    /// The state of the session, all of it.
+    struct Shared {
+        clock: AtomicI64,
+        tempo: Real,
+        origin_beat: Real,
+        origin_time: AtomicI64,
+        peers: AtomicU64,
+        playing: AtomicBool,
+        playing_time: AtomicI64,
+        enabled: AtomicBool,
+        sync: AtomicBool,
+        /// Whether the peers share start and stop.
+        peers_sync: AtomicBool,
+        /// The state Beatlayer plays by when it shares none.
+        own_playing: AtomicBool,
+        told: [Real; TOLD],
+        told_count: AtomicUsize,
+        commits: AtomicU64,
+    }
+
+    impl Shared {
+        fn beat_at(&self, time: i64) -> f64 {
+            self.origin_beat.get()
+                + (time - self.origin_time.load(Relaxed)) as f64 * self.tempo.get() / 60e6
+        }
+
+        fn set_tempo(&self, bpm: f64, at: i64) {
+            self.origin_beat.set(self.beat_at(at));
+            self.origin_time.store(at, Relaxed);
+            self.tempo.set(bpm);
+        }
+    }
+
+    /// The session a [`LinkSession`] reads, which a test changes as a peer.
+    #[derive(Clone)]
+    pub struct LinkPeers(Arc<Shared>);
+
+    impl LinkPeers {
+        /// Sets Link's clock, in microseconds.
+        pub fn set_clock(&self, micros: i64) {
+            self.0.clock.store(micros, Relaxed);
+        }
+
+        /// Link's clock, in microseconds.
+        #[must_use]
+        pub fn clock(&self) -> i64 {
+            self.0.clock.load(Relaxed)
+        }
+
+        /// Switches Link on or off.
+        pub fn enable(&self, on: bool) {
+            self.0.enabled.store(on, Relaxed);
+        }
+
+        /// Sets how many other peers are in the session.
+        pub fn set_peers(&self, peers: u64) {
+            self.0.peers.store(peers, Relaxed);
+        }
+
+        /// Switches Beatlayer's Start Stop Sync.
+        pub fn set_start_stop_sync(&self, on: bool) {
+            self.0.sync.store(on, Relaxed);
+        }
+
+        /// Whether the peers have Start Stop Sync on.
+        pub fn set_peers_sync(&self, on: bool) {
+            self.0.peers_sync.store(on, Relaxed);
+        }
+
+        /// A peer sets the tempo, from now on.
+        pub fn peer_tempo(&self, bpm: f64) {
+            self.0.set_tempo(bpm, self.clock());
+        }
+
+        /// A peer starts, from `at`.
+        pub fn peer_start(&self, at: i64) {
+            if self.0.peers_sync.load(Relaxed) {
+                self.0.playing.store(true, Relaxed);
+                self.0.playing_time.store(at, Relaxed);
+            }
+        }
+
+        /// A peer stops, from `at`.
+        pub fn peer_stop(&self, at: i64) {
+            if self.0.peers_sync.load(Relaxed) {
+                self.0.playing.store(false, Relaxed);
+                self.0.playing_time.store(at, Relaxed);
+            }
+        }
+
+        /// The session's tempo.
+        #[must_use]
+        pub fn tempo(&self) -> f64 {
+            self.0.tempo.get()
+        }
+
+        /// The session's phase at `time` within `quantum`.
+        #[must_use]
+        pub fn phase_at(&self, time: i64, quantum: f64) -> f64 {
+            self.0.beat_at(time).rem_euclid(quantum)
+        }
+
+        /// The session's beat at `time`.
+        #[must_use]
+        pub fn beat_at(&self, time: i64) -> f64 {
+            self.0.beat_at(time)
+        }
+
+        /// Moves the session's beats by `beats`, as a peer that remapped its
+        /// timeline would.
+        pub fn shift_beat(&self, beats: f64) {
+            self.0.origin_beat.set(self.0.origin_beat.get() + beats);
+        }
+
+        /// Whether the session's start and stop state is playing.
+        #[must_use]
+        pub fn playing(&self) -> bool {
+            self.0.playing.load(Relaxed)
+        }
+
+        /// When the last start or stop the session holds takes effect.
+        #[must_use]
+        pub fn playing_time(&self) -> i64 {
+            self.0.playing_time.load(Relaxed)
+        }
+
+        /// The tempos the follower told the main thread peers set, in order.
+        #[must_use]
+        pub fn told(&self) -> Vec<f64> {
+            let count = self.0.told_count.load(Relaxed);
+            self.0.told[..count].iter().map(Real::get).collect()
+        }
+
+        /// How many times the follower wrote the session.
+        #[must_use]
+        pub fn commits(&self) -> u64 {
+            self.0.commits.load(Relaxed)
+        }
+    }
+
+    /// The session as the audio host's follower reads it: a snapshot taken
+    /// by [`Session::capture`], changed and written back by
+    /// [`Session::commit`].
+    pub struct LinkSession {
+        shared: Arc<Shared>,
+        tempo: f64,
+        origin_beat: f64,
+        origin_time: i64,
+        playing: bool,
+        playing_time: i64,
+    }
+
+    impl LinkSession {
+        fn beat_at(&self, time: i64) -> f64 {
+            self.origin_beat + (time - self.origin_time) as f64 * self.tempo / 60e6
+        }
+
+        fn time_at(&self, beat: f64) -> i64 {
+            self.origin_time + ((beat - self.origin_beat) * 60e6 / self.tempo).round() as i64
+        }
+    }
+
+    /// A session at `bpm`, on, alone, with its clock at zero, and the handle
+    /// a test acts on it by.
+    #[must_use]
+    pub fn link_session(bpm: f64) -> (LinkSession, LinkPeers) {
+        let shared = Arc::new(Shared {
+            clock: AtomicI64::new(0),
+            tempo: Real::new(bpm),
+            origin_beat: Real::new(0.0),
+            origin_time: AtomicI64::new(0),
+            peers: AtomicU64::new(0),
+            playing: AtomicBool::new(false),
+            playing_time: AtomicI64::new(0),
+            enabled: AtomicBool::new(true),
+            sync: AtomicBool::new(false),
+            peers_sync: AtomicBool::new(true),
+            own_playing: AtomicBool::new(false),
+            told: std::array::from_fn(|_| Real::new(0.0)),
+            told_count: AtomicUsize::new(0),
+            commits: AtomicU64::new(0),
+        });
+        (
+            LinkSession {
+                shared: Arc::clone(&shared),
+                tempo: bpm,
+                origin_beat: 0.0,
+                origin_time: 0,
+                playing: false,
+                playing_time: 0,
+            },
+            LinkPeers(shared),
+        )
+    }
+
+    impl Session for LinkSession {
+        fn enabled(&self) -> bool {
+            self.shared.enabled.load(Relaxed)
+        }
+
+        fn peers(&self) -> u64 {
+            self.shared.peers.load(Relaxed)
+        }
+
+        fn start_stop_sync(&self) -> bool {
+            self.shared.sync.load(Relaxed)
+        }
+
+        fn clock_micros(&self) -> i64 {
+            self.shared.clock.load(Relaxed)
+        }
+
+        fn capture(&mut self) {
+            let shared = &self.shared;
+            self.tempo = shared.tempo.get();
+            self.origin_beat = shared.origin_beat.get();
+            self.origin_time = shared.origin_time.load(Relaxed);
+            let shares = shared.sync.load(Relaxed) && shared.peers_sync.load(Relaxed);
+            self.playing = if shares {
+                shared.playing.load(Relaxed)
+            } else {
+                shared.own_playing.load(Relaxed)
+            };
+            self.playing_time = shared.playing_time.load(Relaxed);
+        }
+
+        fn commit(&mut self) {
+            let shared = &self.shared;
+            shared.tempo.set(self.tempo);
+            shared.origin_beat.set(self.origin_beat);
+            shared.origin_time.store(self.origin_time, Relaxed);
+            shared.own_playing.store(self.playing, Relaxed);
+            if shared.sync.load(Relaxed) && shared.peers_sync.load(Relaxed) {
+                shared.playing.store(self.playing, Relaxed);
+                shared.playing_time.store(self.playing_time, Relaxed);
+            }
+            shared.commits.fetch_add(1, Relaxed);
+        }
+
+        fn tempo(&self) -> f64 {
+            self.tempo
+        }
+
+        fn set_tempo(&mut self, bpm: f64, at: i64) {
+            self.origin_beat = self.beat_at(at);
+            self.origin_time = at;
+            self.tempo = bpm;
+        }
+
+        fn phase_at_time(&self, time: i64, quantum: f64) -> f64 {
+            self.beat_at(time).rem_euclid(quantum)
+        }
+
+        fn beat_at_time(&self, time: i64, _quantum: f64) -> f64 {
+            self.beat_at(time)
+        }
+
+        fn time_at_beat(&self, beat: f64, _quantum: f64) -> i64 {
+            self.time_at(beat)
+        }
+
+        fn request_beat_at_time(&mut self, beat: f64, time: i64, quantum: f64) {
+            let mut time = time;
+            if self.peers() > 0 {
+                let ahead = (beat - self.beat_at(time)).rem_euclid(quantum);
+                time = self.time_at(self.beat_at(time) + ahead);
+            }
+            self.origin_beat = beat;
+            self.origin_time = time;
+        }
+
+        fn playing(&self) -> bool {
+            self.playing
+        }
+
+        fn time_for_playing(&self) -> i64 {
+            self.playing_time
+        }
+
+        fn set_playing(&mut self, playing: bool, at: i64) {
+            self.playing = playing;
+            self.playing_time = at;
+        }
+
+        fn peer_tempo(&mut self, bpm: f64) {
+            let shared = &self.shared;
+            let count = shared.told_count.load(Relaxed);
+            if count < TOLD {
+                shared.told[count].set(bpm);
+                shared.told_count.store(count + 1, Relaxed);
+            }
+        }
+    }
+}
+
+pub use link_session::{LinkPeers, LinkSession, link_session};

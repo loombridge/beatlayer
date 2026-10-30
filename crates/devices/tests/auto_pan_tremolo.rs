@@ -231,6 +231,7 @@ fn each_synced_mode_starts_cycle_on_beat_across_tempos() {
         TransportInfo {
             playing: true,
             position: Frames(0),
+            ..TransportInfo::default()
         },
     );
     // Sine starts at 0 phase (midpoint level = 0.5)
@@ -254,6 +255,7 @@ fn each_synced_mode_starts_cycle_on_beat_across_tempos() {
         TransportInfo {
             playing: true,
             position: Frames(0),
+            ..TransportInfo::default()
         },
     );
     assert!(
@@ -277,6 +279,7 @@ fn each_synced_mode_starts_cycle_on_beat_across_tempos() {
         TransportInfo {
             playing: true,
             position: Frames(0),
+            ..TransportInfo::default()
         },
     );
     // At phase 90° (0.25 cycle), Sine is at peak (+1.0), so tremolo level is 1.0
@@ -307,6 +310,7 @@ fn each_synced_mode_starts_cycle_on_beat_across_tempos() {
         TransportInfo {
             playing: true,
             position: Frames(0),
+            ..TransportInfo::default()
         },
     );
     assert!(
@@ -746,4 +750,41 @@ fn a_set_with_auto_pan_tremolo_saves_and_reopens() {
     assert_eq!(reopened_dev.params.get(&SHAPE), Some(&50.0));
     assert_eq!(reopened_dev.params.get(&ATTACK_TIME), Some(&50.0));
     assert_eq!(reopened_dev.params.get(&DYNAMIC_FM), Some(&-30.0));
+}
+
+// Spec: transport R24
+#[test]
+fn a_synced_cycle_follows_the_played_tempo() {
+    let input = vec![vec![1.0f32; 12_000], vec![1.0f32; 12_000]];
+    let params = vec![
+        (MODE, 1.0),
+        (WAVE, 0.0),
+        (TIME_MODE, 2.0),
+        (SYNCED_DIVISION, 3.0), // 1/4 note
+        (AMOUNT, 100.0),
+    ];
+    let run_with = |bpm: f64, speed: f64| {
+        run_at(
+            auto_pan(&params, 12_000).as_mut(),
+            &input,
+            &[],
+            &tempo(bpm),
+            TransportInfo {
+                playing: true,
+                position: Frames(0),
+                speed,
+                ..TransportInfo::default()
+            },
+        )
+    };
+    // A quarter note at 240 BPM is 12,000 frames, so the peak is at 3,000.
+    let followed = run_with(120.0, 2.0);
+    assert!(
+        (followed[0][3_000] - 1.0).abs() < 1e-3,
+        "the peak at the played tempo"
+    );
+    let same = run_with(240.0, 1.0);
+    for (a, b) in followed[0].iter().zip(&same[0]) {
+        assert!((a - b).abs() < 1e-4, "{a} against {b}");
+    }
 }

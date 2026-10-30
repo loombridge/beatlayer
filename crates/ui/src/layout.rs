@@ -287,8 +287,12 @@ pub enum Anchor {
 pub enum Element {
     BrowserToggle,
     BrowserMenu,
-    SyncLamps,
+    ExternalSync,
+    SyncInput,
+    SyncOutput,
     ResyncExternalHardware,
+    LinkToggle,
+    LinkMenu,
     TapTempo,
     Tempo,
     NudgeDown,
@@ -313,6 +317,7 @@ pub enum Element {
     AutomationArm,
     ReEnableAutomation,
     CaptureMidi,
+    New,
     SessionRecord,
     LoopStartBars,
     LoopStartBeats,
@@ -332,6 +337,7 @@ pub enum Element {
     Cpu,
     CpuMenu,
     Overload,
+    RemoteIndicators,
     MidiIndicators,
     SessionView,
     ArrangementView,
@@ -413,9 +419,9 @@ pub const D24: &str = "D24";
 /// that the assistant's toggle (D24) takes the Control Bar's far right, so
 /// the right group, the view selector included, sits 20 points (the toggle's
 /// width and a gap) left of Live's measurements. The
-/// Link toggle, the Tempo Follower toggle, and the Global Groove Amount
-/// (L-CTRL-002, 003, 008) are hidden in Live's default state and come with
-/// the packages that build them. Widths not measured in layout.md run to the
+/// Tempo Follower toggle and the Global Groove Amount (L-CTRL-003, 008) are
+/// hidden in Live's default state and come with the packages that build
+/// them. Widths not measured in layout.md run to the
 /// next element's left edge, less a 2-point gap. The transport section
 /// (Tempo, the time signature, the Arrangement Position, Play, Stop, the
 /// loop fields, and the Loop switch) works from WP-1.18
@@ -424,12 +430,16 @@ pub const D24: &str = "D24";
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),
     p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, None),
-    p(E::SyncLamps, "L-CTRL-028", "Sync Input and Output Indicators", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
+    p(E::ExternalSync, "L-CTRL-028", "External Sync", CB, 54.0, EXTERNAL_SYNC_WIDTH, Left, Switch, None),
+    p(E::SyncInput, "L-CTRL-028", "Sync Input", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
+    p(E::SyncOutput, "L-CTRL-028", "Sync Output", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
     p(E::ResyncExternalHardware, "L-CTRL-029", "Resync External Hardware", CB, 54.0, RESYNC_WIDTH, Left, Button, None),
+    p(E::LinkToggle, "L-CTRL-002", "Link", CB, 54.0, LINK_WIDTH, Left, Switch, None),
+    p(E::LinkMenu, "L-CTRL-002", "Link Options", CB, 54.0, LINK_MENU_WIDTH, Left, MenuArrow, None),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, None),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
-    p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Button, Some("M7")),
-    p(E::NudgeUp, "L-CTRL-006", "Phase Nudge Up", CB, 145.0, 18.0, Left, Button, Some("M7")),
+    p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Switch, None),
+    p(E::NudgeUp, "L-CTRL-006", "Phase Nudge Up", CB, 145.0, 18.0, Left, Switch, None),
     p(E::SignatureNumerator, "L-CTRL-007", "Time Signature Numerator", CB, 167.0, 20.0, Left, Value, None),
     p(E::SignatureDenominator, "L-CTRL-007", "Time Signature Denominator", CB, 189.0, 18.0, Left, Value, None),
     p(E::GlobalAmount, "L-CTRL-008", "Global Amount", CB, 209.0, GLOBAL_AMOUNT_WIDTH, Left, Value, None),
@@ -450,6 +460,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::AutomationArm, "L-CTRL-015", "Automation Arm", CB, 778.0, 16.0, Middle, Switch, None),
     p(E::ReEnableAutomation, "L-CTRL-015", "Re-Enable Automation", CB, 796.0, 18.0, Middle, Button, None),
     p(E::CaptureMidi, "L-CTRL-015", "Capture MIDI", CB, 816.0, 16.0, Middle, Button, None),
+    p(E::New, "L-CTRL-031", "New", CB, 834.0, NEW_WIDTH, Middle, Button, None),
     p(E::SessionRecord, "L-CTRL-015", "Session Record", CB, 834.0, 18.0, Middle, Switch, Some("M3")),
     p(E::LoopStartBars, "L-CTRL-016", "Loop Start Bars", CB, 875.0, 26.0, Middle, Value, None),
     p(E::LoopStartBeats, "L-CTRL-016", "Loop Start Beats", CB, 901.0, 26.0, Middle, Value, None),
@@ -462,13 +473,14 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::LoopLengthSixteenths, "L-CTRL-018", "Loop Length Sixteenths", CB, 1080.0, 26.0, Middle, Value, None),
     p(E::DrawMode, "L-CTRL-019", "Draw Mode", CB, 1263.0, 17.0, Right, Switch, None),
     p(E::ComputerKeyboard, "L-CTRL-020", "Computer MIDI Keyboard", CB, 1282.0, 17.0, Right, Switch, None),
-    p(E::KeyMap, "L-CTRL-021", "Key Map Mode", CB, 1301.0, 27.0, Right, Switch, Some("M7")),
-    p(E::KeyIndicators, "L-CTRL-021", "Key Input and Output Indicators", CB, 1330.0, 7.0, Right, Indicator, Some("M7")),
-    p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1339.0, 28.0, Right, Switch, Some("M7")),
+    p(E::KeyMap, "L-CTRL-021", "Key Map Mode", CB, 1301.0, 27.0, Right, Switch, None),
+    p(E::KeyIndicators, "L-CTRL-021", "Key Input and Output Indicators", CB, 1330.0, 7.0, Right, Indicator, None),
+    p(E::MidiMap, "L-CTRL-022", "MIDI Map Mode", CB, 1339.0, 28.0, Right, Switch, None),
     p(E::SampleRate, "L-CTRL-023", "Sample Rate", CB, 1369.0, 50.0, Right, Display, None),
     p(E::Cpu, "L-CTRL-024", "CPU Load", CB, 1419.0, 49.0, Right, Meter, None),
     p(E::CpuMenu, "L-CTRL-024", "CPU Meter Options", CB, 1468.0, 8.0, Right, MenuArrow, Some("M5")),
     p(E::Overload, "L-CTRL-025", "Disk Overload", CB, 1478.0, 18.0, Right, Indicator, Some("WP-1.3")),
+    p(E::RemoteIndicators, "L-CTRL-026", "Remote Input and Output Indicators", CB, 1498.0, 7.0, Right, Indicator, None),
     p(E::MidiIndicators, "L-CTRL-026", "MIDI Track Input and Output Indicators", CB, 1507.0, 14.0, Right, Indicator, None),
     p(E::SessionView, "L-CTRL-027", "Session View", CB, 1529.0, 20.0, Right, Switch, None),
     p(E::ArrangementView, "L-CTRL-027", "Arrangement View", CB, 1550.0, 20.0, Right, Switch, None),
@@ -496,12 +508,30 @@ pub fn placement(element: Element) -> &'static Placement {
 /// its right while it shows (L-CTRL-008).
 pub const GLOBAL_AMOUNT_WIDTH: f32 = 40.0;
 
+/// The width of the EXT switch (L-CTRL-028), when it shows.
+pub const EXTERNAL_SYNC_WIDTH: f32 = 26.0;
+
 /// The width of the sync lamp pair (L-CTRL-028), when it shows.
 pub const SYNC_LAMPS_WIDTH: f32 = 7.0;
 
 /// The width of the Resync External Hardware button (L-CTRL-029), when it
 /// shows.
 pub const RESYNC_WIDTH: f32 = 40.0;
+
+/// The width of the Link toggle (L-CTRL-002), when it shows: Beatlayer's own,
+/// as Live's isn't measured. It holds "2 Links".
+pub const LINK_WIDTH: f32 = 44.0;
+
+/// The width of the Link menu's arrow (L-CTRL-002), when it shows: the
+/// Metronome Settings arrow's.
+pub const LINK_MENU_WIDTH: f32 = 10.0;
+
+/// The width of the New button (L-CTRL-031), when it shows.
+pub const NEW_WIDTH: f32 = 28.0;
+
+/// What the New button takes, with the gap after it, from the Control Bar's
+/// middle group, which moves what follows it right by this much.
+const NEW_SPACE: f32 = NEW_WIDTH + 2.0;
 
 /// The gap after each of those, in points.
 const SYNC_GAP: f32 = 2.0;
@@ -534,11 +564,21 @@ pub struct DetailViews {
     /// moves what is to its right 40 points right (L-CTRL-008, the grooves
     /// spec R30).
     pub global_amount: bool,
-    /// Whether the Control Bar shows the sync lamp pair (L-CTRL-028), and
-    /// the Resync External Hardware button (L-CTRL-029): they sit at the
-    /// left of the tempo group and move what is to their right right by
-    /// their widths (the MIDI clock spec, R10, R15).
+    /// Whether the Control Bar shows the EXT switch with its sync lamp pair
+    /// (L-CTRL-028), and the Resync External Hardware button (L-CTRL-029):
+    /// they sit at the left of the tempo group and move what is to their
+    /// right right by their widths (the MIDI clock spec, R10, R15).
     pub sync: (bool, bool),
+    /// Whether the Control Bar shows the Link toggle with its menu's arrow
+    /// (L-CTRL-002, the Link spec R17), which sit after the sync items and
+    /// move what is to their right right by their widths. The window shows
+    /// it by default; a layout built without it has Live's measured
+    /// positions, as with the other optional items.
+    pub link: bool,
+    /// Whether the Control Bar shows the New button (L-CTRL-031), which a
+    /// map mode shows just before Session Record and which moves it, and
+    /// what follows in the middle group, right (map modes R20).
+    pub new_button: bool,
 }
 
 impl DetailViews {
@@ -554,6 +594,8 @@ impl DetailViews {
             browser_width: BROWSER_WIDTH,
             global_amount: false,
             sync: (false, false),
+            link: false,
+            new_button: false,
         }
     }
 
@@ -565,10 +607,24 @@ impl DetailViews {
         self
     }
 
+    /// The same, with the Link toggle showing or not.
+    #[must_use]
+    pub const fn with_link(mut self, on: bool) -> Self {
+        self.link = on;
+        self
+    }
+
     /// The same, with the Global Groove Amount field showing or not.
     #[must_use]
     pub const fn with_global_amount(mut self, on: bool) -> Self {
         self.global_amount = on;
+        self
+    }
+
+    /// The same, with the New button showing or not.
+    #[must_use]
+    pub const fn with_new_button(mut self, on: bool) -> Self {
+        self.new_button = on;
         self
     }
 
@@ -600,6 +656,8 @@ impl Default for DetailViews {
             browser_width: BROWSER_WIDTH,
             global_amount: false,
             sync: (false, false),
+            link: false,
+            new_button: false,
         }
     }
 }
@@ -881,13 +939,15 @@ impl ShellLayout {
         } else {
             0.0
         };
-        // Spec: midi-clock R10, R15. The sync lamp pair and the Resync
-        // External Hardware button open the tempo group, and what follows
+        // Spec: midi-clock R10, R15. The EXT switch with its sync lamp pair
+        // and the Resync External Hardware button open the tempo group, and
+        // what follows
         // moves right by their widths, in the room the first gap has, as the
         // Global Amount does; a narrower window, and the second window, hide
         // them.
         let (want_lamps, want_resync) = detail_views.sync;
-        let lamps_width = SYNC_LAMPS_WIDTH + SYNC_GAP;
+        let ext_width = EXTERNAL_SYNC_WIDTH + SYNC_GAP;
+        let lamps_width = ext_width + SYNC_LAMPS_WIDTH + SYNC_GAP;
         let resync_width = RESYNC_WIDTH + SYNC_GAP;
         let wanted = f32::from(u8::from(want_lamps)) * lamps_width
             + f32::from(u8::from(want_resync)) * resync_width;
@@ -898,13 +958,27 @@ impl ShellLayout {
         );
         let sync_shift = f32::from(u8::from(lamps_shown)) * lamps_width
             + f32::from(u8::from(resync_shown)) * resync_width;
+        // Spec: link R17. The Link toggle with its arrow follows them, before
+        // Tap, in the room the first gap has; a narrower window, and the
+        // second window, hide it.
+        let link_width = LINK_WIDTH + SYNC_GAP + LINK_MENU_WIDTH + SYNC_GAP;
+        let link_shown =
+            detail_views.link && !second && w >= MINIMUM.x + groove_shift + wanted + link_width;
+        let link_shift = if link_shown { link_width } else { 0.0 };
         let sync_at = placement(Element::TapTempo).x;
+        // Spec: map-modes R20. The New button shows in a map mode, before
+        // Session Record, out of the room the middle group's gap has; a
+        // narrower window, and the second window, hide it.
+        let new_shown =
+            detail_views.new_button && !second && w >= MINIMUM.x + NEW_SPACE / (1.0 - MIDDLE_SHARE);
+        let new_shift = if new_shown { NEW_SPACE } else { 0.0 };
+        let new_at = placement(Element::SessionRecord).x;
         let middle_push = {
             let left_end = placement(Element::ScaleName);
             let middle = placement(Element::Follow);
             let gap = (middle.x + controls_extra * MIDDLE_SHARE)
-                - (left_end.x + left_end.width + groove_shift + sync_shift);
-            (-gap).clamp(0.0, groove_shift + sync_shift)
+                - (left_end.x + left_end.width + groove_shift + sync_shift + link_shift);
+            (-gap).clamp(0.0, groove_shift + sync_shift + link_shift)
         };
         let elements = ELEMENTS
             .iter()
@@ -916,27 +990,40 @@ impl ShellLayout {
                 let control_bar = placement.strip == Strip::ControlBar;
                 let own_sync = matches!(
                     placement.element,
-                    Element::SyncLamps | Element::ResyncExternalHardware
+                    Element::ExternalSync
+                        | Element::SyncInput
+                        | Element::SyncOutput
+                        | Element::ResyncExternalHardware
+                        | Element::LinkToggle
+                        | Element::LinkMenu
                 );
                 let shift = match placement.anchor {
-                    Left if control_bar
-                        && placement.element != Element::GlobalAmount
-                        && !own_sync =>
-                    {
-                        let groove = if placement.x >= groove_at {
+                    Left if control_bar && !own_sync => {
+                        // The Global Amount field makes the room the groove
+                        // shift gives, so only the sync items push it.
+                        let groove = if placement.x >= groove_at
+                            && placement.element != Element::GlobalAmount
+                        {
                             groove_shift
                         } else {
                             0.0
                         };
                         let sync = if placement.x >= sync_at {
-                            sync_shift
+                            sync_shift + link_shift
                         } else {
                             0.0
                         };
                         groove + sync
                     }
                     Left => 0.0,
-                    Middle if control_bar => extra * MIDDLE_SHARE + middle_push,
+                    Middle if control_bar => {
+                        let new = if placement.x >= new_at && placement.element != Element::New {
+                            new_shift
+                        } else {
+                            0.0
+                        };
+                        extra * MIDDLE_SHARE + middle_push + new
+                    }
                     Middle => extra * MIDDLE_SHARE,
                     // The Status Bar's right edge is the pane's left edge.
                     Right if placement.strip == Strip::StatusBar => extra - taken,
@@ -948,9 +1035,20 @@ impl ShellLayout {
                     // Bar has no room for it.
                     width = 0.0;
                 }
-                if (placement.element == Element::SyncLamps && !lamps_shown)
+                if (matches!(
+                    placement.element,
+                    Element::ExternalSync | Element::SyncInput | Element::SyncOutput
+                ) && !lamps_shown)
                     || (placement.element == Element::ResyncExternalHardware && !resync_shown)
                 {
+                    width = 0.0;
+                }
+                if matches!(placement.element, Element::LinkToggle | Element::LinkMenu)
+                    && !link_shown
+                {
+                    width = 0.0;
+                }
+                if placement.element == Element::New && !new_shown {
                     width = 0.0;
                 }
                 if placement.element == Element::Message {
@@ -961,7 +1059,33 @@ impl ShellLayout {
                 if placement.element == Element::ResyncExternalHardware && lamps_shown {
                     x += lamps_width;
                 }
+                // The Link toggle follows the sync items, its arrow the toggle.
+                if matches!(placement.element, Element::LinkToggle | Element::LinkMenu) {
+                    x += sync_shift;
+                }
+                if placement.element == Element::LinkMenu && link_shown {
+                    x += LINK_WIDTH + SYNC_GAP;
+                }
+                // The lamps sit beside the EXT switch, one above the other.
+                if matches!(placement.element, Element::SyncInput | Element::SyncOutput)
+                    && lamps_shown
+                {
+                    x += ext_width;
+                }
                 let rect = match placement.strip {
+                    Strip::ControlBar
+                        if matches!(
+                            placement.element,
+                            Element::SyncInput | Element::SyncOutput
+                        ) =>
+                    {
+                        let top = if placement.element == Element::SyncInput {
+                            28.0
+                        } else {
+                            38.0
+                        };
+                        Rect::from_min_size(pos2(x, y(top)), vec2(width, 8.0))
+                    }
                     Strip::ControlBar => Rect::from_min_size(pos2(x, y(28.0)), vec2(width, 18.0)),
                     Strip::StatusBar => Rect::from_min_size(
                         pos2(x, status_bar.top() + 4.0),
@@ -1820,7 +1944,9 @@ mod tests {
                 let rects: Vec<Rect> = ELEMENTS
                     .iter()
                     .zip(&layout.elements)
-                    .filter(|(p, _)| p.strip == strip)
+                    // The sync lamps sit one above the other, the lower
+                    // sharing the upper's place along the bar.
+                    .filter(|(p, _)| p.strip == strip && p.element != Element::SyncOutput)
                     .map(|(_, (_, r))| *r)
                     .collect();
                 for pair in rects.windows(2) {

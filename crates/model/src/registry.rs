@@ -782,6 +782,22 @@ const ENTRIES: &[Entry] = &[
             set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_record_quantization",
+        action: Action::Apply("set_record_quantization"),
+        label: "Record Quantization",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets Record Quantization, as Edit > Record Quantization does: the grid the \
+            notes an Arrangement recording, a Session slot recording or a Session overdub makes \
+            are moved onto. Give `quantization` as `none`, `1/4`, `1/8`, `1/8t`, `1/8+1/8t`, \
+            `1/16`, `1/16t`, `1/16+1/16t` or `1/32`, or give `on` as false to turn it off and as \
+            true to turn it back on at the last value chosen other than `none`. Step recording, \
+            Capture MIDI and notes drawn, pasted or made by a command are never moved. It can't \
+            be changed while an Arrangement or Session slot recording runs. The setting is saved \
+            with the set, and undo restores it.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",
@@ -3361,7 +3377,29 @@ const ENTRIES: &[Entry] = &[
             \"samples\", \"value\": 600 }` (0 to 192000, kept in samples); to switch the unit, \
             send the converted value. Each change recompiles the song's audio, so these are \
             settings, not parameters. Read them back in the query tool's `device` result, \
-            under `external`.",
+            under `external`. A CV device (CV Instrument, CV Triggers) has no MIDI To or \
+            Audio To: `cv_outputs` and `cv_inputs` set its CV outputs and inputs, each given \
+            as `{ \"name\": ..., \"channel\": ... }` with the port's name in the device \
+            (Pitch, Gate, Mod 1, Mod 2 on CV Instrument) and the audio interface's channel, \
+            counted from 1, or no `channel` for No Output (No Input), the state of a new \
+            device; the ports not given stay. A CV output writes its voltage on its channel \
+            at full value (1.0 is +10 V), added to whatever else plays there. Read them in \
+            the query tool's `device` result, under `external`.",
+    },
+    Entry {
+        id: "cv.set_calibration",
+        action: Action::Apply("set_cv_calibration"),
+        label: "Set CV Calibration",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Stores a calibration in a CV Instrument, or takes it away with a null \
+            `calibration`: the line fitted to the oscillator patched to Pitch \
+            (`octaves_per_volt`, `hz_at_zero_volts`) and the `steps` it was fitted to, each a \
+            `volts`, the `hz` measured and its `error_cents`, which Pitch's law corrects. \
+            `cv.calibrate` measures and stores one; this command only writes what it is \
+            given, and one undo step. Read it back in the query tool's `device` result, \
+            under `cv`.",
     },
     Entry {
         id: "device.set_midi_sidechain_source",

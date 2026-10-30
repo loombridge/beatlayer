@@ -180,6 +180,17 @@ impl Shell {
                 self.clip_view.panel_arrangement()
                     == serde_json::from_value(args["arrangement"].clone()).ok()?,
             ),
+            // Spec: recording R17. The submenu's ticked item is the set's
+            // value.
+            transport_ids::SET_RECORD_QUANTIZATION => Some(
+                self.editor.document().settings().record_quantization
+                    == serde_json::from_value(args["quantization"].clone()).ok()?,
+            ),
+            // Spec: map-modes R1. Edit MIDI Map and Edit Key Map are ticked
+            // while their mode is on.
+            bl_shell_spec::remote::MAP_MODE => {
+                Some(self.remote.map.mode == serde_json::from_value(args["mode"].clone()).ok()?)
+            }
             ids::VIEW_NOTE_SPELLING => Some(
                 self.clip_view.note_spelling()
                     == serde_json::from_value(args["spelling"].clone()).ok()?,
@@ -251,6 +262,7 @@ impl Shell {
             ids::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO => {
                 Some(self.prefs.start_transport_with_tap_tempo.0)
             }
+            bl_shell_spec::link::SET_START_STOP_SYNC => Some(self.prefs.link.start_stop_sync),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),
@@ -262,6 +274,7 @@ impl Shell {
                 Some(self.editor.document().settings().metronome.enabled)
             }
             "transport.set_midi_overdub" => Some(self.editor.document().settings().midi_overdub),
+            transport_ids::SET_EXTERNAL_SYNC => Some(self.external_sync()),
             "transport.set_metronome_only_while_recording" => Some(
                 self.editor
                     .document()
@@ -490,6 +503,18 @@ impl Shell {
             return self.detail_of(self.window_in(args)).clip_shown();
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
+            return false;
+        }
+        // Spec: midi-clock R15. Options ▸ External Sync is enabled while an
+        // input has Sync on.
+        if id == transport_ids::SET_EXTERNAL_SYNC {
+            return self.sync_lamps_shown();
+        }
+        // Spec: recording R21. The submenu's items are disabled while a
+        // recording holds the value.
+        if id == transport_ids::SET_RECORD_QUANTIZATION
+            && self.record_quantization_locked().is_some()
+        {
             return false;
         }
         if info_text::is_info_command(id) && !Self::has_info_text(id, args) {
@@ -751,6 +776,9 @@ impl Shell {
         }
         if autosampler_ids::handles(id) {
             return self.can_autosampler(id, args);
+        }
+        if bl_shell_spec::cv::handles(id) {
+            return self.can_cv(id, args);
         }
         if slice_ids::handles(id) {
             // Spec: slice-to-midi R1. The menus' enabled states: one audio

@@ -10,12 +10,18 @@ impl Shell {
     #[must_use]
     pub fn floating_windows(&self) -> device_ids::FloatingWindows {
         let doc = self.editor.document();
-        self.devices.floating_windows(
+        let mut windows = self.devices.floating_windows(
             doc,
             devices::shown_track(&self.arrangement, doc),
             self.prefs.auto_hide_plug_in_windows.0,
             self.plug_in_windows,
-        )
+        );
+        // Spec: device-chains R42. A floating device's title bar shows the
+        // hand icon too.
+        for window in &mut windows.windows {
+            window.view.locks = self.device_locks(window.device);
+        }
+        windows
     }
 
     /// Whether any device floats, on any track.

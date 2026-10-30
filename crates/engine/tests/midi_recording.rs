@@ -179,6 +179,57 @@ fn notes_played_during_a_take_are_on_their_exact_samples() {
     );
 }
 
+// Spec: transport R24. While the song follows an outside tempo, a take's
+// messages are stamped with the song frame their frame plays, and the take
+// covers the song frames its frames moved through.
+#[test]
+fn a_take_under_a_followed_tempo_stamps_the_song_frames() {
+    let mut midi = Midi::new(|_| {});
+    let (mut ring, _) = midi.record(64);
+    // Twice the map's 120 BPM: two song frames to a frame.
+    midi.rig.follow(bl_engine::testing::following(240.0));
+    midi.rig
+        .sender
+        .transport(TransportCommand::SetRecording(true));
+    midi.rig.sender.transport(TransportCommand::Play);
+    let (on, off) = (
+        MidiMessage::note_on(0, 60, 100),
+        MidiMessage::note_off(0, 60),
+    );
+    midi.block();
+    midi.send(0, 70, on);
+    midi.block();
+    midi.send(1, 40, off);
+    for _ in 0..4 {
+        midi.block();
+    }
+    midi.rig.sender.transport(TransportCommand::Stop);
+    midi.block();
+
+    let state = midi.rig.monitor.state();
+    assert_eq!(
+        state.take,
+        Some(TakeBounds {
+            start: Frames(0),
+            // The first song frame past the take: a frame owns the song frames
+            // nearest it, so after 1,536 frames of two song frames each, the
+            // next frame owns from the one before 3,072.
+            end: Frames(2 * 6 * BLOCK as i64 - 1),
+            wrap: None,
+            frames: 6 * BLOCK as u64,
+        })
+    );
+    midi.rig.collector.collect();
+    assert_eq!(
+        drain(&mut ring),
+        vec![
+            // Placed in block 1, 70 frames in: 326 frames, 652 song frames.
+            (2 * (BLOCK as i64 + 70), on),
+            (2 * (2 * BLOCK as i64 + 40), off),
+        ]
+    );
+}
+
 // Spec: midi-controller-data R10. Control changes, pitch bend, channel
 // pressure and polyphonic pressure on any channel go into the ring beside
 // the notes, with the channel they came on, whether the track monitors or

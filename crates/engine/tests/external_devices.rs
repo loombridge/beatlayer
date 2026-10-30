@@ -262,6 +262,8 @@ fn the_instrument_ends_its_notes_when_its_device_goes() {
         audio_from: None,
         audio_to: None,
         hardware_latency: None,
+        cv_outputs: None,
+        cv_inputs: None,
     });
     notes.run();
     notes.run();

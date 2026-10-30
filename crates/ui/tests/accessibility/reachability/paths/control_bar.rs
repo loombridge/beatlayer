@@ -47,6 +47,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("transport.set_metronome_sound", Exception(METRONOME_MENU)),
         ("transport.set_metronome_rhythm", Exception(METRONOME_MENU)),
+        (
+            "transport.phase_nudge",
+            Exception(Live(
+                "Live binds no key to Phase Nudge Down or Up, which nudge while the mouse holds \
+                 them; a key or MIDI mapping makes each a momentary control (transport R28)",
+            )),
+        ),
         // The Control Bar's scale controls (scales R9, R12, R14): the
         // switch changes the selected clips' scales, or the set's current
         // scale when no clip is selected.
@@ -337,6 +344,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("transport.state", Exception(Query)),
+        ("link.state", Exception(Query)),
+        (
+            "link.set_enabled",
+            main(the_link_toggle_shown, control_bar, "Link", Key::Enter),
+        ),
+        (
+            "link.set_show_toggle",
+            settings("link", nothing, "Show Link Toggle", Key::ArrowUp),
+        ),
         ("song.scales", Exception(Query)),
         (
             "song.unfollow_tempo_automation",

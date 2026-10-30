@@ -28,6 +28,8 @@ pub const GATE_MOD: &str = "beatlayer.gate_mod";
 pub const STRIKE_MOD: &str = "beatlayer.strike_mod";
 /// The Expression Control's device type.
 pub const PLAY_MOD: &str = "beatlayer.play_mod";
+/// CV In's device type (`docs/specs/cv-tools.md`, R26).
+pub const CV_IN: &str = "beatlayer.cv_in";
 
 /// How many targets a modulator maps: the first slot is always shown, and
 /// Show Multimap shows the other seven (R17).
@@ -91,7 +93,7 @@ pub fn is_modulator_kind(kind: &DeviceKind) -> bool {
 pub fn is_modulator_type(device_type: &str) -> bool {
     matches!(
         device_type,
-        WAVE_MOD | CURVE_MOD | LEVEL_MOD | GATE_MOD | STRIKE_MOD | PLAY_MOD
+        WAVE_MOD | CURVE_MOD | LEVEL_MOD | GATE_MOD | STRIKE_MOD | PLAY_MOD | CV_IN
     )
 }
 

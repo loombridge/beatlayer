@@ -118,7 +118,6 @@ impl Node for ChainSelector {
         let frames = block.frames().min(self.values.len());
         let transport = block.transport();
         let bus = block.modulation();
-        let song = transport.playing.then(|| transport.position.get());
         let automation = self.automation.clone();
         let list = automation
             .as_ref()
@@ -138,7 +137,7 @@ impl Node for ChainSelector {
                 let value = match (list, &now) {
                     _ if self.fixed => 0.0,
                     (Some(list), Some(now)) => {
-                        let song = song.map(|from| from + at as i64);
+                        let song = transport.playing.then(|| transport.song_frame(at));
                         let base =
                             list.base(travel, CHAIN_SELECTOR, song, now, bus, at, |_| self.value);
                         descriptor.clamp(list.played(travel, CHAIN_SELECTOR, song, base, bus, at))

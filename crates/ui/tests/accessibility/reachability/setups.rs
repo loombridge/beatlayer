@@ -94,6 +94,21 @@ pub(crate) fn a_midi_port(h: &mut Harness) {
     h.shell.use_midi_backend(Box::new(test));
 }
 
+/// A row of the Control Surfaces table with the test surface on a port pair,
+/// so its Dump button is enabled (WP-7.5).
+pub(crate) fn a_surface_row(h: &mut Harness) {
+    let test = bl_midi_io::TestBackend::new();
+    test.add_port(bl_midi_io::Direction::Input, "Pads");
+    test.add_port(bl_midi_io::Direction::Output, "Pads Out");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run(
+            "control_surface.set",
+            json!({ "row": 1, "surface": "test", "input": "Pads", "output": "Pads Out" }),
+        )
+        .unwrap();
+}
+
 /// Show Resync Button is on, so the Control Bar has the Resync External
 /// Hardware button.
 pub(crate) fn the_resync_button_shown(h: &mut Harness) {
@@ -102,6 +117,13 @@ pub(crate) fn the_resync_button_shown(h: &mut Harness) {
             "midi.set_show_resync_button",
             serde_json::json!({ "on": true }),
         )
+        .unwrap();
+}
+
+/// Show Link Toggle is on, so the Control Bar has the Link toggle.
+pub(crate) fn the_link_toggle_shown(h: &mut Harness) {
+    h.shell
+        .run("link.set_show_toggle", serde_json::json!({ "on": true }))
         .unwrap();
 }
 
@@ -448,6 +470,46 @@ pub(crate) fn a_hardware_device(h: &mut Harness) {
         .unwrap();
     h.shell
         .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A CV Instrument on a new MIDI track, its section showing, no device
+/// selected (WP-7.17).
+pub(crate) fn a_cv_instrument(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::cv_instrument_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A CV Instrument that holds a calibration (WP-7.17).
+pub(crate) fn a_calibrated_cv_instrument(h: &mut Harness) {
+    a_cv_instrument(h);
+    let device = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .find(|device| device.external.as_ref().is_some_and(|e| e.is_cv()))
+        .expect("the CV Instrument")
+        .id;
+    let calibration = bl_model::CvCalibration::fit(&[(0.0, 130.0), (1.0, 260.0)]).unwrap();
+    h.shell
+        .run(
+            "cv.set_calibration",
+            json!({ "device": device, "calibration": calibration }),
+        )
         .unwrap();
 }
 

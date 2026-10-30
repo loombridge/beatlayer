@@ -155,6 +155,7 @@ fn a_128_track_set_renders_bit_identically_with_workers() {
                 schedule: &[],
                 cues: &[Cue::PLAY],
                 launches: &[],
+                device_channels: 0,
             };
             let summary = render_launching_with_workers(
                 editor.document(),
@@ -542,4 +543,103 @@ fn bl_cli_golden_update_makes_references_and_then_leaves_them_alone() {
         read_flac(&fixture.reference_path(&temp.0)),
         read_flac(&fixture.reference_path(&golden_dir()))
     );
+}
+
+// Spec: cv-tools R12, R13, R17. The CV fixture's reference holds the device
+// channels after Main's two, with the voltages the phrase writes on their
+// frames, the same at any block size.
+#[test]
+fn the_cv_fixture_writes_its_voltages_on_the_device_channels() {
+    let fixture = fixture("cv-instrument-and-triggers").expect("the fixture exists");
+    let render = fixture.render();
+    assert_eq!(render.channels, 8, "Main's two and six device channels");
+    let at = |frame: usize, channel: usize| render.samples[frame * 8 + channel];
+    // The first key, 60, is 0 V on Pitch (channel 3), the gate (4) rises on
+    // its frame at 5 V, and the first trigger (6) pulses for 10 ms.
+    assert_eq!(at(0, 2), 0.0);
+    assert_eq!(at(0, 3), 0.5);
+    assert_eq!(at(0, 5), 0.5);
+    assert_eq!(at(479, 5), 0.5);
+    assert_eq!(at(480, 5), 0.0, "the pulse ends after 480 frames");
+    // Key 67 plays Pitch at 7/12 V by its frame, once the glide has run.
+    let pitch = at(14 * 6_000 + 3_000 + 200, 2);
+    assert!((pitch - 0.7 / 12.0).abs() < 1e-5, "{pitch}");
+    for block in [1, 64, 4096] {
+        assert!(
+            fixture.render_in_blocks(block).same_bits(&render),
+            "blocks of {block}"
+        );
+    }
+}
+
+// Spec: cv-tools R22. The clock fixture's device channel pulses on every
+// sixteenth note of the song, on the frames the tempo map gives them, through
+// the ramps up and down, and the same at any block size.
+#[test]
+fn the_cv_clock_fixture_pulses_on_the_tempo_maps_frames() {
+    use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
+    let fixture = fixture("cv-clock-out-tempo-ramp").expect("the fixture exists");
+    let render = fixture.render();
+    assert_eq!(render.channels, 3, "Main's two and the clock's channel");
+    let clock: Vec<f32> = render.samples.chunks(3).map(|frame| frame[2]).collect();
+    let rises: Vec<usize> = (0..clock.len())
+        .filter(|&at| clock[at] > 0.0 && (at == 0 || clock[at - 1] == 0.0))
+        .collect();
+    let beats = |n: i64| Ticks::QUARTER * n;
+    let bpm = |n: f64| Bpm::new(n).unwrap();
+    let tempo = TempoMap::from_breakpoints([
+        (beats(0), bpm(90.0)),
+        (beats(4), bpm(150.0)),
+        (beats(8), bpm(90.0)),
+        (beats(12), bpm(90.0)),
+    ])
+    .unwrap();
+    for (k, &rise) in rises.iter().enumerate() {
+        let want = tempo
+            .ticks_to_frames(Ticks(k as i64 * Ticks::QUARTER.0 / 4), SampleRate::HZ_48000)
+            .get();
+        assert_eq!(rise as i64, want, "pulse {k}");
+    }
+    assert!(rises.len() > 30, "{} pulses", rises.len());
+    assert!(clock.iter().all(|&s| s == 0.0 || s == 0.5), "5 V");
+    for block in [1, 64, 4096] {
+        assert!(
+            fixture.render_in_blocks(block).same_bits(&render),
+            "blocks of {block}"
+        );
+    }
+}
+
+// Spec: cv-tools R28. The Utility fixture's track in Main and its CV output
+// are one signal, clamped to ±10 V and centred on the volt of offset, the
+// same at any block size.
+#[test]
+fn the_cv_utility_fixture_puts_one_signal_on_the_track_and_its_cv_output() {
+    let fixture = fixture("cv-utility-track").expect("the fixture exists");
+    let render = fixture.render();
+    assert_eq!(render.channels, 3);
+    let cv: Vec<f32> = render.samples.chunks(3).map(|frame| frame[2]).collect();
+    let main: Vec<f32> = render.samples.chunks(3).map(|frame| frame[0]).collect();
+    assert!(cv.iter().all(|s| s.abs() <= 1.0));
+    let mean = cv.iter().sum::<f32>() / cv.len() as f32;
+    assert!((mean - 0.1).abs() < 0.01, "a volt of offset: {mean}");
+    // The track reaches Main through its own mixer: the same shape, scaled
+    // by one constant.
+    let ratios: Vec<f32> = cv
+        .iter()
+        .zip(&main)
+        .filter(|(c, _)| c.abs() > 0.05)
+        .map(|(c, m)| m / c)
+        .collect();
+    assert!(ratios.len() > 1000);
+    assert!(
+        ratios.iter().all(|r| (r - ratios[0]).abs() < 1e-4),
+        "Main is the CV output through the mixer"
+    );
+    for block in [1, 64, 4096] {
+        assert!(
+            fixture.render_in_blocks(block).same_bits(&render),
+            "blocks of {block}"
+        );
+    }
 }

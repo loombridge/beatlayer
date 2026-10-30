@@ -160,6 +160,15 @@ impl Harness {
         harness
     }
 
+    /// A harness on `shell` and the `control` of its manually paced null
+    /// stream, drawing Live's title bar as on macOS (WP-7.17).
+    pub fn on_rig(window: Window, mut shell: Shell, control: NullControl) -> Self {
+        shell.start_audio();
+        let mut harness = Self::with_shell(window, shell);
+        harness.control = Some(control);
+        Self::titled(harness, window)
+    }
+
     /// A harness whose shell journals the open set's edits in `dir`, as
     /// the app does at start-up (WP-6.62, the crash-recovery spec, R21),
     /// and which offers the sets a crash left.
@@ -170,7 +179,27 @@ impl Harness {
         Self::with_shell(window, shell)
     }
 
+    /// A harness on the preferences kept in `dir`, over a null stream paced
+    /// by hand, with the Link toggle as the preferences have it: a second
+    /// harness on the same directory is a relaunch.
+    pub fn manual_in(window: Window, dir: &std::path::Path) -> Self {
+        let (mut shell, control) = testing::rig_in(dir);
+        shell.start_audio();
+        let mut harness = Self::as_installed(window, shell);
+        harness.control = Some(control);
+        harness
+    }
+
     fn with_shell(window: Window, mut shell: Shell) -> Self {
+        // The harness's Control Bar has Live's measured positions (L-CTRL-002
+        // is hidden there); the tests of the Link toggle show it again.
+        shell
+            .run("link.set_show_toggle", json!({ "on": false }))
+            .unwrap();
+        Self::as_installed(window, shell)
+    }
+
+    fn as_installed(window: Window, mut shell: Shell) -> Self {
         if window == Window::Second {
             // The second window of a set opens on the other main view.
             shell.run("view.toggle_second_window", json!({})).unwrap();

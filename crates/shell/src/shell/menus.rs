@@ -262,6 +262,7 @@ impl Shell {
             ids::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO => {
                 Some(self.prefs.start_transport_with_tap_tempo.0)
             }
+            bl_shell_spec::link::SET_START_STOP_SYNC => Some(self.prefs.link.start_stop_sync),
             session_launch_ids::SET_QUANTIZATION_ENABLED => Some(self.store.launch().enabled),
             SOLO_IN_PLACE => Some(self.editor.document().settings().solo_in_place),
             DELAY_COMPENSATION => Some(self.editor.document().settings().delay_compensation),

@@ -208,7 +208,11 @@ fn icon(
                 stroke,
             );
         }
-        Element::BrowserMenu | Element::MetronomeMenu | Element::CpuMenu | Element::MixerMenu => {
+        Element::BrowserMenu
+        | Element::MetronomeMenu
+        | Element::LinkMenu
+        | Element::CpuMenu
+        | Element::MixerMenu => {
             painter.add(triangle(
                 pos2(c.x - 3.0, c.y - 1.5),
                 pos2(c.x + 3.0, c.y - 1.5),

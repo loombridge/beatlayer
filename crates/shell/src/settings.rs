@@ -210,8 +210,8 @@ pub struct Preferences {
     pub link: LinkPrefs,
 }
 
-/// What the app keeps of Link between starts (the Link spec, R1 and R8):
-/// both off in a new install.
+/// What the app keeps of Link between starts (the Link spec, R1, R8 and
+/// R17): Link and Start Stop Sync off in a new install, the toggle shown.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LinkPrefs {
@@ -219,6 +219,9 @@ pub struct LinkPrefs {
     pub enabled: bool,
     /// Whether starts and stops are shared with the peers that share them.
     pub start_stop_sync: bool,
+    /// Show Link Toggle (Settings ▸ Link): whether the Control Bar shows the
+    /// Link toggle and its menu.
+    pub show_toggle: OnByDefault,
 }
 
 /// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3

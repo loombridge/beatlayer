@@ -250,6 +250,8 @@ fn controls_keep_their_live_size_times_the_zoom() {
                     | bl_ui::layout::Element::SyncInput
                     | bl_ui::layout::Element::SyncOutput
                     | bl_ui::layout::Element::ResyncExternalHardware
+                    | bl_ui::layout::Element::LinkToggle
+                    | bl_ui::layout::Element::LinkMenu
                     | bl_ui::layout::Element::New
             ) {
                 assert!(
@@ -458,9 +460,10 @@ fn the_main_window_draws_every_row_scaled_at_every_step() {
                 }
                 // Every row but the Global Amount, which the Control Bar hides
                 // where it has no room for it, and the sync lamps and the
-                // Resync button, which show only when asked for.
+                // Resync button and the Link toggle with its arrow, which show
+                // only when asked for.
                 assert!(
-                    checked >= ELEMENTS.len() - 2 + 16,
+                    checked >= ELEMENTS.len() - 4 + 16,
                     "{what}: only {checked} rows drawn"
                 );
 

@@ -119,7 +119,13 @@ pub fn region(clip: &Clip, midi: &MidiData) -> (Ticks, Ticks) {
 
 /// Where in its contents the clip plays now, if it is playing: the time it
 /// has played, brought into its loop (R23, R28).
-pub fn playhead(model: &ReadModel, track: TrackId, scene: SceneId, clip: &Clip, midi: &MidiData) -> Option<Ticks> {
+pub fn playhead(
+    model: &ReadModel,
+    track: TrackId,
+    scene: SceneId,
+    clip: &Clip,
+    midi: &MidiData,
+) -> Option<Ticks> {
     model.slots.iter().find(|status| {
         status.track == track && status.scene == scene && status.state == SlotState::Playing
     })?;

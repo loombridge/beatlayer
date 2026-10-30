@@ -10,8 +10,8 @@
 
 mod clip;
 pub mod grid;
-mod paint;
 mod pads;
+mod paint;
 mod steps;
 
 use std::collections::BTreeMap;
@@ -316,7 +316,7 @@ impl Content for Note {
         self.down
             .values()
             .filter_map(|down| match down {
-                Down::Step(step) => Some(step.clone()),
+                Down::Step(step) => Some(*step),
                 _ => None,
             })
             .collect()
@@ -356,7 +356,11 @@ impl Note {
         };
         // The strip chooses the bank by sixteen notes, or by a row of four
         // with Shift held (R13).
-        let (parts, per) = if ctx.modifiers.shift() { (32.0, 4) } else { (8.0, 16) };
+        let (parts, per) = if ctx.modifiers.shift() {
+            (32.0, 4)
+        } else {
+            (8.0, 16)
+        };
         let place = (position.clamp(0.0, 0.999) * parts) as u8;
         let first = (place * per).min(grid::LAST_FIRST_PAD);
         ctx.cx
@@ -415,7 +419,11 @@ impl Note {
                 if ctx.modifiers.shift() {
                     let overlay = frame.layout.held();
                     let memory = self.memory(track);
-                    memory.lock = if memory.lock.is_some() { None } else { Some(overlay) };
+                    memory.lock = if memory.lock.is_some() {
+                        None
+                    } else {
+                        Some(overlay)
+                    };
                     self.layout_used = true;
                 }
             }
@@ -444,16 +452,25 @@ impl Note {
         let Kind::Rack { rack, first, .. } = frame.kind else {
             return;
         };
-        let (key, by) = if self.octave_shift { ("rows", 1) } else { ("groups", 1) };
+        let (key, by) = if self.octave_shift {
+            ("rows", 1)
+        } else {
+            ("groups", 1)
+        };
         let by = if up { by } else { -by };
         if Self::can_move(first, up) {
-            ctx.cx.run("rack.move_pads", json!({ "rack": rack, key: by }));
+            ctx.cx
+                .run("rack.move_pads", json!({ "rack": rack, key: by }));
         }
     }
 
     /// Whether the bank can move that way: it stays within notes 0 to 127.
     const fn can_move(first: u8, up: bool) -> bool {
-        if up { first < grid::LAST_FIRST_PAD } else { first > 0 }
+        if up {
+            first < grid::LAST_FIRST_PAD
+        } else {
+            first > 0
+        }
     }
 
     fn page_button(&mut self, right: bool, hold: bool) {

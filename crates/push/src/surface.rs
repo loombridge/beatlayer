@@ -743,7 +743,11 @@ impl Push {
     /// follow (R26).
     fn select_track(cx: &mut Cx, track: TrackId) {
         Self::run(cx, "session.select", json!({ "track": track }));
-        Self::run(cx, "arrangement.select_tracks", json!({ "tracks": [track] }));
+        Self::run(
+            cx,
+            "arrangement.select_tracks",
+            json!({ "tracks": [track] }),
+        );
     }
 
     fn toggle_menu(&mut self, menu: Menu) {

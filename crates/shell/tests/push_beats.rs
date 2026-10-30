@@ -353,7 +353,11 @@ fn the_pads_colours_say_what_they_hold() {
     // Pad 36 is selected, 37 and 38 hold chains, 39 is empty.
     assert_eq!(rgb(&rig, "pad_0_0"), [204, 204, 204], "selected");
     assert_eq!(rgb(&rig, "pad_0_1"), track, "a chain receives it");
-    assert_eq!(rgb(&rig, "pad_0_3"), bl_push::note::grid::lighter(track), "empty");
+    assert_eq!(
+        rgb(&rig, "pad_0_3"),
+        bl_push::note::grid::lighter(track),
+        "empty"
+    );
     // Soloed and muted.
     let rack = rig.rack;
     rig.run("pad.set_solo", json!({ "rack": rack, "note": 37 }));
@@ -406,7 +410,10 @@ fn octave_and_the_strip_move_the_bank_and_the_app_moves_the_pads() {
         .iter()
         .map(|v| v.as_u64().unwrap())
         .collect();
-    assert!(lit[8] == 7 && lit[11] == 7 && lit[0] == 0 && lit[20] == 0, "{lit:?}");
+    assert!(
+        lit[8] == 7 && lit[11] == 7 && lit[0] == 0 && lit[20] == 0,
+        "{lit:?}"
+    );
 
     // The app moves the view; the pads follow, and the end of the range
     // turns Octave Up off.
@@ -528,12 +535,19 @@ fn a_velocity_pad_sets_the_velocity_new_steps_take() {
     rig.tap_pad(4, 0);
     rig.pass(20);
     let (_, midi) = rig.clip().expect("a clip");
-    assert_eq!(midi.notes.iter().map(|n| n.velocity).collect::<Vec<_>>(), [127]);
+    assert_eq!(
+        midi.notes.iter().map(|n| n.velocity).collect::<Vec<_>>(),
+        [127]
+    );
     rig.tap_pad(0, 4);
     assert_eq!(rig.note()["velocity"], 8);
     rig.tap_pad(4, 1);
     let (_, midi) = rig.clip().unwrap();
-    let mut velocities: Vec<_> = midi.notes.iter().map(|n| (n.start.get(), n.velocity)).collect();
+    let mut velocities: Vec<_> = midi
+        .notes
+        .iter()
+        .map(|n| (n.start.get(), n.velocity))
+        .collect();
     velocities.sort_unstable();
     assert_eq!(velocities[1].1, 8);
 }
@@ -675,7 +689,11 @@ fn steps_show_their_notes_and_triplet_sizes_darken_two_columns() {
         rig.pass(40);
         let (_, midi) = rig.clip().unwrap();
         assert_eq!(midi.notes.iter().next().unwrap().mute, mute);
-        let expected = if mute { bl_push::note::grid::lighter(colour) } else { loud };
+        let expected = if mute {
+            bl_push::note::grid::lighter(colour)
+        } else {
+            loud
+        };
         assert_eq!(rgb(&rig, "pad_4_0"), expected);
     }
 
@@ -694,7 +712,14 @@ fn steps_show_their_notes_and_triplet_sizes_darken_two_columns() {
     assert_eq!(rig.clip().unwrap().1.notes.len(), notes, "they do nothing");
     // Step 7 of a triplet row is at the sixth place.
     rig.tap_pad(5, 0);
-    let mut starts: Vec<i64> = rig.clip().unwrap().1.notes.iter().map(|n| n.start.get()).collect();
+    let mut starts: Vec<i64> = rig
+        .clip()
+        .unwrap()
+        .1
+        .notes
+        .iter()
+        .map(|n| n.start.get())
+        .collect();
     starts.sort_unstable();
     assert_eq!(starts, [0, 6 * (BAR / 24)]);
 }
@@ -728,7 +753,10 @@ fn loop_length_pads_set_the_loop() {
     rig.pass(40);
     let (_, midi) = rig.clip().unwrap();
     assert!(midi.looping);
-    assert_eq!((midi.loop_start.get(), midi.loop_end.unwrap().get()), (0, 3 * BAR));
+    assert_eq!(
+        (midi.loop_start.get(), midi.loop_end.unwrap().get()),
+        (0, 3 * BAR)
+    );
     assert_eq!(rig.steps(), steps + 1, "one undo step");
     assert_eq!(lit(&rig, 0, 5), 122, "pages 1 and 2 are in view");
     assert_eq!(lit(&rig, 0, 6), 123, "page 3 is in the loop, out of view");
@@ -740,20 +768,30 @@ fn loop_length_pads_set_the_loop() {
     rig.pass(20);
     assert!(rig.sim.release_pad(0, 5));
     rig.pass(20);
-    assert_eq!(rig.clip().unwrap().1.loop_start.get(), 0, "one tap changes nothing");
+    assert_eq!(
+        rig.clip().unwrap().1.loop_start.get(),
+        0,
+        "one tap changes nothing"
+    );
     assert!(rig.sim.press_pad(0, 5, 100));
     rig.pass(20);
     assert!(rig.sim.release_pad(0, 5));
     rig.pass(40);
     let (_, midi) = rig.clip().unwrap();
-    assert_eq!((midi.loop_start.get(), midi.loop_end.unwrap().get()), (BAR, 2 * BAR));
+    assert_eq!(
+        (midi.loop_start.get(), midi.loop_end.unwrap().get()),
+        (BAR, 2 * BAR)
+    );
     assert_eq!(rig.steps(), steps + 1);
 
     // A tap outside the loop, on page 5.
     let steps = rig.steps();
     rig.tap_pad(1, 4);
     let (_, midi) = rig.clip().unwrap();
-    assert_eq!((midi.loop_start.get(), midi.loop_end.unwrap().get()), (4 * BAR, 5 * BAR));
+    assert_eq!(
+        (midi.loop_start.get(), midi.loop_end.unwrap().get()),
+        (4 * BAR, 5 * BAR)
+    );
     assert_eq!(rig.steps(), steps + 1);
     assert_eq!(rig.note()["page"], 5, "the pair that holds page 5 shows");
 }
@@ -764,13 +802,19 @@ fn loop_length_pads_set_the_loop() {
 #[test]
 fn the_page_buttons_and_a_loop_pad_tap_stop_following() {
     let mut rig = Rig::new();
-    rig.run("session.set_quantization", json!({ "quantization": "none" }));
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
     rig.tap_pad(4, 0);
     rig.pass(40);
     assert_eq!(rig.note()["following"], true);
     rig.tap("page_right");
     let note = rig.note();
-    assert_eq!((note["page"].clone(), note["following"].clone()), (json!(3), json!(false)));
+    assert_eq!(
+        (note["page"].clone(), note["following"].clone()),
+        (json!(3), json!(false))
+    );
     rig.tap("page_left");
     assert_eq!(rig.note()["page"], 1);
     rig.hold("page_right");
@@ -780,7 +824,11 @@ fn the_page_buttons_and_a_loop_pad_tap_stop_following() {
     rig.tap_pad(0, 4);
     assert_eq!(rig.note()["following"], false);
     let (_, midi) = rig.clip().unwrap();
-    assert_eq!((midi.loop_start.get(), midi.loop_end), (0, None), "the loop is as it was");
+    assert_eq!(
+        (midi.loop_start.get(), midi.loop_end),
+        (0, None),
+        "the loop is as it was"
+    );
 }
 
 // Spec: push-2-notes R28, R23. The step area follows the page that plays:
@@ -789,7 +837,10 @@ fn the_page_buttons_and_a_loop_pad_tap_stop_following() {
 #[test]
 fn the_step_area_follows_the_page_that_plays() {
     let mut rig = Rig::new();
-    rig.run("session.set_quantization", json!({ "quantization": "none" }));
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
     rig.tap_pad(4, 0);
     rig.pass(40);
     // Hold page 1 and tap page 4: the loop is four bars.
@@ -925,7 +976,10 @@ fn held_steps_are_exposed() {
 #[test]
 fn the_pads_notes_reach_the_armed_track_and_its_recording() {
     let mut rig = Rig::new();
-    rig.run("session.set_quantization", json!({ "quantization": "none" }));
+    rig.run(
+        "session.set_quantization",
+        json!({ "quantization": "none" }),
+    );
     rig.run("transport.set_recording", json!({ "recording": true }));
     rig.run("transport.play", json!({}));
     rig.pass(100);
@@ -974,11 +1028,9 @@ fn an_arm_by_selection_isnt_saved() {
     let dir = std::env::temp_dir().join(format!("bl-push-arm-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Armed.blset");
-    let result: bl_shell::commands::SetResult = serde_json::from_value(rig.run(
-        "set.save_as",
-        json!({ "path": path.to_string_lossy() }),
-    ))
-    .unwrap();
+    let result: bl_shell::commands::SetResult =
+        serde_json::from_value(rig.run("set.save_as", json!({ "path": path.to_string_lossy() })))
+            .unwrap();
     assert!(armed(&rig, rig.track), "still armed here");
     let (mut other, _) = testing::rig();
     other

@@ -67,8 +67,7 @@ fn records(model: &ReadModel, track: TrackId) -> bool {
         .slots
         .iter()
         .any(|s| s.track == track && s.state == SlotState::Recording)
-        || (model.transport.recording
-            && model.document.track(track).is_some_and(|t| t.mixer().arm))
+        || (model.transport.recording && model.document.track(track).is_some_and(|t| t.mixer().arm))
 }
 
 impl Note {
@@ -156,10 +155,9 @@ impl Note {
                     Role::Velocity(velocity) if self.velocity == Some(velocity) => {
                         Shade::Fixed(fixed::WHITE)
                     }
-                    Role::Velocity(velocity) => Shade::Rgb(scaled(
-                        track_colour,
-                        25 + u16::from(velocity) * 75 / 127,
-                    )),
+                    Role::Velocity(velocity) => {
+                        Shade::Rgb(scaled(track_colour, 25 + u16::from(velocity) * 75 / 127))
+                    }
                     Role::Loop(page) => self.loop_shade(&frame, page, edited, playhead, recording),
                     Role::Step(index) => {
                         self.step_shade(&frame, index, edited, playhead, recording, clip_colour)
@@ -176,7 +174,9 @@ impl Note {
         };
         paint.lights.white(54, can_down, false);
         paint.lights.white(55, can_up, false);
-        paint.lights.white(cc::LAYOUT, true, frame.overlay.is_some());
+        paint
+            .lights
+            .white(cc::LAYOUT, true, frame.overlay.is_some());
         paint.lights.white(62, edited.is_some(), false);
         paint.lights.white(63, edited.is_some(), false);
         for row in 0..8u8 {

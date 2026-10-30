@@ -3848,5 +3848,9 @@ fn an_arm_by_selection_is_drawn_in_the_themes_pink() {
     assert_eq!(faces(&mut h, colours.arm_selection.0), 0);
     bl_shell::testing::arm_by_selection(&mut h.shell, t[0]);
     assert_eq!(faces(&mut h, colours.record.0), 0);
-    assert_eq!(faces(&mut h, colours.arm_selection.0), 1, "pink by selection");
+    assert_eq!(
+        faces(&mut h, colours.arm_selection.0),
+        1,
+        "pink by selection"
+    );
 }

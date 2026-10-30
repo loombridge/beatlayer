@@ -1956,7 +1956,10 @@ fn every_command_runs_by_id() {
     );
     agent.run("chain.set_play", json!({ "chain": pad, "play": 62 }));
     agent.run("chain.set_choke", json!({ "chain": pad, "choke": 2 }));
-    agent.run("chain.set_push_colour", json!({ "chain": pad, "colour": 7 }));
+    agent.run(
+        "chain.set_push_colour",
+        json!({ "chain": pad, "colour": 7 }),
+    );
     agent.run(
         "chain.set_send",
         json!({ "chain": pad, "to": ret, "level": 0.5 }),

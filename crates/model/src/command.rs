@@ -5279,11 +5279,7 @@ impl Document {
             }
             Command::SetChainPushColour { chain, colour } => {
                 if let Some(colour) = colour {
-                    check_value(
-                        "pad colour",
-                        f64::from(*colour),
-                        *colour < CHAIN_COLOURS,
-                    )?;
+                    check_value("pad colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
                 }
                 self.edit_drum_chain(*chain, false, |c| c.push_colour = *colour)
             }

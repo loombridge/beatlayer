@@ -17,9 +17,9 @@ use bl_project::preset::Preset;
 use bl_shell_spec::devices::{ChainRow, Grouped, NewDevice};
 use bl_shell_spec::pads::{
     DrumRow, ExtractChainArgs, Extracted, GroupToDrumRackArgs, MovePadsArgs, PADS_PER_ROW,
-    PadCopyArgs,
-    PADS_SHOWN, PadArgs, PadDropArgs, PadDropped, PadFrame, PadHotSwapArgs, PadKind, PadPushColourArgs,
-    PadRenameArgs, PadState, PadSwapArgs, PadSwitch, PadSwitchArgs, ReturnChoice, ReturnRow,
+    PADS_SHOWN, PadArgs, PadCopyArgs, PadDropArgs, PadDropped, PadFrame, PadHotSwapArgs, PadKind,
+    PadPushColourArgs, PadRenameArgs, PadState, PadSwapArgs, PadSwitch, PadSwitchArgs,
+    ReturnChoice, ReturnRow,
 };
 
 use super::{DeviceError, DeviceView, Outcome, new_device, preset_path};
@@ -1086,11 +1086,11 @@ impl DeviceView {
                 for chain in old {
                     editor.apply(Command::RemoveChain { chain })?;
                 }
-                let mut index = editor
+                let end = editor
                     .document()
                     .device(rack.id)
                     .map_or(0, Self::drum_chain_end);
-                for mut chain in source {
+                for (index, mut chain) in (end..).zip(source) {
                     chain.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
                     chain.id = editor.new_id();
                     chain.receive = Receive::Note(to);
@@ -1100,7 +1100,6 @@ impl DeviceView {
                         index,
                         chain,
                     })?;
-                    index += 1;
                 }
                 Ok::<_, bl_model::EditError>(())
             })

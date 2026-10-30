@@ -34,7 +34,10 @@ impl Note {
             length,
         };
         let velocity = self.velocity.unwrap_or(VELOCITY);
-        match frame.clip.and_then(|id| clip::midi(model, id).map(|(_, midi)| (id, midi))) {
+        match frame
+            .clip
+            .and_then(|id| clip::midi(model, id).map(|(_, midi)| (id, midi)))
+        {
             Some((id, midi)) => {
                 let places = clip::places(midi, key, start, start + length);
                 if ctx.modifiers.has(cc::MUTE) {
@@ -142,9 +145,9 @@ impl Note {
             Down::Loop(first) => Some(*first),
             _ => None,
         });
-        let double = self
-            .last_loop_tap
-            .is_some_and(|(last, at)| last == page && ctx.at.saturating_duration_since(at) <= DOUBLE_TAP);
+        let double = self.last_loop_tap.is_some_and(|(last, at)| {
+            last == page && ctx.at.saturating_duration_since(at) <= DOUBLE_TAP
+        });
         self.last_loop_tap = Some((page, ctx.at));
         let (low, high) = clip::region(clip, midi);
         let outside = from >= high || to <= low;
@@ -163,14 +166,7 @@ impl Note {
 
     /// Sets the loop from page `first`'s start to page `last`'s end, and
     /// turns it on, as one undo step (R27).
-    fn set_loop(
-        &mut self,
-        clip: ClipId,
-        size: grid::Size,
-        first: u8,
-        last: u8,
-        ctx: &mut Ctx<'_>,
-    ) {
+    fn set_loop(&mut self, clip: ClipId, size: grid::Size, first: u8, last: u8, ctx: &mut Ctx<'_>) {
         Self::group(
             ctx.cx,
             vec![
@@ -182,7 +178,10 @@ impl Note {
                         "end": size.page_start(last + 1),
                     }),
                 ),
-                ("clip.set_loop_enabled", json!({ "clip": clip, "enabled": true })),
+                (
+                    "clip.set_loop_enabled",
+                    json!({ "clip": clip, "enabled": true }),
+                ),
             ],
         );
         self.pair = first / 2;
@@ -218,7 +217,8 @@ impl Note {
             && let Some((c, midi)) = clip::midi(model, id)
             && let Some(at) = clip::playhead(model, frame.track, scene, c, midi)
         {
-            let page = (at.get() / frame.size.page().get().max(1)).clamp(0, i64::from(grid::PAGES) - 1);
+            let page =
+                (at.get() / frame.size.page().get().max(1)).clamp(0, i64::from(grid::PAGES) - 1);
             self.pair = u8::try_from(page / 2).unwrap_or(0);
         }
         self.summarise(&frame);
@@ -248,7 +248,10 @@ impl Note {
                         "velocity": velocity,
                     }),
                 ),
-                ("clip.set_loop_enabled", json!({ "clip": clip, "enabled": true })),
+                (
+                    "clip.set_loop_enabled",
+                    json!({ "clip": clip, "enabled": true }),
+                ),
                 ("session.launch", json!({ "track": track, "scene": scene })),
             ],
         );

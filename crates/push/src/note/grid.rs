@@ -222,7 +222,9 @@ pub fn role(
         };
     }
     if layout == Layout::Pads {
-        let note = u16::from(first) + u16::from(column / 4) * 32 + u16::from(row) * 4
+        let note = u16::from(first)
+            + u16::from(column / 4) * 32
+            + u16::from(row) * 4
             + u16::from(column % 4);
         return drum(note).map_or(Role::Off, Role::Drum);
     }
@@ -324,9 +326,15 @@ mod tests {
     fn a_triplet_size_has_six_steps_to_a_row() {
         let size = Size(2);
         assert!(size.triplet());
-        assert_eq!(role(Layout::LoopSelector, None, 36, size, 4, 5), Role::Step(5));
+        assert_eq!(
+            role(Layout::LoopSelector, None, 36, size, 4, 5),
+            Role::Step(5)
+        );
         assert_eq!(role(Layout::LoopSelector, None, 36, size, 4, 6), Role::Off);
-        assert_eq!(role(Layout::LoopSelector, None, 36, size, 5, 0), Role::Step(6));
+        assert_eq!(
+            role(Layout::LoopSelector, None, 36, size, 5, 0),
+            Role::Step(6)
+        );
         assert_eq!(size.ticks(), Ticks::WHOLE / 24);
         assert_eq!(Size::default().page(), Ticks::WHOLE);
     }
@@ -338,7 +346,14 @@ mod tests {
         assert_eq!(Layout::LoopSelector.held(), Overlay::Velocities);
         assert_eq!(Layout::Velocities.held(), Overlay::LoopPads);
         assert_eq!(
-            role(Layout::Pads, Some(Overlay::LoopPads), 36, Size::default(), 0, 4),
+            role(
+                Layout::Pads,
+                Some(Overlay::LoopPads),
+                36,
+                Size::default(),
+                0,
+                4
+            ),
             Role::Loop(0)
         );
     }

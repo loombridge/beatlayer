@@ -55,8 +55,7 @@ impl Note {
     /// become since (R2).
     pub(super) fn pad_off(&mut self, pad: Pad, ctx: &mut Ctx<'_>) {
         if let Some(Down::Played(note)) = self.down.remove(&(pad.row, pad.column)) {
-            ctx.cx
-                .play_at(ctx.at, MidiMessage::note_off(0, note));
+            ctx.cx.play_at(ctx.at, MidiMessage::note_off(0, note));
         }
     }
 
@@ -143,7 +142,12 @@ impl Note {
         if let Some(id) = frame.clip
             && let Some((_, midi)) = clip::midi(model, id)
         {
-            let places = clip::places(midi, note, bl_core::time::Ticks(0), bl_core::time::Ticks(i64::MAX));
+            let places = clip::places(
+                midi,
+                note,
+                bl_core::time::Ticks(0),
+                bl_core::time::Ticks(i64::MAX),
+            );
             if !places.is_empty() {
                 ctx.cx
                     .run("note.delete", json!({ "clip": id, "notes": places }));
@@ -153,20 +157,26 @@ impl Note {
         if let Kind::Rack { rack, .. } = frame.kind
             && filled
         {
-            ctx.cx.run("pad.delete", json!({ "rack": rack, "note": note }));
+            ctx.cx
+                .run("pad.delete", json!({ "rack": rack, "note": note }));
         }
     }
 
     /// Duplicate and a pad, then another: the first pad's chains replace the
     /// second's (R17).
     fn duplicate_pad(&mut self, frame: &Frame, note: u8, filled: bool, ctx: &mut Ctx<'_>) {
-        let Kind::Rack { rack, filled: all, .. } = frame.kind else {
+        let Kind::Rack {
+            rack, filled: all, ..
+        } = frame.kind
+        else {
             return;
         };
         match self.source.take() {
             Some(Source::Pad(from)) if from != note && all >> from & 1 == 1 => {
-                ctx.cx
-                    .run("pad.copy", json!({ "rack": rack, "from": from, "to": note }));
+                ctx.cx.run(
+                    "pad.copy",
+                    json!({ "rack": rack, "from": from, "to": note }),
+                );
             }
             _ if filled => self.source = Some(Source::Pad(note)),
             _ => {}

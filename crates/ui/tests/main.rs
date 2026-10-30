@@ -41,6 +41,7 @@ mod file_manager;
 mod floating_windows;
 mod groove_pool;
 mod info_view;
+mod instant_mappings;
 mod keymap;
 mod keymap_sweep;
 mod launch_panel;

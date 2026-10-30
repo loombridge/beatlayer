@@ -735,7 +735,7 @@ impl MixerUi {
 
 /// Scrolls a mixer so the track column at `index` is wholly in view, if it
 /// isn't.
-fn scroll_into_view(
+pub(crate) fn scroll_into_view(
     layout: &MixerLayout,
     tracks: &[TrackColumn],
     index: usize,

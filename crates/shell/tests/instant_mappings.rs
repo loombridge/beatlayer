@@ -747,3 +747,53 @@ fn session_state_reports_each_rings_tracks_and_scenes() {
     assert_eq!(state["rings"][0]["tracks"][0], json!(columns[1]));
     assert_eq!(state["rings"][1]["tracks"][0], json!(columns[0]), "its own");
 }
+
+// Spec: control-surfaces R22. A relative knob steps the parameter as a
+// relative mapping does, and instant mappings are never listed as mappings
+// or saved with the set.
+#[test]
+fn a_relative_knob_steps_the_parameter_and_leaves_no_mapping() {
+    let mut rig = Rig::new();
+    let audio = rig.track(TrackKind::Audio);
+    rig.select(audio);
+    let utility = rig.add(UTILITY, "audio_effect");
+    let gain = rig.banks(utility)[0].1[0];
+    rig.run(
+        "device.set_param",
+        json!({ "device": utility, "param": gain, "value": 0.5 }),
+    );
+    let start = rig.param(utility, gain).unwrap();
+    // Two's complement: 1 is one step up, 127 one step down.
+    rig.cc(8, 1);
+    rig.cc(8, 1);
+    let up = rig.param(utility, gain).unwrap();
+    assert!(up > start, "{start} to {up}");
+    rig.cc(8, 127);
+    let down = rig.param(utility, gain).unwrap();
+    assert!(down < up && down > start, "{up} to {down}");
+    assert_eq!(
+        rig.run("remote.mappings", json!({}))["mappings"],
+        json!([]),
+        "an instant mapping is no mapping"
+    );
+}
+
+// Spec: control-surfaces R7. A knob turned several times is one undo step,
+// which ends when it has rested half a second.
+#[test]
+fn a_knob_turned_several_times_is_one_undo_step() {
+    let mut rig = Rig::new();
+    let audio = rig.track(TrackKind::Audio);
+    rig.select(audio);
+    let utility = rig.add(UTILITY, "audio_effect");
+    let steps = rig.steps();
+    for value in [10, 40, 90] {
+        rig.cc(0, value);
+    }
+    assert!(rig.shell.gesture_under_way(), "the step stays open");
+    rig.pass(600);
+    assert!(!rig.shell.gesture_under_way(), "it rested");
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+    let gain = rig.banks(utility)[0].1[0];
+    assert!(rig.param(utility, gain).is_some());
+}

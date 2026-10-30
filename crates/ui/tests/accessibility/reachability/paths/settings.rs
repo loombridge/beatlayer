@@ -65,6 +65,8 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // Instant mappings (WP-7.6): a surface's own buttons move its ring
         // and its banks, and an agent reads the banks without one; Lock to
         // is the device menu's.
+        ("control_surface.lock", Exception(DEVICE_MENU)),
+        ("control_surface.unlock", Exception(DEVICE_MENU)),
         (
             "control_surface.move_ring",
             Exception(Equivalent("a surface's arrow and page buttons")),

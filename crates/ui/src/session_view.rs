@@ -20,6 +20,7 @@ use bl_core::time::TICKS_PER_QUARTER;
 use bl_engine::SlotState;
 use bl_model::{ClipId, Document, SceneId, TrackId, TrackKind};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
+use bl_shell::control_surface_commands::RingBox;
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as mixer_ids;
 use bl_shell::session_view_commands as ids;
@@ -34,7 +35,7 @@ use serde_json::{Value, json};
 
 use crate::layout::mixer::{
     Column, ColumnKind, MainStatusCells, MixerLayout, SLOT_ROW, SceneRow, SessionLayout,
-    StatusCells,
+    StatusCells, TrackColumn,
 };
 use crate::main_window::UiEvent;
 use crate::session_menus::{Rename, SessionMenus};
@@ -127,6 +128,9 @@ pub struct GridUi {
     hover: Option<(TrackId, SceneId)>,
     /// The slot and scene menus (WP-6.56).
     menus: SessionMenus,
+    /// How many times each surface's ring had been moved when the grid last
+    /// looked, so a move brings the ring into view once (R37).
+    rings_seen: Vec<u64>,
 }
 
 impl GridUi {
@@ -171,12 +175,8 @@ impl GridUi {
         let columns = shell.mixer_columns();
         let state = shell.session().state();
         let scroll_y = state.scroll_y as f32;
-        let layout = crate::mixer::mixer_layout(
-            shell,
-            session.slots,
-            MixerOf::Session,
-            &crate::mixer::folds(shell, &columns),
-        );
+        let folds = crate::mixer::folds(shell, &columns);
+        let layout = crate::mixer::mixer_layout(shell, session.slots, MixerOf::Session, &folds);
         let scenes: Vec<(SceneId, String)> = doc
             .scenes()
             .map(|scene| (scene.id, scene.name.clone()))
@@ -211,6 +211,7 @@ impl GridUi {
             }
         }
 
+        let rings = shell.session_rings();
         // Only the rows on screen are built; one extra above and below keeps
         // a partly scrolled row whole.
         let first = session.first_scene(scroll_y).saturating_sub(1);
@@ -261,9 +262,42 @@ impl GridUi {
                     &mut grid, shell, theme, track, *scene, &name, cell, selected, tab, events,
                 );
                 self.built += 1;
+                // Spec: session-view R38. A slot inside a ring says whose.
+                let held: Vec<&str> = rings
+                    .iter()
+                    .filter(|r| r.tracks.contains(&track) && r.scenes.contains(scene))
+                    .map(|r| r.surface.as_str())
+                    .collect();
+                if !held.is_empty() {
+                    let note = held
+                        .iter()
+                        .map(|surface| format!("in the ring of {surface}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    grid.ctx()
+                        .accesskit_node_builder(slot_id(track, *scene), |node| {
+                            let text = match node.description() {
+                                Some(text) => format!("{text}; {note}"),
+                                None => note,
+                            };
+                            node.set_description(text);
+                        });
+                }
             }
         }
 
+        // Spec: session-view R36, R37, R38. Each running surface's ring is
+        // drawn over the slots, and a ring a surface moved is brought into
+        // view.
+        self.show_rings(
+            &grid,
+            shell,
+            theme,
+            (session, &layout, &folds.columns),
+            (&columns, scroll_y),
+            &rings,
+            events,
+        );
         self.status_row(ui, shell, theme, session, &layout, &columns, events);
         self.keys(&grid, shell, &columns, &scenes, events);
         self.take_drop(&grid, shell, session, &layout, &columns, &scenes, events);
@@ -323,6 +357,101 @@ impl GridUi {
                     json!({ "clip": clip, "track": to_track, "scene": to_scene }),
                 )));
             }
+        }
+    }
+
+    /// Draws each running surface's ring as a border over the grid, in its
+    /// row's colour, and brings a ring a surface has just moved into view
+    /// (session view R36, R37).
+    #[expect(clippy::too_many_arguments, reason = "the rings' inputs")]
+    fn show_rings(
+        &mut self,
+        grid: &Ui,
+        shell: &Shell,
+        theme: &Theme,
+        (session, layout, tracks): (&SessionLayout, &MixerLayout, &[TrackColumn]),
+        (columns, scroll_y): (&[TrackId], f32),
+        rings: &[RingBox],
+        events: &mut Vec<UiEvent>,
+    ) {
+        let doc = shell.editor().document();
+        let returns: Vec<TrackId> = doc.returns().collect();
+        // Where a ring's track sits across the grid, in view or not.
+        let span = |track: TrackId| -> Option<(f32, f32)> {
+            if let Some(index) = columns.iter().position(|t| *t == track) {
+                let (left, right) = layout.track_span(tracks, index)?;
+                let origin = layout.tracks.left() - layout.scroll;
+                return Some((origin + left, origin + right));
+            }
+            let index = returns.iter().position(|t| *t == track)?;
+            let column = layout.returns.iter().find(|c| c.index == index)?;
+            Some((column.rect.left(), column.rect.right()))
+        };
+        let moves = shell.ring_moves();
+        self.rings_seen.resize(moves.len(), 0);
+        for ring in rings {
+            let row = usize::from(ring.row).saturating_sub(1);
+            let moved = moves.get(row).is_some_and(|m| self.rings_seen[row] != *m);
+            if let Some(count) = moves.get(row) {
+                self.rings_seen[row] = *count;
+            }
+            if moved && self.drag.is_none() {
+                // The least it takes to show the first track and scene.
+                if let Some(index) = ring
+                    .tracks
+                    .first()
+                    .and_then(|t| columns.iter().position(|c| c == t))
+                {
+                    crate::mixer::scroll_into_view(layout, tracks, index, MixerOf::Session, events);
+                }
+                if let Some(scene) = ring.scenes.first().and_then(|s| doc.scene_position(*s)) {
+                    let top = SLOT_ROW * scene as f32;
+                    let view = session.slots.height();
+                    let by = if top < scroll_y {
+                        top - scroll_y
+                    } else if top + SLOT_ROW > scroll_y + view {
+                        top + SLOT_ROW - scroll_y - view
+                    } else {
+                        0.0
+                    };
+                    if by != 0.0 {
+                        events.push(UiEvent::Invoke(Invocation::new(
+                            ids::SCROLL,
+                            json!({ "y": by }),
+                        )));
+                    }
+                }
+            }
+        }
+        // The lower row's ring is drawn on top.
+        let painter = grid.painter().with_clip_rect(session.slots);
+        for ring in rings {
+            let spans: Vec<(f32, f32)> = ring.tracks.iter().filter_map(|t| span(*t)).collect();
+            let (Some(left), Some(right)) = (
+                spans.iter().map(|s| s.0).reduce(f32::min),
+                spans.iter().map(|s| s.1).reduce(f32::max),
+            ) else {
+                continue;
+            };
+            let colour = theme.ring_colour(usize::from(ring.row).saturating_sub(1));
+            let stroke = Stroke::new(2.0, colour);
+            let first = ring.scenes.first().and_then(|s| doc.scene_position(*s));
+            let Some(first) = first else {
+                // A ring with no scenes is a line under the title bars.
+                let y = session.slots.top() + 1.0;
+                painter.line_segment([pos2(left, y), pos2(right, y)], stroke);
+                continue;
+            };
+            let top = session.scene_row(first, scroll_y).top();
+            let bottom = session
+                .scene_row(first + ring.scenes.len() - 1, scroll_y)
+                .bottom();
+            painter.rect_stroke(
+                Rect::from_min_max(pos2(left, top), pos2(right, bottom)),
+                0.0,
+                stroke,
+                StrokeKind::Inside,
+            );
         }
     }
 

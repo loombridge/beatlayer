@@ -138,6 +138,23 @@ pub struct Theme {
 }
 
 impl Theme {
+    /// The colour of the border of the session ring of row `row` of the
+    /// Control Surfaces table, counting from 0: six theme colours in
+    /// Beatlayer's own order, the first red (the Session View spec, R36).
+    #[must_use]
+    pub fn ring_colour(&self, row: usize) -> Color32 {
+        let c = &self.colors;
+        [
+            c.record,
+            c.pending,
+            c.meter,
+            c.accent,
+            c.modulation,
+            c.automation,
+        ][row % 6]
+            .0
+    }
+
     /// The colour of swatch `index` (0 to 69) of the palette of 5 rows of 14:
     /// the top row is the theme's track colours, the second and third mix
     /// 30 % and 60 % of the way towards white, the fourth and fifth 30 % and

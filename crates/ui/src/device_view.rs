@@ -29,6 +29,7 @@ use std::f32::consts::FRAC_PI_2;
 
 use bl_model::{AutomationTarget, DeviceId, DeviceRole, TrackId};
 use bl_shell::context_menus;
+use bl_shell::control_surface_commands as control_surface_ids;
 use bl_shell::device_commands::{
     self as ids, DEVICE_GAP, DeviceFrame, DeviceViewState, FloatingWindow, TITLE_BAR_HEIGHT,
 };
@@ -628,6 +629,29 @@ impl DeviceViewUi {
             // A rack's strip holds its view selectors under the activator.
             controls.title.min.y = controls.activator.bottom() + 6.0 + 3.0 * (BUTTON + 3.0);
         }
+        // Spec: device-chains R42. While a surface is locked to the device
+        // its title bar shows the hand icon straight after the name, the
+        // name giving up the room; a folded strip shows it under the name.
+        if !frame.locks.is_empty() {
+            let step = BUTTON + 3.0;
+            let hot_swap = controls.hot_swap.center();
+            let hand = if strip {
+                let hand = Rect::from_center_size(
+                    pos2(hot_swap.x, hot_swap.y - step),
+                    vec2(BUTTON, BUTTON),
+                );
+                controls.title.max.y = hand.top() - 4.0;
+                hand
+            } else {
+                let hand = Rect::from_center_size(
+                    pos2(hot_swap.x - step, hot_swap.y),
+                    vec2(BUTTON, BUTTON),
+                );
+                controls.title.max.x = hand.left() - 4.0;
+                hand
+            };
+            controls.hand = Some(hand);
+        }
         painter.rect_filled(bar, theme.sizes.corner, bar_colour);
         if frame.floating && !window {
             // Drawn as floating: outlined in the accent.
@@ -739,6 +763,9 @@ impl DeviceViewUi {
                 }
                 if let (Some(rect), Some(switch)) = (controls.switch, frame.title_switch()) {
                     self.title_switch(ui, theme, frame, &switch, rect, events);
+                }
+                if let Some(hand) = controls.hand {
+                    hand_icon(ui, frame, text_colour, hand);
                 }
                 self.round_button(ui, theme, frame, "hot_swap", controls.hot_swap, events);
                 self.round_button(ui, theme, frame, "save", controls.save, events);
@@ -1328,6 +1355,38 @@ impl DeviceViewUi {
                 crate::menus::take_focus_first(ui, &response);
             }
         }
+        // Spec: device-chains R41 (C-DEVICE-014). Lock to, after Save as
+        // Default Preset and before the device's own items: one item per
+        // running surface that can lock, ticked while it is locked to this
+        // device.
+        ui.separator();
+        let surfaces = shell.lockable_surfaces();
+        if surfaces.is_empty() {
+            let text = "No control surface that can lock to a device is running.";
+            let response = ui.add_enabled(false, egui::Button::new("Lock to Control Surface"));
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(text.to_owned());
+            });
+            response.on_disabled_hover_text(text);
+        }
+        for (row, name) in surfaces {
+            let locked = frame.locks.iter().any(|l| l.row == row);
+            let response = ui.button(format!("{}Lock to {name}", if locked { "✔ " } else { "" }));
+            crate::menus::register_item(ui.ctx(), &response);
+            if response.clicked() {
+                let (id, args) = if locked {
+                    (control_surface_ids::UNLOCK, json!({ "row": row }))
+                } else {
+                    (
+                        control_surface_ids::LOCK,
+                        json!({ "row": row, "device": frame.id }),
+                    )
+                };
+                invoke(events, id, args);
+                ui.close();
+            }
+            crate::menus::take_focus_first(ui, &response);
+        }
         // Spec: multisampler R29. The multisampler's own options follow the
         // device's (C-DEVICE-015).
         if frame.multisampler.is_some() {
@@ -1784,6 +1843,9 @@ struct Controls {
     /// (L-DEV-004), before the name.
     switch: Option<Rect>,
     title: Rect,
+    /// The hand icon of a device locked to a control surface, beside the
+    /// name and before Hot-Swap Presets (device chains R42).
+    hand: Option<Rect>,
     hot_swap: Rect,
     save: Rect,
     options: Rect,
@@ -1836,6 +1898,7 @@ fn unfolded_layout(rect: Rect, expandable: bool, plugin: bool, switch: bool) -> 
             configure,
             switch,
             title,
+            hand: None,
             hot_swap,
             save,
             options,
@@ -1882,12 +1945,52 @@ fn folded_layout(rect: Rect) -> (Rect, Controls) {
             configure: None,
             switch: None,
             title,
+            hand: None,
             hot_swap,
             save,
             options,
             dock: None,
         },
     )
+}
+
+/// What a locked device's hand icon says: the surfaces locked to it, by name
+/// (device chains R42).
+fn locked_to(frame: &DeviceFrame) -> String {
+    let names: Vec<&str> = frame.locks.iter().map(|l| l.surface.as_str()).collect();
+    format!("Locked to {}", names.join(", "))
+}
+
+/// The hand icon of a device locked to a control surface (Beatlayer's own
+/// drawing): hovering it names the surfaces in the Status Bar, and it
+/// reaches assistive technology as an image with the same text (device chains
+/// R42).
+fn hand_icon(ui: &mut Ui, frame: &DeviceFrame, ink: Color32, rect: Rect) {
+    let response = ui.interact(rect, control_id(frame.id, "locked"), Sense::hover());
+    let painter = ui.painter_at(rect.expand(1.0));
+    let (c, r) = (rect.center(), BUTTON / 2.0);
+    let stroke = Stroke::new(1.2, ink);
+    // The palm, four fingers up from it and the thumb out to the side.
+    painter.rect_filled(
+        Rect::from_center_size(c + vec2(0.0, r * 0.35), vec2(r * 1.3, r * 0.9)),
+        1.0,
+        ink,
+    );
+    for i in 0..4_u8 {
+        let x = c.x - r * 0.45 + f32::from(i) * r * 0.3;
+        let top = c.y - r * (if i == 1 || i == 2 { 0.95 } else { 0.8 });
+        painter.line_segment([pos2(x, top), pos2(x, c.y)], stroke);
+    }
+    painter.line_segment([c + vec2(-r * 0.6, r * 0.1), c + vec2(-r, -r * 0.3)], stroke);
+    let text = locked_to(frame);
+    if response.hovered() {
+        crate::mapping::set_hover_lock(ui.ctx(), Some(text.clone()));
+    }
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Other, true, &text));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(Role::Image);
+        node.set_label(text.clone());
+    });
 }
 
 fn focus_ring(ui: &Ui, theme: &Theme, rect: Rect, response: &egui::Response) {

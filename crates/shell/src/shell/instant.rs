@@ -132,6 +132,25 @@ impl Shell {
         kinds
     }
 
+    /// The running surfaces a device can be locked to, as the device menu's
+    /// Lock to items list them: the row, from 1, and the surface's name, in
+    /// the table's row order (device chains R41, control surfaces R27).
+    #[must_use]
+    pub fn lockable_surfaces(&self) -> Vec<(u8, String)> {
+        let reports = self.midi.surface_rows();
+        self.running_kinds()
+            .iter()
+            .enumerate()
+            .filter(|(_, kind)| kind.is_some_and(|k| k.can_lock))
+            .filter_map(|(row, _)| {
+                Some((
+                    u8::try_from(row + 1).ok()?,
+                    reports.get(row)?.surface_name.clone()?,
+                ))
+            })
+            .collect()
+    }
+
     /// Starts every ring again, as a newly opened set does (R9, R30).
     pub(super) fn instant_reset(&mut self) {
         self.instant.fresh = true;
@@ -540,9 +559,11 @@ impl Shell {
             .collect()
     }
 
-    /// The running surfaces' rings, by track and scene ID, for
-    /// `session.state` (session view R38).
-    pub(super) fn ring_boxes(&self) -> Vec<RingBox> {
+    /// The running surfaces' rings, by track and scene ID: what
+    /// `session.state` reports (session view R38) and the Session View
+    /// draws a border round (R36).
+    #[must_use]
+    pub fn session_rings(&self) -> Vec<RingBox> {
         let names = self.midi.surface_rows();
         (0..ROWS)
             .filter_map(|row| {

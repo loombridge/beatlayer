@@ -13,6 +13,7 @@ use bl_core::midi::{ClockType, HardwareResync, MidiMessage, SyncOutput};
 use bl_core::time::{Frames, SampleRate, TICKS_PER_QUARTER, TempoMap, Ticks, TimeSignatureMap};
 
 use crate::midi::{MidiIn, Stamped};
+use crate::node::{TIE, TransportInfo};
 
 /// The most output ports with Sync on the engine sends clock to; the list is
 /// made with the engine, and any more are ignored and counted.
@@ -97,6 +98,9 @@ pub(crate) struct Part<'a> {
     pub counting_in: bool,
     /// The song position of the part's first frame.
     pub position: Frames,
+    /// How the song moves over the part: its speed, under a followed tempo
+    /// (midi-clock R9; transport R24).
+    pub info: TransportInfo,
     /// Where Play starts.
     pub insert_marker: Ticks,
     /// The frame the Arrangement loop wraps at, if it is on and ahead.
@@ -271,7 +275,7 @@ impl SyncOut {
         if !p.playing {
             return;
         }
-        let end = p.position + Frames(i64::from(p.length));
+        let end = Frames(p.info.window_end(p.length as usize)).max(p.position);
         self.expect = Some(p.beats.ticks(end));
         if self.outputs.is_empty() {
             self.cursor = None;
@@ -409,7 +413,15 @@ impl SyncOut {
         message: MidiMessage,
         steady: bool,
     ) -> bool {
-        let from_block = i64::from(p.offset) + (frame - p.position).get();
+        // Spec: midi-clock R9. Under a followed tempo the song's frames
+        // are not the block's: a frame past the part is placed on the same
+        // line.
+        let from_block = i64::from(p.offset)
+            + if p.info.speed == 1.0 {
+                (frame - p.position).get()
+            } else {
+                ((frame.get() as f64 - p.info.exact(0) + TIE) / p.info.speed + 0.5).floor() as i64
+            };
         let stamped = midi.emit_sync(
             output.port,
             from_block + i64::from(p.output_latency),

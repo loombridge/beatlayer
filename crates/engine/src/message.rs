@@ -287,4 +287,13 @@ pub(crate) enum Message {
         count: u8,
         output: Option<bl_core::midi::SyncOutput>,
     },
+    /// Input `index` of the `count` input ports with Sync on and their Sync
+    /// Delay (midi-clock R14); a `count` of 0 clears the list.
+    SyncInput {
+        index: u8,
+        count: u8,
+        input: Option<bl_core::midi::SyncInput>,
+    },
+    /// Whether the song follows the incoming clock: EXT (midi-clock R15).
+    ExternalSync(bool),
 }

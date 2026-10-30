@@ -2023,13 +2023,22 @@ fn tempo_midi_page(
         if !output {
             switches.push(("MPE", port.mpe));
         }
-        // Spec: midi-clock R1. An output with Sync on has the triangle.
-        let triangle = output && port.sync;
+        // Spec: midi-clock R1, R14. A port with Sync on has the triangle: an
+        // output's after its switches, an input's before them, where an
+        // input's row, a switch longer, has no room.
+        let triangle = port.sync;
         let mut widths = vec![SettingsLayout::SWITCH; switches.len()];
-        if triangle {
+        if triangle && output {
             widths.push(SettingsLayout::TRIANGLE);
         }
-        let mut rects = rows.row_of(ui, &label, &widths).into_iter();
+        let all = rows.row_of(ui, &label, &widths);
+        let before = (triangle && !output).then(|| {
+            Rect::from_min_size(
+                pos2(all[0].left() - 22.0, all[0].top()),
+                vec2(SettingsLayout::TRIANGLE, 18.0),
+            )
+        });
+        let mut rects = all.into_iter();
         for ((name, on), rect) in switches.into_iter().zip(rects.by_ref()) {
             let salt = format!("midi-port-{}-{}-{name}", port.direction as u8, port.name);
             if let Some(on) = switch(ui, theme, &salt, &format!("{label} {name}"), rect, on) {
@@ -2039,7 +2048,7 @@ fn tempo_midi_page(
             }
         }
         if triangle {
-            let open = match rects.next() {
+            let open = match before.or_else(|| rects.next()) {
                 Some(rect) => disclosure(ui, &format!("{label} Sync Options"), rect),
                 None => false,
             };
@@ -2220,8 +2229,8 @@ fn disclosure(ui: &mut Ui, name: &str, rect: Rect) -> bool {
     open
 }
 
-/// An output's three sync options, the rows under its port row (the MIDI
-/// clock spec, R1).
+/// A port's sync options, the rows under its port row: an output's three, and
+/// an input's Sync Delay alone (the MIDI clock spec, R1, R14).
 fn sync_options(
     ui: &mut Ui,
     theme: &Theme,
@@ -2236,12 +2245,18 @@ fn sync_options(
     };
     let name = |option: &str| format!("{}: {} {option}", port.direction.label(), port.name);
     let delay = i32::from(port.sync_delay_ms);
-    let rect = rows.row(ui, "MIDI Clock Sync Delay", SettingsLayout::NUMBER);
+    let input = port.direction == midi_ids::PortDirection::Input;
+    let delay_label = if input {
+        "Sync Delay"
+    } else {
+        "MIDI Clock Sync Delay"
+    };
+    let rect = rows.row(ui, delay_label, SettingsLayout::NUMBER);
     if let Some(ms) = number_box(
         ui,
         theme,
         &name("delay"),
-        &name("MIDI Clock Sync Delay"),
+        &name(delay_label),
         rect,
         f64::from(delay),
         (
@@ -2252,6 +2267,9 @@ fn sync_options(
         &format!("{delay} ms"),
     ) {
         set(events, "sync_delay_ms", json!(ms.round() as i16));
+    }
+    if input {
+        return;
     }
     let types: Vec<Choice<midi_ids::ClockTypeChoice>> = midi_ids::ClockTypeChoice::ALL
         .into_iter()

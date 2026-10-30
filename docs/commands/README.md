@@ -11646,6 +11646,34 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
 
 </details>
 
+### `ExternalSync`
+
+What `transport.set_external_sync` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether EXT is on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `transport.set_external_sync` returns.",
+  "properties": {
+    "on": {
+      "description": "Whether EXT is on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Extracted`
 
 What `chain.extract` and `chain.extract_return` return.
@@ -30103,6 +30131,16 @@ What `sync.state` returns.
 | `clocks_sent` | integer, at least 0 | yes | Timing Clocks handed to the MIDI output thread since the audio engine started, one for each port. |
 | `clocks_late` | integer, at least 0 | yes | Timing Clocks stamped for a moment already past when the engine wrote them. |
 | `clocks_dropped` | integer, at least 0 | yes | Sync messages dropped because the queue to the MIDI output thread was full. |
+| `input_ports` | integer, at least 0 | yes | How many input ports have Sync on, so their clock can be followed. |
+| `external_sync_available` | boolean | yes | Whether EXT is available: some input port has Sync on. |
+| `external_sync` | boolean | yes | Whether EXT is on. |
+| `leading_input` | string or null | yes | The input port that leads, while usable clocks arrive from it. |
+| `receiving` | boolean | yes | Whether usable clocks arrive: one came in the last 500 ms. |
+| `input_lamp` | boolean | yes | Whether the upper sync lamp is lit: a quarter note's clock arrived in the last 100 ms. |
+| `tempo` | number or null | yes | The smoothed tempo of the incoming clock in BPM, once there is one; what the Tempo field shows while EXT is on. |
+| `clocks_received` | integer, at least 0 | yes | Timing Clocks that arrived from the leading input since the audio engine started. |
+| `clocks_set_aside` | integer, at least 0 | yes | Timing Clocks set aside as glitches: doubled or missing. |
+| `sync_dropped` | integer, at least 0 | yes | Incoming sync messages dropped because the audio thread's list was full. |
 
 <details><summary>JSON Schema</summary>
 
@@ -30122,11 +30160,55 @@ What `sync.state` returns.
       "minimum": 0,
       "type": "integer"
     },
+    "clocks_received": {
+      "default": 0,
+      "description": "Timing Clocks that arrived from the leading input since the audio engine started.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "clocks_sent": {
       "description": "Timing Clocks handed to the MIDI output thread since the audio engine started, one for each port.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "clocks_set_aside": {
+      "default": 0,
+      "description": "Timing Clocks set aside as glitches: doubled or missing.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "external_sync": {
+      "default": false,
+      "description": "Whether EXT is on.",
+      "type": "boolean"
+    },
+    "external_sync_available": {
+      "default": false,
+      "description": "Whether EXT is available: some input port has Sync on.",
+      "type": "boolean"
+    },
+    "input_lamp": {
+      "default": false,
+      "description": "Whether the upper sync lamp is lit: a quarter note's clock arrived in the last 100 ms.",
+      "type": "boolean"
+    },
+    "input_ports": {
+      "default": 0,
+      "description": "How many input ports have Sync on, so their clock can be followed.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "leading_input": {
+      "default": null,
+      "description": "The input port that leads, while usable clocks arrive from it.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "output_lamp": {
       "description": "Whether the lower sync lamp is lit: a quarter note's clock left for a port in the last 100 ms.",
@@ -30138,9 +30220,30 @@ What `sync.state` returns.
       "minimum": 0,
       "type": "integer"
     },
+    "receiving": {
+      "default": false,
+      "description": "Whether usable clocks arrive: one came in the last 500 ms.",
+      "type": "boolean"
+    },
     "sending": {
       "description": "Whether MIDI clock is going out now: the song plays, past any count-in, and some output has Sync on.",
       "type": "boolean"
+    },
+    "sync_dropped": {
+      "default": 0,
+      "description": "Incoming sync messages dropped because the audio thread's list was full.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tempo": {
+      "default": null,
+      "description": "The smoothed tempo of the incoming clock in BPM, once there is one; what the Tempo field shows while EXT is on.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
     }
   },
   "required": [
@@ -30149,7 +30252,17 @@ What `sync.state` returns.
     "output_lamp",
     "clocks_sent",
     "clocks_late",
-    "clocks_dropped"
+    "clocks_dropped",
+    "input_ports",
+    "external_sync_available",
+    "external_sync",
+    "leading_input",
+    "receiving",
+    "input_lamp",
+    "tempo",
+    "clocks_received",
+    "clocks_set_aside",
+    "sync_dropped"
   ],
   "type": "object"
 }
@@ -32754,6 +32867,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `waiting_start` | boolean | yes | Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25). |
 | `waiting_frame` | integer or null | yes | The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
+| `external_sync` | boolean | yes | Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on. |
 
 <details><summary>JSON Schema</summary>
 
@@ -32788,6 +32902,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     },
     "engine_running": {
       "description": "Whether the audio engine runs on a device, so the transport can play. While it doesn't, the transport's commands are refused.",
+      "type": "boolean"
+    },
+    "external_sync": {
+      "default": false,
+      "description": "Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on.",
       "type": "boolean"
     },
     "insert_marker": {
@@ -32951,7 +33070,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "phase_nudge",
     "waiting_start",
     "waiting_frame",
-    "tap_tempo"
+    "tap_tempo",
+    "external_sync"
   ],
   "type": "object"
 }

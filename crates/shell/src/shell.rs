@@ -598,6 +598,12 @@ pub struct Shell {
     /// been lit (the MIDI clock spec, R12).
     sync_seen: u64,
     sync_lit: Option<std::time::Instant>,
+    /// The clock the engine follows as [`Shell::poll`] last heard of it, and
+    /// the quarter notes of it that had arrived when the upper sync lamp
+    /// last lit (midi-clock R16, R17).
+    sync_in: bl_engine::SyncInState,
+    sync_in_seen: u64,
+    sync_in_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     /// The remote input and the set's MIDI and key mappings (WP-7.1).
@@ -1285,6 +1291,9 @@ impl Shell {
             midi_lit: [None; 2],
             sync_seen: 0,
             sync_lit: None,
+            sync_in: bl_engine::SyncInState::default(),
+            sync_in_seen: 0,
+            sync_in_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),
             remote: remote::RemoteState::default(),
             surface: control_surface::SurfaceHost::default(),
@@ -1869,6 +1878,9 @@ impl Shell {
         }
         if id == transport_ids::TAP_TEMPO {
             return self.run_tap_tempo(args);
+        }
+        if id == transport_ids::SET_EXTERNAL_SYNC {
+            return self.run_set_external_sync(args);
         }
         if transport_ids::handles(id) {
             Self::args::<NoArgs>(id, args)?;

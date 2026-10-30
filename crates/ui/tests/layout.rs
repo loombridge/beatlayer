@@ -175,7 +175,11 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
         // Show Resync Button is on.
         let hidden = matches!(
             placement.element,
-            Element::GlobalAmount | Element::SyncLamps | Element::ResyncExternalHardware
+            Element::GlobalAmount
+                | Element::ExternalSync
+                | Element::SyncInput
+                | Element::SyncOutput
+                | Element::ResyncExternalHardware
         );
         if placement.element != Element::Message && !hidden {
             assert_eq!(rect.width(), placement.width, "{:?}", placement.element);

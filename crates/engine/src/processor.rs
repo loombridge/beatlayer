@@ -413,6 +413,8 @@ pub struct Processor {
     /// Set while a held start or a follower's own command runs, so it isn't
     /// held again.
     releasing: bool,
+    /// EXT: whether the incoming MIDI clock leads the song (midi-clock R17).
+    ext: bool,
     /// The Phase Nudge buttons (R27).
     nudge: Nudge,
     /// Where the song exactly stood at the end of the last part.
@@ -495,6 +497,7 @@ impl Processor {
             last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
             follower: None,
+            ext: false,
             follow: Follow::with_capacity(config.max_scheduled),
             followed: None,
             deciding: false,
@@ -894,6 +897,12 @@ impl Processor {
                     count,
                     output,
                 } => self.sync_out.set_output(index, count, output),
+                Message::SyncInput {
+                    index,
+                    count,
+                    input,
+                } => self.midi.sync_in.set_input(index, count, input),
+                Message::ExternalSync(on) => self.ext = on,
             }
         }
     }
@@ -2069,36 +2078,50 @@ impl Processor {
         // The ticks of where the song is now, not where the last part ended:
         // a wrap or a locate moves the playhead after it.
         let exact = self.exact_at_position().ticks;
+        let rate = self.config.sample_rate.as_f64();
+        let ticks = match exact {
+            Some(ticks) if self.playing => ticks,
+            _ => {
+                let tempo = self
+                    .program
+                    .as_ref()
+                    .map_or(&self.fallback_tempo, |p| &p.get().tempo);
+                tempo.seconds_to_ticks_exact(self.position.get() as f64 / rate)
+            }
+        };
+        let ask = Ask {
+            clock: self.clock,
+            frames,
+            playing: self.playing,
+            position: ticks,
+            rate,
+        };
+        self.follow.clear();
         if let Some(follower) = self.follower.as_mut() {
-            let rate = self.config.sample_rate.as_f64();
-            let ticks = match exact {
-                Some(ticks) if self.playing => ticks,
-                _ => {
-                    let tempo = self
-                        .program
-                        .as_ref()
-                        .map_or(&self.fallback_tempo, |p| &p.get().tempo);
-                    tempo.seconds_to_ticks_exact(self.position.get() as f64 / rate)
-                }
-            };
-            let ask = Ask {
-                clock: self.clock,
-                frames,
-                playing: self.playing,
-                position: ticks,
-                rate,
-            };
-            self.follow.clear();
             follower.get_mut().block(&ask, &mut self.follow);
-            self.followed = self.follow.followed();
-            self.deciding = self.follow.deciding();
-            if self.deciding && !self.held.is_empty() && self.follow.release().is_some() {
-                self.release = self.follow.release();
-            }
-            for i in 0..self.follow.commands().len() {
-                let (frame, command) = self.follow.commands()[i];
-                self.queue_transport(command, frame, true);
-            }
+        }
+        // Spec: midi-clock R14 to R24. An incoming clock is the follower
+        // when none is set; it counts what arrives for the lamp whether EXT
+        // is on or not.
+        let clock = self.follower.is_none();
+        let looped = self
+            .loop_region
+            .map(|region| (region.start.get() as f64, region.end.get() as f64));
+        self.midi.follow_clock(
+            &ask,
+            self.output_latency,
+            self.ext && clock,
+            looped,
+            &mut self.follow,
+        );
+        self.followed = self.follow.followed();
+        self.deciding = self.follow.deciding();
+        if self.deciding && !self.held.is_empty() && self.follow.release().is_some() {
+            self.release = self.follow.release();
+        }
+        for i in 0..self.follow.commands().len() {
+            let (frame, command) = self.follow.commands()[i];
+            self.queue_transport(command, frame, true);
         }
         // A follower that stops deciding, or goes, lets what waited start.
         if !self.deciding && !self.held.is_empty() {
@@ -2340,7 +2363,7 @@ impl Processor {
     /// the loop's end goes on from its start: the parts of a block end
     /// there, so the next part starts at the loop's start.
     fn render(&mut self, offset: usize, length: usize, part: Part) {
-        self.write_sync(offset, length);
+        self.write_sync(offset, length, part.transport);
         let stride = self.config.max_frames;
         let transport = part.transport;
         // The song frame this part starts at, for a real-time render's
@@ -2479,7 +2502,7 @@ impl Processor {
     /// Writes the MIDI clock and transport messages for the part of the
     /// block that starts at `offset` and runs `length` frames (midi-clock R3
     /// to R8, R11).
-    fn write_sync(&mut self, offset: usize, length: usize) {
+    fn write_sync(&mut self, offset: usize, length: usize, info: TransportInfo) {
         let (tempo, signatures) = match &self.program {
             Some(p) => (&p.get().tempo, &p.get().time_signatures),
             None => (&self.fallback_tempo, &self.fallback_time_signatures),
@@ -2498,6 +2521,7 @@ impl Processor {
                 playing: self.playing && !counting_in,
                 counting_in,
                 position: self.position,
+                info,
                 insert_marker: self.insert_marker,
                 loop_end,
                 beats: Beats {
@@ -2790,6 +2814,7 @@ impl Processor {
         state.cpu_load = cpu_load;
         state.cpu_load_max = self.cpu_load_max;
         state.following = self.followed;
+        state.sync_in = self.midi.sync_in.state();
         state.waiting_start = !self.held.is_empty();
         state.waiting_frame = self.release.filter(|_| !self.held.is_empty());
         state.phase_nudge = self.nudge.active();

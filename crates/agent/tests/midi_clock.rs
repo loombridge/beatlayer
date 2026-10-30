@@ -1,7 +1,8 @@
-//! MIDI clock out through the agent API (WP-7.11, `docs/specs/midi-clock.md`
-//! R25): an output's sync options and Show Resync Button are set by ID and
-//! read back from `midi.ports`, the resync runs by ID, and `sync.state`
-//! reports the sending half. The shell plays through the null device paced
+//! MIDI clock through the agent API (WP-7.11 and WP-7.12,
+//! `docs/specs/midi-clock.md` R25): an output's sync options and Show Resync
+//! Button are set by ID and read back from `midi.ports`, the resync runs by
+//! ID, and `sync.state` reports the sending half; EXT is switched by ID and
+//! `sync.state` and `transport.state` read the receiving half back. The shell plays through the null device paced
 //! by hand (T199), as the app's host does.
 
 use bl_agent::Agent;
@@ -12,18 +13,23 @@ use bl_shell::testing;
 use serde_json::{Value, json};
 
 fn host() -> (Client<InProcess>, NullControl) {
+    let (client, control, _) = host_with_ports();
+    (client, control)
+}
+
+fn host_with_ports() -> (Client<InProcess>, NullControl, TestBackend) {
     let test = TestBackend::new();
     test.add_port(Direction::Input, "Keys");
     test.add_port(Direction::Output, "Drum machine");
     let (mut shell, control) = testing::rig();
-    shell.use_midi_backend(Box::new(test));
+    shell.use_midi_backend(Box::new(test.clone()));
     shell.start_audio();
     assert!(shell.audio().engine_running(), "{:?}", shell.audio());
     let mut client = Client::new(InProcess::new(Agent::for_app(), shell));
     // The person allows the connection and the external command.
     client.transport().answer = Box::new(|_| true);
     client.initialize("conductor").unwrap();
-    (client, control)
+    (client, control, test)
 }
 
 /// Runs one command, then what the app's event loop does: the engine hears
@@ -125,4 +131,67 @@ fn a_delay_past_the_range_and_an_inputs_clock_type_are_refused() {
             refused.text
         );
     }
+}
+
+#[test]
+fn ext_is_switched_by_id_and_the_clock_it_follows_is_read_back() {
+    let (mut client, control, test) = host_with_ports();
+    let mut run =
+        |command: &str, args: Value, millis: u64| run(&control, &mut client, command, args, millis);
+    let state = run("sync.state", json!({}), 5);
+    assert_eq!(state["external_sync_available"], false);
+    assert_eq!(state["external_sync"], false);
+    assert_eq!(run("transport.state", json!({}), 5)["external_sync"], false);
+
+    run(
+        "midi.set_port",
+        json!({ "direction": "input", "name": "Keys", "sync": true, "sync_delay_ms": 3 }),
+        5,
+    );
+    let state = run("sync.state", json!({}), 5);
+    assert_eq!(state["external_sync_available"], true);
+    assert_eq!(state["input_ports"], 1);
+    let on = run("transport.set_external_sync", json!({ "on": true }), 5);
+    assert_eq!(on["on"], true);
+    assert_eq!(run("transport.state", json!({}), 5)["external_sync"], true);
+
+    // A 140 BPM clock, 160 clocks of it, and the song plays along.
+    let now = control.clock().unwrap().now();
+    let period = std::time::Duration::from_secs_f64(60.0 / (140.0 * 24.0));
+    for k in 0..160 {
+        assert!(test.send("Keys", now + period * k, &[0xF8]));
+    }
+    run("transport.play", json!({}), 2_500);
+    let state = run("sync.state", json!({}), 5);
+    assert_eq!(state["receiving"], true);
+    assert_eq!(state["leading_input"], "Keys");
+    assert!(
+        (state["tempo"].as_f64().unwrap() - 140.0).abs() < 0.2,
+        "{state}"
+    );
+    assert!(state["clocks_received"].as_u64().unwrap() > 80);
+    assert_eq!(state["clocks_set_aside"], 0);
+    let transport = run("transport.state", json!({}), 5);
+    assert!((transport["tempo"].as_f64().unwrap() - 140.0).abs() < 0.2);
+    assert_eq!(transport["tempo_editable"], false);
+
+    // Left out, it switches to the other state.
+    let off = run("transport.set_external_sync", json!({}), 50);
+    assert_eq!(off["on"], false);
+    let transport = run("transport.state", json!({}), 5);
+    assert_eq!(transport["external_sync"], false);
+    assert_eq!(transport["tempo"], 120.0);
+}
+
+#[test]
+fn ext_is_refused_while_no_input_has_sync_on() {
+    let (mut client, _control) = host();
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "transport.set_external_sync",
+                                   "args": { "on": true } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
 }

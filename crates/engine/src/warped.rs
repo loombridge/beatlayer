@@ -362,13 +362,15 @@ impl Warped {
 
     /// Where a Session clip launched on song frame `launch` reads: the tempo
     /// map followed from there, at `rate` frames a second, `offset` ticks
-    /// into its own time on that frame (the launch quantisation spec, R29).
+    /// into its own time on that frame (the launch quantisation spec, R29),
+    /// its time running at `speed` times the tempo's.
     pub(crate) fn launched<'a>(
         &'a self,
         tempo: &'a TempoMap,
         launch: i64,
         rate: f64,
         offset: f64,
+        speed: f64,
     ) -> Positions<'a> {
         Positions::Launched {
             warped: self,
@@ -376,6 +378,7 @@ impl Warped {
             launch,
             rate,
             offset,
+            speed,
         }
     }
 
@@ -887,6 +890,9 @@ pub(crate) enum Positions<'a> {
         rate: f64,
         /// The clip time, in ticks, it had on the launch frame.
         offset: f64,
+        /// How many times faster than the tempo the clip time runs: 1,
+        /// or a transposed Re-Pitch launch's pitch ratio (remote-mapping R35).
+        speed: f64,
     },
     /// An unwarped clip transposed: its file read at the pitch ratio (R27),
     /// from the song frame it starts playing at.
@@ -950,6 +956,7 @@ impl Positions<'_> {
                 launch,
                 rate,
                 offset,
+                speed,
             } => {
                 let started = tempo.seconds_to_ticks_exact(*launch as f64 / rate);
                 // A run ends at the next line of the speed grid, so each of
@@ -963,7 +970,7 @@ impl Positions<'_> {
                 for (i, position) in out.iter_mut().enumerate() {
                     let now = tempo.seconds_to_ticks_exact((first + i as i64) as f64 / rate);
                     // Frames before the launch frame play its first.
-                    let played = (now - started).max(0.0) + offset;
+                    let played = (now - started).max(0.0) * speed + offset;
                     let Some((beat, passes)) = warped.contents.beat_after(played) else {
                         if i == 0 {
                             return Fill {
@@ -997,7 +1004,7 @@ impl Positions<'_> {
                 // frame. A run with no such frame reads at the run's own.
                 let at = |frame: i64| {
                     let now = tempo.seconds_to_ticks_exact(frame as f64 / rate);
-                    let played = (now - started).max(0.0) + offset;
+                    let played = (now - started).max(0.0) * speed + offset;
                     warped
                         .contents
                         .beat_after(played)
@@ -1399,6 +1406,7 @@ impl WarpScratch {
                 launch,
                 positions.rate(),
                 positions.offset(),
+                positions.speed(),
             ),
             None => past.warped.positions(),
         };
@@ -1697,6 +1705,14 @@ impl Positions<'_> {
         match self {
             Self::Table(_) | Self::Flat(_) => unreachable!("no offset"),
             Self::Launched { offset, .. } => *offset,
+        }
+    }
+
+    /// How fast a launched clip's time runs against the tempo's.
+    fn speed(&self) -> f64 {
+        match self {
+            Self::Table(_) | Self::Flat(_) => unreachable!("no speed"),
+            Self::Launched { speed, .. } => *speed,
         }
     }
 }

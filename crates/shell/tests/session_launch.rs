@@ -557,6 +557,40 @@ fn launch_selected_launches_the_selection_and_agents_launch_and_stop_by_id() {
     wait_for_slots(&control, &mut shell, "the scene", |slots| slots.len() == 1);
 }
 
+// Spec: remote-mapping R37. A scripted agent launches a clip with a velocity
+// and a transposition by `session.launch`'s ID, and the slot the engine
+// publishes carries them; values outside the ranges are refused.
+#[test]
+fn an_agent_launches_with_a_velocity_and_a_transposition_by_id() {
+    let (mut shell, control, track, first, _) = shell_with_a_slot_clip();
+    shell
+        .run(ids::SET_QUANTIZATION, json!({ "quantization": "none" }))
+        .unwrap();
+    for args in [
+        json!({ "track": track, "scene": first, "velocity": 0 }),
+        json!({ "track": track, "scene": first, "transpose": 128 }),
+        json!({ "track": track, "scene": first, "transpose": -128 }),
+    ] {
+        assert!(shell.run("session.launch", args).is_err());
+    }
+    shell
+        .run(
+            "session.launch",
+            json!({ "track": track, "scene": first, "velocity": 64, "transpose": -5 }),
+        )
+        .unwrap();
+    wait_for_slots(&control, &mut shell, "the transposed launch", |slots| {
+        slots.len() == 1 && (slots[0].velocity, slots[0].transpose) == (64, -5)
+    });
+    // A plain launch is untransposed again.
+    shell
+        .run("session.launch", json!({ "track": track, "scene": first }))
+        .unwrap();
+    wait_for_slots(&control, &mut shell, "the plain launch", |slots| {
+        slots.len() == 1 && (slots[0].velocity, slots[0].transpose) == (127, 0)
+    });
+}
+
 // Spec: session-context-menus R10. Cancel Scene Launch drops what a scene's
 // launch queued and hasn't played, leaves the clips that play, and is refused
 // with nothing queued; `session.state` reads the slots' states back.

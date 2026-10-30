@@ -74,6 +74,8 @@ pub(super) struct Instant {
     /// How many times each ring was moved, so the Session View scrolls to
     /// show it when it changes (session view R37).
     moved: [u64; ROWS],
+    /// The kind of surface each row ran when the state last synced.
+    kinds: [Option<&'static Kind>; ROWS],
 }
 
 /// A device's banks: a name and the parameters it takes.
@@ -120,9 +122,14 @@ fn role_id(role: Role) -> u32 {
 }
 
 impl Shell {
-    /// The kind of surface each row runs, or `None` for a row that doesn't
-    /// run one.
+    /// The kind of surface each row ran at the last sync, or `None` for a
+    /// row that doesn't run one.
     fn running_kinds(&self) -> [Option<&'static Kind>; ROWS] {
+        self.instant.kinds
+    }
+
+    /// The kind of surface each row runs now.
+    fn current_kinds(&self) -> [Option<&'static Kind>; ROWS] {
         let mut kinds = [None; ROWS];
         for (row, report) in self.midi.surface_rows().into_iter().enumerate() {
             if report.run == RunState::Running {
@@ -161,7 +168,8 @@ impl Shell {
     /// their places by ID (R24, R26, R30). Runs after every change to the
     /// set.
     pub(super) fn sync_instant(&mut self) {
-        let kinds = self.running_kinds();
+        let kinds = self.current_kinds();
+        self.instant.kinds = kinds;
         let tracks = ring_tracks(self);
         let doc = self.editor.document();
         let scenes: Vec<SceneId> = doc.scenes().map(|s| s.id).collect();

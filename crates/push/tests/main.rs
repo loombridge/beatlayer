@@ -11,3 +11,4 @@ mod leds;
 mod modes;
 mod realtime;
 mod rig;
+mod sim;

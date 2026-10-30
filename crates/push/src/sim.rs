@@ -144,7 +144,7 @@ impl Default for Device {
         palette[122] = ([204, 204, 204], 128);
         palette[123] = ([64, 64, 64], 84);
         palette[124] = ([20, 20, 20], 32);
-        palette[125] = ([0, 0, 255], 0);
+        palette[125] = ([0, 0, 255], 126);
         palette[126] = ([0, 255, 0], 0);
         palette[127] = ([255, 0, 0], 128);
         palette[16] = ([0, 0, 0], 32);
@@ -182,6 +182,8 @@ pub struct Simulated {
     pub silent: bool,
     /// Whether the device answers a Device Inquiry as some other device.
     pub impostor: bool,
+    /// Every reply the device sent.
+    pub replies: Vec<Vec<u8>>,
 }
 
 impl Simulated {
@@ -199,6 +201,7 @@ impl Simulated {
             violations: Vec::new(),
             silent: false,
             impostor: false,
+            replies: Vec::new(),
         }
     }
 
@@ -300,7 +303,7 @@ impl Simulated {
 
     fn receive(&mut self, bytes: &[u8]) {
         if sysex::is_sysex(bytes) {
-            self.command(bytes);
+            self.handle(bytes);
             return;
         }
         // In User mode the device ignores the Live port, except for the
@@ -330,108 +333,106 @@ impl Simulated {
         }
     }
 
-    fn reply(&self, bytes: &[u8]) {
-        let at = self.clock.now();
-        self.backend.send(LIVE, at, bytes);
-    }
-
-    fn silent_effects(&mut self, _bytes: &[u8]) {}
-
-    fn command(&mut self, bytes: &[u8]) {
+    /// Takes a system exclusive message the surface sent, as the device does:
+    /// applies it and sends what it answers on the Live port, and on both
+    /// ports for Set MIDI Mode.
+    pub fn handle(&mut self, bytes: &[u8]) {
         if self.silent {
-            // The commands still take effect; the replies are lost.
-            self.silent_effects(bytes);
+            // A silent device takes nothing and answers nothing.
             return;
         }
+        let mut replies: Vec<Vec<u8>> = Vec::new();
+        let answer = |id: u8, args: &[u8]| sysex::command(id, args);
         if bytes == sysex::DEVICE_INQUIRY {
             let mut identity = IDENTITY;
             if self.impostor {
                 identity[8] = 0x10;
             }
-            self.reply(&identity);
-            return;
+            replies.push(identity.to_vec());
+        } else if let Some(body) = bytes.strip_prefix(&[0xF0, 0x00, 0x21, 0x1D, 0x01, 0x01])
+            && let Some((&id, rest)) = body.split_first()
+        {
+            let args = rest.strip_suffix(&[0xF7]).unwrap_or(rest);
+            let device = &mut self.device;
+            match id {
+                sysex::id::SET_PALETTE_ENTRY if args.len() == 9 => {
+                    let value = |n: usize| args[n] | args[n + 1] << 7;
+                    device.palette[usize::from(args[0])] =
+                        ([value(1), value(3), value(5)], value(7));
+                }
+                sysex::id::SET_LED_BRIGHTNESS => {
+                    device.led_brightness = args.first().copied().unwrap_or(0);
+                }
+                sysex::id::SET_DISPLAY_BRIGHTNESS => {
+                    device.display_brightness =
+                        args.first().copied().unwrap_or(0) | args.get(1).copied().unwrap_or(0) << 7;
+                }
+                sysex::id::SET_MIDI_MODE => {
+                    let mode = args.first().copied().unwrap_or(0);
+                    device.mode = if mode == 1 {
+                        MidiMode::User
+                    } else {
+                        MidiMode::Live
+                    };
+                    replies.push(answer(sysex::id::SET_MIDI_MODE, &[mode]));
+                }
+                sysex::id::SET_TOUCH_STRIP_CONFIG => {
+                    device.strip_config = args.first().copied().unwrap_or(0);
+                }
+                sysex::id::SET_TOUCH_STRIP_LEDS if args.len() == 16 => {
+                    for n in 0..31 {
+                        device.strip_leds[n] = args[n / 2] >> (3 * (n % 2)) & 7;
+                    }
+                }
+                sysex::id::REQUEST_STATISTICS => {
+                    replies.push(answer(
+                        sysex::id::REQUEST_STATISTICS,
+                        &[1, 0, 0x3F, 7, 0, 0, 0],
+                    ));
+                }
+                sysex::id::SET_PAD_PARAMETERS if args.len() == 8 => {
+                    let value = |n: usize| u16::from(args[n]) | u16::from(args[n + 1]) << 7;
+                    device.thresholds = (value(4), value(6));
+                }
+                sysex::id::SET_AFTERTOUCH_MODE => {
+                    device.aftertouch = args.first().copied().unwrap_or(0);
+                }
+                sysex::id::SET_VELOCITY_CURVE if args.len() == 17 => {
+                    let start = usize::from(args[0]);
+                    device.curve[start..start + 16].copy_from_slice(&args[1..]);
+                }
+                // The Get commands, answered from what the device holds.
+                0x04 => {
+                    let index = usize::from(args.first().copied().unwrap_or(0) & 0x7F);
+                    let (rgb, white) = device.palette[index];
+                    let mut entry = vec![index as u8];
+                    for value in [rgb[0], rgb[1], rgb[2], white] {
+                        entry.extend([value & 0x7F, value >> 7]);
+                    }
+                    replies.push(answer(0x04, &entry));
+                }
+                0x07 => replies.push(answer(0x07, &[device.led_brightness])),
+                0x09 => {
+                    let value = device.display_brightness;
+                    replies.push(answer(0x09, &[value & 0x7F, value >> 7]));
+                }
+                0x18 => replies.push(answer(0x18, &[device.strip_config])),
+                0x1F => replies.push(answer(0x1F, &[device.aftertouch])),
+                0x21 => {
+                    let index = args.first().copied().unwrap_or(0) & 0x7F;
+                    replies.push(answer(0x21, &[index, device.curve[usize::from(index)]]));
+                }
+                _ => {}
+            }
         }
-        let Some(body) = bytes.strip_prefix(&[0xF0, 0x00, 0x21, 0x1D, 0x01, 0x01]) else {
-            return;
-        };
-        let Some((&id, rest)) = body.split_first() else {
-            return;
-        };
-        let args = rest.strip_suffix(&[0xF7]).unwrap_or(rest);
-        let (backend, clock) = (self.backend.clone(), self.clock.clone());
-        let reply = |bytes: &[u8]| {
-            backend.send(LIVE, clock.now(), bytes);
-        };
-        let device = &mut self.device;
-        let answer = |id: u8, args: &[u8]| sysex::command(id, args);
-        match id {
-            sysex::id::SET_PALETTE_ENTRY if args.len() == 9 => {
-                let value = |n: usize| args[n] | args[n + 1] << 7;
-                device.palette[usize::from(args[0])] = ([value(1), value(3), value(5)], value(7));
+        let at = self.clock.now();
+        for reply in replies {
+            self.backend.send(LIVE, at, &reply);
+            if reply.get(6) == Some(&sysex::id::SET_MIDI_MODE) {
+                // The reply to Set MIDI Mode always goes to both ports.
+                self.backend.send(USER, at, &reply);
             }
-            sysex::id::SET_LED_BRIGHTNESS => {
-                device.led_brightness = args.first().copied().unwrap_or(0)
-            }
-            sysex::id::SET_DISPLAY_BRIGHTNESS => {
-                device.display_brightness =
-                    args.first().copied().unwrap_or(0) | args.get(1).copied().unwrap_or(0) << 7;
-            }
-            sysex::id::SET_MIDI_MODE => {
-                let mode = args.first().copied().unwrap_or(0);
-                device.mode = if mode == 1 {
-                    MidiMode::User
-                } else {
-                    MidiMode::Live
-                };
-                reply(&answer(sysex::id::SET_MIDI_MODE, &[mode]));
-            }
-            sysex::id::SET_TOUCH_STRIP_CONFIG => {
-                device.strip_config = args.first().copied().unwrap_or(0)
-            }
-            sysex::id::SET_TOUCH_STRIP_LEDS if args.len() == 16 => {
-                for n in 0..31 {
-                    device.strip_leds[n] = args[n / 2] >> (3 * (n % 2)) & 7;
-                }
-            }
-            sysex::id::REQUEST_STATISTICS => {
-                reply(&answer(
-                    sysex::id::REQUEST_STATISTICS,
-                    &[1, 0, 0x3F, 7, 0, 0, 0],
-                ));
-            }
-            sysex::id::SET_PAD_PARAMETERS if args.len() == 8 => {
-                let value = |n: usize| u16::from(args[n]) | u16::from(args[n + 1]) << 7;
-                device.thresholds = (value(4), value(6));
-            }
-            sysex::id::SET_AFTERTOUCH_MODE => {
-                device.aftertouch = args.first().copied().unwrap_or(0)
-            }
-            sysex::id::SET_VELOCITY_CURVE if args.len() == 17 => {
-                let start = usize::from(args[0]);
-                device.curve[start..start + 16].copy_from_slice(&args[1..]);
-            }
-            // The Get commands, answered from what the device holds.
-            0x04 => {
-                let index = usize::from(args.first().copied().unwrap_or(0) & 0x7F);
-                let (rgb, white) = device.palette[index];
-                let mut entry = vec![index as u8];
-                for value in [rgb[0], rgb[1], rgb[2], white] {
-                    entry.extend([value & 0x7F, value >> 7]);
-                }
-                reply(&answer(0x04, &entry));
-            }
-            0x07 => reply(&answer(0x07, &[device.led_brightness])),
-            0x09 => {
-                let value = device.display_brightness;
-                reply(&answer(0x09, &[value & 0x7F, value >> 7]));
-            }
-            0x18 => reply(&answer(0x18, &[device.strip_config])),
-            0x1F => reply(&answer(0x1F, &[device.aftertouch])),
-            0x21 => {
-                let index = args.first().copied().unwrap_or(0) & 0x7F;
-                reply(&answer(0x21, &[index, device.curve[usize::from(index)]]));
-            }
-            _ => {}
+            self.replies.push(reply);
         }
     }
 

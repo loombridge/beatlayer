@@ -626,3 +626,29 @@ fn a_mode_without_content_shows_its_name_and_its_encoders_do_nothing() {
     rig.advance(1);
     assert!(rig.commands().is_empty(), "the encoders control nothing");
 }
+
+// Spec: push-2 R32. Workflow is what the modes read to decide what Duplicate,
+// New and the arrows do: the content is told it with every event.
+#[test]
+fn workflow_reaches_the_modes() {
+    let mut rig = Rig::new();
+    rig.flags.lock().unwrap().hooks = true;
+    rig.start();
+    rig.tick();
+    rig.tap("duplicate");
+    assert!(
+        rig.heard
+            .take()
+            .contains(&"Device: workflow Scene".to_owned())
+    );
+    rig.tap("setup");
+    assert!(rig.sim.turn(7, 10));
+    rig.advance(1);
+    rig.tap("setup");
+    rig.tap("new");
+    assert!(
+        rig.heard
+            .take()
+            .contains(&"Device: workflow Clip".to_owned())
+    );
+}

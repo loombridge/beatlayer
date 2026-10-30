@@ -87,6 +87,7 @@ impl Content for Recorder {
                     current: Some(3),
                 }),
                 "convert" => ctx.notify("Hello"),
+                "duplicate" | "new" => self.note(format!("workflow {:?}", ctx.setup.workflow)),
                 _ => {}
             }
         }

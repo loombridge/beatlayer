@@ -234,3 +234,40 @@ fn the_chooser_lists_templates_after_the_native_surfaces_and_notes_a_match() {
     assert!(notes.iter().all(|n| n.bounds.unwrap().y0 != other));
     assert!(notes.iter().any(|n| n.bounds.unwrap().y0 > pads));
 }
+
+// Spec: push-2 R2. A Push 2 that is plugged in fills the first empty row: the
+// chooser reads Push 2 with its Live port as input and output; choosing None
+// stops it, and it doesn't come back into a row on its own.
+#[test]
+fn a_push_2_fills_the_first_row_and_none_keeps_it_out() {
+    use bl_push::sim::{LIVE, Simulated};
+
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    let mut sim = Simulated::new(&test, &bl_core::clock::TestClock::new());
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    h.shell.use_push_display(sim.frames().claim());
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    h.settle();
+
+    sim.plug_in();
+    h.shell.refresh_midi();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Control Surface 1").value, "Push 2");
+    assert_eq!(Harness::node(&nodes, "Input 1").value, LIVE);
+    assert_eq!(Harness::node(&nodes, "Output 1").value, LIVE);
+    assert_eq!(Harness::node(&nodes, "Control Surface 2").value, "None");
+
+    choose(&mut h, "Control Surface 1", "None");
+    assert!(
+        h.events
+            .iter()
+            .any(|e| format!("{e:?}").contains("control_surface.set"))
+    );
+    h.shell.refresh_midi();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(Harness::node(&nodes, "Control Surface 1").value, "None");
+    assert_eq!(Harness::node(&nodes, "Control Surface 2").value, "None");
+}

@@ -1,6 +1,6 @@
 # Push 2: connecting it, its controls, LEDs and display, and the modes
 
-- **Status:** draft
+- **Status:** implemented (R1 to R36 each have a passing test)
 - **Work packages:** WP-7.19 (R1 to R36). What the pads play in Note Mode, step sequencing, recording on Push 2, and Simpler on Push 2 are [notes on Push 2](push-2-notes.md)'s (WP-7.21 to WP-7.24); browsing, Device mode and racks, mixing, Clip mode and the Session View on Push 2 are [tracks on Push 2](push-2-tracks.md)'s (WP-7.20, WP-7.25 to WP-7.28). The control-surface host, a surface's ports, the Control Surfaces table, instant mappings, the session ring and track banks are [control surfaces](control-surfaces.md)' (WP-7.5, WP-7.6)
 - **Parity-matrix row:** Sync and control: Push 2 as a controller
 - **Checked against:** the Live 12 reference manual (online edition), read 23 October 2026 (chapter 36 "Using Push 2", all of it; chapter 34, section 34.1.1; chapter 12, section 12.4); Ableton's "Push 2 MIDI and Display Interface Manual", revision 1.1, with its control map, read 23 October 2026; the UI parity reference's row L-SET-014
@@ -137,39 +137,39 @@ What Push 2 does depends on two modes at once. The pad mode, Note or Session, de
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-7.19 | unit (simulated Push 2) |
-| R2 | to be written in WP-7.19 | unit, UI script |
-| R3 | to be written in WP-7.19 | unit |
-| R4 | to be written in WP-7.19 | unit (simulated Push 2) |
-| R5 | to be written in WP-7.19 | unit |
-| R6 | to be written in WP-7.19 | unit (simulated Push 2) |
-| R7 | to be written in WP-7.19 | unit |
-| R8 | to be written in WP-7.19 | unit |
-| R9 | to be written in WP-7.19 | unit, agent |
-| R10 | to be written in WP-7.19 | unit, agent |
-| R11 | to be written in WP-7.19 | unit (simulated Push 2) |
-| R12 | to be written in WP-7.19 | unit, agent |
-| R13 | to be written in WP-7.19 | unit (simulated Push 2) |
-| R14 | to be written in WP-7.19 | unit |
-| R15 | to be written in WP-7.19 | unit |
-| R16 | to be written in WP-7.19 | unit |
-| R17 | to be written in WP-7.19 | unit, golden frame |
-| R18 | to be written in WP-7.19 | golden frame |
-| R19 | to be written in WP-7.19 | golden frame |
-| R20 | to be written in WP-7.19 | golden frame |
-| R21 | to be written in WP-7.19 | unit, agent |
-| R22 | to be written in WP-7.19 | unit, agent |
-| R23 | to be written in WP-7.19 | unit |
-| R24 | to be written in WP-7.19 | unit |
-| R25 | to be written in WP-7.19 | unit |
-| R26 | to be written in WP-7.19 | unit, agent |
-| R27 | to be written in WP-7.19 | unit |
-| R28 | to be written in WP-7.19 | unit |
-| R29 | to be written in WP-7.19 | unit, property |
-| R30 | to be written in WP-7.19 | unit, golden frame, agent |
-| R31 | to be written in WP-7.19 | unit |
-| R32 | to be written in WP-7.19 | unit (simulated Push 2) |
-| R33 | to be written in WP-7.19 | agent |
-| R34 | to be written in WP-7.19 | unit |
-| R35 | to be written in WP-7.19 | real-time trap |
-| R36 | to be written in WP-7.19 | unit |
+| R1 | `bl-shell` `push::a_push_2_that_appears_takes_the_first_empty_row_and_starts`; `bl-push` `connect::unplugging_stops_and_plugging_in_again_starts_afresh`, `a_device_that_is_not_a_push_2_is_left_alone` | unit (simulated Push 2) |
+| R2 | `bl-shell` `push::none_in_the_row_stops_it_and_keeps_it_stopped_across_a_relaunch` (real preference files), `with_every_row_taken_it_doesnt_start_and_the_status_bar_says_why`; `bl-ui` `control_surfaces::a_push_2_fills_the_first_row_and_none_keeps_it_out` | unit, UI script |
+| R3 | `bl-push` `ports::tests::the_live_and_user_ports_are_recognised_by_their_names`, `connect::a_pads_note_never_reaches_a_track_through_the_ports_track_switch` | unit |
+| R4 | `bl-push` `connect::starting_sends_exactly_r4s_sequence_and_reads_the_replies`, `stopping_puts_every_led_out_darkens_the_display_and_leaves_live_mode`, `a_reply_that_never_comes_is_waited_for_twice_and_then_given_up` | unit (simulated Push 2) |
+| R5 | `bl-push` `sysex::tests::commands_are_the_interface_manuals_examples`, `the_allowlist_takes_what_beatlayer_sends_and_none_of_the_three`; every test on the rig checks the sysex it sent against the allowlist when it ends | unit |
+| R6 | `bl-push` `controls::every_control_in_the_table_decodes_and_lights_its_led_with_the_right_message` | unit (simulated Push 2) |
+| R7 | `bl-push` `buttons::tests::a_tap_is_under_300_ms_and_a_hold_is_noticed_at_300_ms`, `controls::a_button_that_acts_on_a_tap_acts_when_it_is_released` | unit |
+| R8 | `bl-push` `controls::every_control_in_the_table_decodes_and_lights_its_led_with_the_right_message`, `a_pads_pressure_reaches_the_content` | unit |
+| R9 | `bl-push` `encoder::tests::relative_values_read_as_two_s_complement`, `a_continuous_parameter_moves_a_two_hundredth_a_step_and_stops_at_the_ends`, `a_list_moves_one_value_for_every_ten_steps`, `controls::the_master_encoder_sets_main_volume_and_with_shift_the_cue_volume`; `bl-shell` `push::a_touch_of_the_master_encoder_is_one_undo_step` | unit, agent |
+| R10 | `bl-push` `controls::the_master_encoder_sets_main_volume_and_with_shift_the_cue_volume`, `the_tempo_encoder_moves_one_bpm_a_step_and_a_tenth_with_shift_within_the_range`, `the_swing_encoder_sets_the_swing_amount_and_shows_it`; `bl-shell` `push::the_setup_values_and_the_swing_amount_survive_a_relaunch` | unit, agent |
+| R11 | `bl-push` `controls::the_touch_strip_has_three_configurations_and_each_use_sends_its_flags`, `the_range_configuration_has_the_surface_light_the_strip`, `leds::tests::the_strip_goes_when_the_host_lights_it` | unit (simulated Push 2) |
+| R12 | `bl-push` `controls::the_transport_buttons_run_their_commands`; `bl-shell` `push::the_buttons_run_the_apps_commands_and_the_picker_colours_a_track` | unit, agent |
+| R13 | `bl-push` `leds::only_changed_leds_are_sent`, `a_white_led_is_off_dim_or_full`, `a_switch_that_is_on_pulses`, `leds::tests::only_changed_leds_are_sent_and_all_again_after_forgetting`, `a_pulse_sends_both_colours`, `modes::user_mode_turns_the_leds_out_and_back` | unit (simulated Push 2) |
+| R14 | `bl-push` `leds::tests::the_allocator_keeps_the_fixed_entries_and_reuses_the_least_recently_shown`, `a_new_colour_is_written_and_the_palette_reapplied` | unit |
+| R15 | `bl-push` `leds::the_clock_is_24_to_the_beat_stamped_with_start_at_the_transport` | unit |
+| R16 | `bl-push` `curve::tests::brightness_maps_to_the_device_ranges`, `leds::brightness_reaches_the_device_when_it_changes` | unit |
+| R17 | `bl-push` `frame::tests::a_frame_is_327696_bytes_with_the_pixel_bits_the_filler_and_the_xor`, `display::tests::frames_go_at_most_sixty_a_second_and_at_least_one_a_second`, `a_failed_claim_is_retried_every_two_seconds`, `display::the_first_frame_reaches_the_display`, `a_failed_claim_leaves_the_pads_and_leds_working` | unit, golden frame |
+| R18 | `bl-push` `display::the_bands_hold_the_labels` (golden `bands.png`), `leds::a_display_buttons_led_follows_its_label` | golden frame |
+| R19 | `bl-push` `display::a_notification_is_a_box_over_the_content`, `the_count_in_is_a_bar_across_the_top`, `progress_bars_sit_under_the_lower_labels` (golden `notification.png`, `count_in.png`, `progress.png`), `modes::the_count_in_the_progress_bars_and_a_touched_encoder_show_on_the_display` | golden frame |
+| R20 | `bl-push` `display::a_parameter_column_shows_its_value_and_each_dot` (golden `parameters.png`), `the_screen_reads_back_as_text` | golden frame |
+| R21 | `bl-push` `modes::a_tap_switches_the_pad_mode_and_a_hold_switches_it_while_held`, `the_surface_starts_in_note_mode_with_device_and_lights_the_active_buttons`, `a_mode_without_content_shows_its_name_and_its_encoders_do_nothing` | unit, agent |
+| R22 | `bl-push` `modes::the_display_modes_switch_on_a_tap_and_are_momentary_when_held_except_browse`, `tapping_mix_in_mix_switches_between_track_mix_and_global_mix`, `set_mode_sets_the_modes_as_the_buttons_do` | unit, agent |
+| R23 | `bl-push` `modes::setup_and_scale_open_and_close_without_changing_the_mode` | unit |
+| R24 | `bl-push` `buttons::tests::mute_held_alone_for_a_second_locks_and_a_press_unlocks`, `modes::mute_solo_and_stop_clip_lock_after_a_second_alone` | unit |
+| R25 | `bl-push` `modes::a_modifier_used_in_a_combination_does_not_do_its_own_action`, `a_core_button_with_a_modifier_held_does_not_do_its_own_action`, `buttons::tests::a_control_used_while_mute_is_held_stops_the_lock_and_the_tap` | unit |
+| R26 | `bl-push` `modes::the_lower_buttons_select_the_rings_tracks`; `bl-shell` `push::the_buttons_run_the_apps_commands_and_the_picker_colours_a_track` | unit, agent |
+| R27 | `bl-push` `modes::the_colour_picker_colours_a_track_with_one_command`, `the_picker_takes_any_target_and_any_button_closes_it`; `bl-shell` `push::the_buttons_run_the_apps_commands_and_the_picker_colours_a_track` | unit |
+| R28 | `bl-push` `controls::footswitch_1_reaches_a_track_as_controller_64` | unit |
+| R29 | `bl-push` `controls::footswitch_2_taps_record_and_double_taps_new` | unit, property |
+| R30 | `bl-push` `curve::tests::five_four_seven_is_the_identity`, `the_curve_goes_out_in_eight_messages`, `sensitivity_raises_the_curve`, `every_curve_is_monotonic_and_in_range`, `leds::changing_the_pad_values_sends_the_curve_again`, `display::the_setup_curve_and_the_user_mode_screen` (golden `setup.png`); `bl-shell` `push::push_state_reads_back_the_modes_the_leds_the_display_and_the_setup` | unit, golden frame, agent |
+| R31 | `bl-push` `modes::the_setup_menu_shows_and_changes_its_values`; `bl-shell` `push::the_setup_values_and_the_swing_amount_survive_a_relaunch` | unit |
+| R32 | `bl-push` `modes::workflow_reaches_the_modes` | unit (simulated Push 2) |
+| R33 | `bl-push` `modes::user_mode_turns_the_leds_out_and_back` (golden `user_mode.png`) | agent |
+| R34 | `bl-shell` `push::push_state_reads_back_the_modes_the_leds_the_display_and_the_setup`; `bl-agent` `push::an_agent_reads_and_sets_a_simulated_push_2`; `bl-push` `modes::set_mode_sets_the_modes_as_the_buttons_do` | unit |
+| R35 | `bl-push` `realtime::pads_notes_reach_the_engine_without_allocating_on_the_audio_thread` | real-time trap |
+| R36 | `bl-push` `sim::the_responder_answers_as_the_interface_manuals_examples_do`, `set_midi_mode_is_answered_on_both_ports`, `the_led_model_applies_colours_and_animations`, `the_frame_sink_decodes_frames`, `the_controls_send_on_the_ports_the_modes_say` | unit |

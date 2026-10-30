@@ -778,7 +778,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.75 | todo |  |  |
 | 6.76 | todo |  |  |
 | 7.1 | done | 29 October 2026 | [#501](https://github.com/loombridge/beatlayer/pull/501): MIDI and key mappings are saved with the set and leave with a deleted target, the remote input keeps mapped messages off tracks through a lock-free table on the MIDI thread, mapped messages are applied on the main thread as hand moves with placeholder value laws for WP-7.2 to replace, and the `remote.*` commands read back |
-| 7.2 | todo |  |  |
+| 7.2 | done | 29 October 2026 | [#514](https://github.com/loombridge/beatlayer/pull/514): the value laws replace WP-7.1's placeholders: notes carry their velocity to a clip launch, absolute and relative controllers with the relative encodings and the mode guess, and Takeover Mode with its preference, command and readback |
 | 7.2b | todo |  |  |
 | 7.3 | todo |  |  |
 | 7.3b | todo |  |  |
@@ -810,7 +810,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.28 | todo |  |  |
 | 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |
 | 7.30 | todo |  |  |
-| 7.31 | todo |  |  |
+| 7.31 | done | 29 October 2026 | [#508](https://github.com/loombridge/beatlayer/pull/508): the Control Bar's Tap button runs `transport.tap_tempo` with the tap law on the engine's time base, a run of taps is one undo step, and Start Transport With Tap Tempo is in Settings and Playback ▸ Options; Link, EXT and mapping the button come with WP-7.14, 7.12 and 7.3b |
 | 7.32 | todo |  |  |
-| 7.33 | todo |  |  |
+| 7.33 | done | 29 October 2026 | [#512](https://github.com/loombridge/beatlayer/pull/512): Simpler's region is the Start and End flags in the sample's own frames, set by `device.set_sample_region` as one undo step; Classic plays S Start, S Length and S Loop Length inside the flags and One-Shot and Slice play flag to flag; the display, Crop, Normalize, the conversions and Slice to New MIDI Track read the flags, and schema 13 moves older sets over |
 | 7.33b | todo |  |  |

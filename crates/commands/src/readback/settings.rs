@@ -44,6 +44,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_default_launch_quantization", read("settings.state", "launch.default_quantization")),
     ("settings.set_record_session_automation_in", read("settings.state", "record_session_automation_in")),
     ("settings.set_automation_record_mode", read("settings.state", "automation_record_mode")),
+    ("settings.set_takeover_mode", read("settings.state", "takeover_mode")),
     ("settings.set_select_next_scene_on_launch", read("settings.state", "launch.select_next_scene_on_launch")),
     ("settings.set_select_on_launch", read("settings.state", "launch.select_on_launch")),
     ("settings.set_start_recording_on_scene_launch", read("settings.state", "launch.start_recording_on_scene_launch")),
@@ -60,6 +61,10 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("settings.set_reduced_automatic_colours", read("settings.state", "theme_colors.reduced_automatic_colours")),
     ("settings.set_clip_colour", read("settings.state", "theme_colors.clip_colour")),
     ("settings.set_warp_recorded_audio", read("settings.state", "warp_recorded_audio")),
+    (
+        "settings.set_start_transport_with_tap_tempo",
+        read("settings.state", "start_transport_with_tap_tempo"),
+    ),
     ("view.set_zoom", read("view.state", "window.zoom")),
     (
         "view.toggle_full_height_browser",

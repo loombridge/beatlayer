@@ -2522,7 +2522,7 @@ const ENTRIES: &[Entry] = &[
         id: "clip.delete_envelope",
         action: Action::Apply("delete_clip_envelope"),
         label: "Clear Envelope",
-        permission: Permission::Edit,
+        permission: Permission::Destructive,
         contexts: &[ClipView],
         keys: &[],
         description: "Deletes a clip's envelope for a parameter, as Clear Envelope in the \
@@ -3130,6 +3130,19 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Deletes a manual slice at `frame` into the sample (WP-5.15b).",
+    },
+    Entry {
+        id: "device.write_sample_region",
+        action: Action::Apply("set_device_region"),
+        label: "Change Sample Region",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Writes the region of a device's sample, between its Start and End flags, \
+            as given, without looking at the sample (the sampler spec, R22): `region` holds \
+            `start` and `end` in frames of the sample at its own rate, Start before End, or is \
+            `null` for the whole sample. One undo step. `device.set_sample_region` clamps the \
+            flags to the sample.",
     },
     Entry {
         id: "device.insert_layers",

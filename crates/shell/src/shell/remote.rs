@@ -15,8 +15,8 @@ use bl_control::{Action, Hit, Law, Memory};
 use bl_core::midi::{MidiInputEvent, MidiMessage};
 use bl_model::modulation::Travel;
 use bl_model::{
-    Command, ControlKind, CrossfadeAssign, MixerParam, ParamKind, RemoteMapping, RemoteSource,
-    RemoteTarget,
+    Command, ControlKind, CrossfadeAssign, MixerParam, ParamDescriptor, ParamKind, RemoteMapping,
+    RemoteSource, RemoteTarget,
 };
 use bl_shell_spec::remote as ids;
 use bl_shell_spec::remote::{MappingInfo, MappingsResult};
@@ -129,11 +129,21 @@ impl Shell {
             .sender()
             .remote()
             .publish(&bl_control::bits(mappings));
-        self.remote.published.clone_from(mappings);
-        let held: Vec<&RemoteSource> = mappings.iter().map(|m| &m.source).collect();
-        self.remote
-            .memory
-            .retain(|source, _| held.contains(&source));
+        // Spec: remote-mapping R29. A mapping that is new or changed starts
+        // takeover afresh.
+        let before = std::mem::replace(&mut self.remote.published, mappings.clone());
+        self.remote.memory.retain(|source, _| {
+            mappings
+                .iter()
+                .any(|m| &m.source == source && before.contains(m))
+        });
+    }
+
+    /// Forgets what the mappings remember, as a set replaced by another
+    /// does (R29).
+    pub(super) fn forget_remote_values(&mut self) {
+        self.remote.memory.clear();
+        self.remote.run = None;
     }
 
     /// Applies the messages mappings took since the last poll, in the order
@@ -215,17 +225,22 @@ impl Shell {
     /// Runs the command a hit on `mapping` asks of its control.
     fn apply_hit(&mut self, mapping: &RemoteMapping, hit: Hit) {
         let (min, max) = self.law_range(mapping);
-        let law = Law::of(mapping, min, max);
+        let law = Law {
+            takeover: self.prefs.takeover_mode,
+            step: self.step_of(&mapping.target),
+            ..Law::of(mapping, min, max)
+        };
         let key = match (&mapping.source, hit) {
             (RemoteSource::NoteRange { low, .. }, Hit::NoteOn { key, .. }) => u32::from(key - low),
             _ => 0,
         };
+        let at = self.value_of(mapping);
         let memory = self
             .remote
             .memory
             .entry(mapping.source.clone())
             .or_default();
-        let Some(action) = bl_control::act(&law, hit, key, memory) else {
+        let Some(action) = bl_control::act(&law, hit, key, at, memory) else {
             return;
         };
         // A button's release has nothing to do, and isn't a refusal.
@@ -252,9 +267,45 @@ impl Shell {
         self.remote.applying = false;
         if result.is_ok() {
             self.remote.applied += 1;
+            // Spec: remote-mapping R29. Where a stepped control really is
+            // after the command is where the mapping left it.
+            if let (Action::Position(_), Some(at)) = (action, self.value_of(mapping))
+                && let Some(memory) = self.remote.memory.get_mut(&mapping.source)
+            {
+                memory.gave(at);
+            }
         } else {
             self.remote.refused += 1;
         }
+    }
+
+    /// The control's value as the laws read it: a continuous control's
+    /// position on its travel and a radio button's option (R21, R23).
+    fn value_of(&self, mapping: &RemoteMapping) -> Option<f64> {
+        let value = self.current(&mapping.target)?;
+        match mapping.kind {
+            ControlKind::Continuous => Some(self.position_of(&mapping.target, value)),
+            ControlKind::Radio { .. } => Some(value),
+            _ => None,
+        }
+    }
+
+    /// One step of a stepped control as a share of its travel (R26); `None`
+    /// for a control with no steps of its own.
+    fn step_of(&self, target: &RemoteTarget) -> Option<f64> {
+        let descriptor = self.descriptor(target)?;
+        let span = descriptor.max() - descriptor.min();
+        (descriptor.is_stepped() && span > 0.0).then(|| 1.0 / span)
+    }
+
+    /// The description of the device parameter a target names.
+    fn descriptor(&self, target: &RemoteTarget) -> Option<&ParamDescriptor> {
+        let RemoteTarget::Device { device, param } = *target else {
+            return None;
+        };
+        self.devices
+            .description(&self.editor.document().device(device)?.kind)?
+            .param(param)
     }
 
     /// A mapping's Min and Max as the laws take them: positions on the
@@ -280,13 +331,7 @@ impl Shell {
                 })
             }
             RemoteTarget::Send { .. } => Some(Travel::Send),
-            RemoteTarget::Device { device, param } => self
-                .editor
-                .document()
-                .device(device)
-                .and_then(|d| self.devices.description(&d.kind))
-                .and_then(|description| description.param(param))
-                .map(Travel::Param),
+            RemoteTarget::Device { .. } => self.descriptor(target).map(Travel::Param),
             _ => None,
         }
     }
@@ -347,9 +392,12 @@ impl Shell {
             _ => None,
         };
         match (target, action) {
-            (RemoteTarget::Slot { track, scene }, Action::Press(_)) => {
-                cmd("session.launch", json!({ "track": track, "scene": scene }))
-            }
+            // Spec: remote-mapping R16. The launch carries the note's
+            // velocity.
+            (RemoteTarget::Slot { track, scene }, Action::Press(velocity)) => cmd(
+                "session.launch",
+                json!({ "track": track, "scene": scene, "velocity": velocity }),
+            ),
             (RemoteTarget::Slot { track, scene }, Action::Release) => {
                 cmd("session.release", json!({ "track": track, "scene": scene }))
             }

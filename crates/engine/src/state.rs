@@ -6,6 +6,7 @@ use rtrb::Consumer;
 
 use crate::capture::CapturedMidi;
 use crate::message::{LoopRegion, Report};
+use crate::midi::TimeBase;
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
 use crate::node::NodeKey;
@@ -157,6 +158,9 @@ pub struct EngineState {
     /// backwards and a frame sent for it ([`When::Frame`](crate::When::Frame))
     /// means the same frame either side of a restart.
     pub clock: u64,
+    /// Where the last block started on the engine clock and on the system's
+    /// clock; none before the first block.
+    pub time_base: Option<TimeBase>,
     /// Whether the song is playing.
     pub playing: bool,
     /// The playhead: the song position of the next frame to play. While
@@ -247,6 +251,7 @@ impl EngineState {
         Self {
             sample_rate,
             clock: 0,
+            time_base: None,
             playing: false,
             position: Frames::ZERO,
             position_ticks: Ticks::ZERO,
@@ -340,6 +345,7 @@ impl Clone for EngineState {
         Self {
             sample_rate: self.sample_rate,
             clock: self.clock,
+            time_base: self.time_base,
             playing: self.playing,
             position: self.position,
             position_ticks: self.position_ticks,

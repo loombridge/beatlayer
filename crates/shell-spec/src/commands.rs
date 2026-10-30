@@ -224,6 +224,10 @@ pub const SETTINGS_SET_TEMPORARY_FOLDER: &str = "settings.set_temporary_folder";
 pub const SETTINGS_SET_SAMPLE_EDITOR: &str = "settings.set_sample_editor";
 /// `settings.set_warp_recorded_audio`: switch Warp recorded audio (WP-2.13).
 pub const SETTINGS_SET_WARP_RECORDED_AUDIO: &str = "settings.set_warp_recorded_audio";
+/// `settings.set_start_transport_with_tap_tempo`: switch Start Transport
+/// With Tap Tempo (the control bar transport spec, R20).
+pub const SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO: &str =
+    "settings.set_start_transport_with_tap_tempo";
 /// `settings.set_loop_warp_short_samples`: choose Loop/Warp Short Samples
 /// (WP-4.9).
 pub const SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES: &str = "settings.set_loop_warp_short_samples";
@@ -255,6 +259,8 @@ pub const SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN: &str =
 /// `settings.set_automation_record_mode`: choose the mode an Arrangement
 /// recording writes control moves in (WP-6.46).
 pub const SETTINGS_SET_AUTOMATION_RECORD_MODE: &str = "settings.set_automation_record_mode";
+/// `settings.set_takeover_mode`: choose Takeover Mode (WP-7.2).
+pub const SETTINGS_SET_TAKEOVER_MODE: &str = "settings.set_takeover_mode";
 /// `settings.set_auto_hide_plug_in_windows`: switch Auto-Hide Plug-In
 /// Windows (WP-2.5b).
 pub const SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS: &str = "settings.set_auto_hide_plug_in_windows";
@@ -370,6 +376,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_TEMPORARY_FOLDER,
     SETTINGS_SET_SAMPLE_EDITOR,
     SETTINGS_SET_WARP_RECORDED_AUDIO,
+    SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO,
     SETTINGS_SET_LOOP_WARP_SHORT_SAMPLES,
     SETTINGS_SET_AUTO_WARP_LONG_SAMPLES,
     SETTINGS_SET_DEFAULT_WARP_MODE,
@@ -380,6 +387,7 @@ pub const IDS: &[&str] = &[
     SETTINGS_SET_START_RECORDING_ON_SCENE_LAUNCH,
     SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN,
     SETTINGS_SET_AUTOMATION_RECORD_MODE,
+    SETTINGS_SET_TAKEOVER_MODE,
     SETTINGS_SET_AUTO_HIDE_PLUG_IN_WINDOWS,
     SETTINGS_SET_OUTLINE_VIEW_IN_FOCUS,
     SETTINGS_SET_PERMANENT_SCRUB_AREAS,
@@ -617,6 +625,14 @@ pub struct RecordSessionAutomationInArgs {
 pub struct AutomationRecordModeArgs {
     /// `touch`, `latch` or `write`.
     pub mode: crate::settings::AutomationRecordMode,
+}
+
+/// Arguments of `settings.set_takeover_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TakeoverModeArgs {
+    /// `none`, `pick_up` or `value_scaling`.
+    pub mode: crate::settings::TakeoverMode,
 }
 
 /// Arguments of `settings.set_default_launch_quantization`.
@@ -2345,6 +2361,24 @@ fn specs() -> Vec<CommandSpec> {
             .context(Settings)
             .args::<SwitchArgs>()
             .result::<SwitchResult>(),
+        // Spec: control-bar-transport R20 (L-SET-018, M-PLAY-006c): an
+        // edit-class preference.
+        CommandSpec::new(
+            SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO,
+            "Start Transport With Tap Tempo",
+        )
+        .description(
+            "Switches Start Transport With Tap Tempo, on the Settings window's Record, Warp & \
+             Launch page and in the Playback menu's Options; it's on in a new install. With it \
+             on and the song stopped, the tap of `transport.tap_tempo` that makes the run as \
+             many taps as the time signature's numerator starts the transport one beat later; \
+             with it off, taps only set the tempo. The setting is kept for the next start, and \
+             isn't part of the set or an undo step. The result's `on` is the setting afterwards.",
+        )
+        .permission(Permission::Edit)
+        .contexts([Global, Settings])
+        .args::<SwitchArgs>()
+        .result::<SwitchResult>(),
         // Record, Warp & Launch, Launch (L-SET-018; WP-3.4): edit-class
         // preferences, kept between starts and not saved with a set.
         // Record, Warp & Launch, Warp/Fades (L-SET-018; WP-4.9): edit-class
@@ -2459,6 +2493,22 @@ fn specs() -> Vec<CommandSpec> {
         .context(Settings)
         .args::<AutomationRecordModeArgs>()
         .result::<()>(),
+        CommandSpec::new(SETTINGS_SET_TAKEOVER_MODE, "Takeover Mode")
+            .description(
+                "Chooses Takeover Mode on the Settings window's Tempo & MIDI page: what an \
+                 absolute MIDI controller mapped to a continuous control does when its value \
+                 and the control's differ. `none` (the default) sets the control to the \
+                 controller's value at once, `pick_up` changes nothing until the controller \
+                 reaches the control's value and then follows it, and `value_scaling` moves \
+                 the control and the controller towards each other as the controller moves, \
+                 so both reach the end of the range together. It applies to every mapping of \
+                 every set. The setting is kept for the next start, and isn't part of the \
+                 set or an undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Settings)
+            .args::<TakeoverModeArgs>()
+            .result::<()>(),
         CommandSpec::new(SETTINGS_SET_SELECT_ON_LAUNCH, "Select on Launch")
             .description(
                 "Switches Select on Launch on the Settings window's Record, Warp & Launch \

@@ -191,9 +191,10 @@ pub use rack::{
 };
 pub use remote::{
     ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
+    TakeoverMode,
 };
 pub use repr::{SavedSong, saved_schema};
-pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
+pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use spelling::NoteSpelling;

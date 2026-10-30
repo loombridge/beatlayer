@@ -10,7 +10,7 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
-use bl_model::{LaunchMode, LaunchQuantization};
+use bl_model::{LaunchMode, LaunchQuantization, TakeoverMode};
 use bl_project::registry as recovery_ids;
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
@@ -1162,14 +1162,12 @@ const RECORD: [Pending; 6] = [
     switch_row("Start Transport With Record", "WP-2.13").showing("On"),
 ];
 
-/// The Tap Tempo section.
-const TAP_TEMPO: [Pending; 1] = [switch_row("Start Transport With Tap Tempo", "M2")];
-
 /// Record, Warp & Launch (L-SET-018, as observed in Live 12.4.6): the
 /// Record, Warp/Fades, Launch, and Tap Tempo sections in Live's order, with
 /// the Warp/Fades rows (WP-4.9, WP-1.4b) with Warp recorded audio, a
-/// Beatlayer addition after them (IMP-02), and the Launch section's rows
-/// (WP-3.4), the only settings built. The other rows keep their places,
+/// Beatlayer addition after them (IMP-02), the Launch section's rows
+/// (WP-3.4), and Start Transport With Tap Tempo (WP-7.31), the only settings
+/// built. The other rows keep their places,
 /// pending.
 fn record_warp_launch_page(
     ui: &mut Ui,
@@ -1244,8 +1242,20 @@ fn record_warp_launch_page(
     rows.heading(ui, "Launch");
     launch_rows(ui, shell, theme, rows, events);
     rows.heading(ui, "Tap Tempo");
-    for row in &TAP_TEMPO {
-        rows.pending(ui, row);
+    // Spec: control-bar-transport R20.
+    let rect = rows.row(ui, "Start Transport With Tap Tempo", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "start-transport-with-tap-tempo",
+        "Start Transport With Tap Tempo",
+        rect,
+        shell.start_transport_with_tap_tempo(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO,
+            json!({ "on": on }),
+        )));
     }
 }
 
@@ -1940,9 +1950,10 @@ fn library_page(
 /// Remote switches, and an input its MPE switch after them, as the MIDI I/O
 /// spec R2 and R27 give it. An output with Sync on has a disclosure triangle
 /// after its switches that opens its MIDI Clock Sync Delay, MIDI Clock Type
-/// and Hardware Resync (the MIDI clock spec, R1). The Tempo Follower, control
-/// surfaces, and Takeover Mode come with later packages. Remote is kept and
-/// acts when MIDI mapping is built (R5).
+/// and Hardware Resync (the MIDI clock spec, R1). Takeover Mode comes before
+/// the ports (the remote mapping spec, R28). The Tempo Follower and control
+/// surfaces come with later packages. Remote is kept and acts when MIDI
+/// mapping is built (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -1967,10 +1978,34 @@ fn tempo_midi_page(
     }
     rows.heading(ui, "MIDI");
     control_surfaces_table(ui, shell, theme, rows, events);
-    rows.note(
+    rows.note(ui, "The Tempo Follower settings come with a later package.");
+    // Spec: remote-mapping R28. Takeover Mode sits where Live has it: after
+    // the Control Surfaces table's place and before the MIDI ports table.
+    let modes: Vec<Choice<TakeoverMode>> = TakeoverMode::ALL
+        .into_iter()
+        .map(|mode| Choice {
+            label: mode.label().to_owned(),
+            value: mode,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Takeover Mode", SettingsLayout::CHOOSER);
+    let current = shell.takeover_mode();
+    if let Some(mode) = chooser(
         ui,
-        "The Tempo Follower and Takeover Mode settings come with later packages.",
-    );
+        theme,
+        "takeover-mode",
+        "Takeover Mode",
+        rect,
+        &modes,
+        Some(&current),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_TAKEOVER_MODE,
+            json!({ "mode": mode }),
+        )));
+    }
     rows.heading(ui, "MIDI Ports");
     let ports = shell.midi().ports();
     if ports.is_empty() {

@@ -96,6 +96,7 @@ impl Shell {
     /// set's plug-in devices load their plug-ins from their saved state.
     pub(super) fn set_replaced(&mut self) {
         self.editor_replaced();
+        self.forget_remote_values();
         // What a DAWproject import said about the set that's gone (R11, R12).
         self.pending_name = None;
         self.import_report = None;
@@ -735,6 +736,17 @@ impl Shell {
                             "{relinked} missing file{} found again and relinked",
                             if relinked == 1 { " was" } else { "s were" }
                         ),
+                        error: false,
+                        action: None,
+                    });
+                }
+                if let Some(notice) = self.store.open_notice() {
+                    let text = match self.message.take() {
+                        Some(relinked) => format!("{}; {notice}", relinked.text),
+                        None => notice,
+                    };
+                    self.message = Some(Message {
+                        text,
                         error: false,
                         action: None,
                     });

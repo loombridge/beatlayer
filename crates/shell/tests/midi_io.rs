@@ -1173,6 +1173,51 @@ fn a_track_keeps_a_missing_ports_name_and_sends_again_when_it_returns() {
     assert_eq!(rig.test.sent("Synth").len(), 1);
 }
 
+// Spec: remote-mapping R28. Takeover Mode is None in a new install, set by
+// `settings.set_takeover_mode`, read back by `settings.state`, and kept in
+// the preferences across a restart.
+#[test]
+fn takeover_mode_persists_across_restarts_and_reads_back() {
+    let dir = std::env::temp_dir().join(format!("bl-shell-takeover-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let start = |dir: &std::path::Path| {
+        let prefs = Preferences::load(dir).unwrap();
+        Shell::new(
+            prefs.clone(),
+            Some(dir.to_owned()),
+            AudioHost::null(prefs.audio),
+            Box::new(ProjectFiles::new()),
+        )
+    };
+    let mut shell = start(&dir);
+    assert_eq!(
+        shell.run("settings.state", json!({})).unwrap()["takeover_mode"],
+        "none"
+    );
+    for mode in ["pick_up", "value_scaling"] {
+        shell
+            .run("settings.set_takeover_mode", json!({ "mode": mode }))
+            .unwrap();
+        assert_eq!(
+            shell.run("settings.state", json!({})).unwrap()["takeover_mode"],
+            mode
+        );
+    }
+    assert!(
+        shell
+            .run("settings.set_takeover_mode", json!({ "mode": "jump" }))
+            .is_err()
+    );
+    drop(shell);
+
+    let mut shell = start(&dir);
+    assert_eq!(
+        shell.run("settings.state", json!({})).unwrap()["takeover_mode"],
+        "value_scaling"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A shell started on the preferences in `dir`, with an input and two
 /// outputs plugged in.
 fn start_with_outputs(dir: &std::path::Path) -> (Shell, TestBackend) {

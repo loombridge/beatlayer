@@ -25,6 +25,7 @@ bl-control = { path = ".", features = ["testing"] }
 # while the host runs (the real-time rules).
 bl-rt.workspace = true
 rtrb = "0.4.0"
+proptest = { version = "1.11", default-features = false, features = ["std"] }
 
 [features]
 # The test surface (control surfaces R16), for the tests of the crates above.

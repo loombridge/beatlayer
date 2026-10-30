@@ -440,6 +440,11 @@ fn fixture() -> Project {
         bpm: Some(90.0),
     };
     device.slices = vec![1_000, 2_000];
+    // The flags that bound what a Simpler plays (sampler R22).
+    device.region = Some(bl_model::SampleRegion::Frames {
+        start: 500,
+        end: 4_000,
+    });
     // A multisampler's layers and options (WP-5.13).
     device.layers = bl_model::Layers {
         list: vec![bl_model::Layer::new(
@@ -1822,4 +1827,73 @@ fn the_copies_between_the_views_run_by_id_and_read_back() {
     // The Session clip it came from is where it was.
     let again = query(&mut client, json!({ "path": "track \"Keys\" / slot 2" }));
     assert_eq!(again["clip"]["id"], slot["clip"]["id"]);
+}
+
+// Spec: agent-perception. What `clip.trim_start` and `clip.set_loop_enabled`
+// declare as their readback is a field their edit changes, for audio and
+// MIDI clips alike.
+#[test]
+fn the_trim_and_loop_switch_readbacks_change_with_their_commands() {
+    use bl_commands::readback::{Object, READBACK, Readback};
+
+    let declared = |command: &str| -> &'static str {
+        match READBACK.iter().find(|(id, _)| *id == command) {
+            Some((
+                _,
+                Readback::Query {
+                    object: Object::Clip,
+                    field,
+                },
+            )) => field,
+            other => panic!("{command}: {other:?}"),
+        }
+    };
+    let mut client = open(&fixture(), "trim-loop");
+    let first_clip = |client: &mut Client<InProcess>, track: &str| -> Value {
+        let full = query(
+            client,
+            json!({ "path": format!("track \"{track}\""), "detail": "full" }),
+        );
+        full["saved"]["clips"]["items"][0]["id"].clone()
+    };
+    let read = |client: &mut Client<InProcess>, clip: &Value, field: &str| -> Value {
+        let mut here = query(client, json!({ "id": clip, "detail": "full" }))["saved"].clone();
+        for name in field.split('.') {
+            here = here[name].clone();
+        }
+        here
+    };
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        client
+            .call(
+                "run",
+                json!({ "label": command, "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap()
+            .ok()
+            .unwrap_or_else(|error| panic!("{command}: {error}"));
+    };
+
+    let audio = first_clip(&mut client, "Vox");
+    let field = declared("clip.trim_start");
+    let start = read(&mut client, &audio, "start");
+    let before = read(&mut client, &audio, field);
+    let to = start.as_i64().unwrap() + BAR / 4;
+    run(
+        &mut client,
+        "clip.trim_start",
+        json!({ "clip": audio, "start": to }),
+    );
+    assert_ne!(read(&mut client, &audio, field), before, "{field}");
+
+    let midi = first_clip(&mut client, "Keys");
+    let field = declared("clip.set_loop_enabled");
+    let looping = read(&mut client, &midi, "data.midi.looping");
+    let before = read(&mut client, &midi, field);
+    run(
+        &mut client,
+        "clip.set_loop_enabled",
+        json!({ "clip": midi, "enabled": !looping.as_bool().unwrap() }),
+    );
+    assert_ne!(read(&mut client, &midi, field), before, "{field}");
 }

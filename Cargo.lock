@@ -811,6 +811,7 @@ dependencies = [
  "bl-midi-io",
  "bl-model",
  "bl-rt",
+ "proptest",
  "rtrb",
  "serde_json",
 ]

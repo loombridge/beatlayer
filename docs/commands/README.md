@@ -7888,6 +7888,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
+| `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
@@ -8069,6 +8070,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         "string",
         "null"
       ]
+    },
+    "region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SampleRegion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample."
     },
     "role": {
       "$ref": "#/$defs/DeviceRole",
@@ -26082,6 +26094,123 @@ A span of a sample, in frames at the sample's own rate: `from` inclusive to `to`
 
 </details>
 
+### `SampleRegion`
+
+The part of a Simpler's sample between its Start and End flags (the sampler spec, R22). Absent from the device for the whole sample.
+
+Flags are saved as frames of the edited sample at its own rate, as the slices and the edits' selections are. A set saved before the region existed (R24) holds the shares of the decoded sample its Start and Length parameters chose until the next edit of the region writes frames, because turning a share into a frame needs the sample's length, which the saved file doesn't hold.
+
+One of:
+
+- an object with `start` (integer, at least 0), `end` (integer, at least 0): The Start and End flags, in frames; Start is before End.
+- an object with `start_share` (number), `end_share` (number): An older set's region, as shares (0 to 1) of the decoded sample.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "description": "The Start and End flags, in frames; Start is before End.",
+      "properties": {
+        "end": {
+          "description": "The frame after the last one played.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "The first frame played.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An older set's region, as shares (0 to 1) of the decoded sample.",
+      "properties": {
+        "end_share": {
+          "description": "Where it ends.",
+          "format": "double",
+          "type": "number"
+        },
+        "start_share": {
+          "description": "Where the region starts.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start_share",
+        "end_share"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "The part of a Simpler's sample between its Start and End flags (the sampler spec, R22). Absent from the device for the whole sample.\n\nFlags are saved as frames of the edited sample at its own rate, as the slices and the edits' selections are. A set saved before the region existed (R24) holds the shares of the decoded sample its Start and Length parameters chose until the next edit of the region writes frames, because turning a share into a frame needs the sample's length, which the saved file doesn't hold."
+}
+```
+
+</details>
+
+### `SampleRegionSet`
+
+What `device.set_sample_region` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | Simpler. |
+| `start` | integer, at least 0 | yes | The Start flag now. |
+| `end` | integer, at least 0 | yes | The End flag now. |
+| `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_sample_region` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "Simpler."
+    },
+    "end": {
+      "description": "The End flag now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "description": "The edited sample's length in frames at its own rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start": {
+      "description": "The Start flag now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "start",
+    "end",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SampleViewChange`
 
 How to change the Sample Editor's view: `selection` zooms to the time selection (Z), `back` goes to the view before the last zoom (X), `whole` fits the whole file across the editor (W), `height` switches fitting the waveform to the editor's height (H), `span` shows the span `start` to `end`, `scroll` shows it without remembering the view before, and `page` does the same without pausing Follow.
@@ -27823,10 +27952,12 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
+| `takeover_mode` | [`TakeoverMode`](#takeovermode) | yes | Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it (the remote mapping spec, R28). |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `retune_on_tuning_load` | boolean | yes | Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15). |
 | `snap_automation_to_grid` | boolean | yes | Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31). |
 | `warp_recorded_audio` | boolean | yes | Record, Warp & Launch: Warp Recorded Audio, as `settings.set_warp_recorded_audio` sets it. |
+| `start_transport_with_tap_tempo` | boolean | yes | Record, Warp & Launch: Start Transport With Tap Tempo, as `settings.set_start_transport_with_tap_tempo` sets it (the control bar transport spec, R20). |
 | `warp` | [`WarpPrefs`](#warpprefs) | yes | Record, Warp & Launch: Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode. |
 | `launch` | [`LaunchPrefs`](#launchprefs) | yes | Record, Warp & Launch: the Launch section, as the `settings.set_default_launch_*`, `settings.set_select_on_launch`, `settings.set_select_next_scene_on_launch` and `settings.set_start_recording_on_scene_launch` commands set it. |
 | `record_session_automation_in` | [`SessionAutomationTracks`](#sessionautomationtracks) | yes | Record, Warp & Launch: Record Session automation in, as `settings.set_record_session_automation_in` sets it. |
@@ -27904,6 +28035,14 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31).",
       "type": "boolean"
     },
+    "start_transport_with_tap_tempo": {
+      "description": "Record, Warp & Launch: Start Transport With Tap Tempo, as `settings.set_start_transport_with_tap_tempo` sets it (the control bar transport spec, R20).",
+      "type": "boolean"
+    },
+    "takeover_mode": {
+      "$ref": "#/$defs/TakeoverMode",
+      "description": "Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it (the remote mapping spec, R28)."
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -27927,10 +28066,12 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "theme_colors",
     "audio",
     "tempo_midi",
+    "takeover_mode",
     "create_fades_on_clip_edges",
     "retune_on_tuning_load",
     "snap_automation_to_grid",
     "warp_recorded_audio",
+    "start_transport_with_tap_tempo",
     "warp",
     "launch",
     "record_session_automation_in",
@@ -29931,6 +30072,43 @@ Type: integer, at least 1.
 
 </details>
 
+### `TakeoverMode`
+
+What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.
+
+One of:
+
+- `"none"`: The control jumps to the controller's value at once.
+- `"pick_up"`: The control waits until the controller reaches its value, then follows.
+- `"value_scaling"`: The control and the controller converge as the controller moves.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "The control jumps to the controller's value at once.",
+      "type": "string"
+    },
+    {
+      "const": "pick_up",
+      "description": "The control waits until the controller reaches its value, then follows.",
+      "type": "string"
+    },
+    {
+      "const": "value_scaling",
+      "description": "The control and the controller converge as the controller moves.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Tap`
 
 Where a track's signal is taken: `pre_fx` before its devices, `post_fx` after its devices and before its mixer, or `post_mixer` (the default) after its pan, volume, and activator.
@@ -29963,6 +30141,57 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `TapTempo`
+
+A run of taps, as `transport.tap_tempo` returns it and `transport.state` reports it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `taps` | integer, at least 0 | yes | How many taps the run has; 0 once a new run would start. |
+| `tempo` | number or null | yes | The tempo the run set, in quarter notes per minute: none until its second tap. |
+| `start_at` | integer or null | yes | The engine-clock frame a tap start waits for, if one does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A run of taps, as `transport.tap_tempo` returns it and `transport.state` reports it.",
+  "properties": {
+    "start_at": {
+      "description": "The engine-clock frame a tap start waits for, if one does.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "taps": {
+      "description": "How many taps the run has; 0 once a new run would start.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tempo": {
+      "description": "The tempo the run set, in quarter notes per minute: none until its second tap.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "taps",
+    "tempo",
+    "start_at"
+  ],
+  "type": "object"
 }
 ```
 
@@ -32009,6 +32238,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
 | `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
+| `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 
 <details><summary>JSON Schema</summary>
 
@@ -32119,6 +32349,15 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether a take is running: Arrangement Record is on and the armed tracks' input is being written, so playback is past the count-in and any punch-in point. It ends at the punch-out point or when recording does.",
       "type": "boolean"
     },
+    "tap_tempo": {
+      "$ref": "#/$defs/TapTempo",
+      "default": {
+        "start_at": null,
+        "taps": 0,
+        "tempo": null
+      },
+      "description": "The run of taps Tap Tempo has now (the control bar transport spec, R22)."
+    },
     "tempo": {
       "description": "The tempo where the Arrangement Position fields are, in quarter notes per minute, as the Tempo field shows it.",
       "format": "double",
@@ -32163,7 +32402,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "automation_record_mode",
     "recording",
     "last_recording",
-    "capture_midi_ready"
+    "capture_midi_ready",
+    "tap_tempo"
   ],
   "type": "object"
 }

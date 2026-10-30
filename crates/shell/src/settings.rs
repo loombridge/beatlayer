@@ -13,8 +13,9 @@ pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
     ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
-    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs,
-    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
+    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
+    WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
+    zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -126,6 +127,10 @@ pub struct Preferences {
     /// as Live warps its recordings, and on for preferences saved before the
     /// setting existed.
     pub warp_recorded_audio: OnByDefault,
+    /// Start Transport With Tap Tempo (Record, Warp & Launch, L-SET-018, and
+    /// Playback ▸ Options; the control bar transport spec, R20). On in a new
+    /// install, and on for preferences saved before it existed.
+    pub start_transport_with_tap_tempo: OnByDefault,
     /// Loop/Warp Short Samples, Auto-Warp Long Samples and Default Warp Mode
     /// (Record, Warp & Launch, L-SET-018; WP-4.9): what a new clip of a file
     /// gets (the warping spec, R29 and R33).
@@ -140,6 +145,11 @@ pub struct Preferences {
     /// automation spec, R18): Touch, Latch or Write. It's kept between
     /// launches, and isn't part of the set.
     pub automation_record_mode: AutomationRecordMode,
+    /// Takeover Mode (Tempo & MIDI, L-SET-014; the remote mapping spec, R28):
+    /// what an absolute controller does when it and its control disagree.
+    /// It's kept between launches, is the same for every set, and is None in
+    /// a new install.
+    pub takeover_mode: TakeoverMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -461,6 +471,19 @@ mod tests {
         assert!(!off.warp_recorded_audio.0);
         let saved = serde_json::to_value(&off).unwrap();
         assert_eq!(saved["warp_recorded_audio"], false);
+    }
+
+    #[test]
+    fn start_transport_with_tap_tempo_is_on_unless_saved_off() {
+        // Spec: control-bar-transport R20.
+        assert!(Preferences::default().start_transport_with_tap_tempo.0);
+        let older: Preferences = serde_json::from_str(r#"{"tab_navigation": true}"#).unwrap();
+        assert!(older.start_transport_with_tap_tempo.0);
+        let off: Preferences =
+            serde_json::from_str(r#"{"start_transport_with_tap_tempo": false}"#).unwrap();
+        assert!(!off.start_transport_with_tap_tempo.0);
+        let saved = serde_json::to_value(&off).unwrap();
+        assert_eq!(saved["start_transport_with_tap_tempo"], false);
     }
 
     #[test]

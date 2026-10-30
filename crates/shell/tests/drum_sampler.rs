@@ -211,8 +211,24 @@ fn swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step() {
         "the sample came along"
     );
     assert_eq!(device.params.get(&sampler::MODE), Some(&1.0), "One-Shot");
-    assert_eq!(device.params.get(&sampler::START), Some(&20.0));
-    assert_eq!(device.params.get(&sampler::LENGTH), Some(&50.0));
+    // Drum Sampler's Start 20 % and Length 50 % become the flags.
+    assert_eq!(
+        device.region,
+        Some(bl_model::SampleRegion::Shares {
+            start_share: 0.2,
+            end_share: 0.7
+        })
+    );
+    assert_eq!(
+        device.params.get(&sampler::START),
+        None,
+        "S Start untouched"
+    );
+    assert_eq!(
+        device.params.get(&sampler::LENGTH),
+        None,
+        "S Length untouched"
+    );
 
     // One undo step brings Drum Sampler back as it was.
     shell.run("edit.undo", json!({})).unwrap();

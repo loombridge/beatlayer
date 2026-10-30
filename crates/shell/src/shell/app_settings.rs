@@ -21,7 +21,6 @@ use super::{ShellError, to_value};
 use crate::browser;
 use crate::commands as ids;
 use crate::commands::AppearanceArgs;
-use crate::commands::AutomationRecordModeArgs;
 use crate::commands::BrightnessArgs;
 use crate::commands::CollectFilesArgs;
 use crate::commands::DefaultLaunchModeArgs;
@@ -40,6 +39,7 @@ use crate::commands::TemporaryFolderResult;
 use crate::commands::ThemeArgs;
 use crate::commands::UserLibraryArgs;
 use crate::commands::UserLibraryResult;
+use crate::commands::{AutomationRecordModeArgs, TakeoverModeArgs};
 use crate::commands::{ClipColourArgs, SwatchArgs, ToneArgs};
 use crate::settings::OnByDefault;
 use bl_commands::NoArgs;
@@ -94,6 +94,13 @@ impl Shell {
         self.prefs.warp_recorded_audio.0
     }
 
+    /// Whether Start Transport With Tap Tempo is on (the control bar
+    /// transport spec, R20).
+    #[must_use]
+    pub fn start_transport_with_tap_tempo(&self) -> bool {
+        self.prefs.start_transport_with_tap_tempo.0
+    }
+
     /// Whether Create Fades on Clip Edges is on: new audio clips get 4 ms
     /// fades at their edges.
     #[must_use]
@@ -119,6 +126,12 @@ impl Shell {
     #[must_use]
     pub fn warp_prefs(&self) -> WarpPrefs {
         self.prefs.warp
+    }
+
+    /// Takeover Mode (the remote mapping spec, R28).
+    #[must_use]
+    pub fn takeover_mode(&self) -> crate::settings::TakeoverMode {
+        self.prefs.takeover_mode
     }
 
     /// The Launch section of Record, Warp & Launch (WP-3.4).
@@ -161,10 +174,12 @@ impl Shell {
                 tone: self.audio.tone(),
             },
             tempo_midi: self.midi.report(),
+            takeover_mode: self.prefs.takeover_mode,
             create_fades_on_clip_edges: self.create_fades_on_clip_edges(),
             retune_on_tuning_load: self.retune_on_tuning_load(),
             snap_automation_to_grid: self.snap_automation_to_grid(),
             warp_recorded_audio: self.warp_recorded_audio(),
+            start_transport_with_tap_tempo: self.start_transport_with_tap_tempo(),
             warp: self.prefs.warp,
             file_folder: FileFolderSettings {
                 temporary_folder: self.temporary_folder().to_string_lossy().into_owned(),
@@ -551,6 +566,12 @@ impl Shell {
                 self.save_preferences();
                 Ok(to_value(&SwitchResult { on }))
             }
+            ids::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO => {
+                let SwitchArgs { on } = Self::args(id, args)?;
+                self.prefs.start_transport_with_tap_tempo = OnByDefault(on);
+                self.save_preferences();
+                Ok(to_value(&SwitchResult { on }))
+            }
             ids::SETTINGS_SET_DEFAULT_LAUNCH_MODE => {
                 let DefaultLaunchModeArgs { mode } = Self::args(id, args)?;
                 self.prefs.launch.default_mode = mode;
@@ -584,6 +605,12 @@ impl Shell {
             ids::SETTINGS_SET_RECORD_SESSION_AUTOMATION_IN => {
                 let RecordSessionAutomationInArgs { tracks } = Self::args(id, args)?;
                 self.prefs.record_session_automation_in = tracks;
+                self.save_preferences();
+                Ok(Value::Null)
+            }
+            ids::SETTINGS_SET_TAKEOVER_MODE => {
+                let TakeoverModeArgs { mode } = Self::args(id, args)?;
+                self.prefs.takeover_mode = mode;
                 self.save_preferences();
                 Ok(Value::Null)
             }

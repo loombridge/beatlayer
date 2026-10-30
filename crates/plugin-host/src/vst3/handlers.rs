@@ -86,12 +86,16 @@ impl Default for GestureSlot {
 /// parameter with a gesture in flight, recycled as each one is taken.
 pub(crate) struct Gestures {
     slots: [GestureSlot; MAX_GESTURES],
+    /// A value was dropped for want of a slot: the main thread reads every
+    /// value again, as for a plug-in that changed them all.
+    overflow: AtomicBool,
 }
 
 impl Default for Gestures {
     fn default() -> Self {
         Self {
             slots: std::array::from_fn(|_| GestureSlot::default()),
+            overflow: AtomicBool::new(false),
         }
     }
 }
@@ -126,6 +130,7 @@ impl Gestures {
     /// once.
     pub(crate) fn perform(&self, id: u32, value: f64) {
         let Some(slot) = self.slot(id) else {
+            self.overflow.store(true, Relaxed);
             return;
         };
         slot.value.store(value.to_bits(), Relaxed);
@@ -145,6 +150,12 @@ impl Gestures {
         if slot.fresh.swap(false, Relaxed) {
             slot.ready.store(true, Relaxed);
         }
+    }
+
+    /// Whether a value was dropped for want of a slot since this was last
+    /// asked.
+    pub(crate) fn take_overflow(&self) -> bool {
+        self.overflow.swap(false, Relaxed)
     }
 
     /// Takes the finished changes: each gesture once, with its last value.
@@ -198,7 +209,8 @@ impl IComponentHandlerTrait for ComponentHandler {
 
     unsafe fn restartComponent(&self, flags: int32) -> tresult {
         // A restart ask from any thread: the flags wait for the main
-        // thread, which deactivates and activates the plug-in again.
+        // thread, which reads again what they say changed, and deactivates
+        // and activates the plug-in again if they ask for it.
         self.restart
             .fetch_or(u32::from_ne_bytes(flags.to_ne_bytes()), Relaxed);
         kResultOk

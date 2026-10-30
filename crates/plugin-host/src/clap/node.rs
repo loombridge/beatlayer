@@ -345,9 +345,14 @@ fn transport(block: &Block<'_>) -> TransportEvent {
     let ticks = tempo.frames_to_ticks(info.position, rate);
     let beats = ticks.0 as f64 / TICKS_PER_QUARTER as f64;
     let seconds = tempo.ticks_to_seconds(ticks);
+    let signatures = block.signatures();
+    let signature = signatures.signature_at(ticks);
+    let (bar, into_bar) = signatures.bar_at(ticks);
+    let bar_start = (ticks - into_bar).0 as f64 / TICKS_PER_QUARTER as f64;
     let mut flags = TransportFlags::HAS_TEMPO
         | TransportFlags::HAS_BEATS_TIMELINE
-        | TransportFlags::HAS_SECONDS_TIMELINE;
+        | TransportFlags::HAS_SECONDS_TIMELINE
+        | TransportFlags::HAS_TIME_SIGNATURE;
     if info.playing {
         flags |= TransportFlags::IS_PLAYING;
     }
@@ -362,10 +367,42 @@ fn transport(block: &Block<'_>) -> TransportEvent {
         loop_end_beats: BeatTime::from_int(0),
         loop_start_seconds: SecondsTime::from_int(0),
         loop_end_seconds: SecondsTime::from_int(0),
-        bar_start: BeatTime::from_int(0),
-        bar_number: 0,
-        time_signature_numerator: 4,
-        time_signature_denominator: 4,
+        bar_start: BeatTime::from_float(bar_start),
+        bar_number: i32::try_from(bar).unwrap_or(i32::MAX),
+        time_signature_numerator: signature.numerator().into(),
+        time_signature_denominator: signature.denominator().into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bl_core::time::{Frames, SampleRate, TimeSignature, TimeSignatureMap};
+    use bl_engine::TransportInfo;
+
+    #[test]
+    fn the_transport_carries_the_songs_time_signature_and_bar_start() {
+        let signatures = TimeSignatureMap::constant(TimeSignature::new(3, 4).unwrap());
+        let mut data = [0.0f32; 8];
+        // At 120 bpm and 48 kHz four quarters are 96 000 frames: one quarter
+        // into the second bar of 3/4.
+        let transport_info = TransportInfo::at(true, Frames(96_000));
+        let block = Block::new(
+            &mut data,
+            1,
+            8,
+            8,
+            &[],
+            transport_info,
+            SampleRate::HZ_48000,
+        )
+        .with_signatures(&signatures);
+        let event = transport(&block);
+        assert_eq!(event.time_signature_numerator, 3);
+        assert_eq!(event.time_signature_denominator, 4);
+        assert_eq!(event.bar_number, 1);
+        assert_eq!(event.bar_start, BeatTime::from_float(3.0));
+        assert!(event.flags.contains(TransportFlags::HAS_TIME_SIGNATURE));
     }
 }
 

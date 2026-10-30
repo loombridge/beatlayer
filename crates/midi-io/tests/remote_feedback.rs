@@ -3,13 +3,12 @@
 //! while the engine runs blocks under the allocation trap, and neither
 //! waits for the other.
 
-use std::thread;
-use std::time::Instant;
-
+use bl_core::clock::TestClock;
 use bl_core::midi::PortId;
 use bl_core::time::SampleRate;
 use bl_engine::{Collector, Compiler, EngineConfig, NoInput, Registry, channel};
 use bl_midi_io::{Direction, MidiPorts, OutputBus, PortSwitches, TestBackend, input_queue};
+use std::thread;
 
 const BLOCK: usize = 256;
 const MESSAGES: usize = 5_000;
@@ -43,11 +42,12 @@ fn feedback_flows_while_the_audio_thread_allocates_nothing() {
                 .unwrap();
         }
     });
+    let clock = TestClock::new();
     // Blocks run on this thread until the last message has left, each a
     // real-time section: an allocation or a lock would fail the test.
     while !feedback.is_finished() {
         bl_rt::rt_test!({
-            processor.process_at(BLOCK, &NoInput, Instant::now());
+            processor.process_at(BLOCK, &NoInput, clock.now());
         });
     }
     feedback.join().unwrap();

@@ -1,6 +1,6 @@
 # Recording: arm, monitoring, and writing armed audio tracks to disk
 
-- **Status:** partial (R1 to R15, WP-2.13 and WP-2.14; R16, WP-6.21; R17 to R23 drafts for WP-7.32)
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-2.13 (R1 to R15); WP-6.21 (R16: every recording onto take lanes, and MIDI takes); WP-7.32 (R17 to R23: Record Quantization)
 - **Parity-matrix row:** Recording
 - **Checked against:** the Live 12 reference manual, read 15 October 2026 (chapter 19, "Recording New Clips": arming, recording into the Arrangement, and monitoring with In, Auto, and Off), and [routing](routing.md)'s Monitor rules; for R16, the Live 12 reference manual (online edition), read 20 October 2026 (chapter 21, section 21.3); for R17 to R23, the online edition read 23 October 2026 (chapter 19, sections 19.3.3, 19.5 and 19.10; chapter 36, section 36.4.2)
@@ -72,12 +72,12 @@ This spec covers arming, the Monitor rules as recording uses them, the take, the
 | R14 | `crates/shell/tests/recording.rs`, `a_running_recording_and_the_last_one_s_report_read_back_from_transport_state`, `a_recording_that_cannot_write_is_reported_and_makes_no_clip` | unit, on the null backend |
 | R15 | `crates/agent/tests/engine_host.rs`, `an_agent_s_arrangement_record_sets_the_recording_up_as_the_ui_s_does`; `crates/cli/tests/m2_song.rs`, `the_song_is_played_recorded_arranged_exported_and_reopened` | agent API, on the null backend |
 | R16 | `crates/shell/tests/recording.rs`, `an_audio_take_goes_on_a_take_lane_and_a_later_take_reuses_it`, `a_midi_take_goes_on_a_take_lane_and_overdub_merges_only_the_main_lane`, `midi_passes_round_the_loop_each_go_on_a_take_lane`; `crates/engine/tests/midi_recording.rs`, `a_take_round_the_loop_stamps_its_messages_with_the_frames_it_has_run_for` | shell test, null backend |
-| R17 | to be written in WP-7.32 | unit (saved with the set, undo), UI script (the submenu ticks), agent API |
-| R18 | to be written in WP-7.32 | unit (every value's grid, ties, triplet and mixed grids, in 4/4 and 7/8) |
-| R19 | to be written in WP-7.32 | shell test on the null backend (a take, then Undo once and twice; overdub; a take round the loop) |
-| R20 | to be written in WP-7.32 | shell test on the null backend |
-| R21 | to be written in WP-7.32 | shell test, UI script |
-| R22 | to be written in WP-7.32 | shell test on the null backend (a change between two passes) |
-| R23 | to be written in WP-7.32 | shell test (step recording and Capture MIDI with Record Quantization on) |
+| R17 | `crates/shell/tests/record_quantization.rs`, `the_setting_is_an_undo_step_and_on_returns_to_the_last_value`, `the_setting_saves_and_reopens_with_the_set_and_an_older_set_opens_with_none`, `the_menu_ticks_the_sets_value_and_each_item_chooses_its_own`; `crates/ui/tests/record_quantization.rs`, `each_item_of_the_submenu_chooses_its_value_and_is_the_only_one_ticked`; `crates/agent/tests/readback_runtime.rs`, `record_quantization_reads_back_from_transport_state`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id` | unit (saved with the set, undo), UI script (the submenu ticks), agent API |
+| R18 | `crates/shell/src/record_quantize.rs`, `each_value_lays_out_its_lines_from_the_bars_start`, `every_values_lines_fall_on_its_grid_in_four_four`, `lines_count_from_each_bars_start_in_seven_eight`, `a_tie_goes_to_the_earlier_line`, `an_and_value_takes_the_nearer_of_its_two_grids`, `a_moved_note_keeps_its_length_velocities_and_expression` | unit (every value's grid, ties, triplet and mixed grids, in 4/4 and 7/8) |
+| R19 | `crates/shell/tests/record_quantization.rs`, `an_arrangement_take_is_quantised_in_a_step_after_its_own`, `a_take_without_record_quantization_makes_no_extra_step`, `an_overdub_take_leaves_the_clips_earlier_notes_alone`, `a_take_round_the_loop_is_quantised_in_one_step_after_its_passes`; `crates/shell/src/record_quantize.rs`, `a_note_past_the_end_goes_to_the_last_line_inside` | shell test on the null backend (a take, then Undo once and twice; overdub; a take round the loop) |
+| R20 | `crates/shell/tests/record_quantization.rs`, `a_session_slot_take_is_quantised_inside_its_own_step` | shell test on the null backend |
+| R21 | `crates/shell/tests/record_quantization.rs`, `the_value_is_locked_while_an_arrangement_take_runs`, `the_value_is_locked_while_a_session_slot_take_runs`; `crates/ui/tests/record_quantization.rs`, `each_item_of_the_submenu_chooses_its_value_and_is_the_only_one_ticked` (the items enabled outside a recording) | shell test, UI script |
+| R22 | `crates/shell/tests/record_quantization.rs`, `an_overdub_quantises_each_note_by_the_value_in_force_when_it_arrives` | shell test on the null backend (a change between two passes) |
+| R23 | `crates/shell/tests/step_recording.rs`, `step_recording_is_not_record_quantised`; `crates/shell/tests/capture_midi.rs`, `a_capture_is_not_record_quantised` | shell test (step recording and Capture MIDI with Record Quantization on) |
 
 Every engine test runs its blocks under the allocation trap: recording and the Monitor Auto gate allocate nothing on the audio thread. The shell test checks that the stream's `heap_operations` stays 0 while the writer thread drains.

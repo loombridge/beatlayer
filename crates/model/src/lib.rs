@@ -97,6 +97,7 @@ pub mod note_expression;
 pub mod note_ops;
 pub mod param;
 pub mod rack;
+mod record_quantization;
 pub mod registry;
 pub mod remote;
 mod repr;
@@ -189,6 +190,7 @@ pub use rack::{
     default_macro_name, description as rack_description, general_midi_drum, macro_number,
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
+pub use record_quantization::RecordQuantization;
 pub use remote::{
     ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
     TakeoverMode,

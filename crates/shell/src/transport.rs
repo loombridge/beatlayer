@@ -531,6 +531,8 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         punch_in: doc.settings().punch_in,
         punch_out: doc.settings().punch_out,
         midi_overdub: doc.settings().midi_overdub,
+        record_quantization: doc.settings().record_quantization,
+        record_quantization_last: doc.settings().record_quantization_last,
         automation_arm: shell.arrangement().automation_arm(),
         automation_record_mode: shell.automation_record_mode(),
         recording: shell.running_recording(),

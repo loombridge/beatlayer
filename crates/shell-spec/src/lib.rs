@@ -72,6 +72,8 @@
 //!   it and the seed.
 //! - [`modulation`]: what a track's clips modulate (`modulation.state`,
 //!   WP-5.9).
+//! - [`control_surface`]: the Control Surfaces table (`control_surface.*`,
+//!   WP-7.5).
 //! - [`remote`]: the set's MIDI and key mappings and the remote input
 //!   (`remote.*`, WP-7.1).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
@@ -110,6 +112,7 @@ pub mod clip_properties;
 pub mod commands;
 pub mod comping;
 pub mod context_menus;
+pub mod control_surface;
 pub mod dawproject;
 pub mod devices;
 pub mod editing;
@@ -178,6 +181,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     dawproject::register(registry)?;
     midi_io::register(registry)?;
     remote::register(registry)?;
+    control_surface::register(registry)?;
     midi_tools::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;

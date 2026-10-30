@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use bl_core::midi::{MidiMessage, MidiOutputEvent, PortId};
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use crate::backend::OutputConnection;
+use crate::backend::{MidiError, OutputConnection};
 
 /// How often the output thread looks at its queue when it's empty.
 const POLL: Duration = Duration::from_millis(1);
@@ -183,6 +183,32 @@ impl OutputBus {
         {
             slot.track = track;
             slot.sync = sync;
+        }
+    }
+
+    /// Sends `bytes`, a whole message or a system exclusive one, to the open
+    /// output `port` now, or at `at` where the port's backend schedules, for
+    /// a control surface (`docs/specs/control-surfaces.md`, R8). The port's
+    /// Track switch doesn't matter, and the counts of the engine's output
+    /// don't include it.
+    ///
+    /// # Errors
+    ///
+    /// [`MidiError`] if the port isn't open or refused the message.
+    pub fn send_to(
+        &self,
+        port: PortId,
+        bytes: &[u8],
+        at: Option<Instant>,
+    ) -> Result<(), MidiError> {
+        let mut table = lock(&self.shared.table);
+        let slot = table
+            .iter_mut()
+            .find(|slot| slot.port == port)
+            .ok_or_else(|| MidiError::System("the output port isn't open".to_owned()))?;
+        match at {
+            Some(at) => slot.connection.send_at(bytes, at),
+            None => slot.connection.send(bytes),
         }
     }
 

@@ -42,6 +42,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("remote.invert_range", read("remote.mappings", "mappings[].max")),
     ("remote.set_mode", read("remote.mappings", "mappings[].mode")),
     ("remote.input", nothing("its effect is the mapped control's own and reads back as that control's command does (remote mapping R14); an unmapped message does nothing")),
+    ("control_surface.set", read("control_surface.list", "rows")),
+    ("control_surface.dump", nothing("it sends the surface's setup to a device outside Beatlayer, which keeps nothing a command can read; a test surface records what it was sent (control surfaces R11)")),
     ("set.collect_all_and_save", query(Song, "set.unsaved_changes")),
     ("set.discard_changes", query(Song, "set.unsaved_changes")),
     ("set.discard_recovery", read("set.list_recoverable", "sets")),

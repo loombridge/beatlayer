@@ -222,6 +222,23 @@ pub struct MidiPrefs {
     /// R10): the Control Bar shows Resync External Hardware. Off in a new
     /// install.
     pub show_resync_button: bool,
+    /// The Control Surfaces table's rows, by the surface's ID and the ports'
+    /// names, so they apply again whatever set is open (control surfaces
+    /// R2). A file from before the table has none, which reads as six empty
+    /// rows.
+    pub surfaces: Vec<SurfaceRowPrefs>,
+}
+
+/// One row of the Control Surfaces table in the preferences.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SurfaceRowPrefs {
+    /// The surface's ID.
+    pub surface: Option<String>,
+    /// The input's name.
+    pub input: Option<String>,
+    /// The output's name.
+    pub output: Option<String>,
 }
 
 /// One MIDI port's switches in the preferences.

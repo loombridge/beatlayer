@@ -5,6 +5,7 @@
 
 mod clip_edge_fades;
 mod comping;
+mod control_surfaces;
 mod engine_host;
 mod export;
 mod fades;

@@ -40,6 +40,7 @@ The commands, by the part of their ID before its first dot:
 - [`chain`](chain.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
+- [`control_surface`](control_surface.md)
 - [`device`](device.md)
 - [`device_view`](device_view.md)
 - [`edit`](edit.md)
@@ -10176,6 +10177,36 @@ A drum chain's row in the chain list (drum racks spec, R21).
 
 </details>
 
+### `DumpResult`
+
+What `control_surface.dump` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | integer, at least 0 | yes | How many messages were sent to the output. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.dump` returns.",
+  "properties": {
+    "sent": {
+      "description": "How many messages were sent to the output.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sent"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DurationArgs`
 
 The Duration filter's controls in `clip_view.note_filters`.
@@ -16712,6 +16743,37 @@ Type: integer, at least 1.
 
 </details>
 
+### `ListResult`
+
+What `control_surface.list` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`RowInfo`](#rowinfo) | yes | The six rows, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.list` returns.",
+  "properties": {
+    "rows": {
+      "description": "The six rows, in order.",
+      "items": {
+        "$ref": "#/$defs/RowInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LoadSampleResult`
 
 What `device.load_sample` returns.
@@ -22591,6 +22653,40 @@ One MIDI port as the Settings window's table shows it.
 
 </details>
 
+### `PortRef`
+
+A port a row names, and whether the MIDI system offers it now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name the MIDI system gives the port. |
+| `present` | boolean | yes | Whether the port is present now. A missing port keeps its name, and the surface starts when a port of that name appears. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A port a row names, and whether the MIDI system offers it now.",
+  "properties": {
+    "name": {
+      "description": "The name the MIDI system gives the port.",
+      "type": "string"
+    },
+    "present": {
+      "description": "Whether the port is present now. A missing port keeps its name, and the surface starts when a port of that name appears.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "present"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Position`
 
 A position in the song: ticks (705,600 to the quarter note; 0 is 1.1.1, the start of the arrangement), or bars, beats, and sixteenths as text under the song's time signatures, such as "5", "5.3", or "5.3.2" (missing fields are 1). There's no bar 0: the bar before 1 is -1.
@@ -23729,6 +23825,79 @@ One of:
         "note"
       ],
       "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RecordQuantization`
+
+A Record Quantization value: No Quantization or the note values of the Edit menu's submenu, in the menu's order.
+
+One of:
+
+- `"none"`: No Quantization: recorded notes stay where they were played.
+- `"1/4"`: Quarter notes.
+- `"1/8"`: Eighth notes.
+- `"1/8t"`: Eighth-note triplets.
+- `"1/8+1/8t"`: Eighth notes and eighth-note triplets together.
+- `"1/16"`: Sixteenth notes.
+- `"1/16t"`: Sixteenth-note triplets.
+- `"1/16+1/16t"`: Sixteenth notes and sixteenth-note triplets together.
+- `"1/32"`: Thirty-second notes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A Record Quantization value: No Quantization or the note values of the Edit menu's submenu, in the menu's order.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "No Quantization: recorded notes stay where they were played.",
+      "type": "string"
+    },
+    {
+      "const": "1/4",
+      "description": "Quarter notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/8",
+      "description": "Eighth notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/8t",
+      "description": "Eighth-note triplets.",
+      "type": "string"
+    },
+    {
+      "const": "1/8+1/8t",
+      "description": "Eighth notes and eighth-note triplets together.",
+      "type": "string"
+    },
+    {
+      "const": "1/16",
+      "description": "Sixteenth notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/16t",
+      "description": "Sixteenth-note triplets.",
+      "type": "string"
+    },
+    {
+      "const": "1/16+1/16t",
+      "description": "Sixteenth notes and sixteenth-note triplets together.",
+      "type": "string"
+    },
+    {
+      "const": "1/32",
+      "description": "Thirty-second notes.",
+      "type": "string"
     }
   ]
 }
@@ -25340,6 +25509,191 @@ What `clip.reverse` did.
     "clip"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `RingInfo`
+
+The size of a surface's ring: the block of tracks and scenes its grid controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | integer from 0 to 255 | yes | How many tracks wide. |
+| `scenes` | integer from 0 to 255 | yes | How many scenes tall; 0 for a surface with no clip launching. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The size of a surface's ring: the block of tracks and scenes its grid controls.",
+  "properties": {
+    "scenes": {
+      "description": "How many scenes tall; 0 for a surface with no clip launching.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "How many tracks wide.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tracks",
+    "scenes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RowInfo`
+
+One row of the table.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row, from 1 to 6. |
+| `surface` | [`SurfaceRef`](#surfaceref) or null | yes | The surface, or none. |
+| `input` | [`PortRef`](#portref) or null | yes | The input, or none. |
+| `output` | [`PortRef`](#portref) or null | yes | The output, or none. |
+| `state` | [`RowRun`](#rowrun) | yes | Whether the surface runs, waits for a port, or stopped. |
+| `can_dump` | boolean | yes | Whether Dump is enabled: the surface has a setup to send and its output is present. |
+| `error` | string or null | no | Why the surface stopped. |
+| `surface_state` | [`SurfaceStateInfo`](#surfacestateinfo) or null | no | What a running surface reports of itself. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One row of the table.",
+  "properties": {
+    "can_dump": {
+      "description": "Whether Dump is enabled: the surface has a setup to send and its output is present.",
+      "type": "boolean"
+    },
+    "error": {
+      "description": "Why the surface stopped.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PortRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The input, or none."
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PortRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The output, or none."
+    },
+    "row": {
+      "description": "The row, from 1 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/RowRun",
+      "description": "Whether the surface runs, waits for a port, or stopped."
+    },
+    "surface": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SurfaceRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The surface, or none."
+    },
+    "surface_state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SurfaceStateInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a running surface reports of itself."
+    }
+  },
+  "required": [
+    "row",
+    "surface",
+    "input",
+    "output",
+    "state",
+    "can_dump"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RowRun`
+
+What a row's surface is doing.
+
+One of:
+
+- `"empty"`: The row names no surface.
+- `"waiting"`: The surface waits for a port to appear.
+- `"running"`: The surface runs.
+- `"stopped"`: The surface is stopped; `error` says why.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a row's surface is doing.",
+  "oneOf": [
+    {
+      "const": "empty",
+      "description": "The row names no surface.",
+      "type": "string"
+    },
+    {
+      "const": "waiting",
+      "description": "The surface waits for a port to appear.",
+      "type": "string"
+    },
+    {
+      "const": "running",
+      "description": "The surface runs.",
+      "type": "string"
+    },
+    {
+      "const": "stopped",
+      "description": "The surface is stopped; `error` says why.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -29201,6 +29555,183 @@ A point inside a stretch's range that moves while both ends stay, as dragging th
 
 </details>
 
+### `SurfaceInfo`
+
+One surface the chooser offers.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID, which `control_surface.set` takes. |
+| `name` | string | yes | Its name, as the chooser shows it. |
+| `needs_output` | boolean | yes | Whether it needs an output to start. |
+| `can_lock` | boolean | yes | Whether a device can be locked to it. |
+| `ring` | [`RingInfo`](#ringinfo) or null | yes | The size of its ring, if it has one. |
+| `has_setup` | boolean | yes | Whether it has a setup for Dump to send. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One surface the chooser offers.",
+  "properties": {
+    "can_lock": {
+      "description": "Whether a device can be locked to it.",
+      "type": "boolean"
+    },
+    "has_setup": {
+      "description": "Whether it has a setup for Dump to send.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID, which `control_surface.set` takes.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, as the chooser shows it.",
+      "type": "string"
+    },
+    "needs_output": {
+      "description": "Whether it needs an output to start.",
+      "type": "boolean"
+    },
+    "ring": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RingInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The size of its ring, if it has one."
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "needs_output",
+    "can_lock",
+    "ring",
+    "has_setup"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SurfaceRef`
+
+The surface a row names.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID. |
+| `name` | string or null | yes | Its name, if Beatlayer offers a surface with that ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The surface a row names.",
+  "properties": {
+    "id": {
+      "description": "Its ID.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, if Beatlayer offers a surface with that ID.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SurfaceStateInfo`
+
+What a running surface reports of itself.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ring` | [`RingInfo`](#ringinfo) or null | yes | Its ring, if it has one. |
+| `mode` | string or null | yes | Its own mode, by name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a running surface reports of itself.",
+  "properties": {
+    "mode": {
+      "description": "Its own mode, by name.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ring": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RingInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its ring, if it has one."
+    }
+  },
+  "required": [
+    "ring",
+    "mode"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SurfacesResult`
+
+What `control_surface.surfaces` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `surfaces` | array of [`SurfaceInfo`](#surfaceinfo) | yes | Every surface the chooser offers, native ones by name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.surfaces` returns.",
+  "properties": {
+    "surfaces": {
+      "description": "Every surface the chooser offers, native ones by name.",
+      "items": {
+        "$ref": "#/$defs/SurfaceInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "surfaces"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SustainMode`
 
 What a voice does between Sample Start and Sample End while a note is held (R17).
@@ -31843,6 +32374,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `punch_in` | boolean | yes | Whether Punch-In is on. |
 | `punch_out` | boolean | yes | Whether Punch-Out is on. |
 | `midi_overdub` | boolean | yes | Whether MIDI Arrangement Overdub is on. |
+| `record_quantization` | [`RecordQuantization`](#recordquantization) | yes | Record Quantization, the grid recorded notes are moved onto (the recording spec, R17): `none` or a note value such as `1/16`. |
+| `record_quantization_last` | [`RecordQuantization`](#recordquantization) | yes | The last Record Quantization value other than `none` that was chosen, which `transport.set_record_quantization` with `on` set to true returns to. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
@@ -31952,6 +32485,14 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether Punch-Out is on.",
       "type": "boolean"
     },
+    "record_quantization": {
+      "$ref": "#/$defs/RecordQuantization",
+      "description": "Record Quantization, the grid recorded notes are moved onto (the recording spec, R17): `none` or a note value such as `1/16`."
+    },
+    "record_quantization_last": {
+      "$ref": "#/$defs/RecordQuantization",
+      "description": "The last Record Quantization value other than `none` that was chosen, which `transport.set_record_quantization` with `on` set to true returns to."
+    },
     "recording": {
       "anyOf": [
         {
@@ -32031,6 +32572,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "punch_in",
     "punch_out",
     "midi_overdub",
+    "record_quantization",
+    "record_quantization_last",
     "automation_arm",
     "automation_record_mode",
     "recording",

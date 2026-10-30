@@ -9,6 +9,7 @@ use bl_core::time::SampleRate;
 use bl_model::AudioData;
 use bl_model::Clip;
 use bl_model::ClipData;
+use bl_model::ClipId;
 use bl_model::ContentHash;
 use bl_model::Editor;
 use bl_model::Input;
@@ -101,6 +102,9 @@ impl Shell {
             return;
         };
         recording.follow(engine.take, engine.take_running);
+        // Spec: recording R22. Messages drained now are taken under the
+        // value the set has now.
+        recording.quantization = self.editor.document().settings().record_quantization;
         // A closed engine (a reconfigured device) never publishes the take.
         let running = engine.running && !recording.engine_closed(&self.audio);
         if let Some(outcome) = recording.poll(running) {
@@ -262,6 +266,10 @@ impl Shell {
             .tracks()
             .map(|track| (track.id(), track.take_lanes().len()))
             .collect();
+        // The clips the take put notes in, with the place of the first note
+        // it added to each, for Record Quantization (Spec: recording R19).
+        let mut added: std::collections::BTreeMap<ClipId, usize> =
+            std::collections::BTreeMap::new();
         let applied = match take.wrap {
             None => {
                 let mut placed = std::collections::BTreeSet::new();
@@ -311,7 +319,7 @@ impl Shell {
                             clip,
                         })?;
                     }
-                    crate::recording::place_midi(
+                    for (clip, first) in crate::recording::place_midi(
                         editor,
                         &midi,
                         take,
@@ -319,7 +327,9 @@ impl Shell {
                         overdub,
                         true,
                         &mut placed,
-                    )?;
+                    )? {
+                        added.entry(clip).or_insert(first);
+                    }
                     let made: Vec<_> = placed.iter().copied().collect();
                     crate::colours::colour_new(editor, look, &[], &made)?;
                     crate::session_capture::place(editor, &watch, &runs, &armed, end)?;
@@ -331,9 +341,20 @@ impl Shell {
             Some(_) => {
                 let frames = files.first().map_or(0, |file| file.frames);
                 self.place_loop_passes(frames, &imported, &midi, take, rate, delay)
+                    .map(|found| added = found)
             }
         };
         if let Err(error) = applied {
+            self.fail_recording(format!("Recording failed: {error}"));
+            return;
+        }
+        // Spec: recording R19. The notes the take added are quantised in a
+        // step of their own, after the take's.
+        let value = self.editor.document().settings().record_quantization;
+        if !value.is_none()
+            && let Err(error) =
+                crate::record_quantize::quantize_added(&mut self.editor, &added, value)
+        {
             self.fail_recording(format!("Recording failed: {error}"));
             return;
         }
@@ -419,7 +440,8 @@ impl Shell {
         take: bl_engine::TakeBounds,
         rate: SampleRate,
         delay: i64,
-    ) -> Result<(), bl_model::EditError> {
+    ) -> Result<std::collections::BTreeMap<ClipId, usize>, bl_model::EditError> {
+        let mut added = std::collections::BTreeMap::new();
         let tempo = self.editor.document().settings().tempo.clone();
         let edge_fades = self.create_fades_on_clip_edges();
         let warp_recorded = self.warp_recorded_audio();
@@ -518,7 +540,7 @@ impl Shell {
                     let mut placed = std::collections::BTreeSet::new();
                     if let (0, Some(pass)) = (step, &midi_lead_in) {
                         let cut = crate::recording::midi_in_pass(midi, take, pass);
-                        crate::recording::place_midi(
+                        for (clip, first) in crate::recording::place_midi(
                             editor,
                             &cut,
                             ends(pass),
@@ -526,11 +548,13 @@ impl Shell {
                             overdub,
                             false,
                             &mut placed,
-                        )?;
+                        )? {
+                            added.entry(clip).or_insert(first);
+                        }
                     }
                     if let Some(pass) = midi_passes.get(step) {
                         let cut = crate::recording::midi_in_pass(midi, take, pass);
-                        crate::recording::place_midi(
+                        for (clip, first) in crate::recording::place_midi(
                             editor,
                             &cut,
                             ends(pass),
@@ -538,14 +562,16 @@ impl Shell {
                             overdub,
                             true,
                             &mut placed,
-                        )?;
+                        )? {
+                            added.entry(clip).or_insert(first);
+                        }
                     }
                     let made: Vec<_> = placed.iter().copied().collect();
                     crate::colours::colour_new(editor, look, &[], &made)?;
                     Ok::<(), bl_model::EditError>(())
                 })?;
         }
-        Ok(())
+        Ok(added)
     }
 
     /// Split Clip (note-editing R41): `arrangement.split` on the clip the

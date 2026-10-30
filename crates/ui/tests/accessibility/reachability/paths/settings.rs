@@ -45,6 +45,23 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "replaces the whole list; the remote.* commands change one",
             )),
         ),
+        // The Control Surfaces table (WP-7.5): its choosers step with Up and
+        // Down, and Dump is a button.
+        ("control_surface.list", Exception(Query)),
+        ("control_surface.surfaces", Exception(Query)),
+        (
+            "control_surface.set",
+            settings(
+                "tempo-midi",
+                a_midi_port,
+                "Control Surface 1",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "control_surface.dump",
+            settings("tempo-midi", a_surface_row, "Dump 1", Key::Enter),
+        ),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (

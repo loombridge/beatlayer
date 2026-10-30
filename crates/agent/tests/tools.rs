@@ -779,6 +779,7 @@ const TRANSPORT_COMMANDS: [&str; 25] = [
     "transport.set_midi_overdub",
     "transport.set_punch_in",
     "transport.set_punch_out",
+    "transport.set_record_quantization",
     "transport.set_recording",
     "transport.state",
     "transport.stop",

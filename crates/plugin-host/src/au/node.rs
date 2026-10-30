@@ -469,6 +469,10 @@ impl Node for AuNode {
         for (index, &(offset, event)) in self.events.iter().enumerate() {
             let scheduled = match event {
                 In::Param(param, value) => {
+                    // shortcut: a scan of the later events per change, quadratic in
+                    // a block's events; the driver sends at most 16 per automated
+                    // parameter per 512 frames, so it stays cheap until hundreds
+                    // of parameters move at once.
                     let later = self.events[index + 1..]
                         .iter()
                         .any(|(_, e)| matches!(e, In::Param(p, _) if *p == param));

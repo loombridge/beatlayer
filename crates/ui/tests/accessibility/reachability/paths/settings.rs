@@ -222,6 +222,10 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             settings("file-folder", nothing, "Browse", Key::Enter),
         ),
         (
+            "settings.set_takeover_mode",
+            settings("tempo-midi", nothing, "Takeover Mode", Key::ArrowDown),
+        ),
+        (
             "settings.set_collect_files_on_export",
             settings(
                 "library",

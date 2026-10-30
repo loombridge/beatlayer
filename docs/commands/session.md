@@ -394,7 +394,7 @@ Result: [`LaunchSettings`](README.md#launchsettings).
 
 **Launch Clip**. Permission: `read`. Contexts: `session`.
 
-Launches the clip in a track's Session slot at `scene`, as clicking the slot's launch button does. While the song plays the clip starts on the next line of the global launch quantisation grid, and until then the slot reads `queued`; while it's stopped the transport starts at once from the Arrangement position and the clip starts with it. A clip already playing on that track stops where the new one starts. The clip's launch mode (`clip.set_launch_mode`) says what the press does next: a Trigger, Gate or Repeat clip that already plays restarts on the grid, and a Toggle clip that plays is queued to stop. A Gate or Repeat clip stops when `session.release` follows. The engine publishes the slots' states with the playhead, so the UI can draw them. It changes nothing in the set.
+Launches the clip in a track's Session slot at `scene`, as clicking the slot's launch button does. While the song plays the clip starts on the next line of the global launch quantisation grid, and until then the slot reads `queued`; while it's stopped the transport starts at once from the Arrangement position and the clip starts with it. A clip already playing on that track stops where the new one starts. The clip's launch mode (`clip.set_launch_mode`) says what the press does next: a Trigger, Gate or Repeat clip that already plays restarts on the grid, and a Toggle clip that plays is queued to stop. A Gate or Repeat clip stops when `session.release` follows. The engine publishes the slots' states with the playhead, so the UI can draw them. The optional `velocity`, 1 to 127, is a MIDI note's: the clip's velocity amount (`clip.set_velocity_amount`) turns it into the clip's gain, from full at 127 down to silence at 1 with the amount at 100 %, and the gain holds until the clip stops or launches again; a launch without one is at 127. It changes nothing in the set.
 
 Default keys: none.
 
@@ -404,6 +404,7 @@ Arguments:
 |---|---|---|---|
 | `track` | [`TrackId`](README.md#trackid) | yes | The track whose slot it is. |
 | `scene` | [`SceneId`](README.md#sceneid) | yes | The scene whose slot it is. |
+| `velocity` | integer or null | no | The launch's velocity, 1 to 127: the clip's velocity amount turns it into the clip's gain (the remote mapping spec, R16). A click, a key and a controller launch at 127, as a launch without one does. |
 
 Result: nothing (`null`).
 

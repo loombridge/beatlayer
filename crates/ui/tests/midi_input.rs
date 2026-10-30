@@ -220,6 +220,48 @@ fn the_tempo_and_midi_page_lists_each_port_with_its_switches() {
     assert!(test.is_open(Direction::Output, "Synth"));
 }
 
+// Spec: remote-mapping R28 (L-SET-014). Takeover Mode is a chooser on the
+// Tempo & MIDI page, before the MIDI ports table, None in a new install; the
+// keyboard picks another and the command runs.
+#[test]
+fn the_tempo_and_midi_page_has_the_takeover_mode_chooser_before_the_ports() {
+    use egui::Id;
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Keys A");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let chooser = Harness::node(&nodes, "Takeover Mode");
+    assert_eq!(chooser.value, "None", "a new install's choice");
+    assert!(
+        bounds(chooser).bottom() <= bounds(Harness::node(&nodes, "In: Keys A Track")).top(),
+        "before the ports"
+    );
+
+    h.accesskit(
+        Id::new(("chooser", "takeover-mode")),
+        egui::accesskit::Action::Focus,
+    );
+    h.key(Key::ArrowDown, Modifiers::NONE);
+    h.settle();
+    assert_eq!(
+        h.shell.takeover_mode(),
+        bl_shell::settings::TakeoverMode::PickUp
+    );
+    assert!(
+        h.events.iter().any(|e| matches!(
+            e,
+            bl_ui::main_window::UiEvent::Invoke(i) if i.id == "settings.set_takeover_mode"
+        )),
+        "the chooser runs its command"
+    );
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert_eq!(Harness::node(&nodes, "Takeover Mode").value, "Pick-Up");
+}
+
 // Spec: midi-io R27. An input's row has a fourth switch, MPE, after Remote,
 // off for a port seen for the first time; clicking it sets it, and an output
 // has none.

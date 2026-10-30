@@ -889,7 +889,10 @@ impl Shell {
     pub(super) fn re_enable_launched_automation(&mut self, command: SessionCommand) {
         let document = self.editor.document();
         let slots: Vec<(TrackId, SceneId)> = match command {
-            SessionCommand::Launch { track, scene } => vec![(track, scene)],
+            SessionCommand::Launch { track, scene }
+            | SessionCommand::LaunchAt { track, scene, .. } => {
+                vec![(track, scene)]
+            }
             SessionCommand::LaunchScene(scene) => document
                 .track_order()
                 .into_iter()

@@ -12,7 +12,7 @@ use imbl::OrdMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::external::External;
+use crate::external::{CvPort, External};
 use crate::ids::{ContentHash, DeviceId, ParamId, TrackId};
 use crate::layers::Layers;
 use crate::modulator::{Mapping, ShapePoint};
@@ -617,6 +617,22 @@ impl Device {
     pub fn with_external_output(mut self) -> Self {
         let mut external = self.external.take().unwrap_or_default();
         external.audio_to = Some(Channel::default());
+        self.external = Some(external);
+        self
+    }
+
+    /// The same device with CV outputs and inputs, by their names in the
+    /// device's order, none set to a channel, as a new CV device has
+    /// (`docs/specs/cv-tools.md`, R3). It works with hardware, so it has the
+    /// routing of an external device.
+    #[must_use]
+    pub fn with_cv(mut self, outputs: &[String], inputs: &[String]) -> Self {
+        let mut external = self.external.take().unwrap_or_default();
+        external.cv_outputs = outputs.iter().map(|name| CvPort::new(name)).collect();
+        external.cv_inputs = inputs.iter().map(|name| CvPort::new(name)).collect();
+        // Audio From starts at No Input, so a new CV device doesn't make
+        // an export real time until a return is chosen.
+        external.audio_from = External::NO_INPUT;
         self.external = Some(external);
         self
     }

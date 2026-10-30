@@ -348,6 +348,8 @@ fn an_agent_reads_each_controllers_mode() {
             [
                 ("apc-mini-mk2", "APC mini mk2"),
                 ("apc40-mkii", "APC40 mkII"),
+                ("launchkey-mk3", "Launchkey MK3"),
+                ("launchkey-mk4", "Launchkey MK4"),
                 ("launchpad-mini-mk3", "Launchpad Mini MK3"),
                 ("launchpad-pro-mk3", "Launchpad Pro MK3"),
                 ("launchpad-x", "Launchpad X"),
@@ -360,6 +362,47 @@ fn an_agent_reads_each_controllers_mode() {
         assert_eq!(row["state"], "running");
         assert_eq!(row["surface_state"]["mode"], mode);
         assert_eq!(row["surface_state"]["ring"]["tracks"], 8);
+    }
+}
+
+// Spec: supported-controllers R1, R2, R4. An agent finds the Launchkeys in the
+// chooser's list, and reads each plugged-in controller's own mode by name
+// from the Control Surfaces table.
+#[test]
+fn an_agent_reads_each_launchkeys_mode() {
+    use bl_control::launchkey::sim::{Launchkey, Size};
+    for (mk4, id, mode) in [
+        (
+            false,
+            "launchkey-mk3",
+            "Session; track buttons: Clips; pots: Device; faders: Volume; fader buttons: Rec Arm",
+        ),
+        (
+            true,
+            "launchkey-mk4",
+            "Session; track buttons: Clips; encoders: Plugin; faders: Volume; fader buttons: Rec Arm",
+        ),
+    ] {
+        let test = TestBackend::new();
+        let mut keys = if mk4 {
+            Launchkey::mk4(&test, Size::K61)
+        } else {
+            Launchkey::mk3(&test, Size::K61)
+        };
+        keys.plug_in();
+        let mut shell = Shell::headless();
+        shell.use_midi_backend(Box::new(test.clone()));
+        keys.pump();
+        let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+        client.initialize("test-agent").unwrap();
+
+        let listed = run(&mut client, "control_surface.list", json!({}));
+        let row = &listed["rows"][0];
+        assert_eq!(row["surface"]["id"], id);
+        assert_eq!(row["state"], "running");
+        assert_eq!(row["surface_state"]["mode"], mode);
+        assert_eq!(row["surface_state"]["ring"]["tracks"], 8, "eight tracks");
+        assert_eq!(row["surface_state"]["ring"]["scenes"], 2, "two scenes");
     }
 }
 

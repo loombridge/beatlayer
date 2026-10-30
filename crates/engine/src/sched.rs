@@ -52,7 +52,9 @@ pub(crate) struct Lane {
     pub(crate) events: Vec<NodeEvent>,
     /// A delayed route's input: `channels` channels of `max_frames` frames.
     pub(crate) delay: Vec<f32>,
-    /// One task's device input mapped to the tracks' stereo layout.
+    /// One task's device input mapped to the tracks' stereo layout, and
+    /// after it the input channels a CV device reads, one buffer each of the
+    /// same size (`docs/specs/cv-tools.md`, R6).
     pub(crate) device: Vec<f32>,
 }
 
@@ -62,7 +64,7 @@ impl Lane {
         Self {
             events: Vec::with_capacity(config.max_pending_events),
             delay: vec![0.0; size],
-            device: vec![0.0; size],
+            device: vec![0.0; size * (1 + bl_model::MAX_CV_PORTS)],
         }
     }
 }

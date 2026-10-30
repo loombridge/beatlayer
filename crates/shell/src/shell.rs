@@ -100,6 +100,7 @@ pub mod autosample;
 mod bounce;
 mod capture;
 mod clip_properties;
+mod cv;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
@@ -2144,6 +2145,9 @@ impl Shell {
         }
         if autosampler_ids::handles(id) {
             return self.run_autosampler(id, args);
+        }
+        if bl_shell_spec::cv::handles(id) {
+            return self.run_cv(id, args);
         }
         if device_ids::handles(id) {
             return self.run_devices(id, args);

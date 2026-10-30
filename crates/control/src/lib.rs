@@ -24,6 +24,7 @@ use bl_model::{
 
 pub mod grid;
 mod host;
+pub mod launchkey;
 mod surface;
 pub mod template;
 mod template_surface;

@@ -66,6 +66,7 @@ pub fn apc40() -> Kind {
     )
     .recognised(Recognise {
         port: "apc40 mkii",
+        test: None,
         maker: &MAKER,
         pair: false,
     })

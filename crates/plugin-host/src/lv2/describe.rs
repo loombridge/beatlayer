@@ -205,6 +205,8 @@ pub(crate) fn device_type(info: &PluginInfo) -> (DeviceType, Vec<Parameter>) {
     let params = parameters(info);
     let device_type = DeviceType {
         external_output: false,
+        cv_outputs: Vec::new(),
+        cv_inputs: Vec::new(),
         kind: DeviceKind::Plugin {
             format: PluginFormat::Lv2,
             plugin_id: info.uri.clone(),

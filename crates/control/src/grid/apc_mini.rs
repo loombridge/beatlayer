@@ -45,6 +45,7 @@ pub fn apc_mini() -> Kind {
     )
     .recognised(Recognise {
         port: "apc mini mk2",
+        test: None,
         maker: &MAKER,
         pair: true,
     })

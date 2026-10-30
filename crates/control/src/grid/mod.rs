@@ -31,7 +31,7 @@ use crate::surface::{
 mod apc;
 mod apc40;
 mod apc_mini;
-mod palette;
+pub(crate) mod palette;
 #[cfg(feature = "testing")]
 pub mod sim;
 #[cfg(feature = "testing")]
@@ -120,6 +120,7 @@ fn kind(
 ) -> Kind {
     Kind::new(id, model.name(), true, true, Some(RING), Vec::new(), make).recognised(Recognise {
         port,
+        test: None,
         maker: &MAKER,
         pair: false,
     })
@@ -282,7 +283,7 @@ enum Layout {
 
 /// What a row of track buttons does (R13).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TrackFn {
+pub(crate) enum TrackFn {
     Stop,
     Solo,
     Mute,
@@ -291,7 +292,7 @@ enum TrackFn {
 }
 
 impl TrackFn {
-    const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Stop => "Clip Stop",
             Self::Solo => "Solo",
@@ -301,7 +302,7 @@ impl TrackFn {
         }
     }
 
-    const fn role(self, column: u8) -> Role {
+    pub(crate) const fn role(self, column: u8) -> Role {
         match self {
             Self::Stop => Role::Stop(column),
             Self::Solo => Role::Solo(column),
@@ -464,7 +465,7 @@ enum Look {
 
 /// What the surface knows of the controller's state, and what it has told
 /// the controller.
-struct Grid {
+pub(crate) struct Grid {
     model: Model,
     layout: Layout,
     /// The Launchpad X's Mixer function, if Mixer shows.
@@ -619,7 +620,7 @@ impl Grid {
 
     // Colours ------------------------------------------------------------
 
-    fn track_colour(doc: &Document, track: TrackId) -> [u8; 3] {
+    pub(crate) fn track_colour(doc: &Document, track: TrackId) -> [u8; 3] {
         let swatch = doc.track(track).map_or(0, bl_model::Track::colour);
         swatch_rgb(&DEFAULT_TRACK_PALETTE, swatch)
     }
@@ -639,7 +640,7 @@ impl Grid {
     // Rendering ----------------------------------------------------------
 
     /// The state of a slot, from what the engine reports.
-    fn state_of(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<SlotState> {
+    pub(crate) fn state_of(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<SlotState> {
         model
             .slots
             .iter()
@@ -665,7 +666,7 @@ impl Grid {
     }
 
     /// A pad's slot as it shows on a Launchpad (R9).
-    fn slot_light(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Light> {
+    pub(crate) fn slot_light(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Light> {
         let colour_of = || Self::clip_colour(&model.document, track, scene);
         match Self::slot_look(model, track, scene) {
             Look::Queued => Some(Light::Flash {
@@ -701,7 +702,7 @@ impl Grid {
     }
 
     /// A scene button as it shows on a Launchpad (R9).
-    fn scene_light(model: &ReadModel, scene: SceneId) -> Option<Light> {
+    pub(crate) fn scene_light(model: &ReadModel, scene: SceneId) -> Option<Light> {
         Some(Light::Static(if Self::scene_look(model, scene)? {
             colour::GREEN
         } else {
@@ -741,7 +742,7 @@ impl Grid {
     }
 
     /// A track button as it shows its track's state on a Launchpad (R13).
-    fn track_fn_light(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<Light> {
+    pub(crate) fn track_fn_light(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<Light> {
         let on = Self::track_fn_on(model, f, track)?;
         let (bright, dim) = match f {
             TrackFn::Stop | TrackFn::Arm => (colour::RED, colour::DIM_RED),

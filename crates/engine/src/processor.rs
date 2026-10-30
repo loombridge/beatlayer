@@ -2523,6 +2523,9 @@ impl Processor {
                     offset,
                     length,
                 );
+                // Spec: cv-tools R3. A CV output adds to its channel at full
+                // value.
+                program.mix_cv(&mut self.ext_output, self.ext_width, stride, offset, length);
             }
             None => {
                 self.ext_width = 0;

@@ -44,6 +44,13 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: single_tone,
     },
     Fixture {
+        name: "cv-instrument-and-triggers",
+        about: "The device channels after Main's two, of a phrase played through CV Instrument \
+                (Pitch, Gate and Mod 1, with a 50 ms glide) and CV Triggers (a pulse, a held \
+                gate and a velocity-scaled pulse): the voltages as sample values, on their frames.",
+        build: cv_instrument_and_triggers,
+    },
+    Fixture {
         name: "summed-tracks",
         about: "Four tracks summed into Main through their faders, at three volumes, one muted.",
         build: summed_tracks,
@@ -525,11 +532,14 @@ struct Song {
     schedule: Vec<ScheduledCommand>,
     cues: Vec<Cue>,
     launches: Vec<Launch>,
+    /// The interface channels the render keeps after Main's.
+    device_channels: usize,
 }
 
 impl Song {
     fn new() -> Self {
         Self {
+            device_channels: 0,
             editor: Editor::new(),
             files: Vec::new(),
             media: MediaMap::new(),
@@ -778,6 +788,7 @@ impl Song {
             },
             launches: self.launches,
             frames: SAMPLE_RATE.seconds_to_frames(seconds).get() as u64,
+            device_channels: self.device_channels,
         }
     }
 }
@@ -893,6 +904,94 @@ fn beat_repeat() -> Scene {
         device,
     });
     song.finish(4.25)
+}
+
+/// A phrase through CV Instrument and CV Triggers, captured on the device
+/// channels after Main's two (WP-7.17; the CV tools spec, R12, R17).
+fn cv_instrument_and_triggers() -> Scene {
+    use bl_devices::cv_instrument::{GLIDE, cv_instrument_type};
+    use bl_devices::cv_triggers::{Field, cv_triggers_type, param};
+
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let notes = |played: &[(u8, i64, i64, u8)]| {
+        played
+            .iter()
+            .map(|&(key, start, length, velocity)| {
+                bl_model::Note::new(
+                    key,
+                    Ticks(start * beat / 4),
+                    Ticks(length * beat / 4),
+                    velocity,
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    // The instrument: Pitch, Gate and Mod 1 on device channels 1 to 3, with a
+    // legato line that glides.
+    let keys = song.track(TrackKind::Midi, "Keys", None);
+    let id = song.editor.new_id();
+    let mut instrument = cv_instrument_type().device(id);
+    instrument.params.insert(GLIDE, 50.0);
+    let external = instrument.external.as_mut().expect("it has routing");
+    for (port, channel) in external.cv_outputs.iter_mut().zip([1, 2, 3]) {
+        port.channel = Some(channel);
+    }
+    song.apply(Command::InsertDevice {
+        track: keys,
+        index: 0,
+        device: instrument,
+    });
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(notes(&[
+                (60, 0, 8, 100),
+                (64, 6, 6, 40),
+                (67, 14, 4, 127),
+                (72, 20, 6, 80),
+            ]))),
+        ),
+    });
+    // The triggers: a pulse, a held gate, and a pulse scaled by velocity, on
+    // device channels 4 to 6.
+    let drums = song.track(TrackKind::Midi, "Drums", None);
+    let id = song.editor.new_id();
+    let mut triggers = cv_triggers_type().device(id);
+    triggers.params.insert(param(1, Field::Mode), 1.0);
+    triggers.params.insert(param(2, Field::Velocity), 1.0);
+    let external = triggers.external.as_mut().expect("it has routing");
+    for (port, channel) in external.cv_outputs.iter_mut().zip([4, 5, 6]) {
+        port.channel = Some(channel);
+    }
+    song.apply(Command::InsertDevice {
+        track: drums,
+        index: 0,
+        device: triggers,
+    });
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track: drums,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(notes(&[
+                (36, 0, 1, 100),
+                (36, 4, 1, 100),
+                (36, 5, 1, 100),
+                (37, 2, 6, 100),
+                (38, 8, 1, 127),
+                (38, 12, 1, 50),
+            ]))),
+        ),
+    });
+    song.device_channels = 6;
+    song.finish(3.5)
 }
 
 fn single_tone() -> Scene {

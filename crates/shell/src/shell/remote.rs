@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use bl_commands::{NoArgs, Permission};
 use bl_control::{Action, Hit, Law, Memory, State};
-use bl_core::midi::{MidiInputEvent, MidiMessage, PortId};
+use bl_core::midi::{MidiMessage, PortId};
 use bl_engine::SlotState;
 use bl_model::modulation::Travel;
 use bl_model::{
@@ -21,14 +21,24 @@ use bl_model::{
 };
 use bl_shell_spec::midi_io::PortDirection;
 use bl_shell_spec::remote as ids;
-use bl_shell_spec::remote::{MappingInfo, MappingsResult};
+use bl_shell_spec::remote::{MapMode, MappingInfo, MappingsResult};
 use serde_json::{Value, json};
 
+use super::map_mode::MapState;
 use super::{Shell, ShellError, to_value};
 
 /// How long a run of messages to one continuous control may pause and stay
 /// one undo step (R12).
 const RUN_PAUSE: Duration = Duration::from_secs(1);
+
+/// What a run of messages that is one undo step belongs to: one mapping's
+/// controller messages (R12), or the learning of one control's mapping (map
+/// modes R5).
+#[derive(Clone, PartialEq)]
+pub(super) enum RunKey {
+    Source(RemoteSource),
+    Learning(RemoteTarget),
+}
 
 /// The remote input's state in the shell.
 #[derive(Default)]
@@ -39,16 +49,14 @@ pub(super) struct RemoteState {
     memory: HashMap<RemoteSource, Memory>,
     /// The mapping whose run of messages to a continuous control is one
     /// undo step, and when its latest message came.
-    run: Option<(RemoteSource, Instant)>,
+    pub(super) run: Option<(RunKey, Instant)>,
     /// Set while a mapped message's command runs, so it doesn't end its own
     /// run.
-    applying: bool,
-    /// Whether a map mode is on, so no mapping acts (R13).
-    map_mode: bool,
-    /// The messages that crossed for learning while a map mode was on.
-    learned: Vec<MidiInputEvent>,
+    pub(super) applying: bool,
+    /// The map mode, what it has selected and what it has learned so far.
+    pub(super) map: MapState,
     applied: u64,
-    refused: u64,
+    pub(super) refused: u64,
     /// What each mapping last told the outputs with Remote on (R39).
     fed: HashMap<RemoteSource, Vec<MidiMessage>>,
     /// The outputs with Remote on at the last poll.
@@ -84,28 +92,6 @@ fn drag(id: &'static str, args: Value, name: &'static str) -> Option<Run> {
 }
 
 impl Shell {
-    /// Turns a map mode's flag on or off: while it is on no mapping acts,
-    /// and every message on the remote input crosses to
-    /// [`Shell::take_learned_messages`] (R10, R13).
-    pub fn set_map_mode(&mut self, on: bool) {
-        self.end_remote_run();
-        self.remote.map_mode = on;
-        self.remote.learned.clear();
-        self.midi.sender().remote().set_learning(on);
-    }
-
-    /// Whether a map mode is on.
-    #[must_use]
-    pub fn map_mode(&self) -> bool {
-        self.remote.map_mode
-    }
-
-    /// The messages that crossed from the remote input since the last call
-    /// while a map mode was on, for learning.
-    pub fn take_learned_messages(&mut self) -> Vec<MidiInputEvent> {
-        std::mem::take(&mut self.remote.learned)
-    }
-
     /// How many mapped messages ran their control's command, and how many
     /// were refused: a control the set no longer has, or a command that
     /// failed (R11).
@@ -119,7 +105,7 @@ impl Shell {
     /// from the shortcuts.
     #[must_use]
     pub fn key_is_mapped(&self, name: &str) -> bool {
-        !self.remote.map_mode
+        self.remote.map.mode == MapMode::Off
             && self
                 .editor
                 .document()
@@ -161,12 +147,58 @@ impl Shell {
         self.remote.run = None;
         // Spec: remote-mapping R39. A set that loads sends every value.
         self.remote.fed.clear();
+        // Spec: map-modes R2. A map mode is off when a set opens.
+        self.set_map_mode(MapMode::Off);
     }
 
     /// The feedback and indicator counts: messages sent to outputs with
     /// Remote on, and keys key mappings took (R41, R43).
     pub(super) fn remote_traffic(&self) -> (u64, u64) {
         (self.remote.sent, self.remote.keys)
+    }
+
+    /// The remote input's counts, lamps and takeover states, for
+    /// `remote.state` (R43).
+    pub(super) fn remote_report(&self) -> (ids::Counts, ids::Lamps, Vec<ids::TakeoverInfo>) {
+        let stats = self.midi.sender().stats().snapshot();
+        let [remote_input, remote_output, key_input] = self.remote_lamps();
+        let takeover = self
+            .editor
+            .document()
+            .settings()
+            .remote
+            .iter()
+            .filter(|m| {
+                m.kind == ControlKind::Continuous
+                    && matches!(m.mode, RemoteMode::Absolute | RemoteMode::Absolute14)
+            })
+            .map(|m| {
+                let memory = self.remote.memory.get(&m.source);
+                ids::TakeoverInfo {
+                    source: m.source.clone(),
+                    state: if memory.is_none_or(Memory::following) {
+                        ids::TakeoverState::Following
+                    } else {
+                        ids::TakeoverState::Waiting
+                    },
+                    last: memory.and_then(Memory::last),
+                }
+            })
+            .collect();
+        let counts = ids::Counts {
+            taken: stats.remote_taken,
+            dropped: stats.remote_dropped,
+            unmapped: stats.remote_unmapped,
+            applied: self.remote.applied,
+            refused: self.remote.refused,
+            feedback_sent: self.remote.sent,
+        };
+        let lamps = ids::Lamps {
+            remote_input,
+            remote_output,
+            key_input,
+        };
+        (counts, lamps, takeover)
     }
 
     /// What a mapping's control is now, as feedback shows it (R38).
@@ -280,12 +312,16 @@ impl Shell {
         let revision = self.document_revision;
         let mut events = Vec::new();
         self.midi.sender().remote().drain(&mut events);
-        if self.remote.map_mode {
-            self.remote.learned.append(&mut events);
-        }
         for event in events {
-            self.apply_message(&event.message);
+            if self.remote.map.mode == MapMode::Off {
+                self.apply_message(&event.message);
+            } else {
+                // Spec: map-modes R5. In a map mode a message is taken for
+                // learning instead.
+                self.learn(&event.message);
+            }
         }
+        self.keep_selection();
         if let Some((_, at)) = self.remote.run
             && self.midi.now().saturating_duration_since(at) >= RUN_PAUSE
         {
@@ -315,7 +351,7 @@ impl Shell {
 
     /// Applies a MIDI message to the mappings that take it; whether one did.
     fn apply_message(&mut self, message: &MidiMessage) -> bool {
-        if self.remote.map_mode {
+        if self.remote.map.mode != MapMode::Off {
             return false;
         }
         let mut taken = false;
@@ -335,7 +371,7 @@ impl Shell {
 
     /// Applies a computer key to the mapping of it; whether there is one.
     fn apply_key(&mut self, key: &str, pressed: bool) -> bool {
-        if self.remote.map_mode {
+        if self.remote.map.mode != MapMode::Off {
             return false;
         }
         let mut taken = false;
@@ -384,11 +420,12 @@ impl Shell {
         let now = self.midi.now();
         match run.gesture {
             Some(name) => {
-                if self.remote.run.as_ref().map(|(source, _)| source) != Some(&mapping.source) {
+                let key = RunKey::Source(mapping.source.clone());
+                if self.remote.run.as_ref().map(|(key, _)| key) != Some(&key) {
                     self.end_remote_run();
                     self.begin_gesture(name);
                 }
-                self.remote.run = Some((mapping.source.clone(), now));
+                self.remote.run = Some((key, now));
             }
             None => self.end_remote_run(),
         }
@@ -741,7 +778,22 @@ impl Shell {
         }
     }
 
-    fn mapping_info(&self, mapping: &RemoteMapping) -> MappingInfo {
+    /// The values Min and Max may take, in the control's own units (map
+    /// modes R9).
+    fn units_of(&self, mapping: &RemoteMapping) -> (f64, f64) {
+        match mapping.kind {
+            ControlKind::Continuous => mapping
+                .target
+                .natural_range()
+                .or_else(|| self.param_control(&mapping.target).and_then(|(_, r)| r))
+                .unwrap_or((0.0, 1.0)),
+            ControlKind::Radio { options } => (0.0, f64::from(options.saturating_sub(1))),
+            ControlKind::RangedSwitch => (0.0, 127.0),
+            _ => (0.0, 1.0),
+        }
+    }
+
+    pub(super) fn mapping_info(&self, mapping: &RemoteMapping) -> MappingInfo {
         let (path, name) = self.describe(&mapping.target);
         MappingInfo {
             source: mapping.source.clone(),
@@ -751,13 +803,17 @@ impl Shell {
             kind: mapping.kind,
             min: mapping.min,
             max: mapping.max,
+            range: self.units_of(mapping),
             mode: mapping.mode,
         }
     }
 
     /// The kind and the range a device parameter's control has, from its
     /// description: a toggle is a ranged switch, a choice a radio button.
-    fn param_control(&self, target: &RemoteTarget) -> Option<(ControlKind, Option<(f64, f64)>)> {
+    pub(super) fn param_control(
+        &self,
+        target: &RemoteTarget,
+    ) -> Option<(ControlKind, Option<(f64, f64)>)> {
         let RemoteTarget::Device { device, param } = *target else {
             return None;
         };
@@ -788,18 +844,25 @@ impl Shell {
         label: &'static str,
         mappings: Vec<RemoteMapping>,
     ) -> Result<(), ShellError> {
-        self.end_remote_run();
-        self.edit(|editor| {
-            editor.transact(label, |editor| {
-                editor
-                    .apply(Command::SetRemoteMappings { mappings })
-                    .map(drop)
+        if self.remote.applying || self.gesture {
+            // A gesture is open (learning's, or a number box's drag; map
+            // modes R5, R9): the mapping joins its undo step, which an `edit`
+            // of its own can't.
+            self.run("song.set_remote_mappings", json!({ "mappings": mappings }))?;
+        } else {
+            self.end_remote_run();
+            self.edit(|editor| {
+                editor.transact(label, |editor| {
+                    editor
+                        .apply(Command::SetRemoteMappings { mappings })
+                        .map(drop)
+                })
             })
-        })
-        .map_err(|error| ShellError::Failed {
-            command: id.to_owned(),
-            message: error.to_string(),
-        })?;
+            .map_err(|error| ShellError::Failed {
+                command: id.to_owned(),
+                message: error.to_string(),
+            })?;
+        }
         self.publish_remote();
         Ok(())
     }
@@ -938,57 +1001,14 @@ impl Shell {
             }
             ids::SET_MODE => {
                 let args = Self::args::<ids::SetModeArgs>(id, args)?;
-                self.change_mapping(id, "Change Mapping Mode", &args.source, |m| {
-                    m.mode = args.mode;
-                })
-            }
-            ids::STATE => {
-                Self::args::<NoArgs>(id, args)?;
-                let stats = self.midi.sender().stats().snapshot();
-                let [remote_input, remote_output, key_input] = self.remote_lamps();
-                let takeover = self
-                    .editor
-                    .document()
-                    .settings()
-                    .remote
-                    .iter()
-                    .filter(|m| {
-                        m.kind == ControlKind::Continuous
-                            && matches!(m.mode, RemoteMode::Absolute | RemoteMode::Absolute14)
-                    })
-                    .map(|m| {
-                        let memory = self.remote.memory.get(&m.source);
-                        ids::TakeoverInfo {
-                            source: m.source.clone(),
-                            state: if memory.is_none_or(Memory::following) {
-                                ids::TakeoverState::Following
-                            } else {
-                                ids::TakeoverState::Waiting
-                            },
-                            last: memory.and_then(Memory::last),
-                        }
-                    })
-                    .collect();
-                let learned: Vec<MidiMessage> =
-                    self.remote.learned.iter().map(|e| e.message).collect();
-                Ok(to_value(&ids::StateResult {
-                    counts: ids::Counts {
-                        taken: stats.remote_taken,
-                        dropped: stats.remote_dropped,
-                        unmapped: stats.remote_unmapped,
-                        applied: self.remote.applied,
-                        refused: self.remote.refused,
-                        feedback_sent: self.remote.sent,
-                    },
-                    lamps: ids::Lamps {
-                        remote_input,
-                        remote_output,
-                        key_input,
-                    },
-                    takeover,
-                    guess: (self.remote.map_mode && !learned.is_empty())
-                        .then(|| bl_control::guess(&learned)),
-                }))
+                let changed =
+                    self.change_mapping(id, "Change Mapping Mode", &args.source, |m| {
+                        m.mode = args.mode;
+                    })?;
+                if !self.remote.applying {
+                    self.mode_chosen(&args.source);
+                }
+                Ok(changed)
             }
             ids::INPUT => {
                 let args = Self::args::<ids::InputArgs>(id, args)?;
@@ -1013,6 +1033,7 @@ impl Shell {
                 self.end_remote_run();
                 Ok(to_value(&ids::InputResult { taken }))
             }
+            ids::MAP_MODE | ids::SELECT | ids::STATE => self.run_map_mode(id, args),
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
     }

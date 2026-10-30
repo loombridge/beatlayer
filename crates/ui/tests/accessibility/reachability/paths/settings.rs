@@ -8,30 +8,40 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
     use Reason::{AgentOnly, Equivalent, LaterView, Query};
     vec![
-        // The mappings' commands (WP-7.1): the map modes' overlays and the
-        // Mapping Browser that make them by a click and a key come with
-        // WP-7.3; until then agents reach them.
+        // The mappings' commands (WP-7.1) and the map modes that make them
+        // (WP-7.3).
         ("remote.mappings", Exception(Query)),
         ("remote.state", Exception(Query)),
         (
+            "remote.select",
+            Exception(Equivalent(
+                "a click on a tinted control in a map mode, or Enter with the control focused",
+            )),
+        ),
+        (
             "remote.map",
-            Exception(LaterView("the map modes' overlays (WP-7.3)")),
+            Exception(Equivalent(
+                "the next key in Key Map Mode, or the next message in MIDI Map Mode, with a \
+                 control selected",
+            )),
         ),
         (
             "remote.unmap",
-            Exception(LaterView("the Mapping Browser's Delete (WP-7.3)")),
+            Exception(Equivalent(
+                "Delete or Backspace with a control selected in a map mode",
+            )),
         ),
         (
             "remote.set_range",
-            Exception(LaterView("the Mapping Browser's Min and Max (WP-7.3)")),
+            Exception(Equivalent("the Mapping Browser's Min and Max boxes")),
         ),
         (
             "remote.invert_range",
-            Exception(LaterView("the Mapping Browser's Invert Range (WP-7.3)")),
+            Exception(Equivalent("the Mapping Browser's Invert Range")),
         ),
         (
             "remote.set_mode",
-            Exception(LaterView("the Status Bar's mode chooser (WP-7.3)")),
+            Exception(Equivalent("the Status Bar's mode chooser")),
         ),
         (
             "remote.input",

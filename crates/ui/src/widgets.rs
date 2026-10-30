@@ -94,7 +94,12 @@ fn paint(
     let boxed = !matches!(placement.kind, Kind::MenuArrow | Kind::Indicator)
         && placement.element != Element::Message;
     let face = if look.on && live {
-        c.accent.0
+        // Spec: map-modes R3. The map switches are lit in their overlay's colour.
+        match placement.element {
+            Element::MidiMap => c.midi_map.0,
+            Element::KeyMap => c.key_map.0,
+            _ => c.accent.0,
+        }
     } else if look.entry || response.is_pointer_button_down_on() {
         c.control_pressed.0
     } else if response.hovered() && live {

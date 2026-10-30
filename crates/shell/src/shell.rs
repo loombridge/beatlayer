@@ -126,6 +126,7 @@ mod focus;
 mod gestures;
 mod info_text;
 mod invoke;
+mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
@@ -1638,6 +1639,7 @@ impl Shell {
         let revision = self.document_revision;
         let generation = self.editor_generation;
         let result = self.run_command(id, args);
+        self.rack_map_mode_ends_map_mode(id);
         self.sync_key_edit();
         if result.is_ok() {
             self.follow_restored_breakpoint(history);

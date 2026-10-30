@@ -99,6 +99,10 @@ pub struct Colours {
     /// The tint of every parameter a lit Map button can map, and of the lit
     /// button (WP-5.10).
     pub mapping: Colour,
+    /// The overlay of every control MIDI Map Mode can map (WP-7.3).
+    pub midi_map: Colour,
+    /// The overlay of every control Key Map Mode can map (WP-7.3).
+    pub key_map: Colour,
     /// The outline of the tracks the search field finds, in the Arrangement,
     /// the Session View and the mixers (WP-6.42).
     pub search: Colour,

@@ -75,6 +75,10 @@ inactive = "#6a717a"
 automation = "#f0a35c"
 modulation = "#b78cf0"
 mapping = "#4fd6c4"
+# The overlays of the map modes: MIDI Map Mode in blue and Key Map Mode in red
+# (WP-7.3).
+midi_map = "#5aa8ff"
+key_map = "#ff6b6b"
 # The outline of the tracks the search field finds (WP-6.42).
 search = "#f5d142"
 # The keys of a clip's scale on the piano ruler and the rows Highlight Scales

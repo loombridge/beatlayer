@@ -17714,6 +17714,43 @@ One of:
 
 </details>
 
+### `MapMode`
+
+Which map mode is on (map modes R1, R2).
+
+One of:
+
+- `"off"`: No map mode: mappings act.
+- `"midi"`: MIDI Map Mode.
+- `"key"`: Key Map Mode.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which map mode is on (map modes R1, R2).",
+  "oneOf": [
+    {
+      "const": "off",
+      "description": "No map mode: mappings act.",
+      "type": "string"
+    },
+    {
+      "const": "midi",
+      "description": "MIDI Map Mode.",
+      "type": "string"
+    },
+    {
+      "const": "key",
+      "description": "Key Map Mode.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Mapping`
 
 One slot's mapping: the parameter it modulates.
@@ -17764,6 +17801,7 @@ One mapping as `remote.mappings` reports it (R14).
 | `kind` | [`ControlKind`](#controlkind) | yes | The control's kind. |
 | `min` | number | yes | The bottom of the range, in the control's own units. |
 | `max` | number | yes | The top of the range. |
+| `range` | pair of number and number | yes | The lowest and highest values the control's own units allow Min and Max (map modes R9). |
 | `mode` | [`RemoteMode`](#remotemode) | yes | How a controller's values are read. |
 
 <details><summary>JSON Schema</summary>
@@ -17798,6 +17836,22 @@ One mapping as `remote.mappings` reports it (R14).
       "description": "The path to the control: its track and device, or its view.",
       "type": "string"
     },
+    "range": {
+      "description": "The lowest and highest values the control's own units allow Min and Max (map modes R9).",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ],
+      "type": "array"
+    },
     "source": {
       "$ref": "#/$defs/RemoteSource",
       "description": "Its source; with a note range, the range's root."
@@ -17815,6 +17869,7 @@ One mapping as `remote.mappings` reports it (R14).
     "kind",
     "min",
     "max",
+    "range",
     "mode"
   ],
   "type": "object"
@@ -29345,24 +29400,28 @@ Stacks' progression and bank.
 
 ### `StateResult`
 
-What `remote.state` returns (R43).
+What `remote.map_mode`, `remote.select` and `remote.state` return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `counts` | [`Counts`](#counts) | yes | The counts. |
-| `lamps` | [`Lamps`](#lamps) | yes | The lamps. |
-| `takeover` | array of [`TakeoverInfo`](#takeoverinfo) | yes | The takeover state of each absolute controller mapping on a continuous control. |
-| `guess` | [`RemoteMode`](#remotemode) or null | yes | The mode guessed for the controller being learned, while a map mode is on and a message has crossed (R27). |
+| `mode` | [`MapMode`](#mapmode) | yes | The map mode that is on. |
+| `selected` | [`RemoteTarget`](#remotetarget) or null | yes | The selected control, if one is. |
+| `guess` | [`RemoteMode`](#remotemode) or null | yes | The mode the last learned controller was guessed to be, while it is learned (R27 of remote mapping). |
+| `remote_input` | boolean | yes | Whether an input has its Remote switch on, so a message can reach learning. |
+| `rows` | array of [`MappingInfo`](#mappinginfo) | yes | The Mapping Browser's rows while a map mode is on: the mode's mappings in order of their source. None otherwise. |
+| `counts` | [`Counts`](#counts) | yes | The remote input's counts (R43 of remote mapping). |
+| `lamps` | [`Lamps`](#lamps) | yes | The lamps the remote input lights (R41 of remote mapping). |
+| `takeover` | array of [`TakeoverInfo`](#takeoverinfo) | yes | The takeover state of each absolute controller mapping on a continuous control (R43 of remote mapping). |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What `remote.state` returns (R43).",
+  "description": "What `remote.map_mode`, `remote.select` and `remote.state` return.",
   "properties": {
     "counts": {
       "$ref": "#/$defs/Counts",
-      "description": "The counts."
+      "description": "The remote input's counts (R43 of remote mapping)."
     },
     "guess": {
       "anyOf": [
@@ -29373,14 +29432,40 @@ What `remote.state` returns (R43).
           "type": "null"
         }
       ],
-      "description": "The mode guessed for the controller being learned, while a map mode is on and a message has crossed (R27)."
+      "description": "The mode the last learned controller was guessed to be, while it is learned (R27 of remote mapping)."
     },
     "lamps": {
       "$ref": "#/$defs/Lamps",
-      "description": "The lamps."
+      "description": "The lamps the remote input lights (R41 of remote mapping)."
+    },
+    "mode": {
+      "$ref": "#/$defs/MapMode",
+      "description": "The map mode that is on."
+    },
+    "remote_input": {
+      "description": "Whether an input has its Remote switch on, so a message can reach learning.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "The Mapping Browser's rows while a map mode is on: the mode's mappings in order of their source. None otherwise.",
+      "items": {
+        "$ref": "#/$defs/MappingInfo"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected control, if one is."
     },
     "takeover": {
-      "description": "The takeover state of each absolute controller mapping on a continuous control.",
+      "description": "The takeover state of each absolute controller mapping on a continuous control (R43 of remote mapping).",
       "items": {
         "$ref": "#/$defs/TakeoverInfo"
       },
@@ -29388,10 +29473,14 @@ What `remote.state` returns (R43).
     }
   },
   "required": [
+    "mode",
+    "selected",
+    "guess",
+    "remote_input",
+    "rows",
     "counts",
     "lamps",
-    "takeover",
-    "guess"
+    "takeover"
   ],
   "type": "object"
 }

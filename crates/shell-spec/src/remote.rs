@@ -10,7 +10,7 @@
 //! by ID.
 
 use bl_commands::Context::Global;
-use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_commands::{Binding, CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::{ControlKind, RemoteMode, RemoteSource, RemoteTarget};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -30,7 +30,12 @@ pub const SET_MODE: &str = "remote.set_mode";
 /// `remote.input`: apply a MIDI message or a key as if it came from the
 /// remote input.
 pub const INPUT: &str = "remote.input";
-/// `remote.state`: the remote input's counts, lamps and takeover states.
+/// `remote.map_mode`: turn MIDI Map Mode or Key Map Mode on or off.
+pub const MAP_MODE: &str = "remote.map_mode";
+/// `remote.select`: select the control the next message or key maps.
+pub const SELECT: &str = "remote.select";
+/// `remote.state`: the map mode, the selection, the guess, the Mapping
+/// Browser's rows, and the remote input's counts, lamps and takeover states.
 pub const STATE: &str = "remote.state";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
@@ -43,6 +48,8 @@ pub const IDS: &[&str] = &[
     INVERT_RANGE,
     SET_MODE,
     INPUT,
+    MAP_MODE,
+    SELECT,
     STATE,
 ];
 
@@ -69,6 +76,9 @@ pub struct MappingInfo {
     pub min: f64,
     /// The top of the range.
     pub max: f64,
+    /// The lowest and highest values the control's own units allow Min and
+    /// Max (map modes R9).
+    pub range: (f64, f64),
     /// How a controller's values are read.
     pub mode: RemoteMode,
 }
@@ -258,19 +268,63 @@ pub struct TakeoverInfo {
     pub last: Option<f64>,
 }
 
-/// What `remote.state` returns (R43).
+/// Which map mode is on (map modes R1, R2).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum MapMode {
+    /// No map mode: mappings act.
+    #[default]
+    Off,
+    /// MIDI Map Mode.
+    Midi,
+    /// Key Map Mode.
+    Key,
+}
+
+/// Arguments of `remote.map_mode`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MapModeArgs {
+    /// The mode to turn on, or `off`.
+    pub mode: MapMode,
+    /// With `midi` or `key`: turn the mode off when it is on already, as
+    /// the switches and their keys do.
+    #[serde(default)]
+    pub toggle: bool,
+}
+
+/// Arguments of `remote.select`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SelectArgs {
+    /// The control to select. Left out, the selection clears.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<RemoteTarget>,
+}
+
+/// What `remote.map_mode`, `remote.select` and `remote.state` return.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateResult {
-    /// The counts.
+    /// The map mode that is on.
+    pub mode: MapMode,
+    /// The selected control, if one is.
+    pub selected: Option<RemoteTarget>,
+    /// The mode the last learned controller was guessed to be, while it is
+    /// learned (R27 of remote mapping).
+    pub guess: Option<RemoteMode>,
+    /// Whether an input has its Remote switch on, so a message can reach
+    /// learning.
+    pub remote_input: bool,
+    /// The Mapping Browser's rows while a map mode is on: the mode's
+    /// mappings in order of their source. None otherwise.
+    pub rows: Vec<MappingInfo>,
+    /// The remote input's counts (R43 of remote mapping).
     pub counts: Counts,
-    /// The lamps.
+    /// The lamps the remote input lights (R41 of remote mapping).
     pub lamps: Lamps,
     /// The takeover state of each absolute controller mapping on a
-    /// continuous control.
+    /// continuous control (R43 of remote mapping).
     pub takeover: Vec<TakeoverInfo>,
-    /// The mode guessed for the controller being learned, while a map mode
-    /// is on and a message has crossed (R27).
-    pub guess: Option<RemoteMode>,
 }
 
 /// Adds the remote mapping commands to a registry.
@@ -379,15 +433,59 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .result::<InputResult>(),
     )?;
     registry.register(
+        CommandSpec::new(MAP_MODE, "Map Mode")
+            .description(
+                "Turns MIDI Map Mode (`midi`) or Key Map Mode (`key`) on, or both off, as the \
+                 Control Bar's switches, Cmd-M and Cmd-K do; with `toggle` a mode that is on \
+                 already turns off. One map mode is on at a time: turning one on turns the \
+                 other and any rack's Map mode off. While one is on every mappable control is \
+                 tinted, a click selects instead of operating, no mapping acts, and the Mapping \
+                 Browser lists the mode's mappings. View state: it isn't saved with the set and \
+                 isn't an undo step, and it is off when a set opens. Read back in \
+                 `remote.state`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .binding(
+                Binding::new("S-MAP-001")
+                    .arg("mode", "midi")
+                    .arg("toggle", true),
+            )
+            .binding(
+                Binding::new("S-MAP-002")
+                    .arg("mode", "key")
+                    .arg("toggle", true),
+            )
+            .args::<MapModeArgs>()
+            .result::<StateResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SELECT, "Select Control to Map")
+            .description(
+                "Selects the control `target` names, as a click on its overlay does in a map \
+                 mode, so the next note, controller or pitch bend on the remote input (MIDI Map \
+                 Mode) or the next key (Key Map Mode) maps to it; with no `target` the \
+                 selection clears, as Esc does. Needs a map mode on, and the control must be \
+                 one the mode maps: Key Map Mode takes no continuous control. View state, \
+                 read back in `remote.state`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<SelectArgs>()
+            .result::<StateResult>(),
+    )?;
+    registry.register(
         CommandSpec::new(STATE, "Remote Control State")
             .description(
-                "Reports the remote input's counts (messages taken, dropped, unmapped, applied \
-                 and refused, and feedback messages sent to outputs with Remote on), when each \
-                 of its indicator lamps last lit (the remote pair's two and the key \
-                 indicators' upper one) and whether each is lit now, the takeover state of \
-                 each absolute controller mapping on a continuous control (following, or \
-                 waiting with the controller's last position), and the mode guessed for the \
-                 controller being learned while a map mode is on. Changes nothing.",
+                "Reports the map mode that is on, the selected control, the mode guessed for \
+                 the controller being learned, whether an input has its Remote switch on, and \
+                 the Mapping Browser's rows: the mode's mappings in order of their source. \
+                 Also the remote input's counts (messages taken, dropped, unmapped, applied and \
+                 refused, and feedback messages sent to outputs with Remote on), when each of \
+                 its indicator lamps last lit (the remote pair's two and the key indicators' \
+                 upper one) and whether each is lit now, and the takeover state of each \
+                 absolute controller mapping on a continuous control (following, or waiting \
+                 with the controller's last position). Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

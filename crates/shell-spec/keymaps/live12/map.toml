@@ -9,7 +9,10 @@ trigger = "press"
 milestone = "M7"
 mac = ["Cmd+M"]
 win = ["Ctrl+M"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "remote.map_mode", contexts = ["global"], args = { mode = "midi", toggle = true } },
+]
 
 [[shortcut]]
 id = "S-MAP-002"
@@ -20,7 +23,10 @@ trigger = "press"
 milestone = "M7"
 mac = ["Cmd+K"]
 win = ["Ctrl+K"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "remote.map_mode", contexts = ["global"], args = { mode = "key", toggle = true } },
+]
 
 [[shortcut]]
 id = "S-MAP-003"

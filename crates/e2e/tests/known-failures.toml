@@ -252,14 +252,3 @@ key = "remix/slice to a drum rack"
 property = "the sliced rack plays the loop as the warped clip did"
 description = "A one-bar drum loop at 120 BPM, warped in Beats mode in a 90 BPM song, sliced to a new MIDI track by transients with Preserve warped timing on: the rack's rendered slices don't sound as the clip plays (envelope correlation 0.16 with the clip's own export, 0.81 with the loop unstretched). The slice render reads the plain media store, without the analysed transients Beats cuts at, so it cuts at the warp markers alone. Re-Pitch and Complex slice correctly."
 
-[[failure]]
-suite = "scenarios"
-key = "mix/freeze"
-property = "the set with a frozen MIDI track keeps the model's rules"
-description = "Freezing a MIDI track (Cascade and Auto Filter, a two-bar clip) puts the freeze file's audio into the track's clips, so the document holds audio clips on a MIDI track, which Document::check_invariants refuses: \"track is a MIDI track; this needs an audio track\". The loader's clip-kind check makes no exception for a frozen track."
-
-[[failure]]
-suite = "scenarios"
-key = "mix/freeze"
-property = "the set with a frozen MIDI track saves and reopens"
-description = "A set holding a frozen MIDI track saves, but set.open refuses the file: \"the set isn't valid: track is a MIDI track; this needs an audio track\". Frozen clips hold audio data while their track is MIDI, and loading checks each clip's kind against its track's without regard to the freeze, so the saved set can't be opened again."

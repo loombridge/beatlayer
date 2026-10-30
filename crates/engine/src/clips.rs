@@ -953,9 +953,15 @@ fn window_width(track: &Track, previous: Option<&Track>, rate: SampleRate) -> us
         _ => None,
     };
     track
-        .played_clips()
+        .playback_clips()
+        .iter()
         .filter_map(&audio)
-        .chain(track.slots().filter_map(|(_, clip)| audio(clip)))
+        .chain(
+            track
+                .playback_slots()
+                .iter()
+                .filter_map(|(_, clip)| audio(clip)),
+        )
         .max()
         .unwrap_or(0)
 }

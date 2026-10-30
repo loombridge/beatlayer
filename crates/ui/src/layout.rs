@@ -287,7 +287,9 @@ pub enum Anchor {
 pub enum Element {
     BrowserToggle,
     BrowserMenu,
-    SyncLamps,
+    ExternalSync,
+    SyncInput,
+    SyncOutput,
     ResyncExternalHardware,
     TapTempo,
     Tempo,
@@ -426,7 +428,9 @@ pub const D24: &str = "D24";
 pub const ELEMENTS: &[Placement] = &[
     p(E::BrowserToggle, "L-CTRL-001", "Show/Hide Browser", CB, 9.0, 18.0, Left, Switch, None),
     p(E::BrowserMenu, "L-CTRL-001", "Browser Config Menu", CB, 27.0, 8.0, Left, MenuArrow, None),
-    p(E::SyncLamps, "L-CTRL-028", "Sync Input and Output Indicators", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
+    p(E::ExternalSync, "L-CTRL-028", "External Sync", CB, 54.0, EXTERNAL_SYNC_WIDTH, Left, Switch, None),
+    p(E::SyncInput, "L-CTRL-028", "Sync Input", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
+    p(E::SyncOutput, "L-CTRL-028", "Sync Output", CB, 54.0, SYNC_LAMPS_WIDTH, Left, Indicator, None),
     p(E::ResyncExternalHardware, "L-CTRL-029", "Resync External Hardware", CB, 54.0, RESYNC_WIDTH, Left, Button, None),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, None),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
@@ -500,6 +504,9 @@ pub fn placement(element: Element) -> &'static Placement {
 /// its right while it shows (L-CTRL-008).
 pub const GLOBAL_AMOUNT_WIDTH: f32 = 40.0;
 
+/// The width of the EXT switch (L-CTRL-028), when it shows.
+pub const EXTERNAL_SYNC_WIDTH: f32 = 26.0;
+
 /// The width of the sync lamp pair (L-CTRL-028), when it shows.
 pub const SYNC_LAMPS_WIDTH: f32 = 7.0;
 
@@ -545,10 +552,10 @@ pub struct DetailViews {
     /// moves what is to its right 40 points right (L-CTRL-008, the grooves
     /// spec R30).
     pub global_amount: bool,
-    /// Whether the Control Bar shows the sync lamp pair (L-CTRL-028), and
-    /// the Resync External Hardware button (L-CTRL-029): they sit at the
-    /// left of the tempo group and move what is to their right right by
-    /// their widths (the MIDI clock spec, R10, R15).
+    /// Whether the Control Bar shows the EXT switch with its sync lamp pair
+    /// (L-CTRL-028), and the Resync External Hardware button (L-CTRL-029):
+    /// they sit at the left of the tempo group and move what is to their
+    /// right right by their widths (the MIDI clock spec, R10, R15).
     pub sync: (bool, bool),
     /// Whether the Control Bar shows the New button (L-CTRL-031), which a
     /// map mode shows just before Session Record and which moves it, and
@@ -905,13 +912,15 @@ impl ShellLayout {
         } else {
             0.0
         };
-        // Spec: midi-clock R10, R15. The sync lamp pair and the Resync
-        // External Hardware button open the tempo group, and what follows
+        // Spec: midi-clock R10, R15. The EXT switch with its sync lamp pair
+        // and the Resync External Hardware button open the tempo group, and
+        // what follows
         // moves right by their widths, in the room the first gap has, as the
         // Global Amount does; a narrower window, and the second window, hide
         // them.
         let (want_lamps, want_resync) = detail_views.sync;
-        let lamps_width = SYNC_LAMPS_WIDTH + SYNC_GAP;
+        let ext_width = EXTERNAL_SYNC_WIDTH + SYNC_GAP;
+        let lamps_width = ext_width + SYNC_LAMPS_WIDTH + SYNC_GAP;
         let resync_width = RESYNC_WIDTH + SYNC_GAP;
         let wanted = f32::from(u8::from(want_lamps)) * lamps_width
             + f32::from(u8::from(want_resync)) * resync_width;
@@ -947,7 +956,10 @@ impl ShellLayout {
                 let control_bar = placement.strip == Strip::ControlBar;
                 let own_sync = matches!(
                     placement.element,
-                    Element::SyncLamps | Element::ResyncExternalHardware
+                    Element::ExternalSync
+                        | Element::SyncInput
+                        | Element::SyncOutput
+                        | Element::ResyncExternalHardware
                 );
                 let shift = match placement.anchor {
                     Left if control_bar
@@ -986,7 +998,10 @@ impl ShellLayout {
                     // Bar has no room for it.
                     width = 0.0;
                 }
-                if (placement.element == Element::SyncLamps && !lamps_shown)
+                if (matches!(
+                    placement.element,
+                    Element::ExternalSync | Element::SyncInput | Element::SyncOutput
+                ) && !lamps_shown)
                     || (placement.element == Element::ResyncExternalHardware && !resync_shown)
                 {
                     width = 0.0;
@@ -1002,7 +1017,26 @@ impl ShellLayout {
                 if placement.element == Element::ResyncExternalHardware && lamps_shown {
                     x += lamps_width;
                 }
+                // The lamps sit beside the EXT switch, one above the other.
+                if matches!(placement.element, Element::SyncInput | Element::SyncOutput)
+                    && lamps_shown
+                {
+                    x += ext_width;
+                }
                 let rect = match placement.strip {
+                    Strip::ControlBar
+                        if matches!(
+                            placement.element,
+                            Element::SyncInput | Element::SyncOutput
+                        ) =>
+                    {
+                        let top = if placement.element == Element::SyncInput {
+                            28.0
+                        } else {
+                            38.0
+                        };
+                        Rect::from_min_size(pos2(x, y(top)), vec2(width, 8.0))
+                    }
                     Strip::ControlBar => Rect::from_min_size(pos2(x, y(28.0)), vec2(width, 18.0)),
                     Strip::StatusBar => Rect::from_min_size(
                         pos2(x, status_bar.top() + 4.0),
@@ -1861,7 +1895,9 @@ mod tests {
                 let rects: Vec<Rect> = ELEMENTS
                     .iter()
                     .zip(&layout.elements)
-                    .filter(|(p, _)| p.strip == strip)
+                    // The sync lamps sit one above the other, the lower
+                    // sharing the upper's place along the bar.
+                    .filter(|(p, _)| p.strip == strip && p.element != Element::SyncOutput)
                     .map(|(_, (_, r))| *r)
                     .collect();
                 for pair in rects.windows(2) {

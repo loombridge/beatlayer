@@ -246,6 +246,8 @@ pub struct EngineState {
     pub counters: EngineCounters,
     /// The MIDI clock the engine sends (midi-clock R12).
     pub sync_out: crate::SyncOutState,
+    /// The MIDI clock the engine follows (midi-clock R16, R17).
+    pub sync_in: crate::SyncInState,
 }
 
 impl EngineState {
@@ -293,6 +295,7 @@ impl EngineState {
             processing: Vec::with_capacity(processing),
             counters: EngineCounters::default(),
             sync_out: crate::SyncOutState::default(),
+            sync_in: crate::SyncInState::default(),
         }
     }
 
@@ -391,6 +394,7 @@ impl Clone for EngineState {
             processing,
             counters: self.counters,
             sync_out: self.sync_out,
+            sync_in: self.sync_in,
         }
     }
 }

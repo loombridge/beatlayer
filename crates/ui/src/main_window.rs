@@ -1220,10 +1220,16 @@ impl MainWindowUi {
             if *el == Element::GlobalAmount && rect.width() <= 0.0 {
                 continue;
             }
-            // Spec: midi-clock R10, R15. The sync lamps show while an input
-            // has Sync on, the Resync button while Show Resync Button is on.
-            if matches!(el, Element::SyncLamps | Element::ResyncExternalHardware)
-                && rect.width() <= 0.0
+            // Spec: midi-clock R10, R15. EXT and the sync lamps show while an
+            // input has Sync on, the Resync button while Show Resync Button
+            // is on.
+            if matches!(
+                el,
+                Element::ExternalSync
+                    | Element::SyncInput
+                    | Element::SyncOutput
+                    | Element::ResyncExternalHardware
+            ) && rect.width() <= 0.0
             {
                 continue;
             }
@@ -2329,18 +2335,17 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 ..Look::default()
             }
         }
-        Element::SyncLamps => {
-            // Spec: midi-clock R12, R15. The number holds the two lamps: 1
-            // for the upper (sync received), 2 for the lower (sync sent).
-            let sending = shell.sync_output_lit();
+        Element::SyncInput | Element::SyncOutput => {
+            // Spec: midi-clock R12, R16, R27. Each lamp is lit or dark.
+            let (lit, what) = if element == Element::SyncInput {
+                (shell.sync_input_lit(), "arrives at an input with Sync on")
+            } else {
+                (shell.sync_output_lit(), "is sent to an output with Sync on")
+            };
             Look {
-                number: Some(f64::from(u8::from(sending) << 1)),
-                value: Some(if sending { "sending" } else { "" }.to_owned()),
-                description: Some(
-                    "The upper light flashes when MIDI clock arrives at an input with Sync \
-                     on, the lower when Beatlayer sends MIDI clock to an output."
-                        .to_owned(),
-                ),
+                number: Some(f64::from(u8::from(lit))),
+                value: Some(if lit { "lit" } else { "dark" }.to_owned()),
+                description: Some(format!("Flashes when MIDI clock {what}.")),
                 ..Look::default()
             }
         }

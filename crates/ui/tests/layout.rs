@@ -176,7 +176,9 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
         let hidden = matches!(
             placement.element,
             Element::GlobalAmount
-                | Element::SyncLamps
+                | Element::ExternalSync
+                | Element::SyncInput
+                | Element::SyncOutput
                 | Element::ResyncExternalHardware
                 | Element::New
         );

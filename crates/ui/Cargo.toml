@@ -60,6 +60,8 @@ bl-midi-tools = { workspace = true, features = ["testing"] }
 # The test surface, so the Control Surfaces table has a surface to run
 # (WP-7.5).
 bl-control = { workspace = true, features = ["testing"] }
+# The simulated Push 2 the Control Surfaces table's test plugs in (WP-7.19).
+bl-push.workspace = true
 rtrb = "0.4.0"
 # Every registered command, for the keyboard-reachability test (WP-1.14),
 # which walks the whole registry the command reference lists.

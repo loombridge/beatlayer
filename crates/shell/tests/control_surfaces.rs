@@ -116,8 +116,9 @@ impl Rig {
 fn rows_are_set_listed_dumped_and_stopped_by_command() {
     let mut rig = Rig::new();
     let surfaces = rig.run("control_surface.surfaces", json!({}));
-    // The native surfaces come first in alphabetical order (the APCs and the
-    // Launchpads), then the test surfaces, which only test builds offer.
+    // The native surfaces come first in alphabetical order (the APCs, the
+    // Launchpads and Push 2), then the test surfaces, which only test builds
+    // offer.
     let listed: Vec<Value> = surfaces["surfaces"].as_array().unwrap().clone();
     let ids: Vec<&str> = listed.iter().map(|s| s["id"].as_str().unwrap()).collect();
     assert_eq!(
@@ -128,13 +129,14 @@ fn rows_are_set_listed_dumped_and_stopped_by_command() {
             "launchpad-mini-mk3",
             "launchpad-pro-mk3",
             "launchpad-x",
+            "push-2",
             "test",
             "test-instant",
             "template:Generic 8 + 8"
         ]
     );
     assert_eq!(
-        listed[5..],
+        listed[6..],
         [
             json!({
                 "id": "test", "name": "Test Surface", "needs_output": true, "can_lock": false,

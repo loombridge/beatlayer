@@ -32,6 +32,7 @@ bl-rt = { path = "crates/rt" }
 bl-midi-io = { path = "crates/midi-io" }
 bl-midi-tools = { path = "crates/midi-tools" }
 bl-control = { path = "crates/control" }
+bl-push = { path = "crates/push" }
 bl-link = { path = "crates/link" }
 bl-interop = { path = "crates/interop" }
 bl-ui = { path = "crates/ui" }

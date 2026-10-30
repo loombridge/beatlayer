@@ -1,9 +1,9 @@
 # The delay device
 
-- **Status:** implemented (every rule below has a passing test)
-- **Work packages:** WP-2.18b, part 2. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); the compressor, EQ and limiter are WP-2.18a; the reverb and Utility are the rest of WP-2.18b
+- **Status:** partial (R1 to R9 each have a passing test; R10 to R14 are WP-8.33's)
+- **Work packages:** WP-2.18b, part 2 (R1 to R9); WP-8.33 (Live 12.4's LFO rate modes and Morph, the renamed controls and the device's banks: R10 to R14). The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)); the compressor, EQ and limiter are WP-2.18a; the reverb and Utility are the rest of WP-2.18b
 - **Parity-matrix row:** Devices: Delay
-- **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.11 "Delay", read on 14 October 2026
+- **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", section 29.11 "Delay", read on 14 October 2026 and again (online edition) on 30 October 2026; the Live 12.4 release notes, read 30 October 2026
 
 ## The behaviour
 
@@ -38,6 +38,9 @@ or an observation of Live running, as the clean-room policy allows.
 | S3 | Beatlayer | [The architecture](../02-architecture.md), "Device chains", "Parameters, automation, and modulation", "Real-time rules" | A device runs as a node that takes parameter changes at their frames; no allocation, lock, or blocking call on the audio thread; every buffer is made with the node |
 | S4 | Beatlayer | [The native device framework](device-framework.md) | A native device describes its parameters and layout; the engine clamps and smooths continuous values; gains reach −∞ dB (G1) and every parameter is automatable (G2); the generic UI draws any described device |
 | S5 | Beatlayer | [The musical time spec](musical-time.md) | The tempo map places ticks on frames and counts quarter notes per minute whatever the time signature |
+| S6 | Release notes | Live 12.4 release notes, Delay | Delay's LFO gained time modes (a rate in Hz, a time in milliseconds, or synced divisions), seven waveforms and Morph, and its parameters were given clearer names |
+| S7 | Manual | Live 12 reference manual (online edition, read 30 October 2026), section 29.11 "Delay", its LFO | The LFO Controls toggle shows the LFO; its Rate chooser offers Rate, Time, Synced, Triplet, Dotted and Sixteenth; its Wave chooser Sine, Triangle, Ramp Up, Ramp Down, Square, S&H and Wander; Morph reshapes the chosen wave; Delay and Filter set its amounts |
+| S8 | Beatlayer | [Control surfaces](control-surfaces.md) R19 | Each native device type declares named banks of eight for instant mappings, every automatable parameter in at least one |
 
 ## Rules
 
@@ -84,6 +87,14 @@ or an observation of Live running, as the clean-room policy allows.
   thread allocates, locks, or blocks: the delay lines, the filter state, and
   the LFO state are made with the device. (S3, S4)
 
+### Live 12.4's LFO and names (WP-8.33)
+
+- **R10.** The LFO's Rate chooser offers, in this order, Rate (the rate in Hz, 0.01 to 40 Hz), Time (the length of a cycle, 25 ms to 100 s, logarithmic), Synced (a cycle of 1/64 note to 8 bars, in the divisions 1/64, 1/32, 1/16, 1/8, 1/4, 1/2, 1 bar, 2, 4 and 8 bars), Triplet and Dotted (the same divisions, two thirds and one and a half times as long) and Sixteenth (1 to 16 sixteenth notes). Each mode's amount is a parameter of its own, because a descriptor's range and unit are fixed, and the modes not chosen keep their values. Rate and Time free-run; Synced, Triplet, Dotted and Sixteenth are counts of quarter notes, so while the song plays a cycle starts on the beat grid through the tempo map, at any tempo and across a tempo change, within 0.1 % of a cycle, as [the device framework](device-framework.md) R27 says, and the LFO is the same at any block size. (S6, S7; the ranges and the division list are Beatlayer's own)
+- **R11.** The Wave chooser's seven waves, in the manual's order, are Sine, Triangle, Ramp Up, Ramp Down, Square, S&H and Wander, the effects LFO's Sine, Triangle, Saw Up, Saw Down, Rectangle, Sample & Hold and Wander ([the device framework](device-framework.md) R26). Morph, 0 to 100 %, reshapes the chosen wave: for Sine, Triangle, the ramps and Square it moves the wave's turning point (the duty cycle of framework R26) from the middle of the cycle at 0 % to the front of it at 100 %, so Triangle becomes a ramp and Square a narrow pulse; for S&H and Wander it is the share of each step the wave takes to glide to the next value, from none at 0 % (stepped) to the whole step at 100 %. At 0 % every wave is the shape R8 has always played. (S6, S7; Morph's law is Beatlayer's own)
+- **R12.** Each parameter's name is the one Live 12.4 gives it, in the table under "Defaults, ranges and details", and its descriptor keeps its number, so sets, presets, automation lanes, clip envelopes, macro and remote mappings saved before the change load onto the same parameter under its new name; its undo steps and its automation lane read the new name. A set saved before WP-8.33 opens with the LFO in Rate mode at its saved rate and renders sample-identically. (S6; keeping the numbers is Beatlayer's own)
+- **R13.** The LFO Controls toggle shows and hides the LFO's controls in the device's body; it is view state, saved with the set, and not an undo step. (S7; saving it with the set is Beatlayer's own)
+- **R14.** Delay declares its banks of eight (S8): Main (the two times or divisions, Sync, Link, Feedback, Ping Pong, Freeze and Dry/Wet), Filter and LFO (Filter, Freq, Width, the Delay and Filter amounts, the rate mode's amount, Wave and Morph), and Times (the offsets, Time Mode and the other rate modes' amounts), so every automatable parameter is in a bank. (S8; the banks are Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -97,12 +108,16 @@ or an observation of Live running, as the clean-room policy allows.
 | R7 | `crates/devices/tests/delay.rs`, `dry_wet_balances_the_dry_signal_and_the_repeat` | unit, real-time trap |
 | R8 | `crates/devices/src/delay.rs`, `every_lfo_wave_stays_between_minus_one_and_one` | unit |
 | R9 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_gain_parameter_reaches_minus_infinity`; every test in `crates/devices/tests/delay.rs` runs its blocks as real-time sections under the allocation trap | unit, real-time trap |
+| R10, R11 | to be written in WP-8.33 | unit, real-time trap (a synced LFO's cycles on the beat at block sizes 1, 64 and 4,096 and across a tempo change; each wave and Morph's law) |
+| R12, R13 | to be written in WP-8.33 | unit (a set and a preset saved before load onto the same parameters and render identically); shell test (undo labels, lane names) |
+| R14 | to be written in WP-8.33 | `crates/devices/tests/banks.rs` |
 
 ## Defaults, ranges and details
 
 - A new Delay starts with Sync on, Link off, Filter off, Freeze off, Ping Pong off, a delay time of one beat (four sixteenths) in Sync and 100 ms in Time, 50 per cent Feedback, 100 per cent Dry/Wet, a Freq of 1 kHz at a Width of Q 2.5, and an LFO of a 1 Hz sine with no movement.
 - Freq runs from 20 Hz to 20 kHz, logarithmically. Width runs from 0.5 to 9 and is the band-pass's Q, so a wider setting passes a wider band. Offset runs from −50 to +50 per cent of the division. The LFO's Rate runs from 0.01 to 40 Hz, and its Delay and Filter amounts from 0 to 100 per cent. The sync buttons run from 1 to 16 sixteenths.
-- The LFO is the effects LFO (the device framework spec, R26 and R27), with the free-rate mode only (Rate, in Hz); its Time, Synced, Triplet, Dotted, and Sixteenth rate modes are not built. Its S&H and Wander waves follow the device's own random seed (R29), and Wander is a line between random values.
+- The LFO is the effects LFO (the device framework spec, R26 and R27), in the six rate modes of R10; a new Delay starts in Rate mode at 1 Hz, Time at 1 s, Synced at 1/4, Triplet and Dotted at 1/8 and Sixteenth at 4, Morph at 0 %. Its S&H and Wander waves follow the device's own random seed (R29), and Wander is a line between random values.
+- The parameters' names (R12) are the ones Live 12.4 gives them; WP-8.33 writes the table here, old name beside new, with each descriptor's number.
 - Freeze cycles the buffer at the Feedback setting. Ping Pong crosses the feedback between the channels.
 - The band-pass filters the signal entering each line, feedback included, so the repeats thin out as they decay.
 - The framework does not smooth the delay time: the device reads the time parameters' targets and moves between them itself, over 20 ms in Repitch and Fade. Other continuous parameters take the framework's smoothing as every device does.

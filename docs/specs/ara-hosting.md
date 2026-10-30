@@ -1,7 +1,7 @@
 # ARA 2 hosting
 
-- **Status:** implemented for VST3 (every rule has a test; the formats Audio Unit and CLAP are not hosted, see "Formats")
-- **Work packages:** WP-5.41 (IMP-20, accepted on 24 October 2026). Beatlayer's own behaviour: Live 12 hosts no ARA plug-in, so nothing here is Live's to match.
+- **Status:** partial for VST3 (R1 to R13 have tests; R14 is WP-10.4's; the formats Audio Unit and CLAP are not hosted, see "Formats")
+- **Work packages:** WP-5.41 (IMP-20, accepted on 24 October 2026); WP-10.4 (R14, with [the plug-in sandbox](plugin-sandbox.md)). Beatlayer's own behaviour: Live 12 hosts no ARA plug-in, so nothing here is Live's to match.
 - **Parity-matrix row:** none (an improvement over Live, [IMP-20](../05-improvements.md))
 - **Checked against:** the ARA SDK 2.1.0's own headers and documentation (`ARAInterface.h`, `ARAVST3.h`), read on 24 October 2026; the manual has no ARA section
 
@@ -46,6 +46,8 @@ This spec covers the host side of ARA for VST3 plug-ins. It leaves to [the VST3 
 - **R12.** The plug-in's editor view is told which of its regions and sequences the Arrangement has selected, when the selection changes: the selected clips on its track, and the selected track. (S1, S2)
 - **R13.** `ara.state` is the registered read command for ARA: each running plug-in's factory, devices and the tracks they render, the counts of sequences, sources and modifications, each playback region with its place in its file and on the timeline, the edit cycles it has been given, its audio readers' reads, the files it couldn't be given, and whether it restored its archive. `plugin.info` reports for an ARA device its factory, its track and how many regions its document holds. Clips are edited by their own commands, so ARA adds none that change the set. (S6)
 
+- **R14.** A plug-in that answers ARA's entry points runs in Beatlayer's process whatever the Plug-In Hosting setting and the device's override say ([the plug-in sandbox](plugin-sandbox.md) R31), since its readers read the set's audio from the media store; `plugin.info` gives its process as `in_process` with the reason `ara`. (WP-10.4) (S1)
+
 ## Tests
 
 The tests run against two plug-ins. `bl-test-ara`, in `crates/test-ara`, is an ARA 2 VST3 plug-in built from source, so they run everywhere: it plays its renderer's regions from the audio it read (a stretched region by nearest sample), counts every use of ARA that breaks a rule above, keeps a count of the updates each modification got, writes the counts into its archive, and logs what its editor view was told. The ARA SDK's own example plug-in is built on the test machine and never committed: with Xcode on macOS, fetch the SDK and the VST3 SDK it needs (`cmake -P install_vst3sdk.cmake` in the SDK's root), configure `ARA_Examples` for Xcode with `-DARA_SETUP_DEBUGGING=OFF`, build the target `ARATestPlugInVST3` with `CODE_SIGN_IDENTITY=-`, and set `BL_ARA_TEST_PLUGIN` to the `.vst3` it makes; without the variable those tests say they were skipped. The SDK's example does not time-stretch, and keeps no report.
@@ -65,3 +67,4 @@ The tests run against two plug-ins. `bl-test-ara`, in `crates/test-ara`, is an A
 | R11 | `crates/plugin-host/tests/ara.rs`, `the_transport_requests_a_plugin_makes_reach_the_host` | unit |
 | R12 | `crates/plugin-host/tests/ara.rs`, `the_editor_view_is_told_what_the_arrangement_has_selected` | unit |
 | R13 | `crates/shell/tests/ara.rs`, `an_ara_plugin_follows_the_set_through_commands_and_keeps_its_archive`, `the_sdks_example_plugin_follows_the_set_through_commands_too` | unit |
+| R14 | to be written in WP-10.4 | shell test, agent API |

@@ -1,7 +1,7 @@
 # The Auto Filter
 
 - **Status:** partial (every rule below has a passing test; the display's spectrum and handle, and a layout that shows only the controls the chosen type and rate mode use, are not built yet)
-- **Work packages:** WP-5.20. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), its LFO, envelope follower, seeded random source, menu options and display path are WP-5.42's and WP-5.43's (device framework R26 to R29 and R35 to R38, device chains R35), its sidechain is WP-2.19b's ([routing](routing.md) R22 to R31), and its Hi-Quality path uses the oversampler (device framework R8)
+- **Work packages:** WP-5.20. The instruments' filter, with its own Clean, OSR, MS2, SMP and PRD circuits for Simpler, Sampler, Operator and Wavetable, is [the instruments' filter](instrument-filter.md) (WP-8.3) and leaves Auto Filter's circuits as they are. The framework it sits on is WP-2.5 ([the native device framework](device-framework.md)), its LFO, envelope follower, seeded random source, menu options and display path are WP-5.42's and WP-5.43's (device framework R26 to R29 and R35 to R38, device chains R35), its sidechain is WP-2.19b's ([routing](routing.md) R22 to R31), and its Hi-Quality path uses the oversampler (device framework R8)
 - **Parity-matrix row:** Audio effects: the redesigned Auto Filter (12.2)
 - **Checked against:** the Live 12 reference manual, chapter 29 "Live Audio Effect Reference", sections 29.2 to 29.2.7.1 "Auto Filter", read on 17 October 2026; the Live 12.2 release notes (11 June 2025); Live 12.4.6 on macOS, observed 12 October 2026 (the device's menu and sidechain strip); the ranges, defaults and algorithms the manual does not give are Beatlayer's own
 
@@ -71,4 +71,4 @@ The display shows the filter's curve and, as the engine runs, the curves of the 
 
 - The display's output spectrum behind the curves, and dragging its handle to set Freq and Res (or Pitch and Formant).
 - A layout that shows only the controls the chosen type and rate mode use: Auto Filter's frame places every control, so it is wider than Live's.
-- Auto Filter Legacy, which maps to Auto Filter when legacy devices are imported (M9).
+- Auto Filter Legacy, which isn't built: a Live set or preset holding it maps it to Auto Filter ([Live device mapping](live-device-mapping.md) R15).

@@ -1,7 +1,7 @@
 # Control surfaces: the surface host, instant mappings, the session ring, and controller templates
 
-- **Status:** implemented <!-- the host, the table, instant mappings, device banks, Lock to Control Surface, the session ring, track banks and controller templates (R1 to R48) are implemented and tested (WP-7.5, WP-7.6, WP-7.7) -->
-- **Work packages:** WP-7.5, the control-surface host and the Control Surfaces table (R1 to R16); WP-7.6, instant mappings, device banks, Lock to Control Surface, the session ring and track banks (R17 to R38); WP-7.7, Beatlayer's controller templates (R39 to R48). The device title bar's Lock to items and hand icon are [device chains](device-chains.md) R41 and R42, and the ring's border in the grid is [Session View](session-view.md) R36 to R38. The mappings a person makes in MIDI Map Mode, the value laws and Takeover Mode are [remote mapping](remote-mapping.md)'s and [map modes](map-modes.md)'; what each supported controller does is [supported controllers](supported-controllers.md)'; Push 2 is [Push 2](push-2.md)'s, on the same host
+- **Status:** partial (the host, the table, instant mappings, device banks, Lock to Control Surface, the session ring, track banks and controller templates, R1 to R48, are implemented and tested by WP-7.5, WP-7.6 and WP-7.7; R49 to R51 are WP-9.31's)
+- **Work packages:** WP-7.5, the control-surface host and the Control Surfaces table (R1 to R16); WP-7.6, instant mappings, device banks, Lock to Control Surface, the session ring and track banks (R17 to R38); WP-7.7, Beatlayer's controller templates (R39 to R48). The device title bar's Lock to items and hand icon are [device chains](device-chains.md) R41 and R42, and the ring's border in the grid is [Session View](session-view.md) R36 to R38. The mappings a person makes in MIDI Map Mode, the value laws and Takeover Mode are [remote mapping](remote-mapping.md)'s and [map modes](map-modes.md)'; what each supported controller does is [supported controllers](supported-controllers.md)'; Push 2 is [Push 2](push-2.md)'s, on the same host; WP-9.31, surfaces written as extensions (R49 to R51, with [extensions](extensions.md) R21 to R23)
 - **Parity-matrix row:** Control and mapping: MIDI map mode, key map mode, takeover modes, relative controllers, instant mappings; Control surfaces: Control-surface scripts
 - **Checked against:** the Live 12 reference manual (online edition), read 23 October 2026 (chapter 2 section 2.3.5, chapter 3 section 3.20, chapter 23 section 23.2.1, chapter 25 section 25.6.1, chapter 34 sections 34.1 to 34.1.3 and 34.2, chapter 36 section 36.15); the UI parity reference rows L-SET-014, L-SES-001 to L-SES-013, L-DEV-004, L-DEV-009, L-CTRL-026 and C-DEVICE-014; the vendors' user guides listed in the sources
 
@@ -9,7 +9,7 @@
 
 A control surface is a MIDI controller Beatlayer drives as a whole rather than one mapped control at a time. On the Tempo & MIDI page of the Settings, the Control Surfaces table has six rows; each picks a surface by name and the MIDI input and output it talks on, and a Dump button sends the controller a setup where the surface has one. A surface chosen there owns its ports: what arrives on its input goes to the surface, which turns presses and turns into Beatlayer's commands, and what it sends back lights the controller's buttons and moves its displays. The mappings a person makes by hand in MIDI Map Mode still win over the surface's own.
 
-Each surface runs inside Beatlayer's control-surface host, on a thread of its own, away from the audio thread and the window. A surface is Beatlayer code written against one interface, the `ControlSurface` trait: it receives its input's messages, sends its output's, reads the set and what the engine is doing, runs the same registered commands a person and an agent run, and gets a regular tick. Surfaces written as extensions later implement the same interface.
+Each surface runs inside Beatlayer's control-surface host, on a thread of its own, away from the audio thread and the window. A surface is Beatlayer code written against one interface, the `ControlSurface` trait: it receives its input's messages, sends its output's, reads the set and what the engine is doing, runs the same registered commands a person and an agent run, and gets a regular tick. Surfaces written as extensions implement the same interface, on the same host (R49 to R51).
 
 A surface's controls follow the context instead of a fixed list, which the manual calls instant mappings. Its device controls follow the selected device, a bank of eight parameters at a time; a device can be locked to a surface from its title bar's context menu, and then keeps the surface's hands whatever is selected, with a hand icon in its title bar. By default, arming a MIDI track locks the surfaces to its instrument. A surface that plays the Session View has a session ring, a block of tracks and scenes its grid controls, drawn as a coloured border over the Session View; its mixer controls follow the ring's tracks. Beatlayer's own declarative templates describe a controller's controls and their roles in a small text file, so a controller without a native surface works without code.
 
@@ -99,6 +99,12 @@ A surface's controls follow the context instead of a fixed list, which the manua
 - **R47.** `control_surface.set` chooses a template as it chooses a native surface, by the ID `template:<name>`, and `control_surface.list` reports it so (R13). (S13)
 - **R48.** Reading templates never runs code: a template is data, read on the main thread, and a surface made from one runs on the host thread as any surface does (R7). (S13)
 
+### Surfaces written as extensions (WP-9.31)
+
+- **R49.** A surface from an extension ([extensions](extensions.md) R21) is listed in the Control Surface chooser after the native surfaces and the controller templates, in alphabetical order, its description naming its extension, and runs on the host thread as a native surface does (R6 to R10), with the same ports, tick, read model and commands. (S13)
+- **R50.** A surface from an extension that traps, or runs past its call limit of 10 ms, stops alone as R10 says: its row reads the reason, the other surfaces keep running, and choosing it again restarts it. While its extension is missing or off, its row keeps it by name and reads why. (S13; the limit is Beatlayer's own)
+- **R51.** Agents choose an extension's surface for a row, and read it back, as any surface (R13 to R16); `control_surface.list` gives its extension's ID. (S13)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -151,3 +157,4 @@ A surface's controls follow the context instead of a fixed list, which the manua
 | R46 | `bl-control` `templates::the_bundled_template_parses_and_every_key_and_role_is_commented` | unit |
 | R47 | `bl-agent` `control_surfaces::an_agent_lists_the_templates_and_chooses_one`; `bl-shell` `controller_templates::a_template_surface_launches_a_slot_a_scene_and_a_stop` | agent |
 | R48 | `bl-control` `templates::a_folder_lists_its_templates_and_a_same_named_one_replaces_the_bundled`; `bl-shell` `controller_templates::a_broken_file_is_reported_with_its_line_and_not_listed` | unit |
+| R49 to R51 | to be written in WP-9.31: the native test surface's scenario run against a test component, message for message; a trapping component | unit, agent API |

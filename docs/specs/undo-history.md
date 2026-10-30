@@ -1,7 +1,7 @@
 # The Undo History: the panel, its list, and jumping back and forward through it
 
-- **Status:** implemented (R1 to R12 each have a passing test)
-- **Work packages:** WP-6.28 (R1 to R12). Undo and redo themselves, one step per edit and what a step is, are [tracks-and-undo.md](tracks-and-undo.md)'s and the editor's (WP-0.6)
+- **Status:** partial (R1 to R12 each have a passing test; R13 is WP-10.23's and R14 WP-9.34's)
+- **Work packages:** WP-6.28 (R1 to R12); WP-10.23 (R13, sharing the column with the Learn View, [learn-view.md](learn-view.md)); WP-9.34 (an extension's steps, R14). Undo and redo themselves, one step per edit and what a step is, are [tracks-and-undo.md](tracks-and-undo.md)'s and the editor's (WP-0.6)
 - **Parity-matrix row:** Views and workflow: Undo History panel
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.1 and 12.3; the UI parity reference's rows L-OTH-001, L-WIN-007, L-WIN-008, L-WIN-009, L-LRN-002, M-VIEW-008, M-EDIT-001 and M-EDIT-002, and S-VIEW-021, recorded from Live 12.4.3 on macOS
 
@@ -52,6 +52,9 @@ This spec covers the panel, its list, its keys, the jump, and what an agent sees
 - **R11.** The panel's width, rows and text scale with the interface zoom ([interface-zoom.md](interface-zoom.md) R1). (S5)
 - **R12.** The accessibility tree holds the panel as a region named "Undo History" with a list box inside; each row is a list item named by its label, its description naming the agent for an agent's step, reported as undone while greyed, and the current row selected; the highlight R8 moves is the list's active descendant, so a screen reader reads each row as it's reached. (S5)
 
+- **R13.** The right-hand column holds one of the Learn View ([learn-view.md](learn-view.md)), the Undo History and the save history ([crash recovery](crash-recovery.md) R12) at a time, each at R1's place and width: showing one hides the one showing, and hiding it shows none. Which shows is view state, as R3 says. (WP-10.23) (S3, S5)
+- **R14.** A step an extension makes through the API to the set is marked with the extension's name, as an agent's steps are ([extensions](extensions.md) R41). (Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -68,3 +71,5 @@ This spec covers the panel, its list, its keys, the jump, and what an agent sees
 | R10 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id` (the jump by ID); `crates/shell/tests/undo_history.rs`, `a_jump_returns_the_set_to_its_point_and_is_no_step`; `crates/agent/tests/undo_history.rs`, `an_agent_jumps_through_the_history_and_reads_it_back`, `an_agents_jump_waits_for_the_persons_gesture`; `crates/commands/src/readback/arrangement.rs` (`edit.go_to_step` reads back through the song's `undo.current`) | unit, UI script |
 | R11 | `crates/ui/tests/undo_history.rs`, `the_panel_scales_with_the_zoom` | UI script |
 | R12 | `crates/ui/tests/undo_history.rs`, `the_accessibility_tree_holds_the_list_and_its_rows` (the region, the list box, the rows' names, their undone state, and the agent's description) | UI script |
+| R13 | to be written in WP-10.23 | UI script |
+| R14 | to be written in WP-9.34 | shell test with a test extension |

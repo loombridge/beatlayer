@@ -1,0 +1,99 @@
+# The instruments' voice section: voices, Poly and Mono, Legato, Glide, Unison, pitch bend, the MPE sources, the tuning path and Hi-Quality
+
+- **Status:** draft
+- **Work packages:** WP-8.2 (this spec: R1 to R22, with Drift moved onto it). Each Phase 8 instrument's own voice controls, ranges and defaults are in its spec: [Drift](polysynth.md), [Wavetable](wavetable.md), [Operator](operator.md), [Analog](analog.md), [Bass and Poli](bass-and-poli.md), [Meld](meld.md), [Collision](collision.md), [Tension](tension.md), [Electric](electric.md), [the Drum Synths](drum-synths.md) and [Granulator III](granulator-iii.md). The filter they share is [the instruments' filter](instrument-filter.md); the routes from the sources below to parameters are [the instruments' modulation matrix](instrument-modulation.md); per-note expression reaching a device from clips and controllers is [MPE](mpe.md)'s; the pitch a key plays under a tuning is [tunings](tunings.md)'
+- **Parity-matrix row:** Instruments: Analog, Operator, Wavetable, Meld, Collision, Tension, Electric, Drum Synths, Granulator III, Bass and Poli (the parts every one of them shares); Drift
+- **Checked against:** the Live 12 reference manual (online edition), read 30 October 2026 (chapter 31, sections 31.1.8 and 31.1.9, 31.2.6.1, 31.3.7, 31.5.5, 31.8.8 and 31.8.11, 31.9.6, 31.9.7 and 31.9.10.1 to 31.9.10.3, 31.12.3, 31.13.8 and 31.13.9); the Live 12 release notes, 12.0 (every Live instrument plays MPE; Operator's per-note pitch bend) and 12.2 (Drift's Hi-Quality in its title bar's menu; Operator's 32 voices); the UI parity reference row C-DEVICE-015
+
+## The behaviour
+
+Every Phase 8 instrument plays its notes through one voice section, built on the plug-in kit's voices. The section takes the notes, pitch bends, pressures and controllers that reach the device, gives each note a voice up to the device's Voices limit, steals a voice when a note arrives past the limit, and hands every voice's pitch, velocity and per-note expressions to the device's sound engine as values per voice and frame. Each device offers the parts its manual gives it: a polyphony limit and a stealing priority, Poly and Mono with Legato, Glide as Portamento or Glissando, unison copies stacked on each voice with their detune and spread, Retrigger, pitch bend ranges for the wheel and for per-note bends, and the MPE sources. The parts behave alike in every device that has them; their names, units and readings are shared, while each device states its own ranges and defaults from its manual section.
+
+The section also gives the modulation matrix its per-voice sources: velocity, release velocity, the key, a random value per note, the MPE sources Pressure, Slide and Note PB, and the global mod wheel, pitch bend and aftertouch. Under a tuning a voice plays its key's tuned pitch, and glide, bends and transposition add to it. Hi-Quality is a device option in the title bar's menu for the instruments that have one in Live.
+
+This spec covers what the instruments share. The plug-in kit's voices themselves (allocation, lanes, the voice callbacks) are the kit's; an instrument's own unison modes, such as Wavetable's six, are in that instrument's spec.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 31 "Live Instrument Reference", section 31.1.8 "Global Parameters" (Analog) | Analog's Voices sets its polyphony and Priority (High, Low, Last) decides which notes are cut off past it; Unison stacks 2 or 4 voices with Detune and a Delay between their starts; Glide with its Time, a Legato option (gliding only between overlapping notes) and Glide Mode (Const, a fixed time, or Prop, a time growing with the interval); Vibrato with Rate, Delay, Attack, Error and Amt < MW; the keyboard's Octave, Semi, Detune (±50 cents), PB Range in semitones, Stretch and Error |
+| S2 | Manual | Section 31.1.9 "MPE Sources" (Analog); section 31.12.3 "Filter/Global Tab" (Tension); section 31.5.5 "Global Section" (Electric) | Pressure and Slide are sources sent to destinations with amounts, with activity lights; a global Pitch Bend range and a Note PB range for per-note bends, in semitones |
+| S3 | Manual | Section 31.12.3 (Tension): "Keyboard", "Portamento" and "Unison" | Voices and Priority (High, Low, Last); Detune in one-cent steps to ±50; Stretch; Error, a random detune per note; Portamento with Time, Legato and Prop.; Unison of 2 or 4 voices with Detune and Delay |
+| S4 | Manual | Section 31.9.6 "Global Controls", 31.9.7 "Glide and Spread" and 31.9.10.1 to 31.9.10.3 (Operator) | Voices up to 32, with Voices at 1 playing overlapping notes legato; Retrigger retriggers a sounding note instead of taking a voice; polyphonic Glide, each new note starting from the previous note's pitch, with Glide Time, envelopes not restarting on legato notes; PB Range scales the pitch wheel; Transpose moves notes already playing |
+| S5 | Manual | Section 31.13.8 "Global and Unison Controls" and 31.13.9 "Hi-Quality Mode" (Wavetable) | Poly and Mono, Mono playing one voice with legato envelopes; Poly Voices active only in Poly; Glide active only in Mono; Hi-Quality is turned on from the device's context menu; off, modulation is worked out every 32 samples and lighter filters run |
+| S6 | Manual | Section 31.8.8 "Settings Tab" and 31.8.11 "Global Controls" (Meld) | Glide as Portamento (a smooth slide) or Glissando (in steps, in scale degrees when the device is scale-aware), with Glide Time, in Mono and in Poly, heard only with Glide Time above zero; Mono with Legato, a new note taking over the envelopes' position; Poly with 2 to 12 voices; Stacked Voices duplicating both engines per note |
+| S7 | Manual | Section 31.3.7 "Global Section" (Drift); section 31.2.6.1 "The Global Section" (Collision) | Drift's Voice Mode, Voices up to 32, Legato in Mono, Glide for overlapping notes, Note PB and PB Range; Collision's Voices and Retrig., retriggering a sounding note rather than taking a voice |
+| S8 | Release notes | Live 12 release notes, 12.0 and 12.2 | 12.0: every Live instrument plays MPE, and Operator gained per-note pitch bend, switched in its title bar's menu. 12.2: Drift's Hi-Quality is turned on from its title bar's context menu; Operator's voice count reaches 32 |
+| S9 | Beatlayer | [MPE](mpe.md) R5 to R8; [tunings](tunings.md) R12 to R14; [scales](scales.md) R15 to R18 | Per-note bend, pressure and slide reaching a device with each note; a key's tuned pitch, per-note bends in steps of the tuning, Drum Racks playing twelve steps; a device's current scale |
+| S10 | Beatlayer | [The device framework](device-framework.md) R1, R4, R9, R29 and R39; [device chains](device-chains.md) R35; [the improvements](../05-improvements.md), rule G2 | Descriptors, smoothing, no allocation on the audio thread, seeded randomness, control changes and channel messages beside the notes; menu options as switch parameters; every parameter automatable and modulatable |
+| S11 | Reference | [menus.md](../ui-parity/menus.md) C-DEVICE-015 | A device's own options in its title bar's menu, after Save as Default Preset |
+
+## Rules
+
+**What a device declares**
+
+- **R1.** An instrument built on the voice section declares which of its parts it has, and gives each its own range and default from its manual section; the section's descriptors give every such parameter its name, unit, taper and reading, so Voices, Glide Time, a unison Detune or PB Range read alike in every device. A part a device doesn't declare isn't there: no parameter, no control, no behaviour. Every declared control is a parameter, automatable and modulatable (rule G2), apart from those a device's spec names as settings. (S1 to S7, S10; Beatlayer's own)
+- **R2.** A device's largest voice count times its largest unison copy count fits the plug-in kit's lane layout, whose lane count is a multiple of 16, and every buffer the section needs is made with the device: nothing it does on the audio thread allocates, locks or blocks, at any block size. (S10)
+
+**Voices, stealing and Retrigger**
+
+- **R3.** Voices sets the most notes that sound at once. A note past the limit takes a voice by the device's priority: Last (the default, and the only one where a device offers no Priority) takes the voice that started longest ago; High keeps the highest notes, so the new note takes the lowest sounding note's voice if it is higher than that note and is not played otherwise; Low keeps the lowest notes in the same way. Released voices whose tails still sound are taken before held ones, the oldest first. (S1, S3, S4, S7; the High and Low readings are Beatlayer's own)
+- **R4.** A taken voice starts its new note with every envelope restarting from the level it had reached, so a steal never clicks: the sample before and after the steal differ by no more than the voice's own signal could move in one frame at its new pitch. (S10; Beatlayer's own)
+- **R5.** With Retrigger on, in a device that has it, a note on a key that already sounds restarts that voice (its envelopes from their levels, as R4) rather than taking another. (S4, S7)
+
+**Poly, Mono and Legato**
+
+- **R6.** In Mono one note sounds at a time. A new note takes over the voice. Releasing the sounding key while others are held returns the voice to the most recent of them; releasing the last key releases the voice. A device whose manual gives Voices at 1 rather than a Mono switch (Operator) plays Mono there. (S4, S5, S6, S7; the return to a held key is Beatlayer's own)
+- **R7.** Legato, in Mono: with it on, a note that arrives while another is held moves the voice to its pitch (gliding where Glide is on) without restarting its envelopes or any LFO that restarts with a note; with it off, the note restarts them from their levels (R4). A device that, like Wavetable, always plays Mono legato behaves as if Legato were on. (S5, S6, S7)
+
+**Glide**
+
+- **R8.** Portamento: a note glides from the pitch the voice was sounding (in Mono) or from the pitch of the note before it (in Poly, where a device glides polyphonically, as Operator and Meld do) to its own pitch, in a straight line in semitones, starting on the note's frame and reaching its pitch exactly when Glide Time has passed. With Glide Time at 0, or Glide off, the note starts at its pitch. The first note after the device starts, or after every note has ended in Poly, doesn't glide. (S1, S3, S4, S6)
+- **R9.** A device with Glide's Legato option (Analog, Tension) glides only into a note that arrives while another key is held; a note after all keys were released starts at its pitch. A device with a proportional mode (Analog's Prop, Tension's Prop.) glides over Glide Time × |interval| / 12, the time Glide Time gives an octave; Const keeps Glide Time whatever the interval. (S1, S3; the octave reference is Beatlayer's own)
+- **R10.** Glissando (Meld): the note moves in steps instead of a line, through every semitone between the two pitches, or every degree of the device's current scale when its scale awareness is on ([scales](scales.md) R15), or every key's tuned pitch under a tuning (R18), each step held for an equal share of Glide Time, and lands on its own pitch when Glide Time has passed. (S6, S9; the equal shares are Beatlayer's own)
+
+**Unison and stacked copies**
+
+- **R11.** A device with unison stacks a number of copies of each voice, from the counts its spec gives (Analog and Tension 2 or 4, Wavetable its Voices, Meld its Stacked Voices). The copies of a voice play its note together. With n copies and a detune of d cents, copy i (from 0) is tuned (2i / (n − 1) − 1) × d cents from the note, so the copies spread evenly and symmetrically, and their mean pitch is the note's. (S1, S3, S5, S6; the law is Beatlayer's own)
+- **R12.** A device whose unison has a Delay starts copy i a share i / (n − 1) of the Delay time after copy 0, measured from the note's frame. Copies pan alternately left and right, copy 0 left, by the device's spread (centre where it has none), so an even count sums to the centre; a device's own spread law, such as Wavetable's modes, is in its spec. (S1, S3, S5; Beatlayer's own)
+- **R13.** A voice with n copies counts as one voice towards Voices and is stolen and released whole; its copies' sum is scaled by 1 / √n, so stacking copies keeps the voice's level for uncorrelated copies (Beatlayer's own). (S5, S6)
+
+**Pitch bend, Note PB and the sources**
+
+- **R14.** The pitch wheel (a channel's pitch bend on a non-member channel, device framework R39) moves every sounding note by its bend times PB Range semitones, on the frame it lands. A per-note bend, from an MPE member channel or a clip's per-note pitch envelope ([MPE](mpe.md) R5 to R8), moves only its note, by the bend times the device's Note PB range in semitones; a device with a Note PB switch rather than a range (Drift) uses PB Range for both, and a device that has neither (Operator, whose per-note bend is a menu option) uses 48 semitones, MPE's per-note range. With per-note bend switched off a device ignores per-note bends, and Pressure and Slide still reach it. (S2, S4, S7, S8, S9; the 48-semitone default is Beatlayer's own)
+- **R15.** The section gives the matrix these per-voice sources, each with its range: Velocity (0 to 1, the note's velocity over 127), Release Velocity (0 to 1, 0 until the note ends), Key ((k − 60) / 48 for key k, clamped to −1 to 1, so C3 is 0 and each unit four octaves), Random (a value from 0 to 1 drawn when the note starts, from the device's seeded generator, device framework R29), Pressure (0 to 1, the note's per-note pressure, or the channel's pressure when no per-note pressure reached it), Slide (0 to 1, the note's per-note slide, controller 74 on its member channel) and Note PB (−1 to 1); and these global sources: Mod Wheel (0 to 1, controller 1), Pitch Bend (−1 to 1, the wheel) and Aftertouch (0 to 1, the latest channel pressure on a non-member channel). Each reads on the frame its message lands, at any block size. A device's spec may give a source a scale of its own for one destination (Wavetable's Note into its filter's frequency tracking the key exactly at 100 %). (S1, S2, S5, S6, S9, S10; the Key span is Beatlayer's own, Drift's)
+- **R16.** Where a device has a velocity curve or a key curve, the curve maps the source through x^(4^(−c)) for a curve amount c from −1 to 1 (0 straight, positive bowing upward, so softer notes read higher), applied to Velocity as it is and to Key on its 0-to-1 reading, (Key + 1) / 2. (S10; Beatlayer's own)
+- **R17.** Transpose, a device's coarse and fine tuning, Stretch and Error move a voice's pitch on top of its key: Transpose and the coarse and fine tuning add their semitones and cents to every voice, notes already sounding included; Stretch moves key k by s × (k − 60) / 12 × 0.12 semitones at Stretch s (−100 % to 100 %), so at 100 % C3 stays and each octave above is 12 cents wider; Error detunes each note by a value drawn when it starts, uniformly within ±Error × 0.5 semitones, from the device's seeded generator. (S1, S3; the Stretch and Error laws are Beatlayer's own)
+
+**Tunings**
+
+- **R18.** On a track that plays the set's tuning ([tunings](tunings.md) R12, R14), a voice's pitch is its key's tuned pitch, and Transpose, tuning, glide, unison detune, pitch modulation, the pitch wheel and the device's pitch envelopes add to it as they add to a key without a tuning. A per-note bend moves its note by steps of the tuning ([tunings](tunings.md) R13) times the Note PB range; the pitch wheel stays in semitones. Glissando under a tuning steps through each key's tuned pitch between the two keys (R10), and Stretch is not applied under a tuning. What a device chooses by key (a key-tracked filter's Key amount aside, which follows the tuned pitch measured from C3's twelve-step pitch) goes by the key number. (S9)
+
+**Hi-Quality**
+
+- **R19.** Hi-Quality is a device option for the instruments that have it in Live (Wavetable, Drift, and any device whose spec names it): a switch parameter the device's type marks as a menu option ([device chains](device-chains.md) R35), listed in its title bar's menu after Save as Default Preset (C-DEVICE-015), off in a new device. Choosing it is one undo step, it's saved with the set, automatable like any parameter, set by `device.set_param` and read back by `device.parameters`, marked `menu_option`. (S5, S8, S10, S11)
+- **R20.** With Hi-Quality on, a device works out its modulation for every frame and runs its oscillators' and filters' finest settings, as its spec says; off, the matrix's control-rate routes are worked out once every 32 frames and the device runs the lighter settings its spec gives. Either way a render is the same at any block size. (S5)
+
+**Throughout**
+
+- **R21.** What the section does with a note, a bend or a controller depends only on its frame and the device's parameters and seed, never on how blocks fall: an instrument's output is the same sample for sample at block sizes 1, 64, 512 and 4,096. (S10)
+- **R22.** Drift plays through the voice section with its rules unchanged: [polysynth](polysynth.md) R13, R16, R17, R21, R22, R24 and R25 are the section's R3, R4, R14, R15 and R18 with Drift's ranges. (S7; Beatlayer's own)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-8.2 | unit (a test instrument's descriptors) |
+| R2 | to be written in WP-8.2 | real-time trap; RealtimeSanitizer (`rtsan/tests`) |
+| R3, R4, R5 | to be written in WP-8.2 | render under the allocation trap (32 voices stolen; a click detector on the steal frames) |
+| R6, R7 | to be written in WP-8.2 | render under the allocation trap |
+| R8, R9, R10 | to be written in WP-8.2 | render under the allocation trap (the glide's pitch measured per frame; Glissando's steps) |
+| R11, R12, R13 | to be written in WP-8.2 | render under the allocation trap (copies' pitches by FFT; level of a stacked voice) |
+| R14 | to be written in WP-8.2 | render under the allocation trap (a per-note bend of ±1 moves only its note) |
+| R15, R16 | to be written in WP-8.2 | unit (source values per frame) |
+| R17 | to be written in WP-8.2 | unit; render |
+| R18 | to be written in WP-8.2 | render (every key of a 19-step tuning within 0.1 cent) |
+| R19, R20 | to be written in WP-8.2 | unit; agent API (`device.set_param`, `device.parameters`) |
+| R21 | to be written in WP-8.2 | render at block sizes 1, 64, 512 and 4,096 |
+| R22 | to be written in WP-8.2 | golden render (Drift before and after, sample for sample) |

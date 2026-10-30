@@ -1,7 +1,7 @@
 # Agent permissions per call: edits over other clips, the person's gestures, and agents' tokens
 
-- **Status:** implemented (R1 to R14 each have a passing test)
-- **Work packages:** WP-1.15b (this spec) and WP-1.15c (its interface follow-up: R4's named clips, R11 to R13); WP-6.11 adds the MIDI Tools commands to R11; building on WP-1.15 (the agent API), WP-1.8b ([arrangement-editing](arrangement-editing.md)), WP-1.10 ([browser](browser.md)), and WP-1.18 (the transport in the app, [control-bar-transport](control-bar-transport.md))
+- **Status:** partial (R1 to R15 each have a passing test; R16 is WP-9.34's)
+- **Work packages:** WP-1.15b (this spec) and WP-1.15c (its interface follow-up: R4's named clips, R11 to R13); WP-6.11 adds the MIDI Tools commands to R11; building on WP-1.15 (the agent API), WP-1.8b ([arrangement-editing](arrangement-editing.md)), WP-1.10 ([browser](browser.md)), and WP-1.18 (the transport in the app, [control-bar-transport](control-bar-transport.md)); WP-9.34 (commands an extension runs, R16)
 - **Parity-matrix row:** none: the agent API is Beatlayer's own (D17). What an edit does to the set is Live's, through the specs it cites
 - **Checked against:** the architecture's "Agent control" and the specs cited, 11 October 2026
 
@@ -46,6 +46,7 @@ The agent API isn't a Live feature, so these rules rest on Beatlayer's own desig
 - **R13.** The Agents page's note says what the person sees: "An agent you allow gets its own token and isn't asked again. Clients using the server's token are asked each time." (S6)
 - **R14.** The built-in assistant's tool calls may give a new object's ID as `{"$new": "name"}` and refer to it in a later call of the same turn as `{"$ref": "name"}`, as an agent's calls may. The project issues each ID once, before the call's class is decided, so the class is decided from the arguments that run (R1). A name given twice, or a `$ref` to a name no `$new` made, refuses that call, and the refusal goes back to the model. (S1)
 - **R15.** Recording captures input devices, a microphone included, so `transport.set_recording` is external whichever value it sets and asks first as R2 says; `transport.stop_recording` (read) stops a recording and never asks. The app's own Record controls run in the shell and record at once. (S1)
+- **R16.** Commands an extension runs through the API to the set take these classes as an agent's do: read and edit run; destructive and external ask the person first, naming the extension, and are refused headless unless the run allows them ([extensions](extensions.md) R40). (Beatlayer's own)
 
 ## Tests
 
@@ -65,3 +66,4 @@ The agent API isn't a Live feature, so these rules rest on Beatlayer's own desig
 | R12 | `crates/ui/tests/agent_settings.rs`, `each_allowed_agent_s_token_shows_in_its_row_and_new_token_replaces_it`; `crates/shell/tests/agent_settings.rs`, `each_allowed_agent_gets_a_token_of_its_own_that_can_be_replaced`; `crates/shell-spec/src/agent.rs`, `tokens_never_show_in_results_or_debug_prints`; `crates/agent/tests/http.rs`, `a_client_presenting_another_agent_s_name_gets_none_of_its_rights` (a replaced token gets 401) | UI (headless, AccessKit), unit, HTTP |
 | R13 | `crates/ui/tests/agent_settings.rs`, `each_allowed_agent_s_token_shows_in_its_row_and_new_token_replaces_it` | UI (headless) |
 | R15 | `crates/agent/tests/permissions.rs`, `starting_a_recording_asks_first_and_stopping_never_does`; `crates/shell/tests/transport.rs`, `the_shell_registers_the_transport_and_runs_it_on_the_engine` | unit |
+| R16 | to be written in WP-9.34 | agent API; shell test with a test extension |

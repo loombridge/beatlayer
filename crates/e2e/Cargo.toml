@@ -1,0 +1,39 @@
+[package]
+autotests = false
+name = "bl-e2e"
+description = "The headless end-to-end suite: the app's host wiring without a window, the agent API over stdio, a rich set built through the agent API, and the known-failures ratchet."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# The agent API, in this process and over stdio, as the app and `bl-cli mcp`
+# serve it.
+bl-agent.workspace = true
+# The shell the agent API runs commands on, and its null-device test rig.
+bl-shell.workspace = true
+# The null device paced by hand, and the cable that copies what it played.
+bl-audio-io.workspace = true
+bl-core.workspace = true
+bl-model.workspace = true
+# The native devices' type IDs and parameters, which the fixture and the
+# device sweeps name.
+bl-devices.workspace = true
+# Loudness for the measurements.
+bl-analysis.workspace = true
+# Decodes exported files.
+bl-media.workspace = true
+serde_json = "1"
+# The known-failures list, with the version and features bl-control already
+# uses, so nothing new enters the build.
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+
+[[test]]
+name = "e2e"
+path = "tests/main.rs"
+
+[lints]
+workspace = true

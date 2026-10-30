@@ -1,0 +1,31 @@
+# Failures the end-to-end suite has found in Beatlayer that aren't fixed yet.
+#
+# A sweep goes on past a listed failure, and fails on any failure that isn't
+# listed and on any listed entry whose check now passes: a fix deletes its
+# entry in the same change. Every entry is a real, reproducible bug in
+# Beatlayer, never a gap in the harness (a harness bug is fixed in the
+# harness). `bl_e2e::known` reads this file.
+#
+# Each entry is a [[failure]] table with four fields, all required:
+#
+#   suite        the test family that finds it: commands, devices,
+#                live_offline, background, round_trips, scenarios or smoke
+#   key          what was checked: a command ID, a device type and parameter
+#                name, or a scenario's step
+#   property     the property that doesn't hold, as the suite names it
+#   description  the bug in plain words: what was done, what was expected,
+#                what happened
+#
+# For example:
+#
+#   [[failure]]
+#   suite = "devices"
+#   key = "beatlayer.grit/Drive"
+#   property = "level bounded"
+#   description = "At its maximum the output rises 30 dB above the default setting."
+
+[[failure]]
+suite = "smoke"
+key = "export.audio in the app, allowed by the person"
+property = "the call answers with the export's result"
+description = "With the app's window open and the agent not autonomous, an agent's export.audio asks the person first; once allowed, the call fails with \"the call asked twice\" although the export starts, runs and writes its file. The agent never hears the result. Without a window (bl-cli mcp), or with autonomous mode on, the same call answers."

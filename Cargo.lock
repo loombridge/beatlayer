@@ -861,6 +861,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-e2e"
+version = "0.2.0"
+dependencies = [
+ "bl-agent",
+ "bl-analysis",
+ "bl-audio-io",
+ "bl-core",
+ "bl-devices",
+ "bl-media",
+ "bl-model",
+ "bl-shell",
+ "serde",
+ "serde_json",
+ "toml",
+]
+
+[[package]]
 name = "bl-engine"
 version = "0.2.0"
 dependencies = [

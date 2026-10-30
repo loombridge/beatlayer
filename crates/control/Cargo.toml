@@ -1,4 +1,5 @@
 [package]
+autotests = false
 name = "bl-control"
 description = "MIDI and key mapping, control surfaces, Push, and the scripting host."
 version.workspace = true
@@ -11,9 +12,28 @@ publish.workspace = true
 bl-core.workspace = true
 bl-model.workspace = true
 bl-midi-io.workspace = true
+# The slots' states and the meters the engine publishes, which a surface
+# reads (control surfaces R6).
+bl-engine.workspace = true
+# The commands a surface asks for, by ID with JSON arguments (R7).
+serde_json = "1"
 
 [dev-dependencies]
+# The test surface, for the host's tests (control surfaces R16).
+bl-control = { path = ".", features = ["testing"] }
+# The allocation trap, so a test can show the audio thread stays off the heap
+# while the host runs (the real-time rules).
+bl-rt.workspace = true
+rtrb = "0.4.0"
 proptest = { version = "1.11", default-features = false, features = ["std"] }
+
+[features]
+# The test surface (control surfaces R16), for the tests of the crates above.
+testing = []
+
+[[test]]
+name = "control_tests"
+path = "tests/main.rs"
 
 [lints]
 workspace = true

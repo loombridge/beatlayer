@@ -8,6 +8,9 @@
 //! needed to test it. The window's side (running the control's command) is
 //! `bl-shell`'s.
 //!
+//! The control-surface host is [`Surfaces`] (`docs/specs/control-surfaces.md`,
+//! R1 to R16), with the [`ControlSurface`] trait a surface implements.
+//!
 //! [`act`] holds the value laws of R15 to R31: a note or a key, an absolute
 //! controller (with Takeover Mode) and a relative one, on each kind of
 //! control. [`guess`] is the mode guess of R27. A chromatic slot's
@@ -17,6 +20,17 @@ use bl_core::midi::MidiMessage;
 use bl_midi_io::RemoteBits;
 use bl_model::{
     ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, TakeoverMode,
+};
+
+mod host;
+mod surface;
+#[cfg(feature = "testing")]
+pub mod testing;
+
+pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, Traffic};
+pub use surface::{
+    ControlSurface, Cx, Gesture, Kind, Out, ReadModel, Request, Ring, Selection, SurfaceState,
+    TICK, Transport, kind, kinds,
 };
 
 /// The messages `mappings` take, for the MIDI system's thread to judge by

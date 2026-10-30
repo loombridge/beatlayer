@@ -103,22 +103,22 @@ A surface's controls follow the context instead of a fixed list, which the manua
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-7.5 | UI script |
-| R2 | to be written in WP-7.5 | unit, real preference files |
-| R3 | to be written in WP-7.5 | unit |
-| R4 | to be written in WP-7.5 | unit, test ports |
-| R5 | to be written in WP-7.5 | unit, against a running engine |
-| R6 | to be written in WP-7.5 | unit |
-| R7 | to be written in WP-7.5 | unit, agent |
-| R8 | to be written in WP-7.5 | unit, test ports |
-| R9 | to be written in WP-7.5 | unit, test ports |
-| R10 | to be written in WP-7.5 | unit |
-| R11 | to be written in WP-7.5 | unit, UI script |
-| R12 | to be written in WP-7.5 | unit |
-| R13 | to be written in WP-7.5 | agent |
-| R14 | to be written in WP-7.5 | UI script |
-| R15 | to be written in WP-7.5 | unit |
-| R16 | to be written in WP-7.5 | real-time trap, unit |
+| R1 | `bl-ui` `control_surfaces::the_table_has_six_rows_of_choosers_and_a_dump_button_above_the_ports`, `choosing_runs_set_and_dump_runs_dump_enabled_only_with_a_setup_and_an_output`; `bl-shell` `control_surfaces::rows_are_set_listed_dumped_and_stopped_by_command` | UI script |
+| R2 | `bl-shell` `control_surfaces::rows_survive_a_relaunch_and_wait_for_missing_ports` (real preference files); `bl-ui` `control_surfaces::a_missing_port_shows_by_name`; `bl-control` `surfaces::a_row_keeps_a_surface_that_is_not_offered` | unit, real preference files |
+| R3 | `bl-control` `surfaces::a_port_a_row_names_is_open_and_serves_one_row`; `bl-midi-io` `ports::tests::a_held_input_opens_and_gives_a_surface_its_messages_whole` | unit |
+| R4 | `bl-control` `surfaces::a_message_a_mapping_takes_never_reaches_the_surface`, `a_message_the_surface_takes_never_reaches_a_track_and_one_it_hands_back_does_under_track` | unit, test ports |
+| R5 | `bl-control` `realtime::a_note_a_surface_plays_reaches_an_all_ins_track_with_track_off`, `surfaces::notes_a_surface_plays_reach_tracks_with_track_off` | unit, against a running engine |
+| R6 | `bl-control` `surfaces::a_surface_starts_gets_every_message_sends_in_order_and_stops_with_its_goodbye`, `ticks_bring_the_read_model_and_commands_queue_in_order` | unit |
+| R7 | `bl-shell` `control_surfaces::a_knob_turned_three_times_and_released_is_one_undo_step`, `a_control_with_no_release_rests_for_half_a_second`, `a_refused_command_is_counted_and_the_next_one_runs`, `a_surface_does_not_end_a_drag_of_the_persons`; `bl-agent` `control_surfaces::an_agents_call_waits_while_a_surface_gesture_lasts` | unit, agent |
+| R8 | `bl-control` `surfaces::a_surface_starts_gets_every_message_sends_in_order_and_stops_with_its_goodbye`, `a_stamped_message_reaches_the_port_with_its_moment`, `host::tests::thinning_drops_the_oldest_for_a_control_before_anything_else` | unit, test ports |
+| R9 | `bl-control` `surfaces::a_surface_starts_gets_every_message_sends_in_order_and_stops_with_its_goodbye`; `bl-shell` `control_surfaces::rows_survive_a_relaunch_and_wait_for_missing_ports` | unit, test ports |
+| R10 | `bl-control` `surfaces::a_surface_that_sleeps_or_panics_is_stopped_alone` | unit |
+| R11 | `bl-control` `surfaces::dump_sends_the_setup_to_the_rows_output`; `bl-ui` `control_surfaces::choosing_runs_set_and_dump_runs_dump_enabled_only_with_a_setup_and_an_output` | unit, UI script |
+| R12 | `bl-control` `surfaces::a_stopped_surface_holds_nothing`; `bl-shell` `control_surfaces::rows_are_set_listed_dumped_and_stopped_by_command` | unit |
+| R13 | `bl-agent` `control_surfaces::an_agent_sets_lists_dumps_and_reads_the_surfaces_back`; `bl-shell` `control_surfaces::rows_are_set_listed_dumped_and_stopped_by_command` | agent |
+| R14 | `bl-ui` `control_surfaces::choosing_runs_set_and_dump_runs_dump_enabled_only_with_a_setup_and_an_output` | UI script |
+| R15 | `bl-shell` `control_surfaces::a_surfaces_traffic_lights_the_remote_indicators` | unit |
+| R16 | `bl-control` `realtime::the_audio_thread_allocates_nothing_while_the_host_takes_ten_thousand_messages` | real-time trap, unit |
 | R17 | to be written in WP-7.6 | unit |
 | R18 | to be written in WP-7.6 | unit |
 | R19 | to be written in WP-7.6 | unit (every native device type) |

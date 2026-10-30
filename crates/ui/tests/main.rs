@@ -25,6 +25,7 @@ mod clip_panels;
 mod clip_view;
 mod clips_between_views;
 mod common;
+mod control_surfaces;
 mod dawproject_window;
 mod detail_views;
 mod device_panel;

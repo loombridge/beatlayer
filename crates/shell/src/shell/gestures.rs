@@ -526,6 +526,7 @@ impl Shell {
         // run of mapped messages (remote mapping R12).
         self.end_key_edit();
         self.remote_run_ends_for("");
+        self.surface_gesture_ends_for("");
         if !self.gesture {
             self.editor.begin(label.to_owned());
             self.gesture = true;

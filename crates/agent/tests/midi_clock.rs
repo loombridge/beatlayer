@@ -195,3 +195,63 @@ fn ext_is_refused_while_no_input_has_sync_on() {
         .unwrap();
     assert!(refused.is_error, "{}", refused.text);
 }
+
+// Spec: midi-timecode R1, R12. An input's sync type, rate and offset are set
+// by ID and read back from `midi.ports`; `sync.state` reports the last whole
+// time, its rate, whether it runs and the song position it gives.
+#[test]
+fn timecode_options_are_set_by_id_and_the_time_it_follows_is_read_back() {
+    let (mut client, control, test) = host_with_ports();
+    let mut run =
+        |command: &str, args: Value, millis: u64| run(&control, &mut client, command, args, millis);
+    let set = run(
+        "midi.set_port",
+        json!({ "direction": "input", "name": "Keys", "sync": true,
+                "sync_type": "midi_timecode", "timecode_rate": "smpte_all",
+                "timecode_offset": "00:00:10:00" }),
+        5,
+    );
+    assert_eq!(set["sync_type"], "midi_timecode");
+    assert_eq!(set["timecode_offset"], "00:00:10:00");
+    let ports = run("midi.ports", json!({}), 5);
+    let keys = &ports["ports"][0];
+    assert_eq!(
+        (
+            &keys["sync_type"],
+            &keys["timecode_rate"],
+            &keys["timecode_offset"]
+        ),
+        (
+            &json!("midi_timecode"),
+            &json!("smpte_all"),
+            &json!("00:00:10:00")
+        )
+    );
+    run("transport.set_external_sync", json!({ "on": true }), 5);
+    assert_eq!(run("sync.state", json!({}), 5)["timecode"], Value::Null);
+
+    // Two whole times of 25 fps timecode from 00:00:12:00: the song starts at
+    // the offset's two seconds on.
+    let now = control.clock().unwrap().now();
+    let frame = std::time::Duration::from_millis(40);
+    for pair in 0..2u32 {
+        let frames = 300 + pair * 2;
+        let (s, f) = ((frames / 25 % 60) as u8, (frames % 25) as u8);
+        let nibbles = [f & 15, f >> 4, s & 15, s >> 4, 0, 0, 0, 1 << 1];
+        for (k, nibble) in nibbles.into_iter().enumerate() {
+            let at = now + frame * (pair * 2) + frame * k as u32 / 4;
+            assert!(test.send("Keys", at, &[0xF1, ((k as u8) << 4) | nibble]));
+        }
+    }
+    run("transport.state", json!({}), 200);
+    let state = run("sync.state", json!({}), 5);
+    let report = &state["timecode"];
+    assert_eq!(report["rate"], "fps_25");
+    assert_eq!(report["time"], "00:00:12:02");
+    assert_eq!(report["running"], true);
+    // 12:02 and the eighth piece's two frames, less the offset: 2.16 s, 4.32
+    // quarter notes at 120 BPM.
+    let ticks = report["position_ticks"].as_i64().unwrap() as f64;
+    assert!((ticks - 2.16 * 2.0 * 705_600.0).abs() < 2.0, "{ticks}");
+    assert_eq!(run("transport.state", json!({}), 5)["playing"], true);
+}

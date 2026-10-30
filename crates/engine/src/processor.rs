@@ -1508,9 +1508,15 @@ impl Processor {
     }
 
     /// The loop the song plays now: a held click in the scrub area's, which
-    /// the Arrangement loop gives way to, or else the Arrangement loop.
+    /// the Arrangement loop gives way to, or else the Arrangement loop
+    /// unless timecode leads.
     fn active_loop(&self) -> Option<LoopFrames> {
-        self.held_frames.or(self.loop_frames)
+        // Spec: midi-timecode R9. Timecode that leads plays its own
+        // position through the Arrangement loop's end.
+        let arrangement = self
+            .loop_frames
+            .filter(|_| !self.midi.sync_in.state().timecode_leads);
+        self.held_frames.or(arrangement)
     }
 
     /// Applies a jump waiting for the next line of the global launch
@@ -2134,11 +2140,16 @@ impl Processor {
         let looped = self
             .loop_region
             .map(|region| (region.start.get() as f64, region.end.get() as f64));
+        let tempo = self
+            .program
+            .as_ref()
+            .map_or(&self.fallback_tempo, |p| &p.get().tempo);
         self.midi.follow_clock(
             &ask,
             self.output_latency,
             self.ext,
             looped,
+            tempo,
             &mut self.follow,
         );
         ask.leader = self.follow.followed();

@@ -91,6 +91,21 @@ impl Host {
     }
 
     fn with(block: usize, tempo: f64, build: impl FnOnce(&mut Rig)) -> Self {
+        let input = SyncInput {
+            port: port(),
+            delay_ms: 0,
+            timecode: None,
+        };
+        Self::with_input(block, tempo, input, build)
+    }
+
+    /// A rig whose one sync input is `input`.
+    pub(crate) fn with_input(
+        block: usize,
+        tempo: f64,
+        input: SyncInput,
+        build: impl FnOnce(&mut Rig),
+    ) -> Self {
         let mut rig = Rig::new(block);
         rig.editor
             .apply(Command::SetTempo {
@@ -101,10 +116,7 @@ impl Host {
         rig.sync();
         let (queue, consumer) = RingBuffer::new(8192);
         assert!(rig.processor.set_midi_input(consumer).is_none());
-        rig.sender.sync_inputs(&[SyncInput {
-            port: port(),
-            delay_ms: 0,
-        }]);
+        rig.sender.sync_inputs(&[input]);
         rig.sender.external_sync(true);
         assert!(rig.sender.flush());
         Self {
@@ -118,11 +130,11 @@ impl Host {
     }
 
     /// Has `message` arrive `ns` nanoseconds after the start.
-    fn at(&mut self, ns: f64, message: MidiMessage) {
+    pub(crate) fn at(&mut self, ns: f64, message: MidiMessage) {
         self.at_port(port(), ns, message);
     }
 
-    fn at_port(&mut self, from: PortId, ns: f64, message: MidiMessage) {
+    pub(crate) fn at_port(&mut self, from: PortId, ns: f64, message: MidiMessage) {
         self.waiting.push((ns, message, from));
         self.waiting.sort_by(|a, b| a.0.total_cmp(&b.0));
     }
@@ -134,6 +146,10 @@ impl Host {
     }
 
     /// The start of block `n`, in nanoseconds from the start.
+    pub(crate) fn block_size(&self) -> u64 {
+        self.block as u64
+    }
+
     pub(crate) fn block_ns(&self, n: u64) -> f64 {
         frames_ns(n * self.block as u64)
     }
@@ -171,7 +187,7 @@ impl Host {
         self.rig.monitor.state().sync_in.tempo
     }
 
-    fn playing(&mut self) -> bool {
+    pub(crate) fn playing(&mut self) -> bool {
         self.rig.monitor.state().playing
     }
 
@@ -184,7 +200,7 @@ impl Host {
     }
 
     /// The song position in ticks the last block started on.
-    fn ticks(&mut self) -> f64 {
+    pub(crate) fn ticks(&mut self) -> f64 {
         self.rig.monitor.state().position_ticks.get() as f64
     }
 
@@ -623,6 +639,7 @@ fn a_sync_delay_plays_later_against_the_clock_and_a_negative_one_earlier() {
         host.rig.sender.sync_inputs(&[SyncInput {
             port: port(),
             delay_ms,
+            timecode: None,
         }]);
         assert!(host.rig.sender.flush());
         let first = host.block_ns(40);
@@ -653,10 +670,12 @@ fn the_first_input_with_clocks_leads_and_the_others_are_ignored() {
         SyncInput {
             port: port(),
             delay_ms: 0,
+            timecode: None,
         },
         SyncInput {
             port: other,
             delay_ms: 0,
+            timecode: None,
         },
     ]);
     assert!(host.rig.sender.flush());

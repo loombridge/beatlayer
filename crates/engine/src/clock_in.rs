@@ -13,16 +13,22 @@
 //! little faster or slower to close a difference in position, and jumps
 //! when the position is more than a sixteenth note away.
 //!
+//! An input set to MIDI Timecode sends its quarter frames and full frames
+//! the same way (`docs/specs/midi-timecode.md`, R2 to R10): they follow the
+//! song's position and start and stop it, and never its tempo.
+//!
 //! Times are nanoseconds after the block clock's epoch, as
 //! [`MidiIn`](crate::midi::MidiIn) keeps them. Nothing here allocates, locks
 //! or blocks: the pending messages and the inputs are in storage made with
 //! the engine.
 
 use bl_core::midi::{MidiMessage, PortId, SyncInput};
-use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+use bl_core::time::{TICKS_PER_QUARTER, TempoMap, Ticks};
+use bl_core::timecode::{FrameRate, Timecode};
 
 use crate::follower::{Ask, Follow};
 use crate::message::TransportCommand;
+use crate::timecode_in::{Assembler, Piece, full_frame, song_ticks};
 
 /// The most input ports with Sync on the engine follows; the list is made
 /// with the engine, and any more are ignored and counted.
@@ -47,6 +53,9 @@ const MAX_CORRECTION: f64 = 0.02;
 const CORRECTION_SPAN: f64 = 2.0 * TICKS_PER_QUARTER as f64;
 /// How long without a usable clock before the clock counts as silent (R21).
 const SILENCE_NS: f64 = 500e6;
+/// How long without a quarter frame before the timecode counts as stopped
+/// (midi-timecode R8).
+const TIMECODE_SILENCE_NS: f64 = 100e6;
 /// The fastest and slowest clock intervals the fit takes, in nanoseconds:
 /// 999 and 20 BPM.
 const MIN_PERIOD: f64 = 60e9 / (24.0 * 999.0);
@@ -167,6 +176,10 @@ enum Sync {
     Stop,
     /// A Song Position Pointer, in sixteenth notes.
     Pointer(u32),
+    /// A quarter frame's data byte.
+    Quarter(u8),
+    /// A full frame's hours with the rate, minutes, seconds and frames.
+    Full([u8; 4]),
 }
 
 impl Sync {
@@ -179,6 +192,13 @@ impl Sync {
             0xF2 => Some(Self::Pointer(
                 u32::from(message.data1()) | u32::from(message.data2()) << 7,
             )),
+            0xF1 => Some(Self::Quarter(message.data1())),
+            0xF0 => match message.bytes() {
+                &[_, hours, minutes, seconds, frames] => {
+                    Some(Self::Full([hours, minutes, seconds, frames]))
+                }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -221,6 +241,26 @@ pub struct SyncInState {
     /// Sync messages dropped because the audio thread's list was full, and
     /// inputs over [`MAX_SYNC_INPUTS`].
     pub dropped: u64,
+    /// The last whole time from an input set to MIDI Timecode, if one came.
+    pub timecode: Option<TimecodeState>,
+    /// Whether timecode leads the song with EXT on, so the Arrangement loop
+    /// doesn't wrap it (midi-timecode R9).
+    pub timecode_leads: bool,
+}
+
+/// The last whole time of the timecode the engine follows (midi-timecode
+/// R12).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TimecodeState {
+    /// The time, as its message spelled it.
+    pub time: Timecode,
+    /// The rate it is counted at.
+    pub rate: FrameRate,
+    /// Whether the timecode runs: whole times arrive in order and the song
+    /// follows them.
+    pub running: bool,
+    /// The song position the time gives, in ticks, less the offset (R4).
+    pub position: Ticks,
 }
 
 /// Where the engine's block stands on the monotonic clock, as the block
@@ -264,6 +304,19 @@ pub(crate) struct ClockIn {
     latest: u64,
     /// Clocks since the lamp's last quarter note began.
     lamp: u32,
+    /// Whether the input that leads sends timecode, not clock.
+    lead_timecode: bool,
+    /// The quarter frames being read, and the input they come from.
+    pieces: Assembler,
+    pieces_port: Option<PortId>,
+    /// When the last quarter frame or full frame of the leading input came.
+    timecode_last: f64,
+    /// Whether whole times arrive in order and the song follows them: once
+    /// the time reaches the offset.
+    timecode_running: bool,
+    /// Whether this block's timecode already jumped the song, so a later
+    /// time in it isn't compared against a position from before the jump.
+    jumped: bool,
     state: SyncInState,
 }
 
@@ -284,6 +337,12 @@ impl ClockIn {
             launch: None,
             latest: 0,
             lamp: 0,
+            lead_timecode: false,
+            pieces: Assembler::new(),
+            pieces_port: None,
+            timecode_last: f64::NEG_INFINITY,
+            timecode_running: false,
+            jumped: false,
             state: SyncInState::default(),
         }
     }
@@ -314,11 +373,15 @@ impl ClockIn {
         let Some(what) = Sync::of(message) else {
             return;
         };
-        let delay = self
-            .inputs
-            .iter()
-            .find(|i| i.port == port)
-            .map_or(0.0, |i| f64::from(i.delay_ms) * 1e6);
+        let input = self.inputs.iter().find(|i| i.port == port);
+        // Spec: midi-timecode R2. An input follows its clock or its time
+        // code, and the other kind of message is ignored.
+        let timecode = matches!(what, Sync::Quarter(_) | Sync::Full(_));
+        if input.is_some_and(|i| i.timecode.is_some() != timecode) || (input.is_none() && timecode)
+        {
+            return;
+        }
+        let delay = input.map_or(0.0, |i| f64::from(i.delay_ms) * 1e6);
         if self.pending.len() < PENDING {
             self.pending.push(Pending {
                 port,
@@ -359,18 +422,20 @@ impl ClockIn {
         timing: Option<Timing>,
         ext: bool,
         looped: Option<(f64, f64)>,
+        tempo: &TempoMap,
         answer: &mut Follow,
     ) {
         let Some(timing) = timing else {
             self.pending.clear();
             return;
         };
-        if timing.start - self.last > SILENCE_NS {
+        if !self.lead_timecode && timing.start - self.last > SILENCE_NS {
             self.lead = None;
             self.anchored = false;
         }
         let mut issued = false;
         self.latest = ask.clock;
+        self.jumped = false;
         let mut pending = std::mem::take(&mut self.pending);
         for event in pending.drain(..) {
             match event.what {
@@ -378,6 +443,9 @@ impl ClockIn {
                     if let Some(kind) = self.clock(&event) {
                         issued |= self.begin_song(kind, 0.0, &timing, ask, answer);
                     }
+                }
+                Sync::Quarter(_) | Sync::Full(_) => {
+                    issued |= self.timecode(&event, ext, &timing, ask, tempo, answer);
                 }
                 what if ext => {
                     issued |= self.message(event.time, what, &timing, ask, looped, answer);
@@ -387,21 +455,42 @@ impl ClockIn {
             }
         }
         self.pending = pending;
+        // Spec: midi-timecode R8. Timecode that falls silent has stopped.
+        if self.lead_timecode && timing.start - self.timecode_last > TIMECODE_SILENCE_NS {
+            self.timecode_stopped(ext, ask, answer);
+            self.lead = None;
+            self.lead_timecode = false;
+        }
+        let timecode = self.lead_timecode;
         let heard = timing.start + f64::from(timing.latency) * timing.ns_per_frame;
         let silent = timing.start - self.last > SILENCE_NS;
-        self.state.receiving = !silent;
+        self.state.receiving = if timecode { true } else { !silent };
         self.state.lead = self.lead;
-        self.state.tempo = self.fit.bpm().or(self.prior);
+        self.state.tempo = if timecode {
+            None
+        } else {
+            self.fit.bpm().or(self.prior)
+        };
         let launching = self.launch.is_some_and(|frame| frame >= ask.clock);
         if !launching {
             self.launch = None;
+        }
+        self.state.timecode_leads = ext && timecode;
+        if let Some(state) = self.state.timecode.as_mut() {
+            state.running = self.timecode_running;
         }
         if !ext {
             self.anchored = false;
             self.anchor = None;
             self.begin = None;
             self.launch = None;
+            self.timecode_running = false;
             self.state.following = false;
+            return;
+        }
+        if timecode {
+            // Spec: midi-timecode R4. The tempo stays Beatlayer's own.
+            self.state.following = self.timecode_running;
             return;
         }
         let Some(bpm) = self.state.tempo else {
@@ -454,8 +543,11 @@ impl ClockIn {
         // Spec: midi-clock R17. The first input to deliver usable clocks
         // leads until it falls silent.
         match self.lead {
-            None => self.lead = Some(event.port),
-            Some(lead) if lead != event.port => return None,
+            None => {
+                self.lead = Some(event.port);
+                self.lead_timecode = false;
+            }
+            Some(lead) if lead != event.port || self.lead_timecode => return None,
             Some(_) => {}
         }
         let time = event.time;
@@ -521,7 +613,7 @@ impl ClockIn {
         answer: &mut Follow,
     ) -> bool {
         match what {
-            Sync::Clock => false,
+            Sync::Clock | Sync::Quarter(_) | Sync::Full(_) => false,
             Sync::Start | Sync::Continue => {
                 self.lamp = 0;
                 let kind = if what == Sync::Start {
@@ -569,6 +661,138 @@ impl ClockIn {
                 }
             }
         }
+    }
+
+    /// Takes a quarter frame or a full frame from an input set to MIDI
+    /// Timecode (midi-timecode R2 to R10). The first input to deliver a
+    /// whole time leads until its timecode falls silent. With EXT on, the
+    /// first whole time in order starts the song (R6), later ones move it
+    /// when it is more than a frame away (R7), a full frame moves it at once
+    /// (R5, R8), and pieces in reverse order stop it (R8). Returns whether
+    /// it asked the transport to do anything.
+    fn timecode(
+        &mut self,
+        event: &Pending,
+        ext: bool,
+        timing: &Timing,
+        ask: &Ask,
+        tempo: &TempoMap,
+        answer: &mut Follow,
+    ) -> bool {
+        let Some(settings) = self
+            .inputs
+            .iter()
+            .find(|i| i.port == event.port)
+            .and_then(|i| i.timecode)
+        else {
+            return false;
+        };
+        if self.lead.is_some_and(|lead| lead != event.port) {
+            return false;
+        }
+        if self.pieces_port != Some(event.port) {
+            self.pieces.reset();
+            self.pieces_port = Some(event.port);
+        }
+        let leading = self.lead == Some(event.port);
+        let (time, carried, quarter) = match event.what {
+            Sync::Quarter(data) => match self.pieces.push(data) {
+                Piece::Whole(time, rate) => (time, rate, true),
+                Piece::Part => {
+                    if leading {
+                        self.timecode_last = event.time;
+                    }
+                    return false;
+                }
+                Piece::Reverse => {
+                    if leading {
+                        self.timecode_last = event.time;
+                        return self.timecode_stopped(ext, ask, answer);
+                    }
+                    return false;
+                }
+            },
+            Sync::Full(data) => {
+                let (time, rate) = full_frame(data);
+                (time, rate, false)
+            }
+            _ => return false,
+        };
+        let rate = settings.rate.of(carried);
+        if !time.fits(rate) {
+            return false;
+        }
+        self.lead = Some(event.port);
+        self.lead_timecode = true;
+        self.timecode_last = event.time;
+        // Spec: midi-timecode R10. Each whole time lights the lamp.
+        self.state.quarters += 1;
+        // Spec: midi-timecode R6. The pieces of a time took two frames to
+        // send: the time is that much further on when the eighth arrives.
+        let seconds = time.seconds(rate) + if quarter { 2.0 * rate.frame() } else { 0.0 };
+        let offset = settings.offset.seconds(rate);
+        self.state.timecode = Some(TimecodeState {
+            time,
+            rate,
+            running: self.timecode_running,
+            position: Ticks(song_ticks(tempo, seconds, offset).round() as i64),
+        });
+        if !ext {
+            return false;
+        }
+        // The song starts or moves on the frame this time is heard on (R20),
+        // further along by what that frame is after it.
+        let playing = ask.playing || self.launch.is_some();
+        let frame = self.frame_of(timing, ask, event.time).max(self.latest);
+        let heard = timing.start
+            + (f64::from(timing.latency) + (frame - ask.clock) as f64) * timing.ns_per_frame;
+        let to =
+            Ticks(song_ticks(tempo, seconds + (heard - event.time) / 1e9, offset).round() as i64);
+        if !quarter {
+            // While stopped, a locate goes to the time itself.
+            let at = Ticks(song_ticks(tempo, seconds, offset).round() as i64);
+            return self.timecode_jump(frame, if playing { to } else { at }, answer);
+        }
+        if !self.timecode_running {
+            // The song waits for the time the Arrangement starts at.
+            if seconds < offset {
+                return false;
+            }
+            self.timecode_running = true;
+            if !playing {
+                answer.command(frame, TransportCommand::Locate(to));
+                answer.command(frame, TransportCommand::PlayFromInsertMarker);
+                self.latest = frame;
+                self.launch = Some(frame);
+                return true;
+            }
+        }
+        if ask.playing && self.launch.is_none() && !self.jumped {
+            // Spec: midi-timecode R7. Where the song stood when the time
+            // was sent, against where the time puts it.
+            let start = timing.start + f64::from(timing.latency) * timing.ns_per_frame;
+            let own = tempo.ticks_to_seconds_exact(ask.position) + (event.time - start) / 1e9;
+            if ((seconds - offset).max(0.0) - own).abs() > rate.frame() {
+                return self.timecode_jump(frame, to, answer);
+            }
+        }
+        false
+    }
+
+    /// Moves the song to `to` on `frame`, as a locate does (R5, R7).
+    fn timecode_jump(&mut self, frame: u64, to: Ticks, answer: &mut Follow) -> bool {
+        self.latest = frame;
+        self.jumped = true;
+        answer.jump(frame, to)
+    }
+
+    /// The timecode has stopped (R8): the song stops if it was following.
+    fn timecode_stopped(&mut self, ext: bool, ask: &Ask, answer: &mut Follow) -> bool {
+        let was = std::mem::take(&mut self.timecode_running);
+        if was && ext && (ask.playing || self.launch.is_some()) {
+            return answer.command(self.latest, TransportCommand::Stop);
+        }
+        false
     }
 
     /// Starts the song the way the host's Start or Continue says, on the

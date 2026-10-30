@@ -757,3 +757,64 @@ fn an_inputs_triangle_opens_its_sync_delay() {
         "-12 ms"
     );
 }
+
+// Spec: midi-timecode R1, R11. An input's sync options start with MIDI Sync
+// Type, and with MIDI Timecode chosen add a frame rate and an offset; an
+// output's have no timecode rows.
+#[test]
+fn an_inputs_sync_type_adds_timecode_rows_and_an_output_has_none() {
+    let mut h = Harness::new(Window::Settings);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Tape");
+    test.add_port(Direction::Output, "Synth");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    for (direction, name) in [("input", "Tape"), ("output", "Synth")] {
+        h.shell
+            .run(
+                "midi.set_port",
+                json!({ "direction": direction, "name": name, "sync": true }),
+            )
+            .unwrap();
+    }
+    let nodes = Harness::nodes(&h.settle());
+    h.click(bounds(Harness::node(&nodes, "In: Tape Sync Options")).center());
+    let nodes = Harness::nodes(&h.settle());
+    h.click(bounds(Harness::node(&nodes, "Out: Synth Sync Options")).center());
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Sync Type").value,
+        "MIDI Clock"
+    );
+    assert!(!labelled(&nodes, "In: Tape MIDI Timecode Frame Rate"));
+    assert!(!labelled(&nodes, "Out: Synth MIDI Sync Type"));
+
+    h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Tape", "sync_type": "midi_timecode",
+                    "timecode_rate": "fps_25", "timecode_offset": "01:02:03:04" }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Sync Type").value,
+        "MIDI Timecode"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Timecode Frame Rate").value,
+        "25 fps"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape MIDI Timecode Offset").value,
+        "01:02:03:04"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "In: Tape Sync Delay").value,
+        "0 ms",
+        "the delay is still there"
+    );
+    assert!(!labelled(&nodes, "Out: Synth MIDI Timecode Frame Rate"));
+}

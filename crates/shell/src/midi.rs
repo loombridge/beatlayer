@@ -9,6 +9,7 @@ use std::time::Instant;
 
 use bl_control::{RowConfig, RowReport, Surfaces};
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
+use bl_core::timecode::Timecode;
 use bl_midi_io::{
     ComputerKeyboard, Direction, InputSender, KeyboardKey, MidiBackend, MidiPorts, OutputBus,
     PortState, PortSwitches,
@@ -73,6 +74,9 @@ fn info(state: PortState) -> PortInfo {
         sync_delay_ms: state.switches.delay_ms,
         clock_type: state.switches.clock_type.into(),
         hardware_resync: state.switches.resync.into(),
+        sync_type: state.switches.sync_type.into(),
+        timecode_rate: state.switches.timecode_rate.into(),
+        timecode_offset: state.switches.timecode_offset.to_string(),
         present: state.present,
         open: state.open,
         error: state.error,
@@ -106,6 +110,9 @@ impl MidiHost {
                         .clamp(*SYNC_DELAY_RANGE.start(), *SYNC_DELAY_RANGE.end()),
                     clock_type: port.clock_type.into(),
                     resync: port.hardware_resync.into(),
+                    sync_type: port.sync_type.into(),
+                    timecode_rate: port.timecode_rate.into(),
+                    timecode_offset: Timecode::parse(&port.timecode_offset).unwrap_or_default(),
                 },
             );
         }
@@ -187,6 +194,9 @@ impl MidiHost {
                     sync_delay_ms: switches.delay_ms,
                     clock_type: switches.clock_type.into(),
                     hardware_resync: switches.resync.into(),
+                    sync_type: switches.sync_type.into(),
+                    timecode_rate: switches.timecode_rate.into(),
+                    timecode_offset: switches.timecode_offset.to_string(),
                 })
                 .collect(),
             keyboard_on: self.keyboard.is_on(),
@@ -337,6 +347,24 @@ impl MidiHost {
                 "the MIDI input port \"{name}\" has no MIDI Clock Type or Hardware Resync: they are an output's"
             ));
         }
+        // Spec: midi-timecode R1, R11. Timecode is followed, never sent.
+        if (args.sync_type.is_some()
+            || args.timecode_rate.is_some()
+            || args.timecode_offset.is_some())
+            && dir == Direction::Output
+        {
+            return Err(format!(
+                "the MIDI output port \"{name}\" has no MIDI Sync Type or MIDI Timecode options: Beatlayer never sends timecode"
+            ));
+        }
+        let offset = match &args.timecode_offset {
+            Some(text) => Timecode::parse(text).ok_or_else(|| {
+                format!(
+                    "MIDI Timecode Offset is hh:mm:ss:ff (hours below 24, minutes and seconds below 60, frames below 30), not \"{text}\""
+                )
+            })?,
+            None => now.timecode_offset,
+        };
         if let Some(delay) = args.sync_delay_ms
             && !SYNC_DELAY_RANGE.contains(&delay)
         {
@@ -354,6 +382,9 @@ impl MidiHost {
             delay_ms: args.sync_delay_ms.unwrap_or(now.delay_ms),
             clock_type: args.clock_type.map_or(now.clock_type, Into::into),
             resync: args.hardware_resync.map_or(now.resync, Into::into),
+            sync_type: args.sync_type.map_or(now.sync_type, Into::into),
+            timecode_rate: args.timecode_rate.map_or(now.timecode_rate, Into::into),
+            timecode_offset: offset,
         };
         self.ports
             .set_switches(dir, name, switches)

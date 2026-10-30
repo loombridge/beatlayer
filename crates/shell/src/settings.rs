@@ -283,6 +283,16 @@ pub struct PortPrefs {
     /// An output's Hardware Resync.
     #[serde(default)]
     pub hardware_resync: bl_shell_spec::midi_io::HardwareResyncChoice,
+    /// An input's MIDI Sync Type (the MIDI Timecode spec, R1).
+    #[serde(default)]
+    pub sync_type: bl_shell_spec::midi_io::SyncTypeChoice,
+    /// An input's MIDI Timecode Frame Rate.
+    #[serde(default)]
+    pub timecode_rate: bl_shell_spec::midi_io::TimecodeRateChoice,
+    /// An input's MIDI Timecode Offset, as `hh:mm:ss:ff`; a preferences file
+    /// from before it has none, which is 00:00:00:00.
+    #[serde(default)]
+    pub timecode_offset: String,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

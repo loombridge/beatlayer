@@ -6,5 +6,6 @@
 // can't install its own global allocator.
 bl_rt::install_trap!();
 
+mod grid;
 mod realtime;
 mod surfaces;

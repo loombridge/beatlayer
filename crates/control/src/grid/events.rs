@@ -220,9 +220,8 @@ impl Grid {
             self.released(button, cc, at, cx);
             return;
         }
-        let mixer_button = self.model == Model::X
-            && self.mixer.is_some()
-            && matches!(button, Button::Scene(_));
+        let mixer_button =
+            self.model == Model::X && self.mixer.is_some() && matches!(button, Button::Scene(_));
         if !mixer_button {
             self.used();
         }
@@ -454,12 +453,13 @@ impl Grid {
             Faders::Pan => track.map(|t| nearest(Self::track_colour(doc, t))),
             Faders::Send(send) => {
                 let t = doc.track(track?)?;
-                (t.kind() != TrackKind::Return && usize::from(send) < doc.returns().len())
-                    .then(|| match send {
+                (t.kind() != TrackKind::Return && usize::from(send) < doc.returns().len()).then(
+                    || match send {
                         0 => colour::PURPLE,
                         1 => colour::BLUE,
                         n => colour::RAINBOW[usize::from(n) % colour::RAINBOW.len()],
-                    })
+                    },
+                )
             }
             Faders::Device => {
                 let focus = model.row(self.row)?.focus.as_ref()?;
@@ -546,10 +546,7 @@ impl Grid {
             if slot.is_none_or(|sent| sent.abs_diff(value) > 1) {
                 *slot = Some(value);
                 let cc = FADER_CC + page * 8 + index;
-                cx.send_for(
-                    0x1_0000 | u32::from(cc),
-                    vec![0xB4, cc, value],
-                );
+                cx.send_for(0x1_0000 | u32::from(cc), vec![0xB4, cc, value]);
             }
         }
     }

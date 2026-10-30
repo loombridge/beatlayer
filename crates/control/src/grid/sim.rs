@@ -175,7 +175,10 @@ impl Launchpad {
             return;
         }
         let (kind, channel) = (status & 0xF0, status & 0x0F);
-        let (a, b) = (bytes.get(1).copied().unwrap_or(0), bytes.get(2).copied().unwrap_or(0));
+        let (a, b) = (
+            bytes.get(1).copied().unwrap_or(0),
+            bytes.get(2).copied().unwrap_or(0),
+        );
         let layer = match (kind, channel) {
             (0x90 | 0x80, 0..=2) => Some((Layer::Pad, channel)),
             (0x90 | 0x80, 8..=10) => Some((Layer::Drum, channel - 8)),
@@ -186,7 +189,13 @@ impl Launchpad {
             let c = if kind == 0x80 { 0 } else { b };
             let led = self.leds.entry((layer, a)).or_default();
             match mode {
-                0 => *led = Led { fixed: c, flash: None, pulse: None },
+                0 => {
+                    *led = Led {
+                        fixed: c,
+                        flash: None,
+                        pulse: None,
+                    }
+                }
                 1 => led.flash = Some(c),
                 _ => led.pulse = Some(c),
             }
@@ -246,7 +255,7 @@ impl Launchpad {
         };
         let bank = &mut self.banks[bank];
         bank.horizontal = orientation == 1;
-        for entry in faders.chunks_exact(4) {
+        for entry in faders.as_chunks::<4>().0 {
             if let Some(fader) = bank.faders.get_mut(usize::from(entry[0])) {
                 let position = fader.position;
                 *fader = Fader {

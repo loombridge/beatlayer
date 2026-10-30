@@ -23,10 +23,10 @@ use bl_model::{
 };
 use serde_json::json;
 
+use crate::Hit;
 use crate::surface::{
     ControlSurface, Cx, DrumView, Kind, ReadModel, Recognise, Ring, RingStep, Role, SurfaceState,
 };
-use crate::Hit;
 
 mod palette;
 #[cfg(feature = "testing")]
@@ -85,7 +85,12 @@ impl Model {
 const MAKER: [u8; 3] = [0x00, 0x20, 0x29];
 
 /// The Launchpad Mini MK3 as the chooser offers it (R1, R25).
-pub const MINI: Kind = kind(Model::Mini, "launchpad-mini-mk3", "lpminimk3 daw", make_mini);
+pub const MINI: Kind = kind(
+    Model::Mini,
+    "launchpad-mini-mk3",
+    "lpminimk3 daw",
+    make_mini,
+);
 /// The Launchpad Pro MK3 as the chooser offers it (R1, R29).
 pub const PRO: Kind = kind(Model::Pro, "launchpad-pro-mk3", "lppromk3 daw", make_pro);
 /// The Launchpad X as the chooser offers it (R1, R18).
@@ -699,11 +704,7 @@ impl Grid {
             TrackFn::Select => {
                 let rgb = Self::track_colour(doc, track);
                 let selected = model.selection.tracks.contains(&track);
-                let c = if selected {
-                    nearest(rgb)
-                } else {
-                    dimmed(rgb)
-                };
+                let c = if selected { nearest(rgb) } else { dimmed(rgb) };
                 (c, c)
             }
         };
@@ -863,27 +864,28 @@ impl Grid {
         let scene_at = |r: usize| ring.and_then(|ring| ring.scenes.get(r).copied());
         match self.model {
             Model::X if self.mixer.is_some() => {
-                for (row, mix) in MIXES.iter().enumerate() {
-                    put(Layer::Button, SCENE[row], white(self.mixer == Some(*mix)));
+                for (cc, mix) in SCENE.iter().zip(MIXES) {
+                    put(Layer::Button, *cc, white(self.mixer == Some(mix)));
                 }
             }
             Model::Mini => {
-                for row in 0..7 {
+                // The bottom button is Stop/Solo/Mute, not a scene's (R26).
+                for (row, cc) in SCENE.iter().enumerate().take(7) {
                     let light = scene_at(row).and_then(|s| Self::scene_light(model, s));
-                    put(Layer::Button, SCENE[row], light);
+                    put(Layer::Button, *cc, light);
                 }
-                let (c, _) = match self.cycle {
-                    Cycle::Clips => (colour::WHITE, ()),
-                    Cycle::Stop => (colour::RED, ()),
-                    Cycle::Solo => (colour::BLUE, ()),
-                    Cycle::Mute => (colour::YELLOW, ()),
+                let cycle = match self.cycle {
+                    Cycle::Clips => colour::WHITE,
+                    Cycle::Stop => colour::RED,
+                    Cycle::Solo => colour::BLUE,
+                    Cycle::Mute => colour::YELLOW,
                 };
-                put(Layer::Button, SCENE[7], Some(Light::Static(c)));
+                put(Layer::Button, SCENE[7], Some(Light::Static(cycle)));
             }
             _ => {
-                for row in 0..8 {
+                for (row, cc) in SCENE.iter().enumerate() {
                     let light = scene_at(row).and_then(|s| Self::scene_light(model, s));
-                    put(Layer::Button, SCENE[row], light);
+                    put(Layer::Button, *cc, light);
                 }
             }
         }

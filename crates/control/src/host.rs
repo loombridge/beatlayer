@@ -780,9 +780,7 @@ impl Surfaces {
     /// names its maker.
     fn recognise(&mut self, ports: &mut MidiPorts) {
         let present = |ports: &MidiPorts, direction, name: &str| {
-            ports
-                .port(direction, name)
-                .is_some_and(|port| port.present)
+            ports.port(direction, name).is_some_and(|port| port.present)
         };
         for probe in std::mem::take(&mut self.probes) {
             let answered = lock(&probe.replies)

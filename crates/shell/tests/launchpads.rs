@@ -28,7 +28,6 @@ struct Rig {
     control: NullControl,
     test: TestBackend,
     pad: Launchpad,
-    which: Which,
 }
 
 impl Rig {
@@ -55,7 +54,6 @@ impl Rig {
             control,
             test,
             pad,
-            which,
         }
     }
 
@@ -162,12 +160,6 @@ impl Rig {
             "clip.set_colour",
             json!({ "clips": [clip], "colour": colour }),
         );
-    }
-
-    fn playing(&self, track: TrackId, scene: SceneId) -> bool {
-        self.shell.session_states().iter().any(|s| {
-            s.track == track && s.scene == scene && s.state == bl_engine::SlotState::Playing
-        })
     }
 
     fn queued(&self, track: TrackId, scene: SceneId) -> bool {
@@ -358,10 +350,9 @@ fn launching_turns_a_pad_from_flashing_to_pulsing_green() {
         }
         let (track, scene) = (tracks[0], scenes[0]);
         testing::wait_for(&rig.control, &mut rig.shell, "the clip to play", |shell| {
-            shell
-                .session_states()
-                .iter()
-                .any(|s| s.track == track && s.scene == scene && s.state == bl_engine::SlotState::Playing)
+            shell.session_states().iter().any(|s| {
+                s.track == track && s.scene == scene && s.state == bl_engine::SlotState::Playing
+            })
         });
         rig.settle();
         assert_eq!(rig.pad.pad(0, 0), Some(Light::Pulse(GREEN)));
@@ -382,10 +373,9 @@ fn an_empty_pad_records_on_an_armed_track_and_stops_an_unarmed_one() {
     rig.tap(1, 0);
     let (track, scene) = (tracks[1], scenes[0]);
     testing::wait_for(&rig.control, &mut rig.shell, "the clip to play", |shell| {
-        shell
-            .session_states()
-            .iter()
-            .any(|s| s.track == track && s.scene == scene && s.state == bl_engine::SlotState::Playing)
+        shell.session_states().iter().any(|s| {
+            s.track == track && s.scene == scene && s.state == bl_engine::SlotState::Playing
+        })
     });
     // An unarmed track's empty slot stops its track.
     rig.tap(1, 1);
@@ -426,7 +416,10 @@ fn a_scene_button_launches_its_scene_and_lights_with_its_clips() {
         rig.clip(tracks[1], scenes[0], 5);
         rig.run("transport.play", json!({}));
         rig.settle();
-        assert!(is_static(rig.pad.scene_button(0), 1), "dim white with clips");
+        assert!(
+            is_static(rig.pad.scene_button(0), 1),
+            "dim white with clips"
+        );
         assert_eq!(rig.pad.scene_button(1), None, "an empty scene is dark");
         rig.tap_button(89);
         let (a, b, scene) = (tracks[0], tracks[1], scenes[0]);
@@ -438,7 +431,10 @@ fn a_scene_button_launches_its_scene_and_lights_with_its_clips() {
             })
         });
         rig.settle();
-        assert!(is_static(rig.pad.scene_button(0), GREEN), "green while playing");
+        assert!(
+            is_static(rig.pad.scene_button(0), GREEN),
+            "green while playing"
+        );
     }
 }
 
@@ -474,13 +470,7 @@ fn the_arrows_move_the_ring_and_darken_at_the_edges() {
 }
 
 fn track_of(rig: &Rig, track: TrackId) -> bl_model::Mixer {
-    rig.shell
-        .editor()
-        .document()
-        .track(track)
-        .unwrap()
-        .mixer()
-        .clone()
+    *rig.shell.editor().document().track(track).unwrap().mixer()
 }
 
 // Spec: supported-controllers R13, R20. On the Launchpad X, Session switches
@@ -506,9 +496,21 @@ fn the_x_mixer_turns_the_bottom_row_into_a_track_function() {
         "the bottom row holds clips in Session"
     );
 
+    // Spec: supported-controllers R24. The buttons the controller keeps for
+    // itself are never lit.
+    for cc in [95, 96, 97] {
+        assert_eq!(rig.pad.button(cc), None, "{cc}");
+    }
     rig.tap_button(95);
     assert_eq!(rig.mode(), "Mixer: Volume; faders: Volume");
-    assert_eq!(rig.pad.scene_button(0), Some(Light::Static(3)), "chosen: bright");
+    for cc in [95, 96, 97] {
+        assert_eq!(rig.pad.button(cc), None, "{cc}");
+    }
+    assert_eq!(
+        rig.pad.scene_button(0),
+        Some(Light::Static(3)),
+        "chosen: bright"
+    );
     for row in 1..8 {
         assert!(is_static(rig.pad.scene_button(row), 1), "dim white: {row}");
     }
@@ -691,7 +693,11 @@ fn the_minis_stop_solo_mute_button_cycles_the_bottom_row() {
         rig.tap_button(19);
         assert!(is_static(rig.pad.button(19), colour), "{mode}");
         assert_eq!(rig.mode(), mode);
-        assert!(is_static(rig.pad.pad(0, 7), pad), "{mode}: {:?}", rig.pad.pad(0, 7));
+        assert!(
+            is_static(rig.pad.pad(0, 7), pad),
+            "{mode}: {:?}",
+            rig.pad.pad(0, 7)
+        );
     }
     // Mute acts: a pad of the bottom row mutes its track.
     rig.tap(1, 7);
@@ -764,7 +770,10 @@ fn the_pros_faders_follow_its_pages_and_the_device_page_follows_the_focus() {
     rig.settle();
     rig.tap_button(4);
     assert_eq!(rig.pad.layout(), (1, 0), "the Fader layout, page 0");
-    assert_eq!(rig.mode(), "Fader: Volume; track buttons: Select; faders: Volume");
+    assert_eq!(
+        rig.mode(),
+        "Fader: Volume; track buttons: Select; faders: Volume"
+    );
     let bank = rig.pad.bank(0);
     assert!(bank.faders[0].shown && bank.faders[3].shown && !bank.faders[4].shown);
     assert_eq!(bank.faders[0].colour, GREEN);
@@ -813,7 +822,10 @@ fn the_pros_faders_follow_its_pages_and_the_device_page_follows_the_focus() {
 }
 
 fn pad_view(rig: &Rig, rack: DeviceId) -> (u8, Option<u8>) {
-    fn find(frames: &[bl_shell::device_commands::DeviceFrame], id: DeviceId) -> Option<bl_shell::pad_commands::PadFrame> {
+    fn find(
+        frames: &[bl_shell::device_commands::DeviceFrame],
+        id: DeviceId,
+    ) -> Option<bl_shell::pad_commands::PadFrame> {
         frames.iter().find_map(|d| {
             if d.id == id {
                 d.rack.as_ref().and_then(|r| r.pads.clone())
@@ -888,14 +900,20 @@ fn a_drum_rack_on_the_selected_track_gives_the_drum_layout_both_ways() {
         rig.pad.drum_up(1, 7);
         rig.settle();
         assert_eq!(pad_view(&rig, rack).1, Some(37));
-        assert!(is_static(rig.pad.drum_pad(1, 7), 45), "the selected pad is blue");
+        assert!(
+            is_static(rig.pad.drum_pad(1, 7), 45),
+            "the selected pad is blue"
+        );
         assert!(is_static(rig.pad.drum_pad(0, 3), 13), "52 is yellow again");
 
         // The arrows scroll the pad view: up by sixteen, right by four.
         assert!(rig.pad.button(up).is_some() && rig.pad.button(left).is_some());
         rig.tap_button(up);
         assert_eq!(pad_view(&rig, rack).0, 52);
-        assert!(is_static(rig.pad.drum_pad(0, 7), 13), "52 is now the first pad");
+        assert!(
+            is_static(rig.pad.drum_pad(0, 7), 13),
+            "52 is now the first pad"
+        );
         rig.tap_button(right);
         assert_eq!(pad_view(&rig, rack).0, 56);
         rig.tap_button(left);
@@ -979,10 +997,19 @@ fn the_pros_functions_run_their_commands_and_shift_lights_gold() {
     rig.press(60);
     rig.tap(0, 1);
     rig.release(60);
-    assert!(rig.shell.editor().document().slot(tracks[0], scenes[1]).is_none());
+    assert!(
+        rig.shell
+            .editor()
+            .document()
+            .slot(tracks[0], scenes[1])
+            .is_none()
+    );
 
     // Quantise: the notes land on sixteenths.
-    rig.run("session.select", json!({ "track": tracks[0], "scene": scenes[0] }));
+    rig.run(
+        "session.select",
+        json!({ "track": tracks[0], "scene": scenes[0] }),
+    );
     rig.run(
         "note.add",
         json!({ "key": 60, "start": 50_000, "length": 100_000 }),
@@ -1020,12 +1047,21 @@ fn the_pros_functions_run_their_commands_and_shift_lights_gold() {
     assert!(doubled > length, "{doubled:?} {length:?}");
 
     // Shift with the track controls: Undo, Redo, the metronome, Tap Tempo.
-    rig.run("mixer.set_volume", json!({ "track": tracks[0], "volume": 0.5 }));
+    rig.run(
+        "mixer.set_volume",
+        json!({ "track": tracks[0], "volume": 0.5 }),
+    );
     rig.press(90);
     rig.tap_button(1);
-    assert!((track_of(&rig, tracks[0]).volume - 0.5).abs() > 1e-9, "undone");
+    assert!(
+        (track_of(&rig, tracks[0]).volume - 0.5).abs() > 1e-9,
+        "undone"
+    );
     rig.tap_button(2);
-    assert!((track_of(&rig, tracks[0]).volume - 0.5).abs() < 1e-9, "redone");
+    assert!(
+        (track_of(&rig, tracks[0]).volume - 0.5).abs() < 1e-9,
+        "redone"
+    );
     assert!(!rig.shell.editor().document().settings().metronome.enabled);
     rig.tap_button(3);
     assert!(rig.shell.editor().document().settings().metronome.enabled);
@@ -1040,11 +1076,15 @@ fn the_pros_functions_run_their_commands_and_shift_lights_gold() {
     // Play starts the transport and stops it; Record starts Session Record.
     rig.run("mixer.set_arm", json!({ "track": tracks[1], "arm": true }));
     rig.tap_button(20);
-    testing::wait_for(&rig.control, &mut rig.shell, "play", |s| s.arrangement().transport().playing);
+    testing::wait_for(&rig.control, &mut rig.shell, "play", |s| {
+        s.arrangement().transport().playing
+    });
     rig.settle();
     assert!(is_static(rig.pad.button(20), GREEN));
     rig.tap_button(20);
-    testing::wait_for(&rig.control, &mut rig.shell, "stop", |s| !s.arrangement().transport().playing);
+    testing::wait_for(&rig.control, &mut rig.shell, "stop", |s| {
+        !s.arrangement().transport().playing
+    });
     rig.tap_button(10);
     testing::wait_for(&rig.control, &mut rig.shell, "the recording", |s| {
         s.session_states()
@@ -1059,7 +1099,11 @@ fn the_pros_functions_run_their_commands_and_shift_lights_gold() {
     rig.tap_button(10);
     rig.release(90);
     let after = rig.shell.surface_counts();
-    assert_eq!(after.0 + after.1, before.0 + before.1 + 1, "Capture MIDI ran");
+    assert_eq!(
+        after.0 + after.1,
+        before.0 + before.1 + 1,
+        "Capture MIDI ran"
+    );
     let _ = undo_label(&rig);
 }
 
@@ -1078,7 +1122,11 @@ fn holding_session_on_the_pro_shows_session_overview() {
     rig.run("transport.play", json!({}));
     rig.settle();
     rig.press(93);
-    assert_eq!(rig.pad.pad(0, 0), Some(Light::Static(105)), "the ring's block");
+    assert_eq!(
+        rig.pad.pad(0, 0),
+        Some(Light::Static(105)),
+        "the ring's block"
+    );
     assert_eq!(rig.pad.pad(1, 0), Some(Light::Static(45)), "blue");
     assert_eq!(rig.pad.pad(2, 0), None, "a block past the set");
     assert_eq!(rig.pad.pad(0, 1), None, "scenes: one block");
@@ -1099,9 +1147,9 @@ fn holding_session_on_the_pro_shows_session_overview() {
     let (track, scene) = (tracks[9], scenes[0]);
     rig.tap(7, 0);
     testing::wait_for(&rig.control, &mut rig.shell, "the clip to play", |s| {
-        s.session_states()
-            .iter()
-            .any(|x| x.track == track && x.scene == scene && x.state == bl_engine::SlotState::Playing)
+        s.session_states().iter().any(|x| {
+            x.track == track && x.scene == scene && x.state == bl_engine::SlotState::Playing
+        })
     });
     rig.press(93);
     assert_eq!(rig.pad.pad(1, 0), Some(Light::Pulse(GREEN)));
@@ -1122,7 +1170,8 @@ fn the_x_capture_button_records_on_a_tap_and_captures_on_a_hold() {
     let now = std::time::Instant::now();
     // A tap of 100 ms: Session Record.
     rig.pad.button_down_at(98, now);
-    rig.pad.button_up_at(98, now + std::time::Duration::from_millis(100));
+    rig.pad
+        .button_up_at(98, now + std::time::Duration::from_millis(100));
     rig.settle();
     testing::wait_for(&rig.control, &mut rig.shell, "the recording", |s| {
         s.session_states()
@@ -1130,30 +1179,35 @@ fn the_x_capture_button_records_on_a_tap_and_captures_on_a_hold() {
             .any(|slot| slot.state == bl_engine::SlotState::Recording)
     });
     rig.settle();
-    assert!(is_static(rig.pad.button(98), RED), "lit red while it records");
-    rig.pad.button_down_at(98, now + std::time::Duration::from_secs(5));
-    rig.pad.button_up_at(98, now + std::time::Duration::from_millis(5_100));
-    rig.settle();
-    for _ in 0..200 {
-        rig.pass(20);
-        if is_static(rig.pad.button(98), 1) {
-            break;
-        }
-    }
     assert!(
-        is_static(rig.pad.button(98), 1),
-        "{:?} {:?}",
-        rig.pad.button(98),
-        rig.shell.session_states()
+        is_static(rig.pad.button(98), RED),
+        "lit red while it records"
     );
+    rig.pad
+        .button_down_at(98, now + std::time::Duration::from_secs(5));
+    rig.pad
+        .button_up_at(98, now + std::time::Duration::from_millis(5_100));
+    rig.settle();
+    testing::wait_for(&rig.control, &mut rig.shell, "the recording to end", |s| {
+        s.session_states()
+            .iter()
+            .all(|slot| slot.state != bl_engine::SlotState::Recording)
+    });
     // A hold of 700 ms: Capture MIDI, which starts no recording.
     let before = rig.shell.surface_counts();
-    rig.pad.button_down_at(98, now + std::time::Duration::from_secs(10));
-    rig.pad.button_up_at(98, now + std::time::Duration::from_millis(10_700));
+    rig.pad
+        .button_down_at(98, now + std::time::Duration::from_secs(10));
+    rig.pad
+        .button_up_at(98, now + std::time::Duration::from_millis(10_700));
     rig.settle();
     let after = rig.shell.surface_counts();
     assert_eq!(after.0 + after.1, before.0 + before.1 + 1);
-    assert!(rig.shell.session_states().iter().all(|slot| slot.state != bl_engine::SlotState::Recording));
+    assert!(
+        rig.shell
+            .session_states()
+            .iter()
+            .all(|slot| slot.state != bl_engine::SlotState::Recording)
+    );
 }
 
 // Spec: supported-controllers R11. A grid surface sends its controller 24
@@ -1234,4 +1288,28 @@ fn removing_the_row_puts_out_every_light_and_sends_standalone() {
         }
         assert_eq!(rig.row()["state"], "empty");
     }
+}
+
+// Spec: supported-controllers R26, R28. The Mini's Drums, Keys and User are
+// the controller's own layouts: the ring stays where it was while one shows
+// and Session brings the Session back; the Mini has no faders and no Mixer.
+#[test]
+fn the_minis_own_layouts_leave_the_ring_alone_and_it_has_no_mixer() {
+    let mut rig = Rig::new(Which::Mini);
+    rig.tracks(10);
+    rig.tap_button(94);
+    assert_eq!(rig.row()["surface_state"]["ring"]["track_index"], 1);
+    // Session doesn't open a Mixer on the Mini.
+    rig.tap_button(95);
+    assert_eq!(rig.mode(), "Session");
+    assert_eq!(rig.pad.layout(), (0, 0));
+    for cc in [96, 97, 98] {
+        rig.tap_button(cc);
+        assert_eq!(rig.mode(), "Custom", "{cc}");
+        assert_eq!(rig.row()["surface_state"]["ring"]["track_index"], 1);
+        assert_eq!(rig.pad.button(cc), None, "left to the controller");
+    }
+    rig.tap_button(95);
+    assert_eq!(rig.mode(), "Session");
+    assert!(!rig.pad.bank(0).faders[0].shown);
 }

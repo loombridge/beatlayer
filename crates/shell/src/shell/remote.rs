@@ -625,6 +625,7 @@ impl Shell {
                 CrossfadeAssign::None => 1.0,
                 CrossfadeAssign::B => 2.0,
             },
+            RemoteTarget::Send { track, to } => doc.track(track)?.send(to),
             RemoteTarget::Crossfader => doc.settings().crossfader,
             RemoteTarget::DeviceOn { device } => flag(doc.device(device)?.enabled),
             RemoteTarget::Device { device, param } => doc

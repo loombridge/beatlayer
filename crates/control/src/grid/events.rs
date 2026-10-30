@@ -550,25 +550,29 @@ impl Grid {
         }
     }
 
-    /// Sends the clock the controller's flashing and pulsing keep time with:
-    /// 24 pulses a quarter note at the set's tempo, each stamped with its
-    /// moment (R11).
     fn pulses(&mut self, model: &ReadModel, cx: &mut Cx) {
-        let now = cx.now();
-        let period = Duration::from_secs_f64(60.0 / (24.0 * model.tempo.get().max(1.0)));
-        let mut next = self.clock.unwrap_or(now);
-        if next + Duration::from_millis(200) < now {
-            next = now;
-        }
-        for _ in 0..64 {
-            if next >= now + AHEAD {
-                break;
-            }
-            cx.send_at(next, vec![0xF8]);
-            next += period;
-        }
-        self.clock = Some(next);
+        pulses(&mut self.clock, model, cx);
     }
+}
+
+/// Sends the clock the controller's flashing and pulsing keep time with: 24
+/// pulses a quarter note at the set's tempo, each stamped with its moment;
+/// `next` is when the following one is due (R11).
+pub(super) fn pulses(next: &mut Option<Instant>, model: &ReadModel, cx: &mut Cx) {
+    let now = cx.now();
+    let period = Duration::from_secs_f64(60.0 / (24.0 * model.tempo.get().max(1.0)));
+    let mut due = next.unwrap_or(now);
+    if due + Duration::from_millis(200) < now {
+        due = now;
+    }
+    for _ in 0..64 {
+        if due >= now + AHEAD {
+            break;
+        }
+        cx.send_at(due, vec![0xF8]);
+        due += period;
+    }
+    *next = Some(due);
 }
 
 fn control_id(layer: Layer, number: u8) -> u32 {

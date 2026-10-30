@@ -6,7 +6,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
 use bl_core::midi::{
-    ClockType, HardwareResync, MidiInputEvent, MidiMessage, MidiSource, PortId, SyncOutput,
+    ClockType, HardwareResync, MidiInputEvent, MidiMessage, MidiSource, PortId, SyncInput,
+    SyncOutput,
 };
 
 use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
@@ -203,8 +204,8 @@ impl Entry {
 ///   input takes them (R5);
 /// - with Remote on, to remote control when a mapping takes them, which
 ///   keeps them from tracks (`docs/specs/remote-mapping.md`, R7 and R8),
-///   and with Sync on, clock and transport messages to sync, counted until
-///   Phase 7 takes them.
+///   and with Sync on, clock and transport messages to the engine on the
+///   same queue, stamped as sync's own (R14 of the MIDI clock spec).
 ///
 /// System messages never go to tracks (R9), and system exclusive goes
 /// to a control surface that holds the input, and nowhere else.
@@ -405,6 +406,21 @@ impl MidiPorts {
             .collect()
     }
 
+    /// The open inputs with Sync on and their Sync Delay: what the engine's
+    /// clock follower reads their messages with (`docs/specs/midi-clock.md`,
+    /// R14).
+    #[must_use]
+    pub fn sync_inputs(&self) -> Vec<SyncInput> {
+        self.ports
+            .iter()
+            .filter(|e| e.direction == Direction::Input && e.input.is_some() && e.switches.sync)
+            .map(|e| SyncInput {
+                port: PortId::from_name(&e.name),
+                delay_ms: e.switches.delay_ms,
+            })
+            .collect()
+    }
+
     /// Sets a port's switches, opening or closing it as they say (R4).
     ///
     /// # Errors
@@ -526,7 +542,17 @@ fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandle
         if message.is_system() {
             // Spec: midi-io R5, R9
             if on.sync && is_sync(&message) {
-                stats.to_sync.fetch_add(1, Relaxed);
+                // Spec: midi-clock R14. Clock and transport messages go to
+                // the engine's clock follower; time code is counted only.
+                if matches!(message.status(), 0xF2 | 0xF8 | 0xFA..=0xFC) {
+                    sender.send_sync(MidiInputEvent {
+                        source: MidiSource::Sync(port),
+                        time,
+                        message,
+                    });
+                } else {
+                    stats.to_sync.fetch_add(1, Relaxed);
+                }
             } else if !live.to_surface(time, bytes) {
                 stats.ignored.fetch_add(1, Relaxed);
             }
@@ -686,7 +712,8 @@ mod tests {
         assert_eq!(event.message.bytes(), &note);
         assert!(engine.pop().is_err());
 
-        // Remote and Sync only: nothing reaches the engine.
+        // Remote and Sync only: no track's message reaches the engine, and
+        // the clock goes to it stamped as sync's own (midi-clock R14).
         ports
             .set_switches(
                 Direction::Input,
@@ -702,6 +729,9 @@ mod tests {
             .unwrap();
         assert!(test.send("Keys", now, &note));
         assert!(test.send("Keys", now, &[0xF8]));
+        let clock = engine.pop().unwrap();
+        assert_eq!(clock.source, MidiSource::Sync(PortId::from_name("Keys")));
+        assert_eq!((clock.time, clock.message), (now, MidiMessage::CLOCK));
         assert!(engine.pop().is_err());
         let counts = stats.snapshot();
         assert_eq!(

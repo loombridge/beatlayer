@@ -397,6 +397,52 @@ fn warp_off_disables_the_tempo_controls() {
     }
 }
 
+// Spec: warping R46, R55. With EXT on every clip follows the incoming clock:
+// the Lead/Follow switch is disabled and keeps showing what the clip is, and
+// it is live again with EXT off.
+#[test]
+fn ext_disables_the_lead_follow_switch_and_it_keeps_showing_lead() {
+    let mut p = Panel::new("ext");
+    p.h.shell
+        .run("clip.set_warp", json!({ "clip": p.clip, "warp": true }))
+        .unwrap();
+    p.h.shell
+        .run(
+            "clip.set_tempo_leader",
+            json!({ "clip": p.clip, "leader": true }),
+        )
+        .unwrap();
+    let test = bl_midi_io::TestBackend::new();
+    test.add_port(bl_midi_io::Direction::Input, "Clock in");
+    p.h.shell.use_midi_backend(Box::new(test));
+    p.h.shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Clock in", "sync": true }),
+        )
+        .unwrap();
+    let all = p.nodes();
+    let switch = Harness::node(&all, "Lead/Follow");
+    assert!(!switch.disabled);
+    assert_eq!(switch.value, "On");
+
+    p.h.shell
+        .run("transport.set_external_sync", json!({ "on": true }))
+        .unwrap();
+    let all = p.nodes();
+    let switch = Harness::node(&all, "Lead/Follow");
+    assert!(switch.disabled, "EXT on");
+    assert_eq!(switch.value, "On", "it still shows Lead");
+    assert!(switch.description.contains("External Sync"));
+    assert!(p.audio().tempo_leader, "nothing in the set changed");
+
+    p.h.shell
+        .run("transport.set_external_sync", json!({ "on": false }))
+        .unwrap();
+    let all = p.nodes();
+    assert!(!Harness::node(&all, "Lead/Follow").disabled, "EXT off");
+}
+
 // The header shows the file's name, sample rate, bit depth and channel
 // count (R2).
 #[test]

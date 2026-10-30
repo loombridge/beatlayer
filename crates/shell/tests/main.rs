@@ -58,6 +58,7 @@ mod eqs_and_dynamics;
 mod export;
 mod export_dialog;
 mod external_devices;
+mod external_sync;
 mod fades;
 mod file_management;
 mod file_manager;

@@ -334,3 +334,89 @@ fn a_warped_set_following_140_nulls_against_its_render_at_140() {
         "{off} samples differ by more than 5e-4 (worst of the rest {worst})"
     );
 }
+
+/// Plays `name`'s song on the engine's real-time path, following a MIDI
+/// clock at `bpm` whose Start begins the song on the first frame (the MIDI
+/// clock spec, R17, R20, R22), and returns its interleaved samples.
+fn render_following_a_clock(name: &str, bpm: f64, frames: usize) -> Vec<f32> {
+    use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource, PortId, SyncInput};
+    use std::time::{Duration, Instant};
+    let scene = fixture(name).expect("the fixture exists").scene();
+    let config = bl_engine::EngineConfig::new(SAMPLE_RATE, 512);
+    let mut registry = bl_engine::Registry::new();
+    bl_devices::register(&mut registry);
+    let registry = registry.with_media(std::sync::Arc::new(scene.media.clone()));
+    let collector = bl_engine::Collector::new();
+    let mut compiler = bl_engine::Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = bl_engine::channel(&config);
+    sender.send_update(compiler.sync(scene.document()));
+    let (mut queue, input) = rtrb::RingBuffer::new(8192);
+    processor.set_midi_input(input);
+    let port = PortId::from_name("Sequencer");
+    sender.sync_inputs(&[SyncInput { port, delay_ms: 0 }]);
+    sender.external_sync(true);
+    assert!(sender.flush());
+    // Steady clocks from twelve before the first block, and Start between
+    // two of them: the next clock, the song's first frame, falls on the
+    // first block's start. The song plays from the clock alone.
+    let start = bl_core::clock::TestClock::new().now();
+    let period = Duration::from_secs_f64(60.0 / (bpm * 24.0));
+    let seconds = frames as f64 / SAMPLE_RATE.as_f64();
+    let count = (seconds / period.as_secs_f64()) as u32 + 24;
+    let mut send = |time: Instant, message| {
+        let source = MidiSource::Sync(port);
+        let event = MidiInputEvent {
+            source,
+            time,
+            message,
+        };
+        queue.push(event).unwrap();
+    };
+    for k in (1..=12).rev() {
+        send(start - period * k, MidiMessage::CLOCK);
+    }
+    send(start - period / 2, MidiMessage::START);
+    for k in 0..count {
+        send(start + period * k, MidiMessage::CLOCK);
+    }
+    let mut out = Vec::new();
+    let mut done = 0;
+    while done < frames {
+        let n = 512.min(frames - done);
+        let now = start + Duration::from_secs_f64(done as f64 / SAMPLE_RATE.as_f64());
+        processor.process_at(n, &bl_engine::NoInput, now);
+        let output = processor.output();
+        for i in 0..n {
+            out.push(output.channel(0)[i]);
+            out.push(output.channel(1)[i]);
+        }
+        done += n;
+    }
+    out
+}
+
+// Spec: midi-clock R17, R20, R22. A warped set following a steady 140 BPM
+// clock, started by the clock, nulls against its render at 140 within the
+// golden tolerance.
+#[test]
+fn a_warped_set_following_a_140_clock_nulls_against_its_render_at_140() {
+    let (_, at_140) = render("warped-loop-140");
+    let following = render_following_a_clock("warped-loop-120", 140.0, at_140.samples.len() / 2);
+    assert_eq!(following.len(), at_140.samples.len());
+    // The clock's tempo is the fit's, a hair off 140: the loop starts again
+    // a frame or two from the render's, and every other frame reads the file
+    // where the maps put it.
+    let (mut worst, mut off) = (0.0f32, 0usize);
+    for (got, want) in following.iter().zip(&at_140.samples) {
+        let gap = (got - want).abs();
+        if gap > 5e-4 {
+            off += 1;
+        } else {
+            worst = worst.max(gap);
+        }
+    }
+    assert!(
+        off < 64,
+        "{off} samples differ by more than 5e-4 (worst of the rest {worst})"
+    );
+}

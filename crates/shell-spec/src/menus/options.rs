@@ -5,6 +5,7 @@ use super::{Row, SEPARATOR};
 use crate::browser::SET_PREVIEW as BROWSER_PREVIEW;
 use crate::commands::{AUDIO_TOGGLE_ENGINE, VIEW_DRAW_MODE, VIEW_HIGHLIGHT_SCALES};
 use crate::notes::SET_PREVIEW as NOTE_PREVIEW;
+use crate::transport::SET_EXTERNAL_SYNC as EXTERNAL_SYNC;
 
 pub(super) const OPTIONS: &[Row] = &[
     ("M-OPT-001", "Accessibility", Submenu),
@@ -28,7 +29,7 @@ pub(super) const OPTIONS: &[Row] = &[
     ("M-OPT-005", "MIDI Note Editor Preview", Cmd(NOTE_PREVIEW)),
     ("M-OPT-006", "Browser File Preview", Cmd(BROWSER_PREVIEW)),
     SEPARATOR,
-    ("M-OPT-007", "External Sync", Pending(None)),
+    ("M-OPT-007", "External Sync", Cmd(EXTERNAL_SYNC)),
     (
         "M-OPT-008",
         "Delay Compensation",

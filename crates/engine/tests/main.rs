@@ -14,6 +14,7 @@ mod clip_envelopes;
 mod clip_launch;
 mod clip_settings;
 mod clips;
+mod clock_in;
 mod common;
 mod crossfades;
 mod cue;

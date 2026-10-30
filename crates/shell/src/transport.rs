@@ -171,6 +171,11 @@ pub(crate) fn signature(doc: &Document, shell: &Shell) -> TimeSignature {
 /// The tempo where the Arrangement Position fields are, in BPM.
 #[must_use]
 pub fn tempo(shell: &Shell) -> f64 {
+    // Spec: midi-clock R17. With EXT on, the Tempo field shows the tempo of
+    // the clock the song follows.
+    if let Some(followed) = shell.external_tempo() {
+        return followed;
+    }
     shell
         .editor()
         .document()
@@ -189,6 +194,11 @@ pub fn editable(shell: &Shell, group: Group) -> bool {
     let settings = shell.editor().document().settings();
     match group {
         Group::Tempo => {
+            // Spec: midi-clock R17. The clock sets the tempo while it
+            // arrives.
+            if shell.external_tempo().is_some() {
+                return false;
+            }
             // Spec: warping R45. While a clip leads the tempo the field is
             // off: the clips set the tempo, and the commands refuse it.
             if shell.editor().document().any_tempo_leader() {
@@ -546,6 +556,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         waiting_start: engine.waiting_start,
         waiting_frame: engine.waiting_frame,
         tap_tempo,
+        external_sync: shell.external_sync(),
     }
 }
 

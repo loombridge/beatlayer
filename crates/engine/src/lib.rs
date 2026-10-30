@@ -87,6 +87,7 @@ pub mod capture;
 mod clip_sound;
 mod clip_source;
 pub mod clips;
+mod clock_in;
 mod compiler;
 pub mod controller_take;
 mod disjoint;
@@ -144,6 +145,7 @@ pub use clips::{
     Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
     SourceCues, media_edits,
 };
+pub use clock_in::{MAX_SYNC_INPUTS, SyncInState};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use drum::ChainHits;

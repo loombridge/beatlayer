@@ -160,6 +160,15 @@ impl Harness {
         harness
     }
 
+    /// A harness on `shell` and the `control` of its manually paced null
+    /// stream, drawing Live's title bar as on macOS (WP-7.17).
+    pub fn on_rig(window: Window, mut shell: Shell, control: NullControl) -> Self {
+        shell.start_audio();
+        let mut harness = Self::with_shell(window, shell);
+        harness.control = Some(control);
+        Self::titled(harness, window)
+    }
+
     /// A harness whose shell journals the open set's edits in `dir`, as
     /// the app does at start-up (WP-6.62, the crash-recovery spec, R21),
     /// and which offers the sets a crash left.

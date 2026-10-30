@@ -777,6 +777,9 @@ impl Shell {
         if autosampler_ids::handles(id) {
             return self.can_autosampler(id, args);
         }
+        if bl_shell_spec::cv::handles(id) {
+            return self.can_cv(id, args);
+        }
         if slice_ids::handles(id) {
             // Spec: slice-to-midi R1. The menus' enabled states: one audio
             // clip selected, in either view.

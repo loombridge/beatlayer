@@ -117,6 +117,7 @@ fn midi_out_and_the_external_instrument_pass_under_rtsan() {
         audio_from: Channel::Pair(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Milliseconds { value: 3.0 },
+        ..External::default()
     });
     editor
         .apply(Command::InsertDevice {

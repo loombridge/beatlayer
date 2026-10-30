@@ -795,10 +795,10 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.14 | done | 30 October 2026 | [#540](https://github.com/loombridge/beatlayer/pull/540): `bl-link` builds the vendored Link 4.1.1; the engine joins and leaves without jumps, shares tempo both ways with a peer overriding tempo automation, keeps phase on the global quantum, waits for it to start, follows Start Stop Sync, lets EXT lead the session and skips the count-in; `link.set_enabled`, `link.set_start_stop_sync` and `link.state` |
 | 7.15 | todo |  |  |
 | 7.16 | todo |  |  |
-| 7.17 | todo |  |  |
+| 7.17 | done | 30 October 2026 | [#506](https://github.com/loombridge/beatlayer/pull/506): CV in the engine as DC samples on the interface's channels with output and input choosers, timed against Main and exported in real time; CV Instrument (pitch under the set's tuning, gate with Retrigger, two Mod outputs, calibration against the returning oscillator kept as one undo step) and CV Triggers; `cv.calibrate`, `cv.clear_calibration` and `cv.set_calibration` |
 | 7.18 | todo |  |  |
 | 7.18b | todo |  |  |
-| 7.19 | todo |  |  |
+| 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | todo |  |  |
 | 7.21 | todo |  |  |
 | 7.22 | todo |  |  |

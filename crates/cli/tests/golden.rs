@@ -155,6 +155,7 @@ fn a_128_track_set_renders_bit_identically_with_workers() {
                 schedule: &[],
                 cues: &[Cue::PLAY],
                 launches: &[],
+                device_channels: 0,
             };
             let summary = render_launching_with_workers(
                 editor.document(),
@@ -542,4 +543,31 @@ fn bl_cli_golden_update_makes_references_and_then_leaves_them_alone() {
         read_flac(&fixture.reference_path(&temp.0)),
         read_flac(&fixture.reference_path(&golden_dir()))
     );
+}
+
+// Spec: cv-tools R12, R13, R17. The CV fixture's reference holds the device
+// channels after Main's two, with the voltages the phrase writes on their
+// frames, the same at any block size.
+#[test]
+fn the_cv_fixture_writes_its_voltages_on_the_device_channels() {
+    let fixture = fixture("cv-instrument-and-triggers").expect("the fixture exists");
+    let render = fixture.render();
+    assert_eq!(render.channels, 8, "Main's two and six device channels");
+    let at = |frame: usize, channel: usize| render.samples[frame * 8 + channel];
+    // The first key, 60, is 0 V on Pitch (channel 3), the gate (4) rises on
+    // its frame at 5 V, and the first trigger (6) pulses for 10 ms.
+    assert_eq!(at(0, 2), 0.0);
+    assert_eq!(at(0, 3), 0.5);
+    assert_eq!(at(0, 5), 0.5);
+    assert_eq!(at(479, 5), 0.5);
+    assert_eq!(at(480, 5), 0.0, "the pulse ends after 480 frames");
+    // Key 67 plays Pitch at 7/12 V by its frame, once the glide has run.
+    let pitch = at(14 * 6_000 + 3_000 + 200, 2);
+    assert!((pitch - 0.7 / 12.0).abs() < 1e-5, "{pitch}");
+    for block in [1, 64, 4096] {
+        assert!(
+            fixture.render_in_blocks(block).same_bits(&render),
+            "blocks of {block}"
+        );
+    }
 }

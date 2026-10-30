@@ -563,6 +563,8 @@ impl Vst3Host {
                 path: path.to_owned(),
                 device_type: DeviceType {
                     external_output: false,
+                    cv_outputs: Vec::new(),
+                    cv_inputs: Vec::new(),
                     kind: DeviceKind::Plugin {
                         format: PluginFormat::Vst3,
                         plugin_id: format_fuid(&cid),

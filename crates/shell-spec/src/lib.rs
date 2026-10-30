@@ -75,6 +75,8 @@
 //!   WP-5.9).
 //! - [`control_surface`]: the Control Surfaces table (`control_surface.*`,
 //!   WP-7.5).
+//! - [`push`]: Push 2 for agents (`push.state`, `push.set_mode`,
+//!   `push.set_setup`, `push.display_frame`, WP-7.19).
 //! - [`remote`]: the set's MIDI and key mappings and the remote input
 //!   (`remote.*`, WP-7.1).
 //! - [`perception`]: how agents hear and see the set (`perception.*`,
@@ -114,6 +116,7 @@ pub mod commands;
 pub mod comping;
 pub mod context_menus;
 pub mod control_surface;
+pub mod cv;
 pub mod dawproject;
 pub mod devices;
 pub mod editing;
@@ -137,6 +140,7 @@ pub mod notes;
 pub mod pads;
 pub mod perception;
 pub mod plugins;
+pub mod push;
 pub mod remote;
 pub mod sample_editor;
 pub mod scales;
@@ -185,10 +189,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     midi_io::register(registry)?;
     remote::register(registry)?;
     control_surface::register(registry)?;
+    push::register(registry)?;
     midi_tools::register(registry)?;
     devices::register(registry)?;
     multisampler::register(registry)?;
     autosampler::register(registry)?;
+    cv::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;

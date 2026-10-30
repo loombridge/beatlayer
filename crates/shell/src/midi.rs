@@ -5,6 +5,7 @@
 //! The device layer is `bl-midi-io`'s. This keeps the preferences and the
 //! command-facing results around it.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use bl_control::{RowConfig, RowReport, Surfaces};
@@ -19,7 +20,7 @@ use bl_shell_spec::midi_io::{
     SetPortArgs,
 };
 
-use crate::settings::{MidiPrefs, PortPrefs, SurfaceRowPrefs};
+use crate::settings::{MidiPrefs, PortPrefs, PushPrefs, SurfaceRowPrefs};
 
 /// The ports in use, the computer MIDI keyboard, and the queue to the
 /// engine they share.
@@ -38,6 +39,19 @@ pub struct MidiHost {
     /// Whether EXT is on (R15); the song follows only while an input has
     /// Sync on.
     external_sync: bool,
+    /// What every Push 2 surface shares with the preferences (push-2 R10,
+    /// R31).
+    push: Arc<bl_push::Shared>,
+    /// How Push 2's display interface is claimed: through `nusb`, or a
+    /// test's sink.
+    push_claim: bl_push::Claim,
+    /// The Live ports of the Push 2s whose row the user set to None
+    /// (push-2 R2).
+    push_declined: Vec<String>,
+    /// Whether the Status Bar has said that every row is taken.
+    push_said: bool,
+    /// What the Status Bar should say about Push 2 now.
+    push_message: Option<String>,
 }
 
 impl std::fmt::Debug for MidiHost {
@@ -93,6 +107,7 @@ impl MidiHost {
         sender: InputSender,
         output: OutputBus,
         prefs: &MidiPrefs,
+        push_claim: bl_push::Claim,
     ) -> Self {
         let surfaces = Surfaces::new(sender.clone(), output.clone());
         let mut ports = MidiPorts::new(backend, sender.clone()).with_output(output);
@@ -126,7 +141,16 @@ impl MidiHost {
             clock: None,
             show_resync_button: prefs.show_resync_button,
             external_sync: prefs.external_sync,
+            push: Arc::new(bl_push::Shared::new(
+                prefs.push.setup(),
+                f64::from(prefs.push.swing) / 1000.0,
+            )),
+            push_claim,
+            push_declined: prefs.push_declined.clone(),
+            push_said: false,
+            push_message: None,
         };
+        host.offer_push();
         // Spec: control-surfaces R2. The rows apply again at once, and
         // wait for ports that aren't there.
         for (row, saved) in prefs.surfaces.iter().take(bl_control::ROWS).enumerate() {
@@ -160,6 +184,7 @@ impl MidiHost {
     /// switches say. A system that can't list its ports shows none.
     pub fn refresh(&mut self) {
         let _ = self.ports.refresh();
+        self.find_push();
         // Spec: control-surfaces R9. A surface stops when its port goes and
         // starts when it comes back.
         self.surfaces.reconcile(&mut self.ports);
@@ -219,7 +244,104 @@ impl MidiHost {
             },
             show_resync_button: self.show_resync_button,
             external_sync: self.external_sync,
+            push_declined: self.push_declined.clone(),
+            push: PushPrefs::of(self.push.setup(), self.push.swing()),
         }
+    }
+
+    /// Offers Push 2 in the Control Surfaces table's chooser (push-2 R2).
+    fn offer_push(&mut self) {
+        let kind = bl_push::kind(
+            Arc::clone(&self.push),
+            Arc::clone(&self.push_claim),
+            bl_push::placeholder_contents(),
+        );
+        self.surfaces.set_natives(vec![Arc::new(kind)]);
+    }
+
+    /// Claims Push 2's display interface through `claim` from now on, in
+    /// place of `nusb`'s: a test's sink.
+    pub fn set_push_display(&mut self, claim: bl_push::Claim) {
+        self.push_claim = claim;
+        self.offer_push();
+    }
+
+    /// What Push 2 shares with the preferences: the Setup values and the
+    /// swing amount.
+    #[must_use]
+    pub const fn push(&self) -> &Arc<bl_push::Shared> {
+        &self.push
+    }
+
+    /// Takes a Push 2 that appeared, with its Live port, into the first
+    /// empty row of the Control Surfaces table, unless its row was set to
+    /// None (push-2 R1, R2).
+    fn find_push(&mut self) {
+        let present = |host: &Self, direction| -> Vec<String> {
+            host.ports
+                .ports()
+                .into_iter()
+                .filter(|p| p.direction == direction && p.present)
+                .map(|p| p.name)
+                .collect()
+        };
+        let outputs = present(self, Direction::Output);
+        let inputs = present(self, Direction::Input);
+        let live: Vec<String> = bl_push::ports::live_ports(inputs.iter().map(String::as_str))
+            .into_iter()
+            .filter(|name| outputs.contains(name))
+            .collect();
+        if live.is_empty() {
+            self.push_said = false;
+        }
+        for name in live {
+            let named = |row: &RowConfig| {
+                row.input.as_deref() == Some(name.as_str())
+                    || row.output.as_deref() == Some(name.as_str())
+            };
+            if self.push_declined.contains(&name) || self.surfaces.rows().iter().any(named) {
+                continue;
+            }
+            if let Some(row) = self
+                .surfaces
+                .rows()
+                .iter()
+                .position(|row| *row == RowConfig::default())
+            {
+                let config = RowConfig {
+                    surface: Some(bl_push::SURFACE_ID.to_owned()),
+                    input: Some(name.clone()),
+                    output: Some(name),
+                };
+                let _ = self.surfaces.set_row(row, config);
+                self.push_said = false;
+            } else if !self.push_said {
+                self.push_said = true;
+                self.push_message = Some(
+                    "Push 2 isn't started: all six rows of the Control Surfaces table are in use"
+                        .to_owned(),
+                );
+            }
+        }
+    }
+
+    /// Remembers that the user set the row of the Push 2 on `port` to None,
+    /// so it doesn't take a row again (push-2 R2).
+    pub fn decline_push(&mut self, port: &str) {
+        if !self.push_declined.iter().any(|p| p == port) {
+            self.push_declined.push(port.to_owned());
+        }
+    }
+
+    /// Forgets that the Push 2 on `port` was set to None: the user chose it
+    /// again.
+    pub fn accept_push(&mut self, port: &str) {
+        self.push_declined.retain(|p| p != port);
+    }
+
+    /// What the Status Bar should say about Push 2, once.
+    pub fn take_push_message(&mut self) -> Option<String> {
+        self.push_message.take()
     }
 
     /// The control surfaces and the table of their rows.

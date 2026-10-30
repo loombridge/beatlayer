@@ -74,6 +74,7 @@ use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::push as push_ids;
 use bl_shell_spec::remote as remote_ids;
 use bl_shell_spec::sample_editor as sample_ids;
 use bl_shell_spec::scales as scales_ids;
@@ -99,6 +100,7 @@ pub mod autosample;
 mod bounce;
 mod capture;
 mod clip_properties;
+mod cv;
 mod envelope_keys;
 mod export_dialog;
 pub use export_dialog::ExportPrefs;
@@ -139,6 +141,7 @@ mod playback;
 mod plugin_commands;
 mod plugin_scan;
 mod plugin_windows;
+mod push;
 mod recording_takes;
 mod recovery;
 mod remote;
@@ -608,6 +611,8 @@ pub struct Shell {
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
+    /// How Push 2's display interface is claimed (push-2 R17).
+    push_display: bl_push::Claim,
     /// The counts of messages that reached tracks' inputs and left for
     /// ports when [`Shell::poll`] last looked, and when each last changed
     /// while the indicator still lit (external-devices R7).
@@ -1213,11 +1218,13 @@ impl Shell {
         audio.set_midi(midi_sender.clone());
         let midi_output = bl_midi_io::OutputBus::new();
         audio.set_midi_output(midi_output.clone());
+        let push_display = bl_push::display::usb();
         let midi = MidiHost::new(
             Box::new(bl_midi_io::NullBackend),
             midi_sender,
             midi_output,
             &prefs.midi,
+            Arc::clone(&push_display),
         );
         let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
         // Spec: browser-tags R1. The browser's database holds the index of
@@ -1314,6 +1321,7 @@ impl Shell {
             tempo_override: false,
             link_waiting_view: false,
             midi_listed: std::time::Instant::now(),
+            push_display,
             midi_seen: (0, 0),
             midi_lit: [None; 2],
             sync_seen: 0,
@@ -2142,6 +2150,9 @@ impl Shell {
         if autosampler_ids::handles(id) {
             return self.run_autosampler(id, args);
         }
+        if bl_shell_spec::cv::handles(id) {
+            return self.run_cv(id, args);
+        }
         if device_ids::handles(id) {
             return self.run_devices(id, args);
         }
@@ -2220,6 +2231,9 @@ impl Shell {
         }
         if surface_ids::handles(id) {
             return self.run_control_surface(id, args);
+        }
+        if push_ids::handles(id) {
+            return self.run_push(id, args);
         }
         if file_manager_ids::handles(id) {
             // Spec: file-management R10 to R17. The File Manager's own

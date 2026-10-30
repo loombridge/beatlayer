@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        272,
+        273,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration"
     );
 
     for op in &ops {
@@ -1770,6 +1770,76 @@ fn every_command_runs_by_id() {
             .unwrap()
             .port,
         None
+    );
+    // A CV device's choosers and calibration (WP-7.17): the ports given
+    // change, a port the device lacks is refused, and the calibration is one
+    // undo step that reads back.
+    let cv: DeviceId = agent.new_id();
+    agent.run(
+        "device.insert",
+        json!({ "track": bass, "index": 0, "device": {
+            "id": cv, "name": "Voltage", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": "beatlayer.voltage" } },
+            "external": { "cv_outputs": [{ "name": "Pitch" }, { "name": "Gate" }] },
+        } }),
+    );
+    agent.run(
+        "device.set_external",
+        json!({ "device": cv, "cv_outputs": [{ "name": "Gate", "channel": 4 }] }),
+    );
+    let ports = |agent: &Agent| {
+        agent
+            .editor
+            .document()
+            .device(cv)
+            .unwrap()
+            .external
+            .as_ref()
+            .unwrap()
+            .cv_outputs
+            .clone()
+    };
+    assert_eq!(
+        ports(&agent).iter().map(|p| p.channel).collect::<Vec<_>>(),
+        [None, Some(4)]
+    );
+    assert!(
+        registry::run(
+            &mut agent.editor,
+            "device.set_external",
+            json!({ "device": cv, "cv_outputs": [{ "name": "Nope", "channel": 1 }] }),
+        )
+        .is_err()
+    );
+    agent.run(
+        "cv.set_calibration",
+        json!({ "device": cv, "calibration": {
+            "octaves_per_volt": 1.0, "hz_at_zero_volts": 130.0,
+            "steps": [{ "volts": 0.0, "hz": 130.0, "error_cents": 0.0 }],
+        } }),
+    );
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(cv)
+            .unwrap()
+            .external
+            .as_ref()
+            .unwrap()
+            .cv_calibration
+            .is_some()
+    );
+    // A line that doesn't rise is refused.
+    assert!(
+        registry::run(
+            &mut agent.editor,
+            "cv.set_calibration",
+            json!({ "device": cv, "calibration": {
+                "octaves_per_volt": 0.0, "hz_at_zero_volts": 130.0, "steps": [],
+            } }),
+        )
+        .is_err()
     );
     // A plug-in's MPE Mode and settings (WP-6.17b): both are one undo step,
     // and the device keeps them.
@@ -3964,6 +4034,15 @@ fn schemas_match_what_commands_serialise() {
                 mpe: None,
                 audio_from: Some(Channel::Pair(3)),
                 hardware_latency: Some(HardwareLatency::Samples { value: 96 }),
+                cv_outputs: None,
+                cv_inputs: None,
+            },
+        ),
+        (
+            "cv.set_calibration",
+            Command::SetCvCalibration {
+                device,
+                calibration: bl_model::CvCalibration::fit(&[(0.0, 130.0), (1.0, 260.0)]),
             },
         ),
         (

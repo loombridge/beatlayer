@@ -27,15 +27,16 @@ use bl_shell_spec::arrangement as view_ids;
 use bl_shell_spec::devices::{
     self as ids, AddDeviceArgs, AddPresetArgs, ArticulationLearn, ArticulationLearnArgs,
     ArticulationList, ArticulationListArgs, ChainAdded, ChainArgs, ChainRow, ChainSelect,
-    CreateChainArgs, DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame, DeviceListEntry,
-    DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs, ExpandDeviceArgs,
-    ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs, Grouped, HotSwap,
-    HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs, MapModeArgs,
-    MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs, PresetResult, RackFrame,
-    RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs, ScrollDeviceViewArgs, SelectChainArgs,
-    SelectDeviceArgs, SelectMacroArgs, SelectSlotArgs, SelectVariationArgs, SetAutoSelectArgs,
-    SetMacroCountArgs, SetRackViewArgs, SetWindowArgs, SetZoneEditorArgs, ShowSidechainArgs,
-    ShowVariationsArgs, SidechainSection, SoloChainArgs, Ungrouped,
+    CreateChainArgs, CvSection, DeleteChainsArgs, DeviceAdded, DeviceArgs, DeviceFrame,
+    DeviceListEntry, DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs,
+    ExpandDeviceArgs, ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs,
+    Grouped, HotSwap, HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs,
+    MapModeArgs, MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs,
+    PresetResult, RackFrame, RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs,
+    ScrollDeviceViewArgs, SelectChainArgs, SelectDeviceArgs, SelectMacroArgs, SelectSlotArgs,
+    SelectVariationArgs, SetAutoSelectArgs, SetMacroCountArgs, SetRackViewArgs, SetWindowArgs,
+    SetZoneEditorArgs, ShowSidechainArgs, ShowVariationsArgs, SidechainSection, SoloChainArgs,
+    Ungrouped,
 };
 use bl_shell_spec::devices::{ArmMapArgs, ArmedMap, MappingRow, ModulatorFrame};
 use bl_shell_spec::multisampler::MultisamplerState;
@@ -693,6 +694,55 @@ impl DeviceView {
     }
 
     /// Whether `device`'s type has an expanded part.
+    /// A CV device's part of its section (the CV tools spec, R14; L-DEV-026):
+    /// whether it calibrates, and the readout under the Calibrate and Clear
+    /// buttons: the step a calibration is on, the fit it holds, or that it
+    /// holds none.
+    fn cv_section(&self, device: &Device, external: &bl_model::External) -> CvSection {
+        let calibrates = matches!(
+            &device.kind,
+            DeviceKind::Native { device_type } if device_type == bl_devices::CV_INSTRUMENT
+        );
+        let published = self.displays.get(&device.id).map(|d| d.values.as_slice());
+        let running = published
+            .filter(|v| v.len() > bl_devices::cv_instrument::STEP_AT)
+            .filter(|v| {
+                v[bl_devices::cv_instrument::STATE_AT] == bl_devices::cv_instrument::RUNNING
+            });
+        let readout = match (calibrates, running, &external.cv_calibration) {
+            (false, ..) => String::new(),
+            (true, Some(values), _) => format!(
+                "Calibrating: step {} of {}",
+                values[bl_devices::cv_instrument::STEP_AT] as usize + 1,
+                bl_devices::cv_instrument::STEPS
+            ),
+            (true, None, Some(calibration)) => {
+                let worst = calibration
+                    .steps
+                    .iter()
+                    .map(|step| step.error_cents.abs())
+                    .fold(0.0, f64::max);
+                format!(
+                    "{:.2} oct/V, {} steps, worst {worst:.1} cents",
+                    calibration.octaves_per_volt,
+                    calibration.steps.len()
+                )
+            }
+            (true, None, None) => "Not calibrated".to_owned(),
+        };
+        CvSection {
+            calibrates,
+            calibrated: external.cv_calibration.is_some(),
+            readout,
+            ports: external
+                .cv_outputs
+                .iter()
+                .chain(&external.cv_inputs)
+                .map(|port| port.name.clone())
+                .collect(),
+        }
+    }
+
     fn expandable(&self, device: &Device) -> bool {
         self.description(&device.kind)
             .is_some_and(|d| d.layout.has_expanded())
@@ -1469,6 +1519,7 @@ impl DeviceView {
                     .iter()
                     .any(|t| t.kind == d.kind && t.external_output),
                 hardware_latency: external.hardware_latency,
+                cv: external.is_cv().then(|| self.cv_section(d, external)),
             }),
             midi_sidechain: d
                 .midi_sidechain
@@ -3486,6 +3537,11 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     // To.
     if known.is_some_and(|t| t.external_output) {
         device = device.with_external_output();
+    }
+    // Spec: cv-tools R3. A CV device starts with its outputs and inputs set
+    // to none.
+    if let Some(t) = known.filter(|t| !t.cv_outputs.is_empty() || !t.cv_inputs.is_empty()) {
+        device = device.with_cv(&t.cv_outputs, &t.cv_inputs);
     }
     if args.device.midi_sidechain {
         device = device.with_midi_sidechain();

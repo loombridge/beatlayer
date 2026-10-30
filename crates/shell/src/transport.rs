@@ -448,7 +448,7 @@ fn set_loop(doc: &Document, start: Ticks, length: Ticks) -> Option<Invocation> {
 
 /// `song.set_tempo` with one constant tempo, brought within the field's
 /// range and to hundredths, if it changes the tempo.
-fn set_tempo(shell: &Shell, bpm: f64) -> Option<Invocation> {
+pub(crate) fn set_tempo(shell: &Shell, bpm: f64) -> Option<Invocation> {
     if !bpm.is_finite() {
         return None;
     }

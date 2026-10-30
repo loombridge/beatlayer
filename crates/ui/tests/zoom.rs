@@ -250,6 +250,7 @@ fn controls_keep_their_live_size_times_the_zoom() {
                     | bl_ui::layout::Element::SyncInput
                     | bl_ui::layout::Element::SyncOutput
                     | bl_ui::layout::Element::ResyncExternalHardware
+                    | bl_ui::layout::Element::New
             ) {
                 assert!(
                     (rect.width() - placement.width * zoom).abs() < EPS * 10.0,

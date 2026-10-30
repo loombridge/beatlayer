@@ -12,6 +12,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // (WP-7.3).
         ("remote.mappings", Exception(Query)),
         ("remote.state", Exception(Query)),
+        ("remote.targets", Exception(Query)),
         (
             "remote.select",
             Exception(Equivalent(

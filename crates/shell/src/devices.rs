@@ -715,8 +715,7 @@ impl DeviceView {
         );
         // Spec: cv-tools R24. CV Clock In's panel shows the tempo it
         // measures and what leads, from its display data.
-        let display = clock_in
-            .then(|| bl_devices::cv_clock_in::display(device.id, published.map(|v| &v[..])));
+        let display = clock_in.then(|| bl_devices::cv_clock_in::display(device.id, published));
         let readout = match (calibrates, running, &external.cv_calibration) {
             (false, ..) => display.as_ref().map_or_else(String::new, |display| {
                 format!(

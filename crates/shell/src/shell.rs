@@ -1631,6 +1631,7 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        self.close_missing_plug_in_windows();
         // Spec: control-surfaces R24, R26, R30. Locks and rings follow the
         // set.
         self.sync_instant();

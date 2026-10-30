@@ -2236,7 +2236,8 @@ fn disclosure(ui: &mut Ui, name: &str, rect: Rect) -> bool {
 }
 
 /// A port's sync options, the rows under its port row: an output's three, and
-/// an input's Sync Delay alone (the MIDI clock spec, R1, R14).
+/// an input's Sync Type, Sync Delay, and its timecode rows while the type is
+/// MIDI Timecode (the MIDI clock spec, R1, R14; the MIDI Timecode spec, R1).
 fn sync_options(
     ui: &mut Ui,
     theme: &Theme,
@@ -2252,6 +2253,31 @@ fn sync_options(
     let name = |option: &str| format!("{}: {} {option}", port.direction.label(), port.name);
     let delay = i32::from(port.sync_delay_ms);
     let input = port.direction == midi_ids::PortDirection::Input;
+    if input {
+        // Spec: midi-timecode R1. An input follows clock or timecode, and
+        // timecode has a frame rate and an offset.
+        let types: Vec<Choice<midi_ids::SyncTypeChoice>> = midi_ids::SyncTypeChoice::ALL
+            .into_iter()
+            .map(|value| Choice {
+                label: value.label().to_owned(),
+                value,
+                leds: NO_LEDS,
+            })
+            .collect();
+        let rect = rows.row(ui, "MIDI Sync Type", SettingsLayout::CHOOSER);
+        if let Some(value) = chooser(
+            ui,
+            theme,
+            &name("sync type"),
+            &name("MIDI Sync Type"),
+            rect,
+            &types,
+            Some(&port.sync_type),
+            true,
+        ) {
+            set(events, "sync_type", json!(value));
+        }
+    }
     let delay_label = if input {
         "Sync Delay"
     } else {
@@ -2275,6 +2301,42 @@ fn sync_options(
         set(events, "sync_delay_ms", json!(ms.round() as i16));
     }
     if input {
+        if port.sync_type == midi_ids::SyncTypeChoice::MidiTimecode {
+            let rates: Vec<Choice<midi_ids::TimecodeRateChoice>> =
+                midi_ids::TimecodeRateChoice::ALL
+                    .into_iter()
+                    .map(|value| Choice {
+                        label: value.label().to_owned(),
+                        value,
+                        leds: NO_LEDS,
+                    })
+                    .collect();
+            let rect = rows.row(ui, "MIDI Timecode Frame Rate", SettingsLayout::CHOOSER);
+            if let Some(value) = chooser(
+                ui,
+                theme,
+                &name("timecode frame rate"),
+                &name("MIDI Timecode Frame Rate"),
+                rect,
+                &rates,
+                Some(&port.timecode_rate),
+                true,
+            ) {
+                set(events, "timecode_rate", json!(value));
+            }
+            let rect = rows.row(ui, "MIDI Timecode Offset", SettingsLayout::NUMBER + 30.0);
+            if let Some(text) = committed_field(
+                ui,
+                rect,
+                &name("timecode offset"),
+                &name("MIDI Timecode Offset"),
+                &port.timecode_offset,
+                |edit| edit.hint_text("hh:mm:ss:ff"),
+                Some("The time at which the Arrangement starts, as hours:minutes:seconds:frames."),
+            ) {
+                set(events, "timecode_offset", json!(text));
+            }
+        }
         return;
     }
     let types: Vec<Choice<midi_ids::ClockTypeChoice>> = midi_ids::ClockTypeChoice::ALL

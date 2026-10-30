@@ -7,8 +7,9 @@ use std::time::Instant;
 
 use bl_core::midi::{
     ClockType, HardwareResync, MidiInputEvent, MidiMessage, MidiSource, PortId, SyncInput,
-    SyncOutput,
+    SyncOutput, SyncType, TimecodeSettings,
 };
+use bl_core::timecode::{Timecode, TimecodeRate};
 
 use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
 use crate::output::{OutputBus, OutputStats};
@@ -36,6 +37,13 @@ pub struct PortSwitches {
     pub clock_type: ClockType,
     /// An output's Hardware Resync.
     pub resync: HardwareResync,
+    /// An input's MIDI Sync Type: whether Sync follows its clock or its
+    /// MIDI Timecode (`docs/specs/midi-timecode.md`, R1).
+    pub sync_type: SyncType,
+    /// An input's MIDI Timecode Frame Rate. Kept while the type is clock.
+    pub timecode_rate: TimecodeRate,
+    /// An input's MIDI Timecode Offset. Kept while the type is clock.
+    pub timecode_offset: Timecode,
 }
 
 impl PortSwitches {
@@ -48,6 +56,9 @@ impl PortSwitches {
         delay_ms: 0,
         clock_type: ClockType::Song,
         resync: HardwareResync::StopAndStart,
+        sync_type: SyncType::Clock,
+        timecode_rate: TimecodeRate::All,
+        timecode_offset: Timecode::ZERO,
     };
 
     /// Whether any switch is on, so the port is open (R4).
@@ -70,7 +81,11 @@ impl PortSwitches {
     }
 
     const fn bits(self) -> u8 {
-        self.track as u8 | (self.sync as u8) << 1 | (self.remote as u8) << 2 | (self.mpe as u8) << 3
+        self.track as u8
+            | (self.sync as u8) << 1
+            | (self.remote as u8) << 2
+            | (self.mpe as u8) << 3
+            | (matches!(self.sync_type, SyncType::Timecode) as u8) << 4
     }
 
     const fn from_bits(bits: u8) -> Self {
@@ -79,6 +94,11 @@ impl PortSwitches {
             sync: bits & 2 != 0,
             remote: bits & 4 != 0,
             mpe: bits & 8 != 0,
+            sync_type: if bits & 16 != 0 {
+                SyncType::Timecode
+            } else {
+                SyncType::Clock
+            },
             ..Self::OFF
         }
     }
@@ -417,6 +437,12 @@ impl MidiPorts {
             .map(|e| SyncInput {
                 port: PortId::from_name(&e.name),
                 delay_ms: e.switches.delay_ms,
+                timecode: (e.switches.sync_type == SyncType::Timecode).then_some(
+                    TimecodeSettings {
+                        rate: e.switches.timecode_rate,
+                        offset: e.switches.timecode_offset,
+                    },
+                ),
             })
             .collect()
     }
@@ -519,6 +545,27 @@ const fn is_sync(message: &MidiMessage) -> bool {
     matches!(message.status(), 0xF1 | 0xF2 | 0xF8 | 0xFA | 0xFB | 0xFC)
 }
 
+/// The time of a MIDI Time Code full-frame message, F0 7F (device) 01 01
+/// hours-and-rate minutes seconds frames F7.
+fn full_frame(bytes: &[u8]) -> Option<MidiMessage> {
+    let &[
+        0xF0,
+        0x7F,
+        _,
+        0x01,
+        0x01,
+        hours,
+        minutes,
+        seconds,
+        frames,
+        0xF7,
+    ] = bytes
+    else {
+        return None;
+    };
+    MidiMessage::full_frame(hours, minutes, seconds, frames)
+}
+
 /// The handler for an open input: it routes each message by the port's
 /// switches, on the MIDI system's thread.
 fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandler {
@@ -531,7 +578,19 @@ fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandle
             MidiSource::Port(port)
         };
         let stats = sender.stats();
+        let timecode = on.sync && on.sync_type == SyncType::Timecode;
         let Some(message) = MidiMessage::from_bytes(bytes) else {
+            // Spec: midi-timecode R2. A full-frame message is read before
+            // anything is refused as too long, and goes to sync as a
+            // message of fixed size.
+            if timecode && let Some(full) = full_frame(bytes) {
+                sender.send_sync(MidiInputEvent {
+                    source: MidiSource::Sync(port),
+                    time,
+                    message: full,
+                });
+                return;
+            }
             // Spec: control-surfaces R6. A system exclusive message goes
             // whole to the surface that holds the input.
             if !live.to_surface(time, bytes) {
@@ -542,9 +601,15 @@ fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandle
         if message.is_system() {
             // Spec: midi-io R5, R9
             if on.sync && is_sync(&message) {
-                // Spec: midi-clock R14. Clock and transport messages go to
-                // the engine's clock follower; time code is counted only.
-                if matches!(message.status(), 0xF2 | 0xF8 | 0xFA..=0xFC) {
+                // Spec: midi-clock R14, midi-timecode R2. An input follows
+                // its clock or its time code: what its sync type doesn't
+                // name is counted and set aside.
+                let wanted = if timecode {
+                    message.status() == 0xF1
+                } else {
+                    matches!(message.status(), 0xF2 | 0xF8 | 0xFA..=0xFC)
+                };
+                if wanted {
                     sender.send_sync(MidiInputEvent {
                         source: MidiSource::Sync(port),
                         time,
@@ -743,6 +808,57 @@ mod tests {
             ),
             (1, 1, 1, 2)
         );
+    }
+
+    // Spec: midi-timecode R2
+    #[test]
+    fn timecode_reaches_sync_as_fixed_size_messages_and_never_a_track() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Tape");
+        let (mut ports, mut engine) = ports(&test);
+        let stats = Arc::clone(ports.sender().stats());
+        let id = PortId::from_name("Tape");
+        let now = Instant::now();
+        let full = [0xF0, 0x7F, 0x7F, 0x01, 0x01, 0x21, 0x02, 0x03, 0x04, 0xF7];
+        let timecode = PortSwitches {
+            track: true,
+            sync: true,
+            sync_type: SyncType::Timecode,
+            ..PortSwitches::OFF
+        };
+        ports
+            .set_switches(Direction::Input, "Tape", timecode)
+            .unwrap();
+        assert!(test.send("Tape", now, &full));
+        assert!(test.send("Tape", now, &[0xF1, 0x35]));
+        // The clock and a note: clock is another type's, and the note is the
+        // track's.
+        assert!(test.send("Tape", now, &[0xF8]));
+        assert!(test.send("Tape", now, &[0x90, 60, 100]));
+        let frame = engine.pop().unwrap();
+        assert_eq!((frame.source, frame.time), (MidiSource::Sync(id), now));
+        assert_eq!(
+            frame.message,
+            MidiMessage::full_frame(0x21, 2, 3, 4).unwrap()
+        );
+        let quarter = engine.pop().unwrap();
+        assert_eq!(quarter.source, MidiSource::Sync(id));
+        assert_eq!(quarter.message.bytes(), &[0xF1, 0x35]);
+        assert_eq!(engine.pop().unwrap().source, MidiSource::Port(id));
+        assert!(engine.pop().is_err());
+        assert_eq!((stats.snapshot().to_sync, stats.snapshot().ignored), (3, 0));
+
+        // A port set to clock sets timecode aside, and a full frame is the
+        // system exclusive message it was before: nothing holds it.
+        let clock = PortSwitches {
+            sync_type: SyncType::Clock,
+            ..timecode
+        };
+        ports.set_switches(Direction::Input, "Tape", clock).unwrap();
+        assert!(test.send("Tape", now, &full));
+        assert!(test.send("Tape", now, &[0xF1, 0x35]));
+        assert!(engine.pop().is_err());
+        assert_eq!(stats.snapshot().ignored, 1);
     }
 
     // Spec: midi-io R27. With MPE on, an input's messages are stamped as an

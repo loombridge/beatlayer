@@ -353,7 +353,11 @@ fn render_following_a_clock(name: &str, bpm: f64, frames: usize) -> Vec<f32> {
     let (mut queue, input) = rtrb::RingBuffer::new(8192);
     processor.set_midi_input(input);
     let port = PortId::from_name("Sequencer");
-    sender.sync_inputs(&[SyncInput { port, delay_ms: 0 }]);
+    sender.sync_inputs(&[SyncInput {
+        port,
+        delay_ms: 0,
+        timecode: None,
+    }]);
     sender.external_sync(true);
     assert!(sender.flush());
     // Steady clocks from twelve before the first block, and Start between

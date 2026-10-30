@@ -1076,6 +1076,7 @@ impl MidiIn {
         output_latency: u32,
         ext: bool,
         looped: Option<(f64, f64)>,
+        tempo: &bl_core::time::TempoMap,
         answer: &mut crate::follower::Follow,
     ) {
         let timing = self.timing.map(|t| ClockTiming {
@@ -1083,7 +1084,7 @@ impl MidiIn {
             ns_per_frame: t.ns_per_frame,
             latency: output_latency,
         });
-        self.sync_in.block(ask, timing, ext, looped, answer);
+        self.sync_in.block(ask, timing, ext, looped, tempo, answer);
     }
 
     /// Where the last block started on the engine clock and on the

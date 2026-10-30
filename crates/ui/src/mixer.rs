@@ -14,7 +14,7 @@
 use bl_engine::{MeterOwner, MeterSite};
 use bl_model::modulator::ModTarget;
 use bl_model::{
-    AutomationTarget, ChainId, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS,
+    AutomationTarget, ChainId, CrossfadeAssign, CrossfaderField, Document, MAX_TRACK_DELAY_MS,
     MAX_TRACK_DELAY_SAMPLES, MixerParam, PanMode, RackKind, RemoteTarget, TrackDelay, TrackId,
     TrackKind,
 };
@@ -313,7 +313,12 @@ impl MixerUi {
     ) {
         let sections = sections(shell, MixerOf::Session);
         let shown = shell.mixer_view().of(MixerOf::Session).shown;
-        let layout = SessionLayout::compute(rect, shown.then_some(sections));
+        let mut layout = SessionLayout::compute(rect, shown.then_some(sections));
+        // Spec: map-modes R14. In both map modes the relative Session
+        // mapping strip takes a slot row above the status row.
+        if crate::mapping::remote_map(ui.ctx()).is_some() {
+            layout = layout.with_strip();
+        }
         // Spec: command-palette R11. With the Session mixer hidden, the
         // grid's columns scroll to a track the search field selected.
         if !shown && let Some((MixerOf::Session, track)) = self.reveal {
@@ -1531,6 +1536,16 @@ impl StripParts<'_> {
                 // Main has no activator or Solo: its cue volume and Solo/Cue
                 // button take their places in the Tab order.
                 self.cue_volume(ui, strip.activator, events);
+                // Spec: map-modes R3, R11. The map modes tint the cue volume.
+                crate::mapping::remote_overlay(
+                    ui,
+                    self.theme,
+                    strip.activator,
+                    Id::new(("mixer-cue-volume", self.place)),
+                    RemoteTarget::CueVolume,
+                    true,
+                    events,
+                );
                 self.cue_mode_button(ui, strip.solo, events);
             }
             _ => {
@@ -1571,6 +1586,22 @@ impl StripParts<'_> {
         for (side, rect) in [(CrossfadeAssign::A, a), (CrossfadeAssign::B, b)] {
             self.assign_button(ui, rect, side, current, events);
         }
+        // Spec: map-modes R3, R11. The map modes tint the two buttons as one
+        // radio button: A, off or B.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            a.union(b),
+            Id::new((
+                "mixer-crossfade-assign",
+                self.place,
+                self.track,
+                CrossfadeAssign::A,
+            )),
+            RemoteTarget::CrossfadeAssign { track: self.track },
+            false,
+            events,
+        );
     }
 
     /// One A or B assign button: lit while the track plays on that side. A
@@ -1698,6 +1729,57 @@ impl StripParts<'_> {
             node.set_min_numeric_value(0.0);
             node.set_max_numeric_value(1.0);
         });
+        // Spec: map-modes R3, R11. The map modes tint the slider.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            rect,
+            id,
+            RemoteTarget::Crossfader,
+            true,
+            events,
+        );
+        self.crossfader_fields(ui, rect, events);
+    }
+
+    /// The crossfader's three mapping fields (L-MIX-011, map modes R19),
+    /// over its left end, its centre and its right end, while a map mode is
+    /// on. Their mappings move the crossfader; a click on one only selects
+    /// it.
+    fn crossfader_fields(&self, ui: &mut Ui, slider: Rect, events: &mut Vec<UiEvent>) {
+        if crate::mapping::remote_map(ui.ctx()).is_none() {
+            return;
+        }
+        let width = (slider.width() / 6.0).min(14.0);
+        for (field, name, left) in [
+            (CrossfaderField::Left, "Crossfader Left", slider.left()),
+            (
+                CrossfaderField::Centre,
+                "Crossfader Centre",
+                slider.center().x - width / 2.0,
+            ),
+            (
+                CrossfaderField::Right,
+                "Crossfader Right",
+                slider.right() - width,
+            ),
+        ] {
+            let rect = Rect::from_min_size(pos2(left, slider.top()), vec2(width, slider.height()));
+            let id = Id::new(("mixer-crossfader-field", self.place, field));
+            let response = ui.interact(rect, id, Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
+            ui.painter_at(rect)
+                .rect_filled(rect, self.theme.sizes.corner, self.theme.colors.control.0);
+            crate::mapping::remote_overlay(
+                ui,
+                self.theme,
+                rect,
+                id,
+                RemoteTarget::CrossfaderField { field },
+                false,
+                events,
+            );
+        }
     }
 
     /// Whether the track's pan mode is Split Stereo Pan Mode.
@@ -2343,6 +2425,19 @@ impl StripParts<'_> {
             AutomationTarget::Mixer { param },
         )
         .overlay(ui, rect, split_pan_id(self.place, self.track, side), events);
+        // Spec: map-modes R3, R11. The map modes tint each split pan knob.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            rect,
+            split_pan_id(self.place, self.track, side),
+            RemoteTarget::Mixer {
+                track: self.track,
+                param,
+            },
+            true,
+            events,
+        );
     }
 
     fn split_pan_control(

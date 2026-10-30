@@ -189,3 +189,71 @@ fn an_agent_turns_a_map_mode_on_selects_a_control_and_reads_the_state() {
     let result = run(&mut client, "remote.input", json!({ "key": "S" }));
     assert_eq!(result["taken"], true, "leaving the mode lets mappings act");
 }
+
+/// Spec: map-modes R24. An agent lists every mappable control with
+/// `remote.targets`, maps one of each kind by the ID it gave, and reads each
+/// mapping back through `remote.mappings`; Key Map Mode's list has no
+/// continuous control.
+#[test]
+fn an_agent_lists_the_mappable_controls_and_maps_one_of_each_kind() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    let list = run(&mut client, "remote.targets", json!({ "mode": "midi" }));
+    let targets = list["targets"].as_array().unwrap().clone();
+    let of_kind = |kind: &str| {
+        targets
+            .iter()
+            .find(|t| t["kind"]["type"] == kind)
+            .unwrap_or_else(|| panic!("no {kind} control"))
+            .clone()
+    };
+    for (at, kind) in [
+        "slot",
+        "button",
+        "switch",
+        "ranged_switch",
+        "radio",
+        "continuous",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let target = of_kind(kind)["target"].clone();
+        let source = json!({ "type": "cc", "channel": 1, "controller": at + 1 });
+        run(
+            &mut client,
+            "remote.map",
+            json!({ "source": source, "target": target }),
+        );
+        let mappings = run(&mut client, "remote.mappings", json!({}));
+        assert!(
+            mappings["mappings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|m| m["source"] == source && m["target"] == target),
+            "{kind} reads back"
+        );
+    }
+    // Every view is in the list: the strip, the Control Bar, the crossfader's
+    // fields, the Clip View and the step buttons.
+    let names: Vec<&str> = targets.iter().filter_map(|t| t["name"].as_str()).collect();
+    for name in [
+        "Scene Down",
+        "Launch Scene",
+        "Cancel Launch",
+        "Tap Tempo",
+        "Crossfader Centre",
+        "Transpose",
+        "Step Forward",
+    ] {
+        assert!(names.contains(&name), "{name}");
+    }
+    let keys = run(&mut client, "remote.targets", json!({ "mode": "key" }));
+    assert!(
+        keys["targets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["kind"]["type"] != "continuous")
+    );
+}

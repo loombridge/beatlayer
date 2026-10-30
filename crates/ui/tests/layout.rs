@@ -171,10 +171,13 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
     for (placement, (_, rect)) in ELEMENTS.iter().zip(&wide.elements) {
         // The Global Amount is hidden unless the pool holds a groove, and the
         // sync lamps and the Resync button unless an input has Sync on or
-        // Show Resync Button is on.
+        // Show Resync Button is on, and New unless a map mode is on.
         let hidden = matches!(
             placement.element,
-            Element::GlobalAmount | Element::SyncLamps | Element::ResyncExternalHardware
+            Element::GlobalAmount
+                | Element::SyncLamps
+                | Element::ResyncExternalHardware
+                | Element::New
         );
         if placement.element != Element::Message && !hidden {
             assert_eq!(rect.width(), placement.width, "{:?}", placement.element);

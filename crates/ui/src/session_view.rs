@@ -18,7 +18,7 @@
 
 use bl_core::time::TICKS_PER_QUARTER;
 use bl_engine::SlotState;
-use bl_model::{ClipId, Document, RemoteTarget, SceneId, TrackId, TrackKind};
+use bl_model::{ClipId, Document, RemoteTarget, SceneId, StripControl, TrackId, TrackKind};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as mixer_ids;
@@ -82,6 +82,19 @@ fn status_field_id(track: TrackId) -> Id {
     Id::new(("session-track-status", track))
 }
 
+/// The ID of the relative Session mapping strip's control `control`
+/// (L-SES-015).
+#[must_use]
+pub fn strip_id(control: StripControl) -> Id {
+    Id::new(("session-strip", control))
+}
+
+/// The ID of a track's Launch button in the relative Session mapping strip.
+#[must_use]
+pub fn strip_launch_id(track: TrackId) -> Id {
+    Id::new(("session-strip-launch", track))
+}
+
 /// The ID of Stop All Clips, at the Main column's left in the status row.
 #[must_use]
 pub fn stop_all_id() -> Id {
@@ -127,6 +140,9 @@ pub struct GridUi {
     hover: Option<(TrackId, SceneId)>,
     /// The slot and scene menus (WP-6.56).
     menus: SessionMenus,
+    /// How many requests to centre a scene the grid has acted on (map modes
+    /// R16).
+    centred: u64,
 }
 
 impl GridUi {
@@ -265,6 +281,8 @@ impl GridUi {
         }
 
         self.status_row(ui, shell, theme, session, &layout, &columns, events);
+        self.strip(ui, shell, theme, session, &layout, &columns, events);
+        self.centre(shell, session, &scenes, scroll_y, events);
         self.keys(&grid, shell, &columns, &scenes, events);
         self.take_drop(&grid, shell, session, &layout, &columns, &scenes, events);
         // Spec: view-options R1, session-view R35. A middle-button drag
@@ -543,6 +561,199 @@ impl GridUi {
         }
         if response.hovered() && clip.is_some() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+    }
+
+    /// Scrolls the grid so the scene the strip or a mapping highlighted sits
+    /// at the vertical centre of the slot area, as far as the scenes reach
+    /// (map modes R16). Only a request does it: a click on a scene doesn't.
+    fn centre(
+        &mut self,
+        shell: &Shell,
+        session: &SessionLayout,
+        scenes: &[(SceneId, String)],
+        scroll_y: f32,
+        events: &mut Vec<UiEvent>,
+    ) {
+        let (asked, scene) = shell.session().centre_request();
+        if asked == self.centred {
+            return;
+        }
+        self.centred = asked;
+        let Some(at) = scene.and_then(|scene| scenes.iter().position(|(id, _)| *id == scene))
+        else {
+            return;
+        };
+        let furthest = scenes.len().saturating_sub(1) as f32 * SLOT_ROW;
+        let to = ((at as f32 + 0.5) * SLOT_ROW - session.slots.height() / 2.0).clamp(0.0, furthest);
+        if (to - scroll_y).abs() > 0.01 {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SCROLL,
+                json!({ "y": to - scroll_y }),
+            )));
+        }
+    }
+
+    /// Draws the relative Session mapping strip above the status row
+    /// (L-SES-015, map modes R14): in each track's column a Launch button,
+    /// and in the Main column Scene Up, Scene Down, the scene number box,
+    /// Launch Scene and Cancel Launch. It shows only while a map mode is on,
+    /// where a click selects a control to map, so these have no action of
+    /// their own: a mapping runs them.
+    #[expect(clippy::too_many_arguments, reason = "the frame's inputs")]
+    fn strip(
+        &mut self,
+        ui: &mut Ui,
+        shell: &Shell,
+        theme: &Theme,
+        session: &SessionLayout,
+        layout: &MixerLayout,
+        columns: &[TrackId],
+        events: &mut Vec<UiEvent>,
+    ) {
+        let Some(strip) = session.strip else {
+            return;
+        };
+        let doc = shell.editor().document();
+        let colours = &theme.colors;
+        let tracks = Rect::from_x_y_ranges(layout.tracks.x_range(), strip.y_range());
+        let painter = ui.painter_at(strip);
+        painter.rect_filled(strip, 0.0, colours.panel.0);
+        for column in &layout.columns {
+            if matches!(column.kind, ColumnKind::Chain(_)) {
+                continue;
+            }
+            let track = columns[column.index];
+            let Some(t) = doc.track(track).filter(|t| t.kind().holds_clips()) else {
+                continue;
+            };
+            let cell = Rect::from_x_y_ranges(column.rect.x_range(), strip.y_range())
+                .shrink(1.0)
+                .intersect(tracks);
+            if cell.width() <= 0.0 || cell.height() <= 0.0 {
+                continue;
+            }
+            let id = strip_launch_id(track);
+            let response = ui.interact(cell, id, Sense::hover());
+            response.widget_info(|| {
+                WidgetInfo::labeled(
+                    WidgetType::Button,
+                    true,
+                    format!("Launch {} at the Highlighted Scene", t.name()),
+                )
+            });
+            painter.rect_filled(cell, 0.0, colours.lane.0);
+            triangle(
+                &painter,
+                Rect::from_center_size(cell.left_center() + vec2(9.0, 0.0), vec2(10.0, 10.0)),
+                colours.text_dim.0,
+            );
+            crate::mapping::remote_overlay(
+                ui,
+                theme,
+                cell,
+                id,
+                RemoteTarget::TrackLaunch { track },
+                false,
+                events,
+            );
+        }
+
+        // The Main column: Scene Up, Scene Down, the scene number box,
+        // Launch Scene and Cancel Launch, left to right.
+        let main = Rect::from_x_y_ranges(layout.main.rect.x_range(), strip.y_range()).shrink(1.0);
+        let button = (main.height()).max(1.0);
+        let cell = |from_left: f32, width: f32| {
+            Rect::from_min_size(main.min + vec2(from_left, 0.0), vec2(width, main.height()))
+        };
+        let number_width = (main.width() - 4.0 * button).max(button);
+        let cells = [
+            (StripControl::SceneUp, "Scene Up", cell(0.0, button)),
+            (StripControl::SceneDown, "Scene Down", cell(button, button)),
+            (
+                StripControl::SceneNumber,
+                "Scene Number",
+                cell(2.0 * button, number_width),
+            ),
+            (
+                StripControl::LaunchScene,
+                "Launch Scene",
+                cell(2.0 * button + number_width, button),
+            ),
+            (
+                StripControl::CancelLaunch,
+                "Cancel Launch",
+                cell(3.0 * button + number_width, button),
+            ),
+        ];
+        let painter = ui.painter_at(main);
+        let number = shell
+            .highlighted_scene()
+            .and_then(|scene| doc.scene_position(scene))
+            .map(|at| at + 1);
+        for (control, name, rect) in cells {
+            let id = strip_id(control);
+            let response = ui.interact(rect, id, Sense::hover());
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
+            painter.rect_filled(rect, 0.0, colours.lane.0);
+            let ink = colours.text_dim.0;
+            let c = rect.center();
+            match control {
+                StripControl::SceneUp => {
+                    painter.add(Shape::convex_polygon(
+                        vec![
+                            pos2(c.x - 4.0, c.y + 3.0),
+                            pos2(c.x + 4.0, c.y + 3.0),
+                            pos2(c.x, c.y - 4.0),
+                        ],
+                        ink,
+                        Stroke::NONE,
+                    ));
+                }
+                StripControl::SceneDown => {
+                    painter.add(Shape::convex_polygon(
+                        vec![
+                            pos2(c.x - 4.0, c.y - 3.0),
+                            pos2(c.x + 4.0, c.y - 3.0),
+                            pos2(c.x, c.y + 4.0),
+                        ],
+                        ink,
+                        Stroke::NONE,
+                    ));
+                }
+                StripControl::SceneNumber => {
+                    painter.text(
+                        c,
+                        Align2::CENTER_CENTER,
+                        number.map_or_else(|| "–".to_owned(), |n| n.to_string()),
+                        theme.small_font(),
+                        colours.text.0,
+                    );
+                }
+                StripControl::LaunchScene => {
+                    triangle(&painter, Rect::from_center_size(c, vec2(10.0, 10.0)), ink);
+                }
+                StripControl::CancelLaunch => {
+                    let stroke = Stroke::new(1.2, ink);
+                    painter.line_segment(
+                        [pos2(c.x - 3.5, c.y - 3.5), pos2(c.x + 3.5, c.y + 3.5)],
+                        stroke,
+                    );
+                    painter.line_segment(
+                        [pos2(c.x - 3.5, c.y + 3.5), pos2(c.x + 3.5, c.y - 3.5)],
+                        stroke,
+                    );
+                }
+            }
+            crate::mapping::remote_overlay(
+                ui,
+                theme,
+                rect,
+                id,
+                RemoteTarget::Strip { control },
+                control == StripControl::SceneNumber,
+                events,
+            );
         }
     }
 

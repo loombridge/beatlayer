@@ -22,9 +22,10 @@ fn every_control_has_a_role_a_name_and_a_value_or_a_note() {
     for placement in ELEMENTS {
         // The sync lamps and the Resync button show only when asked for
         // (tests/midi_input.rs).
+        // New shows only in the map modes (tests/map_modes.rs).
         if matches!(
             placement.element,
-            Element::SyncLamps | Element::ResyncExternalHardware
+            Element::SyncLamps | Element::ResyncExternalHardware | Element::New
         ) {
             continue;
         }
@@ -311,9 +312,10 @@ fn controls_are_drawn_where_the_layout_places_them() {
     for placement in ELEMENTS {
         // The sync lamps and the Resync button show only when an input has
         // Sync on or Show Resync Button is on (tests/midi_input.rs).
+        // New shows only in the map modes (tests/map_modes.rs).
         if matches!(
             placement.element,
-            Element::SyncLamps | Element::ResyncExternalHardware
+            Element::SyncLamps | Element::ResyncExternalHardware | Element::New
         ) {
             continue;
         }

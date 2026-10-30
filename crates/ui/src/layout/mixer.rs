@@ -740,6 +740,9 @@ pub struct SessionLayout {
     pub status_row: Rect,
     /// The mixer, if it shows.
     pub mixer: Option<Rect>,
+    /// The relative Session mapping strip while a map mode is on (L-SES-015):
+    /// one slot row above the status row, taken from the slots.
+    pub strip: Option<Rect>,
 }
 
 impl SessionLayout {
@@ -767,6 +770,24 @@ impl SessionLayout {
             ),
             status_row,
             mixer,
+            strip: None,
+        }
+    }
+
+    /// The same layout with the relative Session mapping strip shown (map
+    /// modes R14): one slot row tall, above the status row, taking its
+    /// height from the slot area.
+    #[must_use]
+    pub fn with_strip(self) -> Self {
+        let height = SLOT_ROW.min(self.slots.height());
+        let strip = Rect::from_min_max(
+            pos2(self.slots.left(), self.slots.bottom() - height),
+            self.slots.max,
+        );
+        Self {
+            slots: Rect::from_min_max(self.slots.min, pos2(self.slots.right(), strip.top())),
+            strip: Some(strip),
+            ..self
         }
     }
 
@@ -806,6 +827,9 @@ impl SessionLayout {
         ];
         if let Some(mixer) = self.mixer {
             rows.push(super::row("L-SES-009", "Session Mixer", mixer));
+        }
+        if let Some(strip) = self.strip {
+            rows.push(super::row("L-SES-015", "Relative Session Mapping Strip", strip));
         }
         rows
     }

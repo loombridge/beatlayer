@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
+use bl_model::{BarControl, ControlKind, CountIn, MetronomeRhythm, MetronomeSound, RemoteTarget};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::remote_commands::{self as remote_ids, MapMode};
@@ -589,7 +589,8 @@ impl MainWindowUi {
             let detail = crate::layout::DetailViews::of(shell.detail_of(self.window))
                 .with_browser_width(shell.browser_view().width())
                 .with_global_amount(shell.global_amount_shown())
-                .with_sync(shell.sync_lamps_shown(), shell.resync_button_shown());
+                .with_sync(shell.sync_lamps_shown(), shell.resync_button_shown())
+                .with_new_button(shell.map_mode() != MapMode::Off);
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
                 // or Undo History; the Control Bar is cut off.
@@ -1225,6 +1226,10 @@ impl MainWindowUi {
             {
                 continue;
             }
+            // Spec: map-modes R20. New shows in the map modes only.
+            if *el == Element::New && rect.width() <= 0.0 {
+                continue;
+            }
             let mut look = self
                 .transport
                 .look(shell, *el)
@@ -1255,6 +1260,19 @@ impl MainWindowUi {
                 && let Some(field) = control_bar::field(*el)
             {
                 self.transport.interact(ui, shell, field, &response, events);
+            }
+            // Spec: map-modes R3, R11. The map modes tint the Control Bar's
+            // mappable controls.
+            if let Some((target, continuous)) = bar_target(*el) {
+                crate::mapping::remote_overlay(
+                    ui,
+                    theme,
+                    *rect,
+                    element_id(*el),
+                    target,
+                    continuous,
+                    events,
+                );
             }
             if response.has_focus() && strip == Strip::ControlBar {
                 self.last_control = *el;
@@ -2100,6 +2118,7 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 .and_then(|clip| doc.clip(clip))
                 .map_or_else(Look::default, |clip| text(&clip.name))
         }
+        Element::New => text("New"),
         Element::DrawMode => Look {
             on: shell.clip_view().draw_mode(),
             value: Some(
@@ -2349,6 +2368,37 @@ pub fn sample_rate_text(rate: u32) -> String {
     }
 }
 
+/// The map modes' control a Control Bar element is, and whether it is a
+/// continuous control (map modes R11): `None` for the elements no map mode
+/// maps, such as the map switches themselves (R13).
+fn bar_target(element: Element) -> Option<(RemoteTarget, bool)> {
+    let control = match element {
+        Element::TapTempo => BarControl::TapTempo,
+        Element::Tempo => BarControl::Tempo,
+        Element::Metronome => BarControl::Metronome,
+        Element::Quantization => BarControl::Quantization,
+        Element::Follow => BarControl::Follow,
+        Element::Play => BarControl::Play,
+        Element::Stop => BarControl::Stop,
+        Element::Record => BarControl::ArrangementRecord,
+        Element::Overdub => BarControl::MidiOverdub,
+        Element::AutomationArm => BarControl::AutomationArm,
+        Element::ReEnableAutomation => BarControl::ReEnableAutomation,
+        Element::CaptureMidi => BarControl::CaptureMidi,
+        Element::New => BarControl::New,
+        Element::SessionRecord => BarControl::SessionRecord,
+        Element::PunchIn => BarControl::PunchIn,
+        Element::Loop => BarControl::ArrangementLoop,
+        Element::PunchOut => BarControl::PunchOut,
+        Element::DrawMode => BarControl::DrawMode,
+        _ => return None,
+    };
+    Some((
+        RemoteTarget::Bar { control },
+        control.kind() == ControlKind::Continuous,
+    ))
+}
+
 /// The registered command a control of the main window runs, for the Info
 /// View to read its description from (WP-2.24): the transport section's
 /// command, then the panel toggles'.
@@ -2362,6 +2412,7 @@ fn command_of(element: Element) -> Option<&'static str> {
         Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::ComputerKeyboard => Some(midi_ids::TOGGLE_COMPUTER_KEYBOARD),
         Element::KeyMap | Element::MidiMap => Some(remote_ids::MAP_MODE),
+        Element::New => Some("session.new_take"),
         Element::ResyncExternalHardware => Some("transport.resync_external_hardware"),
         Element::SessionView | Element::ArrangementView => {
             Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)

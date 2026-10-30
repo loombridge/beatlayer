@@ -313,6 +313,7 @@ pub enum Element {
     AutomationArm,
     ReEnableAutomation,
     CaptureMidi,
+    New,
     SessionRecord,
     LoopStartBars,
     LoopStartBeats,
@@ -450,6 +451,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::AutomationArm, "L-CTRL-015", "Automation Arm", CB, 778.0, 16.0, Middle, Switch, None),
     p(E::ReEnableAutomation, "L-CTRL-015", "Re-Enable Automation", CB, 796.0, 18.0, Middle, Button, None),
     p(E::CaptureMidi, "L-CTRL-015", "Capture MIDI", CB, 816.0, 16.0, Middle, Button, None),
+    p(E::New, "L-CTRL-031", "New", CB, 834.0, NEW_WIDTH, Middle, Button, None),
     p(E::SessionRecord, "L-CTRL-015", "Session Record", CB, 834.0, 18.0, Middle, Switch, Some("M3")),
     p(E::LoopStartBars, "L-CTRL-016", "Loop Start Bars", CB, 875.0, 26.0, Middle, Value, None),
     p(E::LoopStartBeats, "L-CTRL-016", "Loop Start Beats", CB, 901.0, 26.0, Middle, Value, None),
@@ -503,6 +505,13 @@ pub const SYNC_LAMPS_WIDTH: f32 = 7.0;
 /// shows.
 pub const RESYNC_WIDTH: f32 = 40.0;
 
+/// The width of the New button (L-CTRL-031), when it shows.
+pub const NEW_WIDTH: f32 = 28.0;
+
+/// What the New button takes, with the gap after it, from the Control Bar's
+/// middle group, which moves what follows it right by this much.
+const NEW_SPACE: f32 = NEW_WIDTH + 2.0;
+
 /// The gap after each of those, in points.
 const SYNC_GAP: f32 = 2.0;
 
@@ -539,6 +548,10 @@ pub struct DetailViews {
     /// left of the tempo group and move what is to their right right by
     /// their widths (the MIDI clock spec, R10, R15).
     pub sync: (bool, bool),
+    /// Whether the Control Bar shows the New button (L-CTRL-031), which a
+    /// map mode shows just before Session Record and which moves it, and
+    /// what follows in the middle group, right (map modes R20).
+    pub new_button: bool,
 }
 
 impl DetailViews {
@@ -554,6 +567,7 @@ impl DetailViews {
             browser_width: BROWSER_WIDTH,
             global_amount: false,
             sync: (false, false),
+            new_button: false,
         }
     }
 
@@ -569,6 +583,13 @@ impl DetailViews {
     #[must_use]
     pub const fn with_global_amount(mut self, on: bool) -> Self {
         self.global_amount = on;
+        self
+    }
+
+    /// The same, with the New button showing or not.
+    #[must_use]
+    pub const fn with_new_button(mut self, on: bool) -> Self {
+        self.new_button = on;
         self
     }
 
@@ -600,6 +621,7 @@ impl Default for DetailViews {
             browser_width: BROWSER_WIDTH,
             global_amount: false,
             sync: (false, false),
+            new_button: false,
         }
     }
 }
@@ -899,6 +921,14 @@ impl ShellLayout {
         let sync_shift = f32::from(u8::from(lamps_shown)) * lamps_width
             + f32::from(u8::from(resync_shown)) * resync_width;
         let sync_at = placement(Element::TapTempo).x;
+        // Spec: map-modes R20. The New button shows in a map mode, before
+        // Session Record, out of the room the middle group's gap has; a
+        // narrower window, and the second window, hide it.
+        let new_shown = detail_views.new_button
+            && !second
+            && w >= MINIMUM.x + NEW_SPACE / (1.0 - MIDDLE_SHARE);
+        let new_shift = if new_shown { NEW_SPACE } else { 0.0 };
+        let new_at = placement(Element::SessionRecord).x;
         let middle_push = {
             let left_end = placement(Element::ScaleName);
             let middle = placement(Element::Follow);
@@ -936,7 +966,14 @@ impl ShellLayout {
                         groove + sync
                     }
                     Left => 0.0,
-                    Middle if control_bar => extra * MIDDLE_SHARE + middle_push,
+                    Middle if control_bar => {
+                        let new = if placement.x >= new_at && placement.element != Element::New {
+                            new_shift
+                        } else {
+                            0.0
+                        };
+                        extra * MIDDLE_SHARE + middle_push + new
+                    }
                     Middle => extra * MIDDLE_SHARE,
                     // The Status Bar's right edge is the pane's left edge.
                     Right if placement.strip == Strip::StatusBar => extra - taken,
@@ -951,6 +988,9 @@ impl ShellLayout {
                 if (placement.element == Element::SyncLamps && !lamps_shown)
                     || (placement.element == Element::ResyncExternalHardware && !resync_shown)
                 {
+                    width = 0.0;
+                }
+                if placement.element == Element::New && !new_shown {
                     width = 0.0;
                 }
                 if placement.element == Element::Message {

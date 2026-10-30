@@ -138,7 +138,7 @@ fn rows_are_set_listed_dumped_and_stopped_by_command() {
         ]
     );
     assert_eq!(
-        listed[6..],
+        listed[8..],
         [
             json!({
                 "id": "test", "name": "Test Surface", "needs_output": true, "can_lock": false,

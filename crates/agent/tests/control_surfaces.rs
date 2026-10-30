@@ -340,7 +340,7 @@ fn an_agent_reads_each_controllers_mode() {
             .as_array()
             .unwrap()
             .iter()
-            .take(5)
+            .take(7)
             .map(|s| (s["id"].as_str().unwrap(), s["name"].as_str().unwrap()))
             .collect();
         assert_eq!(

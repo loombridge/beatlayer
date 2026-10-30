@@ -151,6 +151,54 @@ fn a_missing_port_shows_by_name() {
     assert_eq!(Harness::node(&nodes, "Input 2").value, "Gone");
 }
 
+// Spec: supported-controllers R1. The Control Surface chooser lists None,
+// then the supported controllers by their product names in alphabetical
+// order (the Launchpads so far), and choosing one runs `control_surface.set`
+// with its ID.
+#[test]
+fn the_chooser_lists_the_launchpads_by_their_product_names() {
+    let (mut h, _) = open();
+    h.accesskit(Id::new(("chooser", "Control Surface 1")), Action::Click);
+    let nodes = Harness::nodes(&h.settle());
+    let top = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n.label == label && n.role == Role::Button)
+            .unwrap_or_else(|| panic!("the chooser offers no {label:?}"))
+            .bounds
+            .unwrap()
+            .y0
+    };
+    let order = [
+        "None",
+        "Launchpad Mini MK3",
+        "Launchpad Pro MK3",
+        "Launchpad X",
+    ]
+    .map(top);
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    let id = nodes
+        .iter()
+        .find(|n| n.label == "Launchpad X" && n.role == Role::Button)
+        .unwrap()
+        .id;
+    h.frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Click,
+        target_tree: TreeId::ROOT,
+        target_node: id,
+        data: None,
+    })]);
+    h.settle();
+    assert_eq!(
+        h.shell.control_surface_rows()[0]
+            .surface
+            .as_ref()
+            .unwrap()
+            .id,
+        "launchpad-x"
+    );
+}
+
 /// A User Library with two templates, `Zed Pads` naming the port `Pads` and
 /// `Beta` naming none, and the Settings opened on Tempo & MIDI.
 fn open_with_templates() -> Harness {

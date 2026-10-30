@@ -17,7 +17,9 @@ use std::time::Instant;
 /// Channel messages (note on and off, pressure, control and program
 /// changes, pitch bend) and the short system messages (clock, start, stop,
 /// song position, and the like) fit. System exclusive doesn't: it has no
-/// fixed length, and nothing that reaches a track needs it.
+/// fixed length, and nothing that reaches a track needs it. The one
+/// exception is [`MidiMessage::full_frame`], the time of a MIDI Time Code
+/// full-frame message, which only sync reads.
 ///
 /// ```
 /// use bl_core::midi::MidiMessage;
@@ -30,7 +32,7 @@ use std::time::Instant;
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MidiMessage {
-    bytes: [u8; 3],
+    bytes: [u8; 5],
     len: u8,
 }
 
@@ -46,7 +48,7 @@ impl MidiMessage {
         if data.len() != wanted || data.iter().any(|&b| b >= 0x80) {
             return None;
         }
-        let mut out = [status, 0, 0];
+        let mut out = [status, 0, 0, 0, 0];
         out[1..=wanted].copy_from_slice(data);
         Some(Self {
             bytes: out,
@@ -59,7 +61,7 @@ impl MidiMessage {
     #[must_use]
     pub const fn note_on(channel: u8, key: u8, velocity: u8) -> Self {
         Self {
-            bytes: [0x90 | (channel & 0x0F), key & 0x7F, velocity & 0x7F],
+            bytes: [0x90 | (channel & 0x0F), key & 0x7F, velocity & 0x7F, 0, 0],
             len: 3,
         }
     }
@@ -69,7 +71,7 @@ impl MidiMessage {
     #[must_use]
     pub const fn note_off(channel: u8, key: u8) -> Self {
         Self {
-            bytes: [0x80 | (channel & 0x0F), key & 0x7F, 64],
+            bytes: [0x80 | (channel & 0x0F), key & 0x7F, 64, 0, 0],
             len: 3,
         }
     }
@@ -85,7 +87,7 @@ impl MidiMessage {
 
     const fn real_time(status: u8) -> Self {
         Self {
-            bytes: [status, 0, 0],
+            bytes: [status, 0, 0, 0, 0],
             len: 1,
         }
     }
@@ -101,9 +103,23 @@ impl MidiMessage {
             sixteenths
         };
         Self {
-            bytes: [0xF2, (beats & 0x7F) as u8, (beats >> 7) as u8],
+            bytes: [0xF2, (beats & 0x7F) as u8, (beats >> 7) as u8, 0, 0],
             len: 3,
         }
+    }
+
+    /// A MIDI Time Code full-frame message's time, as the sync path carries
+    /// it: system exclusive can't be a [`MidiMessage`], so the four data
+    /// bytes that matter (hours with the rate code, minutes, seconds,
+    /// frames) follow a 0xF0 status. The bytes are not a wire message, and
+    /// no output sends them. `None` if a byte is 128 or more.
+    #[must_use]
+    pub fn full_frame(hours_and_rate: u8, minutes: u8, seconds: u8, frames: u8) -> Option<Self> {
+        let data = [hours_and_rate, minutes, seconds, frames];
+        data.iter().all(|&b| b < 0x80).then_some(Self {
+            bytes: [0xF0, hours_and_rate, minutes, seconds, frames],
+            len: 5,
+        })
     }
 
     /// The message's bytes.
@@ -116,7 +132,7 @@ impl MidiMessage {
     /// lacks.
     #[must_use]
     pub const fn padded(&self) -> [u8; 3] {
-        self.bytes
+        [self.bytes[0], self.bytes[1], self.bytes[2]]
     }
 
     /// The status byte.
@@ -315,6 +331,16 @@ pub struct SyncOutput {
     pub resync: HardwareResync,
 }
 
+/// What an input's Sync follows: MIDI Clock or MIDI Timecode.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum SyncType {
+    /// Timing Clock, Start, Continue, Stop and Song Position Pointer.
+    #[default]
+    Clock,
+    /// Quarter-frame and full-frame time code.
+    Timecode,
+}
+
 /// An input port with Sync on and its Sync Delay, as the engine knows it
 /// (`docs/specs/midi-clock.md`, R14).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -323,6 +349,19 @@ pub struct SyncInput {
     pub port: PortId,
     /// Sync Delay in milliseconds, added to every sync message's arrival.
     pub delay_ms: i16,
+    /// For an input whose MIDI Sync Type is MIDI Timecode, its frame rate
+    /// and offset (`docs/specs/midi-timecode.md`, R1); `None` for MIDI
+    /// Clock.
+    pub timecode: Option<TimecodeSettings>,
+}
+
+/// An input's MIDI Timecode options (`docs/specs/midi-timecode.md`, R1).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct TimecodeSettings {
+    /// MIDI Timecode Frame Rate.
+    pub rate: crate::timecode::TimecodeRate,
+    /// MIDI Timecode Offset: the time at which the Arrangement starts.
+    pub offset: crate::timecode::Timecode,
 }
 
 /// A message on its way from the engine to a MIDI output port: the port, the

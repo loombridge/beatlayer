@@ -49,4 +49,4 @@ This spec covers the metronome switch and its settings, the clicks the engine pl
 | R7 | `crates/engine/tests/metronome.rs`, `only_while_recording_silences_playback_unless_recording`, `a_locate_that_ends_the_take_ends_the_recording_only_clicks`, `with_punch_in_the_recording_only_clicks_start_at_the_punch_in_point` | unit |
 | R8 | `crates/model/tests/metronome.rs`, `metronome_commands_and_undo_redo`, `metronome_set_roundtrip`, `metronome_registered_commands`; `crates/agent/tests/tools.rs`, `the_metronome_settings_run_through_the_agent_api`; `crates/shell/tests/transport.rs`, `the_shell_registers_the_transport_and_runs_it_on_the_engine` | unit, agent API |
 | R9 | `crates/engine/tests/metronome.rs` (every block runs under `bl_rt::install_trap!()`) | unit, real-time (allocation trap) |
-| R10 | to be written in WP-7.14 | engine test |
+| R10 | `crates/engine/tests/link.rs`, `no_count_in_plays_while_link_is_on` | engine test |

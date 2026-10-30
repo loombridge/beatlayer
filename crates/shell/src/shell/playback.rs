@@ -233,6 +233,7 @@ impl Shell {
             );
         }
         self.scene_override = self.audio.scene_override();
+        self.tempo_override = engine.tempo_overridden;
         // Spec: transport R28, R29. The Phase Nudge buttons show pressed
         // while held and are off while an outside tempo leads.
         let nudge_view = (engine.phase_nudge, engine.following);

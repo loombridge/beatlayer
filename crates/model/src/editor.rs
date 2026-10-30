@@ -356,6 +356,19 @@ impl Editor {
         ChangeSet::between(&before, &self.document)
     }
 
+    /// Sets the set's tempo to the constant tempo `bpm`, as a peer in a Link
+    /// session setting it does (the Link spec, R3): that is no undo step,
+    /// though the set is marked as changed.
+    ///
+    /// It isn't a command: no person asked for it, so it is the app
+    /// following the session, as [`Editor::follow_scale`] follows the
+    /// scale.
+    pub fn follow_tempo(&mut self, bpm: bl_core::time::Bpm) -> ChangeSet {
+        let before = self.document.clone();
+        self.document.settings.tempo = bl_core::time::TempoMap::constant(bpm);
+        ChangeSet::between(&before, &self.document)
+    }
+
     /// Replaces the whole document with another version of it, inside the
     /// open transaction or as an undo step of its own labelled `label`, and
     /// returns what that changed. The agent API restores a checkpoint this

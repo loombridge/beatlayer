@@ -206,6 +206,9 @@ pub struct EngineState {
     pub waiting_frame: Option<u64>,
     /// The Phase Nudge button that nudges the song while held (R27).
     pub phase_nudge: Option<NudgeDirection>,
+    /// Whether a peer's change of the tempo took the set's tempo envelope's
+    /// place, until Re-Enable Automation (the Link spec, R4).
+    pub tempo_overridden: bool,
     /// The Session slots the engine is doing something with (WP-3.2), one
     /// entry per queued, playing, or stopping slot; a slot that stopped
     /// isn't listed, so an empty list is a Session View at rest.
@@ -283,6 +286,7 @@ impl EngineState {
             waiting_start: false,
             waiting_frame: None,
             phase_nudge: None,
+            tempo_overridden: false,
             session: Vec::with_capacity(slots),
             scene_override: SceneOverride::default(),
             session_over: Vec::with_capacity(tracks),
@@ -382,6 +386,7 @@ impl Clone for EngineState {
             waiting_start: self.waiting_start,
             waiting_frame: self.waiting_frame,
             phase_nudge: self.phase_nudge,
+            tempo_overridden: self.tempo_overridden,
             session,
             scene_override: self.scene_override,
             session_over,

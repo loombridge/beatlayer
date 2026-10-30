@@ -62,6 +62,18 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "control_surface.dump",
             settings("tempo-midi", a_surface_row, "Dump 1", Key::Enter),
         ),
+        // Instant mappings (WP-7.6): a surface's own buttons move its ring
+        // and its banks, and an agent reads the banks without one; Lock to
+        // is the device menu's.
+        (
+            "control_surface.move_ring",
+            Exception(Equivalent("a surface's arrow and page buttons")),
+        ),
+        (
+            "control_surface.set_bank",
+            Exception(Equivalent("a surface's bank buttons")),
+        ),
+        ("control_surface.banks", Exception(Query)),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (

@@ -399,6 +399,7 @@ impl Shell {
             let mut state = self.session.state();
             state.launches = self.session_launches();
             // Spec: session-view R38. Each running surface's ring, by ID.
+            self.sync_instant();
             state.rings = self.ring_boxes();
             return Ok(to_value(&state));
         }

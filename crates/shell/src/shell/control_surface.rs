@@ -312,6 +312,7 @@ impl Shell {
             ids::LIST => {
                 Self::args::<NoArgs>(id, args)?;
                 self.refresh_midi();
+                self.sync_instant();
                 Ok(to_value(&ids::ListResult {
                     rows: self.control_surface_rows(),
                 }))
@@ -327,6 +328,7 @@ impl Shell {
                     output: args.output.unwrap_or(now.output),
                 };
                 self.midi.set_surface_row(row, config).map_err(failed)?;
+                self.sync_instant();
                 self.prefs.midi = self.midi.prefs();
                 self.save_preferences();
                 self.touch();

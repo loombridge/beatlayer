@@ -739,9 +739,11 @@ impl Shell {
             command: id.to_owned(),
             message,
         })?;
+        // Spec: push-2-notes R3. A selection arm isn't saved.
+        let copy = self.without_selection_arms();
         let warnings = self
             .store
-            .save_copy(&placement.path, &self.editor)
+            .save_copy(&placement.path, copy.as_ref().unwrap_or(&self.editor))
             .map_err(|message| ShellError::Failed {
                 command: id.to_owned(),
                 message,

@@ -1038,5 +1038,14 @@ fn an_arm_by_selection_isnt_saved() {
         .unwrap();
     let track = rig.track;
     assert!(!other.editor().document().track(track).unwrap().mixer().arm);
+    // A copy saved with Save a Copy leaves it out too.
+    let copy = rig.run(
+        "set.save_copy",
+        json!({ "path": dir.join("Copy.blset").to_string_lossy() }),
+    );
+    other
+        .run("set.open", json!({ "path": copy["path"] }))
+        .unwrap();
+    assert!(!other.editor().document().track(track).unwrap().mixer().arm);
     let _ = std::fs::remove_dir_all(&dir);
 }

@@ -123,3 +123,15 @@ fn an_agent_maps_reads_back_and_tries_a_mapping_by_id() {
     let left = run(&mut client, "remote.mappings", json!({}));
     assert_eq!(left["mappings"], json!([]));
 }
+
+/// Spec: remote-mapping R43. An agent reads the remote input's counts, lamps
+/// and takeover states with `remote.state`.
+#[test]
+fn an_agent_reads_the_remote_inputs_state() {
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    let state = run(&mut client, "remote.state", json!({}));
+    assert_eq!(state["counts"]["taken"], 0);
+    assert_eq!(state["counts"]["feedback_sent"], 0);
+    assert_eq!(state["lamps"]["key_input"]["lit"], false);
+    assert_eq!(state["takeover"], json!([]));
+}

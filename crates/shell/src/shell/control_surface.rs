@@ -36,10 +36,13 @@ pub(super) struct SurfaceHost {
     /// Set while a surface's command runs, so it doesn't end its own
     /// gesture.
     applying: bool,
-    /// The counts of messages surfaces took and sent when [`Shell::poll`]
-    /// last looked, and when each last changed while the lamp still lit.
-    seen: (u64, u64),
-    lit: [Option<Instant>; 2],
+    /// The counts of messages remote control took and sent, and of keys
+    /// taken, when [`Shell::poll`] last looked, and when each last changed
+    /// while the lamp still lit.
+    seen: (u64, u64, u64),
+    lit: [Option<Instant>; 3],
+    /// When each lamp last lit, for `remote.state`.
+    last_lit: [Option<Instant>; 3],
     applied: u64,
     refused: u64,
 }
@@ -102,11 +105,31 @@ impl Shell {
     }
 
     /// The Control Bar's remote indicators: the upper lamp is lit while a
-    /// message a surface took arrived a moment ago, the lower while one it
-    /// sent left (control surfaces R15; L-CTRL-026).
+    /// message a mapping or a surface took, or one taken for learning,
+    /// arrived a moment ago, the lower while feedback or a surface's message
+    /// left (remote mapping R41; control surfaces R15; L-CTRL-026).
     #[must_use]
     pub fn remote_indicators(&self) -> (bool, bool) {
         (self.surface.lit[0].is_some(), self.surface.lit[1].is_some())
+    }
+
+    /// Each remote lamp as `remote.state` reports it: the remote pair's two
+    /// and the key indicators' upper one.
+    pub(super) fn remote_lamps(&self) -> [bl_shell_spec::remote::Lamp; 3] {
+        let now = Instant::now();
+        std::array::from_fn(|n| bl_shell_spec::remote::Lamp {
+            lit: self.surface.lit[n].is_some(),
+            last_lit_ms_ago: self.surface.last_lit[n]
+                .map(|at| now.saturating_duration_since(at).as_millis() as u64),
+        })
+    }
+
+    /// The key indicators beside the Key switch: the upper lamp is lit while
+    /// a key a key mapping took was pressed a moment ago; the lower stays
+    /// dark (remote mapping R41; L-CTRL-021).
+    #[must_use]
+    pub fn key_indicators(&self) -> (bool, bool) {
+        (self.surface.lit[2].is_some(), false)
     }
 
     /// The six rows of the Control Surfaces table as `control_surface.list`
@@ -188,12 +211,26 @@ impl Shell {
     /// messages since the last call; returns whether either changed (R15).
     fn light_remote_indicators(&mut self) -> bool {
         let now = Instant::now();
-        let seen = self.midi.surfaces().traffic();
-        let counts = [(seen.0, self.surface.seen.0), (seen.1, self.surface.seen.1)];
+        let (surface_in, surface_out) = self.midi.surfaces().traffic();
+        let (sent, keys) = self.remote_traffic();
+        let taken = self.midi.sender().stats().snapshot().remote_taken;
+        let seen = (surface_in + taken, surface_out + sent, keys);
+        let counts = [
+            (seen.0, self.surface.seen.0),
+            (seen.1, self.surface.seen.1),
+            (seen.2, self.surface.seen.2),
+        ];
         let mut changed = false;
-        for (lit, (new, old)) in self.surface.lit.iter_mut().zip(counts) {
+        for ((lit, last), (new, old)) in self
+            .surface
+            .lit
+            .iter_mut()
+            .zip(&mut self.surface.last_lit)
+            .zip(counts)
+        {
             if new != old {
                 *lit = Some(now);
+                *last = Some(now);
                 changed = true;
             } else if lit.is_some_and(|since| now.duration_since(since) >= MIDI_LAMP) {
                 *lit = None;

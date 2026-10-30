@@ -368,6 +368,87 @@ fn the_output_indicator_lights_when_a_message_leaves() {
     assert_eq!(indicators(&mut h), "");
 }
 
+// Spec: remote-mapping R41 (L-CTRL-026). The remote pair's upper lamp lights
+// for a message a mapping takes and its lower for feedback.
+#[test]
+fn the_remote_pair_lights_for_a_mapped_message_and_for_feedback() {
+    use std::time::Instant;
+
+    let mut h = Harness::new(Window::Main);
+    let test = TestBackend::new();
+    test.add_port(Direction::Input, "Pads");
+    test.add_port(Direction::Output, "Lamps");
+    h.shell.use_midi_backend(Box::new(test.clone()));
+    for (direction, name) in [("input", "Pads"), ("output", "Lamps")] {
+        h.shell
+            .run(
+                "midi.set_port",
+                json!({ "direction": direction, "name": name, "remote": true, "track": false }),
+            )
+            .unwrap();
+    }
+    h.shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "T" }))
+        .unwrap();
+    let track = h.shell.editor().document().top_level().last().unwrap();
+    h.settle();
+    let lamps = |h: &mut Harness| {
+        h.shell.poll();
+        let nodes = Harness::nodes(&h.settle());
+        Harness::node(&nodes, "Remote Input and Output Indicators")
+            .value
+            .clone()
+    };
+    assert_eq!(lamps(&mut h), "", "dark until something crosses");
+
+    // Making a mapping sends its value to the output: the lower lamp.
+    h.shell
+        .run(
+            "remote.map",
+            json!({ "source": { "type": "cc", "channel": 1, "controller": 20 },
+                    "target": { "type": "mixer", "track": track, "param": "volume" } }),
+        )
+        .unwrap();
+    assert_eq!(lamps(&mut h), "sending");
+    assert_eq!(test.sent("Lamps").len(), 1);
+
+    // A message the mapping takes: the upper lamp.
+    assert!(test.send("Pads", Instant::now(), &[0xB0, 20, 100]));
+    let value = lamps(&mut h);
+    assert!(value.contains("receiving"), "{value:?}");
+}
+
+// Spec: remote-mapping R41 (L-CTRL-021). The key indicators' upper lamp
+// lights for a key a key mapping takes; a key that is not mapped leaves it
+// dark.
+#[test]
+fn the_key_indicator_lights_for_a_mapped_key() {
+    let mut h = Harness::new(Window::Main);
+    h.shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "T" }))
+        .unwrap();
+    let track = h.shell.editor().document().top_level().last().unwrap();
+    h.shell
+        .run(
+            "remote.map",
+            json!({ "source": { "type": "key", "key": "B" },
+                    "target": { "type": "solo", "track": track } }),
+        )
+        .unwrap();
+    h.settle();
+    let lamp = |h: &mut Harness| {
+        h.shell.poll();
+        let nodes = Harness::nodes(&h.settle());
+        Harness::node(&nodes, "Key Input and Output Indicators")
+            .value
+            .clone()
+    };
+    h.key(Key::X, Modifiers::NONE);
+    assert_eq!(lamp(&mut h), "", "an unmapped key");
+    h.key(Key::B, Modifiers::NONE);
+    assert_eq!(lamp(&mut h), "receiving");
+}
+
 fn labelled(nodes: &[Node], label: &str) -> bool {
     nodes.iter().any(|node| node.label == label)
 }

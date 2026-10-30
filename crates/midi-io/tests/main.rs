@@ -8,6 +8,7 @@
 bl_rt::install_trap!();
 
 mod platform;
+mod remote_feedback;
 mod remote_input;
 mod scheduled_output;
 mod to_the_engine;

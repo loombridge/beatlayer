@@ -188,7 +188,9 @@ impl OutputBus {
 
     /// Sends `bytes`, a whole message or a system exclusive one, to the open
     /// output `port` now, or at `at` where the port's backend schedules, for
-    /// a control surface (`docs/specs/control-surfaces.md`, R8). The port's
+    /// a control surface (`docs/specs/control-surfaces.md`, R8) and for the
+    /// feedback to controllers (`docs/specs/remote-mapping.md`, R40): from
+    /// the calling thread, never through the engine's queue. The port's
     /// Track switch doesn't matter, and the counts of the engine's output
     /// don't include it.
     ///

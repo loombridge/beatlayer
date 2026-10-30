@@ -7531,6 +7531,76 @@ One of:
 
 </details>
 
+### `Counts`
+
+The remote input's counts since the app started (R43).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `taken` | integer, at least 0 | yes | Messages a mapping took, and messages taken for learning. |
+| `dropped` | integer, at least 0 | yes | Messages dropped because the queue to the main thread was full. |
+| `unmapped` | integer, at least 0 | yes | Messages a Remote input got that no mapping takes. |
+| `applied` | integer, at least 0 | yes | Mapped messages and keys whose control's command ran. |
+| `refused` | integer, at least 0 | yes | Mapped messages and keys whose control the set no longer has, or whose command failed. |
+| `feedback_sent` | integer, at least 0 | yes | Feedback messages sent to outputs with Remote on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The remote input's counts since the app started (R43).",
+  "properties": {
+    "applied": {
+      "description": "Mapped messages and keys whose control's command ran.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "dropped": {
+      "description": "Messages dropped because the queue to the main thread was full.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "feedback_sent": {
+      "description": "Feedback messages sent to outputs with Remote on.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "refused": {
+      "description": "Mapped messages and keys whose control the set no longer has, or whose command failed.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "taken": {
+      "description": "Messages a mapping took, and messages taken for learning.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "unmapped": {
+      "description": "Messages a Remote input got that no mapping takes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "taken",
+    "dropped",
+    "unmapped",
+    "applied",
+    "refused",
+    "feedback_sent"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CreatedPack`
 
 What `set.create_pack` returns.
@@ -15312,6 +15382,85 @@ A label as the sidebar lists it.
 
 </details>
 
+### `Lamp`
+
+One of the Control Bar's indicator lamps (R41).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lit` | boolean | yes | Whether it is lit now. |
+| `last_lit_ms_ago` | integer or null | yes | Milliseconds since it last lit; none if it never has. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the Control Bar's indicator lamps (R41).",
+  "properties": {
+    "last_lit_ms_ago": {
+      "description": "Milliseconds since it last lit; none if it never has.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "lit": {
+      "description": "Whether it is lit now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "lit",
+    "last_lit_ms_ago"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Lamps`
+
+The lamps the remote input lights (R41).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `remote_input` | [`Lamp`](#lamp) | yes | The remote pair's upper lamp: a message taken. |
+| `remote_output` | [`Lamp`](#lamp) | yes | The remote pair's lower lamp: feedback sent. |
+| `key_input` | [`Lamp`](#lamp) | yes | The key indicators' upper lamp: a key a key mapping took. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The lamps the remote input lights (R41).",
+  "properties": {
+    "key_input": {
+      "$ref": "#/$defs/Lamp",
+      "description": "The key indicators' upper lamp: a key a key mapping took."
+    },
+    "remote_input": {
+      "$ref": "#/$defs/Lamp",
+      "description": "The remote pair's upper lamp: a message taken."
+    },
+    "remote_output": {
+      "$ref": "#/$defs/Lamp",
+      "description": "The remote pair's lower lamp: feedback sent."
+    }
+  },
+  "required": [
+    "remote_input",
+    "remote_output",
+    "key_input"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Lane`
 
 Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.
@@ -22492,7 +22641,7 @@ One MIDI port as the Settings window's table shows it.
 | `name` | string | yes | The name the MIDI system gives it. |
 | `track` | boolean | yes | Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI. |
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
-| `remote` | boolean | yes | Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built. |
+| `remote` | boolean | yes | Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output gets the values of the mapped controls as feedback (R38 to R40). |
 | `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
 | `sync_delay_ms` | integer from -32768 to 32767 | yes | MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to the clock an output sends; kept while Sync is off. |
 | `clock_type` | [`ClockTypeChoice`](#clocktypechoice) | yes | An output's MIDI Clock Type: Song or Pattern. |
@@ -22546,7 +22695,7 @@ One MIDI port as the Settings window's table shows it.
       "type": "boolean"
     },
     "remote": {
-      "description": "Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built.",
+      "description": "Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output gets the values of the mapped controls as feedback (R38 to R40).",
       "type": "boolean"
     },
     "sync": {
@@ -29194,6 +29343,62 @@ Stacks' progression and bank.
 
 </details>
 
+### `StateResult`
+
+What `remote.state` returns (R43).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `counts` | [`Counts`](#counts) | yes | The counts. |
+| `lamps` | [`Lamps`](#lamps) | yes | The lamps. |
+| `takeover` | array of [`TakeoverInfo`](#takeoverinfo) | yes | The takeover state of each absolute controller mapping on a continuous control. |
+| `guess` | [`RemoteMode`](#remotemode) or null | yes | The mode guessed for the controller being learned, while a map mode is on and a message has crossed (R27). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.state` returns (R43).",
+  "properties": {
+    "counts": {
+      "$ref": "#/$defs/Counts",
+      "description": "The counts."
+    },
+    "guess": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The mode guessed for the controller being learned, while a map mode is on and a message has crossed (R27)."
+    },
+    "lamps": {
+      "$ref": "#/$defs/Lamps",
+      "description": "The lamps."
+    },
+    "takeover": {
+      "description": "The takeover state of each absolute controller mapping on a continuous control.",
+      "items": {
+        "$ref": "#/$defs/TakeoverInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "counts",
+    "lamps",
+    "takeover",
+    "guess"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `StemKind`
 
 A part of the mix to separate (the dialog's four switches).
@@ -30145,6 +30350,50 @@ Type: integer, at least 1.
 
 </details>
 
+### `TakeoverInfo`
+
+One mapping's takeover state.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`RemoteSource`](#remotesource) | yes | The mapping's source. |
+| `state` | [`TakeoverState`](#takeoverstate) | yes | Whether it follows or waits. |
+| `last` | number or null | yes | Where the controller last was, as a position in the mapping's range. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mapping's takeover state.",
+  "properties": {
+    "last": {
+      "description": "Where the controller last was, as a position in the mapping's range.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/RemoteSource",
+      "description": "The mapping's source."
+    },
+    "state": {
+      "$ref": "#/$defs/TakeoverState",
+      "description": "Whether it follows or waits."
+    }
+  },
+  "required": [
+    "source",
+    "state",
+    "last"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TakeoverMode`
 
 What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.
@@ -30174,6 +30423,37 @@ One of:
     {
       "const": "value_scaling",
       "description": "The control and the controller converge as the controller moves.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TakeoverState`
+
+Where a controller mapping on a continuous control stands with its control (R29).
+
+One of:
+
+- `"following"`: The control follows the controller.
+- `"waiting"`: The control waits for the controller to reach it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a controller mapping on a continuous control stands with its control (R29).",
+  "oneOf": [
+    {
+      "const": "following",
+      "description": "The control follows the controller.",
+      "type": "string"
+    },
+    {
+      "const": "waiting",
+      "description": "The control waits for the controller to reach it.",
       "type": "string"
     }
   ]

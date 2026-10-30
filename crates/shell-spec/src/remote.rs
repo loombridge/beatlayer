@@ -30,6 +30,8 @@ pub const SET_MODE: &str = "remote.set_mode";
 /// `remote.input`: apply a MIDI message or a key as if it came from the
 /// remote input.
 pub const INPUT: &str = "remote.input";
+/// `remote.state`: the remote input's counts, lamps and takeover states.
+pub const STATE: &str = "remote.state";
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
@@ -41,6 +43,7 @@ pub const IDS: &[&str] = &[
     INVERT_RANGE,
     SET_MODE,
     INPUT,
+    STATE,
 ];
 
 /// Whether `id` is one of the remote mapping commands.
@@ -195,6 +198,81 @@ pub struct InputResult {
     pub taken: bool,
 }
 
+/// The remote input's counts since the app started (R43).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Counts {
+    /// Messages a mapping took, and messages taken for learning.
+    pub taken: u64,
+    /// Messages dropped because the queue to the main thread was full.
+    pub dropped: u64,
+    /// Messages a Remote input got that no mapping takes.
+    pub unmapped: u64,
+    /// Mapped messages and keys whose control's command ran.
+    pub applied: u64,
+    /// Mapped messages and keys whose control the set no longer has, or
+    /// whose command failed.
+    pub refused: u64,
+    /// Feedback messages sent to outputs with Remote on.
+    pub feedback_sent: u64,
+}
+
+/// One of the Control Bar's indicator lamps (R41).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Lamp {
+    /// Whether it is lit now.
+    pub lit: bool,
+    /// Milliseconds since it last lit; none if it never has.
+    pub last_lit_ms_ago: Option<u64>,
+}
+
+/// The lamps the remote input lights (R41).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Lamps {
+    /// The remote pair's upper lamp: a message taken.
+    pub remote_input: Lamp,
+    /// The remote pair's lower lamp: feedback sent.
+    pub remote_output: Lamp,
+    /// The key indicators' upper lamp: a key a key mapping took.
+    pub key_input: Lamp,
+}
+
+/// Where a controller mapping on a continuous control stands with its
+/// control (R29).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TakeoverState {
+    /// The control follows the controller.
+    Following,
+    /// The control waits for the controller to reach it.
+    Waiting,
+}
+
+/// One mapping's takeover state.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TakeoverInfo {
+    /// The mapping's source.
+    pub source: RemoteSource,
+    /// Whether it follows or waits.
+    pub state: TakeoverState,
+    /// Where the controller last was, as a position in the mapping's range.
+    pub last: Option<f64>,
+}
+
+/// What `remote.state` returns (R43).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct StateResult {
+    /// The counts.
+    pub counts: Counts,
+    /// The lamps.
+    pub lamps: Lamps,
+    /// The takeover state of each absolute controller mapping on a
+    /// continuous control.
+    pub takeover: Vec<TakeoverInfo>,
+    /// The mode guessed for the controller being learned, while a map mode
+    /// is on and a message has crossed (R27).
+    pub guess: Option<RemoteMode>,
+}
+
 /// Adds the remote mapping commands to a registry.
 ///
 /// # Errors
@@ -299,6 +377,22 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<InputArgs>()
             .result::<InputResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(STATE, "Remote Control State")
+            .description(
+                "Reports the remote input's counts (messages taken, dropped, unmapped, applied \
+                 and refused, and feedback messages sent to outputs with Remote on), when each \
+                 of its indicator lamps last lit (the remote pair's two and the key \
+                 indicators' upper one) and whether each is lit now, the takeover state of \
+                 each absolute controller mapping on a continuous control (following, or \
+                 waiting with the controller's last position), and the mode guessed for the \
+                 controller being learned while a map mode is on. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<StateResult>(),
     )?;
     Ok(())
 }

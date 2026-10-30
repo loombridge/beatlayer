@@ -12,6 +12,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // Mapping Browser that make them by a click and a key come with
         // WP-7.3; until then agents reach them.
         ("remote.mappings", Exception(Query)),
+        ("remote.state", Exception(Query)),
         (
             "remote.map",
             Exception(LaterView("the map modes' overlays (WP-7.3)")),

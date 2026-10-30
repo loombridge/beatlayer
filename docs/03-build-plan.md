@@ -782,7 +782,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.2b | done | 30 October 2026 | [#526](https://github.com/loombridge/beatlayer/pull/526): a Session slot mapped to a note range launches its clip transposed by the key minus the root at the key's velocity, MIDI notes moved and audio pitched through its warp mode, a later key relaunching and an earlier key's release ignored, and `session.launch` takes `transpose` |
 | 7.3 | done | 30 October 2026 | [#527](https://github.com/loombridge/beatlayer/pull/527): MIDI Map Mode and Key Map Mode with their switches, shortcuts and overlays, select then learn for MIDI and keys, the Mapping Browser, the Status Bar mode chooser, and `remote.map_mode`, `remote.select` and `remote.state`; the remaining mappable controls come with WP-7.3b |
 | 7.3b | todo |  |  |
-| 7.4 | todo |  |  |
+| 7.4 | done | 30 October 2026 | [#528](https://github.com/loombridge/beatlayer/pull/528): feedback to Remote outputs through each law's inverse, once per poll with no echo and a full send on load, on a new mapping and when Remote turns on, the Control Bar's remote and key indicator lamps, and mapped record and slot controls acting as clicks, with the lamps in `remote.state` |
 | 7.5 | done | 30 October 2026 | [#516](https://github.com/loombridge/beatlayer/pull/516): the `ControlSurface` trait and its host thread in `bl-control`, the Control Surfaces table with Dump on the Tempo & MIDI page kept in the preferences, surfaces owning their ports after manual mappings, surface notes reaching tracks, a test surface, and the `control_surface.*` commands |
 | 7.6 | todo |  |  |
 | 7.7 | todo |  |  |

@@ -133,12 +133,20 @@ thread_local! {
 }
 
 /// The test fixtures folder: the repository's `tests/fixtures`, or the copy
-/// [`copy_fixtures`] made for this thread.
+/// [`copy_fixtures`] made for this thread. The repository's is a plain
+/// absolute path, with no `..` in it, so a set that uses a fixture records it in its media
+/// table as a person's file would be.
 #[must_use]
 pub fn fixtures() -> PathBuf {
     FIXTURES
         .with(|copy| copy.borrow().clone())
-        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures"))
+        .unwrap_or_else(repository_fixtures)
+}
+
+/// The repository's own `tests/fixtures`, canonicalised.
+fn repository_fixtures() -> PathBuf {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    path.canonicalize().unwrap_or(path)
 }
 
 /// Copies the repository's fixture folders named in `folders` (such as
@@ -165,7 +173,7 @@ pub fn copy_fixtures(dir: &Path, folders: &[&str]) -> PathBuf {
         }
         Ok(())
     }
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let repository = repository_fixtures();
     for folder in folders {
         copy(&repository.join(folder), &dir.join(folder))
             .unwrap_or_else(|error| panic!("the {folder} fixtures didn't copy: {error}"));

@@ -5285,10 +5285,7 @@ impl Document {
                         *colour < CHAIN_COLOURS,
                     )?;
                 }
-                if self.chain_ref(*chain)?.push_colour != *colour {
-                    self.chain_mut(*chain)?.push_colour = *colour;
-                }
-                Ok(())
+                self.edit_drum_chain(*chain, false, |c| c.push_colour = *colour)
             }
             Command::SetChainInfo { chain, info } => {
                 if self.chain_ref(*chain)?.info != *info {

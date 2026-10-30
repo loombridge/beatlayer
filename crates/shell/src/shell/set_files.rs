@@ -789,7 +789,14 @@ impl Shell {
                 self.store.set_column_widths(self.mixer.widths().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
-                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                let copy = super::selection_arm::without_selection_arms(
+                    &self.editor,
+                    &self.surface.selection_armed,
+                );
+                let warnings = self
+                    .store
+                    .save(&path, copy.as_ref().unwrap_or(&self.editor))
+                    .map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
             }
@@ -987,7 +994,14 @@ impl Shell {
                     .store
                     .collect_groups(&groups, library)
                     .map_err(failed)?;
-                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                let copy = super::selection_arm::without_selection_arms(
+                    &self.editor,
+                    &self.surface.selection_armed,
+                );
+                let warnings = self
+                    .store
+                    .save(&path, copy.as_ref().unwrap_or(&self.editor))
+                    .map_err(failed)?;
                 self.saved_as(path.clone(), &warnings);
                 Ok(to_value(&FileReport {
                     path: Some(path.to_string_lossy().into_owned()),

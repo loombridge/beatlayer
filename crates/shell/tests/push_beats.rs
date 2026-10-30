@@ -637,3 +637,354 @@ fn shift_and_a_pad_colours_the_pad() {
     // The track's own colour is untouched.
     assert_eq!(chains_on(&rig, 38)[0].push_colour, None);
 }
+
+const STEP: i64 = 176_400;
+const BAR: i64 = 4 * 705_600;
+
+fn clip_colour(rig: &Rig) -> [u8; 3] {
+    let doc = rig.shell.editor().document();
+    let (id, _) = rig.clip().unwrap();
+    let swatch = doc.clip(id).unwrap().colour.unwrap();
+    bl_model::swatch_rgb(&bl_model::DEFAULT_TRACK_PALETTE, swatch)
+}
+
+// Spec: push-2-notes R21 to R23. A step with a note is the clip's colour,
+// brighter for a higher velocity; Mute and a step deactivates its note, which
+// shows in a lighter colour, and activates it again; a triplet size leaves
+// the right two columns of the step area unlit and without effect, and the
+// chosen size is the lit scene button.
+#[test]
+fn steps_show_their_notes_and_triplet_sizes_darken_two_columns() {
+    let mut rig = Rig::new();
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    rig.run("transport.stop", json!({}));
+    rig.run("session.stop_all", json!({}));
+    rig.pass(100);
+    let colour = clip_colour(&rig);
+    let loud = bl_push::note::grid::scaled(colour, 40 + 100 * 60 / 127);
+    assert_eq!(rgb(&rig, "pad_4_0"), loud, "a note at velocity 100");
+    assert_eq!(rgb(&rig, "pad_4_1"), [64, 64, 64], "grey without a note");
+
+    // Mute and a step deactivates its note, and again activates it.
+    for mute in [true, false] {
+        assert!(rig.sim.press("mute"));
+        rig.pass(50);
+        rig.tap_pad(4, 0);
+        assert!(rig.sim.let_go("mute"));
+        rig.pass(40);
+        let (_, midi) = rig.clip().unwrap();
+        assert_eq!(midi.notes.iter().next().unwrap().mute, mute);
+        let expected = if mute { bl_push::note::grid::lighter(colour) } else { loud };
+        assert_eq!(rgb(&rig, "pad_4_0"), expected);
+    }
+
+    // A triplet size: six steps to a row.
+    assert_eq!(rig.led("scene_4").colour, 122, "1/16 is chosen");
+    rig.tap("scene_3");
+    assert_eq!(rig.note()["step_size"], "1/16T");
+    assert_eq!(rig.led("scene_3").colour, 122, "the chosen size is white");
+    assert_eq!(rig.led("scene_4").colour, 124);
+    assert_eq!(rig.led("pad_4_6").colour, 0);
+    assert_eq!(rig.led("pad_4_7").colour, 0);
+    assert_ne!(rig.led("pad_4_5").colour, 0);
+    let notes = rig.clip().unwrap().1.notes.len();
+    rig.tap_pad(4, 6);
+    rig.tap_pad(4, 7);
+    assert_eq!(rig.clip().unwrap().1.notes.len(), notes, "they do nothing");
+    // Step 7 of a triplet row is at the sixth place.
+    rig.tap_pad(5, 0);
+    let mut starts: Vec<i64> = rig.clip().unwrap().1.notes.iter().map(|n| n.start.get()).collect();
+    starts.sort_unstable();
+    assert_eq!(starts, [0, 6 * (BAR / 24)]);
+}
+
+// Spec: push-2-notes R26, R27. The loop length pads are pages of the clip:
+// holding one and tapping another sets the loop from the first page's start
+// to the last page's end; a double tap sets it to one page; a tap on a page
+// outside the loop sets the loop to it. Each is one undo step and turns the
+// loop on.
+#[test]
+fn loop_length_pads_set_the_loop() {
+    let mut rig = Rig::new();
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    rig.run("transport.stop", json!({}));
+    rig.run("session.stop_all", json!({}));
+    rig.pass(100);
+    let (_, midi) = rig.clip().unwrap();
+    assert!(midi.looping, "the first step turns the loop on");
+    assert_eq!(midi.loop_end, None, "over the whole bar");
+    let lit = |rig: &Rig, row, column| rig.led(&format!("pad_{row}_{column}")).colour;
+    assert_eq!(lit(&rig, 0, 4), 122, "page 1 is in the loop and in view");
+    assert_eq!(lit(&rig, 0, 5), 0, "page 2 is outside it");
+
+    // Hold page 1, tap page 3.
+    let steps = rig.steps();
+    assert!(rig.sim.press_pad(0, 4, 100));
+    rig.pass(20);
+    rig.tap_pad(0, 6);
+    assert!(rig.sim.release_pad(0, 4));
+    rig.pass(40);
+    let (_, midi) = rig.clip().unwrap();
+    assert!(midi.looping);
+    assert_eq!((midi.loop_start.get(), midi.loop_end.unwrap().get()), (0, 3 * BAR));
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+    assert_eq!(lit(&rig, 0, 5), 122, "pages 1 and 2 are in view");
+    assert_eq!(lit(&rig, 0, 6), 123, "page 3 is in the loop, out of view");
+    assert_eq!(lit(&rig, 0, 7), 0, "page 4 is outside it");
+
+    // A double tap on page 2 sets the loop to it.
+    let steps = rig.steps();
+    assert!(rig.sim.press_pad(0, 5, 100));
+    rig.pass(20);
+    assert!(rig.sim.release_pad(0, 5));
+    rig.pass(20);
+    assert_eq!(rig.clip().unwrap().1.loop_start.get(), 0, "one tap changes nothing");
+    assert!(rig.sim.press_pad(0, 5, 100));
+    rig.pass(20);
+    assert!(rig.sim.release_pad(0, 5));
+    rig.pass(40);
+    let (_, midi) = rig.clip().unwrap();
+    assert_eq!((midi.loop_start.get(), midi.loop_end.unwrap().get()), (BAR, 2 * BAR));
+    assert_eq!(rig.steps(), steps + 1);
+
+    // A tap outside the loop, on page 5.
+    let steps = rig.steps();
+    rig.tap_pad(1, 4);
+    let (_, midi) = rig.clip().unwrap();
+    assert_eq!((midi.loop_start.get(), midi.loop_end.unwrap().get()), (4 * BAR, 5 * BAR));
+    assert_eq!(rig.steps(), steps + 1);
+    assert_eq!(rig.note()["page"], 5, "the pair that holds page 5 shows");
+}
+
+// Spec: push-2-notes R28. Page Left and Right show the pair of pages before
+// or after and stop following; holding either starts following again; a tap
+// on a loop length pad in the loop shows its page and stops following.
+#[test]
+fn the_page_buttons_and_a_loop_pad_tap_stop_following() {
+    let mut rig = Rig::new();
+    rig.run("session.set_quantization", json!({ "quantization": "none" }));
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    assert_eq!(rig.note()["following"], true);
+    rig.tap("page_right");
+    let note = rig.note();
+    assert_eq!((note["page"].clone(), note["following"].clone()), (json!(3), json!(false)));
+    rig.tap("page_left");
+    assert_eq!(rig.note()["page"], 1);
+    rig.hold("page_right");
+    rig.release("page_right");
+    assert_eq!(rig.note()["following"], true);
+    // A tap on page 1 in the loop shows it without changing the loop.
+    rig.tap_pad(0, 4);
+    assert_eq!(rig.note()["following"], false);
+    let (_, midi) = rig.clip().unwrap();
+    assert_eq!((midi.loop_start.get(), midi.loop_end), (0, None), "the loop is as it was");
+}
+
+// Spec: push-2-notes R28, R23. The step area follows the page that plays:
+// with a clip looping over four bars, its pair shows while the playhead is
+// in it, and a green step marks the playhead.
+#[test]
+fn the_step_area_follows_the_page_that_plays() {
+    let mut rig = Rig::new();
+    rig.run("session.set_quantization", json!({ "quantization": "none" }));
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    // Hold page 1 and tap page 4: the loop is four bars.
+    assert!(rig.sim.press_pad(0, 4, 100));
+    rig.pass(20);
+    rig.tap_pad(1, 4);
+    assert!(rig.sim.release_pad(0, 4));
+    rig.pass(40);
+    // Hold page 1, tap page 4: pages 1 to 4 (page 4 is pad row 0, column 7).
+    let (_, midi) = rig.clip().unwrap();
+    assert!(midi.looping);
+    // Four seconds in at 120 BPM is bar 3, whose pair is pages 3 and 4.
+    for _ in 0..120 {
+        testing::advance(&rig.control, &mut rig.shell, 50);
+        rig.step();
+        if rig.note()["page"] == 3 {
+            break;
+        }
+    }
+    assert_eq!(rig.note()["page"], 3, "following the playing page");
+    assert_eq!(rig.note()["following"], true);
+}
+
+// Spec: push-2-notes R30. With Duplicate held, tapping a loop length pad and
+// then another copies the first page's notes onto the second, adding them to
+// its notes; with Delete held, tapping one deletes that page's notes. One
+// undo step each.
+#[test]
+fn duplicate_and_delete_with_loop_length_pads_copy_and_clear_pages() {
+    let mut rig = Rig::new();
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    rig.run("transport.stop", json!({}));
+    rig.pass(100);
+    rig.tap_pad(4, 3);
+    assert_eq!(keys(&rig.clip().unwrap().1), [(36, 0), (36, 3 * STEP)]);
+
+    // Page 2 is outside the loop, but Duplicate copies onto it anyway.
+    let steps = rig.steps();
+    assert!(rig.sim.press("duplicate"));
+    rig.pass(50);
+    rig.tap_pad(0, 4);
+    rig.tap_pad(0, 5);
+    assert!(rig.sim.let_go("duplicate"));
+    rig.pass(40);
+    assert_eq!(
+        keys(&rig.clip().unwrap().1),
+        [(36, 0), (36, 3 * STEP), (36, BAR), (36, BAR + 3 * STEP)]
+    );
+    assert_eq!(rig.steps(), steps + 1);
+
+    // Delete + page 2 clears it.
+    let steps = rig.steps();
+    assert!(rig.sim.press("delete"));
+    rig.pass(50);
+    rig.tap_pad(0, 5);
+    assert!(rig.sim.let_go("delete"));
+    rig.pass(40);
+    assert_eq!(keys(&rig.clip().unwrap().1), [(36, 0), (36, 3 * STEP)]);
+    assert_eq!(rig.steps(), steps + 1);
+}
+
+// Spec: push-2-notes R24. Delete pressed alone deletes the clip the steps
+// edit.
+#[test]
+fn delete_alone_deletes_the_clip() {
+    let mut rig = Rig::new();
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    assert!(rig.clip().is_some());
+    let steps = rig.steps();
+    rig.tap("delete");
+    assert!(rig.clip().is_none());
+    assert_eq!(rig.steps(), steps + 1);
+}
+
+// Spec: push-2-notes R31. The loop length pads of the Loop Selector use
+// reduced pad sensitivity (Select Pad Settings 1), which the surface sets
+// when the layout appears and puts back to regular when it goes.
+#[test]
+fn the_loop_length_pads_have_reduced_sensitivity() {
+    let mut rig = Rig::new();
+    let reduced = |on: u8| -> Vec<Vec<u8>> {
+        (0..4)
+            .flat_map(|row| (4..8).map(move |column| (row, column)))
+            .map(|(row, column)| bl_push::sysex::select_pad_settings(row, column, on))
+            .collect()
+    };
+    let sent = rig.sim.sysex();
+    for message in reduced(1) {
+        assert!(sent.contains(&message), "{message:02X?}");
+    }
+    // 16 Velocities has no loop length pads.
+    rig.sim.forget_sent();
+    rig.tap("layout");
+    let sent = rig.sim.sysex();
+    for message in reduced(0) {
+        assert!(sent.contains(&message), "back to regular");
+    }
+    // Holding Layout in 16 Velocities shows them again.
+    rig.sim.forget_sent();
+    rig.hold("layout");
+    let sent = rig.sim.sysex();
+    for message in reduced(1) {
+        assert!(sent.contains(&message), "while it is held");
+    }
+    rig.release("layout");
+}
+
+// Spec: push-2-notes R25. The steps held down are exposed to the display
+// modes: their pad, clip, start and length read in `push.state`.
+#[test]
+fn held_steps_are_exposed() {
+    let mut rig = Rig::new();
+    rig.tap_pad(4, 0);
+    rig.pass(40);
+    let (clip, _) = rig.clip().unwrap();
+    assert!(rig.sim.press_pad(4, 3, 100));
+    rig.pass(20);
+    let held = rig.note()["held_steps"].clone();
+    assert_eq!(
+        held,
+        json!([{ "clip": clip, "pad": 36, "start": 3 * STEP, "length": STEP }])
+    );
+    assert!(rig.sim.release_pad(4, 3));
+    rig.pass(20);
+    assert_eq!(rig.note()["held_steps"], json!([]));
+}
+
+// Spec: push-2-notes R2, R14. What the pads play reaches the selected,
+// selection-armed track and its recording; a pad tapped with Select held
+// plays nothing.
+#[test]
+fn the_pads_notes_reach_the_armed_track_and_its_recording() {
+    let mut rig = Rig::new();
+    rig.run("session.set_quantization", json!({ "quantization": "none" }));
+    rig.run("transport.set_recording", json!({ "recording": true }));
+    rig.run("transport.play", json!({}));
+    rig.pass(100);
+    // Select + pad 38 plays nothing.
+    assert!(rig.sim.press("select"));
+    rig.pass(50);
+    rig.tap_pad(0, 2);
+    assert!(rig.sim.let_go("select"));
+    rig.pass(40);
+    assert_eq!(rig.note()["selected_pad"], 38);
+    // Pad 39 plays a note.
+    assert!(rig.sim.press_pad(0, 3, 100));
+    rig.pass(200);
+    assert!(rig.sim.release_pad(0, 3));
+    rig.pass(100);
+    rig.run("transport.stop", json!({}));
+    let track = rig.track;
+    testing::wait_for(&rig.control, &mut rig.shell, "the clip", |shell| {
+        shell.running_recording().is_none()
+            && shell
+                .editor()
+                .document()
+                .track(track)
+                .is_some_and(|t| t.clips().count() > 0)
+    });
+    let doc = rig.shell.editor().document();
+    let notes: Vec<u8> = doc
+        .track(track)
+        .unwrap()
+        .clips()
+        .flat_map(|clip| match &clip.data {
+            ClipData::Midi(midi) => midi.notes.iter().map(|n| n.key).collect::<Vec<_>>(),
+            ClipData::Audio(_) => Vec::new(),
+        })
+        .collect();
+    assert_eq!(notes, [39], "only the pad that was played");
+}
+
+// Spec: push-2-notes R3. An arm by selection isn't saved: the set written
+// while one stands holds the track disarmed, and the arm stays on in the
+// open set.
+#[test]
+fn an_arm_by_selection_isnt_saved() {
+    let mut rig = Rig::new();
+    assert!(armed(&rig, rig.track));
+    let dir = std::env::temp_dir().join(format!("bl-push-arm-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Armed.blset");
+    let result: bl_shell::commands::SetResult = serde_json::from_value(rig.run(
+        "set.save_as",
+        json!({ "path": path.to_string_lossy() }),
+    ))
+    .unwrap();
+    assert!(armed(&rig, rig.track), "still armed here");
+    let (mut other, _) = testing::rig();
+    other
+        .run("set.open", json!({ "path": result.path.unwrap() }))
+        .unwrap();
+    let track = rig.track;
+    assert!(!other.editor().document().track(track).unwrap().mixer().arm);
+    let _ = std::fs::remove_dir_all(&dir);
+}

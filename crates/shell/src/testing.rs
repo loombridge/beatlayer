@@ -171,3 +171,10 @@ pub fn realtime_waiting(shell: &Shell, seconds: u64) {
         .realtime_session()
         .begin_wait(Duration::from_secs(seconds));
 }
+
+/// Marks the armed `track` as armed by a control surface's selection, as
+/// Push 2's selection arm would (the notes on Push 2 spec, R3), for the tests
+/// of what draws and reads it.
+pub fn arm_by_selection(shell: &mut Shell, track: bl_model::TrackId) {
+    shell.mark_armed_by_selection(track);
+}

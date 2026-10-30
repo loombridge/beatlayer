@@ -770,7 +770,7 @@ fn mixer_controls_cover_the_rings_tracks() {
 
     // Mute, Solo and Arm are toggles over the ring's tracks.
     let doc =
-        |rig: &Rig, track: TrackId| rig.shell.editor().document().track(track).unwrap().mixer();
+        |rig: &Rig, track: TrackId| *rig.shell.editor().document().track(track).unwrap().mixer();
     assert!(!doc(&rig, columns[1]).solo);
     rig.tap(48);
     assert!(doc(&rig, columns[1]).solo);

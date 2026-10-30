@@ -86,6 +86,8 @@ impl Counting {
 
 #[cfg(test)]
 mod tests {
+    use bl_core::clock::TestClock;
+
     use super::*;
 
     // Spec: push-2 R9. Two's complement: 1 to 63 clockwise, 127 down to 64
@@ -105,7 +107,7 @@ mod tests {
     // at the ends; steps that arrive together add up.
     #[test]
     fn a_continuous_parameter_moves_a_two_hundredth_a_step_and_stops_at_the_ends() {
-        let now = Instant::now();
+        let now = TestClock::new().now();
         let mut moving = Moving::default();
         assert!((moving.turn(now, 0.5, 1, false) - 0.505).abs() < 1e-12);
         assert!(

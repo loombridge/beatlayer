@@ -45,6 +45,8 @@ pub(super) struct SurfaceHost {
     last_lit: [Option<Instant>; 3],
     applied: u64,
     pub(super) refused: u64,
+    /// The controller templates found when they were last read (R43).
+    pub(super) templates: Vec<bl_control::template::Found>,
 }
 
 fn info(report: RowReport, row: usize) -> ids::RowInfo {
@@ -78,12 +80,27 @@ impl Shell {
     /// The surfaces the table's chooser offers (R1), as
     /// `control_surface.surfaces` reports them.
     #[must_use]
-    pub fn control_surface_choices() -> Vec<ids::SurfaceInfo> {
-        bl_control::kinds()
+    pub fn control_surface_choices(&self) -> Vec<ids::SurfaceInfo> {
+        // The templates that name the ports present come first among the
+        // templates (R45); the sort is stable, so each group keeps its order.
+        let matched: Vec<String> = self
+            .template_matches()
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect();
+        let mut kinds = self.midi.surfaces().kinds();
+        kinds.sort_by_key(|kind| {
+            if !kind.id.starts_with("template:") {
+                0
+            } else {
+                1 + u8::from(!matched.contains(&kind.name))
+            }
+        });
+        kinds
             .iter()
             .map(|kind| ids::SurfaceInfo {
-                id: kind.id.to_owned(),
-                name: kind.name.to_owned(),
+                id: kind.id.clone(),
+                name: kind.name.clone(),
                 needs_output: kind.needs_output,
                 can_lock: kind.can_lock,
                 ring: kind.ring.map(|ring| ids::RingInfo {
@@ -91,6 +108,97 @@ impl Shell {
                     scenes: ring.scenes,
                 }),
                 has_setup: !kind.dump.is_empty(),
+            })
+            .collect()
+    }
+
+    /// Reads the controller templates again: the bundled one and the User
+    /// Library's `Controller Templates` folder, whose files the chooser
+    /// lists after the native surfaces (R43). Done at start and whenever the
+    /// Tempo & MIDI page opens.
+    pub fn refresh_templates(&mut self) {
+        let folder = self
+            .browser_view
+            .user_library()
+            .map(|library| library.join("Controller Templates"));
+        self.surface.templates = bl_control::template::load(folder.as_deref());
+        let kinds = bl_control::template::kinds(&self.surface.templates);
+        self.midi.set_surface_templates(kinds);
+        self.touch();
+    }
+
+    /// The ports present that a template names, with the template's name,
+    /// while no row uses the port and a row is free: the Settings read
+    /// "Matches <template>" beside them (R45).
+    #[must_use]
+    pub fn template_matches(&self) -> Vec<(String, String)> {
+        let rows = self.midi.surfaces().rows();
+        if rows.iter().all(|row| row.surface.is_some()) {
+            return Vec::new();
+        }
+        let mut listed: Vec<&bl_control::template::Template> = self
+            .surface
+            .templates
+            .iter()
+            .filter(|found| found.listed)
+            .filter_map(|found| found.template.as_deref())
+            .collect();
+        listed.sort_by_key(|t| (t.name.to_lowercase(), t.name.clone()));
+        let named = |name: &str| {
+            rows.iter().any(|row| {
+                row.input.as_deref() == Some(name) || row.output.as_deref() == Some(name)
+            })
+        };
+        let mut matches = Vec::new();
+        for port in self
+            .midi
+            .ports()
+            .iter()
+            .filter(|p| p.present && !named(&p.name))
+        {
+            for template in &listed {
+                if template.matches(&port.name) {
+                    matches.push((port.name.clone(), template.name.clone()));
+                }
+            }
+        }
+        matches
+    }
+
+    /// What `control_surface.templates` reports.
+    fn template_infos(&self) -> Vec<ids::TemplateInfo> {
+        let matches = self.template_matches();
+        self.surface
+            .templates
+            .iter()
+            .map(|found| ids::TemplateInfo {
+                name: found.name.clone(),
+                path: found
+                    .path
+                    .as_ref()
+                    .map(|path| path.to_string_lossy().into_owned()),
+                bundled: found.path.is_none(),
+                listed: found.listed,
+                errors: found
+                    .errors
+                    .iter()
+                    .map(|e| ids::TemplateErrorInfo {
+                        line: u32::try_from(e.line).unwrap_or(u32::MAX),
+                        message: e.message.clone(),
+                    })
+                    .collect(),
+                matches: found
+                    .name
+                    .as_ref()
+                    .filter(|_| found.listed)
+                    .map(|name| {
+                        matches
+                            .iter()
+                            .filter(|(_, template)| template == name)
+                            .map(|(port, _)| port.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             })
             .collect()
     }
@@ -209,6 +317,7 @@ impl Shell {
                 playing: view.playing,
                 position: view.position,
                 loop_on: view.loop_on,
+                recording: self.audio.transport_state().recording,
                 loop_start: view.loop_start,
                 loop_length: view.loop_length,
             },
@@ -383,7 +492,14 @@ impl Shell {
             ids::SURFACES => {
                 Self::args::<NoArgs>(id, args)?;
                 Ok(to_value(&ids::SurfacesResult {
-                    surfaces: Self::control_surface_choices(),
+                    surfaces: self.control_surface_choices(),
+                }))
+            }
+            ids::TEMPLATES => {
+                Self::args::<NoArgs>(id, args)?;
+                self.refresh_templates();
+                Ok(to_value(&ids::TemplatesResult {
+                    templates: self.template_infos(),
                 }))
             }
             ids::LOCK | ids::UNLOCK | ids::MOVE_RING | ids::SET_BANK | ids::BANKS => {

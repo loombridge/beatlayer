@@ -24,7 +24,7 @@ use bl_core::clock::TestClock;
 use bl_core::midi::{MidiInputEvent, MidiSource, PortId};
 use bl_midi_io::{Direction, InputLive, InputSender, MidiPorts, OutputBus};
 
-use crate::surface::{Ask, ControlSurface, Cx, Kind, Out, ReadModel, SurfaceState, TICK, kind};
+use crate::surface::{Ask, ControlSurface, Cx, Kind, Out, ReadModel, SurfaceState, TICK, kinds};
 
 /// How many rows the Control Surfaces table has (R1).
 pub const ROWS: usize = 6;
@@ -637,6 +637,9 @@ pub struct Surfaces {
     /// row is chosen again (R10).
     halted: [bool; ROWS],
     sessions: u64,
+    /// The controller templates the chooser offers after the native
+    /// surfaces (R43).
+    templates: Vec<Arc<Kind>>,
 }
 
 impl Surfaces {
@@ -655,7 +658,32 @@ impl Surfaces {
             started: Default::default(),
             halted: [false; ROWS],
             sessions: 0,
+            templates: Vec::new(),
         }
+    }
+
+    /// Sets the controller templates the chooser offers (R43). A row that
+    /// names one that is gone keeps its name and stops, as a row does for a
+    /// missing port (R44).
+    pub fn set_templates(&mut self, templates: Vec<Arc<Kind>>) {
+        self.templates = templates;
+    }
+
+    /// The surfaces the chooser offers: the native ones, then the templates
+    /// (R1).
+    #[must_use]
+    pub fn kinds(&self) -> Vec<Arc<Kind>> {
+        kinds().iter().chain(&self.templates).cloned().collect()
+    }
+
+    /// The surface with this ID, native or a template.
+    #[must_use]
+    pub fn kind(&self, id: &str) -> Option<Arc<Kind>> {
+        kinds()
+            .iter()
+            .chain(&self.templates)
+            .find(|kind| kind.id == id)
+            .cloned()
     }
 
     /// Stamps what surfaces play from `clock` instead of the system's, for
@@ -682,7 +710,7 @@ impl Surfaces {
     /// another row's, naming that row.
     pub fn set_row(&mut self, row: usize, config: RowConfig) -> Result<(), String> {
         if let Some(id) = &config.surface
-            && kind(id).is_none()
+            && self.kind(id).is_none()
         {
             return Err(format!("no control surface has the ID \"{id}\""));
         }
@@ -780,7 +808,7 @@ impl Surfaces {
     /// offers, its input is open, and so is its output where it needs one.
     fn wanted(&self, row: usize, ports: &MidiPorts) -> Option<RowConfig> {
         let config = &self.rows[row];
-        let surface = kind(config.surface.as_deref()?)?;
+        let surface = self.kind(config.surface.as_deref()?)?;
         let open = |direction, name: &Option<String>| {
             name.as_ref()
                 .and_then(|name| ports.port(direction, name))
@@ -805,7 +833,7 @@ impl Surfaces {
 
     fn start(&mut self, row: usize, config: RowConfig) {
         let (Some(surface), Some(input), Some(live)) = (
-            config.surface.as_deref().and_then(kind),
+            config.surface.as_deref().and_then(|id| self.kind(id)),
             config.input.as_deref(),
             self.held[row].live.clone(),
         ) else {
@@ -829,11 +857,10 @@ impl Surfaces {
                 bytes: bytes.to_vec(),
             });
         })));
-        let make = surface.make;
         host.ask(|ack| Event::Start {
             row,
             session,
-            surface: make(),
+            surface: surface.make(),
             link,
             ack,
         });
@@ -872,9 +899,9 @@ impl Surfaces {
             name.as_ref()
                 .map(|name| ports.port(direction, name).is_some_and(|port| port.present))
         };
-        let surface = config.surface.as_deref().map(kind);
+        let surface = config.surface.as_deref().map(|id| self.kind(id));
         let host_error = self.error_of(row);
-        let (run, error) = match (&config.surface, surface) {
+        let (run, error) = match (&config.surface, surface.clone()) {
             (None, _) => (RunState::Empty, None),
             (Some(id), Some(None)) => (
                 RunState::Stopped,
@@ -896,7 +923,7 @@ impl Surfaces {
             })
             .flatten();
         RowReport {
-            surface_name: surface.flatten().map(|kind| kind.name.to_owned()),
+            surface_name: surface.clone().flatten().map(|kind| kind.name.clone()),
             input_present: present(Direction::Input, &config.input),
             can_dump: surface.flatten().is_some_and(|kind| !kind.dump.is_empty())
                 && output_present == Some(true),
@@ -926,15 +953,15 @@ impl Surfaces {
             .config
             .surface
             .as_deref()
-            .and_then(kind)
-            .map_or(&[][..], |kind: &Kind| kind.dump);
+            .and_then(|id| self.kind(id))
+            .map_or_else(Vec::new, |kind| kind.dump.clone());
         let port = report
             .config
             .output
             .as_deref()
             .map(PortId::from_name)
             .ok_or("the row has no output")?;
-        for bytes in setup {
+        for bytes in &setup {
             self.output
                 .send_to(port, bytes, None)
                 .map_err(|e| e.to_string())?;

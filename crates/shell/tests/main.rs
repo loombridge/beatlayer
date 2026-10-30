@@ -39,6 +39,7 @@ mod clip_view_tabs;
 mod colours;
 mod comping;
 mod control_surfaces;
+mod controller_templates;
 mod dawproject;
 mod dawproject_app;
 mod dawproject_export;

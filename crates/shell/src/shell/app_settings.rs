@@ -68,8 +68,17 @@ impl Shell {
     pub fn show_settings_page(&mut self, page: SettingsPage) {
         if self.prefs.settings_page != page {
             self.prefs.settings_page = page;
+            self.templates_for_page();
             self.save_preferences();
             self.touch();
+        }
+    }
+
+    /// Reads the controller templates again when the Tempo & MIDI page is
+    /// the one showing (control surfaces R43).
+    pub(super) fn templates_for_page(&mut self) {
+        if self.prefs.settings_page == SettingsPage::TempoMidi {
+            self.refresh_templates();
         }
     }
 
@@ -301,6 +310,7 @@ impl Shell {
     /// start-up with the preference or the default place (browser R3).
     pub fn set_user_library(&mut self, path: Option<PathBuf>) {
         self.browser_view.set_user_library(path);
+        self.refresh_templates();
         self.touch();
     }
 
@@ -366,6 +376,7 @@ impl Shell {
                 }
                 let step = if id == ids::SETTINGS_NEXT_PAGE { 1 } else { -1 };
                 self.prefs.settings_page = self.prefs.settings_page.step(step);
+                self.templates_for_page();
                 self.save_preferences();
                 Ok(Value::Null)
             }
@@ -524,6 +535,7 @@ impl Shell {
                 }
                 self.prefs.browser.user_library = chosen;
                 self.browser_view.set_user_library(library.clone());
+                self.refresh_templates();
                 self.save_preferences();
                 Ok(to_value(&UserLibraryResult {
                     path: library

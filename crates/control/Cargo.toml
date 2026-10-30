@@ -17,6 +17,9 @@ bl-midi-io.workspace = true
 bl-engine.workspace = true
 # The commands a surface asks for, by ID with JSON arguments (R7).
 serde_json = "1"
+# Controller templates, which are TOML files (R39).
+serde = { version = "1.0.228", default-features = false, features = ["std", "derive"] }
+toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
 # The test surface, for the host's tests (control surfaces R16).

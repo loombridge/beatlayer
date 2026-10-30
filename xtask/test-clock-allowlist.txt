@@ -75,6 +75,7 @@ crates/shell/tests/realtime.rs # measures the callback under real-time pacing
 crates/ui/tests/accessibility/reachability/setups.rs # waits for a real plug-in's editor to load
 crates/ui/tests/agent_settings.rs # measures the Settings window's frame cost itself
 crates/ui/tests/browser.rs # waits for the browser's index thread to read the disk
+crates/ui/tests/link.rs # a second Link instance plays the peer over the loopback network, so the tests wait for discovery with a bounded number of frames
 crates/ui/tests/midi_input.rs # waits for the MIDI output thread and its indicator's timed fade
 crates/ui/tests/plugin_panel.rs # waits for a real plug-in's UI
 crates/ui/tests/transport.rs # measures the drawn playhead against a real-time engine

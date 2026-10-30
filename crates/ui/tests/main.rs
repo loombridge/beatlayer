@@ -46,6 +46,7 @@ mod keymap;
 mod keymap_sweep;
 mod launch_panel;
 mod layout;
+mod link;
 mod locator;
 mod macros;
 mod main_properties;

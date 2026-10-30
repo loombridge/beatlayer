@@ -62,6 +62,7 @@ fn link_and_start_stop_sync_are_off_at_first_and_kept_across_a_relaunch() {
     let at_first = state(&mut shell);
     assert_eq!(at_first["enabled"], false);
     assert_eq!(at_first["start_stop_sync"], false);
+    assert_eq!(at_first["show_toggle"], true, "the toggle shows at first");
     assert_eq!(at_first["peers"], 0);
     assert!(!shell.can_invoke("link.set_enabled", &json!({})) || shell.link_peers() == 0);
 
@@ -71,6 +72,9 @@ fn link_and_start_stop_sync_are_off_at_first_and_kept_across_a_relaunch() {
         .run("link.set_start_stop_sync", json!({ "on": true }))
         .unwrap();
     assert_eq!(sync["on"], true);
+    shell
+        .run("link.set_show_toggle", json!({ "on": false }))
+        .unwrap();
     let now = state(&mut shell);
     assert_eq!(now["enabled"], true);
     assert_eq!(now["start_stop_sync"], true);
@@ -80,6 +84,7 @@ fn link_and_start_stop_sync_are_off_at_first_and_kept_across_a_relaunch() {
     let kept = state(&mut shell);
     assert_eq!(kept["enabled"], true, "Link is kept on");
     assert_eq!(kept["start_stop_sync"], true, "and Start Stop Sync");
+    assert_eq!(kept["show_toggle"], false, "and Show Link Toggle");
     shell
         .run("link.set_enabled", json!({ "on": false }))
         .unwrap();

@@ -2,4 +2,7 @@
 //! binary per crate. Add a test file here as `mod`; `cargo xtask check`
 //! fails on a file in tests/ that isn't listed.
 
+mod delay_compensation;
+mod export_formats;
+mod live_offline;
 mod smoke;

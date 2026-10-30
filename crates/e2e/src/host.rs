@@ -481,6 +481,44 @@ impl Host {
         self.play_from(0, millis)
     }
 
+    /// Plays the song from `ticks` for `millis` of test time, as
+    /// [`play_from`](Self::play_from) does, and gives what the device played
+    /// from the song's first frame on, so its frame `i` is the song's frame
+    /// `i` from `ticks`, as an export's is.
+    ///
+    /// The play reaches the audio thread through the engine's compiler
+    /// thread, so the block it starts in varies from run to run; the engine
+    /// clock and the playhead it publishes say which block it was.
+    ///
+    /// # Panics
+    ///
+    /// If the transport refuses or never plays.
+    pub fn play_exactly(&mut self, ticks: i64, millis: u64) -> Capture {
+        self.locate(ticks);
+        self.settle();
+        let before = self.shell_mut().audio_mut().transport_state().clock;
+        self.recorder.start();
+        self.tool("transport", json!({ "action": "play" }))
+            .unwrap_or_else(|error| panic!("play: {error}"));
+        self.wait_until("the transport to play", Self::is_playing);
+        let state = self.shell_mut().audio_mut().transport_state();
+        let rate = bl_core::time::SampleRate::new(self.shell().engine_rate())
+            .expect("the engine has a rate");
+        let tempo = self.document().tempo_map();
+        let played = tempo.ticks_to_frames(state.position, rate).get()
+            - tempo
+                .ticks_to_frames(bl_core::time::Ticks(ticks), rate)
+                .get();
+        let started = state.clock - before - u64::try_from(played).unwrap_or_default();
+        self.advance_ms(millis);
+        let capture = self.recorder.stop();
+        self.stop();
+        capture.slice(
+            usize::try_from(started).unwrap_or_default(),
+            capture.frames(),
+        )
+    }
+
     /// Exports `length` ticks of the song from `start` through the agent
     /// API's `export.audio`, as `spec` says, into the host's folder, and
     /// decodes the file.

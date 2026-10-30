@@ -494,8 +494,59 @@ impl Shell {
         })
     }
 
+    /// The tracks a ring runs along, in order (R28).
+    pub(super) fn ring_columns(&self) -> Vec<TrackId> {
+        ring_tracks(self)
+    }
+
     /// What each row holds, for the surfaces' read model (R6).
-    pub(super) fn row_views(&self) -> Vec<RowView> {
+    pub(super) fn row_views(&mut self) -> Vec<RowView> {
+        let watch: Vec<Vec<Role>> = self
+            .midi
+            .surface_rows()
+            .into_iter()
+            .map(|report| report.state.map(|s| s.watch).unwrap_or_default())
+            .collect();
+        let mut views = self.row_views_without_positions();
+        for (row, view) in views.iter_mut().enumerate() {
+            view.positions = self.positions(row, &watch[row]);
+        }
+        views
+    }
+
+    /// Where each role a surface watches stands on its travel, from 0 to 1,
+    /// as the faders on its grid show it (supported controllers R14).
+    fn positions(&mut self, row: usize, watch: &[Role]) -> Vec<(Role, f64)> {
+        let mut found = Vec::new();
+        for &role in watch {
+            let Some(target) = self.target_of(row, role) else {
+                continue;
+            };
+            let (kind, range) = match target.natural_kind() {
+                Some(kind) => (kind, target.natural_range()),
+                None => match self.param_control(&target) {
+                    Some(found) => found,
+                    None => continue,
+                },
+            };
+            let source = RemoteSource::Cc {
+                channel: 1,
+                controller: 0,
+            };
+            let Ok(mapping) = RemoteMapping::new(source, target, kind, range, None) else {
+                continue;
+            };
+            let (min, max) = self.law_range(&mapping);
+            if let Some(at) = self.value_of(&mapping)
+                && (max - min).abs() > f64::EPSILON
+            {
+                found.push((role, ((at - min) / (max - min)).clamp(0.0, 1.0)));
+            }
+        }
+        found
+    }
+
+    fn row_views_without_positions(&self) -> Vec<RowView> {
         let kinds = self.running_kinds();
         let doc = self.editor.document();
         (0..ROWS)
@@ -539,7 +590,11 @@ impl Shell {
                         params,
                     })
                 });
-                RowView { ring, focus }
+                RowView {
+                    ring,
+                    focus,
+                    positions: Vec::new(),
+                }
             })
             .collect()
     }

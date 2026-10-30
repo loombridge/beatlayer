@@ -33,6 +33,7 @@ pub const KIND: Kind = Kind {
         scenes: 2,
     }),
     dump: &[SETUP],
+    recognise: None,
     make,
 };
 
@@ -49,6 +50,7 @@ pub const INSTANT: Kind = Kind {
         scenes: 2,
     }),
     dump: &[],
+    recognise: None,
     make: make_instant,
 };
 
@@ -367,6 +369,7 @@ impl ControlSurface for TestSurface {
         SurfaceState {
             ring: KIND.ring,
             mode: Some("Test".to_owned()),
+            watch: Vec::new(),
         }
     }
 

@@ -22,6 +22,7 @@ use bl_model::{
     ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, TakeoverMode,
 };
 
+pub mod grid;
 mod host;
 mod surface;
 #[cfg(feature = "testing")]
@@ -29,8 +30,8 @@ pub mod testing;
 
 pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, Traffic};
 pub use surface::{
-    Ask, Control, ControlSurface, Cx, Focus, Gesture, Kind, Lock, Moves, Out, ParamView, ReadModel,
-    Request, Ring, RingStep, RingView, Role, RowView, Selection, SurfaceState, TICK, Transport,
+    Ask, Control, ControlSurface, Cx, DrumView, Focus, Gesture, Kind, Lock, Moves, Out, ParamView,
+    ReadModel, Recognise, Request, Ring, RingStep, RingView, Role, RowView, Selection, SurfaceState, TICK, Transport,
     kind, kinds,
 };
 

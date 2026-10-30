@@ -70,6 +70,7 @@ mod instant_mappings;
 mod interface_zoom;
 mod keymap;
 mod kitbag;
+mod launchpads;
 mod linked_tracks;
 mod locator;
 mod macros;

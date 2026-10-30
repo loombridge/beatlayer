@@ -154,6 +154,17 @@ impl MidiHost {
         self.surfaces.reconcile(&mut self.ports);
     }
 
+    /// Lets the surfaces follow the rows and the ports again without listing
+    /// the ports, so a controller's answer to the device inquiry fills its
+    /// row at once (supported controllers R2). Returns whether a row was
+    /// filled since the last call.
+    pub fn follow_surfaces(&mut self) -> bool {
+        if self.surfaces.probing() {
+            self.surfaces.reconcile(&mut self.ports);
+        }
+        self.surfaces.filled()
+    }
+
     /// What the preferences keep.
     #[must_use]
     pub fn prefs(&self) -> MidiPrefs {

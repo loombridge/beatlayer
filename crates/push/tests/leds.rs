@@ -260,3 +260,16 @@ fn changing_the_pad_values_sends_the_curve_again() {
     assert_eq!(rig.sim.device.curve, setup.curve());
     assert_ne!(rig.sim.device.curve, bl_push::curve::curve(5, 5, 5));
 }
+
+// Spec: push-2 R15. A host that stalled for an hour starts the clock afresh,
+// rather than sending every tick it missed.
+#[test]
+fn a_long_stall_does_not_flood_the_port_with_clock() {
+    let mut rig = Rig::new();
+    rig.start();
+    rig.advance(20);
+    let before = rig.sim.stamped().len();
+    rig.advance(3_600_000);
+    let sent = rig.sim.stamped().len() - before;
+    assert!(sent < 10, "{sent} ticks after an hour");
+}

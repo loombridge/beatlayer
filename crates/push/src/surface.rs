@@ -71,6 +71,14 @@ enum Phase {
     Failed,
 }
 
+/// Which modes' contents an event goes to.
+#[derive(Clone, Copy)]
+enum Who {
+    Pads,
+    Display,
+    Both,
+}
+
 /// The colour picker (R27).
 struct Picker {
     target: Target,
@@ -361,7 +369,12 @@ impl Push {
 
     /// Runs `f` on the active pad mode's content and then the display
     /// mode's, with a context.
-    fn with_contents(&mut self, cx: &mut Cx, mut f: impl FnMut(&mut dyn Content, &mut Ctx<'_>)) {
+    fn with_contents(
+        &mut self,
+        cx: &mut Cx,
+        who: Who,
+        mut f: impl FnMut(&mut dyn Content, &mut Ctx<'_>),
+    ) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
         let mut actions = std::mem::take(&mut self.actions);
@@ -371,7 +384,12 @@ impl Push {
                 PadMode::Session => self.contents.pads[1].as_mut(),
             };
             let display = self.contents.display[self.display_mode.index()].as_mut();
-            for content in [pad, display] {
+            let chosen: Vec<&mut dyn Content> = match who {
+                Who::Pads => vec![pad],
+                Who::Display => vec![display],
+                Who::Both => vec![pad, display],
+            };
+            for content in chosen {
                 let mut ctx = Ctx {
                     cx,
                     model: self.model.as_ref(),
@@ -381,51 +399,6 @@ impl Push {
                 };
                 f(content, &mut ctx);
             }
-        }
-        self.actions = actions;
-        self.apply(cx.now());
-    }
-
-    fn with_pad_content(&mut self, cx: &mut Cx, f: impl FnOnce(&mut dyn Content, &mut Ctx<'_>)) {
-        let modifiers = self.buttons.modifiers();
-        let setup = self.shared.setup();
-        let mut actions = std::mem::take(&mut self.actions);
-        {
-            let content = match self.pad_mode {
-                PadMode::Note => self.contents.pads[0].as_mut(),
-                PadMode::Session => self.contents.pads[1].as_mut(),
-            };
-            let mut ctx = Ctx {
-                cx,
-                model: self.model.as_ref(),
-                modifiers: &modifiers,
-                setup,
-                actions: &mut actions,
-            };
-            f(content, &mut ctx);
-        }
-        self.actions = actions;
-        self.apply(cx.now());
-    }
-
-    fn with_display_content(
-        &mut self,
-        cx: &mut Cx,
-        f: impl FnOnce(&mut dyn Content, &mut Ctx<'_>),
-    ) {
-        let modifiers = self.buttons.modifiers();
-        let setup = self.shared.setup();
-        let mut actions = std::mem::take(&mut self.actions);
-        {
-            let content = self.contents.display[self.display_mode.index()].as_mut();
-            let mut ctx = Ctx {
-                cx,
-                model: self.model.as_ref(),
-                modifiers: &modifiers,
-                setup,
-                actions: &mut actions,
-            };
-            f(content, &mut ctx);
         }
         self.actions = actions;
         self.apply(cx.now());
@@ -515,7 +488,7 @@ impl Push {
             return;
         }
         if matches!(events.first(), Some(buttons::Event::Unlock(_))) {
-            self.with_contents(cx, |content, ctx| {
+            self.with_contents(cx, Who::Both, |content, ctx| {
                 content.button(button, Gesture::Unlock, ctx)
             });
             return;
@@ -542,7 +515,7 @@ impl Push {
             }
             return;
         }
-        self.with_contents(cx, |content, ctx| {
+        self.with_contents(cx, Who::Both, |content, ctx| {
             content.button(button, Gesture::Press, ctx)
         });
     }
@@ -586,7 +559,7 @@ impl Push {
             } => self.button_up(button, tap, held, used, cx),
             buttons::Event::Hold(button) => self.hold(button, cx),
             buttons::Event::Lock(button) => {
-                self.with_contents(cx, |content, ctx| {
+                self.with_contents(cx, Who::Both, |content, ctx| {
                     content.button(button, Gesture::Lock, ctx)
                 });
             }
@@ -610,7 +583,7 @@ impl Push {
             }
         }
         if !self.is_core(button) {
-            self.with_contents(cx, |content, ctx| {
+            self.with_contents(cx, Who::Both, |content, ctx| {
                 content.button(button, Gesture::Hold, ctx)
             });
         }
@@ -639,11 +612,13 @@ impl Push {
             }
         }
         if !self.is_core(button) {
-            self.with_contents(cx, |content, ctx| {
+            self.with_contents(cx, Who::Both, |content, ctx| {
                 content.button(button, Gesture::Release, ctx)
             });
             if tap {
-                self.with_contents(cx, |content, ctx| content.button(button, Gesture::Tap, ctx));
+                self.with_contents(cx, Who::Both, |content, ctx| {
+                    content.button(button, Gesture::Tap, ctx)
+                });
             }
             return;
         }
@@ -743,7 +718,7 @@ impl Push {
         }
         self.last_pad = Pad { row, column };
         let pad = self.last_pad;
-        self.with_pad_content(cx, |content, ctx| {
+        self.with_contents(cx, Who::Pads, |content, ctx| {
             content.pad(pad, PadEvent::On(velocity), ctx)
         });
     }
@@ -756,14 +731,14 @@ impl Push {
         {
             return;
         }
-        self.with_pad_content(cx, |content, ctx| content.pad(pad, event, ctx));
+        self.with_contents(cx, Who::Pads, |content, ctx| content.pad(pad, event, ctx));
     }
 
     fn strip_event(&mut self, event: StripEvent, cx: &mut Cx) {
         if matches!(event, StripEvent::Touch) {
             self.buttons.use_modifiers(0);
         }
-        self.with_pad_content(cx, |content, ctx| content.strip(event, ctx));
+        self.with_contents(cx, Who::Pads, |content, ctx| content.strip(event, ctx));
     }
 
     fn touch(&mut self, index: u8, touched: bool, cx: &mut Cx) {
@@ -796,7 +771,9 @@ impl Push {
         }
         if index < 8 && self.menu != Some(Menu::Setup) {
             let turn = if touched { Turn::Touch } else { Turn::Release };
-            self.with_display_content(cx, |content, ctx| content.encoder(index, turn, ctx));
+            self.with_contents(cx, Who::Display, |content, ctx| {
+                content.encoder(index, turn, ctx)
+            });
         }
     }
 
@@ -872,7 +849,7 @@ impl Push {
             }
             column if self.menu == Some(Menu::Setup) => self.setup_turn(column, steps, shift),
             column => {
-                self.with_display_content(cx, |content, ctx| {
+                self.with_contents(cx, Who::Display, |content, ctx| {
                     content.encoder(column, Turn::Steps(steps), ctx)
                 });
             }
@@ -931,7 +908,9 @@ impl Push {
     /// A press and release of `button` that wasn't on Push 2 (R29).
     fn synthetic(&mut self, button: u8, cx: &mut Cx) {
         for gesture in [Gesture::Press, Gesture::Release, Gesture::Tap] {
-            self.with_contents(cx, |content, ctx| content.button(button, gesture, ctx));
+            self.with_contents(cx, Who::Both, |content, ctx| {
+                content.button(button, gesture, ctx)
+            });
         }
     }
 
@@ -1063,7 +1042,12 @@ impl Push {
         }
         self.playing = model.transport.playing;
         let interval = Duration::from_secs_f64(60.0 / (model.tempo.get() * 24.0));
-        let mut next = self.clock.unwrap_or(now);
+        // A host that was stalled for a long time starts the clock afresh,
+        // rather than sending every tick it missed.
+        let mut next = self
+            .clock
+            .filter(|&at| at + Duration::from_secs(1) > now)
+            .unwrap_or(now);
         while next < now + CLOCK_AHEAD {
             cx.send_at(next.max(now), vec![0xF8]);
             next += interval;

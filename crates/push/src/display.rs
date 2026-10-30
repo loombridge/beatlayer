@@ -268,10 +268,10 @@ impl Display {
 
 impl Drop for Display {
     fn drop(&mut self) {
+        // The thread ends on its own after the transfer it may be in; the
+        // host's call to stop the surface doesn't wait for it.
         self.shared.stop.store(true, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        drop(self.thread.take());
     }
 }
 

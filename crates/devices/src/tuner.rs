@@ -45,8 +45,9 @@ pub const VIEWS: [&str; 2] = ["Classic", "Histogram"];
 const WINDOW_LEN: usize = 2048;
 /// How many new samples arrive before the pitch is measured again: one window,
 /// about 43 ms at 48 kHz. The difference function costs more than a block's
-/// worth of time at the lowest pitches, and a tuner's needle doesn't need to
-/// move faster than this. (Beatlayer's own response time, the tuner spec.)
+/// worth of time at the lowest pitches, so each measurement is spread over the
+/// blocks of the next interval, and a tuner's needle doesn't need to move
+/// faster than this. (Beatlayer's own response time, the tuner spec.)
 const ANALYSIS_INTERVAL: usize = 2048;
 /// Number of history samples for Histogram view.
 pub const HIST_LEN: usize = 32;
@@ -118,6 +119,13 @@ pub struct Tuner {
     ring_buffer: Vec<f32>,
     ring_pos: usize,
     since_analysis: usize,
+    /// The ring in chronological order, taken when a measurement starts, so
+    /// the difference function reads it without wrapping.
+    scratch: Vec<f32>,
+    analysing: bool,
+    next_tau: usize,
+    pending_reference: f64,
+    analysis_steps: usize,
     diff_buffer: Vec<f32>,
     cmnd_buffer: Vec<f32>,
     detected_pitch: Option<f64>,
@@ -151,6 +159,19 @@ const BOTH_NAMES: [&str; 12] = [
     "C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B",
 ];
 
+/// The sum of squared differences of two equal windows, in eight lanes so it
+/// vectorises.
+fn squared_difference(a: &[f32], b: &[f32]) -> f32 {
+    let mut lanes = [0.0f32; 8];
+    for (a, b) in a.as_chunks::<8>().0.iter().zip(b.as_chunks::<8>().0) {
+        for k in 0..8 {
+            let d = a[k] - b[k];
+            lanes[k] += d * d;
+        }
+    }
+    lanes.iter().sum()
+}
+
 impl Tuner {
     /// Constructs a new Tuner processor.
     #[must_use]
@@ -166,6 +187,11 @@ impl Tuner {
             ring_buffer: vec![0.0f32; ring_len],
             ring_pos: 0,
             since_analysis: 0,
+            scratch: vec![0.0f32; ring_len],
+            analysing: false,
+            next_tau: 0,
+            pending_reference: 440.0,
+            analysis_steps: 0,
             diff_buffer: vec![0.0f32; max_tau + 4],
             cmnd_buffer: vec![1.0f32; max_tau + 4],
             detected_pitch: None,
@@ -185,6 +211,13 @@ impl Tuner {
     #[must_use]
     pub fn detected_pitch(&self) -> Option<f64> {
         self.detected_pitch
+    }
+
+    /// Difference-function steps taken since the last `process` began.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn last_analysis_steps(&self) -> usize {
+        self.analysis_steps
     }
 
     /// Distance in cents from the nearest semitone (-50.0 to +50.0).
@@ -225,8 +258,9 @@ impl Tuner {
 
     /// Hears `samples` (mono), measuring the pitch once per analysis
     /// interval as the device does. Returns `Some` when a measurement was
-    /// made in this call, holding the pitch it found, or none if no tone was
-    /// heard; with more than one interval in `samples`, the last. For the CV
+    /// finished in this call, holding the pitch it found, or none if no tone
+    /// was heard; with more than one in `samples`, the last. A measurement
+    /// finishes one interval after it starts. For the CV
     /// Instrument's calibration, which listens with the same detector
     /// (`docs/specs/cv-tools.md`, R14).
     pub fn listen(&mut self, samples: &[f32]) -> Option<Option<f64>> {
@@ -234,49 +268,91 @@ impl Tuner {
         for &sample in samples {
             self.ring_buffer[self.ring_pos] = sample;
             self.ring_pos = (self.ring_pos + 1) % self.ring_len;
-            self.since_analysis += 1;
-            if self.since_analysis >= ANALYSIS_INTERVAL {
-                self.since_analysis = 0;
-                self.detect_pitch(440.0);
+            if self.advance(1, 440.0) {
                 heard = Some(self.detected_pitch);
             }
         }
         heard
     }
 
-    fn detect_pitch(&mut self, reference: f64) {
-        let min_tau = (self.rate / 2150.0).floor() as usize;
-        let max_tau = (self.rate / 39.0).ceil() as usize;
-        let w = WINDOW_LEN;
+    /// The shortest and longest lag, in samples, the pitch is read from.
+    fn taus(&self) -> (usize, usize) {
+        (
+            (self.rate / 2150.0).floor() as usize,
+            (self.rate / 39.0).ceil() as usize,
+        )
+    }
 
-        // Check signal energy
-        let mut energy = 0.0f32;
-        for i in 0..w {
-            let idx = (self.ring_pos + self.ring_len - w + i) % self.ring_len;
-            let s = self.ring_buffer[idx];
-            energy += s * s;
+    /// Counts `frames` more samples heard: starts a measurement each interval
+    /// and does this call's share of the one under way. Returns whether a
+    /// measurement finished.
+    fn advance(&mut self, frames: usize, reference: f64) -> bool {
+        let mut finished = false;
+        self.since_analysis += frames;
+        if self.since_analysis >= ANALYSIS_INTERVAL {
+            self.since_analysis = 0;
+            // shortcut: block sizes that vary can leave the last measurement
+            // short of its share; it is finished here, in one go, then.
+            finished = self.analyse(ANALYSIS_INTERVAL);
+            finished |= !self.begin_analysis(reference);
         }
-        let rms = (energy / w as f32).sqrt();
+        self.analyse(frames) || finished
+    }
+
+    /// Snapshots the last window and starts measuring it. Returns false, with
+    /// the reading cleared, if it is too quiet to hold a tone.
+    fn begin_analysis(&mut self, reference: f64) -> bool {
+        let (min_tau, _) = self.taus();
+        let (oldest, newest) = self.scratch.split_at_mut(self.ring_len - self.ring_pos);
+        oldest.copy_from_slice(&self.ring_buffer[self.ring_pos..]);
+        newest.copy_from_slice(&self.ring_buffer[..self.ring_pos]);
+
+        let window = &self.scratch[self.ring_len - WINDOW_LEN..];
+        let rms = (window.iter().map(|s| s * s).sum::<f32>() / WINDOW_LEN as f32).sqrt();
         if rms < 0.002 {
+            self.analysing = false;
             self.detected_pitch = None;
             self.cents = None;
             self.nearest_note_midi = None;
             self.update_display_data(None);
-            return;
+            return false;
         }
+        self.analysing = true;
+        self.next_tau = min_tau.saturating_sub(1);
+        self.pending_reference = reference;
+        true
+    }
 
-        // Compute difference function d(tau)
-        let ring = self.ring_len;
-        for tau in (min_tau.saturating_sub(1))..=(max_tau + 1).min(self.diff_buffer.len() - 1) {
-            let mut diff_sum = 0.0f32;
-            for j in 0..w {
-                let back = (self.ring_pos + ring - w - tau + j) % ring;
-                let now = (self.ring_pos + ring - w + j) % ring;
-                let d = self.ring_buffer[back] - self.ring_buffer[now];
-                diff_sum += d * d;
-            }
-            self.diff_buffer[tau] = diff_sum;
+    /// Computes this block's share of the difference function, a block's
+    /// `frames` of an interval's lags, and finishes the measurement after its
+    /// last lag. Returns whether it finished.
+    fn analyse(&mut self, frames: usize) -> bool {
+        if !self.analysing {
+            return false;
         }
+        let (min_tau, max_tau) = self.taus();
+        let first = min_tau.saturating_sub(1);
+        let last = (max_tau + 1).min(self.diff_buffer.len() - 1);
+        let quota = ((last + 1 - first) * frames).div_ceil(ANALYSIS_INTERVAL);
+        let stop = (self.next_tau + quota).min(last + 1);
+        let len = self.scratch.len();
+        let now = &self.scratch[len - WINDOW_LEN..];
+        for tau in self.next_tau..stop {
+            let back = &self.scratch[len - WINDOW_LEN - tau..len - tau];
+            self.diff_buffer[tau] = squared_difference(back, now);
+        }
+        self.analysis_steps += (stop - self.next_tau) * WINDOW_LEN;
+        self.next_tau = stop;
+        if stop <= last {
+            return false;
+        }
+        self.analysing = false;
+        self.finish_analysis(self.pending_reference);
+        true
+    }
+
+    fn finish_analysis(&mut self, reference: f64) {
+        let (min_tau, max_tau) = self.taus();
 
         // Cumulative mean normalized difference
         self.cmnd_buffer[0] = 1.0;
@@ -433,12 +509,10 @@ impl NativeDevice for Tuner {
 
         // Spec: tuner R2. The difference function costs more than a block at
         // the lowest pitches, so the pitch is measured once per analysis
-        // interval, not once per block; audio is never delayed by it.
-        self.since_analysis += frames;
-        if self.since_analysis >= ANALYSIS_INTERVAL {
-            self.since_analysis = 0;
-            self.detect_pitch(reference);
-        }
+        // interval, and each block does only its share of the work, in
+        // proportion to its size; audio is never delayed by it.
+        self.analysis_steps = 0;
+        self.advance(frames, reference);
         // Note: audio is unmodified! Bit-identical pass-through.
     }
 

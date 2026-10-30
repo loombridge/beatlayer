@@ -91,6 +91,23 @@ impl Rig {
             .volume
     }
 
+    /// Where the track's fader sits on its travel, from 0 to 1.
+    fn position(&self, track: TrackId) -> f64 {
+        bl_model::fader::fader_position(self.volume(track))
+    }
+
+    /// A move of the mouse: the fader goes to `position`.
+    fn hand(&mut self, track: TrackId, position: f64) {
+        self.run(
+            "mixer.set_volume",
+            json!({ "track": track, "volume": bl_model::fader::fader_gain(position) }),
+        );
+    }
+
+    fn takeover(&mut self, mode: &str) {
+        self.run("settings.set_takeover_mode", json!({ "mode": mode }));
+    }
+
     fn steps(&self) -> usize {
         self.shell.editor().undo_history().count()
     }
@@ -429,4 +446,185 @@ fn the_mapping_commands_read_back_through_remote_mappings() {
             )
             .is_err()
     );
+}
+
+fn near(value: f64, want: f64) {
+    assert!((value - want).abs() < 1e-6, "{value} vs {want}");
+}
+
+// Spec: remote-mapping R28, R29. With None a fader that the mouse moved jumps
+// to the controller on its next message.
+#[test]
+fn takeover_none_jumps_a_fader_the_mouse_moved() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", false);
+    let track = rig.track("audio");
+    rig.map(cc(20), volume_of(track));
+    rig.send("Pads", &[0xB0, 20, 100]);
+    near(rig.position(track), 100.0 / 127.0);
+    rig.hand(track, 0.2);
+    rig.send("Pads", &[0xB0, 20, 101]);
+    near(rig.position(track), 101.0 / 127.0);
+}
+
+// Spec: remote-mapping R29, R30. Pick-Up waits until the controller crosses
+// the fader, follows from then, and waits again after the mouse moves it.
+#[test]
+fn pick_up_waits_for_the_controller_to_cross_the_fader_and_waits_again_after_a_mouse_move() {
+    let mut rig = Rig::new();
+    rig.takeover("pick_up");
+    rig.remote_port("Pads", false);
+    let track = rig.track("audio");
+    rig.map(cc(20), volume_of(track));
+    rig.hand(track, 0.5);
+    for value in [10, 40, 63] {
+        rig.send("Pads", &[0xB0, 20, value]);
+        near(rig.position(track), 0.5);
+    }
+    rig.send("Pads", &[0xB0, 20, 64]);
+    near(rig.position(track), 64.0 / 127.0);
+    rig.send("Pads", &[0xB0, 20, 90]);
+    near(rig.position(track), 90.0 / 127.0);
+
+    rig.hand(track, 0.1);
+    for value in [100, 20] {
+        rig.send("Pads", &[0xB0, 20, value]);
+        near(rig.position(track), 0.1);
+    }
+    rig.send("Pads", &[0xB0, 20, 5]);
+    near(rig.position(track), 5.0 / 127.0);
+}
+
+// Spec: remote-mapping R29 to R31. Value Scaling brings the fader and the
+// controller to the top together.
+#[test]
+fn value_scaling_brings_the_fader_and_the_controller_to_the_top_together() {
+    let mut rig = Rig::new();
+    rig.takeover("value_scaling");
+    rig.remote_port("Pads", false);
+    let track = rig.track("audio");
+    rig.map(cc(20), volume_of(track));
+    rig.hand(track, 0.8);
+    rig.send("Pads", &[0xB0, 20, 20]);
+    near(rig.position(track), 0.8);
+    let (c, c2) = (20.0 / 127.0, 40.0 / 127.0);
+    rig.send("Pads", &[0xB0, 20, 40]);
+    near(
+        rig.position(track),
+        0.8 + (c2 - c) * (1.0 - 0.8) / (1.0 - c),
+    );
+    let mut last = rig.position(track);
+    for value in [60, 80, 100] {
+        rig.send("Pads", &[0xB0, 20, value]);
+        assert!(rig.position(track) > last, "the fader climbs with it");
+        last = rig.position(track);
+    }
+    // Within one step of each other, the fader follows as None does.
+    rig.send("Pads", &[0xB0, 20, 120]);
+    near(rig.position(track), 120.0 / 127.0);
+    rig.send("Pads", &[0xB0, 20, 127]);
+    near(rig.position(track), 1.0);
+    // Together, it follows as None does.
+    rig.send("Pads", &[0xB0, 20, 126]);
+    near(rig.position(track), 126.0 / 127.0);
+}
+
+// Spec: remote-mapping R23 to R26, R28. A relative encoder moves a fader the
+// same in every takeover mode: by its size when accelerated, by one step when
+// linear.
+#[test]
+fn a_relative_encoder_moves_a_fader_in_every_takeover_mode() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", false);
+    let track = rig.track("audio");
+    rig.map(cc(21), volume_of(track));
+    for (mode, accelerated, up, step) in [
+        ("none", true, 67u8, 3.0),
+        ("pick_up", true, 67, 3.0),
+        ("value_scaling", true, 67, 3.0),
+        ("none", false, 67, 1.0),
+        ("pick_up", false, 67, 1.0),
+        ("value_scaling", false, 67, 1.0),
+    ] {
+        rig.takeover(mode);
+        rig.run(
+            "remote.set_mode",
+            json!({ "source": cc(21), "mode": {
+                "type": "relative", "encoding": "bin_offset", "accelerated": accelerated } }),
+        );
+        rig.hand(track, 0.5);
+        rig.send("Pads", &[0xB0, 21, up]);
+        near(rig.position(track), 0.5 + step / 127.0);
+        rig.send("Pads", &[0xB0, 21, 128 - up]);
+        near(rig.position(track), 0.5);
+    }
+    // The ends hold.
+    rig.hand(track, 1.0);
+    rig.send("Pads", &[0xB0, 21, 127]);
+    near(rig.position(track), 1.0);
+}
+
+// Spec: remote-mapping R16, R37. A mapped note launches its clip with its own
+// velocity; a velocity outside 1 to 127 is refused.
+#[test]
+fn a_mapped_note_launches_at_its_velocity_and_session_launch_checks_it() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", false);
+    let track = rig.track("midi");
+    let scene = rig.scene();
+    rig.run(
+        "session.insert_empty_midi_clip",
+        json!({ "track": track, "scene": scene }),
+    );
+    rig.map(
+        note(36),
+        json!({ "type": "slot", "track": track, "scene": scene }),
+    );
+    rig.send("Pads", &[0x90, 36, 1]);
+    let playing = |shell: &Shell| {
+        shell
+            .session_states()
+            .iter()
+            .any(|s| s.track == track && s.state == bl_engine::SlotState::Playing)
+    };
+    testing::wait_for(&rig.control, &mut rig.shell, "the clip to play", |shell| {
+        playing(shell)
+    });
+    assert_eq!(rig.shell.remote_counts(), (1, 0));
+    for velocity in [0, 128] {
+        assert!(
+            rig.shell
+                .run(
+                    "session.launch",
+                    json!({ "track": track, "scene": scene, "velocity": velocity })
+                )
+                .is_err()
+        );
+    }
+    rig.run(
+        "session.launch",
+        json!({ "track": track, "scene": scene, "velocity": 64 }),
+    );
+}
+
+// Spec: remote-mapping R29. A mapping that is changed forgets where its
+// controller was.
+#[test]
+fn changing_a_mapping_starts_takeover_afresh() {
+    let mut rig = Rig::new();
+    rig.takeover("pick_up");
+    rig.remote_port("Pads", false);
+    let track = rig.track("audio");
+    rig.map(cc(20), volume_of(track));
+    rig.hand(track, 0.5);
+    rig.send("Pads", &[0xB0, 20, 63]);
+    rig.send("Pads", &[0xB0, 20, 64]);
+    near(rig.position(track), 64.0 / 127.0);
+    rig.run(
+        "remote.set_range",
+        json!({ "source": cc(20), "min": 0.0, "max": 1.0 }),
+    );
+    rig.hand(track, 0.9);
+    rig.send("Pads", &[0xB0, 20, 100]);
+    near(rig.position(track), 0.9);
 }

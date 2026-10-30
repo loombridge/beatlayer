@@ -191,6 +191,7 @@ pub use rack::{
 };
 pub use remote::{
     ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
+    TakeoverMode,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};

@@ -241,6 +241,35 @@ pub enum RemoteMode {
     },
 }
 
+/// What an absolute controller does when it and its control disagree (R28):
+/// the preference Takeover Mode. It isn't saved with a set.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TakeoverMode {
+    /// The control jumps to the controller's value at once.
+    #[default]
+    None,
+    /// The control waits until the controller reaches its value, then follows.
+    PickUp,
+    /// The control and the controller converge as the controller moves.
+    ValueScaling,
+}
+
+impl TakeoverMode {
+    /// Every mode, in the order the chooser lists them.
+    pub const ALL: [Self; 3] = [Self::None, Self::PickUp, Self::ValueScaling];
+
+    /// The mode's name in the chooser.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::PickUp => "Pick-Up",
+            Self::ValueScaling => "Value Scaling",
+        }
+    }
+}
+
 /// The control a mapping drives, named by the IDs of what it belongs to
 /// (R3). The kinds the window's other controls take are added with the map
 /// modes that show them.

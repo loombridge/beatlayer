@@ -19,7 +19,7 @@ use bl_control::{
 use bl_shell_spec::control_surface as ids;
 use serde_json::Value;
 
-use super::{MIDI_LAMP, Shell, ShellError, to_value};
+use super::{MIDI_LAMP, MainView, Shell, ShellError, to_value};
 
 /// How long a control with no release may rest and its gesture stay one
 /// undo step (control surfaces R7).
@@ -364,6 +364,7 @@ impl Shell {
             }
         };
         let view = self.arrangement.transport();
+        let engine = self.audio.transport_state();
         let session = self.session.state();
         let rows = self.row_views();
         let browse = self.surface_browse();
@@ -376,8 +377,9 @@ impl Shell {
             transport: Transport {
                 playing: view.playing,
                 position: view.position,
+                insert_marker: engine.insert_marker,
                 loop_on: view.loop_on,
-                recording: self.audio.transport_state().recording,
+                recording: engine.recording,
                 loop_start: view.loop_start,
                 loop_length: view.loop_length,
                 counting_in: self.audio.transport_state().counting_in,
@@ -400,6 +402,7 @@ impl Shell {
                 doc.device_place(device)
                     .is_some_and(|place| self.arrangement.selected_tracks().contains(&place.track))
             }),
+            session_view: self.main_view == MainView::Session,
         }
     }
 

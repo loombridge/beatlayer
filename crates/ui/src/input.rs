@@ -3,7 +3,7 @@
 
 use bl_commands::Context;
 use bl_shell::midi_io_commands as midi_ids;
-use bl_shell::remote_commands as remote_ids;
+use bl_shell::remote_commands::{self as remote_ids, MapMode};
 use bl_shell::{Invocation, Shell};
 use egui::{Event, Key, RawInput};
 use serde_json::{Value, json};
@@ -155,6 +155,43 @@ impl KeyDispatcher {
                     invocations.push(note(false));
                 }
                 return false;
+            }
+            // Spec: map-modes R4, R7, R9. In a map mode Esc clears the
+            // selection, Delete and Backspace delete its mapping, and in Key
+            // Map Mode the next key without Cmd, Ctrl or Option maps to it,
+            // whether or not the computer MIDI keyboard is on.
+            let map_mode = shell.map_mode();
+            if map_mode != MapMode::Off
+                && *pressed
+                && !*repeat
+                && !text_focused
+                && !(modifiers.alt || modifiers.ctrl || modifiers.command)
+            {
+                let selected = shell.map_selection();
+                match (key, selected) {
+                    (Key::Escape, Some(_)) => {
+                        invocations.push(Invocation::new(remote_ids::SELECT, json!({})));
+                        return false;
+                    }
+                    (Key::Delete | Key::Backspace, selected) => {
+                        if let Some(target) = selected {
+                            let via = if map_mode == MapMode::Key { "key" } else { "midi" };
+                            invocations.push(Invocation::new(
+                                remote_ids::UNMAP,
+                                json!({ "target": target, "via": via }),
+                            ));
+                        }
+                        return false;
+                    }
+                    (_, Some(target)) if map_mode == MapMode::Key && *key != Key::Escape => {
+                        invocations.push(Invocation::new(
+                            remote_ids::MAP,
+                            json!({ "source": { "type": "key", "key": key.name() }, "target": target }),
+                        ));
+                        return false;
+                    }
+                    _ => {}
+                }
             }
             // While the keyboard is on its letters play, unless Shift (or
             // Cmd, Ctrl, or Option) is down: then they run their shortcuts.

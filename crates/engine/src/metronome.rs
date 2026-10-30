@@ -10,6 +10,8 @@ use std::f32::consts::PI;
 use bl_core::time::{Frames, SampleRate, TempoMap, Ticks, TimeSignatureMap};
 use bl_model::{MetronomeSettings, MetronomeSound};
 
+use crate::node::TransportInfo;
+
 /// How many clicks can sound at once. Beats are far enough apart that even
 /// the fastest rhythm never overlaps more than a couple.
 const MAX_ACTIVE_CLICKS: usize = 4;
@@ -260,7 +262,7 @@ impl MetronomeEngine {
     pub fn render_active(
         &mut self,
         mut block: Block<'_>,
-        pos_frames: Frames,
+        transport: TransportInfo,
         sample_rate: SampleRate,
         tempo_map: &TempoMap,
         time_signatures: &TimeSignatureMap,
@@ -269,11 +271,15 @@ impl MetronomeEngine {
             return;
         }
         let rate_f32 = sample_rate.as_f64() as f32;
+        let pos_frames = transport.position;
         let start_f = pos_frames.get();
-        let end_f = start_f + block.length as i64;
+        // Spec: transport R24. The part covers `speed` song frames a frame,
+        // and a click lands on the frame its song frame is nearest.
+        let end_f = transport.window_end(block.length);
 
-        // Up to 8 clicks can start within one block.
-        let mut triggers = [(0usize, false); 8];
+        // Up to 64 clicks can start within one block: a song followed at a
+        // tempo 50 times faster covers that many beats in 4,096 frames.
+        let mut triggers = [(0usize, false); 64];
         let mut trigger_count = 0;
 
         if self.is_audible() {
@@ -298,7 +304,7 @@ impl MetronomeEngine {
                         .ticks_to_frames(bar_start + tick_offset, sample_rate)
                         .get();
                     if click_frame >= start_f && click_frame < end_f {
-                        let sample_offset = (click_frame - start_f) as usize;
+                        let sample_offset = transport.offset(click_frame, block.length);
                         if trigger_count < triggers.len() {
                             triggers[trigger_count] = (sample_offset, k == 0);
                             trigger_count += 1;

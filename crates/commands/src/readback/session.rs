@@ -29,6 +29,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("session.duplicate_scene", query(Song, "scenes")),
     ("session.insert_empty_midi_clip", query(Track, "slots")),
     ("session.insert_scene", query(Song, "scenes")),
+    ("session.new_take", query(Song, "scenes")),
     ("session.overdub", read("transport.state", "recording.session_slots")),
     ("session.paste", query(Track, "slots")),
     ("session.record", read("transport.state", "recording.session_slots")),

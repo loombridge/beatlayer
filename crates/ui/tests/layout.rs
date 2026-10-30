@@ -118,6 +118,7 @@ fn each_control_starts_where_layout_md_measured_it() {
         (Element::SampleRate, 1369.0),
         (Element::Cpu, 1419.0),
         (Element::Overload, 1478.0),
+        (Element::RemoteIndicators, 1498.0),
         (Element::MidiIndicators, 1507.0),
         (Element::SessionView, 1529.0),
         (Element::AssistantToggle, 1572.0),
@@ -171,10 +172,15 @@ fn groups_stretch_with_the_window_and_controls_keep_their_size() {
     for (placement, (_, rect)) in ELEMENTS.iter().zip(&wide.elements) {
         // The Global Amount is hidden unless the pool holds a groove, and the
         // sync lamps and the Resync button unless an input has Sync on or
-        // Show Resync Button is on.
+        // Show Resync Button is on, and New unless a map mode is on.
         let hidden = matches!(
             placement.element,
-            Element::GlobalAmount | Element::SyncLamps | Element::ResyncExternalHardware
+            Element::GlobalAmount
+                | Element::ExternalSync
+                | Element::SyncInput
+                | Element::SyncOutput
+                | Element::ResyncExternalHardware
+                | Element::New
         );
         if placement.element != Element::Message && !hidden {
             assert_eq!(rect.width(), placement.width, "{:?}", placement.element);

@@ -13,8 +13,9 @@ pub use bl_shell_spec::midi_io::PortDirection;
 pub use bl_shell_spec::settings::{
     Appearance, AutomationRecordMode, BRIGHTNESS, BUNDLED_THEME, COLOR_HUE, COLOR_INTENSITY,
     ClipColour, CollectFiles, DefaultWarpMode, GRID_LINE_INTENSITY, LaunchPrefs,
-    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, ThemeLook, Tone, WarpPrefs,
-    ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent, zoom_step,
+    LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, TakeoverMode, ThemeLook, Tone,
+    WarpPrefs, ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, ZOOM_STEPS, zoom_factor, zoom_percent,
+    zoom_step,
 };
 
 use crate::keymap::UserKeymap;
@@ -144,6 +145,11 @@ pub struct Preferences {
     /// automation spec, R18): Touch, Latch or Write. It's kept between
     /// launches, and isn't part of the set.
     pub automation_record_mode: AutomationRecordMode,
+    /// Takeover Mode (Tempo & MIDI, L-SET-014; the remote mapping spec, R28):
+    /// what an absolute controller does when it and its control disagree.
+    /// It's kept between launches, is the same for every set, and is None in
+    /// a new install.
+    pub takeover_mode: TakeoverMode,
     /// Auto-Hide Plug-In Windows (Plug-Ins, Plug-In Windows, L-SET-017):
     /// a floating device's window or a plug-in's editor hides while
     /// another track is selected and comes back with its track (WP-2.5b),
@@ -216,6 +222,26 @@ pub struct MidiPrefs {
     /// R10): the Control Bar shows Resync External Hardware. Off in a new
     /// install.
     pub show_resync_button: bool,
+    /// Whether EXT is on: the song follows the incoming MIDI clock (the MIDI
+    /// clock spec, R15). Off in a new install.
+    pub external_sync: bool,
+    /// The Control Surfaces table's rows, by the surface's ID and the ports'
+    /// names, so they apply again whatever set is open (control surfaces
+    /// R2). A file from before the table has none, which reads as six empty
+    /// rows.
+    pub surfaces: Vec<SurfaceRowPrefs>,
+}
+
+/// One row of the Control Surfaces table in the preferences.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SurfaceRowPrefs {
+    /// The surface's ID.
+    pub surface: Option<String>,
+    /// The input's name.
+    pub input: Option<String>,
+    /// The output's name.
+    pub output: Option<String>,
 }
 
 /// One MIDI port's switches in the preferences.

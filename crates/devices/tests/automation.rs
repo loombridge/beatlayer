@@ -102,6 +102,7 @@ fn a_devices_parameter_follows_its_envelope_on_the_exact_frame() {
             TransportInfo {
                 playing: true,
                 position: Frames(position),
+                ..TransportInfo::default()
             },
         )
     };
@@ -131,6 +132,53 @@ fn a_devices_parameter_follows_its_envelope_on_the_exact_frame() {
         TransportInfo::default(),
     );
     assert!(stopped[0].iter().all(|&s| s == 0.0));
+}
+
+// Spec: transport R24
+#[test]
+fn a_devices_envelope_is_read_at_the_song_frames_a_faster_song_plays() {
+    let type_ = testing::utility_type();
+    let mut editor = Editor::new();
+    let (track, id) = track_with_utility(&mut editor, &type_, 1.0);
+    let target = AutomationTarget::Device {
+        device: id,
+        param: UTILITY_GAIN,
+    };
+    // The gain falls from 1 at beat 2 to 0 at beat 3.
+    for (at, value) in [(Ticks::QUARTER, 1.0), (Ticks::QUARTER * 2, 0.0)] {
+        editor
+            .apply(Command::SetAutomationBreakpoint {
+                track,
+                target,
+                at,
+                value,
+            })
+            .unwrap();
+    }
+    let (tempo, data) = automation(&editor, id);
+    let mut utility = node(&testing::registry(), &utility_device(&type_, 1.0), 2048);
+    utility.receive_data(data);
+
+    // At twice the map's speed, frame i of a block from song frame 36,000
+    // plays song frame 36,000 + 2i, and takes that frame's value.
+    let input = vec![vec![1.0f32; 2048]; 2];
+    let out = run_at(
+        utility.as_mut(),
+        &input,
+        &[],
+        &tempo,
+        TransportInfo {
+            playing: true,
+            position: Frames(36_000),
+            speed: 2.0,
+            ..TransportInfo::default()
+        },
+    );
+    for (i, &sample) in out[0].iter().enumerate() {
+        let frame = 36_000 + 2 * i as i64;
+        let want = (1.0 - (frame - 24_000) as f64 / 24_000.0) as f32;
+        assert_eq!(sample, want, "frame {i}");
+    }
 }
 
 // Spec: automation R3
@@ -181,6 +229,7 @@ fn a_hand_move_takes_a_devices_parameter_back_from_its_envelope() {
     let transport = TransportInfo {
         playing: true,
         position: Frames(0),
+        ..TransportInfo::default()
     };
     let out = run_at(utility.as_mut(), &input, &[], &tempo, transport);
     assert!(

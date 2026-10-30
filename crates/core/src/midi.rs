@@ -240,15 +240,18 @@ pub enum MidiSource {
     /// played into the chain of the MIDI track with this ID, whatever its
     /// input and monitoring say. It is neither recorded nor held as a key.
     Preview(crate::id::Id),
+    /// An input port with Sync on, for the clock and transport messages it
+    /// sends to sync, never to tracks (`docs/specs/midi-clock.md`, R14).
+    Sync(PortId),
 }
 
 impl MidiSource {
-    /// The port the message came from, MPE or not; `None` for the computer
-    /// keyboard and a preview.
+    /// The port the message came from, MPE or not, or for sync; `None` for
+    /// the computer keyboard and a preview.
     #[must_use]
     pub const fn port(self) -> Option<PortId> {
         match self {
-            Self::Port(port) | Self::MpePort(port) => Some(port),
+            Self::Port(port) | Self::MpePort(port) | Self::Sync(port) => Some(port),
             Self::ComputerKeyboard | Self::Preview(_) => None,
         }
     }
@@ -310,6 +313,16 @@ pub struct SyncOutput {
     pub clock_type: ClockType,
     /// Hardware Resync.
     pub resync: HardwareResync,
+}
+
+/// An input port with Sync on and its Sync Delay, as the engine knows it
+/// (`docs/specs/midi-clock.md`, R14).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct SyncInput {
+    /// The port.
+    pub port: PortId,
+    /// Sync Delay in milliseconds, added to every sync message's arrival.
+    pub delay_ms: i16,
 }
 
 /// A message on its way from the engine to a MIDI output port: the port, the

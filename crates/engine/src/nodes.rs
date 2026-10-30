@@ -233,7 +233,7 @@ impl Node for BeatTone {
                 continue;
             }
             for i in segment.range {
-                let sample = self.sample_at(tempo, transport.position + Frames(i as i64), rate);
+                let sample = self.sample_at(tempo, Frames(transport.song_frame(i)), rate);
                 for channel in block.channels_mut() {
                     channel[i] += sample;
                 }
@@ -363,6 +363,7 @@ mod tests {
             let transport = TransportInfo {
                 playing,
                 position: Frames(from + out.len() as i64),
+                ..TransportInfo::default()
             };
             let mut b = Block::new(&mut data, 2, n, block, &[], transport, SampleRate::HZ_48000)
                 .with_tempo(tempo);

@@ -544,7 +544,33 @@ pub fn auto_pan_tremolo_type() -> DeviceType {
         "Auto Pan-Tremolo",
         DeviceRole::AudioEffect,
     )
-    .with_description(DeviceDescription::new(params).with_layout(layout()))
+    .with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Main",
+                    &[
+                        "Mode",
+                        "Waveform",
+                        "Amount",
+                        "Shape",
+                        "Time Mode",
+                        "Rate",
+                        "Time",
+                    ],
+                ),
+                ("Sync", &["Synced", "Dotted", "Triplet", "16th"]),
+                (
+                    "Stereo",
+                    &["Stereo Offset", "Phase", "Spin", "Phase Offset", "Invert"],
+                ),
+                (
+                    "Character",
+                    &["Harmonic", "Vintage", "Attack Time", "Dynamic FM"],
+                ),
+            ]),
+    )
 }
 
 fn layout() -> DeviceLayout {

@@ -58,7 +58,8 @@ pub fn dice_type() -> DeviceType {
                  the notes that move land in the scale.",
             ),
         ])
-        .with_title_switch(USE_SCALE),
+        .with_title_switch(USE_SCALE)
+        .with_banks(&[("Random", &["Chance", "Choices", "Interval", "Mode", "Sign"])]),
     )
 }
 

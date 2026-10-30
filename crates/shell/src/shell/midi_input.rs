@@ -5,6 +5,7 @@ use crate::midi::MidiHost;
 use bl_commands::NoArgs;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_io as midi_io_ids;
+use bl_shell_spec::transport as transport_ids;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -36,8 +37,10 @@ impl Shell {
     }
 
     /// Lights the lower sync lamp when the engine has sent a quarter note of
-    /// MIDI clock since the last call, and darkens it 100 ms later (midi-clock
-    /// R12); returns whether it changed.
+    /// MIDI clock since the last call, and the upper when one has arrived,
+    /// and darkens each 100 ms later (midi-clock R12, R16); keeps what the
+    /// engine follows. Returns whether the lamps or the followed tempo
+    /// changed.
     fn track_sync_activity(&mut self, now: std::time::Instant) -> bool {
         let quarters = self.audio.sync_out_state().quarters;
         let before = self.sync_lit.is_some();
@@ -50,7 +53,31 @@ impl Shell {
             self.sync_lit = None;
         }
         self.sync_seen = quarters;
-        before != self.sync_lit.is_some()
+        let moved = self.hear_sync_in();
+        let state = self.sync_in;
+        let upper = self.sync_in_lit.is_some();
+        if state.quarters != self.sync_in_seen {
+            self.sync_in_lit = Some(now);
+        } else if self
+            .sync_in_lit
+            .is_some_and(|since| now.duration_since(since) >= SYNC_LAMP)
+        {
+            self.sync_in_lit = None;
+        }
+        self.sync_in_seen = state.quarters;
+        before != self.sync_lit.is_some() || upper != self.sync_in_lit.is_some() || moved
+    }
+
+    /// Reads what the engine reports of the clock it follows. Returns
+    /// whether what the Tempo field shows changed: that the song follows, or
+    /// the tempo to hundredths.
+    pub(super) fn hear_sync_in(&mut self) -> bool {
+        let state = self.audio.sync_in_state();
+        let shown =
+            |s: &bl_engine::SyncInState| (s.following, s.tempo.map(|t| (t * 100.0).round()));
+        let moved = shown(&self.sync_in) != shown(&state);
+        self.sync_in = state;
+        moved
     }
 
     /// Whether the lower sync lamp is lit: a quarter note of MIDI clock left
@@ -58,6 +85,32 @@ impl Shell {
     #[must_use]
     pub fn sync_output_lit(&self) -> bool {
         self.sync_lit.is_some()
+    }
+
+    /// Whether the upper sync lamp is lit: a quarter note of MIDI clock
+    /// arrived at a sync input a moment ago (the MIDI clock spec, R16).
+    #[must_use]
+    pub fn sync_input_lit(&self) -> bool {
+        self.sync_in_lit.is_some()
+    }
+
+    /// Whether EXT is on: the song follows the incoming MIDI clock. It is
+    /// kept in the preferences, and off while no input has Sync on (the MIDI
+    /// clock spec, R15).
+    #[must_use]
+    pub fn external_sync(&self) -> bool {
+        self.midi.external_sync() && self.sync_lamps_shown()
+    }
+
+    /// The tempo the song follows, in BPM, while EXT is on and a tempo has
+    /// been found: what the Tempo field shows, and why it can't be changed
+    /// (the MIDI clock spec, R17).
+    #[must_use]
+    pub fn external_tempo(&self) -> Option<f64> {
+        self.sync_in
+            .following
+            .then_some(self.sync_in.tempo)
+            .flatten()
     }
 
     /// Whether the Control Bar shows the sync lamp pair: some input port has
@@ -80,6 +133,14 @@ impl Shell {
     pub(super) fn run_sync(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         Self::args::<NoArgs>(id, args)?;
         let engine = self.audio.sync_out_state();
+        let incoming = self.audio.sync_in_state();
+        let leading_input = incoming.lead.and_then(|lead| {
+            self.midi
+                .ports()
+                .into_iter()
+                .find(|p| bl_core::midi::PortId::from_name(&p.name) == lead)
+                .map(|p| p.name)
+        });
         Ok(to_value(&bl_shell_spec::sync::SyncState {
             output_ports: self.midi.sync_outputs().len() as u32,
             sending: engine.sending,
@@ -87,7 +148,36 @@ impl Shell {
             clocks_sent: engine.clocks,
             clocks_late: engine.late,
             clocks_dropped: engine.dropped,
+            input_ports: self.midi.sync_inputs().len() as u32,
+            external_sync_available: self.sync_lamps_shown(),
+            external_sync: self.external_sync(),
+            leading_input,
+            receiving: incoming.receiving,
+            input_lamp: self.sync_input_lit(),
+            tempo: incoming.tempo,
+            clocks_received: incoming.clocks,
+            clocks_set_aside: incoming.glitches,
+            sync_dropped: incoming.dropped,
         }))
+    }
+
+    /// Runs `transport.set_external_sync`: EXT, kept in the preferences
+    /// (the MIDI clock spec, R15).
+    pub(super) fn run_set_external_sync(&mut self, args: Value) -> Result<Value, ShellError> {
+        let id = transport_ids::SET_EXTERNAL_SYNC;
+        let transport_ids::SetExternalSyncArgs { on } = Self::args(id, args)?;
+        let on = on.unwrap_or(!self.external_sync());
+        if on && !self.sync_lamps_shown() {
+            return Err(ShellError::Failed {
+                command: id.to_owned(),
+                message: "no input port has Sync on: switch one on with midi.set_port".to_owned(),
+            });
+        }
+        self.midi.set_external_sync(on);
+        self.prefs.midi = self.midi.prefs();
+        self.save_preferences();
+        self.send_sync();
+        Ok(to_value(&transport_ids::ExternalSync { on }))
     }
 
     /// Whether the Control Bar's MIDI track input and output indicators are
@@ -106,10 +196,12 @@ impl Shell {
         let output = self.midi.output().clone();
         let clock = self.midi.test_clock();
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
+        self.midi
+            .set_surface_templates(bl_control::template::kinds(&self.surface.templates));
         if let Some(clock) = clock {
             self.midi.set_test_clock(clock);
         }
-        self.send_sync_outputs();
+        self.send_sync();
     }
 
     /// Drives the shell's clocks from `clock`: the computer keyboard stamps
@@ -142,15 +234,18 @@ impl Shell {
         self.midi_listed = std::time::Instant::now();
         let changed = before != self.midi.ports();
         if changed {
-            self.send_sync_outputs();
+            self.send_sync();
         }
         changed
     }
 
-    /// Tells the audio engine which output ports have Sync on, and their
-    /// options (the MIDI clock spec, R3).
-    pub(super) fn send_sync_outputs(&mut self) {
+    /// Tells the audio engine which output ports have Sync on and their
+    /// options, which input ports have Sync on and their delay, and whether
+    /// EXT is on (the MIDI clock spec, R3, R14, R15).
+    pub(super) fn send_sync(&mut self) {
         self.audio.set_sync_outputs(self.midi.sync_outputs());
+        self.audio.set_sync_inputs(self.midi.sync_inputs());
+        self.audio.set_external_sync(self.external_sync());
     }
 
     /// Spec: midi-chord R15 and midi-cc-sender R7. While a Chord device's
@@ -329,9 +424,14 @@ impl Shell {
                 let args = Self::args::<midi_io_ids::SetPortArgs>(id, args)?;
                 self.refresh_midi();
                 let port = self.midi.set_port(&args).map_err(failed)?;
+                // Spec: midi-clock R15, R24. With no input on Sync, EXT is
+                // off.
+                if !self.sync_lamps_shown() {
+                    self.midi.set_external_sync(false);
+                }
                 self.prefs.midi = self.midi.prefs();
                 self.save_preferences();
-                self.send_sync_outputs();
+                self.send_sync();
                 to_value(&port)
             }
             midi_io_ids::SET_SHOW_RESYNC_BUTTON => {

@@ -212,7 +212,28 @@ pub fn arpeggiator_type() -> DeviceType {
                  degrees of that scale from Root.",
             ),
         ])
-        .with_title_switch(USE_SCALE),
+        .with_title_switch(USE_SCALE)
+        .with_banks(&[
+            (
+                "Rhythm",
+                &[
+                    "Style",
+                    "Sync",
+                    "Rate Sync",
+                    "Rate Free",
+                    "Gate",
+                    "Hold",
+                    "Offset",
+                    "Retrigger",
+                ],
+            ),
+            (
+                "Pattern",
+                &["Interval", "Repeats", "Distance", "Steps", "Groove"],
+            ),
+            ("Velocity", &["Velocity", "Decay", "Target", "Retrig Vel"]),
+            ("Scale", &["Root", "Scale"]),
+        ]),
     )
 }
 
@@ -489,10 +510,7 @@ impl Arpeggiator {
 impl NativeDevice for Arpeggiator {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let sample_rate = audio.sample_rate().as_f64();
-        let tempo = audio.tempo();
-        let bpm = tempo
-            .bpm_at(tempo.frames_to_ticks(audio.song_position(), audio.sample_rate()))
-            .get();
+        let bpm = audio.bpm();
 
         let hold_mode = value(params, HOLD) >= 0.5;
         if self.was_held_mode && !hold_mode {

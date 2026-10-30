@@ -40,6 +40,7 @@ The commands, by the part of their ID before its first dot:
 - [`chain`](chain.md)
 - [`clip`](clip.md)
 - [`clip_view`](clip_view.md)
+- [`control_surface`](control_surface.md)
 - [`cv`](cv.md)
 - [`device`](device.md)
 - [`device_view`](device_view.md)
@@ -2952,6 +2953,43 @@ One octave band.
 
 </details>
 
+### `Bank`
+
+A named run of up to [`BANK_SIZE`] of a device's parameters, which a control surface's device controls take in order (control surfaces spec, R18, R19).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The bank's name. |
+| `params` | array of [`ParamId`](#paramid) | yes | Its parameters, in the order the controls take them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A named run of up to [`BANK_SIZE`] of a device's parameters, which a control surface's device controls take in order (control surfaces spec, R18, R19).",
+  "properties": {
+    "name": {
+      "description": "The bank's name.",
+      "type": "string"
+    },
+    "params": {
+      "description": "Its parameters, in the order the controls take them.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "params"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BankEntryState`
 
 One entry of Stacks' chord bank.
@@ -2998,6 +3036,96 @@ One entry of Stacks' chord bank.
 
 </details>
 
+### `BankInfo`
+
+One bank of a device.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `params` | array of [`BankParam`](#bankparam) | yes | Its parameters, in the order a surface's device controls take them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One bank of a device.",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "params": {
+      "description": "Its parameters, in the order a surface's device controls take them.",
+      "items": {
+        "$ref": "#/$defs/BankParam"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "params"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BankParam`
+
+One parameter of a bank, as a surface reads it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter. |
+| `name` | string | yes | Its name. |
+| `value` | number | yes | Its value. |
+| `text` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so a surface doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One parameter of a bank, as a surface reads it.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so a surface doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter."
+    },
+    "text": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "param",
+    "name",
+    "value",
+    "text",
+    "held"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BankState`
 
 Stacks' chord bank.
@@ -3036,6 +3164,182 @@ Stacks' chord bank.
     "chords"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `BanksResult`
+
+What `control_surface.banks` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `banks` | array of [`BankInfo`](#bankinfo) | yes | Its banks, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.banks` returns.",
+  "properties": {
+    "banks": {
+      "description": "Its banks, in order.",
+      "items": {
+        "$ref": "#/$defs/BankInfo"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "banks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BarControl`
+
+A control of the Control Bar that isn't a track's or a device's (map modes R11).
+
+One of:
+
+- `"tap_tempo"`: Tap Tempo.
+- `"phase_nudge_down"`: Phase Nudge Down, which nudges while it is held.
+- `"phase_nudge_up"`: Phase Nudge Up, which nudges while it is held.
+- `"play"`: Play.
+- `"stop"`: Stop.
+- `"re_enable_automation"`: Re-Enable Automation.
+- `"capture_midi"`: Capture MIDI.
+- `"new"`: New, which shows only in the map modes (map modes R20).
+- `"tempo"`: The Tempo field.
+- `"metronome"`: The Metronome switch.
+- `"follow"`: Follow.
+- `"arrangement_record"`: Arrangement Record.
+- `"midi_overdub"`: MIDI Arrangement Overdub.
+- `"automation_arm"`: Automation Arm.
+- `"session_record"`: Session Record.
+- `"punch_in"`: Punch-In.
+- `"arrangement_loop"`: The Arrangement Loop switch.
+- `"punch_out"`: Punch-Out.
+- `"draw_mode"`: Draw Mode.
+- `"quantization"`: The Quantization Menu: the global launch quantisation.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of the Control Bar that isn't a track's or a device's (map modes R11).",
+  "oneOf": [
+    {
+      "const": "tap_tempo",
+      "description": "Tap Tempo.",
+      "type": "string"
+    },
+    {
+      "const": "phase_nudge_down",
+      "description": "Phase Nudge Down, which nudges while it is held.",
+      "type": "string"
+    },
+    {
+      "const": "phase_nudge_up",
+      "description": "Phase Nudge Up, which nudges while it is held.",
+      "type": "string"
+    },
+    {
+      "const": "play",
+      "description": "Play.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Stop.",
+      "type": "string"
+    },
+    {
+      "const": "re_enable_automation",
+      "description": "Re-Enable Automation.",
+      "type": "string"
+    },
+    {
+      "const": "capture_midi",
+      "description": "Capture MIDI.",
+      "type": "string"
+    },
+    {
+      "const": "new",
+      "description": "New, which shows only in the map modes (map modes R20).",
+      "type": "string"
+    },
+    {
+      "const": "tempo",
+      "description": "The Tempo field.",
+      "type": "string"
+    },
+    {
+      "const": "metronome",
+      "description": "The Metronome switch.",
+      "type": "string"
+    },
+    {
+      "const": "follow",
+      "description": "Follow.",
+      "type": "string"
+    },
+    {
+      "const": "arrangement_record",
+      "description": "Arrangement Record.",
+      "type": "string"
+    },
+    {
+      "const": "midi_overdub",
+      "description": "MIDI Arrangement Overdub.",
+      "type": "string"
+    },
+    {
+      "const": "automation_arm",
+      "description": "Automation Arm.",
+      "type": "string"
+    },
+    {
+      "const": "session_record",
+      "description": "Session Record.",
+      "type": "string"
+    },
+    {
+      "const": "punch_in",
+      "description": "Punch-In.",
+      "type": "string"
+    },
+    {
+      "const": "arrangement_loop",
+      "description": "The Arrangement Loop switch.",
+      "type": "string"
+    },
+    {
+      "const": "punch_out",
+      "description": "Punch-Out.",
+      "type": "string"
+    },
+    {
+      "const": "draw_mode",
+      "description": "Draw Mode.",
+      "type": "string"
+    },
+    {
+      "const": "quantization",
+      "description": "The Quantization Menu: the global launch quantisation.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -5213,6 +5517,109 @@ One of:
     {
       "const": "random",
       "description": "The clip takes swatch `h mod 70`, `h` being a hash of its ID.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ClipControl`
+
+A control of the Clip View's panels (map modes R11, R17): the Audio Utilities panel's, which act on the audio clips it shows, and the Launch Properties panel's, which act on the clip it shows.
+
+One of:
+
+- `"warp"`: The Warp switch.
+- `"warp_mode"`: The Warp Mode chooser.
+- `"high_quality"`: The High Quality switch.
+- `"ram"`: The RAM switch.
+- `"gain"`: Gain, in decibels.
+- `"transpose"`: Transpose, in semitones.
+- `"detune"`: Detune, in cents.
+- `"launch_mode"`: The Launch Mode chooser.
+- `"legato"`: The Legato switch.
+- `"launch_quantization"`: The clip's Quantization chooser: Global, then the global menu's list.
+- `"velocity"`: The Velocity amount.
+- `"nudge_down"`: The nudge button that moves the playing clip back.
+- `"nudge_up"`: The nudge button that moves the playing clip forward.
+- `"scrub"`: The scrub control between the nudge buttons, which shows in MIDI Map Mode only: a relative controller's increments nudge the clip.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of the Clip View's panels (map modes R11, R17): the Audio Utilities panel's, which act on the audio clips it shows, and the Launch Properties panel's, which act on the clip it shows.",
+  "oneOf": [
+    {
+      "const": "warp",
+      "description": "The Warp switch.",
+      "type": "string"
+    },
+    {
+      "const": "warp_mode",
+      "description": "The Warp Mode chooser.",
+      "type": "string"
+    },
+    {
+      "const": "high_quality",
+      "description": "The High Quality switch.",
+      "type": "string"
+    },
+    {
+      "const": "ram",
+      "description": "The RAM switch.",
+      "type": "string"
+    },
+    {
+      "const": "gain",
+      "description": "Gain, in decibels.",
+      "type": "string"
+    },
+    {
+      "const": "transpose",
+      "description": "Transpose, in semitones.",
+      "type": "string"
+    },
+    {
+      "const": "detune",
+      "description": "Detune, in cents.",
+      "type": "string"
+    },
+    {
+      "const": "launch_mode",
+      "description": "The Launch Mode chooser.",
+      "type": "string"
+    },
+    {
+      "const": "legato",
+      "description": "The Legato switch.",
+      "type": "string"
+    },
+    {
+      "const": "launch_quantization",
+      "description": "The clip's Quantization chooser: Global, then the global menu's list.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "The Velocity amount.",
+      "type": "string"
+    },
+    {
+      "const": "nudge_down",
+      "description": "The nudge button that moves the playing clip back.",
+      "type": "string"
+    },
+    {
+      "const": "nudge_up",
+      "description": "The nudge button that moves the playing clip forward.",
+      "type": "string"
+    },
+    {
+      "const": "scrub",
+      "description": "The scrub control between the nudge buttons, which shows in MIDI Map Mode only: a relative controller's increments nudge the clip.",
       "type": "string"
     }
   ]
@@ -7603,6 +8010,76 @@ One of:
 
 </details>
 
+### `Counts`
+
+The remote input's counts since the app started (R43).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `taken` | integer, at least 0 | yes | Messages a mapping took, and messages taken for learning. |
+| `dropped` | integer, at least 0 | yes | Messages dropped because the queue to the main thread was full. |
+| `unmapped` | integer, at least 0 | yes | Messages a Remote input got that no mapping takes. |
+| `applied` | integer, at least 0 | yes | Mapped messages and keys whose control's command ran. |
+| `refused` | integer, at least 0 | yes | Mapped messages and keys whose control the set no longer has, or whose command failed. |
+| `feedback_sent` | integer, at least 0 | yes | Feedback messages sent to outputs with Remote on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The remote input's counts since the app started (R43).",
+  "properties": {
+    "applied": {
+      "description": "Mapped messages and keys whose control's command ran.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "dropped": {
+      "description": "Messages dropped because the queue to the main thread was full.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "feedback_sent": {
+      "description": "Feedback messages sent to outputs with Remote on.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "refused": {
+      "description": "Mapped messages and keys whose control the set no longer has, or whose command failed.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "taken": {
+      "description": "Messages a mapping took, and messages taken for learning.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "unmapped": {
+      "description": "Messages a Remote input got that no mapping takes.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "taken",
+    "dropped",
+    "unmapped",
+    "applied",
+    "refused",
+    "feedback_sent"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CreatedPack`
 
 What `set.create_pack` returns.
@@ -7739,6 +8216,43 @@ One of:
     {
       "const": "b",
       "description": "On the crossfader's B side.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `CrossfaderField`
+
+One of the crossfader's three mapping fields (map modes R19).
+
+One of:
+
+- `"left"`: The crossfader's left end.
+- `"centre"`: Its centre.
+- `"right"`: Its right end.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the crossfader's three mapping fields (map modes R19).",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "The crossfader's left end.",
+      "type": "string"
+    },
+    {
+      "const": "centre",
+      "description": "Its centre.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "Its right end.",
       "type": "string"
     }
   ]
@@ -8136,6 +8650,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `own_name` | string | no | The device's own name, such as `Auto Filter`, which the title bar shows while Show Preset Name is off. Empty while it's the same as [`name`](Self::name), and left out of the saved set then. |
 | `plugin` | [`PluginState`](#pluginstate) or null | no | A plug-in's own state and where it was loaded from (WP-2.6), as last saved with the set. Left out of the saved set for a native device, and for a plug-in until the set is first saved with it. |
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
+| `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
@@ -8318,6 +8833,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         "null"
       ]
     },
+    "region": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SampleRegion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample."
+    },
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
@@ -8438,6 +8964,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
@@ -8448,6 +8975,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 {
   "description": "What a kind of device is to the framework: its parameters' descriptors, in the order its generic UI and agents list them, and its layout.",
   "properties": {
+    "banks": {
+      "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
+      "items": {
+        "$ref": "#/$defs/Bank"
+      },
+      "type": "array"
+    },
     "layout": {
       "$ref": "#/$defs/DeviceLayout",
       "description": "Where its controls and display cells sit (IMP-14)."
@@ -8564,6 +9098,69 @@ A device's display now, as `device.display` reports it.
 
 </details>
 
+### `DeviceFocus`
+
+The device a surface's device controls reach.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `bank` | integer, at least 0 | yes | The bank the surface shows, from 0. |
+| `bank_name` | string | yes | That bank's name. |
+| `banks` | array of string | yes | Every bank's name, in order. |
+| `locked` | [`LockKind`](#lockkind) or null | no | How it is locked to the surface, if it is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The device a surface's device controls reach.",
+  "properties": {
+    "bank": {
+      "description": "The bank the surface shows, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_name": {
+      "description": "That bank's name.",
+      "type": "string"
+    },
+    "banks": {
+      "description": "Every bank's name, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "locked": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LockKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How it is locked to the surface, if it is."
+    }
+  },
+  "required": [
+    "device",
+    "bank",
+    "bank_name",
+    "banks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DeviceFrame`
 
 One device as the Device View shows it.
@@ -8591,6 +9188,7 @@ One device as the Device View shows it.
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
 | `external` | [`ExternalSection`](#externalsection) or null | no | Its routing to hardware, if it is an external device (WP-5.34). |
+| `locks` | array of [`DeviceLock`](#devicelock) | no | The control surfaces locked to it, in the Control Surfaces table's row order: its title bar's hand icon (device chains R42, control surfaces R35). Surface state, never saved with the set. |
 | `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `mpe` | [`PluginMpe`](#pluginmpe) or null | no | A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which its title bar menu's MPE Mode and MPE Settings… edit; left out for a device that isn't a plug-in. |
@@ -8666,6 +9264,13 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "locks": {
+      "description": "The control surfaces locked to it, in the Control Surfaces table's row order: its title bar's hand icon (device chains R42, control surfaces R35). Surface state, never saved with the set.",
+      "items": {
+        "$ref": "#/$defs/DeviceLock"
+      },
+      "type": "array"
     },
     "midi_sidechain": {
       "anyOf": [
@@ -9128,6 +9733,49 @@ One device, as `audio.devices` lists it.
     "buffer_sizes",
     "buffer_range",
     "default_buffer_size"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceLock`
+
+A surface a device is locked to: what `device_view.state` reports for a device and its title bar's hand icon names.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row of the Control Surfaces table, from 1 to 6. |
+| `surface` | string | yes | The surface's name. |
+| `by` | [`LockKind`](#lockkind) | yes | How the device is locked to it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A surface a device is locked to: what `device_view.state` reports for a device and its title bar's hand icon names.",
+  "properties": {
+    "by": {
+      "$ref": "#/$defs/LockKind",
+      "description": "How the device is locked to it."
+    },
+    "row": {
+      "description": "The row of the Control Surfaces table, from 1 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "surface": {
+      "description": "The surface's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "row",
+    "surface",
+    "by"
   ],
   "type": "object"
 }
@@ -10406,6 +11054,36 @@ A drum chain's row in the chain list (drum racks spec, R21).
     "sends",
     "previewing",
     "all_notes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DumpResult`
+
+What `control_surface.dump` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | integer, at least 0 | yes | How many messages were sent to the output. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.dump` returns.",
+  "properties": {
+    "sent": {
+      "description": "How many messages were sent to the output.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "sent"
   ],
   "type": "object"
 }
@@ -11815,6 +12493,34 @@ An external device's routing section, drawn at the left of its body (WP-5.34; th
     "channel",
     "audio_from",
     "hardware_latency"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ExternalSync`
+
+What `transport.set_external_sync` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether EXT is on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `transport.set_external_sync` returns.",
+  "properties": {
+    "on": {
+      "description": "Whether EXT is on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
   ],
   "type": "object"
 }
@@ -14019,6 +14725,42 @@ A key held on the track's MIDI input, with the velocity it was played at.
 
 </details>
 
+### `Highlighted`
+
+What `session.highlight_scene` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The highlighted scene. |
+| `number` | integer, at least 0 | yes | Its number, counting from 1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.highlight_scene` returns.",
+  "properties": {
+    "number": {
+      "description": "Its number, counting from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The highlighted scene."
+    }
+  },
+  "required": [
+    "scene",
+    "number"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HistoryRow`
 
 A row, as `set.save_history` reports it.
@@ -15558,6 +16300,85 @@ A label as the sidebar lists it.
 
 </details>
 
+### `Lamp`
+
+One of the Control Bar's indicator lamps (R41).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `lit` | boolean | yes | Whether it is lit now. |
+| `last_lit_ms_ago` | integer or null | yes | Milliseconds since it last lit; none if it never has. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the Control Bar's indicator lamps (R41).",
+  "properties": {
+    "last_lit_ms_ago": {
+      "description": "Milliseconds since it last lit; none if it never has.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "lit": {
+      "description": "Whether it is lit now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "lit",
+    "last_lit_ms_ago"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Lamps`
+
+The lamps the remote input lights (R41).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `remote_input` | [`Lamp`](#lamp) | yes | The remote pair's upper lamp: a message taken. |
+| `remote_output` | [`Lamp`](#lamp) | yes | The remote pair's lower lamp: feedback sent. |
+| `key_input` | [`Lamp`](#lamp) | yes | The key indicators' upper lamp: a key a key mapping took. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The lamps the remote input lights (R41).",
+  "properties": {
+    "key_input": {
+      "$ref": "#/$defs/Lamp",
+      "description": "The key indicators' upper lamp: a key a key mapping took."
+    },
+    "remote_input": {
+      "$ref": "#/$defs/Lamp",
+      "description": "The remote pair's upper lamp: a message taken."
+    },
+    "remote_output": {
+      "$ref": "#/$defs/Lamp",
+      "description": "The remote pair's lower lamp: feedback sent."
+    }
+  },
+  "required": [
+    "remote_input",
+    "remote_output",
+    "key_input"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Lane`
 
 Which lane a selection covers: `track` for a track's own lane, where its clips are, `take` for one of its take lanes, and `automation` for the automation lane under it, which shows a parameter.
@@ -16989,6 +17810,37 @@ Type: integer, at least 1.
 
 </details>
 
+### `ListResult`
+
+What `control_surface.list` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of [`RowInfo`](#rowinfo) | yes | The six rows, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.list` returns.",
+  "properties": {
+    "rows": {
+      "description": "The six rows, in order.",
+      "items": {
+        "$ref": "#/$defs/RowInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LoadSampleResult`
 
 What `device.load_sample` returns.
@@ -17178,6 +18030,37 @@ What a locator command did: the locators selected afterwards, and whether it was
     "undo_step"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `LockKind`
+
+How a device is locked to a surface.
+
+One of:
+
+- `"hand"`: By Lock to in the device's menu or `control_surface.lock`.
+- `"arming"`: By arming a MIDI track whose instrument the device is.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a device is locked to a surface.",
+  "oneOf": [
+    {
+      "const": "hand",
+      "description": "By Lock to in the device's menu or `control_surface.lock`.",
+      "type": "string"
+    },
+    {
+      "const": "arming",
+      "description": "By arming a MIDI track whose instrument the device is.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -17780,6 +18663,43 @@ One of:
 
 </details>
 
+### `MapMode`
+
+Which map mode is on (map modes R1, R2).
+
+One of:
+
+- `"off"`: No map mode: mappings act.
+- `"midi"`: MIDI Map Mode.
+- `"key"`: Key Map Mode.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which map mode is on (map modes R1, R2).",
+  "oneOf": [
+    {
+      "const": "off",
+      "description": "No map mode: mappings act.",
+      "type": "string"
+    },
+    {
+      "const": "midi",
+      "description": "MIDI Map Mode.",
+      "type": "string"
+    },
+    {
+      "const": "key",
+      "description": "Key Map Mode.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Mapping`
 
 One slot's mapping: the parameter it modulates.
@@ -17830,6 +18750,7 @@ One mapping as `remote.mappings` reports it (R14).
 | `kind` | [`ControlKind`](#controlkind) | yes | The control's kind. |
 | `min` | number | yes | The bottom of the range, in the control's own units. |
 | `max` | number | yes | The top of the range. |
+| `range` | pair of number and number | yes | The lowest and highest values the control's own units allow Min and Max (map modes R9). |
 | `mode` | [`RemoteMode`](#remotemode) | yes | How a controller's values are read. |
 
 <details><summary>JSON Schema</summary>
@@ -17864,6 +18785,22 @@ One mapping as `remote.mappings` reports it (R14).
       "description": "The path to the control: its track and device, or its view.",
       "type": "string"
     },
+    "range": {
+      "description": "The lowest and highest values the control's own units allow Min and Max (map modes R9).",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ],
+      "type": "array"
+    },
     "source": {
       "$ref": "#/$defs/RemoteSource",
       "description": "Its source; with a note range, the range's root."
@@ -17881,6 +18818,7 @@ One mapping as `remote.mappings` reports it (R14).
     "kind",
     "min",
     "max",
+    "range",
     "mode"
   ],
   "type": "object"
@@ -19926,6 +20864,49 @@ The device `device.add` adds.
 
 </details>
 
+### `NewTake`
+
+What `session.new_take` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The scene it highlighted. |
+| `inserted` | boolean | yes | Whether it inserted that scene. |
+| `stopped` | array of [`TrackId`](#trackid) | yes | The armed tracks whose clips it stopped. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.new_take` returns.",
+  "properties": {
+    "inserted": {
+      "description": "Whether it inserted that scene.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene it highlighted."
+    },
+    "stopped": {
+      "description": "The armed tracks whose clips it stopped.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scene",
+    "inserted",
+    "stopped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NewTakeLane`
 
 A new take lane: its `name`, the `clips` it holds, and its `id`, issued when it's left out.
@@ -20736,6 +21717,37 @@ One of:
     {
       "const": "page",
       "description": "Show a span without remembering the view before or pausing Follow, as Follow turning the page does.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `NudgeDirection`
+
+Which Phase Nudge button (the transport spec, R27).
+
+One of:
+
+- `"down"`: Phase Nudge Down: 4 % slower.
+- `"up"`: Phase Nudge Up: 4 % faster.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which Phase Nudge button (the transport spec, R27).",
+  "oneOf": [
+    {
+      "const": "down",
+      "description": "Phase Nudge Down: 4 % slower.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "Phase Nudge Up: 4 % faster.",
       "type": "string"
     }
   ]
@@ -21985,6 +22997,43 @@ One of:
 
 </details>
 
+### `PhaseNudge`
+
+Which Phase Nudge button nudges the song, in `transport.state`.
+
+One of:
+
+- `"none"`: Neither button is held.
+- `"down"`: Phase Nudge Down is held: the song plays 4 % slower.
+- `"up"`: Phase Nudge Up is held: the song plays 4 % faster.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which Phase Nudge button nudges the song, in `transport.state`.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "Neither button is held.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "Phase Nudge Down is held: the song plays 4 % slower.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "Phase Nudge Up is held: the song plays 4 % faster.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PitchArgs`
 
 The Pitch filter's controls in `clip_view.note_filters`.
@@ -22707,7 +23756,7 @@ One MIDI port as the Settings window's table shows it.
 | `name` | string | yes | The name the MIDI system gives it. |
 | `track` | boolean | yes | Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI. |
 | `sync` | boolean | yes | Sync: an input's clock and transport messages are followed; an output sends clock. Kept now, acted on when sync is built. |
-| `remote` | boolean | yes | Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built. |
+| `remote` | boolean | yes | Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output gets the values of the mapped controls as feedback (R38 to R40). |
 | `mpe` | boolean | yes | MPE: an input's messages reach tracks as MPE, each note on a channel of its own; an output has no MPE switch, and reads false. |
 | `sync_delay_ms` | integer from -32768 to 32767 | yes | MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to the clock an output sends; kept while Sync is off. |
 | `clock_type` | [`ClockTypeChoice`](#clocktypechoice) | yes | An output's MIDI Clock Type: Song or Pattern. |
@@ -22761,7 +23810,7 @@ One MIDI port as the Settings window's table shows it.
       "type": "boolean"
     },
     "remote": {
-      "description": "Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output sends feedback, kept now and acted on when feedback is built.",
+      "description": "Remote: an input controls Beatlayer through the set's MIDI mappings (the remote mapping spec, R7 and R8); an output gets the values of the mapped controls as feedback (R38 to R40).",
       "type": "boolean"
     },
     "sync": {
@@ -22793,6 +23842,40 @@ One MIDI port as the Settings window's table shows it.
     "hardware_resync",
     "present",
     "open"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PortRef`
+
+A port a row names, and whether the MIDI system offers it now.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name the MIDI system gives the port. |
+| `present` | boolean | yes | Whether the port is present now. A missing port keeps its name, and the surface starts when a port of that name appears. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A port a row names, and whether the MIDI system offers it now.",
+  "properties": {
+    "name": {
+      "description": "The name the MIDI system gives the port.",
+      "type": "string"
+    },
+    "present": {
+      "description": "Whether the port is present now. A missing port keeps its name, and the surface starts when a port of that name appears.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "name",
+    "present"
   ],
   "type": "object"
 }
@@ -23945,6 +25028,79 @@ One of:
 
 </details>
 
+### `RecordQuantization`
+
+A Record Quantization value: No Quantization or the note values of the Edit menu's submenu, in the menu's order.
+
+One of:
+
+- `"none"`: No Quantization: recorded notes stay where they were played.
+- `"1/4"`: Quarter notes.
+- `"1/8"`: Eighth notes.
+- `"1/8t"`: Eighth-note triplets.
+- `"1/8+1/8t"`: Eighth notes and eighth-note triplets together.
+- `"1/16"`: Sixteenth notes.
+- `"1/16t"`: Sixteenth-note triplets.
+- `"1/16+1/16t"`: Sixteenth notes and sixteenth-note triplets together.
+- `"1/32"`: Thirty-second notes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A Record Quantization value: No Quantization or the note values of the Edit menu's submenu, in the menu's order.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "No Quantization: recorded notes stay where they were played.",
+      "type": "string"
+    },
+    {
+      "const": "1/4",
+      "description": "Quarter notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/8",
+      "description": "Eighth notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/8t",
+      "description": "Eighth-note triplets.",
+      "type": "string"
+    },
+    {
+      "const": "1/8+1/8t",
+      "description": "Eighth notes and eighth-note triplets together.",
+      "type": "string"
+    },
+    {
+      "const": "1/16",
+      "description": "Sixteenth notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/16t",
+      "description": "Sixteenth-note triplets.",
+      "type": "string"
+    },
+    {
+      "const": "1/16+1/16t",
+      "description": "Sixteenth notes and sixteenth-note triplets together.",
+      "type": "string"
+    },
+    {
+      "const": "1/32",
+      "description": "Thirty-second notes.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `RecordedFileReport`
 
 A file a recording wrote.
@@ -24778,7 +25934,7 @@ One of:
 
 ### `RemoteTarget`
 
-A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer `param`).
+A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: auto, apply, reset, or a `param`).
 
 One of:
 
@@ -24795,12 +25951,22 @@ One of:
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device, whose kind its description gives.
 - an object with `type` = `"device_on"`, `device` ([`DeviceId`](#deviceid)): A device's on/off switch.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer.
+- an object with `type` = `"monitor"`, `track` ([`TrackId`](#trackid)): A track's Monitor switch: In, Auto, Off.
+- an object with `type` = `"cue_volume"`: The Cue Volume knob of Main's strip.
+- an object with `type` = `"track_launch"`, `track` ([`TrackId`](#trackid)): A track's Launch button in the relative Session mapping strip.
+- an object with `type` = `"strip"`, `control` ([`StripControl`](#stripcontrol)): A control of the relative Session mapping strip.
+- an object with `type` = `"crossfader_field"`, `field` ([`CrossfaderField`](#crossfaderfield)): One of the crossfader's three mapping fields.
+- an object with `type` = `"bar"`, `control` ([`BarControl`](#barcontrol)): A control of the Control Bar.
+- an object with `type` = `"step_back"`: The note editor's Step Back button.
+- an object with `type` = `"step_forward"`: The note editor's Step Forward button.
+- an object with `type` = `"clip"`, `control` ([`ClipControl`](#clipcontrol)): A control of the Clip View's panels.
+- an object with `type` = `"midi_tool"`, `tool` ([`ToolId`](#toolid)), `control` ([`ToolControl`](#toolcontrol)): A control of a MIDI Tool's panel, named by the tool and the control so one mapping acts whichever clip the Clip View shows.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer `param`).",
+  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: auto, apply, reset, or a `param`).",
   "oneOf": [
     {
       "description": "A Session slot of a track at a scene, not its clip.",
@@ -25048,6 +26214,176 @@ One of:
         "type",
         "chain",
         "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's Monitor switch: In, Auto, Off.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "monitor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Cue Volume knob of Main's strip.",
+      "properties": {
+        "type": {
+          "const": "cue_volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's Launch button in the relative Session mapping strip.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "track_launch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of the relative Session mapping strip.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/StripControl",
+          "description": "The control."
+        },
+        "type": {
+          "const": "strip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of the crossfader's three mapping fields.",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/CrossfaderField",
+          "description": "The field."
+        },
+        "type": {
+          "const": "crossfader_field",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "field"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of the Control Bar.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/BarControl",
+          "description": "The control."
+        },
+        "type": {
+          "const": "bar",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The note editor's Step Back button.",
+      "properties": {
+        "type": {
+          "const": "step_back",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The note editor's Step Forward button.",
+      "properties": {
+        "type": {
+          "const": "step_forward",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of the Clip View's panels.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ClipControl",
+          "description": "The control."
+        },
+        "type": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a MIDI Tool's panel, named by the tool and the control so one mapping acts whichever clip the Clip View shows.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ToolControl",
+          "description": "The control."
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolId",
+          "description": "The tool."
+        },
+        "type": {
+          "const": "midi_tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tool",
+        "control"
       ],
       "type": "object"
     }
@@ -25549,6 +26885,447 @@ What `clip.reverse` did.
     "clip"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `RingBox`
+
+A running surface's ring as `session.state` reports it: the tracks and scenes inside it, by ID.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row of the Control Surfaces table, from 1 to 6. |
+| `surface` | string | yes | The surface's name. |
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks it covers, left to right. |
+| `scenes` | array of [`SceneId`](#sceneid) | yes | The scenes it covers, top to bottom; none for a ring with no clip launching. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A running surface's ring as `session.state` reports it: the tracks and scenes inside it, by ID.",
+  "properties": {
+    "row": {
+      "description": "The row of the Control Surfaces table, from 1 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes": {
+      "description": "The scenes it covers, top to bottom; none for a ring with no clip launching.",
+      "items": {
+        "$ref": "#/$defs/SceneId"
+      },
+      "type": "array"
+    },
+    "surface": {
+      "description": "The surface's name.",
+      "type": "string"
+    },
+    "tracks": {
+      "description": "The tracks it covers, left to right.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "row",
+    "surface",
+    "tracks",
+    "scenes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RingInfo`
+
+The size of a surface's ring: the block of tracks and scenes its grid controls.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | integer from 0 to 255 | yes | How many tracks wide. |
+| `scenes` | integer from 0 to 255 | yes | How many scenes tall; 0 for a surface with no clip launching. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The size of a surface's ring: the block of tracks and scenes its grid controls.",
+  "properties": {
+    "scenes": {
+      "description": "How many scenes tall; 0 for a surface with no clip launching.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "How many tracks wide.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tracks",
+    "scenes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RingMoves`
+
+Which ways a ring can move.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `left` | boolean | yes | A track to the left. |
+| `right` | boolean | yes | A track to the right. |
+| `up` | boolean | yes | A scene up. |
+| `down` | boolean | yes | A scene down. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which ways a ring can move.",
+  "properties": {
+    "down": {
+      "description": "A scene down.",
+      "type": "boolean"
+    },
+    "left": {
+      "description": "A track to the left.",
+      "type": "boolean"
+    },
+    "right": {
+      "description": "A track to the right.",
+      "type": "boolean"
+    },
+    "up": {
+      "description": "A scene up.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "left",
+    "right",
+    "up",
+    "down"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RingState`
+
+Where a surface's session ring is.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | integer from 0 to 255 | yes | How many tracks wide. |
+| `scenes` | integer from 0 to 255 | yes | How many scenes tall; 0 for a surface with no clip launching. |
+| `first_track` | [`TrackId`](#trackid) or null | yes | Its first track, by ID. |
+| `first_scene` | [`SceneId`](#sceneid) or null | yes | Its first scene, by ID. |
+| `track_index` | integer, at least 0 | yes | Its first track's place among the ring's tracks, from 0. |
+| `scene_index` | integer, at least 0 | yes | Its first scene's place among the scenes, from 0. |
+| `can_move` | [`RingMoves`](#ringmoves) | yes | Which ways it can move. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a surface's session ring is.",
+  "properties": {
+    "can_move": {
+      "$ref": "#/$defs/RingMoves",
+      "description": "Which ways it can move."
+    },
+    "first_scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its first scene, by ID."
+    },
+    "first_track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its first track, by ID."
+    },
+    "scene_index": {
+      "description": "Its first scene's place among the scenes, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes": {
+      "description": "How many scenes tall; 0 for a surface with no clip launching.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "track_index": {
+      "description": "Its first track's place among the ring's tracks, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "How many tracks wide.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tracks",
+    "scenes",
+    "first_track",
+    "first_scene",
+    "track_index",
+    "scene_index",
+    "can_move"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RingStep`
+
+How `control_surface.move_ring` moves a ring by a step.
+
+One of:
+
+- `"left"`: One track left.
+- `"right"`: One track right.
+- `"up"`: One scene up.
+- `"down"`: One scene down.
+- `"page_left"`: Its width left.
+- `"page_right"`: Its width right.
+- `"page_up"`: Its height up.
+- `"page_down"`: Its height down.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How `control_surface.move_ring` moves a ring by a step.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "One track left.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "One track right.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "One scene up.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "One scene down.",
+      "type": "string"
+    },
+    {
+      "const": "page_left",
+      "description": "Its width left.",
+      "type": "string"
+    },
+    {
+      "const": "page_right",
+      "description": "Its width right.",
+      "type": "string"
+    },
+    {
+      "const": "page_up",
+      "description": "Its height up.",
+      "type": "string"
+    },
+    {
+      "const": "page_down",
+      "description": "Its height down.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `RowInfo`
+
+One row of the table.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row, from 1 to 6. |
+| `surface` | [`SurfaceRef`](#surfaceref) or null | yes | The surface, or none. |
+| `input` | [`PortRef`](#portref) or null | yes | The input, or none. |
+| `output` | [`PortRef`](#portref) or null | yes | The output, or none. |
+| `state` | [`RowRun`](#rowrun) | yes | Whether the surface runs, waits for a port, or stopped. |
+| `can_dump` | boolean | yes | Whether Dump is enabled: the surface has a setup to send and its output is present. |
+| `error` | string or null | no | Why the surface stopped. |
+| `surface_state` | [`SurfaceStateInfo`](#surfacestateinfo) or null | no | What a running surface reports of itself. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One row of the table.",
+  "properties": {
+    "can_dump": {
+      "description": "Whether Dump is enabled: the surface has a setup to send and its output is present.",
+      "type": "boolean"
+    },
+    "error": {
+      "description": "Why the surface stopped.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "input": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PortRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The input, or none."
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PortRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The output, or none."
+    },
+    "row": {
+      "description": "The row, from 1 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/RowRun",
+      "description": "Whether the surface runs, waits for a port, or stopped."
+    },
+    "surface": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SurfaceRef"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The surface, or none."
+    },
+    "surface_state": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SurfaceStateInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a running surface reports of itself."
+    }
+  },
+  "required": [
+    "row",
+    "surface",
+    "input",
+    "output",
+    "state",
+    "can_dump"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RowRun`
+
+What a row's surface is doing.
+
+One of:
+
+- `"empty"`: The row names no surface.
+- `"waiting"`: The surface waits for a port to appear.
+- `"running"`: The surface runs.
+- `"stopped"`: The surface is stopped; `error` says why.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a row's surface is doing.",
+  "oneOf": [
+    {
+      "const": "empty",
+      "description": "The row names no surface.",
+      "type": "string"
+    },
+    {
+      "const": "waiting",
+      "description": "The surface waits for a port to appear.",
+      "type": "string"
+    },
+    {
+      "const": "running",
+      "description": "The surface runs.",
+      "type": "string"
+    },
+    {
+      "const": "stopped",
+      "description": "The surface is stopped; `error` says why.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -26083,6 +27860,123 @@ A span of a sample, in frames at the sample's own rate: `from` inclusive to `to`
   "required": [
     "from",
     "to"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SampleRegion`
+
+The part of a Simpler's sample between its Start and End flags (the sampler spec, R22). Absent from the device for the whole sample.
+
+Flags are saved as frames of the edited sample at its own rate, as the slices and the edits' selections are. A set saved before the region existed (R24) holds the shares of the decoded sample its Start and Length parameters chose until the next edit of the region writes frames, because turning a share into a frame needs the sample's length, which the saved file doesn't hold.
+
+One of:
+
+- an object with `start` (integer, at least 0), `end` (integer, at least 0): The Start and End flags, in frames; Start is before End.
+- an object with `start_share` (number), `end_share` (number): An older set's region, as shares (0 to 1) of the decoded sample.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "description": "The Start and End flags, in frames; Start is before End.",
+      "properties": {
+        "end": {
+          "description": "The frame after the last one played.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "start": {
+          "description": "The first frame played.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An older set's region, as shares (0 to 1) of the decoded sample.",
+      "properties": {
+        "end_share": {
+          "description": "Where it ends.",
+          "format": "double",
+          "type": "number"
+        },
+        "start_share": {
+          "description": "Where the region starts.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "start_share",
+        "end_share"
+      ],
+      "type": "object"
+    }
+  ],
+  "description": "The part of a Simpler's sample between its Start and End flags (the sampler spec, R22). Absent from the device for the whole sample.\n\nFlags are saved as frames of the edited sample at its own rate, as the slices and the edits' selections are. A set saved before the region existed (R24) holds the shares of the decoded sample its Start and Length parameters chose until the next edit of the region writes frames, because turning a share into a frame needs the sample's length, which the saved file doesn't hold."
+}
+```
+
+</details>
+
+### `SampleRegionSet`
+
+What `device.set_sample_region` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | Simpler. |
+| `start` | integer, at least 0 | yes | The Start flag now. |
+| `end` | integer, at least 0 | yes | The End flag now. |
+| `length` | integer, at least 0 | yes | The edited sample's length in frames at its own rate. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_sample_region` returns.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "Simpler."
+    },
+    "end": {
+      "description": "The End flag now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "length": {
+      "description": "The edited sample's length in frames at its own rate.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start": {
+      "description": "The Start flag now.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "start",
+    "end",
+    "length"
   ],
   "type": "object"
 }
@@ -27471,6 +29365,7 @@ What `session.state` and its commands return: what the grid has selected.
 | `title_tracks` | boolean | yes | Whether the selection is track title bars, so Esc has already gone up as far as it can. |
 | `scroll_y` | number | yes | How far the scenes are scrolled down, in points at 100%. |
 | `launches` | array of [`SlotLaunch`](#slotlaunch) | no | The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in. |
+| `rings` | array of [`RingBox`](#ringbox) | no | The control surfaces' session rings, by track and scene ID, in the Control Surfaces table's row order (control surfaces R28, session view R38). Empty in the grid's own state; `session.state` fills it in. |
 
 <details><summary>JSON Schema</summary>
 
@@ -27482,6 +29377,13 @@ What `session.state` and its commands return: what the grid has selected.
       "description": "The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in.",
       "items": {
         "$ref": "#/$defs/SlotLaunch"
+      },
+      "type": "array"
+    },
+    "rings": {
+      "description": "The control surfaces' session rings, by track and scene ID, in the Control Surfaces table's row order (control surfaces R28, session view R38). Empty in the grid's own state; `session.state` fills it in.",
+      "items": {
+        "$ref": "#/$defs/RingBox"
       },
       "type": "array"
     },
@@ -27831,6 +29733,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
 | `theme_colors` | [`ThemeColorsSettings`](#themecolorssettings) | yes | Theme & Colors: the Theme and Customization sections, as the `settings.set_theme` to `settings.set_color_hue` commands set them. |
 | `audio` | [`AudioPageSettings`](#audiopagesettings) | yes | Audio. |
 | `tempo_midi` | [`MidiPortsResult`](#midiportsresult) | yes | Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports. |
+| `takeover_mode` | [`TakeoverMode`](#takeovermode) | yes | Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it (the remote mapping spec, R28). |
 | `create_fades_on_clip_edges` | boolean | yes | Record, Warp & Launch: Create Fades on Clip Edges, as `settings.set_create_fades_on_clip_edges` sets it. |
 | `retune_on_tuning_load` | boolean | yes | Options ▸ Retune Set On Loading Tuning Systems, as `settings.set_retune_on_tuning_load` sets it (the tunings spec, R15). |
 | `snap_automation_to_grid` | boolean | yes | Options ▸ Snap Automation to Grid, as `settings.set_snap_automation_to_grid` sets it (the automation spec, R31). |
@@ -27917,6 +29820,10 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
       "description": "Record, Warp & Launch: Start Transport With Tap Tempo, as `settings.set_start_transport_with_tap_tempo` sets it (the control bar transport spec, R20).",
       "type": "boolean"
     },
+    "takeover_mode": {
+      "$ref": "#/$defs/TakeoverMode",
+      "description": "Tempo & MIDI: Takeover Mode, as `settings.set_takeover_mode` sets it (the remote mapping spec, R28)."
+    },
     "tempo_midi": {
       "$ref": "#/$defs/MidiPortsResult",
       "description": "Tempo & MIDI: the MIDI ports' switches and the computer MIDI keyboard, the same as `midi.ports` reports."
@@ -27940,6 +29847,7 @@ What `settings.state` returns: the Settings window's preferences by page. Pages 
     "theme_colors",
     "audio",
     "tempo_midi",
+    "takeover_mode",
     "create_fades_on_clip_edges",
     "retune_on_tuning_load",
     "snap_automation_to_grid",
@@ -28994,6 +30902,96 @@ Stacks' progression and bank.
 
 </details>
 
+### `StateResult`
+
+What `remote.map_mode`, `remote.select` and `remote.state` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`MapMode`](#mapmode) | yes | The map mode that is on. |
+| `selected` | [`RemoteTarget`](#remotetarget) or null | yes | The selected control, if one is. |
+| `guess` | [`RemoteMode`](#remotemode) or null | yes | The mode the last learned controller was guessed to be, while it is learned (R27 of remote mapping). |
+| `remote_input` | boolean | yes | Whether an input has its Remote switch on, so a message can reach learning. |
+| `rows` | array of [`MappingInfo`](#mappinginfo) | yes | The Mapping Browser's rows while a map mode is on: the mode's mappings in order of their source. None otherwise. |
+| `counts` | [`Counts`](#counts) | yes | The remote input's counts (R43 of remote mapping). |
+| `lamps` | [`Lamps`](#lamps) | yes | The lamps the remote input lights (R41 of remote mapping). |
+| `takeover` | array of [`TakeoverInfo`](#takeoverinfo) | yes | The takeover state of each absolute controller mapping on a continuous control (R43 of remote mapping). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.map_mode`, `remote.select` and `remote.state` return.",
+  "properties": {
+    "counts": {
+      "$ref": "#/$defs/Counts",
+      "description": "The remote input's counts (R43 of remote mapping)."
+    },
+    "guess": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The mode the last learned controller was guessed to be, while it is learned (R27 of remote mapping)."
+    },
+    "lamps": {
+      "$ref": "#/$defs/Lamps",
+      "description": "The lamps the remote input lights (R41 of remote mapping)."
+    },
+    "mode": {
+      "$ref": "#/$defs/MapMode",
+      "description": "The map mode that is on."
+    },
+    "remote_input": {
+      "description": "Whether an input has its Remote switch on, so a message can reach learning.",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "The Mapping Browser's rows while a map mode is on: the mode's mappings in order of their source. None otherwise.",
+      "items": {
+        "$ref": "#/$defs/MappingInfo"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RemoteTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The selected control, if one is."
+    },
+    "takeover": {
+      "description": "The takeover state of each absolute controller mapping on a continuous control (R43 of remote mapping).",
+      "items": {
+        "$ref": "#/$defs/TakeoverInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "selected",
+    "guess",
+    "remote_input",
+    "rows",
+    "counts",
+    "lamps",
+    "takeover"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `StemKind`
 
 A part of the mix to separate (the dialog's four switches).
@@ -29287,6 +31285,244 @@ A point inside a stretch's range that moves while both ends stay, as dragging th
 
 </details>
 
+### `StripControl`
+
+A control of the relative Session mapping strip (map modes R14): its Launch buttons, one for each track, are [`RemoteTarget::TrackLaunch`].
+
+One of:
+
+- `"scene_up"`: Highlights the scene before the highlighted one.
+- `"scene_down"`: Highlights the scene after the highlighted one.
+- `"scene_number"`: The scene number box: highlights the scene of its number.
+- `"launch_scene"`: Launches the highlighted scene.
+- `"cancel_launch"`: Cancels the launch of a scene that is queued.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of the relative Session mapping strip (map modes R14): its Launch buttons, one for each track, are [`RemoteTarget::TrackLaunch`].",
+  "oneOf": [
+    {
+      "const": "scene_up",
+      "description": "Highlights the scene before the highlighted one.",
+      "type": "string"
+    },
+    {
+      "const": "scene_down",
+      "description": "Highlights the scene after the highlighted one.",
+      "type": "string"
+    },
+    {
+      "const": "scene_number",
+      "description": "The scene number box: highlights the scene of its number.",
+      "type": "string"
+    },
+    {
+      "const": "launch_scene",
+      "description": "Launches the highlighted scene.",
+      "type": "string"
+    },
+    {
+      "const": "cancel_launch",
+      "description": "Cancels the launch of a scene that is queued.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `SurfaceInfo`
+
+One surface the chooser offers.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID, which `control_surface.set` takes. |
+| `name` | string | yes | Its name, as the chooser shows it. |
+| `needs_output` | boolean | yes | Whether it needs an output to start. |
+| `can_lock` | boolean | yes | Whether a device can be locked to it. |
+| `ring` | [`RingInfo`](#ringinfo) or null | yes | The size of its ring, if it has one. |
+| `has_setup` | boolean | yes | Whether it has a setup for Dump to send. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One surface the chooser offers.",
+  "properties": {
+    "can_lock": {
+      "description": "Whether a device can be locked to it.",
+      "type": "boolean"
+    },
+    "has_setup": {
+      "description": "Whether it has a setup for Dump to send.",
+      "type": "boolean"
+    },
+    "id": {
+      "description": "Its ID, which `control_surface.set` takes.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, as the chooser shows it.",
+      "type": "string"
+    },
+    "needs_output": {
+      "description": "Whether it needs an output to start.",
+      "type": "boolean"
+    },
+    "ring": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RingInfo"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The size of its ring, if it has one."
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "needs_output",
+    "can_lock",
+    "ring",
+    "has_setup"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SurfaceRef`
+
+The surface a row names.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `id` | string | yes | Its ID. |
+| `name` | string or null | yes | Its name, if Beatlayer offers a surface with that ID. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The surface a row names.",
+  "properties": {
+    "id": {
+      "description": "Its ID.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name, if Beatlayer offers a surface with that ID.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SurfaceStateInfo`
+
+What a running surface reports of itself.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ring` | [`RingState`](#ringstate) or null | yes | Its session ring, if it has one. |
+| `mode` | string or null | yes | Its own mode, by name. |
+| `device` | [`DeviceFocus`](#devicefocus) or null | no | The device its device controls reach, if there is one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a running surface reports of itself.",
+  "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceFocus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device its device controls reach, if there is one."
+    },
+    "mode": {
+      "description": "Its own mode, by name.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ring": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RingState"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its session ring, if it has one."
+    }
+  },
+  "required": [
+    "ring",
+    "mode"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SurfacesResult`
+
+What `control_surface.surfaces` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `surfaces` | array of [`SurfaceInfo`](#surfaceinfo) | yes | Every surface the chooser offers, native ones by name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.surfaces` returns.",
+  "properties": {
+    "surfaces": {
+      "description": "Every surface the chooser offers, native ones by name.",
+      "items": {
+        "$ref": "#/$defs/SurfaceInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "surfaces"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SustainMode`
 
 What a voice does between Sample Start and Sample End while a note is held (R17).
@@ -29364,6 +31600,16 @@ What `sync.state` returns.
 | `clocks_sent` | integer, at least 0 | yes | Timing Clocks handed to the MIDI output thread since the audio engine started, one for each port. |
 | `clocks_late` | integer, at least 0 | yes | Timing Clocks stamped for a moment already past when the engine wrote them. |
 | `clocks_dropped` | integer, at least 0 | yes | Sync messages dropped because the queue to the MIDI output thread was full. |
+| `input_ports` | integer, at least 0 | yes | How many input ports have Sync on, so their clock can be followed. |
+| `external_sync_available` | boolean | yes | Whether EXT is available: some input port has Sync on. |
+| `external_sync` | boolean | yes | Whether EXT is on. |
+| `leading_input` | string or null | yes | The input port that leads, while usable clocks arrive from it. |
+| `receiving` | boolean | yes | Whether usable clocks arrive: one came in the last 500 ms. |
+| `input_lamp` | boolean | yes | Whether the upper sync lamp is lit: a quarter note's clock arrived in the last 100 ms. |
+| `tempo` | number or null | yes | The smoothed tempo of the incoming clock in BPM, once there is one; what the Tempo field shows while EXT is on. |
+| `clocks_received` | integer, at least 0 | yes | Timing Clocks that arrived from the leading input since the audio engine started. |
+| `clocks_set_aside` | integer, at least 0 | yes | Timing Clocks set aside as glitches: doubled or missing. |
+| `sync_dropped` | integer, at least 0 | yes | Incoming sync messages dropped because the audio thread's list was full. |
 
 <details><summary>JSON Schema</summary>
 
@@ -29383,11 +31629,55 @@ What `sync.state` returns.
       "minimum": 0,
       "type": "integer"
     },
+    "clocks_received": {
+      "default": 0,
+      "description": "Timing Clocks that arrived from the leading input since the audio engine started.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
     "clocks_sent": {
       "description": "Timing Clocks handed to the MIDI output thread since the audio engine started, one for each port.",
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "clocks_set_aside": {
+      "default": 0,
+      "description": "Timing Clocks set aside as glitches: doubled or missing.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "external_sync": {
+      "default": false,
+      "description": "Whether EXT is on.",
+      "type": "boolean"
+    },
+    "external_sync_available": {
+      "default": false,
+      "description": "Whether EXT is available: some input port has Sync on.",
+      "type": "boolean"
+    },
+    "input_lamp": {
+      "default": false,
+      "description": "Whether the upper sync lamp is lit: a quarter note's clock arrived in the last 100 ms.",
+      "type": "boolean"
+    },
+    "input_ports": {
+      "default": 0,
+      "description": "How many input ports have Sync on, so their clock can be followed.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "leading_input": {
+      "default": null,
+      "description": "The input port that leads, while usable clocks arrive from it.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "output_lamp": {
       "description": "Whether the lower sync lamp is lit: a quarter note's clock left for a port in the last 100 ms.",
@@ -29399,9 +31689,30 @@ What `sync.state` returns.
       "minimum": 0,
       "type": "integer"
     },
+    "receiving": {
+      "default": false,
+      "description": "Whether usable clocks arrive: one came in the last 500 ms.",
+      "type": "boolean"
+    },
     "sending": {
       "description": "Whether MIDI clock is going out now: the song plays, past any count-in, and some output has Sync on.",
       "type": "boolean"
+    },
+    "sync_dropped": {
+      "default": 0,
+      "description": "Incoming sync messages dropped because the audio thread's list was full.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tempo": {
+      "default": null,
+      "description": "The smoothed tempo of the incoming clock in BPM, once there is one; what the Tempo field shows while EXT is on.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
     }
   },
   "required": [
@@ -29410,7 +31721,17 @@ What `sync.state` returns.
     "output_lamp",
     "clocks_sent",
     "clocks_late",
-    "clocks_dropped"
+    "clocks_dropped",
+    "input_ports",
+    "external_sync_available",
+    "external_sync",
+    "leading_input",
+    "receiving",
+    "input_lamp",
+    "tempo",
+    "clocks_received",
+    "clocks_set_aside",
+    "sync_dropped"
   ],
   "type": "object"
 }
@@ -29768,6 +32089,118 @@ Type: integer, at least 1.
 
 </details>
 
+### `TakeoverInfo`
+
+One mapping's takeover state.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `source` | [`RemoteSource`](#remotesource) | yes | The mapping's source. |
+| `state` | [`TakeoverState`](#takeoverstate) | yes | Whether it follows or waits. |
+| `last` | number or null | yes | Where the controller last was, as a position in the mapping's range. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mapping's takeover state.",
+  "properties": {
+    "last": {
+      "description": "Where the controller last was, as a position in the mapping's range.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "source": {
+      "$ref": "#/$defs/RemoteSource",
+      "description": "The mapping's source."
+    },
+    "state": {
+      "$ref": "#/$defs/TakeoverState",
+      "description": "Whether it follows or waits."
+    }
+  },
+  "required": [
+    "source",
+    "state",
+    "last"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TakeoverMode`
+
+What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.
+
+One of:
+
+- `"none"`: The control jumps to the controller's value at once.
+- `"pick_up"`: The control waits until the controller reaches its value, then follows.
+- `"value_scaling"`: The control and the controller converge as the controller moves.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an absolute controller does when it and its control disagree (R28): the preference Takeover Mode. It isn't saved with a set.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "The control jumps to the controller's value at once.",
+      "type": "string"
+    },
+    {
+      "const": "pick_up",
+      "description": "The control waits until the controller reaches its value, then follows.",
+      "type": "string"
+    },
+    {
+      "const": "value_scaling",
+      "description": "The control and the controller converge as the controller moves.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TakeoverState`
+
+Where a controller mapping on a continuous control stands with its control (R29).
+
+One of:
+
+- `"following"`: The control follows the controller.
+- `"waiting"`: The control waits for the controller to reach it.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a controller mapping on a continuous control stands with its control (R29).",
+  "oneOf": [
+    {
+      "const": "following",
+      "description": "The control follows the controller.",
+      "type": "string"
+    },
+    {
+      "const": "waiting",
+      "description": "The control waits for the controller to reach it.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `Tap`
 
 Where a track's signal is taken: `pre_fx` before its devices, `post_fx` after its devices and before its mixer, or `post_mixer` (the default) after its pan, volume, and activator.
@@ -29904,6 +32337,70 @@ One of:
 
 </details>
 
+### `TargetInfo`
+
+One mappable control as `remote.targets` lists it (map modes R24).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`RemoteTarget`](#remotetarget) | yes | The control, named by IDs: what `remote.map` and `remote.select` take and `remote.mappings` reports. |
+| `kind` | [`ControlKind`](#controlkind) | yes | The control's kind. |
+| `path` | string | yes | The path to the control: its track and device, or its view. |
+| `name` | string | yes | The control's name. |
+| `range` | pair of number and number | yes | The lowest and highest values of a continuous control, a radio button's first and last option, or a ranged switch's controller values, in the control's own units. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mappable control as `remote.targets` lists it (map modes R24).",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/ControlKind",
+      "description": "The control's kind."
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The path to the control: its track and device, or its view.",
+      "type": "string"
+    },
+    "range": {
+      "description": "The lowest and highest values of a continuous control, a radio button's first and last option, or a ranged switch's controller values, in the control's own units.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/RemoteTarget",
+      "description": "The control, named by IDs: what `remote.map` and `remote.select` take and `remote.mappings` reports."
+    }
+  },
+  "required": [
+    "target",
+    "kind",
+    "path",
+    "name",
+    "range"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TargetState`
 
 What a tool would act on now.
@@ -29976,6 +32473,178 @@ What a tool would act on now.
     "time_selection",
     "selected",
     "input"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TargetsResult`
+
+What `remote.targets` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`MapMode`](#mapmode) | yes | The list `mode` gives. |
+| `targets` | array of [`TargetInfo`](#targetinfo) | yes | Every control the mode maps that the set has, as the views show them: the Session View's slots, scene launch buttons and stop buttons and the relative Session mapping strip; the mixer; every device's parameters; the Control Bar; the crossfader's fields; the Clip View's panels and the step buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.targets` returns.",
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/MapMode",
+      "description": "The list `mode` gives."
+    },
+    "targets": {
+      "description": "Every control the mode maps that the set has, as the views show them: the Session View's slots, scene launch buttons and stop buttons and the relative Session mapping strip; the mixer; every device's parameters; the Control Bar; the crossfader's fields; the Clip View's panels and the step buttons.",
+      "items": {
+        "$ref": "#/$defs/TargetInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "targets"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TemplateErrorInfo`
+
+One thing wrong in a controller template file.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `line` | integer, at least 0 | yes | The line, from 1. |
+| `message` | string | yes | What is wrong. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One thing wrong in a controller template file.",
+  "properties": {
+    "line": {
+      "description": "The line, from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "message": {
+      "description": "What is wrong.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "line",
+    "message"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TemplateInfo`
+
+One controller template file, bundled or in the User Library.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `bundled` | boolean | yes | Whether it is the template bundled with Beatlayer. |
+| `listed` | boolean | yes | Whether the chooser lists it: not a broken file, not a bundled template a User Library one of the same name replaces, and not a second file of one name. |
+| `errors` | array of [`TemplateErrorInfo`](#templateerrorinfo) | yes | Each mistake in the file, with its line; empty for a whole file. |
+| `matches` | array of string | yes | The ports present that the template names and no row uses, which the Settings mark "Matches" (R45). |
+| `name` | string or null | no | The template's name; left out for a file that doesn't parse. |
+| `path` | string or null | no | The file's path; left out for the bundled template. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One controller template file, bundled or in the User Library.",
+  "properties": {
+    "bundled": {
+      "description": "Whether it is the template bundled with Beatlayer.",
+      "type": "boolean"
+    },
+    "errors": {
+      "description": "Each mistake in the file, with its line; empty for a whole file.",
+      "items": {
+        "$ref": "#/$defs/TemplateErrorInfo"
+      },
+      "type": "array"
+    },
+    "listed": {
+      "description": "Whether the chooser lists it: not a broken file, not a bundled template a User Library one of the same name replaces, and not a second file of one name.",
+      "type": "boolean"
+    },
+    "matches": {
+      "description": "The ports present that the template names and no row uses, which the Settings mark \"Matches\" (R45).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The template's name; left out for a file that doesn't parse.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "description": "The file's path; left out for the bundled template.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "bundled",
+    "listed",
+    "errors",
+    "matches"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TemplatesResult`
+
+What `control_surface.templates` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `templates` | array of [`TemplateInfo`](#templateinfo) | yes | Every template file found, the bundled one first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.templates` returns.",
+  "properties": {
+    "templates": {
+      "description": "Every template file found, the bundled one first.",
+      "items": {
+        "$ref": "#/$defs/TemplateInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "templates"
   ],
   "type": "object"
 }
@@ -30902,6 +33571,105 @@ Changes to Tones' controls.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `ToolControl`
+
+A control of a MIDI Tool's panel (map modes R23).
+
+One of:
+
+- an object with `type` = `"auto"`: The Auto switch.
+- an object with `type` = `"apply"`: The Transform or Generate button.
+- an object with `type` = `"reset"`: The Reset button.
+- an object with `type` = `"param"`, `param` ([`ToolId`](#toolid)): One of the tool's parameters, whose kind its description gives.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of a MIDI Tool's panel (map modes R23).",
+  "oneOf": [
+    {
+      "description": "The Auto switch.",
+      "properties": {
+        "type": {
+          "const": "auto",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Transform or Generate button.",
+      "properties": {
+        "type": {
+          "const": "apply",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Reset button.",
+      "properties": {
+        "type": {
+          "const": "reset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of the tool's parameters, whose kind its description gives.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/ToolId",
+          "description": "Its ID."
+        },
+        "type": {
+          "const": "param",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ToolId`
+
+The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it.
+
+Type: string.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it.",
+  "maxLength": 32,
+  "minLength": 1,
+  "type": "string"
 }
 ```
 
@@ -31892,12 +34660,18 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `punch_in` | boolean | yes | Whether Punch-In is on. |
 | `punch_out` | boolean | yes | Whether Punch-Out is on. |
 | `midi_overdub` | boolean | yes | Whether MIDI Arrangement Overdub is on. |
+| `record_quantization` | [`RecordQuantization`](#recordquantization) | yes | Record Quantization, the grid recorded notes are moved onto (the recording spec, R17): `none` or a note value such as `1/16`. |
+| `record_quantization_last` | [`RecordQuantization`](#recordquantization) | yes | The last Record Quantization value other than `none` that was chosen, which `transport.set_record_quantization` with `on` set to true returns to. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
 | `last_recording` | [`RecordingReport`](#recordingreport) or null | yes | What the last recording that ended came to; null until one has ended in this session. |
 | `capture_midi_ready` | boolean | yes | Whether Capture MIDI has notes to bring back: a monitoring MIDI track was played since the last capture or recording, so `midi.capture` runs and the Control Bar's button and Create menu item are enabled. |
+| `phase_nudge` | [`PhaseNudge`](#phasenudge) | yes | The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28). |
+| `waiting_start` | boolean | yes | Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25). |
+| `waiting_frame` | integer or null | yes | The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
+| `external_sync` | boolean | yes | Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on. |
 
 <details><summary>JSON Schema</summary>
 
@@ -31932,6 +34706,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     },
     "engine_running": {
       "description": "Whether the audio engine runs on a device, so the transport can play. While it doesn't, the transport's commands are refused.",
+      "type": "boolean"
+    },
+    "external_sync": {
+      "default": false,
+      "description": "Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on.",
       "type": "boolean"
     },
     "insert_marker": {
@@ -31977,6 +34756,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether MIDI Arrangement Overdub is on.",
       "type": "boolean"
     },
+    "phase_nudge": {
+      "$ref": "#/$defs/PhaseNudge",
+      "default": "none",
+      "description": "The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28)."
+    },
     "playing": {
       "description": "Whether the song is playing.",
       "type": "boolean"
@@ -31992,6 +34776,14 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "punch_out": {
       "description": "Whether Punch-Out is on.",
       "type": "boolean"
+    },
+    "record_quantization": {
+      "$ref": "#/$defs/RecordQuantization",
+      "description": "Record Quantization, the grid recorded notes are moved onto (the recording spec, R17): `none` or a note value such as `1/16`."
+    },
+    "record_quantization_last": {
+      "$ref": "#/$defs/RecordQuantization",
+      "description": "The last Record Quantization value other than `none` that was chosen, which `transport.set_record_quantization` with `on` set to true returns to."
     },
     "recording": {
       "anyOf": [
@@ -32033,6 +34825,21 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "time_signature_editable": {
       "description": "Whether the song has one time signature throughout, so the time-signature fields can set it.",
       "type": "boolean"
+    },
+    "waiting_frame": {
+      "default": null,
+      "description": "The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "waiting_start": {
+      "default": false,
+      "description": "Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25).",
+      "type": "boolean"
     }
   },
   "required": [
@@ -32057,12 +34864,18 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "punch_in",
     "punch_out",
     "midi_overdub",
+    "record_quantization",
+    "record_quantization_last",
     "automation_arm",
     "automation_record_mode",
     "recording",
     "last_recording",
     "capture_midi_ready",
-    "tap_tempo"
+    "phase_nudge",
+    "waiting_start",
+    "waiting_frame",
+    "tap_tempo",
+    "external_sync"
   ],
   "type": "object"
 }

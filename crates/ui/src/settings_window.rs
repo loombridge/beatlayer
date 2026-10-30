@@ -10,13 +10,14 @@
 //! which Live doesn't have. It follows Plug-Ins, the page whose plug-ins
 //! are the other way another program drives the app.
 
-use bl_model::{LaunchMode, LaunchQuantization};
+use bl_model::{LaunchMode, LaunchQuantization, TakeoverMode};
 use bl_project::registry as recovery_ids;
 use bl_shell::assistant::AssistantProvider;
 use bl_shell::audio::{
     AudioDevices, AudioStatus, COMPENSATION_LIMIT_MS, DeviceListing, TONE_MAX_DBFS, TONE_MAX_HZ,
     TONE_MIN_DBFS, TONE_MIN_HZ,
 };
+use bl_shell::control_surface_commands as control_surface;
 use bl_shell::keymap::Origin;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
@@ -1949,9 +1950,10 @@ fn library_page(
 /// Remote switches, and an input its MPE switch after them, as the MIDI I/O
 /// spec R2 and R27 give it. An output with Sync on has a disclosure triangle
 /// after its switches that opens its MIDI Clock Sync Delay, MIDI Clock Type
-/// and Hardware Resync (the MIDI clock spec, R1). The Tempo Follower, control
-/// surfaces, and Takeover Mode come with later packages. Remote is kept and
-/// acts when MIDI mapping is built (R5).
+/// and Hardware Resync (the MIDI clock spec, R1). Takeover Mode comes before
+/// the ports (the remote mapping spec, R28). The Tempo Follower and control
+/// surfaces come with later packages. Remote is kept and acts when MIDI
+/// mapping is built (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -1975,13 +1977,38 @@ fn tempo_midi_page(
         )));
     }
     rows.heading(ui, "MIDI");
-    rows.note(
+    control_surfaces_table(ui, shell, theme, rows, events);
+    rows.note(ui, "The Tempo Follower settings come with a later package.");
+    // Spec: remote-mapping R28. Takeover Mode sits where Live has it: after
+    // the Control Surfaces table's place and before the MIDI ports table.
+    let modes: Vec<Choice<TakeoverMode>> = TakeoverMode::ALL
+        .into_iter()
+        .map(|mode| Choice {
+            label: mode.label().to_owned(),
+            value: mode,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Takeover Mode", SettingsLayout::CHOOSER);
+    let current = shell.takeover_mode();
+    if let Some(mode) = chooser(
         ui,
-        "The Tempo Follower, control surface, and Takeover Mode settings come with later \
-         packages.",
-    );
+        theme,
+        "takeover-mode",
+        "Takeover Mode",
+        rect,
+        &modes,
+        Some(&current),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            ids::SETTINGS_SET_TAKEOVER_MODE,
+            json!({ "mode": mode }),
+        )));
+    }
     rows.heading(ui, "MIDI Ports");
     let ports = shell.midi().ports();
+    let matches = shell.template_matches();
     if ports.is_empty() {
         rows.note(ui, "The computer offers no MIDI ports.");
     }
@@ -1997,13 +2024,22 @@ fn tempo_midi_page(
         if !output {
             switches.push(("MPE", port.mpe));
         }
-        // Spec: midi-clock R1. An output with Sync on has the triangle.
-        let triangle = output && port.sync;
+        // Spec: midi-clock R1, R14. A port with Sync on has the triangle: an
+        // output's after its switches, an input's before them, where an
+        // input's row, a switch longer, has no room.
+        let triangle = port.sync;
         let mut widths = vec![SettingsLayout::SWITCH; switches.len()];
-        if triangle {
+        if triangle && output {
             widths.push(SettingsLayout::TRIANGLE);
         }
-        let mut rects = rows.row_of(ui, &label, &widths).into_iter();
+        let all = rows.row_of(ui, &label, &widths);
+        let before = (triangle && !output).then(|| {
+            Rect::from_min_size(
+                pos2(all[0].left() - 22.0, all[0].top()),
+                vec2(SettingsLayout::TRIANGLE, 18.0),
+            )
+        });
+        let mut rects = all.into_iter();
         for ((name, on), rect) in switches.into_iter().zip(rects.by_ref()) {
             let salt = format!("midi-port-{}-{}-{name}", port.direction as u8, port.name);
             if let Some(on) = switch(ui, theme, &salt, &format!("{label} {name}"), rect, on) {
@@ -2013,7 +2049,7 @@ fn tempo_midi_page(
             }
         }
         if triangle {
-            let open = match rects.next() {
+            let open = match before.or_else(|| rects.next()) {
                 Some(rect) => disclosure(ui, &format!("{label} Sync Options"), rect),
                 None => false,
             };
@@ -2021,8 +2057,145 @@ fn tempo_midi_page(
                 sync_options(ui, theme, rows, events, &port);
             }
         }
+        // Spec: control-surfaces R45. A template that names the port is
+        // noted under it.
+        for (_, template) in matches.iter().filter(|(name, _)| *name == port.name) {
+            rows.read_note(ui, &format!("Matches {template}"));
+        }
         if let Some(error) = &port.error {
             rows.note(ui, &format!("{label} couldn't be opened: {error}"));
+        }
+    }
+}
+
+/// The Control Surfaces table (L-SET-014; the control surfaces spec, R1, R2,
+/// R11 and R14): six numbered rows, each a Control Surface chooser, an Input
+/// chooser, an Output chooser and a Dump button, left to right. A port a row
+/// names that the system doesn't offer shows by its name, marked missing.
+/// Choosing runs `control_surface.set` and Dump runs `control_surface.dump`.
+fn control_surfaces_table(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    let kinds = shell.control_surface_choices();
+    let ports = shell.midi().ports();
+    let offered = |direction| {
+        ports
+            .iter()
+            .filter(move |port| port.direction == direction)
+            .map(|port| port.name.clone())
+            .collect::<Vec<_>>()
+    };
+    let (inputs, outputs) = (
+        offered(midi_ids::PortDirection::Input),
+        offered(midi_ids::PortDirection::Output),
+    );
+    // None, then the offered names, then a name the row keeps that isn't
+    // offered, marked missing.
+    let port_choices = |offered: &[String], kept: Option<&str>| -> Vec<Choice<Option<String>>> {
+        let choice = |label: String, value: Option<String>| Choice {
+            label,
+            value,
+            leds: NO_LEDS,
+        };
+        let mut choices = vec![choice("None".to_owned(), None)];
+        choices.extend(offered.iter().map(|n| choice(n.clone(), Some(n.clone()))));
+        if let Some(kept) = kept.filter(|kept| !offered.iter().any(|n| n == kept)) {
+            choices.push(choice(format!("{kept} (missing)"), Some(kept.to_owned())));
+        }
+        choices
+    };
+    for row in shell.control_surface_rows() {
+        let n = row.row;
+        let rects = rows.table_row(ui, &n.to_string(), &[100.0, 100.0, 100.0, 44.0]);
+        let surface_id = row.surface.as_ref().map(|s| s.id.clone());
+        let mut surfaces = vec![Choice {
+            label: "None".to_owned(),
+            value: None,
+            leds: NO_LEDS,
+        }];
+        surfaces.extend(kinds.iter().map(|kind| Choice {
+            label: kind.name.clone(),
+            value: Some(kind.id.clone()),
+            leds: NO_LEDS,
+        }));
+        if let Some(id) = surface_id
+            .as_ref()
+            .filter(|id| !kinds.iter().any(|k| &k.id == *id))
+        {
+            surfaces.push(Choice {
+                label: id.clone(),
+                value: Some(id.clone()),
+                leds: NO_LEDS,
+            });
+        }
+        let current_input = row.input.as_ref().map(|p| p.name.clone());
+        let current_output = row.output.as_ref().map(|p| p.name.clone());
+        let mut set = |field: &str, value: Option<String>| {
+            events.push(UiEvent::Invoke(Invocation::new(
+                control_surface::SET,
+                json!({ "row": n, field: value }),
+            )));
+        };
+        let name = format!("Control Surface {n}");
+        if let Some(chosen) = chooser(
+            ui,
+            theme,
+            &name,
+            &name,
+            rects[0],
+            &surfaces,
+            Some(&surface_id),
+            true,
+        ) {
+            set("surface", chosen);
+        }
+        let name = format!("Input {n}");
+        if let Some(chosen) = chooser(
+            ui,
+            theme,
+            &name,
+            &name,
+            rects[1],
+            &port_choices(&inputs, current_input.as_deref()),
+            Some(&current_input),
+            true,
+        ) {
+            set("input", chosen);
+        }
+        let name = format!("Output {n}");
+        if let Some(chosen) = chooser(
+            ui,
+            theme,
+            &name,
+            &name,
+            rects[2],
+            &port_choices(&outputs, current_output.as_deref()),
+            Some(&current_output),
+            true,
+        ) {
+            set("output", chosen);
+        }
+        let dump = ui
+            .add_enabled_ui(row.can_dump, |ui| {
+                ui.put(rects[3], egui::Button::new("Dump"))
+            })
+            .inner;
+        let label = format!("Dump {n}");
+        ui.ctx().accesskit_node_builder(dump.id, |node| {
+            node.set_label(label);
+        });
+        if dump.clicked() {
+            events.push(UiEvent::Invoke(Invocation::new(
+                control_surface::DUMP,
+                json!({ "row": n }),
+            )));
+        }
+        if let Some(error) = &row.error {
+            rows.note(ui, &format!("Row {n} stopped: {error}"));
         }
     }
 }
@@ -2062,8 +2235,8 @@ fn disclosure(ui: &mut Ui, name: &str, rect: Rect) -> bool {
     open
 }
 
-/// An output's three sync options, the rows under its port row (the MIDI
-/// clock spec, R1).
+/// A port's sync options, the rows under its port row: an output's three, and
+/// an input's Sync Delay alone (the MIDI clock spec, R1, R14).
 fn sync_options(
     ui: &mut Ui,
     theme: &Theme,
@@ -2078,12 +2251,18 @@ fn sync_options(
     };
     let name = |option: &str| format!("{}: {} {option}", port.direction.label(), port.name);
     let delay = i32::from(port.sync_delay_ms);
-    let rect = rows.row(ui, "MIDI Clock Sync Delay", SettingsLayout::NUMBER);
+    let input = port.direction == midi_ids::PortDirection::Input;
+    let delay_label = if input {
+        "Sync Delay"
+    } else {
+        "MIDI Clock Sync Delay"
+    };
+    let rect = rows.row(ui, delay_label, SettingsLayout::NUMBER);
     if let Some(ms) = number_box(
         ui,
         theme,
         &name("delay"),
-        &name("MIDI Clock Sync Delay"),
+        &name(delay_label),
         rect,
         f64::from(delay),
         (
@@ -2094,6 +2273,9 @@ fn sync_options(
         &format!("{delay} ms"),
     ) {
         set(events, "sync_delay_ms", json!(ms.round() as i16));
+    }
+    if input {
+        return;
     }
     let types: Vec<Choice<midi_ids::ClockTypeChoice>> = midi_ids::ClockTypeChoice::ALL
         .into_iter()
@@ -2655,6 +2837,25 @@ impl<'a> Rows<'a> {
         rects
     }
 
+    /// A row of a table: a short label in the label column, then controls
+    /// of these widths side by side right after it, where they fit the
+    /// window (the option column starts too far right for a row of three
+    /// choosers and a button).
+    fn table_row(&mut self, ui: &Ui, label: &str, widths: &[f32]) -> Vec<Rect> {
+        self.label(ui, label);
+        let mut x = self.layout.label_x + 18.0;
+        let rects = widths
+            .iter()
+            .map(|&width| {
+                let rect = Rect::from_min_size(pos2(x, self.y), vec2(width, 18.0));
+                x += width + 4.0;
+                rect
+            })
+            .collect();
+        self.y += SettingsLayout::OPTION_ROW;
+        rects
+    }
+
     /// A row that shows a value as text, read by assistive technology as a
     /// labelled value.
     fn text_row(&mut self, ui: &mut Ui, label: &str, value: &str) {
@@ -2806,5 +3007,26 @@ impl<'a> Rows<'a> {
             self.theme.colors.text_dim.0,
         );
         self.y += height + 10.0;
+    }
+
+    /// A note that assistive technology can read, as a value row is: the
+    /// text, labelled by itself.
+    fn read_note(&mut self, ui: &Ui, text: &str) {
+        let top = self.y + 4.0;
+        self.note(ui, text);
+        let rect = Rect::from_min_max(
+            pos2(self.layout.label_x, top),
+            pos2(self.right(), self.y - 6.0),
+        );
+        let response = ui.interact(
+            rect,
+            Id::new(("settings-note", text, top as i32)),
+            Sense::hover(),
+        );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Label);
+            node.set_label(text.to_owned());
+        });
     }
 }

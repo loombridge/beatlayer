@@ -359,6 +359,23 @@ pub fn show(
         // it can map are tinted, and a click selects one for a macro's Map
         // button.
         crate::mapping::macro_overlay(ui, theme, rect, frame.id, param);
+        // Spec: map-modes R3, R11; macros R35. MIDI Map Mode and Key Map Mode
+        // tint the parameters they can map, a toggle or a choice by its own
+        // kind; one a macro holds has no overlay.
+        if crate::mapping::held(ui.ctx(), frame.id, param).is_none() {
+            crate::mapping::remote_overlay(
+                ui,
+                theme,
+                rect,
+                param_control_id(frame.id, param),
+                bl_model::RemoteTarget::Device {
+                    device: frame.id,
+                    param,
+                },
+                matches!(widget, Widget::Knob | Widget::Number),
+                events,
+            );
+        }
         // Spec: macros R11. A parameter a macro holds is drawn disabled, and
         // the Status Bar names the macro while the pointer is over it.
         if let Some(name) = crate::mapping::held(ui.ctx(), frame.id, param) {

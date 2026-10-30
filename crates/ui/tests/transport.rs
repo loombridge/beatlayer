@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use bl_core::time::Ticks;
 use bl_shell::menus::{MenuPlatform, menu_bar};
 use bl_shell::transport;
-use bl_shell::transport_commands::TransportState;
+use bl_shell::transport_commands::{PhaseNudge, TransportState};
 use bl_shell::{Area, Shell, commands as ids};
 use bl_ui::control_bar::{self, SECTION};
 use bl_ui::keymap::Platform;
@@ -256,7 +256,7 @@ fn every_control_in_the_transport_section_is_reachable_from_the_keyboard() {
     h.settle();
     assert_eq!(h.shell.focused_area(), Area::ControlBar);
     let mut reached: BTreeSet<Element> = BTreeSet::new();
-    for _ in 0..30 {
+    for _ in 0..32 {
         let focused = h.ctx.memory(|m| m.focused());
         reached.extend(
             SECTION
@@ -569,6 +569,146 @@ fn the_section_reaches_assistive_technology() {
     assert!(document.settings().punch_in && document.settings().punch_out);
     assert!(!document.settings().arrangement_loop.enabled);
 
+    h.shell.audio_mut().stop();
+}
+
+/// Presses the primary button at the middle of `element`.
+fn press_button(h: &mut Harness, element: Element) {
+    let at = rect(element).center();
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+}
+
+/// Lets go of the primary button at the middle of `element`.
+fn release_button(h: &mut Harness, element: Element) {
+    h.frame(vec![Event::PointerButton {
+        pos: rect(element).center(),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+}
+
+fn phase_nudge(shell: &mut Shell) -> PhaseNudge {
+    state(shell).phase_nudge
+}
+
+/// The pressed state a screen reader reads of a Phase Nudge button.
+fn toggled(h: &mut Harness, name: &str) -> Option<bool> {
+    Harness::node(&Harness::nodes(&h.frame(vec![])), name).toggled
+}
+
+#[test]
+fn the_phase_nudge_buttons_nudge_while_the_mouse_holds_them_and_show_pressed() {
+    // Spec: transport R27, R28. Nothing in the set changes.
+    let mut h = Harness::manual(Window::Main);
+    h.settle();
+    h.shell.run("transport.play", json!({})).unwrap();
+    wait(&mut h, "playback", |h| h.engine.playing);
+    let undoable = h.shell.editor().undo_history().count();
+    let tempo = state(&mut h.shell).tempo;
+    for (element, name, held) in [
+        (Element::NudgeUp, "Phase Nudge Up", PhaseNudge::Up),
+        (Element::NudgeDown, "Phase Nudge Down", PhaseNudge::Down),
+    ] {
+        assert_eq!(toggled(&mut h, name), Some(false), "{name} rests");
+        press_button(&mut h, element);
+        wait(&mut h, name, |h| h.engine.phase_nudge.is_some());
+        assert_eq!(phase_nudge(&mut h.shell), held);
+        assert_eq!(toggled(&mut h, name), Some(true), "{name} shows pressed");
+        let nodes = Harness::nodes(&h.frame(vec![]));
+        assert_eq!(Harness::node(&nodes, name).value, "pressed");
+        release_button(&mut h, element);
+        wait(&mut h, name, |h| h.engine.phase_nudge.is_none());
+        assert_eq!(phase_nudge(&mut h.shell), PhaseNudge::None);
+        assert_eq!(toggled(&mut h, name), Some(false), "{name} lets go");
+    }
+    // The Tempo field and the set stay as they were, and no undo step is made.
+    assert_eq!(state(&mut h.shell).tempo, tempo);
+    assert_eq!(h.shell.editor().undo_history().count(), undoable);
+    h.shell.audio_mut().stop();
+}
+
+#[test]
+fn a_phase_nudge_ends_when_the_window_loses_the_mouse_or_the_focus() {
+    // Spec: transport R28.
+    let mut h = Harness::manual(Window::Main);
+    h.settle();
+    h.shell.run("transport.play", json!({})).unwrap();
+    wait(&mut h, "playback", |h| h.engine.playing);
+    for lost in [Event::PointerGone, Event::WindowFocused(false)] {
+        press_button(&mut h, Element::NudgeUp);
+        wait(&mut h, "the nudge", |h| h.engine.phase_nudge.is_some());
+        h.frame(vec![lost]);
+        wait(&mut h, "the nudge to end", |h| {
+            h.engine.phase_nudge.is_none()
+        });
+        // The button is still down, but the nudge doesn't start again.
+        h.settle();
+        assert_eq!(phase_nudge(&mut h.shell), PhaseNudge::None);
+        release_button(&mut h, Element::NudgeUp);
+        h.settle();
+        assert_eq!(phase_nudge(&mut h.shell), PhaseNudge::None);
+    }
+    h.shell.audio_mut().stop();
+}
+
+#[test]
+fn the_phase_nudge_buttons_are_disabled_and_refused_while_an_outside_tempo_leads() {
+    // Spec: transport R29.
+    let mut h = Harness::manual(Window::Main);
+    let nodes = Harness::nodes(&h.settle());
+    for name in ["Phase Nudge Down", "Phase Nudge Up"] {
+        let node = Harness::node(&nodes, name);
+        assert_eq!(node.role, Role::Button, "{name}");
+        assert!(!node.disabled, "{name} works with no follower");
+    }
+    h.shell.run("transport.play", json!({})).unwrap();
+    wait(&mut h, "playback", |h| h.engine.playing);
+    // A nudge held when a follower arrives can still end.
+    press_button(&mut h, Element::NudgeDown);
+    wait(&mut h, "the nudge", |h| h.engine.phase_nudge.is_some());
+    h.shell
+        .audio()
+        .set_follower(Some(Box::new(bl_engine::testing::following(140.0))));
+    wait(&mut h, "the follower", |h| h.engine.following);
+    release_button(&mut h, Element::NudgeDown);
+    wait(&mut h, "the release", |h| h.engine.phase_nudge.is_none());
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    for name in ["Phase Nudge Down", "Phase Nudge Up"] {
+        assert!(Harness::node(&nodes, name).disabled, "{name} is off");
+    }
+    // A press does nothing, and the command is refused.
+    press_button(&mut h, Element::NudgeUp);
+    h.settle();
+    release_button(&mut h, Element::NudgeUp);
+    h.settle();
+    assert_eq!(phase_nudge(&mut h.shell), PhaseNudge::None);
+    let refused = h
+        .shell
+        .run(
+            "transport.phase_nudge",
+            json!({ "direction": "up", "held": true }),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("leads the tempo"), "{refused}");
+    h.shell
+        .run(
+            "transport.phase_nudge",
+            json!({ "direction": "up", "held": false }),
+        )
+        .unwrap();
+    // When the follower goes, the buttons work again.
+    h.shell.audio().set_follower(None);
+    wait(&mut h, "the follower to go", |h| !h.engine.following);
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    assert!(!Harness::node(&nodes, "Phase Nudge Up").disabled);
     h.shell.audio_mut().stop();
 }
 

@@ -8,29 +8,41 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
     use Path::Exception;
     use Reason::{AgentOnly, Equivalent, LaterView, Query};
     vec![
-        // The mappings' commands (WP-7.1): the map modes' overlays and the
-        // Mapping Browser that make them by a click and a key come with
-        // WP-7.3; until then agents reach them.
+        // The mappings' commands (WP-7.1) and the map modes that make them
+        // (WP-7.3).
         ("remote.mappings", Exception(Query)),
+        ("remote.state", Exception(Query)),
+        ("remote.targets", Exception(Query)),
+        (
+            "remote.select",
+            Exception(Equivalent(
+                "a click on a tinted control in a map mode, or Enter with the control focused",
+            )),
+        ),
         (
             "remote.map",
-            Exception(LaterView("the map modes' overlays (WP-7.3)")),
+            Exception(Equivalent(
+                "the next key in Key Map Mode, or the next message in MIDI Map Mode, with a \
+                 control selected",
+            )),
         ),
         (
             "remote.unmap",
-            Exception(LaterView("the Mapping Browser's Delete (WP-7.3)")),
+            Exception(Equivalent(
+                "Delete or Backspace with a control selected in a map mode",
+            )),
         ),
         (
             "remote.set_range",
-            Exception(LaterView("the Mapping Browser's Min and Max (WP-7.3)")),
+            Exception(Equivalent("the Mapping Browser's Min and Max boxes")),
         ),
         (
             "remote.invert_range",
-            Exception(LaterView("the Mapping Browser's Invert Range (WP-7.3)")),
+            Exception(Equivalent("the Mapping Browser's Invert Range")),
         ),
         (
             "remote.set_mode",
-            Exception(LaterView("the Status Bar's mode chooser (WP-7.3)")),
+            Exception(Equivalent("the Status Bar's mode chooser")),
         ),
         (
             "remote.input",
@@ -45,6 +57,38 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "replaces the whole list; the remote.* commands change one",
             )),
         ),
+        // The Control Surfaces table (WP-7.5): its choosers step with Up and
+        // Down, and Dump is a button.
+        ("control_surface.list", Exception(Query)),
+        ("control_surface.surfaces", Exception(Query)),
+        ("control_surface.templates", Exception(Query)),
+        (
+            "control_surface.set",
+            settings(
+                "tempo-midi",
+                a_midi_port,
+                "Control Surface 1",
+                Key::ArrowDown,
+            ),
+        ),
+        (
+            "control_surface.dump",
+            settings("tempo-midi", a_surface_row, "Dump 1", Key::Enter),
+        ),
+        // Instant mappings (WP-7.6): a surface's own buttons move its ring
+        // and its banks, and an agent reads the banks without one; Lock to
+        // is the device menu's.
+        ("control_surface.lock", Exception(DEVICE_MENU)),
+        ("control_surface.unlock", Exception(DEVICE_MENU)),
+        (
+            "control_surface.move_ring",
+            Exception(Equivalent("a surface's arrow and page buttons")),
+        ),
+        (
+            "control_surface.set_bank",
+            Exception(Equivalent("a surface's bank buttons")),
+        ),
+        ("control_surface.banks", Exception(Query)),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (
@@ -220,6 +264,10 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         (
             "settings.set_temporary_folder",
             settings("file-folder", nothing, "Browse", Key::Enter),
+        ),
+        (
+            "settings.set_takeover_mode",
+            settings("tempo-midi", nothing, "Takeover Mode", Key::ArrowDown),
         ),
         (
             "settings.set_collect_files_on_export",

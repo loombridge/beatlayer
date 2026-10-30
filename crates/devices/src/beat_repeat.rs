@@ -166,8 +166,30 @@ pub fn beat_repeat_type() -> DeviceType {
         ParamDescriptor::continuous(DECAY, "Decay", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("Makes each repeat quieter than the one before."),
     ];
-    DeviceType::native(BEAT_REPEAT, "Beat Repeat", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(BEAT_REPEAT, "Beat Repeat", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Repeat",
+                    &[
+                        "Interval",
+                        "Offset",
+                        "Chance",
+                        "Gate",
+                        "Repeat",
+                        "Grid",
+                        "No Triplets",
+                    ],
+                ),
+                (
+                    "Variation",
+                    &["Variation", "Variation Mode", "Pitch", "Pitch Decay"],
+                ),
+                ("Filter", &["Filter", "Freq", "Width", "Mode"]),
+                ("Volume", &["Volume", "Decay"]),
+            ]),
+    )
 }
 
 fn layout() -> DeviceLayout {

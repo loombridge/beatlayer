@@ -101,7 +101,8 @@ pub fn tuner_type() -> DeviceType {
         DeviceDescription::new(params)
             .with_layout(layout)
             .with_views(&["Classic", "Histogram"])
-            .with_menu_options(&[SPELLING_SHARPS, SPELLING_FLATS, SPELLING_BOTH]),
+            .with_menu_options(&[SPELLING_SHARPS, SPELLING_FLATS, SPELLING_BOTH])
+            .with_banks(&[("Tuner", &["Reference", "Readout", "Classic Mode", "Auto"])]),
     )
 }
 

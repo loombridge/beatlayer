@@ -33,6 +33,8 @@ fn play(
             transient_envelope: 100.0,
             pitch,
             clip: 1,
+            step: 1.0,
+            song: f64::NAN,
         };
         let (before, after) = mode.reach(&request);
         let lo = positions[0].floor() as i64 - before as i64;
@@ -458,6 +460,8 @@ fn a_located_complex_clip_plays_from_the_point_at_the_right_level() {
             transient_envelope: 100.0,
             pitch: 1.0,
             clip: 1,
+            step: 1.0,
+            song: f64::NAN,
         };
         let (before, after) = located.reach(&request);
         let lo = positions[0].floor() as i64 - before as i64;

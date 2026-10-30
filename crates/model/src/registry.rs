@@ -782,6 +782,22 @@ const ENTRIES: &[Entry] = &[
             set, and undo switches it back.",
     },
     Entry {
+        id: "transport.set_record_quantization",
+        action: Action::Apply("set_record_quantization"),
+        label: "Record Quantization",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets Record Quantization, as Edit > Record Quantization does: the grid the \
+            notes an Arrangement recording, a Session slot recording or a Session overdub makes \
+            are moved onto. Give `quantization` as `none`, `1/4`, `1/8`, `1/8t`, `1/8+1/8t`, \
+            `1/16`, `1/16t`, `1/16+1/16t` or `1/32`, or give `on` as false to turn it off and as \
+            true to turn it back on at the last value chosen other than `none`. Step recording, \
+            Capture MIDI and notes drawn, pasted or made by a command are never moved. It can't \
+            be changed while an Arrangement or Session slot recording runs. The setting is saved \
+            with the set, and undo restores it.",
+    },
+    Entry {
         id: "track.create",
         action: Action::Apply("create_track"),
         label: "Insert Track",
@@ -3130,6 +3146,19 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Deletes a manual slice at `frame` into the sample (WP-5.15b).",
+    },
+    Entry {
+        id: "device.write_sample_region",
+        action: Action::Apply("set_device_region"),
+        label: "Change Sample Region",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Writes the region of a device's sample, between its Start and End flags, \
+            as given, without looking at the sample (the sampler spec, R22): `region` holds \
+            `start` and `end` in frames of the sample at its own rate, Start before End, or is \
+            `null` for the whole sample. One undo step. `device.set_sample_region` clamps the \
+            flags to the sample.",
     },
     Entry {
         id: "device.insert_layers",

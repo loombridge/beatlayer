@@ -593,7 +593,8 @@ impl Compiler {
                 (change, old.device(id), document.device(id))
                 && (before.sample_edits != after.sample_edits
                     || before.warp != after.warp
-                    || before.slices != after.slices)
+                    || before.slices != after.slices
+                    || before.region != after.region)
                 && before.media == after.media
                 && let Some(media) = after.media_at(0)
             {
@@ -781,24 +782,56 @@ impl Compiler {
         update: &mut Update,
     ) {
         let rate = self.config.sample_rate;
-        let (warp, slices) = match document.device(device) {
-            Some(d) => (d.warp.clone(), std::sync::Arc::from(d.slices.as_slice())),
-            None => (bl_model::DeviceWarp::default(), std::sync::Arc::from([])),
+        let library = self.registry.media();
+        // Slices and the region's flags count frames of the edited sample at
+        // its own rate (the sampler spec, R22); the node reads the sample at
+        // the engine's.
+        let native = library
+            .and_then(|library| library.native_rate(media))
+            .filter(|&native| native != 0 && native != rate.hz());
+        let engine = |frame: u64| match native {
+            Some(native) => {
+                ((u128::from(frame) * u128::from(rate.hz()) + u128::from(native) / 2)
+                    / u128::from(native)) as u64
+            }
+            None => frame,
         };
-        match self
-            .registry
-            .media()
-            .and_then(|library| library.edited_sample(media, rate, edits))
-        {
-            Some(sample) => update.data.push((
-                NodeKey::Device(device),
-                self.gc.data(SlotSample {
-                    slot,
-                    sample,
-                    warp,
-                    slices,
-                }),
-            )),
+        let (warp, slices, region) = match document.device(device) {
+            Some(d) => (
+                d.warp.clone(),
+                d.slices
+                    .iter()
+                    .map(|&frame| engine(frame))
+                    .collect::<std::sync::Arc<[u64]>>(),
+                d.region,
+            ),
+            None => (
+                bl_model::DeviceWarp::default(),
+                std::sync::Arc::from([]),
+                None,
+            ),
+        };
+        match library.and_then(|library| library.edited_sample(media, rate, edits)) {
+            Some(sample) => {
+                let frames = sample.frames() as u64;
+                let region = match region {
+                    None => (0, frames),
+                    Some(bl_model::SampleRegion::Frames { start, end }) => {
+                        (engine(start).min(frames), engine(end).min(frames))
+                    }
+                    Some(shares) => shares.frames_in(frames),
+                };
+                update.data.push((
+                    NodeKey::Device(device),
+                    self.gc.data(SlotSample {
+                        slot,
+                        sample,
+                        warp,
+                        slices,
+                        region,
+                    }),
+                ));
+            }
             None => update.missing.push(media),
         }
     }

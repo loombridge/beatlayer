@@ -96,6 +96,9 @@ impl Shell {
     /// set's plug-in devices load their plug-ins from their saved state.
     pub(super) fn set_replaced(&mut self) {
         self.editor_replaced();
+        self.forget_remote_values();
+        // Spec: control-surfaces R9, R30. Every ring starts again.
+        self.instant_reset();
         // What a DAWproject import said about the set that's gone (R11, R12).
         self.pending_name = None;
         self.import_report = None;
@@ -739,6 +742,17 @@ impl Shell {
                         action: None,
                     });
                 }
+                if let Some(notice) = self.store.open_notice() {
+                    let text = match self.message.take() {
+                        Some(relinked) => format!("{}; {notice}", relinked.text),
+                        None => notice,
+                    };
+                    self.message = Some(Message {
+                        text,
+                        error: false,
+                        action: None,
+                    });
+                }
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();
@@ -1033,6 +1047,7 @@ impl Shell {
                     self.prefs.settings_page = page;
                 }
                 self.settings_open = true;
+                self.templates_for_page();
                 self.focused_window = WindowKind::Settings;
                 self.effects.push(Effect::OpenSettings);
                 Ok(Value::Null)

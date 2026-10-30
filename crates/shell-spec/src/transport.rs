@@ -53,18 +53,26 @@ pub const SET_METRONOME_RHYTHM: &str = "transport.set_metronome_rhythm";
 pub const SET_METRONOME_ONLY_WHILE_RECORDING: &str = "transport.set_metronome_only_while_recording";
 /// `transport.set_midi_overdub` (`bl-model`): Options ▸ MIDI Arrangement Overdub.
 pub const SET_MIDI_OVERDUB: &str = "transport.set_midi_overdub";
+/// `transport.set_record_quantization` (`bl-model`): Edit ▸ Record Quantization.
+pub const SET_RECORD_QUANTIZATION: &str = "transport.set_record_quantization";
 /// `transport.set_recording` (`bl-engine`): whether transport is recording.
 pub const SET_RECORDING: &str = "transport.set_recording";
+/// `transport.phase_nudge` (`bl-engine`): the Control Bar's Phase Nudge Down
+/// and Up buttons.
+pub const PHASE_NUDGE: &str = "transport.phase_nudge";
 /// `transport.tap_tempo`: the Control Bar's Tap Tempo button (the control bar
 /// transport spec, R18 to R22).
 pub const TAP_TEMPO: &str = "transport.tap_tempo";
+/// `transport.set_external_sync`: the Control Bar's EXT switch and Options ▸
+/// External Sync (the MIDI clock spec, R15).
+pub const SET_EXTERNAL_SYNC: &str = "transport.set_external_sync";
 /// `song.set_tempo` (`bl-model`): the Tempo field.
 pub const SET_TEMPO: &str = "song.set_tempo";
 /// `song.set_time_signatures` (`bl-model`): the time-signature fields.
 pub const SET_TIME_SIGNATURES: &str = "song.set_time_signatures";
 
 /// Every command this module registers.
-pub const IDS: &[&str] = &[STATE, TAP_TEMPO];
+pub const IDS: &[&str] = &[STATE, TAP_TEMPO, SET_EXTERNAL_SYNC];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -136,6 +144,13 @@ pub struct TransportState {
     pub punch_out: bool,
     /// Whether MIDI Arrangement Overdub is on.
     pub midi_overdub: bool,
+    /// Record Quantization, the grid recorded notes are moved onto (the
+    /// recording spec, R17): `none` or a note value such as `1/16`.
+    pub record_quantization: bl_model::RecordQuantization,
+    /// The last Record Quantization value other than `none` that was chosen,
+    /// which `transport.set_record_quantization` with `on` set to true
+    /// returns to.
+    pub record_quantization_last: bl_model::RecordQuantization,
     /// Whether Automation Arm is on (view state, not saved with the set).
     pub automation_arm: bool,
     /// The mode an Arrangement recording writes control moves in, as
@@ -153,10 +168,40 @@ pub struct TransportState {
     /// runs and the Control Bar's button and Create menu item are enabled.
     #[serde(default)]
     pub capture_midi_ready: bool,
+    /// The Phase Nudge button held now, the one pressed last when both are:
+    /// `none`, `down` or `up` (the transport spec, R27 and R28).
+    #[serde(default)]
+    pub phase_nudge: PhaseNudge,
+    /// Whether a start waits for the frame an outside clock or Link session
+    /// gives (the transport spec, R25).
+    #[serde(default)]
+    pub waiting_start: bool,
+    /// The frame of the engine's clock (frames processed since it started)
+    /// that a waiting start begins on, once the follower has given it; null
+    /// otherwise.
+    #[serde(default)]
+    pub waiting_frame: Option<u64>,
     /// The run of taps Tap Tempo has now (the control bar transport spec,
     /// R22).
     #[serde(default)]
     pub tap_tempo: TapTempo,
+    /// Whether EXT is on: the song follows the incoming MIDI clock (the MIDI
+    /// clock spec, R15, R17). Off while no input has Sync on.
+    #[serde(default)]
+    pub external_sync: bool,
+}
+
+/// Which Phase Nudge button nudges the song, in `transport.state`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseNudge {
+    /// Neither button is held.
+    #[default]
+    None,
+    /// Phase Nudge Down is held: the song plays 4 % slower.
+    Down,
+    /// Phase Nudge Up is held: the song plays 4 % faster.
+    Up,
 }
 
 /// Arguments of `transport.tap_tempo`.
@@ -166,6 +211,22 @@ pub struct TapTempoArgs {
     /// The tap's frame on the engine clock; left out, the tap is now.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub at: Option<u64>,
+}
+
+/// Arguments of `transport.set_external_sync`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetExternalSyncArgs {
+    /// Whether EXT is on; left out, it switches to the other state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+}
+
+/// What `transport.set_external_sync` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ExternalSync {
+    /// Whether EXT is on now.
+    pub on: bool,
 }
 
 /// A run of taps, as `transport.tap_tempo` returns it and `transport.state`
@@ -255,6 +316,25 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .result::<TapTempo>(),
     )?;
     registry.register(
+        CommandSpec::new(SET_EXTERNAL_SYNC, "External Sync")
+            .description(
+                "Switches EXT, as the Control Bar's EXT switch and Options > External Sync do: \
+                 with it on, the song follows the incoming MIDI clock of an input port with \
+                 Sync on (its tempo, its Start, Continue, Stop and Song Position Pointer), the \
+                 Tempo field shows the followed tempo and can't be changed, tempo automation \
+                 isn't played, and every clip that leads the tempo plays as a follower. `on` \
+                 left out switches to the other state. Switching it on is refused while no \
+                 input port has Sync on (`midi.set_port`'s `sync`); switching the last such \
+                 input's Sync off switches EXT off. It is a preference kept between starts, \
+                 not part of the set. `transport.state` reports it as `external_sync`, and \
+                 `sync.state` the clock that arrives.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<SetExternalSyncArgs>()
+            .result::<ExternalSync>(),
+    )?;
+    registry.register(
         CommandSpec::new(STATE, "Transport Status")
             .description(
                 "Reports what the Control Bar's transport section shows: whether the song \
@@ -265,8 +345,11 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  sounding, Punch-In and Punch-Out, MIDI Arrangement Overdub, Automation Arm and \
                  the mode an Arrangement recording writes control moves in, \
                  the recording under way (its armed tracks and dropped frames) and what the \
-                 last recording came to, and whether the audio engine runs so the transport \
-                 can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where \
+                 last recording came to, which Phase Nudge button is held (`phase_nudge`: \
+                 `none`, `down` or `up`, set by `transport.phase_nudge`), whether a start waits \
+                 for an outside clock's or Link session's frame, whether EXT is on \
+                 (`external_sync`, set by `transport.set_external_sync`), and whether the audio engine \
+                 runs so the transport can play. Every `transport.set_*` setting reads back here. Changes nothing. Use it to check where \
                  the song is before and after `transport.play`, `transport.stop`, \
                  `transport.locate`, or `transport.set_loop`.",
             )

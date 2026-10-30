@@ -76,6 +76,20 @@ pub fn touch_type() -> DeviceType {
                 "Pushes outputs toward the top and bottom of the output range (positive) or \
                  toward its middle (negative).",
             ),
+        ])
+        .with_banks(&[
+            (
+                "Range",
+                &[
+                    "Lowest",
+                    "Range",
+                    "Out Low",
+                    "Out High",
+                    "Operation",
+                    "Mode",
+                ],
+            ),
+            ("Shaping", &["Drive", "Compand", "Random"]),
         ]),
     )
 }

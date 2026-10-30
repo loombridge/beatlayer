@@ -120,6 +120,22 @@ pub fn note_echo_type() -> DeviceType {
             )
             .decimals(0)
             .describe("Feedback decay for per-note pitch bend expressions."),
+        ])
+        .with_banks(&[
+            (
+                "Echo",
+                &[
+                    "Sync",
+                    "Time",
+                    "Time Free",
+                    "Swing",
+                    "Feedback",
+                    "Decay",
+                    "Pitch",
+                    "Input",
+                ],
+            ),
+            ("MPE", &["MPE", "Press Fback", "Slide Fback", "PB Fback"]),
         ]),
     )
 }
@@ -187,10 +203,7 @@ impl NativeDevice for NoteEcho {
         self.was_playing = is_playing;
 
         let sample_rate = audio.sample_rate().as_f64();
-        let tempo = audio.tempo();
-        let bpm = tempo
-            .bpm_at(tempo.frames_to_ticks(audio.song_position(), audio.sample_rate()))
-            .get();
+        let bpm = audio.bpm();
 
         let is_sync = value(params, SYNC) >= 0.5;
         let delay_frames = if is_sync {

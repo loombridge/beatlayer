@@ -441,9 +441,22 @@ impl Displays {
         let value = |id| param_value(panel, id);
         let state = self.states.get_mut(&frame.id).expect("just loaded");
         let frames = state.audio.frames() as u64;
-        let at = |share: f64| (share.clamp(0.0, 1.0) * frames as f64) as u64;
-        let (start, length) = (value(s::START) / 100.0, value(s::LENGTH) / 100.0);
-        let (region_start, region_end) = (at(start), at(start + length));
+        // The Start and End flags (the sampler spec, R22).
+        let (region_start, region_end) = device
+            .region
+            .map_or((0, frames), |region| region.frames_in(frames));
+        // The part Classic plays, S Start's share of the region for S
+        // Length's (R3), where the loop brace ends.
+        let span = (region_end - region_start) as f64;
+        let (play_start, play_end) = if value(s::MODE) as usize == 0 {
+            let (start, length) = (value(s::START) / 100.0, value(s::LENGTH) / 100.0);
+            (
+                region_start + (start * span) as u64,
+                (region_start + ((start + length).min(1.0) * span) as u64).min(region_end),
+            )
+        } else {
+            (region_start, region_end)
+        };
         let slice_mode = value(s::MODE) as usize == 2;
         // The slices Slice mode cuts the sample into (the sampler spec,
         // R14), worked out again when what they depend on changes.
@@ -461,8 +474,6 @@ impl Displays {
             let key = (
                 Arc::as_ptr(&state.audio) as usize,
                 [
-                    s::START,
-                    s::LENGTH,
                     s::SLICE_BY,
                     s::SLICE_SENSITIVITY,
                     s::SLICE_DIVISION,
@@ -470,7 +481,7 @@ impl Displays {
                 ]
                 .iter()
                 .map(|id| value(*id).to_bits())
-                .chain([sixteenth.to_bits()])
+                .chain([sixteenth.to_bits(), region_start, region_end])
                 .chain(device.slices.iter().copied())
                 .collect::<Vec<_>>(),
             );
@@ -486,6 +497,7 @@ impl Displays {
                 } else {
                     let bounds = bl_devices::slice_boundaries(
                         &state.audio,
+                        (region_start, region_end),
                         &value,
                         sixteenth,
                         &device.slices,
@@ -511,11 +523,10 @@ impl Displays {
         }
         let slices = state.slices.clone();
         let device_id = frame.id;
-        let share = move |frame: u64| frame as f64 / frames.max(1) as f64 * 100.0;
-        let set = move |param: bl_model::ParamId, value: f64| {
+        let set = move |start: Option<u64>, end: Option<u64>| {
             (
-                "device.set_param",
-                json!({ "device": device_id, "param": param, "value": value }),
+                "device.set_sample_region",
+                json!({ "device": device_id, "start": start, "end": end }),
             )
         };
         let mut handles = vec![
@@ -524,11 +535,9 @@ impl Displays {
                 frame: region_start,
                 loop_marker: false,
                 gesture: "Change Sample Region",
+                // The flag moves alone: the End flag stays where it was.
                 drag: Box::new(move |frame| {
-                    let end = share(region_end);
-                    let start = share(frame.min(region_end.saturating_sub(1)));
-                    // The flag moves alone: the end stays where it was.
-                    vec![set(s::START, start), set(s::LENGTH, end - start)]
+                    vec![set(Some(frame.min(region_end.saturating_sub(1))), None)]
                 }),
                 menu: None,
             },
@@ -537,38 +546,35 @@ impl Displays {
                 frame: region_end,
                 loop_marker: false,
                 gesture: "Change Sample Region",
-                drag: Box::new(move |frame| {
-                    let frame = frame.max(region_start + 1);
-                    vec![set(
-                        s::LENGTH,
-                        (share(frame) - share(region_start)).max(0.0),
-                    )]
-                }),
+                drag: Box::new(move |frame| vec![set(None, Some(frame.max(region_start + 1)))]),
                 menu: None,
             },
         ];
         let brace =
             (!slice_mode && value(s::MODE) as usize == 0 && value(s::LOOP) >= 0.5).then(|| {
-                let loop_start = region_end
-                    - ((value(s::LOOP_LENGTH) / 100.0) * (region_end - region_start) as f64) as u64;
+                let loop_start = play_end
+                    - ((value(s::LOOP_LENGTH) / 100.0) * (play_end - play_start) as f64) as u64;
                 handles.push(Flag {
                     name: "Loop Start",
                     frame: loop_start,
                     loop_marker: true,
                     gesture: "Change Loop",
+                    // S Loop Length is a share of the played part.
                     drag: Box::new(move |frame| {
-                        let span = (region_end - region_start).max(1) as f64;
-                        let share = (region_end
-                            .saturating_sub(frame.clamp(region_start, region_end))
+                        let span = (play_end - play_start).max(1) as f64;
+                        let share = (play_end.saturating_sub(frame.clamp(play_start, play_end))
                             as f64
                             / span
                             * 100.0)
                             .clamp(0.0, 100.0);
-                        vec![set(s::LOOP_LENGTH, share)]
+                        vec![(
+                            "device.set_param",
+                            json!({ "device": device_id, "param": s::LOOP_LENGTH, "value": share }),
+                        )]
                     }),
                     menu: None,
                 });
-                (loop_start, region_end)
+                (loop_start, play_end)
             });
         let readout = format!(
             "{}: {} frames, {} Hz, {} channel{}",

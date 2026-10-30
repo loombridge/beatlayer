@@ -1454,8 +1454,8 @@ impl EngineProgram {
         } = *block;
         // Where the block sits in the song, for the automation a route plays
         // (WP-2.12): no time while the song is stopped.
-        let song = transport.playing.then(|| crate::automation::Song {
-            frame: transport.position.get(),
+        let song = transport.playing.then_some(crate::automation::Song {
+            transport,
             session,
             tempo: &self.tempo,
             rate: self.sample_rate,
@@ -2868,8 +2868,8 @@ impl EngineProgram {
         let turn = pass.turn;
         let block = pass.block;
         let (channels, stride, frames) = (self.channels, self.max_frames, block.frames);
-        let song = block.transport.playing.then(|| crate::automation::Song {
-            frame: block.transport.position.get(),
+        let song = block.transport.playing.then_some(crate::automation::Song {
+            transport: block.transport,
             session: block.session,
             tempo: &self.tempo,
             rate: self.sample_rate,

@@ -65,6 +65,7 @@ fn play(node: &mut dyn Node, input: &[f32], block: usize, tempo: &TempoMap) -> V
             let transport = TransportInfo {
                 playing: true,
                 position: Frames(start as i64),
+                ..TransportInfo::default()
             };
             let mut block = Block::new(&mut data, CHANNELS, frames, frames, &[], transport, RATE)
                 .with_tempo(tempo);

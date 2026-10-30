@@ -148,8 +148,22 @@ pub fn wax_type() -> DeviceType {
             (CRACKLE_VOLUME, Widget::Knob),
         ]),
     ]));
-    DeviceType::native(WAX, "Vinyl Distortion", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(WAX, "Vinyl Distortion", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[
+                ("Wax", &["Drive", "Soft/Hard"]),
+                (
+                    "Tracing",
+                    &["Tracing Drive", "Tracing Freq", "Tracing Width"],
+                ),
+                (
+                    "Pinch",
+                    &["Pinch Drive", "Pinch Freq", "Pinch Width", "Pinch Mode"],
+                ),
+                ("Crackle", &["Crackle Density", "Crackle Volume"]),
+            ]),
+    )
 }
 
 /// Adds Vinyl Distortion to `registry`.

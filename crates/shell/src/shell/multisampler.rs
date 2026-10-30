@@ -111,7 +111,8 @@ impl Shell {
             | ids::CROP_SAMPLE
             | ids::REVERSE_SAMPLE
             | ids::CONVERT
-            | ids::AUDITION_SAMPLE => self.run_sample_edits(id, args),
+            | ids::AUDITION_SAMPLE
+            | ids::SET_SAMPLE_REGION => self.run_sample_edits(id, args),
             ids::NORMALIZE_LAYERS => {
                 let args: NormalizeArgs = Self::args(id, args)?;
                 // Simpler's Normalize Volumes sets its Gain (R60).

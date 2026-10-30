@@ -251,6 +251,7 @@ fn resend_on_start_sends_the_outputs_again_when_the_transport_plays() {
         bl_engine::TransportInfo {
             playing: true,
             position: bl_core::time::Frames(0),
+            ..bl_engine::TransportInfo::default()
         },
         common::RATE,
     );
@@ -367,6 +368,7 @@ fn an_automated_articulation_lane_switches_when_its_value_reaches_the_articulati
         TransportInfo {
             playing: true,
             position: Frames(24_000),
+            ..TransportInfo::default()
         },
         common::RATE,
     )

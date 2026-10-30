@@ -94,6 +94,21 @@ pub(crate) fn a_midi_port(h: &mut Harness) {
     h.shell.use_midi_backend(Box::new(test));
 }
 
+/// A row of the Control Surfaces table with the test surface on a port pair,
+/// so its Dump button is enabled (WP-7.5).
+pub(crate) fn a_surface_row(h: &mut Harness) {
+    let test = bl_midi_io::TestBackend::new();
+    test.add_port(bl_midi_io::Direction::Input, "Pads");
+    test.add_port(bl_midi_io::Direction::Output, "Pads Out");
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run(
+            "control_surface.set",
+            json!({ "row": 1, "surface": "test", "input": "Pads", "output": "Pads Out" }),
+        )
+        .unwrap();
+}
+
 /// Show Resync Button is on, so the Control Bar has the Resync External
 /// Hardware button.
 pub(crate) fn the_resync_button_shown(h: &mut Harness) {

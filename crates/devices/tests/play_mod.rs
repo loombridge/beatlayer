@@ -36,6 +36,7 @@ fn playing(at: usize) -> TransportInfo {
     TransportInfo {
         playing: true,
         position: Frames(at as i64),
+        ..TransportInfo::default()
     }
 }
 
@@ -233,6 +234,7 @@ fn increment_steps_and_starts_again_at_stop() {
             TransportInfo {
                 playing: false,
                 position: Frames(0),
+                ..TransportInfo::default()
             }
         }
     };
@@ -269,6 +271,7 @@ fn random_starts_again_with_the_transport() {
     let stopped = |_: usize| TransportInfo {
         playing: false,
         position: Frames(0),
+        ..TransportInfo::default()
     };
     run_with(node.as_mut(), 512, 512, &[], stopped);
     let second = run(node.as_mut(), 2_000, &notes);

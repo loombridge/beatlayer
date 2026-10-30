@@ -111,6 +111,31 @@ fn play_a(control: &NullControl, shell: &mut Shell, count: usize) {
     });
 }
 
+// Spec: recording R23; capture-midi R1. Capture MIDI is never
+// record-quantised: with 1/4 on, the notes come back where they were played,
+// an eighth note apart.
+#[test]
+fn a_capture_is_not_record_quantised() {
+    let (mut shell, control) = rig();
+    let keys = midi_track(&mut shell, &control, "Keys");
+    let scene = scenes(&shell)[0];
+    shell
+        .run(
+            "transport.set_record_quantization",
+            json!({ "quantization": "1/4" }),
+        )
+        .unwrap();
+    play_a(&control, &mut shell, 4);
+    shell.run("midi.capture", json!({})).unwrap();
+    let clip = slot_clip(&shell, keys, scene).expect("the captured clip");
+    let starts: Vec<i64> = notes(&clip).iter().map(|n| n.start.get()).collect();
+    assert_eq!(starts.len(), 4, "{starts:?}");
+    assert!(
+        starts.iter().any(|start| start % Ticks::QUARTER.get() != 0),
+        "{starts:?}: some note is off the quarters"
+    );
+}
+
 fn slot_clip(shell: &Shell, track: TrackId, scene: SceneId) -> Option<Clip> {
     shell.editor().document().slot(track, scene).cloned()
 }

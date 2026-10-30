@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use crate::error::LoadError;
 
 /// The schema version this build writes, and the newest it can read.
-pub const SCHEMA_VERSION: u32 = 12;
+pub const SCHEMA_VERSION: u32 = 13;
 
 /// The oldest schema version this build can read, through [`MIGRATIONS`].
 pub const OLDEST_SCHEMA_VERSION: u32 = SCHEMA_VERSION - MIGRATIONS.len() as u32;
@@ -120,7 +120,157 @@ pub const MIGRATIONS: &[Migration] = &[
                   saved before them opens with none, so the saved JSON itself needs nothing",
         apply: Ok,
     },
+    Migration {
+        from: 12,
+        summary: "a Simpler's sample has a region between Start and End flags, and its Start, \
+                  Length and Loop Length are shares of that region that only Classic mode uses \
+                  (the sampler spec, R22 and R24); a One-Shot or Slice Simpler's Start and \
+                  Length become its region, held as the shares they were until the sample's \
+                  length is known, and its Start and Length go back to 0 % and 100 %, so the \
+                  same frames play",
+        apply: |mut value| {
+            simpler_regions(&mut value);
+            Ok(value)
+        },
+    },
 ];
+
+/// The device type of Simpler, and the IDs of its Mode, Start and Length
+/// (`bl-devices` names them; this crate can't depend on it, and a saved set
+/// holds them as they were in the version being migrated).
+const SIMPLER: &str = "beatlayer.snapshot";
+const SIMPLER_MODE: u64 = 0;
+const SIMPLER_START: u64 = 1;
+const SIMPLER_LENGTH: u64 = 2;
+
+/// Version 12 to 13 (WP-7.33; the sampler spec, R24): every One-Shot or Slice
+/// Simpler in the saved JSON `value` takes the part its Start and Length
+/// chose as its region, as the shares of the decoded sample they were, and
+/// has those two parameters at their defaults. A Classic Simpler is left as
+/// it is: its Start, Length and Loop Length play the same part of the whole
+/// sample.
+pub(crate) fn simpler_regions(value: &mut Value) {
+    match value {
+        Value::Object(fields) => {
+            let is_simpler = fields
+                .get("kind")
+                .and_then(|kind| kind.get("native"))
+                .and_then(|native| native.get("device_type"))
+                .and_then(Value::as_str)
+                == Some(SIMPLER);
+            if is_simpler {
+                simpler_region(fields);
+            }
+            fields.values_mut().for_each(simpler_regions);
+        }
+        Value::Array(items) => items.iter_mut().for_each(simpler_regions),
+        _ => {}
+    }
+}
+
+fn simpler_region(device: &mut Map<String, Value>) {
+    let Some(params) = device.get_mut("params").and_then(Value::as_array_mut) else {
+        return;
+    };
+    let value_of = |params: &[Value], id: u64| {
+        params.iter().find_map(|pair| {
+            let pair = pair.as_array()?;
+            (pair.first()?.as_u64()? == id).then(|| pair.get(1)?.as_f64())?
+        })
+    };
+    if value_of(params, SIMPLER_MODE).unwrap_or(0.0) < 0.5 {
+        return;
+    }
+    // The arithmetic of the playback that read them: shares of the sample,
+    // the end clamped to its end.
+    let start = value_of(params, SIMPLER_START).unwrap_or(0.0) / 100.0;
+    let length = value_of(params, SIMPLER_LENGTH).unwrap_or(100.0) / 100.0;
+    let end = (start + length).min(1.0);
+    params.retain(|pair| {
+        let id = pair.get(0).and_then(Value::as_u64);
+        id != Some(SIMPLER_START) && id != Some(SIMPLER_LENGTH)
+    });
+    // A region that is the whole sample, or that played nothing, is none.
+    if start < end && (start, end) != (0.0, 1.0) {
+        let mut region = Map::new();
+        region.insert("start_share".to_owned(), Value::from(start));
+        region.insert("end_share".to_owned(), Value::from(end));
+        device.insert("region".to_owned(), Value::Object(region));
+    }
+}
+
+/// The names of the One-Shot and Slice Simplers in `document` whose Start or
+/// Length something other than the user's hand drives: automation, a clip
+/// envelope, a macro, or a modulator (the sampler spec, R24). Before the
+/// flags existed those moved the played part; now they move S Start and
+/// S Length, which only Classic mode plays, so such a Simpler's region no
+/// longer follows them. In the order the devices come.
+#[must_use]
+pub fn simplers_whose_start_was_driven(document: &bl_model::Document) -> Vec<String> {
+    let Ok(json) = serde_json::to_value(document) else {
+        return Vec::new();
+    };
+    let mut driven = Vec::new();
+    let mut simplers = Vec::new();
+    collect_driven(&json, &mut simplers, &mut driven);
+    simplers
+        .into_iter()
+        .filter(|(id, _)| {
+            driven.iter().any(|(device, param)| {
+                device == id && (*param == SIMPLER_START || *param == SIMPLER_LENGTH)
+            })
+        })
+        .map(|(_, name)| name)
+        .collect()
+}
+
+/// Walks `value`, noting each One-Shot or Slice Simpler as (ID, name) and
+/// each target `{ "device": ID, "param": N }`.
+fn collect_driven(
+    value: &Value,
+    simplers: &mut Vec<(Value, String)>,
+    driven: &mut Vec<(Value, u64)>,
+) {
+    match value {
+        Value::Object(fields) => {
+            let device_type = fields
+                .get("kind")
+                .and_then(|kind| kind.get("native"))
+                .and_then(|native| native.get("device_type"))
+                .and_then(Value::as_str);
+            if device_type == Some(SIMPLER)
+                && let (Some(id), Some(name), Some(params)) = (
+                    fields.get("id"),
+                    fields.get("name").and_then(Value::as_str),
+                    fields.get("params").and_then(Value::as_array),
+                )
+            {
+                let mode = params.iter().find_map(|pair| {
+                    let pair = pair.as_array()?;
+                    (pair.first()?.as_u64()? == SIMPLER_MODE).then(|| pair.get(1)?.as_f64())?
+                });
+                if mode.unwrap_or(0.0) >= 0.5 {
+                    simplers.push((id.clone(), name.to_owned()));
+                }
+            }
+            if fields.get("type").and_then(Value::as_str) == Some("device")
+                && let (Some(device), Some(param)) = (
+                    fields.get("device"),
+                    fields.get("param").and_then(Value::as_u64),
+                )
+            {
+                driven.push((device.clone(), param));
+            }
+            fields
+                .values()
+                .for_each(|child| collect_driven(child, simplers, driven));
+        }
+        Value::Array(items) => items
+            .iter()
+            .for_each(|child| collect_driven(child, simplers, driven)),
+        _ => {}
+    }
+}
 
 /// Gives every audio clip's and device's warp settings in the saved JSON
 /// `value` that name no Transient Loop Mode the one they had before it

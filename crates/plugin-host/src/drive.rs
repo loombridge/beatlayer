@@ -158,10 +158,14 @@ impl Driver {
             while offset < frames {
                 let frame = transport.position.0 + offset;
                 let on_grid = frame.rem_euclid(GRID) == 0;
+                // Spec: transport R24. The envelope is read at the song frame
+                // the frame plays, which runs faster or slower than the
+                // frames while the song follows an outside tempo.
+                let song = transport.song_frame(usize::try_from(offset).unwrap_or(0));
                 self.visit(
                     list,
                     &now,
-                    transport.playing.then_some(frame),
+                    transport.playing.then_some(song),
                     bus,
                     u32::try_from(offset).unwrap_or(0),
                     on_grid,

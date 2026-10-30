@@ -231,6 +231,7 @@ fn an_envelope_drives_a_kit_plugins_parameter() {
             TransportInfo {
                 playing: true,
                 position: Frames(36_000 + block * 2048),
+                ..TransportInfo::default()
             },
         );
         last = out[0][2047];

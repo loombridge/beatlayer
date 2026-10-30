@@ -362,13 +362,15 @@ impl Warped {
 
     /// Where a Session clip launched on song frame `launch` reads: the tempo
     /// map followed from there, at `rate` frames a second, `offset` ticks
-    /// into its own time on that frame (the launch quantisation spec, R29).
+    /// into its own time on that frame (the launch quantisation spec, R29),
+    /// its time running at `speed` times the tempo's.
     pub(crate) fn launched<'a>(
         &'a self,
         tempo: &'a TempoMap,
         launch: i64,
         rate: f64,
         offset: f64,
+        speed: f64,
     ) -> Positions<'a> {
         Positions::Launched {
             warped: self,
@@ -376,6 +378,7 @@ impl Warped {
             launch,
             rate,
             offset,
+            speed,
         }
     }
 
@@ -887,6 +890,9 @@ pub(crate) enum Positions<'a> {
         rate: f64,
         /// The clip time, in ticks, it had on the launch frame.
         offset: f64,
+        /// How many times faster than the tempo the clip time runs: 1,
+        /// or a transposed Re-Pitch launch's pitch ratio (remote-mapping R35).
+        speed: f64,
     },
     /// An unwarped clip transposed: its file read at the pitch ratio (R27),
     /// from the song frame it starts playing at.
@@ -909,6 +915,25 @@ pub(crate) struct Flat {
     pub(crate) ratio: f64,
 }
 
+/// How the output frames of a run lie in the song: output frame `i` plays
+/// song frame `song + i * step`, unrounded. `step` is 1 except while the song
+/// follows an outside tempo or is nudged (the transport spec, R24).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Pace {
+    pub(crate) song: f64,
+    pub(crate) step: f64,
+}
+
+impl Pace {
+    /// The pace `frames` output frames on.
+    pub(crate) fn after(self, frames: usize) -> Self {
+        Self {
+            song: self.song + frames as f64 * self.step,
+            ..self
+        }
+    }
+}
+
 /// A run of frames over which the position advances smoothly.
 struct Fill {
     frames: usize,
@@ -921,12 +946,13 @@ struct Fill {
 }
 
 impl Positions<'_> {
-    /// Works out the file position of the frames from song frame `first`
-    /// into `out`, for as many as run on smoothly (at least one).
-    fn fill(&self, first: i64, out: &mut [f64]) -> Fill {
+    /// Works out the file position of the frames `pace` plays into `out`,
+    /// for as many as run on smoothly (at least one).
+    fn fill(&self, pace: Pace, out: &mut [f64]) -> Fill {
+        let Pace { song: first, step } = pace;
         match self {
             Positions::Table(table) => {
-                let Some((piece, frames)) = table.run(first, out.len()) else {
+                let Some((piece, frames)) = table.run_by(first, step, out.len()) else {
                     return Fill {
                         frames: out.len(),
                         sound: false,
@@ -935,13 +961,13 @@ impl Positions<'_> {
                     };
                 };
                 for (i, position) in out[..frames].iter_mut().enumerate() {
-                    *position = piece.position_at(first + i as i64);
+                    *position = piece.position_by(first + i as f64 * step);
                 }
                 Fill {
                     frames,
                     sound: !piece.is_silent(),
-                    speed: piece.slope,
-                    neutral: piece.slope == 1.0,
+                    speed: piece.slope * step,
+                    neutral: piece.slope * step == 1.0,
                 }
             }
             Positions::Launched {
@@ -950,20 +976,26 @@ impl Positions<'_> {
                 launch,
                 rate,
                 offset,
+                speed,
             } => {
                 let started = tempo.seconds_to_ticks_exact(*launch as f64 / rate);
                 // A run ends at the next line of the speed grid, so each of
                 // its frames reads at its own grid frame's speed.
-                let grid = first.div_euclid(SPEED_GRID) * SPEED_GRID;
-                let until = out.len().min((grid + SPEED_GRID - first) as usize);
+                let whole = first.floor() as i64;
+                let grid = whole.div_euclid(SPEED_GRID) * SPEED_GRID;
+                let until = out.len().min(
+                    (((grid + SPEED_GRID) as f64 - first) / step)
+                        .ceil()
+                        .max(1.0) as usize,
+                );
                 let out = &mut out[..until];
                 let mut frames = 0;
                 let mut wraps = 0;
                 let mut view = None;
                 for (i, position) in out.iter_mut().enumerate() {
-                    let now = tempo.seconds_to_ticks_exact((first + i as i64) as f64 / rate);
+                    let now = tempo.seconds_to_ticks_exact((first + i as f64 * step) / rate);
                     // Frames before the launch frame play its first.
-                    let played = (now - started).max(0.0) + offset;
+                    let played = (now - started).max(0.0) * speed + offset;
                     let Some((beat, passes)) = warped.contents.beat_after(played) else {
                         if i == 0 {
                             return Fill {
@@ -997,7 +1029,7 @@ impl Positions<'_> {
                 // frame. A run with no such frame reads at the run's own.
                 let at = |frame: i64| {
                     let now = tempo.seconds_to_ticks_exact(frame as f64 / rate);
-                    let played = (now - started).max(0.0) + offset;
+                    let played = (now - started).max(0.0) * speed + offset;
                     warped
                         .contents
                         .beat_after(played)
@@ -1005,7 +1037,9 @@ impl Positions<'_> {
                 };
                 let grid = grid.max(*launch);
                 let speed = match (at(grid), at(grid + 1)) {
-                    (Some((a, before)), Some((b, after))) if before == after && b > a => b - a,
+                    (Some((a, before)), Some((b, after))) if before == after && b > a => {
+                        (b - a) * step
+                    }
                     _ if frames > 1 => span / (frames - 1) as f64,
                     _ => 1.0,
                 };
@@ -1023,7 +1057,7 @@ impl Positions<'_> {
                 let mut frames = 0;
                 let mut previous: Option<f64> = None;
                 for (i, position) in out.iter_mut().enumerate() {
-                    let elapsed = (first + i as i64 - flat.origin).max(0) as f64;
+                    let elapsed = (first + i as f64 * step - flat.origin as f64).max(0.0);
                     let linear = flat.start + elapsed * flat.ratio;
                     let at = match flat.loop_brace {
                         Some((loop_start, loop_end)) if loop_end > loop_start => {
@@ -1053,8 +1087,8 @@ impl Positions<'_> {
                 Fill {
                     frames,
                     sound: frames > 0,
-                    speed: flat.ratio,
-                    neutral: flat.ratio == 1.0,
+                    speed: flat.ratio * step,
+                    neutral: flat.ratio * step == 1.0,
                 }
             }
         }
@@ -1351,6 +1385,7 @@ impl WarpScratch {
         positions: &Positions<'_>,
         launched: Option<i64>,
         first: i64,
+        pace: Pace,
         want: usize,
         playing: Playing,
         plan: Option<&Plan>,
@@ -1379,6 +1414,7 @@ impl WarpScratch {
             window,
             positions,
             first,
+            pace,
             want,
             playing,
             plan,
@@ -1399,6 +1435,7 @@ impl WarpScratch {
                 launch,
                 positions.rate(),
                 positions.offset(),
+                positions.speed(),
             ),
             None => past.warped.positions(),
         };
@@ -1407,6 +1444,7 @@ impl WarpScratch {
             window,
             &old_positions,
             first,
+            pace,
             n,
             past.playing,
             launched.is_none().then(|| past.warped.plan()),
@@ -1454,6 +1492,7 @@ impl WarpScratch {
         window: &mut WindowBuf,
         positions: &Positions<'_>,
         first: i64,
+        pace: Pace,
         want: usize,
         playing: Playing,
         plan: Option<&Plan>,
@@ -1463,7 +1502,7 @@ impl WarpScratch {
         lane: usize,
     ) -> (usize, bool) {
         let want = want.min(self.max_frames);
-        let fill = positions.fill(first, &mut self.positions[..want]);
+        let fill = positions.fill(pace, &mut self.positions[..want]);
         if !fill.sound {
             return (fill.frames, false);
         }
@@ -1549,6 +1588,8 @@ impl WarpScratch {
                 transient_envelope: playing.transient_envelope,
                 pitch: playing.pitch,
                 clip: playing.clip_id,
+                step: pace.step,
+                song: pace.song,
             };
             let (before, after) = mode.reach(&request);
             // The window holds every position the run reads, whichever way it
@@ -1623,7 +1664,7 @@ fn add_outgoing(
     for (i, position) in overlap[..n].iter_mut().enumerate() {
         let mix = request
             .beats
-            .mix(request.first + i as i64, request.transient_envelope);
+            .mix(request.song_frame(i), request.transient_envelope);
         *position = mix.outgoing.map_or(f64::NAN, |(position, _)| position);
         if anchor.is_nan() {
             anchor = *position;
@@ -1697,6 +1738,14 @@ impl Positions<'_> {
         match self {
             Self::Table(_) | Self::Flat(_) => unreachable!("no offset"),
             Self::Launched { offset, .. } => *offset,
+        }
+    }
+
+    /// How fast a launched clip's time runs against the tempo's.
+    fn speed(&self) -> f64 {
+        match self {
+            Self::Table(_) | Self::Flat(_) => unreachable!("no speed"),
+            Self::Launched { speed, .. } => *speed,
         }
     }
 }

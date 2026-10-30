@@ -125,8 +125,14 @@ pub fn channel_eq_type() -> DeviceType {
         ParamDescriptor::gain(OUTPUT, "Output", OUTPUT_MAX_DB, 0.0)
             .describe("The level after the bands, to offset what the EQ added."),
     ];
-    DeviceType::native(CHANNEL_EQ, "Channel EQ", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(CHANNEL_EQ, "Channel EQ", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[(
+                "Channel EQ",
+                &["Low", "Mid", "Mid Freq", "High", "HP 80", "Output"],
+            )]),
+    )
 }
 
 /// The controls on the left, the display growing to their right.

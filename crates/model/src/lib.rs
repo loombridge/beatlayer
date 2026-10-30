@@ -97,6 +97,7 @@ pub mod note_expression;
 pub mod note_ops;
 pub mod param;
 pub mod rack;
+mod record_quantization;
 pub mod registry;
 pub mod remote;
 mod repr;
@@ -181,7 +182,9 @@ pub use layers::{
 };
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
-pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
+pub use param::{
+    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
+};
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,
     DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MACRO_BASE, MACRO_STEPS_DEFAULT, MACRO_STEPS_MAX,
@@ -190,11 +193,13 @@ pub use rack::{
     default_macro_name, description as rack_description, general_midi_drum, macro_number,
     macro_param, macro_step_position, note_name, receive_choices, receive_label,
 };
+pub use record_quantization::RecordQuantization;
 pub use remote::{
-    ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
+    BarControl, ClipControl, ControlKind, CrossfaderField, RelativeEncoding, RemoteMapping,
+    RemoteMode, RemoteSource, RemoteTarget, StripControl, TakeoverMode, ToolControl, ToolId,
 };
 pub use repr::{SavedSong, saved_schema};
-pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange};
+pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use spelling::NoteSpelling;

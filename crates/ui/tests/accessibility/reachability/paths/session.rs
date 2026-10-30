@@ -9,6 +9,36 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // The Session View's grid (WP-3.7): the pointer's selection, drags,
         // drops, and the key the view reads itself.
         ("session.state", Exception(Query)),
+        // The relative Session mapping strip and New (WP-7.3b): controls that
+        // show only in the map modes, where a click selects them, so a
+        // mapping runs them.
+        (
+            "session.highlight_scene",
+            Exception(Equivalent(
+                "a mapping of the relative Session mapping strip's Scene Up, Scene Down or \
+                 scene number box (the map modes spec, R14, R15)",
+            )),
+        ),
+        (
+            "session.launch_highlighted_scene",
+            Exception(Equivalent(
+                "a mapping of the relative Session mapping strip's Launch Scene (the map \
+                 modes spec, R15)",
+            )),
+        ),
+        (
+            "session.launch_highlighted",
+            Exception(Equivalent(
+                "a mapping of a track's Launch button in the relative Session mapping strip \
+                 (the map modes spec, R15)",
+            )),
+        ),
+        (
+            "session.new_take",
+            Exception(Equivalent(
+                "a mapping of the Control Bar's New button (the map modes spec, R20)",
+            )),
+        ),
         // The scene's colour palette is in the scene's context menu (the
         // themes spec, R16; the session context menus spec, R3, R14).
         (

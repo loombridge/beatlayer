@@ -727,6 +727,11 @@ pub struct DeviceFrame {
     pub tuning_loaded: bool,
     /// Whether it's the selected device.
     pub selected: bool,
+    /// The control surfaces locked to it, in the Control Surfaces table's
+    /// row order: its title bar's hand icon (device chains R42, control
+    /// surfaces R35). Surface state, never saved with the set.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locks: Vec<crate::control_surface::DeviceLock>,
     /// Whether it's the device being hot-swapped.
     pub hot_swap: bool,
     /// A multisampler's views and selected layers (WP-5.13, R30); left out

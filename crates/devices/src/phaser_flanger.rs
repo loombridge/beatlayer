@@ -269,8 +269,54 @@ pub fn phaser_flanger_type() -> DeviceType {
         .describe("High-pass filter cutoff on the wet effect signal."),
     ];
 
-    DeviceType::native(PHASER_FLANGER, "Phaser-Flanger", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(PHASER_FLANGER, "Phaser-Flanger", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Main",
+                    &[
+                        "Mode",
+                        "Amount",
+                        "Feedback",
+                        "Feedback Invert",
+                        "Output",
+                        "Warmth",
+                        "Dry/Wet",
+                        "Safe Bass",
+                    ],
+                ),
+                (
+                    "Character",
+                    &[
+                        "Notches",
+                        "Center",
+                        "Spread",
+                        "Blend",
+                        "Flanger Time",
+                        "Doubler Time",
+                    ],
+                ),
+                (
+                    "LFO",
+                    &[
+                        "LFO Wave",
+                        "LFO Mode",
+                        "LFO Freq",
+                        "LFO Rate",
+                        "LFO Stereo",
+                        "LFO Phase",
+                        "LFO Spin",
+                        "Duty Cycle",
+                    ],
+                ),
+                (
+                    "LFO 2",
+                    &["LFO2 Mix", "LFO2 Mode", "LFO2 Freq", "LFO2 Rate"],
+                ),
+                ("Envelope", &["Env Fol", "Env Amount", "Attack", "Release"]),
+            ]),
+    )
 }
 
 fn layout() -> DeviceLayout {
@@ -477,7 +523,7 @@ impl NativeDevice for PhaserFlanger {
         let lfo2_effective_hz = if lfo2_mode_idx == 0 {
             lfo2_hz
         } else {
-            let bpm = audio.tempo().bpm_at(bl_core::time::Ticks(0)).get();
+            let bpm = audio.tempo().bpm_at(bl_core::time::Ticks(0)).get() * audio.speed();
             bpm / 60.0 / DIVISIONS[lfo2_div_idx].1.max(1e-9)
         };
 

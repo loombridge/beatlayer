@@ -116,6 +116,7 @@ fn run(
             TransportInfo {
                 playing: true,
                 position: Frames(position as i64),
+                ..TransportInfo::default()
             },
             RATE,
         )
@@ -148,6 +149,8 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         track,
         scene: Some(scene),
         frame: launched,
+        velocity: 127,
+        transpose: 0,
         offset: ClipOffset::ZERO,
         last: None,
     }];
@@ -185,6 +188,8 @@ fn a_device_parameter_follows_the_playing_clip_and_holds_when_it_stops() {
         track,
         scene: None,
         frame: Frames::ZERO,
+        velocity: 127,
+        transpose: 0,
         offset: ClipOffset::ZERO,
         last: Some(StoppedClip {
             scene,
@@ -244,6 +249,8 @@ fn a_linked_envelope_follows_the_clip_time_and_an_unlinked_one_counts_from_the_l
             track,
             scene: Some(scene),
             frame: Frames(BAR as i64),
+            velocity: 127,
+            transpose: 0,
             offset: half,
             last: None,
         }];

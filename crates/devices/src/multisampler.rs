@@ -1725,13 +1725,14 @@ impl Multisampler {
         rate: SampleRate,
         tempo: &TempoMap,
         position: Frames,
+        speed: f64,
         playing: bool,
     ) -> Settings {
         let v = |id: ParamId| params.value(usize::from(self.index[id.0 as usize]));
         let on = |id: ParamId| v(id) >= 0.5;
         let hz = rate.as_f64();
         let ticks_now = tempo.frames_to_ticks(position, rate);
-        let bpm = tempo.bpm_at(ticks_now).get();
+        let bpm = tempo.bpm_at(ticks_now).get() * speed;
         let frames_per_whole = hz * 60.0 / bpm * 4.0;
         let ticks_per_frame = Ticks::WHOLE.get() as f64 / frames_per_whole;
         let reset_whole = RESET_WHOLES[(v(RESET_INTERVAL) as usize).min(RESET_WHOLES.len() - 1)];
@@ -2552,7 +2553,14 @@ impl NativeDevice for Multisampler {
         self.was_playing = playing;
         let at = |id: ParamId| params.index(id).expect("the description holds it");
         let rate = audio.sample_rate();
-        let mut s = self.settings(params, rate, audio.tempo(), audio.song_position(), playing);
+        let mut s = self.settings(
+            params,
+            rate,
+            audio.tempo(),
+            audio.song_position(),
+            audio.speed(),
+            playing,
+        );
         s.power_loops = !layers.linear_loop_fades;
         s.keys = self.keys;
         let volume = params.ramp(at(VOLUME));

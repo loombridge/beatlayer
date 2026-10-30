@@ -152,8 +152,34 @@ pub fn delay_type() -> DeviceType {
         ParamDescriptor::continuous(LFO_FILTER, "Filter", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much the LFO moves the filter's frequency."),
     ];
-    DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Main",
+                    &[
+                        "Sync",
+                        "Link",
+                        "Freeze",
+                        "Time Mode",
+                        "Ping Pong",
+                        "Feedback",
+                        "Dry/Wet",
+                    ],
+                ),
+                (
+                    "Time",
+                    &[
+                        "L Sync", "R Sync", "L Time", "R Time", "L Offset", "R Offset",
+                    ],
+                ),
+                // Two parameters are named Filter: the switch and the
+                // LFO's amount.
+                ("Filter", &["#3", "Freq", "Width", "#20"]),
+                ("Modulation", &["Rate", "Wave", "Morph", "Delay"]),
+            ]),
+    )
 }
 
 /// A layout of fixed control bands and the delay's display, which grows.
@@ -382,9 +408,7 @@ impl Delay {
 /// Frames in a sixteenth note at the tempo of the stretch's first frame: the
 /// synced delays' unit, shared by the delays (the delay spec, R1).
 pub(crate) fn sixteenth_frames(audio: &Audio<'_, '_>) -> f64 {
-    let tempo = audio.tempo();
-    let ticks = tempo.frames_to_ticks(audio.song_position(), audio.sample_rate());
-    audio.sample_rate().as_f64() * 60.0 / tempo.bpm_at(ticks).get() / 4.0
+    audio.sample_rate().as_f64() * 60.0 / audio.bpm() / 4.0
 }
 
 /// One stretch's settings, worked out once: the parameters the engine

@@ -17,7 +17,6 @@
 
 use core::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
-use bl_core::time::SampleRate;
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
@@ -431,7 +430,63 @@ pub fn auto_filter_type() -> DeviceType {
         .with_description(
             DeviceDescription::new(params)
                 .with_layout(layout())
-                .with_menu_options(&[MONO_SIDECHAIN, HI_QUALITY]),
+                .with_menu_options(&[MONO_SIDECHAIN, HI_QUALITY])
+                .with_banks(&[
+                    (
+                        "Filter",
+                        &[
+                            "Type", "Slope", "Circuit", "Freq", "Res", "Morph", "Control", "Pitch",
+                        ],
+                    ),
+                    ("Output", &["Formant", "Drive", "Clip", "Output", "Dry/Wet"]),
+                    (
+                        "LFO",
+                        &[
+                            "LFO Amt",
+                            "LFO Wave",
+                            "LFO Morph",
+                            "LFO Mode",
+                            "LFO Rate",
+                            "LFO Time",
+                            "LFO Beats",
+                            "LFO 16ths",
+                        ],
+                    ),
+                    (
+                        "LFO Shape",
+                        &[
+                            "LFO Stereo",
+                            "LFO Phase",
+                            "LFO Spin",
+                            "LFO Offset",
+                            "LFO Quantize",
+                            "LFO Steps",
+                            "LFO S&H",
+                        ],
+                    ),
+                    (
+                        "Envelope",
+                        &[
+                            "Env Amt",
+                            "Env Attack",
+                            "Env Release",
+                            "Env Hold",
+                            "Env S&H",
+                            "Env S&H Rate",
+                        ],
+                    ),
+                    (
+                        "Sidechain",
+                        &[
+                            "SC Filter",
+                            "SC Type",
+                            "SC Freq",
+                            "SC Q",
+                            "SC Shelf Gain",
+                            "SC Peak Gain",
+                        ],
+                    ),
+                ]),
         )
 }
 
@@ -1207,7 +1262,6 @@ impl Run<'_> {
 /// Auto Filter's audio-thread half.
 pub struct AutoFilter {
     rate: f64,
-    sample_rate: SampleRate,
     channels: Vec<Chan>,
     oversampler: Oversampler,
     /// The frames Hi-Quality delays by, now.
@@ -1244,7 +1298,6 @@ impl AutoFilter {
         let max_latency = oversampler.latency() as usize;
         Self {
             rate,
-            sample_rate: config.sample_rate,
             channels: (0..2).map(|_| Chan::new(rate)).collect(),
             oversampler,
             latency,
@@ -1307,8 +1360,7 @@ impl NativeDevice for AutoFilter {
         // How much of a beat-time interval a frame covers, at the tempo of
         // the stretch's first frame.
         let tempo = audio.tempo();
-        let ticks = tempo.frames_to_ticks(audio.song_position(), self.sample_rate);
-        let bpm = tempo.bpm_at(ticks).get();
+        let bpm = audio.bpm();
         let rate_hz = self.rate;
         let per_frame = |division: usize| {
             let beats = DIVISIONS[division.min(DIVISIONS.len() - 1)].1;

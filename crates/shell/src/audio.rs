@@ -396,6 +396,16 @@ pub struct EngineTransport {
     pub take: Option<TakeBounds>,
     /// The take running now, as far as it has got (WP-3.11).
     pub take_so_far: Option<TakeBounds>,
+    /// Whether an outside tempo leads (the transport spec, R24), so Phase
+    /// Nudge is disabled and refused (R29).
+    pub following: bool,
+    /// Whether a start waits for the frame the follower gives (R25).
+    pub waiting_start: bool,
+    /// The frame of the engine clock a waiting start begins on, once the
+    /// follower has given it.
+    pub waiting_frame: Option<u64>,
+    /// The Phase Nudge button held now (R27).
+    pub phase_nudge: Option<bl_engine::NudgeDirection>,
 }
 
 /// The audio device the app plays through, the engine that plays the set
@@ -468,6 +478,10 @@ pub struct AudioHost {
     /// The output ports with Sync on, which every engine's clock out goes to
     /// (WP-7.11).
     sync_outputs: Vec<bl_core::midi::SyncOutput>,
+    /// The input ports with Sync on and EXT, which every engine's clock
+    /// follower reads (midi-clock R14, R15).
+    sync_inputs: Vec<bl_core::midi::SyncInput>,
+    external_sync: bool,
     /// The output latency and round trip, in frames, the engine was last
     /// told (WP-5.34).
     latency_sent: (u32, u32),
@@ -556,6 +570,8 @@ impl AudioHost {
             midi: None,
             midi_out: None,
             sync_outputs: Vec::new(),
+            sync_inputs: Vec::new(),
+            external_sync: false,
             latency_sent: (0, 0),
             test_clock: None,
         }
@@ -591,6 +607,39 @@ impl AudioHost {
             engine.sync_outputs(&outputs);
         }
         self.sync_outputs = outputs;
+    }
+
+    /// Sets the input ports with Sync on and their Sync Delay, which the
+    /// engine follows MIDI clock from (the MIDI clock spec, R14): now, and
+    /// for every engine that starts.
+    pub fn set_sync_inputs(&mut self, inputs: Vec<bl_core::midi::SyncInput>) {
+        if inputs == self.sync_inputs {
+            return;
+        }
+        if let Some(engine) = &self.engine {
+            engine.sync_inputs(&inputs);
+        }
+        self.sync_inputs = inputs;
+    }
+
+    /// Switches EXT: whether the engine follows the incoming MIDI clock (R15,
+    /// R17): now, and for every engine that starts.
+    pub fn set_external_sync(&mut self, on: bool) {
+        if on == self.external_sync {
+            return;
+        }
+        if let Some(engine) = &self.engine {
+            engine.set_external_sync(on);
+        }
+        self.external_sync = on;
+    }
+
+    /// What the engine reports of the MIDI clock it follows; all zeros while
+    /// none runs.
+    pub fn sync_in_state(&mut self) -> bl_engine::SyncInState {
+        self.engine
+            .as_mut()
+            .map_or_else(Default::default, |engine| engine.state().sync_in)
     }
 
     /// What the engine reports of the MIDI clock it sends; all zeros while
@@ -783,6 +832,15 @@ impl AudioHost {
     pub fn set_device_latency(&mut self, device: bl_model::DeviceId, frames: u32) {
         if let Some(engine) = &self.engine {
             engine.set_device_latency(device, frames);
+        }
+    }
+
+    /// Sets the outside tempo the running engine follows (the transport spec,
+    /// R24), or with `None` stops following. A new engine starts with none.
+    /// Nothing while no engine runs.
+    pub fn set_follower(&self, follower: Option<Box<dyn bl_engine::Follower>>) {
+        if let Some(engine) = &self.engine {
+            engine.set_follower(follower);
         }
     }
 
@@ -1092,6 +1150,13 @@ impl AudioHost {
         let _ = self.send_transport(TransportCommand::Stop);
     }
 
+    /// Whether Arrangement Record was on in the last block the engine
+    /// published.
+    #[must_use]
+    pub fn recording(&self) -> bool {
+        self.memory.recording
+    }
+
     /// The transport as the engine last published it, all from the same
     /// block: whether the song plays, the playhead, and the insert marker.
     /// Reading takes no lock. Before a new engine's first block, and while
@@ -1103,6 +1168,10 @@ impl AudioHost {
                 running: false,
                 playing: false,
                 clock: 0,
+                following: false,
+                waiting_start: false,
+                waiting_frame: None,
+                phase_nudge: None,
                 ..self.memory
             };
         };
@@ -1114,6 +1183,10 @@ impl AudioHost {
                 running,
                 playing: false,
                 clock: state.clock,
+                following: false,
+                waiting_start: false,
+                waiting_frame: None,
+                phase_nudge: None,
                 ..self.memory
             };
         }
@@ -1128,6 +1201,10 @@ impl AudioHost {
             counting_in: state.counting_in,
             take: state.take,
             take_so_far: state.take_so_far,
+            following: state.following.is_some(),
+            waiting_start: state.waiting_start,
+            waiting_frame: state.waiting_frame,
+            phase_nudge: state.phase_nudge,
         };
         self.memory
     }
@@ -1483,6 +1560,8 @@ impl AudioHost {
         // launching waits for the right grid from the first block.
         engine.session(SessionCommand::SetQuantization(self.launch));
         engine.sync_outputs(&self.sync_outputs);
+        engine.sync_inputs(&self.sync_inputs);
+        engine.set_external_sync(self.external_sync);
         let _ = engine.flush(ENGINE_START_TIMEOUT);
         handoff
             .push(processor)

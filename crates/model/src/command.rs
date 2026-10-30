@@ -40,7 +40,8 @@ use crate::rack::{
     CHAIN_COLOURS, Chain, ChainSend, MACRO_STEPS_MAX, MACRO_STEPS_MIN, MACROS, Macro, MacroMapping,
     MacroStyle, MacroTarget, RackKind, Receive, macro_number,
 };
-use crate::sample_edits::{SampleEdit, SampleRange};
+use crate::record_quantization::RecordQuantization;
+use crate::sample_edits::{SampleEdit, SampleRange, SampleRegion};
 use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
@@ -346,6 +347,19 @@ pub enum Command {
         /// When on, MIDI recorded into the Arrangement merges into the clips
         /// already there instead of replacing them.
         enabled: bool,
+    },
+
+    /// Sets Record Quantization, the grid recorded notes are moved onto
+    /// (the recording spec, R17): `quantization` chooses a value, `on` turns
+    /// record quantising off, or back on at the last value chosen other than
+    /// No Quantization. Exactly one of the two is given.
+    SetRecordQuantization {
+        /// The value to choose.
+        #[serde(default)]
+        quantization: Option<RecordQuantization>,
+        /// Whether record quantising is on.
+        #[serde(default)]
+        on: Option<bool>,
     },
 
     /// Creates an empty track with default mixer settings.
@@ -2046,6 +2060,16 @@ pub enum Command {
         /// Frame of the slice to delete.
         frame: u64,
     },
+    /// Sets the region of a device's sample, between its Start and End flags
+    /// (the sampler spec, R22): `None` is the whole sample. Start must be
+    /// before End; whether a flag is past the sample's end is for the caller
+    /// that knows the sample, `device.set_sample_region`, which clamps it.
+    SetDeviceRegion {
+        /// The device.
+        device: DeviceId,
+        /// The flags, or `null` for the whole sample.
+        region: Option<SampleRegion>,
+    },
     /// Adds layers to a multisampler (WP-5.13; the multisampler spec, R3), at
     /// `index` or at the end. Each layer's own `id` is ignored: the device
     /// gives each the next of its layer IDs, in order, and they read back
@@ -2873,6 +2897,7 @@ impl Command {
             Self::SetMetronomeRhythm { .. } => "Metronome Rhythm",
             Self::SetMetronomeOnlyWhileRecording { .. } => "Hear Metronome Only While Recording",
             Self::SetMidiOverdub { .. } => "MIDI Arrangement Overdub",
+            Self::SetRecordQuantization { .. } => "Record Quantization",
             Self::CreateTrack { .. } => "Create track",
             Self::DeleteTrack { .. } => "Delete track",
             Self::MoveTrack { .. } => "Move track",
@@ -3075,6 +3100,7 @@ impl Command {
             Self::AddSlice { .. } => "Add Slice",
             Self::MoveSlice { .. } => "Move Slice",
             Self::DeleteSlice { .. } => "Delete Slice",
+            Self::SetDeviceRegion { .. } => "Change Sample Region",
             // WP-5.13: Live's names for the layer list's items where it has
             // them (S6); the rest are Beatlayer's own.
             Self::InsertLayers { .. } => "Add Samples",
@@ -3431,6 +3457,27 @@ impl Document {
             }
             Command::SetMidiOverdub { enabled } => {
                 self.settings.midi_overdub = *enabled;
+                Ok(())
+            }
+            Command::SetRecordQuantization { quantization, on } => {
+                let settings = &mut self.settings;
+                let value = match (quantization, on) {
+                    (Some(value), None) => *value,
+                    (None, Some(true)) if settings.record_quantization.is_none() => {
+                        settings.record_quantization_last
+                    }
+                    (None, Some(true)) => settings.record_quantization,
+                    (None, Some(false)) => RecordQuantization::None,
+                    _ => {
+                        return Err(ModelError::InvalidInput(
+                            "give either `quantization` or `on`",
+                        ));
+                    }
+                };
+                settings.record_quantization = value;
+                if !value.is_none() {
+                    settings.record_quantization_last = value;
+                }
                 Ok(())
             }
             Command::CreateTrack {
@@ -4901,6 +4948,24 @@ impl Document {
                 self.device_mut(*device)?.slices.retain(|f| f != frame);
                 Ok(())
             }
+            Command::SetDeviceRegion { device, region } => {
+                match region {
+                    Some(SampleRegion::Frames { start, end }) => {
+                        check_value("region start", *start as f64, start < end)?;
+                    }
+                    Some(SampleRegion::Shares {
+                        start_share,
+                        end_share,
+                    }) => check_value(
+                        "region start",
+                        *start_share,
+                        (0.0..*end_share).contains(start_share) && *end_share <= 1.0,
+                    )?,
+                    None => {}
+                }
+                self.device_mut(*device)?.region = *region;
+                Ok(())
+            }
             Command::InsertLayers {
                 device,
                 index,
@@ -4966,7 +5031,9 @@ impl Document {
                 // Whether the selection fits the sample is for the caller
                 // that knows it; this checks the edit itself.
                 edit.length_after(u64::MAX)?;
-                self.device_mut(*device)?.sample_edits.push(*edit);
+                let d = self.device_mut(*device)?;
+                d.sample_edits.push(*edit);
+                d.region = d.region.and_then(|region| region.after(edit));
                 Ok(())
             }
             Command::ClearSampleEdits {
@@ -4979,7 +5046,11 @@ impl Document {
                 layer: None,
                 ..
             } => {
-                self.device_mut(*device)?.sample_edits.clear();
+                let d = self.device_mut(*device)?;
+                d.sample_edits.clear();
+                // The unedited sample is another length: the flags mark
+                // nothing in it, so the region is the whole of it again.
+                d.region = None;
                 Ok(())
             }
             Command::SetProcessedLayerSample {

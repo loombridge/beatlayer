@@ -1,11 +1,12 @@
 //! The Edit menu.
 
-use super::Action::{Command as Cmd, Pending, Shortcut as Key, Submenu, System};
+use super::Action::{Choice, Command as Cmd, Shortcut as Key, Submenu, System};
 use super::{IMP_12, Row, SEPARATOR, SystemItem};
 use crate::automation::SIMPLIFY;
 use crate::commands::EDIT_INFO_TEXT;
 use crate::devices::COMPARE_COPY;
 use crate::groove::EXTRACT as EXTRACT_GROOVE;
+use crate::transport::SET_RECORD_QUANTIZATION;
 
 pub(super) const EDIT: &[Row] = &[
     ("M-EDIT-001", "Undo", Key(&["S-EDIT-006"])),
@@ -95,34 +96,50 @@ pub(super) const EDIT: &[Row] = &[
     ),
     ("M-EDIT-037", "Extract Groove(s)", Cmd(EXTRACT_GROOVE)),
     ("M-EDIT-038", "Record Quantization", Submenu),
-    ("M-EDIT-038a", "No Quantization", Pending(None)),
-    ("M-EDIT-038b", "Quarter-Note Quantization", Pending(None)),
-    ("M-EDIT-038c", "Eighth-Note Quantization", Pending(None)),
+    (
+        "M-EDIT-038a",
+        "No Quantization",
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"none"}"#),
+    ),
+    (
+        "M-EDIT-038b",
+        "Quarter-Note Quantization",
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/4"}"#),
+    ),
+    (
+        "M-EDIT-038c",
+        "Eighth-Note Quantization",
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/8"}"#),
+    ),
     (
         "M-EDIT-038d",
         "Eighth-Note Triplets Quantization",
-        Pending(None),
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/8t"}"#),
     ),
     (
         "M-EDIT-038e",
         "Eighth-Note and Triplets Quantization",
-        Pending(None),
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/8+1/8t"}"#),
     ),
-    ("M-EDIT-038f", "Sixteenth-Note Quantization", Pending(None)),
+    (
+        "M-EDIT-038f",
+        "Sixteenth-Note Quantization",
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/16"}"#),
+    ),
     (
         "M-EDIT-038g",
         "Sixteenth-Note Triplets Quantization",
-        Pending(None),
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/16t"}"#),
     ),
     (
         "M-EDIT-038h",
         "Sixteenth-Note and Triplets Quantization",
-        Pending(None),
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/16+1/16t"}"#),
     ),
     (
         "M-EDIT-038i",
         "Thirty-Second Note Quantization",
-        Pending(None),
+        Choice(SET_RECORD_QUANTIZATION, r#"{"quantization":"1/32"}"#),
     ),
     SEPARATOR,
     ("M-EDIT-039", "Simplify Envelope", Cmd(SIMPLIFY)),

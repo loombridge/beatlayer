@@ -26,6 +26,7 @@ impl Shell {
         let document = self.editor.document();
         let target = match command {
             engine_session::SessionCommand::Launch { track, scene }
+            | engine_session::SessionCommand::LaunchAt { track, scene, .. }
                 if self.prefs.launch.select_on_launch && document.slot(track, scene).is_some() =>
             {
                 json!({ "track": track, "scene": scene })
@@ -220,6 +221,7 @@ impl Shell {
     pub fn send_session(&mut self, command: engine_session::SessionCommand) -> Result<(), String> {
         self.audio.send_session(command)?;
         if let engine_session::SessionCommand::Launch { scene, .. }
+        | engine_session::SessionCommand::LaunchAt { scene, .. }
         | engine_session::SessionCommand::LaunchScene(scene) = command
         {
             self.last_launched = Some(scene);
@@ -396,6 +398,9 @@ impl Shell {
             Self::args::<NoArgs>(id, args)?;
             let mut state = self.session.state();
             state.launches = self.session_launches();
+            // Spec: session-view R38. Each running surface's ring, by ID.
+            self.sync_instant();
+            state.rings = self.session_rings();
             return Ok(to_value(&state));
         }
         if crate::session_clips::handles(id) {

@@ -47,6 +47,7 @@ use bl_engine::{
 };
 use bl_model::registry as model;
 use bl_shell::Shell;
+use lspk_agent::Session;
 use lspk_agent::permission::Decision;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -87,24 +88,76 @@ pub(crate) struct Playhead {
     playing: bool,
     position: Ticks,
     insert_marker: Ticks,
+    /// Whether an outside tempo leads, so Phase Nudge is refused (the
+    /// transport spec, R29).
+    following: bool,
 }
 
 impl Playhead {
-    pub(crate) fn new(playing: bool, position: Ticks, insert_marker: Ticks) -> Self {
+    pub(crate) fn new(
+        playing: bool,
+        position: Ticks,
+        insert_marker: Ticks,
+        following: bool,
+    ) -> Self {
         Self {
             playing,
             position,
             insert_marker,
+            following,
         }
     }
 
     pub(crate) fn of(state: &EngineState) -> Self {
-        Self {
-            playing: state.playing,
-            position: state.position_ticks,
-            insert_marker: state.insert_marker,
-        }
+        Self::new(
+            state.playing,
+            state.position_ticks,
+            state.insert_marker,
+            state.following.is_some(),
+        )
     }
+}
+
+/// Where a session keeps its number in [`Session::refs`], which every call
+/// carries and which a call that names IDs writes back whole, so the number
+/// survives.
+const SESSION_NUMBER: &str = "$session";
+
+/// Gives `session` a number of its own the first time it calls, so what it
+/// holds in the engine (a Phase Nudge) can end when the session does. The kit
+/// keeps sessions by ID and closes them itself, and a call isn't told which
+/// session it is on.
+pub(crate) fn number_session(state: &mut super::State, session: &mut Session) {
+    if !session.refs.contains_key(SESSION_NUMBER) {
+        state.sessions_numbered += 1;
+        session
+            .refs
+            .insert(SESSION_NUMBER.to_owned(), state.sessions_numbered);
+    }
+}
+
+/// The numbers of the sessions that have one.
+pub(crate) fn session_numbers<'a>(sessions: impl Iterator<Item = &'a Session>) -> Vec<u64> {
+    sessions
+        .filter_map(|session| session.refs.get(SESSION_NUMBER).copied())
+        .collect()
+}
+
+/// Releases the Phase Nudge buttons held by sessions that are not among
+/// `open` any more (spec: transport R28), by queueing the releases they never
+/// sent.
+pub(crate) fn release_orphaned_nudges(state: &mut super::State, open: &[u64]) {
+    let outbox = &mut state.outbox;
+    state.nudges.retain(|&(owner, direction)| {
+        let kept = open.contains(&owner);
+        if !kept {
+            outbox.push(EngineMessage::Transport(TransportCommand::PhaseNudge {
+                direction,
+                held: false,
+            }));
+        }
+        kept
+    });
 }
 
 /// What `transport` does. Each action but `status` runs the transport
@@ -340,6 +393,27 @@ pub(crate) fn send_transport(ctx: &mut Ctx<'_>, id: &str, args: Value) -> Result
         ));
     }
     let command = transport::command_from_args(id, args).map_err(|error| error.to_string())?;
+    if let TransportCommand::PhaseNudge { direction, held } = command {
+        // Spec: transport R29. A release is still accepted, so a held nudge
+        // can end.
+        if held
+            && ctx
+                .state
+                .playhead
+                .is_some_and(|playhead| playhead.following)
+        {
+            return Err(format!(
+                "an incoming clock or Link session leads the tempo and keeps the phase, so \
+                 `{id}` is refused while it does"
+            ));
+        }
+        // Spec: transport R28. The session that pressed a button holds it.
+        let owner = ctx.session.refs.get(SESSION_NUMBER).copied().unwrap_or(0);
+        ctx.state.nudges.retain(|&(_, button)| button != direction);
+        if held {
+            ctx.state.nudges.push((owner, direction));
+        }
+    }
     ctx.state.outbox.push(EngineMessage::Transport(command));
     Ok(())
 }

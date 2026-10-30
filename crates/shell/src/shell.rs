@@ -57,6 +57,7 @@ use bl_shell_spec::browser as browser_ids;
 use bl_shell_spec::capture_midi as capture_ids;
 use bl_shell_spec::clip_envelope_editing as clip_envelope_ids;
 use bl_shell_spec::comping as comping_ids;
+use bl_shell_spec::control_surface as surface_ids;
 use bl_shell_spec::dawproject as dawproject_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
@@ -79,6 +80,7 @@ use bl_shell_spec::scales as scales_ids;
 use bl_shell_spec::search as search_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
+use bl_shell_spec::session_strip as session_strip_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::settings::STATE as SETTINGS_STATE;
@@ -119,12 +121,15 @@ mod assistant_ui;
 mod audio_device;
 mod browser_commands;
 mod clip_scale;
+mod control_surface;
 mod device_commands;
 mod document_edits;
 mod focus;
 mod gestures;
 mod info_text;
+mod instant;
 mod invoke;
+mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
@@ -137,9 +142,11 @@ mod plugin_windows;
 mod recording_takes;
 mod recovery;
 mod remote;
+mod remote_targets;
 mod search;
 mod session_launch;
 mod session_recording;
+mod session_strip;
 mod set_exchange;
 mod set_files;
 mod slice;
@@ -596,10 +603,21 @@ pub struct Shell {
     /// been lit (the MIDI clock spec, R12).
     sync_seen: u64,
     sync_lit: Option<std::time::Instant>,
+    /// The clock the engine follows as [`Shell::poll`] last heard of it, and
+    /// the quarter notes of it that had arrived when the upper sync lamp
+    /// last lit (midi-clock R16, R17).
+    sync_in: bl_engine::SyncInState,
+    sync_in_seen: u64,
+    sync_in_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
     chord_learn: crate::chord_learn::ChordLearn,
     /// The remote input and the set's MIDI and key mappings (WP-7.1).
     remote: remote::RemoteState,
+    /// The control surfaces: what the host was last given and the gesture a
+    /// surface has open (WP-7.5).
+    surface: control_surface::SurfaceHost,
+    /// The instant mappings' state: locks, rings and banks per row.
+    instant: instant::Instant,
     /// The keys held on the MIDI input and the previews sounding, for the
     /// MIDI Note Editor's step recording and Preview (WP-6.5).
     step: step_input::StepInput,
@@ -807,6 +825,9 @@ pub struct Shell {
     /// The tempo and time signature a launched scene put in place of the
     /// set's, as the engine last published them (WP-3.5).
     scene_override: bl_engine::SceneOverride,
+    /// The Phase Nudge button held and whether an outside tempo leads, as the
+    /// engine last published them (the transport spec, R27 to R29).
+    nudge_view: (Option<bl_engine::NudgeDirection>, bool),
     /// The scene launched last since the set opened, which Capture and
     /// Insert Scene goes after.
     last_launched: Option<bl_model::SceneId>,
@@ -1277,8 +1298,13 @@ impl Shell {
             midi_lit: [None; 2],
             sync_seen: 0,
             sync_lit: None,
+            sync_in: bl_engine::SyncInState::default(),
+            sync_in_seen: 0,
+            sync_in_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),
             remote: remote::RemoteState::default(),
+            surface: control_surface::SurfaceHost::default(),
+            instant: instant::Instant::default(),
             step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
@@ -1348,6 +1374,7 @@ impl Shell {
             launched: BTreeMap::new(),
             playing_clip: None,
             scene_override: bl_engine::SceneOverride::default(),
+            nudge_view: (None, false),
             last_launched: None,
             session_over: Vec::new(),
             modulated: Vec::new(),
@@ -1396,6 +1423,7 @@ impl Shell {
         shell.give_agents_tokens();
         shell.publish_plugins();
         shell.load_user_keymap();
+        shell.refresh_templates();
         // Spec: mixer-view R21. The return tracks scroll with the tracks as
         // the application setting says, in the mixers and in the
         // Arrangement's lanes.
@@ -1565,6 +1593,9 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        // Spec: control-surfaces R24, R26, R30. Locks and rings follow the
+        // set.
+        self.sync_instant();
         self.clip_view.sync_sample(self.editor.document());
         // The kit plug-ins' instances first, so a node the engine makes at once
         // finds its device's.
@@ -1612,6 +1643,8 @@ impl Shell {
         // Spec: remote-mapping R12. Any other edit ends a run of mapped
         // messages that is one undo step.
         self.remote_run_ends_for(id);
+        // Spec: control-surfaces R7. The same for a surface's gesture.
+        self.surface_gesture_ends_for(id);
         self.poll_capture();
         self.sync_panels_height();
         // Spec: automation-editing R23. The edit a selected breakpoint
@@ -1631,6 +1664,7 @@ impl Shell {
         let revision = self.document_revision;
         let generation = self.editor_generation;
         let result = self.run_command(id, args);
+        self.rack_map_mode_ends_map_mode(id);
         self.sync_key_edit();
         if result.is_ok() {
             self.follow_restored_breakpoint(history);
@@ -1680,6 +1714,15 @@ impl Shell {
                     "the track {} is frozen; unfreeze it to change its devices or clip settings",
                     track.0
                 ),
+            });
+        }
+        if id == bl_shell_spec::transport::SET_RECORD_QUANTIZATION
+            && let Some(reason) = self.record_quantization_locked()
+        {
+            // Spec: recording R21.
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: reason.to_owned(),
             });
         }
         if self.edit_gesture.is_some()
@@ -1848,6 +1891,9 @@ impl Shell {
         if id == transport_ids::TAP_TEMPO {
             return self.run_tap_tempo(args);
         }
+        if id == transport_ids::SET_EXTERNAL_SYNC {
+            return self.run_set_external_sync(args);
+        }
         if transport_ids::handles(id) {
             Self::args::<NoArgs>(id, args)?;
             let engine = self.poll_engine();
@@ -1870,6 +1916,9 @@ impl Shell {
         }
         if mixer_ids::handles(id) {
             return self.run_mixer_view(id, args);
+        }
+        if session_strip_ids::handles(id) {
+            return self.run_session_strip(id, args);
         }
         if session_ids::handles(id) {
             return self.run_session_view(id, args);
@@ -2142,6 +2191,9 @@ impl Shell {
         }
         if remote_ids::handles(id) {
             return self.run_remote(id, args);
+        }
+        if surface_ids::handles(id) {
+            return self.run_control_surface(id, args);
         }
         if file_manager_ids::handles(id) {
             // Spec: file-management R10 to R17. The File Manager's own

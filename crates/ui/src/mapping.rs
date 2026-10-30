@@ -10,9 +10,10 @@ use bl_model::modulator::{
     ModTarget, STRIKE_MOD, ShapePoint, shape_preset, shape_value, with_bend, with_point_added,
     with_point_moved, with_sustain, without_point,
 };
-use bl_model::{DeviceId, DeviceKind, ParamId};
+use bl_model::{ClipControl, ControlKind, DeviceId, DeviceKind, ParamId, RemoteTarget};
 use bl_shell::Invocation;
 use bl_shell::device_commands::{ArmedMap, DeviceFrame, MappingRow, ModulatorFrame};
+use bl_shell::remote_commands::MapMode;
 use egui::accesskit::Role;
 use egui::{
     Align2, Context, CursorIcon, Id, Key, Modifiers, Pos2, Rect, Sense, Shape, Stroke, StrokeKind,
@@ -46,7 +47,7 @@ pub fn armed(ctx: &Context) -> Option<ArmedMap> {
 /// typed, or a menu is open (`typing`), both keys stay theirs.
 pub fn escape(ctx: &Context, typing: bool, events: &mut Vec<UiEvent>) {
     let typing = typing || ctx.text_edit_focused();
-    let entered = armed(ctx).is_some()
+    let entered = (armed(ctx).is_some() || remote_map(ctx).is_some())
         && !typing
         && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Enter));
     ctx.data_mut(|d| d.insert_temp(entered_id(), entered));
@@ -192,6 +193,38 @@ pub fn hover_hold(ctx: &Context) -> Option<String> {
         .flatten()
 }
 
+fn hover_lock_id(shown: bool) -> Id {
+    Id::new(if shown {
+        "surface-lock-hover-shown"
+    } else {
+        "surface-lock-hover-next"
+    })
+}
+
+/// Notes what the locked device's hand icon under the pointer says, for the
+/// Status Bar to read in the next frame: the Status Bar draws before the
+/// detail area that notes it.
+pub fn set_hover_lock(ctx: &Context, text: Option<String>) {
+    ctx.data_mut(|d| d.insert_temp(hover_lock_id(false), text));
+}
+
+/// Starts a frame: what the last frame noted is what the Status Bar shows.
+pub fn rotate_hover_lock(ctx: &Context) {
+    ctx.data_mut(|d| {
+        let next = d.get_temp::<Option<String>>(hover_lock_id(false)).flatten();
+        d.insert_temp(hover_lock_id(true), next);
+        d.insert_temp(hover_lock_id(false), None::<String>);
+    });
+}
+
+/// What the hand icon the pointer was over in the last frame says, if there
+/// was one (device chains R42).
+#[must_use]
+pub fn hover_lock(ctx: &Context) -> Option<String> {
+    ctx.data(|d| d.get_temp::<Option<String>>(hover_lock_id(true)))
+        .flatten()
+}
+
 /// Selects the parameter Map mode's next Map button maps, or none.
 pub fn set_macro_target(ctx: &Context, target: Option<(DeviceId, ParamId)>) {
     ctx.data_mut(|d| d.insert_temp(macro_target_id(), target));
@@ -244,6 +277,129 @@ pub fn macro_overlay(
         set_macro_target(ui.ctx(), Some((device, param)));
     }
     true
+}
+
+/// A map mode (MIDI Map Mode or Key Map Mode), as this frame's controls see
+/// it (map modes spec, R3).
+#[derive(Clone, Debug)]
+pub struct RemoteMap {
+    /// The mode that is on.
+    pub mode: MapMode,
+    /// The control selected for learning, if one is.
+    pub selected: Option<RemoteTarget>,
+    /// The source each mapped control's overlay reads.
+    pub labels: std::collections::HashMap<RemoteTarget, String>,
+}
+
+fn remote_map_id() -> Id {
+    Id::new("remote-map-mode")
+}
+
+/// Tells the controls drawn this frame which map mode is on, if one is.
+pub fn set_remote_map(ctx: &Context, map: Option<RemoteMap>) {
+    ctx.data_mut(|d| d.insert_temp(remote_map_id(), map.map(std::sync::Arc::new)));
+}
+
+/// The map mode that is on, if one is.
+#[must_use]
+pub fn remote_map(ctx: &Context) -> Option<std::sync::Arc<RemoteMap>> {
+    ctx.data(|d| d.get_temp::<Option<std::sync::Arc<RemoteMap>>>(remote_map_id()))
+        .flatten()
+}
+
+/// Tints `control`'s `rect` while a map mode is on and selects it when it is
+/// clicked, or when Enter is pressed with `control` focused, instead of
+/// operating it (map modes spec, R3, R4). `continuous` says it is a
+/// continuous control, which Key Map Mode leaves as it is, except that a
+/// click does nothing. Returns whether the control is mappable now.
+pub fn remote_overlay(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    control: Id,
+    target: RemoteTarget,
+    continuous: bool,
+    events: &mut Vec<UiEvent>,
+) -> bool {
+    let Some(map) = remote_map(ui.ctx()) else {
+        return false;
+    };
+    let id = control.with("remote-target");
+    // The overlay takes the click and the drag the control would have.
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    if continuous && map.mode == MapMode::Key {
+        return false;
+    }
+    let (colour, name) = match map.mode {
+        MapMode::Key => (theme.colors.key_map.0, "Key Map Mode"),
+        _ => (theme.colors.midi_map.0, "MIDI Map Mode"),
+    };
+    ui.painter()
+        .rect_filled(rect, theme.sizes.corner, colour.gamma_multiply(0.3));
+    ui.painter().rect_stroke(
+        rect,
+        theme.sizes.corner,
+        Stroke::new(1.0, colour),
+        StrokeKind::Inside,
+    );
+    let label = map.labels.get(&target);
+    if let Some(label) = label {
+        ui.painter_at(rect).text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            label,
+            theme.small_font(),
+            theme.colors.text.0,
+        );
+    }
+    if map.selected == Some(target) {
+        ui.painter().rect_stroke(
+            rect.expand(1.0),
+            theme.sizes.corner,
+            Stroke::new(2.0, theme.colors.accent.0),
+            StrokeKind::Outside,
+        );
+    }
+    let description = format!(
+        "{name}: {}",
+        label.map_or_else(|| "not mapped".to_owned(), |l| format!("mapped to {l}"))
+    );
+    ui.ctx().accesskit_node_builder(control, |node| {
+        node.set_description(description);
+    });
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::Crosshair);
+    }
+    let entered = ui.memory(|m| m.has_focus(control))
+        && ui.data(|d| d.get_temp::<bool>(entered_id()).unwrap_or(false));
+    if response.clicked() || entered {
+        events.push(UiEvent::Invoke(Invocation::new(
+            "remote.select",
+            json!({ "target": target }),
+        )));
+    }
+    true
+}
+
+/// The map modes' overlay on one of the Clip View's controls, `control`
+/// (map modes R3, R11, R17): a mapping acts on the clips the Clip View shows.
+pub fn clip_overlay(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    id: Id,
+    control: ClipControl,
+    events: &mut Vec<UiEvent>,
+) -> bool {
+    remote_overlay(
+        ui,
+        theme,
+        rect,
+        id,
+        RemoteTarget::Clip { control },
+        control.kind() == ControlKind::Continuous,
+        events,
+    )
 }
 
 /// The ID of a slot's Unmap button.

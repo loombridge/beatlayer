@@ -4155,6 +4155,46 @@ fn an_agent_sets_the_warp_controls_and_manual_slices_and_reads_them_back() {
     assert_eq!(saved["warp"]["settings"]["beats"]["preserve"], "quarter");
     assert_eq!(saved["warp"]["settings"]["beats"]["transient_envelope"], 40);
     assert_eq!(saved["slices"]["items"], json!([36_000]));
+
+    // The Start and End flags (sampler R22): an End past the sample comes
+    // back to it, and a Start at or after End is refused.
+    let set = one(
+        &mut client,
+        "device.set_sample_region",
+        json!({ "device": snapshot, "start": 100, "end": 1_000_000_000u64 }),
+    );
+    let length = set["length"].as_u64().unwrap();
+    assert_eq!(
+        (set["start"].as_u64(), set["end"].as_u64()),
+        (Some(100), Some(length))
+    );
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_sample_region",
+                "args": { "device": snapshot, "start": length } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    // S Start, S Length and S Loop Length are the parameters with the IDs
+    // Start, Length and Loop Length had.
+    one(
+        &mut client,
+        "device.set_param",
+        json!({ "device": snapshot, "param": 1, "value": 50.0 }),
+    );
+    let saved = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", snapshot.0.get()), "detail": "full" }),
+    )["saved"]
+        .clone();
+    assert_eq!(saved["region"], json!({ "start": 100, "end": length }));
+    assert!(
+        saved["params"].to_string().contains("[1,50.0]"),
+        "{}",
+        saved["params"]
+    );
 }
 
 /// Spec: sample-editor R21. An agent selects, makes, moves and deletes warp

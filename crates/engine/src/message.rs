@@ -3,6 +3,7 @@
 use bl_core::time::{Frames, Ticks};
 use bl_model::ParamId;
 
+use crate::follower::Follower;
 use crate::gc::{Owned, Program};
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::recording::RecordingPlan;
@@ -140,6 +141,36 @@ pub enum TransportCommand {
     /// before the clock of the next bar line. Does nothing while the
     /// transport is stopped.
     ResyncExternalHardware,
+    /// Presses or releases Phase Nudge Down or Up: while one is held and the
+    /// song plays, the song plays 4 % slower or faster (the transport spec,
+    /// R27). With both held, the one pressed last nudges. The engine ignores
+    /// a press while the song follows an outside tempo (R29).
+    PhaseNudge {
+        /// Which button.
+        direction: NudgeDirection,
+        /// Whether it is held: true on the press, false on the release.
+        held: bool,
+    },
+}
+
+/// Which Phase Nudge button (the transport spec, R27).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum NudgeDirection {
+    /// Phase Nudge Down: 4 % slower.
+    Down,
+    /// Phase Nudge Up: 4 % faster.
+    Up,
 }
 
 /// Where recording starts and stops, as the Arrangement loop brace and the
@@ -246,6 +277,9 @@ pub(crate) enum Message {
     /// The frames between the engine handing the device a sound and it
     /// coming out, as the device reports it now (WP-5.34).
     OutputLatency(u32),
+    /// The outside tempo the song follows from the next block on, or `None`
+    /// for none (the transport spec, R24).
+    Follower(Option<Owned<Box<dyn Follower>>>),
     /// Output `index` of the `count` output ports with Sync on and their
     /// options (midi-clock R3); a `count` of 0 clears the list.
     SyncOutput {
@@ -253,4 +287,13 @@ pub(crate) enum Message {
         count: u8,
         output: Option<bl_core::midi::SyncOutput>,
     },
+    /// Input `index` of the `count` input ports with Sync on and their Sync
+    /// Delay (midi-clock R14); a `count` of 0 clears the list.
+    SyncInput {
+        index: u8,
+        count: u8,
+        input: Option<bl_core::midi::SyncInput>,
+    },
+    /// Whether the song follows the incoming clock: EXT (midi-clock R15).
+    ExternalSync(bool),
 }

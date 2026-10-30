@@ -7,6 +7,7 @@
 
 use std::time::Instant;
 
+use bl_control::{RowConfig, RowReport, Surfaces};
 use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_midi_io::{
     ComputerKeyboard, Direction, InputSender, KeyboardKey, MidiBackend, MidiPorts, OutputBus,
@@ -17,11 +18,14 @@ use bl_shell_spec::midi_io::{
     SetPortArgs,
 };
 
-use crate::settings::{MidiPrefs, PortPrefs};
+use crate::settings::{MidiPrefs, PortPrefs, SurfaceRowPrefs};
 
 /// The ports in use, the computer MIDI keyboard, and the queue to the
 /// engine they share.
 pub struct MidiHost {
+    // The surfaces come first, so they stop and say goodbye before the ports
+    // they talk on close (control surfaces R9).
+    surfaces: Surfaces,
     ports: MidiPorts,
     keyboard: ComputerKeyboard,
     sender: InputSender,
@@ -30,6 +34,9 @@ pub struct MidiHost {
     clock: Option<bl_core::clock::TestClock>,
     /// Show Resync Button (the MIDI clock spec, R10).
     show_resync_button: bool,
+    /// Whether EXT is on (R15); the song follows only while an input has
+    /// Sync on.
+    external_sync: bool,
 }
 
 impl std::fmt::Debug for MidiHost {
@@ -83,6 +90,7 @@ impl MidiHost {
         output: OutputBus,
         prefs: &MidiPrefs,
     ) -> Self {
+        let surfaces = Surfaces::new(sender.clone(), output.clone());
         let mut ports = MidiPorts::new(backend, sender.clone()).with_output(output);
         for port in &prefs.ports {
             ports.remember(
@@ -104,12 +112,26 @@ impl MidiHost {
         let mut keyboard = ComputerKeyboard::new();
         keyboard.set_on(prefs.keyboard_on);
         let mut host = Self {
+            surfaces,
             ports,
             keyboard,
             sender,
             clock: None,
             show_resync_button: prefs.show_resync_button,
+            external_sync: prefs.external_sync,
         };
+        // Spec: control-surfaces R2. The rows apply again at once, and
+        // wait for ports that aren't there.
+        for (row, saved) in prefs.surfaces.iter().take(bl_control::ROWS).enumerate() {
+            let config = RowConfig {
+                surface: saved.surface.clone(),
+                input: saved.input.clone(),
+                output: saved.output.clone(),
+            };
+            // A saved row that now breaks a rule (two rows on one port) is
+            // left empty.
+            let _ = host.surfaces.restore(row, config);
+        }
         host.refresh();
         host
     }
@@ -117,6 +139,7 @@ impl MidiHost {
     /// Stamps the keyboard's notes from `clock` instead of the system's
     /// (T199), as the null device's manual pacing needs.
     pub fn set_test_clock(&mut self, clock: bl_core::clock::TestClock) {
+        self.surfaces.set_clock(clock.clone());
         self.clock = Some(clock);
     }
 
@@ -130,6 +153,9 @@ impl MidiHost {
     /// switches say. A system that can't list its ports shows none.
     pub fn refresh(&mut self) {
         let _ = self.ports.refresh();
+        // Spec: control-surfaces R9. A surface stops when its port goes and
+        // starts when it comes back.
+        self.surfaces.reconcile(&mut self.ports);
     }
 
     /// What the preferences keep.
@@ -153,8 +179,67 @@ impl MidiHost {
                 })
                 .collect(),
             keyboard_on: self.keyboard.is_on(),
+            surfaces: {
+                let mut rows: Vec<SurfaceRowPrefs> = self
+                    .surfaces
+                    .rows()
+                    .iter()
+                    .map(|row| SurfaceRowPrefs {
+                        surface: row.surface.clone(),
+                        input: row.input.clone(),
+                        output: row.output.clone(),
+                    })
+                    .collect();
+                // Empty rows at the end aren't kept.
+                while rows.last() == Some(&SurfaceRowPrefs::default()) {
+                    rows.pop();
+                }
+                rows
+            },
             show_resync_button: self.show_resync_button,
+            external_sync: self.external_sync,
         }
+    }
+
+    /// The control surfaces and the table of their rows.
+    #[must_use]
+    pub const fn surfaces(&self) -> &Surfaces {
+        &self.surfaces
+    }
+
+    /// Sets the controller templates the chooser offers (control surfaces
+    /// R43).
+    pub fn set_surface_templates(&mut self, templates: Vec<std::sync::Arc<bl_control::Kind>>) {
+        self.surfaces.set_templates(templates);
+        self.refresh();
+    }
+
+    /// The six rows as the Control Surfaces table shows them.
+    #[must_use]
+    pub fn surface_rows(&self) -> Vec<RowReport> {
+        self.surfaces.report(&self.ports)
+    }
+
+    /// Sets a row (control surfaces R1, R3), and starts or stops what the
+    /// change calls for.
+    ///
+    /// # Errors
+    ///
+    /// A message if the surface isn't offered or a port is another row's.
+    pub fn set_surface_row(&mut self, row: usize, config: RowConfig) -> Result<(), String> {
+        self.surfaces.set_row(row, config)?;
+        self.refresh();
+        Ok(())
+    }
+
+    /// Sends a row's surface's setup to its output (R11); how many
+    /// messages.
+    ///
+    /// # Errors
+    ///
+    /// A message if the row has no setup to send.
+    pub fn dump_surface(&self, row: usize) -> Result<usize, String> {
+        self.surfaces.dump(row, &self.ports)
     }
 
     /// Every port the system offers.
@@ -270,6 +355,24 @@ impl MidiHost {
     #[must_use]
     pub fn sync_outputs(&self) -> Vec<bl_core::midi::SyncOutput> {
         self.ports.sync_outputs()
+    }
+
+    /// The open inputs with Sync on and their Sync Delay: where the engine
+    /// follows MIDI clock from.
+    #[must_use]
+    pub fn sync_inputs(&self) -> Vec<bl_core::midi::SyncInput> {
+        self.ports.sync_inputs()
+    }
+
+    /// Whether EXT is kept on; it takes effect while an input has Sync on.
+    #[must_use]
+    pub fn external_sync(&self) -> bool {
+        self.external_sync
+    }
+
+    /// Switches the kept EXT preference.
+    pub fn set_external_sync(&mut self, on: bool) {
+        self.external_sync = on;
     }
 
     /// Whether Show Resync Button is on.

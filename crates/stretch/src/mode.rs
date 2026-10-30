@@ -45,9 +45,13 @@ pub struct Request<'a> {
     /// The file position, in frames and perhaps fractional, each output
     /// frame plays. Never NaN; in increasing order.
     pub positions: &'a [f64],
-    /// The song frame the run's first output frame plays on.
+    /// A frame count that runs on by one per output frame while the clip
+    /// plays on without a jump: the song frame the run's first output frame
+    /// plays on, unless the song follows an outside tempo (the transport
+    /// spec, R24), when the song frames run on faster or slower than the
+    /// frames do and [`song`](Self::song) holds them.
     pub first: i64,
-    /// File frames per song frame over the run.
+    /// File frames per output frame over the run.
     pub speed: f64,
     /// Whether the run reads the file frame for frame: the speed is exactly 1
     /// and the pitch is unchanged, so each song frame plays the file frame
@@ -68,6 +72,24 @@ pub struct Request<'a> {
     /// since one instance may serve several clips that never sound at once
     /// (R5, R7).
     pub clip: u64,
+    /// Song frames per output frame: 1 unless the song follows an outside
+    /// tempo.
+    pub step: f64,
+    /// The song frame the run's first output frame plays on, unrounded; NaN
+    /// where `first` is it.
+    pub song: f64,
+}
+
+impl Request<'_> {
+    /// The song frame output frame `i` of the run plays on.
+    #[must_use]
+    pub fn song_frame(&self, i: usize) -> i64 {
+        if self.song.is_nan() {
+            self.first + i as i64
+        } else {
+            (self.song + i as f64 * self.step).round() as i64
+        }
+    }
 }
 
 /// The frames of the run a window must hold besides what the mode reaches
@@ -207,7 +229,7 @@ impl Beats {
             for (i, frame) in channel.iter_mut().enumerate() {
                 let mix = request
                     .beats
-                    .mix(request.first + i as i64, request.transient_envelope);
+                    .mix(request.song_frame(i), request.transient_envelope);
                 let level = level(mix);
                 if level != 1.0 {
                     *frame = (*frame as f64 * level) as f32;
@@ -268,6 +290,8 @@ mod tests {
             transient_envelope: 100.0,
             pitch: 1.0,
             clip: 1,
+            step: 1.0,
+            song: f64::NAN,
         };
         let mut out = vec![0.0; 20];
         RePitch.render(&request, &window, &mut out, 20);
@@ -291,6 +315,8 @@ mod tests {
                 transient_envelope: 100.0,
                 pitch: 1.0,
                 clip: 1,
+                step: 1.0,
+                song: f64::NAN,
             };
             RePitch.render(&request, &window, &mut out, 20);
             for (got, p) in out.iter().zip(&positions) {
@@ -321,6 +347,8 @@ mod tests {
             transient_envelope: 100.0,
             pitch: 1.0,
             clip: 1,
+            step: 1.0,
+            song: f64::NAN,
         };
         assert_eq!(RePitch.reach(&request), (0, 0));
         let mut out = vec![0.0; 10];

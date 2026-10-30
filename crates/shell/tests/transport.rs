@@ -14,7 +14,7 @@ use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
 use bl_shell::testing;
 use bl_shell::transport::{self, Field, Group};
-use bl_shell::transport_commands::TransportState;
+use bl_shell::transport_commands::{PhaseNudge, TransportState};
 use bl_shell::{Invocation, Shell, ShellError};
 use serde_json::{Value, json};
 
@@ -74,6 +74,10 @@ const TRANSPORT: &[(&str, &str)] = &[
     ("transport.insert_marker_to_playhead", "{}"),
     ("transport.stop_recording", "{}"),
     ("transport.set_recording", "{\"recording\": true}"),
+    (
+        "transport.phase_nudge",
+        "{\"direction\": \"up\", \"held\": false}",
+    ),
 ];
 
 #[test]
@@ -92,6 +96,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
     expected.extend([
         "transport.set_loop",
         "transport.set_loop_enabled",
+        "transport.set_external_sync",
         "transport.set_metronome_count_in",
         "transport.set_metronome_enabled",
         "transport.set_metronome_only_while_recording",
@@ -100,6 +105,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
         "transport.set_midi_overdub",
         "transport.set_punch_in",
         "transport.set_punch_out",
+        "transport.set_record_quantization",
         "transport.state",
         "transport.tap_tempo",
     ]);
@@ -631,4 +637,136 @@ fn permanent_scrub_areas_is_on_kept_between_launches_and_read_back() {
     // The shell holds a file in `dir` open, which Windows won't delete.
     drop(second);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn phase_nudge_runs_by_id_reads_back_and_the_last_pressed_of_two_counts() {
+    // Spec: transport R27, R28.
+    let (mut shell, control) = shell();
+    shell.run("transport.play", json!({})).unwrap();
+    wait(&control, &mut shell, "playback", |e| e.playing);
+    let undoable = shell.editor().undo_history().count();
+    let nudge = |shell: &mut Shell, direction: &str, held: bool| {
+        shell
+            .run(
+                "transport.phase_nudge",
+                json!({ "direction": direction, "held": held }),
+            )
+            .unwrap();
+    };
+    assert_eq!(state(&mut shell).phase_nudge, PhaseNudge::None);
+    nudge(&mut shell, "down", true);
+    wait(&control, &mut shell, "Down", |e| e.phase_nudge.is_some());
+    assert_eq!(state(&mut shell).phase_nudge, PhaseNudge::Down);
+    nudge(&mut shell, "up", true);
+    wait(&control, &mut shell, "Up", |e| {
+        e.phase_nudge == Some(bl_engine::NudgeDirection::Up)
+    });
+    assert_eq!(state(&mut shell).phase_nudge, PhaseNudge::Up);
+    // Letting go of the one pressed last leaves the other nudging.
+    nudge(&mut shell, "up", false);
+    wait(&control, &mut shell, "Down again", |e| {
+        e.phase_nudge == Some(bl_engine::NudgeDirection::Down)
+    });
+    assert_eq!(state(&mut shell).phase_nudge, PhaseNudge::Down);
+    nudge(&mut shell, "down", false);
+    wait(&control, &mut shell, "the release", |e| {
+        e.phase_nudge.is_none()
+    });
+    assert_eq!(state(&mut shell).phase_nudge, PhaseNudge::None);
+    // The tempo and the set are as they were, and nothing is an undo step.
+    assert_eq!(state(&mut shell).tempo, 120.0);
+    assert_eq!(shell.editor().undo_history().count(), undoable);
+    // A direction that isn't one is refused.
+    assert!(
+        shell
+            .run(
+                "transport.phase_nudge",
+                json!({ "direction": "left", "held": true })
+            )
+            .is_err()
+    );
+    shell.audio_mut().stop();
+}
+
+#[test]
+fn phase_nudge_is_refused_while_an_outside_tempo_leads_but_a_release_is_taken() {
+    // Spec: transport R29.
+    let (mut shell, control) = shell();
+    shell.run("transport.play", json!({})).unwrap();
+    wait(&control, &mut shell, "playback", |e| e.playing);
+    shell
+        .run(
+            "transport.phase_nudge",
+            json!({ "direction": "down", "held": true }),
+        )
+        .unwrap();
+    wait(&control, &mut shell, "the nudge", |e| {
+        e.phase_nudge.is_some()
+    });
+    shell
+        .audio()
+        .set_follower(Some(Box::new(bl_engine::testing::following(140.0))));
+    wait(&control, &mut shell, "the follower", |e| e.following);
+    let refused = shell
+        .run(
+            "transport.phase_nudge",
+            json!({ "direction": "up", "held": true }),
+        )
+        .unwrap_err();
+    assert!(
+        matches!(refused, ShellError::Unavailable { .. }),
+        "{refused}"
+    );
+    assert!(refused.to_string().contains("leads the tempo"), "{refused}");
+    // The release of the nudge held before the follower came is taken.
+    shell
+        .run(
+            "transport.phase_nudge",
+            json!({ "direction": "down", "held": false }),
+        )
+        .unwrap();
+    wait(&control, &mut shell, "the release", |e| {
+        e.phase_nudge.is_none()
+    });
+    assert_eq!(state(&mut shell).phase_nudge, PhaseNudge::None);
+    shell.audio_mut().stop();
+}
+
+#[test]
+fn a_start_that_waits_for_the_follower_is_in_transport_state_until_stop_cancels_it() {
+    // Spec: transport R25.
+    let (mut shell, control) = shell();
+    shell
+        .audio()
+        .set_follower(Some(Box::new(bl_engine::testing::stand_in(|_, answer| {
+            answer.tempo(120.0);
+            answer.decides_starts();
+        }))));
+    wait(&control, &mut shell, "the follower", |e| e.following);
+    let before = state(&mut shell);
+    assert!(!before.waiting_start && before.waiting_frame.is_none());
+    shell.run("transport.play", json!({})).unwrap();
+    wait(&control, &mut shell, "the wait", |e| e.waiting_start);
+    let waiting = state(&mut shell);
+    assert!(waiting.waiting_start && !waiting.playing, "{waiting:?}");
+    assert_eq!(waiting.waiting_frame, None, "no frame yet");
+    // The follower gives a frame, far ahead.
+    shell
+        .audio()
+        .set_follower(Some(Box::new(bl_engine::testing::stand_in(|_, answer| {
+            answer.tempo(120.0);
+            answer.decides_starts();
+            answer.start_at(1_000_000_000);
+        }))));
+    wait(&control, &mut shell, "the frame", |e| {
+        e.waiting_frame.is_some()
+    });
+    assert_eq!(state(&mut shell).waiting_frame, Some(1_000_000_000));
+    shell.run("transport.stop", json!({})).unwrap();
+    wait(&control, &mut shell, "the cancel", |e| !e.waiting_start);
+    let cancelled = state(&mut shell);
+    assert!(!cancelled.waiting_start && cancelled.waiting_frame.is_none());
+    assert!(!cancelled.playing);
+    shell.audio_mut().stop();
 }

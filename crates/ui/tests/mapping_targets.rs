@@ -165,13 +165,12 @@ fn the_strips_controls_map_and_act_through_the_remote_input() {
     }
     // Each control maps by a click and a note.
     mode(&mut h, "midi");
-    let mut key = 36;
-    for (label, control) in [
+    for (key, (label, control)) in (36_u8..).zip([
         ("Scene Up", "scene_up"),
         ("Scene Down", "scene_down"),
         ("Launch Scene", "launch_scene"),
         ("Cancel Launch", "cancel_launch"),
-    ] {
+    ]) {
         let nodes = tree(&mut h);
         h.click(rect_of(Harness::node(&nodes, label)).center());
         h.settle();
@@ -183,7 +182,6 @@ fn the_strips_controls_map_and_act_through_the_remote_input() {
         assert!(test.send("Pads", h.shell.midi().now(), &[0x90, key, 100]));
         h.shell.poll();
         h.settle();
-        key += 1;
     }
     let nodes = tree(&mut h);
     let launch = nodes

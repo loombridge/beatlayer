@@ -50,6 +50,10 @@ pub(super) struct SurfaceHost {
     /// The revision of Push 2's shared Setup values and swing amount the
     /// preferences last kept.
     push_saved: u64,
+    /// The tracks armed by selection, not by hand (Push 2 notes R3).
+    pub(super) selection_armed: std::collections::BTreeSet<bl_model::TrackId>,
+    /// The track the selection last armed or found armed.
+    pub(super) armed_for: Option<bl_model::TrackId>,
 }
 
 fn info(report: RowReport, row: usize) -> ids::RowInfo {
@@ -273,7 +277,7 @@ impl Shell {
     /// (R6, R7). Returns whether the set changed.
     pub(super) fn poll_surfaces(&mut self) -> bool {
         let revision = self.document_revision;
-        let changed = self.poll_push();
+        let changed = self.poll_push() | self.poll_selection_arm();
         self.sync_instant();
         // Spec: supported-controllers R2. A controller's answer to the
         // device inquiry fills its row, which the preferences keep.
@@ -380,12 +384,14 @@ impl Shell {
                 scenes: session.scenes,
             },
             progress: self.clip_progress(),
+            clip_time: self.clip_time(),
             rows,
             columns: self.ring_columns(),
             session_record: self.session_run.is_some(),
             metronome: self.editor.document().settings().metronome.enabled,
             drum,
             session_view: self.main_view == MainView::Session,
+            selection_armed: self.surface.selection_armed.iter().copied().collect(),
         }
     }
 

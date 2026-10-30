@@ -125,7 +125,7 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
 
 impl Shell {
     /// The Push 2 surfaces that run: their rows, from 0, and their handles.
-    fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
+    pub(super) fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
         let surfaces = self.midi.surfaces();
         let report = self.midi.surface_rows();
         (0..bl_control::ROWS)

@@ -22,6 +22,8 @@ const FONT: &[u8] = include_bytes!("../../ui/fonts/inter/Inter-Regular.ttf");
 
 const TEXT: [u8; 3] = [235, 235, 235];
 const DIM: [u8; 3] = [140, 140, 140];
+/// The arm icon's red (Beatlayer's own).
+const ARM: [u8; 3] = [255, 64, 64];
 
 /// Draws `screen` and returns the image: RGB, 3 bytes a pixel, `WIDTH` ×
 /// `HEIGHT`.
@@ -263,6 +265,11 @@ impl Painter<'_> {
         }
         let x = column as f32 * COLUMN;
         let centre = x + COLUMN / 2.0;
+        if label.armed
+            && let Some(dot) = PathBuilder::from_circle(x + 9.0, top + 11.0, 4.0)
+        {
+            self.fill(&dot, ARM);
+        }
         if label.selected {
             self.rect(
                 x + 3.0,

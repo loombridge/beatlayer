@@ -266,11 +266,11 @@ impl Shared {
                 });
             }
         }
-        let time = self.now();
-        for message in cx.played {
+        let now = self.now();
+        for (at, message) in cx.played {
             self.sender.send(MidiInputEvent {
                 source,
-                time,
+                time: at.unwrap_or(now),
                 message,
             });
         }

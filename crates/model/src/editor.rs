@@ -356,6 +356,22 @@ impl Editor {
         ChangeSet::between(&before, &self.document)
     }
 
+    /// Arms or disarms `track` as a control surface does that arms by
+    /// selection (the notes on Push 2 spec, R3): no undo step, and the set
+    /// isn't marked as changed. A track that isn't an audio or MIDI track
+    /// changes nothing.
+    ///
+    /// It isn't a command: no person asked for it, so it is the app
+    /// following the selection, as [`Editor::follow_scale`] follows the
+    /// scale.
+    pub fn follow_arm(&mut self, track: crate::TrackId, arm: bool) -> ChangeSet {
+        let before = self.document.clone();
+        if self.document.follow_arm(track, arm).is_err() {
+            return ChangeSet::between(&before, &before);
+        }
+        ChangeSet::between(&before, &self.document)
+    }
+
     /// Sets the set's tempo to the constant tempo `bpm`, as a peer in a Link
     /// session setting it does (the Link spec, R3): that is no undo step,
     /// though the set is marked as changed.

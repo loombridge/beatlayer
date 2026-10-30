@@ -16,6 +16,9 @@ pub struct Label {
     pub colour: [u8; 3],
     /// Whether it stands for the selected one.
     pub selected: bool,
+    /// Whether it stands for a track armed by hand, which shows an arm icon
+    /// (notes R4).
+    pub armed: bool,
 }
 
 impl Label {
@@ -26,7 +29,15 @@ impl Label {
             text: text.into(),
             colour,
             selected,
+            armed: false,
         }
+    }
+
+    /// The same label, with an arm icon if `armed`.
+    #[must_use]
+    pub fn with_armed(mut self, armed: bool) -> Self {
+        self.armed = armed;
+        self
     }
 
     /// Whether the button under it does anything (R18).
@@ -123,7 +134,8 @@ impl Screen {
         let band = |name: &str, labels: &[Label; 8], lines: &mut Vec<String>| {
             for (n, label) in labels.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
                 let selected = if label.selected { " (selected)" } else { "" };
-                lines.push(format!("{name} {}: {}{selected}", n + 1, label.text));
+                let armed = if label.armed { " (armed)" } else { "" };
+                lines.push(format!("{name} {}: {}{selected}{armed}", n + 1, label.text));
             }
         };
         band("upper", &self.upper, &mut lines);

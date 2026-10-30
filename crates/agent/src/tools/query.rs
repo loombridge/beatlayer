@@ -485,6 +485,7 @@ impl View<'_> {
                 value["receive"] = json!(chain.receive);
                 value["play"] = json!(chain.play);
                 value["choke"] = json!(chain.choke);
+                value["push_colour"] = json!(chain.push_colour);
                 value["sends"] = json!(chain.sends);
             }
         }

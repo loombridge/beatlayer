@@ -18,6 +18,7 @@ pub mod display;
 pub mod encoder;
 pub mod frame;
 pub mod leds;
+pub mod note;
 pub mod paint;
 pub mod ports;
 pub mod screen;
@@ -63,4 +64,15 @@ pub fn kind(shared: Arc<Shared>, claim: Claim, contents: MakeContents) -> Kind {
 #[must_use]
 pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
+}
+
+/// The contents of the modes that are built: Note Mode's own, and the
+/// placeholders for the others (`docs/specs/push-2-notes.md`).
+#[must_use]
+pub fn contents() -> MakeContents {
+    Arc::new(|| {
+        let mut contents = Contents::placeholders();
+        contents.pads[0] = Box::new(note::Note::new());
+        contents
+    })
 }

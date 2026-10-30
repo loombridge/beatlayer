@@ -243,6 +243,82 @@ pub struct MidiPrefs {
     /// R2). A file from before the table has none, which reads as six empty
     /// rows.
     pub surfaces: Vec<SurfaceRowPrefs>,
+    /// The Live ports of the Push 2 whose row the user set to None: Beatlayer
+    /// doesn't take a row for that Push 2 again until the user chooses it
+    /// (push-2 R2).
+    pub push_declined: Vec<String>,
+    /// Push 2's Setup values and swing amount (push-2 R10, R31).
+    pub push: PushPrefs,
+}
+
+/// What the app keeps of Push 2's Setup menu and swing encoder (push-2 R10,
+/// R31): the same for every set.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PushPrefs {
+    /// Pad Sensitivity, 0 to 10.
+    pub pad_sensitivity: u8,
+    /// Pad Gain, 0 to 10.
+    pub pad_gain: u8,
+    /// Pad Dynamics, 0 to 10.
+    pub pad_dynamics: u8,
+    /// Display Light, 0 to 100 %.
+    pub display_light: u8,
+    /// LED Brightness, 0 to 100 %.
+    pub led_brightness: u8,
+    /// Whether Workflow is Clip rather than Scene.
+    pub workflow_clip: bool,
+    /// The swing amount in thousandths, 0 to 1,000.
+    pub swing: u16,
+}
+
+impl Default for PushPrefs {
+    fn default() -> Self {
+        let setup = bl_push::curve::Setup::default();
+        Self {
+            pad_sensitivity: setup.sensitivity,
+            pad_gain: setup.gain,
+            pad_dynamics: setup.dynamics,
+            display_light: setup.display_light,
+            led_brightness: setup.led_brightness,
+            workflow_clip: false,
+            swing: 0,
+        }
+    }
+}
+
+impl PushPrefs {
+    /// The Setup values these preferences keep.
+    #[must_use]
+    pub fn setup(&self) -> bl_push::curve::Setup {
+        bl_push::curve::Setup {
+            sensitivity: self.pad_sensitivity,
+            gain: self.pad_gain,
+            dynamics: self.pad_dynamics,
+            display_light: self.display_light,
+            led_brightness: self.led_brightness,
+            workflow: if self.workflow_clip {
+                bl_push::curve::Workflow::Clip
+            } else {
+                bl_push::curve::Workflow::Scene
+            },
+        }
+        .clamped()
+    }
+
+    /// The preferences that keep `setup` and `swing` (0 to 1).
+    #[must_use]
+    pub fn of(setup: bl_push::curve::Setup, swing: f64) -> Self {
+        Self {
+            pad_sensitivity: setup.sensitivity,
+            pad_gain: setup.gain,
+            pad_dynamics: setup.dynamics,
+            display_light: setup.display_light,
+            led_brightness: setup.led_brightness,
+            workflow_clip: setup.workflow == bl_push::curve::Workflow::Clip,
+            swing: (swing.clamp(0.0, 1.0) * 1000.0).round() as u16,
+        }
+    }
 }
 
 /// One row of the Control Surfaces table in the preferences.

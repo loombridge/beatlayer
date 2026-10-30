@@ -798,7 +798,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.17 | todo |  |  |
 | 7.18 | todo |  |  |
 | 7.18b | todo |  |  |
-| 7.19 | todo |  |  |
+| 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | todo |  |  |
 | 7.21 | todo |  |  |
 | 7.22 | todo |  |  |

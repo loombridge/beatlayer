@@ -236,6 +236,8 @@ impl Shell {
     /// sees (the DAWproject spec, R23).
     pub fn set_track_palette(&mut self, colours: Vec<[u8; 3]>) {
         if !colours.is_empty() {
+            // Push 2's palette is made from the same colours (push-2 R14).
+            self.midi.push().set_track_colours(colours.clone());
             self.track_palette = colours;
         }
     }

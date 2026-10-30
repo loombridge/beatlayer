@@ -6486,3 +6486,141 @@ fn an_agent_packs_a_project_and_installs_the_pack() {
         "{state}"
     );
 }
+
+// Spec: cv-tools R4, R14, R20. An agent adds CV Instrument and CV Triggers by
+// their types, routes their outputs and inputs with `device.set_external`,
+// calibrates CV Instrument against an oscillator on the null device's cable,
+// and reads the choosers back under `external` and the calibration under
+// `cv`.
+#[test]
+fn an_agent_routes_the_cv_devices_calibrates_and_reads_external_and_cv_back() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use bl_audio_io::{NullBackend, NullOptions, Pacing};
+
+    // An oscillator on Pitch (output 3) whose sound comes back on input 4.
+    let cable = bl_shell::testing::oscillator(&Arc::default(), &Arc::default(), &Arc::default());
+    let (backend, control) = NullBackend::with_devices(
+        NullOptions {
+            pacing: Pacing::Manual,
+            channels: 4,
+            ..NullOptions::default()
+        },
+        &[("null", "Null")],
+    );
+    let (mut shell, control) = bl_shell::testing::rig_on(backend.with_cable(cable), control);
+    shell
+        .run("audio.configure", json!({ "input_device": "null:null" }))
+        .unwrap();
+    shell.start_audio();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("cv-agent").unwrap();
+    let keys = default_tracks(&mut client)[2];
+
+    let add = |client: &mut Client<InProcess>, track: u64, t: bl_engine::DeviceType| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [
+                { "command": "arrangement.select_tracks", "args": { "tracks": [track] } },
+            ] }),
+        );
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [
+                { "command": "device.add",
+                  "args": { "device": { "kind": t.kind, "name": t.name, "role": t.role } } },
+            ] }),
+        );
+        reply["results"][0]["result"]["device"].clone()
+    };
+    let instrument = add(&mut client, keys, bl_devices::cv_instrument_type());
+    let drums = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.create",
+                "args": { "id": {"$new": "Drums"}, "kind": "midi", "name": "Drums", "index": 3 } }] }),
+    )["ids"]["Drums"]
+        .as_u64()
+        .unwrap();
+    let triggers = add(&mut client, drums, bl_devices::cv_triggers_type());
+
+    // Route both, and read the choosers back under `external`.
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Patch", "commands": [
+            { "command": "device.set_external",
+              "args": { "device": instrument,
+                        "cv_outputs": [{ "name": "Pitch", "channel": 3 }, { "name": "Gate", "channel": 2 }],
+                        "audio_from": { "type": "mono", "channel": 4 } } },
+            { "command": "device.set_external",
+              "args": { "device": triggers,
+                        "cv_outputs": [{ "name": "Trigger 1", "channel": 1 }, { "name": "Trigger 8", "channel": 4 }] } },
+        ] }),
+    );
+    let outputs = |client: &mut Client<InProcess>, device: &Value| {
+        let read = call(client, "query", json!({ "id": device }));
+        let ports = read["external"]["cv_outputs"].as_array().unwrap().clone();
+        (read, ports)
+    };
+    let (read, ports) = outputs(&mut client, &instrument);
+    assert_eq!(ports[0], json!({ "name": "Pitch", "channel": 3 }));
+    assert_eq!(ports[1], json!({ "name": "Gate", "channel": 2 }));
+    assert_eq!(
+        ports[2],
+        json!({ "name": "Mod 1" }),
+        "No Output has no channel"
+    );
+    assert_eq!(read["cv"], json!({ "calibrated": false }));
+    let (_, ports) = outputs(&mut client, &triggers);
+    assert_eq!(ports.len(), 8);
+    assert_eq!(ports[7], json!({ "name": "Trigger 8", "channel": 4 }));
+
+    // Calibrate against the oscillator: the blocks run on a thread of their
+    // own while the command waits.
+    let stop = Arc::new(AtomicBool::new(false));
+    let driver = {
+        let stop = stop.clone();
+        std::thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                control.run_blocks(8);
+                std::thread::yield_now();
+            }
+        })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Calibrate", "commands": [
+            { "command": "cv.calibrate", "args": { "device": instrument } },
+        ] }),
+    );
+    stop.store(true, Ordering::Relaxed);
+    driver.join().unwrap();
+    let result = &reply["results"][0]["result"];
+    assert!((result["calibration"]["octaves_per_volt"].as_f64().unwrap() - 0.97).abs() < 0.01);
+    assert_eq!(result["measured"].as_array().unwrap().len(), 8);
+
+    // The calibration reads back under `cv`, one undo step.
+    let read = call(&mut client, "query", json!({ "id": instrument }));
+    assert_eq!(read["cv"]["calibrated"], json!(true));
+    assert!(read["cv"]["steps"].as_array().unwrap().len() >= 5);
+    assert_eq!(
+        read["external"]["cv_calibration"]["octaves_per_volt"],
+        read["cv"]["octaves_per_volt"]
+    );
+    let overview = call(&mut client, "query", json!({}));
+    assert_eq!(overview["undo"]["next_undo"], "Calibrate CV Instrument");
+
+    // Clear takes it away.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "cv.clear_calibration", "args": { "device": instrument } }] }),
+    );
+    let read = call(&mut client, "query", json!({ "id": instrument }));
+    assert_eq!(read["cv"], json!({ "calibrated": false }));
+}

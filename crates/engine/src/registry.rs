@@ -82,6 +82,11 @@ pub struct DeviceType {
     /// hear it back (WP-5.35): an external effect, with an Audio To beside
     /// its Audio From.
     pub external_output: bool,
+    /// The names of the CV outputs its devices have, in their order
+    /// (`docs/specs/cv-tools.md`, R3). A type with any is a CV device.
+    pub cv_outputs: Vec<String>,
+    /// The names of the CV inputs its devices have, in their order.
+    pub cv_inputs: Vec<String>,
     /// Whether its devices have a MIDI sidechain input (WP-5.27): the
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
@@ -115,6 +120,8 @@ impl DeviceType {
             sidechain: false,
             external: false,
             external_output: false,
+            cv_outputs: Vec::new(),
+            cv_inputs: Vec::new(),
             midi_sidechain: false,
             note_output: role == DeviceRole::MidiEffect,
             outputs: Vec::new(),
@@ -148,6 +155,29 @@ impl DeviceType {
     pub fn with_external_output(mut self) -> Self {
         self.external = true;
         self.external_output = true;
+        self
+    }
+
+    /// The same device type, with CV outputs and inputs by name
+    /// (`docs/specs/cv-tools.md`, R3, R8): its devices have the routing of an
+    /// external device with these choosers, and its nodes read and write
+    /// them through [`Block::cv_in`](crate::Block::cv_in) and
+    /// [`Block::cv_out_mut`](crate::Block::cv_out_mut).
+    ///
+    /// # Panics
+    ///
+    /// If it has more than [`MAX_CV_PORTS`](bl_model::MAX_CV_PORTS) of
+    /// either.
+    #[must_use]
+    pub fn with_cv(mut self, outputs: &[&str], inputs: &[&str]) -> Self {
+        assert!(
+            outputs.len().max(inputs.len()) <= bl_model::MAX_CV_PORTS,
+            "a device has at most {} CV outputs or inputs",
+            bl_model::MAX_CV_PORTS
+        );
+        self.external = true;
+        self.cv_outputs = outputs.iter().map(|&n| n.to_owned()).collect();
+        self.cv_inputs = inputs.iter().map(|&n| n.to_owned()).collect();
         self
     }
 
@@ -189,6 +219,9 @@ impl DeviceType {
         }
         if self.external_output {
             device = device.with_external_output();
+        }
+        if !self.cv_outputs.is_empty() || !self.cv_inputs.is_empty() {
+            device = device.with_cv(&self.cv_outputs, &self.cv_inputs);
         }
         if self.midi_sidechain {
             device = device.with_midi_sidechain();

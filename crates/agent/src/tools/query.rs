@@ -510,6 +510,22 @@ impl View<'_> {
             .map(|(param, value)| json!({ "param": param, "value": value }))
             .collect();
         value["params"] = self.page.slice(params);
+        // Spec: cv-tools R4, R20. An external device's routing, the CV
+        // choosers of a CV device among it, and a CV device's calibration:
+        // the fit, each step's error, and whether one is held.
+        if let Some(external) = &device.external {
+            value["external"] = json!(external);
+            if external.is_cv() {
+                value["cv"] = match &external.cv_calibration {
+                    Some(calibration) => {
+                        let mut cv = json!(calibration);
+                        cv["calibrated"] = json!(true);
+                        cv
+                    }
+                    None => json!({ "calibrated": false }),
+                };
+            }
+        }
         // A multisampler's layers and the options of its layer list
         // (WP-5.13, R30).
         if !device.layers.is_default() {

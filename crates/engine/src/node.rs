@@ -681,6 +681,16 @@ pub struct Block<'a> {
     /// interface's outputs (WP-5.35): planar with the block's channels and
     /// stride. `None` for every other device.
     pub(crate) external_out: Option<&'a mut [f32]>,
+    /// Where a CV device writes its CV outputs (`docs/specs/cv-tools.md`,
+    /// R3, R8): one buffer per output the device declares, in its order,
+    /// each `channels * stride` samples apart and `frames` long. `None` for
+    /// every other device.
+    pub(crate) cv_out: Option<&'a mut [f32]>,
+    /// What a CV device reads on its CV inputs (R6): one buffer per input
+    /// the device declares, laid out as `cv_out` is; an input set to no
+    /// channel, or to one the interface lacks, reads 0 V. `None` for every
+    /// other device.
+    pub(crate) cv_in: Option<&'a [f32]>,
     /// Where a device with extra audio outputs past its main one writes
     /// them (WP-5.45): one buffer per output, in the order the device
     /// declares them, each planar with the block's channels and stride, at
@@ -768,6 +778,8 @@ impl<'a> Block<'a> {
             sidechain: None,
             external: None,
             external_out: None,
+            cv_out: None,
+            cv_in: None,
             outputs: None,
             notes: &[],
             notes_out: None,
@@ -927,6 +939,28 @@ impl<'a> Block<'a> {
         );
         Self {
             external_out: Some(external_out),
+            ..self
+        }
+    }
+
+    /// The same block with the buffers a CV device writes its CV outputs
+    /// into: one per output, `channels * stride` samples apart. For tests of
+    /// nodes outside a program.
+    #[must_use]
+    pub fn with_cv_out(self, cv_out: &'a mut [f32]) -> Self {
+        Self {
+            cv_out: Some(cv_out),
+            ..self
+        }
+    }
+
+    /// The same block with what a CV device reads on its CV inputs: one
+    /// buffer per input, `channels * stride` samples apart. For tests of
+    /// nodes outside a program.
+    #[must_use]
+    pub fn with_cv_in(self, cv_in: &'a [f32]) -> Self {
+        Self {
+            cv_in: Some(cv_in),
             ..self
         }
     }
@@ -1115,6 +1149,25 @@ impl<'a> Block<'a> {
         assert!(index < self.channels, "channel {index} out of range");
         let start = index * self.stride;
         self.external.map(|data| &data[start..start + self.frames])
+    }
+
+    /// Where a CV device writes its CV output `output`, in sample values
+    /// (1.0 is +10 V), for the block's frames. `None` for a device without
+    /// that output.
+    pub fn cv_out_mut(&mut self, output: usize) -> Option<&mut [f32]> {
+        let start = output * self.channels * self.stride;
+        let frames = self.frames;
+        self.cv_out
+            .as_deref_mut()
+            .and_then(|data| data.get_mut(start..start + frames))
+    }
+
+    /// What a CV device reads on its CV input `input`, for the block's
+    /// frames. `None` for a device without that input.
+    pub fn cv_in(&self, input: usize) -> Option<&'a [f32]> {
+        let start = input * self.channels * self.stride;
+        self.cv_in
+            .and_then(|data| data.get(start..start + self.frames))
     }
 
     /// The block's samples on `channel`, and the buffer an external effect

@@ -2137,6 +2137,8 @@ mod tests {
                 audio_from: None,
                 audio_to: None,
                 hardware_latency: None,
+                cv_outputs: None,
+                cv_inputs: None,
             })
             .unwrap();
         // A new plug-in's MPE is left out of the saved set.
@@ -2314,6 +2316,8 @@ mod tests {
                 audio_from: None,
                 audio_to: None,
                 hardware_latency: Some(HardwareLatency::Samples { value: 64 }),
+                cv_outputs: None,
+                cv_inputs: None,
             })
             .unwrap();
         let back = load(serde_json::to_value(editor.document()).unwrap()).unwrap();

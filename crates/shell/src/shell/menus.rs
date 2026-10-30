@@ -273,6 +273,7 @@ impl Shell {
                 Some(self.editor.document().settings().metronome.enabled)
             }
             "transport.set_midi_overdub" => Some(self.editor.document().settings().midi_overdub),
+            transport_ids::SET_EXTERNAL_SYNC => Some(self.external_sync()),
             "transport.set_metronome_only_while_recording" => Some(
                 self.editor
                     .document()
@@ -502,6 +503,11 @@ impl Shell {
         }
         if !spec.contexts.iter().any(|context| active.contains(context)) {
             return false;
+        }
+        // Spec: midi-clock R15. Options ▸ External Sync is enabled while an
+        // input has Sync on.
+        if id == transport_ids::SET_EXTERNAL_SYNC {
+            return self.sync_lamps_shown();
         }
         // Spec: recording R21. The submenu's items are disabled while a
         // recording holds the value.

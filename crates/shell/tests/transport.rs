@@ -96,6 +96,7 @@ fn the_shell_registers_the_transport_and_runs_it_on_the_engine() {
     expected.extend([
         "transport.set_loop",
         "transport.set_loop_enabled",
+        "transport.set_external_sync",
         "transport.set_metronome_count_in",
         "transport.set_metronome_enabled",
         "transport.set_metronome_only_while_recording",

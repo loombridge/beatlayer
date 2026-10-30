@@ -1,6 +1,5 @@
 //! Sync: what `sync.state` reports of MIDI clock (`docs/specs/midi-clock.md`,
-//! R12, R25). WP-7.11 adds the sending half; following a clock adds its own
-//! fields to the same result.
+//! R12, R25): the sending half (WP-7.11) and the receiving half (WP-7.12).
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
@@ -20,7 +19,7 @@ pub fn handles(id: &str) -> bool {
 }
 
 /// What `sync.state` returns.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SyncState {
     /// How many output ports have Sync on, so MIDI clock goes to them while
     /// the song plays.
@@ -40,6 +39,40 @@ pub struct SyncState {
     /// Sync messages dropped because the queue to the MIDI output thread was
     /// full.
     pub clocks_dropped: u64,
+    /// How many input ports have Sync on, so their clock can be followed.
+    #[serde(default)]
+    pub input_ports: u32,
+    /// Whether EXT is available: some input port has Sync on.
+    #[serde(default)]
+    pub external_sync_available: bool,
+    /// Whether EXT is on.
+    #[serde(default)]
+    pub external_sync: bool,
+    /// The input port that leads, while usable clocks arrive from it.
+    #[serde(default)]
+    pub leading_input: Option<String>,
+    /// Whether usable clocks arrive: one came in the last 500 ms.
+    #[serde(default)]
+    pub receiving: bool,
+    /// Whether the upper sync lamp is lit: a quarter note's clock arrived in
+    /// the last 100 ms.
+    #[serde(default)]
+    pub input_lamp: bool,
+    /// The smoothed tempo of the incoming clock in BPM, once there is one;
+    /// what the Tempo field shows while EXT is on.
+    #[serde(default)]
+    pub tempo: Option<f64>,
+    /// Timing Clocks that arrived from the leading input since the audio
+    /// engine started.
+    #[serde(default)]
+    pub clocks_received: u64,
+    /// Timing Clocks set aside as glitches: doubled or missing.
+    #[serde(default)]
+    pub clocks_set_aside: u64,
+    /// Incoming sync messages dropped because the audio thread's list was
+    /// full.
+    #[serde(default)]
+    pub sync_dropped: u64,
 }
 
 /// Adds the sync commands to a registry.
@@ -51,11 +84,15 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(STATE, "Sync Status")
             .description(
-                "Reports the state of MIDI clock: how many output ports have Sync on, whether \
-                 clock is going out now (the song plays, past any count-in), whether the lower \
-                 sync lamp beside the Control Bar's tempo is lit, and how many Timing Clocks \
-                 the audio engine has sent, stamped late and dropped since it started. Changes \
-                 nothing. Set an output's Sync switch and its options with `midi.set_port`.",
+                "Reports the state of MIDI clock. Sent: how many output ports have Sync on, \
+                 whether clock is going out now (the song plays, past any count-in), whether \
+                 the lower sync lamp beside the Control Bar's tempo is lit, and how many Timing \
+                 Clocks the audio engine has sent, stamped late and dropped since it started. \
+                 Received: how many input ports have Sync on, whether EXT is available and on, \
+                 the input that leads, whether usable clocks arrive, whether the upper sync \
+                 lamp is lit, the smoothed incoming tempo, and how many Timing Clocks arrived \
+                 and were set aside as glitches. Changes nothing. Set a port's Sync switch and \
+                 its options with `midi.set_port`, and EXT with `transport.set_external_sync`.",
             )
             .permission(Permission::Read)
             .context(Global)

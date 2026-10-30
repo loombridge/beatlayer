@@ -104,6 +104,23 @@ impl InputSender {
         pushed
     }
 
+    /// Queues a sync message for the engine's clock follower (midi-clock
+    /// R14), counted as sync, or dropped if the queue is full.
+    pub(crate) fn send_sync(&self, event: MidiInputEvent) {
+        let pushed = self
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(event)
+            .is_ok();
+        let counter = if pushed {
+            &self.stats.to_sync
+        } else {
+            &self.stats.dropped
+        };
+        counter.fetch_add(1, Relaxed);
+    }
+
     /// The remote input: the table of mapped messages and the queue to the
     /// main thread (`docs/specs/remote-mapping.md`, R7 to R10).
     #[must_use]
@@ -192,7 +209,8 @@ pub struct MidiStats {
     /// Messages no mapping takes that arrived on an input whose only
     /// switch on is Remote, so they went nowhere.
     pub remote_unmapped: AtomicU64,
-    /// Clock and transport messages from inputs with Sync on (Phase 7).
+    /// Clock and transport messages from inputs with Sync on, taken by the
+    /// engine's clock follower or counted by a sync type that isn't clock.
     pub to_sync: AtomicU64,
     /// Messages nothing takes: system exclusive, or from an input whose
     /// switches don't take them.

@@ -570,9 +570,19 @@ pub fn show(
             "Lead/Follow",
             Rect::from_min_size(at, vec2(SWITCH, CONTROL.y)),
             leader,
-            audio.warp,
+            // Spec: warping R46, R55. With EXT on every clip follows: the
+            // switch keeps showing what the clip is and can't be changed.
+            audio.warp && !shell.external_sync(),
         ) {
             each(events, "clip.set_tempo_leader", json!({ "leader": on }));
+        }
+        if shell.external_sync() {
+            ui.ctx()
+                .accesskit_node_builder(Id::new(("switch", "audio-tempo-leader")), |node| {
+                    node.set_description(
+                        "External Sync is on: every clip follows the incoming clock".to_owned(),
+                    );
+                });
         }
     }
 

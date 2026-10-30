@@ -127,6 +127,10 @@ pub struct Complex {
     /// (R7).
     #[cfg(test)]
     primes: u64,
+    /// The output frames primes have dropped, for the test that bounds a
+    /// prime's work (R5).
+    #[cfg(test)]
+    primed_frames: u64,
     /// The room a prime's dropped output is written into, in frames per
     /// channel: made once, so no prime allocates (R5).
     scratch: Vec<f32>,
@@ -135,10 +139,11 @@ pub struct Complex {
 
 impl Complex {
     /// The file frames the input is fed ahead of the audio it makes, at
-    /// `rate`: the frames a prime drops, in file frames, so a run's feed and a
-    /// prime's agree (R6, R24).
+    /// `rate`: the frames a prime feeds, so a run's feed and a prime's agree
+    /// (R6, R24).
     fn lead_frames(&self, rate: f64) -> usize {
-        (rate.max(0.0) * self.discard_frames(rate) as f64).round() as usize
+        let output = (self.stretcher.output_latency() + 2) as f64;
+        self.stretcher.input_latency() + (rate.max(0.0) * output).round() as usize
     }
 
     /// How far beyond a run's last position this mode's reads reach at `rate`:
@@ -155,11 +160,15 @@ impl Complex {
 
     /// How many output frames a prime drops at `rate`: the library's output
     /// latency, and its input latency in the output frames it feeds while
-    /// dropping them (R24).
+    /// flushing it, at no less than the file's own speed, so the work a prime
+    /// does doesn't grow as the clip slows (R5, R24).
     fn discard_frames(&self, rate: f64) -> usize {
-        let input = self.stretcher.input_latency() as f64;
-        let output = self.stretcher.output_latency() as f64;
-        (output + input / rate.max(1e-6)).round().max(0.0) as usize + 2
+        self.flush_frames(rate) + self.stretcher.output_latency() + 2
+    }
+
+    /// The output frames a prime flushes the input latency in.
+    fn flush_frames(&self, rate: f64) -> usize {
+        ((self.stretcher.input_latency() as f64 / rate.max(1.0)).round() as usize).max(1)
     }
 
     /// Makes a stretcher for `channels` channels at `sample_rate` Hz, for
@@ -192,6 +201,8 @@ impl Complex {
             fed: 0,
             #[cfg(test)]
             primes: 0,
+            #[cfg(test)]
+            primed_frames: 0,
             scratch: vec![0.0; channels.max(1) * SCRATCH_FRAMES],
             scratch_frames: SCRATCH_FRAMES,
         }
@@ -295,14 +306,25 @@ impl Complex {
         let from = p0 - seek as i64;
         let before = (0..self.channels).map(|c| slice(window, c, from, seek).unwrap_or(&[]));
         self.stretcher.output_seek(before, seek);
-        // The dropped output: the seek's pre-computed latency, while the input
-        // it needs is fed from the point on.
+        // The dropped output, in two phases. The input latency is fed over
+        // `flush` frames at no less than the file's own speed, so a slow clip
+        // costs no more to prime than a fast one (R5). The rest is fed at the
+        // run's own speed, so the synthesis overlap the stretcher holds into
+        // the first frame is the run's. The feed ends `lead_frames` on.
         let discard = self.discard_frames(rate);
+        let flush = self.flush_frames(rate);
+        let input = self.stretcher.input_latency();
         self.fed = p0;
         let mut produced = 0;
         while produced < discard {
             let n = (discard - produced).min(self.scratch_frames);
-            let until = (p0 as f64 + rate * (produced + n) as f64).round() as i64;
+            let end = produced + n;
+            let ahead = if end <= flush {
+                (input * end).div_ceil(flush)
+            } else {
+                input + (rate * (end - flush) as f64).round() as usize
+            };
+            let until = p0 + ahead as i64;
             let (inputs, need) = self.inputs(window, until);
             let columns = self
                 .scratch
@@ -312,6 +334,10 @@ impl Complex {
             self.stretcher.process(inputs, need, columns, n);
             self.fed = until;
             produced += n;
+            #[cfg(test)]
+            {
+                self.primed_frames += n as u64;
+            }
         }
     }
 
@@ -414,12 +440,25 @@ mod tests {
     /// Renders one run of `n` frames whose file positions start at `at`, for
     /// clip `clip`, through a window of `file` built as the player builds it.
     fn run(mode: &mut Complex, file: &[f32], at: f64, first: i64, n: usize, clip: u64) -> Vec<f32> {
+        run_at(mode, file, at, 1.0, first, n, clip)
+    }
+
+    /// [`run`] at `speed` file frames per song frame.
+    fn run_at(
+        mode: &mut Complex,
+        file: &[f32],
+        at: f64,
+        speed: f64,
+        first: i64,
+        n: usize,
+        clip: u64,
+    ) -> Vec<f32> {
         let empty = Plan::EMPTY;
-        let positions: Vec<f64> = (0..n).map(|i| at + i as f64).collect();
+        let positions: Vec<f64> = (0..n).map(|i| at + i as f64 * speed).collect();
         let request = Request {
             positions: &positions,
             first,
-            speed: 1.0,
+            speed,
             neutral: false,
             high_quality: true,
             beats: &empty,
@@ -488,6 +527,27 @@ mod tests {
         // Another clip taking the instance over primes too.
         run(&mut mode, &file, 30_000.0, 20_480, 480, 8);
         assert_eq!(mode.primes, 3, "another clip must prime");
+    }
+
+    // Spec: warp-modes R5. A prime's work is the same however slowly the clip
+    // plays: it dropped a number of frames in proportion to 1 / speed, so a
+    // marker dragged to a crawl stalled the audio callback.
+    #[test]
+    fn a_prime_is_bounded_whatever_the_speed() {
+        let file: Vec<f32> = (0..96_000).map(|i| (i as f32 * 0.01).sin()).collect();
+        for pro in [false, true] {
+            let mut a = Complex::new(1, 48_000.0, pro);
+            run_at(&mut a, &file, 40_000.0, 1.0, 0, 128, 1);
+            let base = a.primed_frames;
+            let mut b = Complex::new(1, 48_000.0, pro);
+            run_at(&mut b, &file, 40_000.0, 0.02, 0, 128, 1);
+            let slow = b.primed_frames;
+            assert!(
+                slow <= 2 * base,
+                "a prime at speed 0.02 dropped {slow} frames against {base} at speed 1"
+            );
+            assert!(b.discard_frames(0.02) <= b.discard_frames(1.0) * 2);
+        }
     }
 
     // Spec: warp-modes R22, R23, R35. Beatlayer's own formant correction runs

@@ -212,7 +212,28 @@ pub fn arpeggiator_type() -> DeviceType {
                  degrees of that scale from Root.",
             ),
         ])
-        .with_title_switch(USE_SCALE),
+        .with_title_switch(USE_SCALE)
+        .with_banks(&[
+            (
+                "Rhythm",
+                &[
+                    "Style",
+                    "Sync",
+                    "Rate Sync",
+                    "Rate Free",
+                    "Gate",
+                    "Hold",
+                    "Offset",
+                    "Retrigger",
+                ],
+            ),
+            (
+                "Pattern",
+                &["Interval", "Repeats", "Distance", "Steps", "Groove"],
+            ),
+            ("Velocity", &["Velocity", "Decay", "Target", "Retrig Vel"]),
+            ("Scale", &["Root", "Scale"]),
+        ]),
     )
 }
 

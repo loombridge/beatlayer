@@ -138,8 +138,61 @@ pub fn cc_control_type() -> DeviceType {
             &format!("Custom {letter}'s controller, or None."),
         ));
     }
-    DeviceType::native(CC_CONTROL, "CC Control", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params))
+    DeviceType::native(CC_CONTROL, "CC Control", DeviceRole::MidiEffect).with_description(
+        DeviceDescription::new(params).with_banks(&[
+            (
+                "Main",
+                &[
+                    "Mod Wheel",
+                    "Pitch Bend",
+                    "Pressure",
+                    "Page",
+                    "Send",
+                    "Learn",
+                ],
+            ),
+            (
+                "Custom A-D",
+                &[
+                    "Custom A",
+                    "Custom A CC",
+                    "Custom B",
+                    "Custom B CC",
+                    "Custom C",
+                    "Custom C CC",
+                    "Custom D",
+                    "Custom D CC",
+                ],
+            ),
+            (
+                "Custom E-H",
+                &[
+                    "Custom E",
+                    "Custom E CC",
+                    "Custom F",
+                    "Custom F CC",
+                    "Custom G",
+                    "Custom G CC",
+                    "Custom H",
+                    "Custom H CC",
+                ],
+            ),
+            (
+                "Custom I-L",
+                &[
+                    "Custom I",
+                    "Custom I CC",
+                    "Custom J",
+                    "Custom J CC",
+                    "Custom K",
+                    "Custom K CC",
+                    "Custom L",
+                    "Custom L CC",
+                ],
+            ),
+            ("Custom M", &["Custom M", "Custom M CC"]),
+        ]),
+    )
 }
 
 /// Adds CC Control to `registry`.

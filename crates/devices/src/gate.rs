@@ -114,7 +114,26 @@ pub fn gate_type() -> DeviceType {
     ];
     DeviceType::native(GATE, "Gate", DeviceRole::AudioEffect)
         .with_sidechain()
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&[
+                    (
+                        "Gate",
+                        &[
+                            "Threshold",
+                            "Return",
+                            "Attack",
+                            "Hold",
+                            "Release",
+                            "Floor",
+                            "Flip",
+                            "Look",
+                        ],
+                    ),
+                    ("Sidechain", &["SC EQ", "Type", "Freq", "Res"]),
+                ]),
+        )
 }
 
 /// The detector's controls on the left, the display with the envelope's

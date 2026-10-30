@@ -22,6 +22,21 @@ pub use lspk_params::{
 use crate::device_layout::DeviceLayout;
 use crate::ids::ParamId;
 
+/// How many parameters a bank holds at most: a control surface's eight
+/// knobs (control surfaces spec, R18).
+pub const BANK_SIZE: usize = 8;
+
+/// A named run of up to [`BANK_SIZE`] of a device's parameters, which a
+/// control surface's device controls take in order (control surfaces spec,
+/// R18, R19).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Bank {
+    /// The bank's name.
+    pub name: String,
+    /// Its parameters, in the order the controls take them.
+    pub params: Vec<ParamId>,
+}
+
 /// What a kind of device is to the framework: its parameters' descriptors,
 /// in the order its generic UI and agents list them, and its layout.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -47,6 +62,12 @@ pub struct DeviceDescription {
     /// for.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title_switch: Option<ParamId>,
+    /// The banks the type declares for control surfaces, its main controls
+    /// first; empty for a type that leaves them to [`DeviceDescription::banks`]'
+    /// generic ones. They hold neither the menu options nor the title
+    /// switch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub banks: Vec<Bank>,
 }
 
 // Every value in a description is a finite number (`check`), so equality is
@@ -65,6 +86,7 @@ impl DeviceDescription {
             views: Vec::new(),
             menu_options: Vec::new(),
             title_switch: None,
+            banks: Vec::new(),
         }
     }
 
@@ -106,6 +128,80 @@ impl DeviceDescription {
             self.layout = DeviceLayout::generic(&self.placed());
         }
         self
+    }
+
+    /// The same, with the banks `banks` for control surfaces: each a name
+    /// and the names of up to eight parameters, in the order the controls
+    /// take them; a device whose names repeat gives a parameter as `#` and
+    /// its number. Descriptions are static data, so a name the device
+    /// doesn't have is a bug, not an error.
+    ///
+    /// # Panics
+    ///
+    /// On a parameter name the device doesn't have, or has twice.
+    #[must_use]
+    pub fn with_banks(mut self, banks: &[(&str, &[&str])]) -> Self {
+        self.banks = banks
+            .iter()
+            .map(|(name, params)| Bank {
+                name: (*name).to_owned(),
+                params: params
+                    .iter()
+                    .map(|param| {
+                        if let Some(number) = param.strip_prefix('#') {
+                            let id = ParamId(number.parse().expect("a number after the #"));
+                            assert!(
+                                self.param(id).is_some(),
+                                "a bank names no parameter {param}"
+                            );
+                            return id;
+                        }
+                        let mut named = self.params.iter().filter(|p| p.name == *param);
+                        let found = named
+                            .next()
+                            .unwrap_or_else(|| panic!("a bank names no parameter {param:?}"));
+                        assert!(named.next().is_none(), "two parameters are named {param:?}");
+                        found.id
+                    })
+                    .collect(),
+            })
+            .collect();
+        self
+    }
+
+    /// The banks a control surface shows (control surfaces spec, R19): the
+    /// declared ones, or without any the parameters in order, eight at a
+    /// time, named "1–8", "9–16" and so on; then, in a bank of their own,
+    /// the title bar's switch and the menu options.
+    #[must_use]
+    pub fn banks(&self) -> Vec<Bank> {
+        let options: Vec<ParamId> = self
+            .title_switch
+            .into_iter()
+            .chain(self.menu_options.iter().copied())
+            .collect();
+        let mut banks = if self.banks.is_empty() {
+            let rest: Vec<ParamId> = self
+                .params
+                .iter()
+                .map(|p| p.id)
+                .filter(|id| !options.contains(id))
+                .collect();
+            numbered(&rest)
+        } else {
+            self.banks.clone()
+        };
+        for (i, chunk) in options.chunks(BANK_SIZE).enumerate() {
+            banks.push(Bank {
+                name: if i == 0 {
+                    "Options".to_owned()
+                } else {
+                    format!("Options {}", i + 1)
+                },
+                params: chunk.to_vec(),
+            });
+        }
+        banks
     }
 
     /// The parameters the layout places a control for: all but the menu
@@ -181,8 +277,48 @@ impl DeviceDescription {
                 id.0
             ));
         }
+        let options =
+            |id: &ParamId| self.menu_options.contains(id) || self.title_switch == Some(*id);
+        for bank in &self.banks {
+            if bank.params.len() > BANK_SIZE
+                || bank
+                    .params
+                    .iter()
+                    .any(|id| self.param(*id).is_none() || options(id))
+            {
+                return Err(format!(
+                    "bank {:?} holds more than {BANK_SIZE} parameters, or one the device \
+                     doesn't have, or an option",
+                    bank.name
+                ));
+            }
+        }
+        if !self.banks.is_empty() {
+            let banked = |id: &ParamId| self.banks.iter().any(|b| b.params.contains(id));
+            if let Some(p) = self
+                .params
+                .iter()
+                .find(|p| !options(&p.id) && !banked(&p.id))
+            {
+                return Err(format!("parameter {} is in no bank", p.id.0));
+            }
+        }
         self.layout.check(&self.placed())
     }
+}
+
+/// `params` in banks of [`BANK_SIZE`], named by their positions: "1–8",
+/// "9–16" (control surfaces spec, R19, R21).
+#[must_use]
+pub fn numbered(params: &[ParamId]) -> Vec<Bank> {
+    params
+        .chunks(BANK_SIZE)
+        .enumerate()
+        .map(|(i, chunk)| Bank {
+            name: format!("{}–{}", i * BANK_SIZE + 1, i * BANK_SIZE + chunk.len()),
+            params: chunk.to_vec(),
+        })
+        .collect()
 }
 
 #[cfg(test)]

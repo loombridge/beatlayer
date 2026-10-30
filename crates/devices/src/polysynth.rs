@@ -605,8 +605,98 @@ pub fn polysynth_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(POLYSYNTH, "Drift", DeviceRole::Instrument)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(POLYSYNTH, "Drift", DeviceRole::Instrument).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[
+                (
+                    "Oscillators",
+                    &[
+                        "Osc 1",
+                        "Osc 1 Wave",
+                        "Osc 1 Oct",
+                        "Osc 1 Gain",
+                        "Osc 2",
+                        "Osc 2 Wave",
+                        "Osc 2 Oct",
+                        "Osc 2 Gain",
+                    ],
+                ),
+                (
+                    "Osc Detail",
+                    &["Osc 1 Shape", "Osc 2 Detune", "Noise", "Noise Gain"],
+                ),
+                ("Filter", &["Filter", "Type", "Freq", "Res", "HP", "Key"]),
+                (
+                    "Envelope 1",
+                    &[
+                        "Env 1 Attack",
+                        "Env 1 Decay",
+                        "Env 1 Sustain",
+                        "Env 1 Release",
+                    ],
+                ),
+                (
+                    "Envelope 2",
+                    &[
+                        "Env 2 Attack",
+                        "Env 2 Decay",
+                        "Env 2 Sustain",
+                        "Env 2 Release",
+                    ],
+                ),
+                (
+                    "Global",
+                    &[
+                        "Volume",
+                        "Voices",
+                        "Transpose",
+                        "Vel > Vol",
+                        "Retrigger",
+                        "Note PB",
+                        "PB Range",
+                    ],
+                ),
+                (
+                    "LFO",
+                    &[
+                        "LFO Mode",
+                        "LFO Rate",
+                        "LFO Ratio",
+                        "LFO Time",
+                        "LFO Sync",
+                        "LFO Shape",
+                        "LFO R",
+                        "LFO Amount",
+                    ],
+                ),
+                (
+                    "LFO Mod",
+                    &["LFO Mod", "LFO Mod Amount", "Shape Mod", "Shape Mod Amount"],
+                ),
+                ("Mod 1", &["Mod 1 Source", "Mod 1 Dest", "Mod 1 Amount"]),
+                ("Mod 2", &["Mod 2 Source", "Mod 2 Dest", "Mod 2 Amount"]),
+                ("Mod 3", &["Mod 3 Source", "Mod 3 Dest", "Mod 3 Amount"]),
+                (
+                    "Pitch Mod",
+                    &[
+                        "Pitch Mod 1",
+                        "Pitch Mod 1 Amount",
+                        "Pitch Mod 2",
+                        "Pitch Mod 2 Amount",
+                    ],
+                ),
+                (
+                    "Freq Mod",
+                    &[
+                        "Freq Mod 1",
+                        "Freq Mod 1 Amount",
+                        "Freq Mod 2",
+                        "Freq Mod 2 Amount",
+                    ],
+                ),
+            ]),
+    )
 }
 
 /// Adds Drift to `registry`.

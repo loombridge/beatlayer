@@ -526,8 +526,90 @@ pub fn sampler_type() -> DeviceType {
         )
         .describe("How far the pitch envelope moves the pitch, up to 48 semitones each way."),
     ];
-    DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Playback",
+                    &[
+                        "Mode",
+                        "Gain",
+                        "Transpose",
+                        "Detune",
+                        "Voices",
+                        "Volume",
+                        "Pan",
+                        "Velocity",
+                    ],
+                ),
+                (
+                    "Region",
+                    &["S Start", "S Length", "Loop", "S Loop Length", "Fade"],
+                ),
+                ("Envelope", &["Attack", "Decay", "Sustain", "Release"]),
+                (
+                    "Voice",
+                    &[
+                        "Retrig",
+                        "Trigger",
+                        "Fade In",
+                        "Fade Out",
+                        "Glide",
+                        "Glide Mode",
+                        "Glide Time",
+                    ],
+                ),
+                (
+                    "Slicing",
+                    &["Slice By", "Sensitivity", "Division", "Regions"],
+                ),
+                ("Filter", &["Filter", "Type", "Freq", "Res", "Key"]),
+                (
+                    "Filter Envelope",
+                    &[
+                        "Filter Attack",
+                        "Filter Decay",
+                        "Filter Sustain",
+                        "Filter Release",
+                        "Filter Env",
+                    ],
+                ),
+                (
+                    "LFO",
+                    &[
+                        "LFO",
+                        "LFO Wave",
+                        "LFO Rate",
+                        "LFO Sync",
+                        "LFO Division",
+                        "LFO Attack",
+                        "LFO Offset",
+                        "LFO Retrigger",
+                    ],
+                ),
+                (
+                    "LFO Amounts",
+                    &[
+                        "LFO Key",
+                        "LFO Volume",
+                        "LFO Pitch",
+                        "LFO Pan",
+                        "LFO Filter",
+                    ],
+                ),
+                (
+                    "Pitch Envelope",
+                    &[
+                        "Pitch Attack",
+                        "Pitch Decay",
+                        "Pitch Sustain",
+                        "Pitch Release",
+                        "Pitch Env",
+                    ],
+                ),
+            ]),
+    )
 }
 
 /// A layout of fixed control bands and the sample's display, which grows.

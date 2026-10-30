@@ -117,6 +117,20 @@ pub fn hold_type() -> DeviceType {
                 "Keeps each note sounding until the next one starts; Length and Gate then do \
                  nothing.",
             ),
+        ])
+        .with_banks(&[
+            (
+                "Length",
+                &[
+                    "Trigger",
+                    "Sync",
+                    "Length",
+                    "Length Division",
+                    "Gate",
+                    "Latch",
+                ],
+            ),
+            ("Release", &["Release Velocity", "Decay Time", "Key Scale"]),
         ]),
     )
 }

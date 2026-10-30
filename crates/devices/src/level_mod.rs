@@ -86,7 +86,40 @@ pub fn level_mod_type() -> DeviceType {
     ));
     DeviceType::native(LEVEL_MOD, "Envelope Follower", DeviceRole::AudioEffect)
         .with_sidechain()
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&[
+                    (
+                        "Level",
+                        &[
+                            "Gain",
+                            "Rise",
+                            "Fall",
+                            "Delay Mode",
+                            "Delay",
+                            "Delay Division",
+                        ],
+                    ),
+                    ("Mapping", &["Mod", "Polarity", "Depth"]),
+                    (
+                        "Targets 1-2",
+                        &["Amount 1", "Min 1", "Max 1", "Amount 2", "Min 2", "Max 2"],
+                    ),
+                    (
+                        "Targets 3-4",
+                        &["Amount 3", "Min 3", "Max 3", "Amount 4", "Min 4", "Max 4"],
+                    ),
+                    (
+                        "Targets 5-6",
+                        &["Amount 5", "Min 5", "Max 5", "Amount 6", "Min 6", "Max 6"],
+                    ),
+                    (
+                        "Targets 7-8",
+                        &["Amount 7", "Min 7", "Max 7", "Amount 8", "Min 8", "Max 8"],
+                    ),
+                ]),
+        )
 }
 
 fn layout() -> DeviceLayout {

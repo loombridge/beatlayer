@@ -120,6 +120,22 @@ pub fn note_echo_type() -> DeviceType {
             )
             .decimals(0)
             .describe("Feedback decay for per-note pitch bend expressions."),
+        ])
+        .with_banks(&[
+            (
+                "Echo",
+                &[
+                    "Sync",
+                    "Time",
+                    "Time Free",
+                    "Swing",
+                    "Feedback",
+                    "Decay",
+                    "Pitch",
+                    "Input",
+                ],
+            ),
+            ("MPE", &["MPE", "Press Fback", "Slide Fback", "PB Fback"]),
         ]),
     )
 }

@@ -67,8 +67,11 @@ pub fn oscilloscope_type() -> DeviceType {
         )),
     ]));
 
-    DeviceType::native(OSCILLOSCOPE, "Oscilloscope", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(OSCILLOSCOPE, "Oscilloscope", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[("Scope", &["Time", "Gain", "Freeze", "Divisions", "Trigger"])]),
+    )
 }
 
 /// Adds Oscilloscope to `registry`.

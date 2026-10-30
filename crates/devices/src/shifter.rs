@@ -363,7 +363,55 @@ pub fn shifter_type() -> DeviceType {
     ];
     DeviceType::native(SHIFTER, "Shifter", DeviceRole::AudioEffect)
         .with_midi_sidechain()
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout())
+                .with_banks(&[
+                    (
+                        "Shift",
+                        &[
+                            "Mode", "Coarse", "Fine", "Window", "Shift", "Drive", "Spread", "Wide",
+                        ],
+                    ),
+                    (
+                        "Delay",
+                        &[
+                            "Delay",
+                            "Delay Mode",
+                            "Delay Time",
+                            "Delay Beats",
+                            "Feedback",
+                            "Tone",
+                            "Dry/Wet",
+                        ],
+                    ),
+                    (
+                        "LFO",
+                        &[
+                            "LFO Amount",
+                            "LFO Wave",
+                            "LFO Mode",
+                            "LFO Rate",
+                            "LFO Beats",
+                            "LFO Stereo",
+                            "LFO Phase",
+                            "LFO Spin",
+                        ],
+                    ),
+                    ("LFO Shape", &["LFO Offset", "LFO Duty Cycle", "LFO Width"]),
+                    (
+                        "Envelope",
+                        &[
+                            "Env Fol",
+                            "Env Attack",
+                            "Env Release",
+                            "Env Amount",
+                            "Env Amount Hz",
+                        ],
+                    ),
+                    ("Pitch", &["Pitch Source", "Glide", "PB"]),
+                ]),
+        )
 }
 
 /// The device's layout: the shift, the delay, the LFO and the envelope

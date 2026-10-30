@@ -518,6 +518,7 @@ impl DeviceView {
                 views: Vec::new(),
                 menu_options: Vec::new(),
                 title_switch: None,
+                banks: Vec::new(),
             },
             plugin: true,
             configured: knob_params,

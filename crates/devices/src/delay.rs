@@ -152,8 +152,34 @@ pub fn delay_type() -> DeviceType {
         ParamDescriptor::continuous(LFO_FILTER, "Filter", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much the LFO moves the filter's frequency."),
     ];
-    DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Main",
+                    &[
+                        "Sync",
+                        "Link",
+                        "Freeze",
+                        "Time Mode",
+                        "Ping Pong",
+                        "Feedback",
+                        "Dry/Wet",
+                    ],
+                ),
+                (
+                    "Time",
+                    &[
+                        "L Sync", "R Sync", "L Time", "R Time", "L Offset", "R Offset",
+                    ],
+                ),
+                // Two parameters are named Filter: the switch and the
+                // LFO's amount.
+                ("Filter", &["#3", "Freq", "Width", "#20"]),
+                ("Modulation", &["Rate", "Wave", "Morph", "Delay"]),
+            ]),
+    )
 }
 
 /// A layout of fixed control bands and the delay's display, which grows.

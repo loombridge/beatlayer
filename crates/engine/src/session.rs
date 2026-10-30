@@ -835,6 +835,11 @@ impl SessionLauncher {
             slot.line = line;
             slot.next = played;
             self.clear_way_for(track, scene, at);
+        } else {
+            // A restart is already queued: it keeps its grid line, and the
+            // later press's velocity and transposition win (remote-mapping
+            // R36).
+            slot.next = played;
         }
     }
 

@@ -750,8 +750,9 @@ fn a_transposed_launch_moves_a_midi_clips_notes_and_drops_those_outside_the_keys
     }
 }
 
-// Spec: remote-mapping R36. A second key pressed before the first launch has
-// started launches at its own transposition on the same grid line.
+// Spec: remote-mapping R36. A second key pressed before the first launch, or
+// a relaunch, has started launches at its own transposition on the same grid
+// line.
 #[test]
 fn a_second_key_before_the_grid_line_launches_at_its_own_transposition() {
     for block in [1, 64, 513] {
@@ -779,6 +780,16 @@ fn a_second_key_before_the_grid_line_launches_at_its_own_transposition() {
             .find(|&(_, _, on)| on)
             .map(|(frame, key, _)| (frame, key));
         assert_eq!(on, Some((BAR_FRAMES, 62)), "blocks of {block}");
+        // So does a second key while the clip plays and its relaunch waits.
+        rig.sender.session(transposed(track, scene, 5));
+        play(&mut rig, 10_000, block);
+        rig.sender.session(transposed(track, scene, 9));
+        play(&mut rig, BAR_FRAMES as usize, block);
+        let relaunched = notes(&mut rig)
+            .into_iter()
+            .find(|&(frame, _, on)| on && frame >= 2 * BAR_FRAMES)
+            .map(|(frame, key, _)| (frame, key));
+        assert_eq!(relaunched, Some((2 * BAR_FRAMES, 69)), "blocks of {block}");
     }
 }
 

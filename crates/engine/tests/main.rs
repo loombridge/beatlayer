@@ -18,6 +18,8 @@ mod clock_in;
 mod common;
 mod crossfades;
 mod cue;
+mod cv_clock;
+mod cv_modular;
 mod cv_tools;
 mod deactivated;
 mod device_chains;

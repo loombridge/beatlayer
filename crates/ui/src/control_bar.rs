@@ -444,7 +444,9 @@ impl TransportFields {
         let editable = transport::editable(shell, field.group);
         if !editable {
             // Spec: midi-clock R17. With EXT on, the clock sets the tempo.
-            let why = if field.group == Group::Tempo && shell.external_tempo().is_some() {
+            let why = if field.group == Group::Tempo && shell.cv_clock_leader().is_some() {
+                "a CV Clock In sets it"
+            } else if field.group == Group::Tempo && shell.external_tempo().is_some() {
                 "the incoming MIDI clock sets it"
             } else {
                 "the song changes it along the arrangement"

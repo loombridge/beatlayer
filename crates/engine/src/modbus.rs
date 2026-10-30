@@ -123,6 +123,12 @@ pub struct Control<'a> {
     /// The rows of the modulators that ran before this one, which its own
     /// parameters may be mapped to.
     pub earlier: Bus<'a>,
+    /// What a modulator with a CV input reads on it over the part, in sample
+    /// values (`docs/specs/cv-tools.md`, R27): the interface's input as it
+    /// was delivered for these frames. `None` for a modulator with no CV
+    /// input, or one whose input is set to no channel, or one the interface
+    /// lacks: 0 V.
+    pub cv_in: Option<&'a [f32]>,
     /// Where this modulator writes its [`ROWS`] rows, `stride` apart.
     pub out: &'a mut [f32],
     /// The distance between rows in `out`.

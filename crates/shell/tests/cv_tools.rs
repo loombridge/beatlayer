@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use bl_audio_io::{NullBackend, NullControl, NullOptions, Pacing};
+use bl_audio_io::{Cable, NullBackend, NullControl, NullOptions, Pacing};
 use bl_devices::{Tuner, cv_instrument_type, cv_triggers_type};
 use bl_engine::DeviceType;
 use bl_engine::NodeConfig;
@@ -594,4 +594,211 @@ fn an_export_with_a_routed_cv_device_renders_in_real_time() {
         assert!(out.exists());
         let _ = std::fs::remove_dir_all(&folder);
     }
+}
+
+// Spec: cv-tools R9 (WP-7.18)
+#[test]
+fn the_browser_lists_cv_in_under_modulators_and_the_other_three_under_audio_effects() {
+    use bl_shell::browser_commands::{self as ids, BrowserState};
+    let mut shell = Shell::headless();
+    let mut names = |label: &str| -> Vec<String> {
+        let state: BrowserState = serde_json::from_value(
+            shell
+                .run(ids::OPEN_PLACE, json!({ "label": label }))
+                .unwrap(),
+        )
+        .unwrap();
+        state.rows.into_iter().map(|row| row.name).collect()
+    };
+    let modulators = names("modulators");
+    assert!(modulators.contains(&"CV In".to_owned()));
+    let effects = names("audio_effects");
+    for listed in ["CV Clock Out", "CV Clock In", "CV Utility"] {
+        assert!(effects.contains(&listed.to_owned()), "{listed}");
+    }
+    assert!(!effects.contains(&"CV In".to_owned()));
+    for under_modulators in ["CV Clock Out", "CV Clock In", "CV Utility"] {
+        assert!(!modulators.contains(&under_modulators.to_owned()));
+    }
+}
+
+/// The preview's render of the whole range with the tone at a quarter note:
+/// the samples of the left channel.
+fn render_offline(shell: &Shell, to: bl_core::time::Ticks) -> Vec<f32> {
+    use bl_plugin_host::Hosts;
+    use bl_shell::export::{self, Length, Render};
+    let spec = Render {
+        start: bl_core::time::Ticks::ZERO,
+        length: Length::To(to),
+        sample_rate: 48_000,
+        engine_rate: 48_000,
+        block: 512,
+    };
+    let mut samples = Vec::new();
+    export::render(
+        shell.editor().document(),
+        shell.media_store(),
+        Hosts::default(),
+        &spec,
+        60.0,
+        &AtomicBool::new(false),
+        &mut |_| {},
+        &mut |block| {
+            samples.extend(block.iter().step_by(2));
+            Ok(())
+        },
+        None,
+    )
+    .unwrap();
+    samples
+}
+
+// Spec: cv-tools R7, R24, R26, R27. In an offline render the song keeps its
+// own tempo under a CV Clock In, and a CV In reads 0 V: with Low and High
+// either side of it the mapped volume sits half way, with Low at 0 V it sits
+// at the bottom, and with High at 0 V at the top.
+#[test]
+fn in_an_offline_render_cv_clock_in_leaves_the_tempo_alone_and_cv_in_reads_zero_volts() {
+    use bl_devices::{cv_clock_in_type, cv_in_type};
+    let folder = std::env::temp_dir().join(format!("bl-cv-offline-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let file = folder.join("Tone.wav");
+    tone(&file);
+    let peaks: Vec<(f32, usize)> = [(-5.0, 5.0), (0.0, 10.0), (-10.0, 0.0)]
+        .into_iter()
+        .map(|(low, high)| {
+            let mut shell = Shell::headless();
+            shell
+                .run(
+                    bl_shell::browser_commands::ADD_TO_ARRANGEMENT,
+                    json!({ "paths": [file.to_string_lossy()], "at": 705_600 }),
+                )
+                .unwrap();
+            let track = shell
+                .editor()
+                .document()
+                .tracks()
+                .find(|t| t.clips().next().is_some())
+                .unwrap()
+                .id();
+            let clock = add_to(&mut shell, &cv_clock_in_type(), track);
+            shell
+                .run(
+                    "device.set_external",
+                    json!({ "device": clock, "cv_inputs": [{ "name": "Clock", "channel": 1 }] }),
+                )
+                .unwrap();
+            let cv_in = add_to(&mut shell, &cv_in_type(), track);
+            shell
+                .run(
+                    "device.set_external",
+                    json!({ "device": cv_in, "cv_inputs": [{ "name": "CV", "channel": 2 }] }),
+                )
+                .unwrap();
+            for (param, value) in [(64, 1.0), (0, low), (1, high)] {
+                shell
+                    .run(
+                        "device.set_param",
+                        json!({ "device": cv_in, "param": param, "value": value }),
+                    )
+                    .unwrap();
+            }
+            shell
+                .run(
+                    "modulator.map",
+                    json!({ "device": cv_in, "slot": 0,
+                            "target": { "type": "mixer", "track": track, "param": "volume" } }),
+                )
+                .unwrap();
+            let samples = render_offline(&shell, bl_core::time::Ticks::from_quarters(2));
+            let peak = samples.iter().fold(0.0f32, |p, s| p.max(s.abs()));
+            let onset = samples.iter().position(|&s| s != 0.0).unwrap_or(0);
+            (peak, onset)
+        })
+        .collect();
+    // The tone begins where it does with neither device: on the quarter
+    // note's frame at the song's own 120 BPM.
+    let mut plain = Shell::headless();
+    plain
+        .run(
+            bl_shell::browser_commands::ADD_TO_ARRANGEMENT,
+            json!({ "paths": [folder.join("Tone.wav").to_string_lossy()], "at": 705_600 }),
+        )
+        .unwrap();
+    let reference = render_offline(&plain, bl_core::time::Ticks::from_quarters(2));
+    let onset = reference.iter().position(|&s| s != 0.0).unwrap();
+    assert!((24_000..24_100).contains(&onset), "{onset}");
+    assert!(
+        peaks.iter().filter(|p| p.0 > 0.0).all(|p| p.1 == onset),
+        "{peaks:?}"
+    );
+    let _ = std::fs::remove_dir_all(&folder);
+    let [middle, bottom, top] = [peaks[0].0, peaks[1].0, peaks[2].0];
+    assert_eq!(bottom, 0.0, "0 V is Low: the volume at its bottom");
+    assert!(middle > 0.0 && top > middle, "{middle} below {top}");
+}
+
+/// A cable carrying a pulse train at `bpm` and 4 to the quarter on the input
+/// channel `channel` (counted from 0), each pulse 5 V high for half its
+/// period.
+fn pulses(bpm: f64, channel: usize) -> Cable {
+    let period = 60.0 / bpm / 4.0 * 48_000.0;
+    let mut frame = 0u64;
+    Cable::new(move |_, next| {
+        for i in 0..next[channel].len() {
+            let phase = ((frame + i as u64 + 1) as f64 / period).fract();
+            next[channel][i] = if phase < 0.5 { 0.5 } else { 0.0 };
+        }
+        frame += next[channel].len() as u64;
+    })
+}
+
+// Spec: cv-tools R24, R25, R31. A CV Clock In fed a pulse train leads the
+// song's tempo: `transport.state` gives the tempo it plays, takes no edits to
+// it, and names the device that leads.
+#[test]
+fn transport_state_names_the_cv_clock_in_that_leads_and_the_tempo_it_plays() {
+    let (backend, control) = NullBackend::with_devices(
+        NullOptions {
+            pacing: Pacing::Manual,
+            channels: CHANNELS,
+            ..NullOptions::default()
+        },
+        &[("null", "Null")],
+    );
+    let (mut shell, control) = testing::rig_on(backend.with_cable(pulses(100.0, 0)), control);
+    shell
+        .run("audio.configure", json!({ "input_device": "null:null" }))
+        .unwrap();
+    shell.start_audio();
+    let state = |shell: &mut Shell| -> Value {
+        shell.poll_engine();
+        shell.run("transport.state", json!({})).unwrap()
+    };
+    assert_eq!(state(&mut shell)["cv_clock_leader"], Value::Null);
+    let device = add(&mut shell, &bl_devices::cv_clock_in_type());
+    shell
+        .run(
+            "device.set_external",
+            json!({ "device": device, "cv_inputs": [{ "name": "Clock", "channel": 1 }] }),
+        )
+        .unwrap();
+    testing::advance(&control, &mut shell, 4_000);
+    let led = state(&mut shell);
+    assert_eq!(led["cv_clock_leader"], json!(device));
+    let tempo = led["tempo"].as_f64().unwrap();
+    assert!((tempo - 100.0).abs() < 0.5, "{tempo}");
+    assert_eq!(led["tempo_editable"], json!(false));
+    // Sync off: the song's own tempo again, and the Tempo field takes edits.
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": 0, "value": 0.0 }),
+        )
+        .unwrap();
+    testing::advance(&control, &mut shell, 500);
+    let free = state(&mut shell);
+    assert_eq!(free["cv_clock_leader"], Value::Null);
+    assert_eq!(free["tempo"].as_f64().unwrap(), 120.0);
+    assert_eq!(free["tempo_editable"], json!(true));
 }

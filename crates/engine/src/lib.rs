@@ -90,6 +90,7 @@ pub mod clips;
 mod clock_in;
 mod compiler;
 pub mod controller_take;
+pub mod cv_clock;
 mod disjoint;
 pub mod display;
 pub mod drum;

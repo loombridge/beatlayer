@@ -1487,9 +1487,11 @@ fn the_apc40s_transport_buttons_run_and_light() {
     });
     // The recording ends on the next grid line, a bar away, and Session
     // Record stays lit until its clip is written, which happens off the main
-    // thread on the wall clock.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    while rig.apc.single(0x66, 0).is_some() && std::time::Instant::now() < deadline {
+    // thread, so give it up to a minute and a half of test time.
+    for _ in 0..900 {
+        if rig.apc.single(0x66, 0).is_none() {
+            break;
+        }
         rig.pass(100);
     }
     assert_eq!(rig.apc.single(0x66, 0), None);

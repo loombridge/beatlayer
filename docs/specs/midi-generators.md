@@ -1,7 +1,7 @@
 # MIDI Tools: the generators
 
-- **Status:** implemented (R1 to R28 each have a passing test)
-- **Work packages:** WP-6.14 (what every generator shares, Rhythm, Seed, Shape and Euclidean: R1 to R16); WP-6.14b (Stacks, its chord banks in Beatlayer's own format and Beatlayer's built-in bank: R17 to R28). The Generate panel, choosing a tool, where a generator writes, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15)
+- **Status:** partial (R1 to R28 each have a passing test; R29 to R42 are WP-9.39's)
+- **Work packages:** WP-6.14 (what every generator shares, Rhythm, Seed, Shape and Euclidean: R1 to R16); WP-6.14b (Stacks, its chord banks in Beatlayer's own format and Beatlayer's built-in bank: R17 to R28). The Generate panel, choosing a tool, where a generator writes, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15); WP-9.39 (the MIDI Tools Pack's generators Polyrhythm, Phase Pattern and Stages, as bundled extensions: R29 to R42)
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, generators (Rhythm, Seed, Shape, Stacks, Euclidean)", whose note says chord banks are in Beatlayer's own format
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 11, its introduction and sections 11.3.1 to 11.3.5; the Live 12 release notes, 12.0, 12.0.5, 12.1 and 12.2; the UI parity reference's I-CLICK-049 and S-NOTE-052
 
@@ -27,6 +27,7 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 | S8 | Beatlayer | [midi-tools.md](midi-tools.md) R5, R8, R9, R12 to R17 and R20; [midi-transformations.md](midi-transformations.md) R1 and R2; [scales.md](scales.md) R1 and R2; [piano-roll.md](piano-roll.md) R26; [browser.md](browser.md) | The framework every generator sits in; note divisions and shared terms; the scales and the nearest scale key; what a click on the piano ruler does without a modifier; the browser's places and items |
 | S9 | Beatlayer | [The architecture](../02-architecture.md), "Project files and interop" and "Agent control" | Presets, racks and clips have file types of Beatlayer's own; what an agent sets it reads back |
 | S10 | Reference | [interactions.md](../ui-parity/interactions.md) I-CLICK-049; [shortcuts.toml](../ui-parity/shortcuts.toml) S-NOTE-052 (from the manual, sections 11.3.1 to 11.3.4, and the 12.1 release notes) | Option-clicking or Option-dragging the piano ruler sets a generator's pitch or range; Cmd+Up and Cmd+Down choose the previous or next chord on Stacks' Chord Selector Pad |
+| S11 | Product page | Ableton's MIDI Tools pack page (ableton.com/en/packs/midi-tools), read 30 October 2026 | Generators: Polyrhythm builds polymetric and polyrhythmic patterns from six pattern generators, Euclidean among them, which can take a long time to repeat; Phase Pattern makes organic variations by changing a clip's timing, pitch and velocity, free of the grid or locked to it; Stages grows a few notes into a longer pattern, with sliders setting pitch, repeats and rests |
 
 ## Rules
 
@@ -163,6 +164,29 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 
 - **R28.** `midi_tool.state` reads Stacks' progression, each chord's settings, and its bank: the bank's name, whether it is the built-in one, and every entry with its name and intervals. (S8)
 
+**Polyrhythm (WP-9.39)**
+
+- **R29.** Polyrhythm is a generator from a bundled extension ([MIDI Tools](midi-tools.md) R37). It has six lanes, each with a switch, a pitch (a scale degree in Scale Mode), a velocity (1 to 127), a mode, a length of 1 to 64 steps, and a step division (1/1 to 1/32, triplets included). (S11; the parameters' ranges are Beatlayer's own)
+- **R30.** A lane's mode is Euclidean (Density hits in Steps, with Rotation, as Euclidean's pattern is, R15), Pulse (a hit every Interval steps from an Offset), Burst (a run of Count hits at a Ratchet division every Interval steps), Accent (every step, with an accent of +Amount velocity every Interval steps), Random (each step a hit with a Chance, from the seed) or Pattern (16 drawn toggles). (S11; every mode but Euclidean is Beatlayer's own)
+- **R31.** Each lane repeats its pattern from the range's start on its own length and division, so lanes of different lengths run against each other, and writes a note a step long at each hit, until the range's end. (S11)
+- **R32.** Where two lanes write the same pitch at the same time, one note is written with the higher velocity. (Beatlayer's own)
+- **R33.** The same range, settings and seed give the same notes ([MIDI Tools](midi-tools.md) R16). (S11)
+
+**Phase Pattern (WP-9.39)**
+
+- **R34.** Phase Pattern is a generator from a bundled extension that grows a pattern from the range's notes: it writes them Repeats times (1 to 32) one after another over the range, each repetition changed from the one before by a Phase shift of its timing (−50 % to +50 % of a step), a Pitch drift (−12 to +12 semitones, or scale degrees in Scale Mode) and a Velocity drift (−32 to +32). (S11; the parameters are Beatlayer's own)
+- **R35.** Quantize (Off, or a division) snaps every note it writes to the grid, so the result is free of the grid when off and locked to it when on. (S11)
+- **R36.** Variation adds a seeded random change to each note's timing, pitch and velocity up to its amount (0 to 100 %). (S11; Beatlayer's own)
+- **R37.** With no notes in the range, Phase Pattern writes nothing and says so. (Beatlayer's own)
+- **R38.** Notes pushed past the range's end are dropped; pitches outside 0 to 127 fold back by octaves. (Beatlayer's own)
+
+**Stages (WP-9.39)**
+
+- **R39.** Stages is a generator from a bundled extension with up to eight stages, each with a switch, a Pitch (−24 to +24 semitones from the root, or scale degrees in Scale Mode), Repeats (1 to 8) and Rests (0 to 8 steps), and one step division and Gate (10 % to 100 % of a step). (S11; the ranges are Beatlayer's own)
+- **R40.** The root is the lowest note in the range, or the Root parameter when the range has none. Stages plays its switched-on stages in order, each writing its Repeats notes a step apart then its Rests empty steps, and starts again, until the range's end. (S11; Beatlayer's own)
+- **R41.** Direction (Forward, Backward, Ping-Pong, Random from the seed) sets the order of the stages. (Beatlayer's own)
+- **R42.** Each stage's Velocity (1 to 127) sets its notes' velocity. (Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -195,3 +219,4 @@ Stacks' chord banks are files in Beatlayer's own format, which a person writes o
 | R26 | `crates/shell/tests/midi_tools.rs`, `r26_a_bank_loads_from_a_file_replaces_the_bank_and_changes_no_notes`; `crates/shell/tests/browser.rs`, `the_browser_lists_chord_banks_and_loading_one_replaces_stacks_bank`; `crates/ui/tests/browser.rs`, `double_clicking_a_chord_bank_loads_it_into_stacks`; `crates/agent/tests/midi_tools.rs`, `stacks_loads_a_bank_and_applies_by_id_and_the_chord_commands_read_back` | shell, UI script, agent |
 | R27 | `crates/midi-tools/tests/stacks.rs`, `r27_the_built_in_bank_holds_the_twenty_seven_entries_in_order` | unit |
 | R28 | `crates/shell/tests/midi_tools.rs`, `r17_r28_state_reads_the_progression_and_the_bank_and_the_chord_commands_change_them`; `crates/agent/tests/midi_tools.rs`, `stacks_loads_a_bank_and_applies_by_id_and_the_chord_commands_read_back` | shell, agent |
+| R29 to R42 | to be written in WP-9.39: tests under `extensions/midi-tools-pack/` on generated notes with fixed seeds, in and out of Scale Mode; `crates/agent/tests/midi_tools.rs` running each by `midi_tool.apply` | unit, agent API |

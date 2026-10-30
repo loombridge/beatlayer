@@ -70,4 +70,4 @@ This spec covers the device only. Where it sits in a chain and the frame around 
 
 - The device's panel shows every control at once: a layout that shows only the controls the chosen mode and rate mode use waits, as Sweep's does.
 - Tuning systems (Phase 6) don't change the MIDI source's intervals: they are equal-tempered semitones from C3.
-- The legacy Frequency Shifter, which maps to Shifter when legacy devices are imported (M9).
+- The legacy Frequency Shifter, which isn't built: a Live set or preset holding it maps it to Shifter ([Live device mapping](live-device-mapping.md) R15).

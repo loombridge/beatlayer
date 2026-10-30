@@ -1,9 +1,9 @@
 # Stem separation
 
 - **Status:** partial
-- **Work packages:** IMP-11, built ahead of Phase 9 in [#202](https://github.com/loombridge/beatlayer/pull/202)
+- **Work packages:** IMP-11, built ahead of Phase 9 in [#202](https://github.com/loombridge/beatlayer/pull/202) (R1 to R14); WP-9.1 (the Packages manager shared by every on-device feature: R15 to R21); WP-9.2 (Session clips, files from the browser and time selections, the stems' colours, and the group's devices and automation: R22 to R31); WP-9.3 (the split model, Core ML on macOS and the speed target: R32 to R38); WP-9.4 (DirectML on Windows and CUDA on Linux: R39 to R41). Audio to MIDI's use of the packages is [audio to MIDI](audio-to-midi.md) R2 and R18; the library's is [core library](core-library.md) R5
 - **Parity-matrix row:** Audio clips and warping: Stem separation (vocals, drums, bass, others; fast and high-quality modes; files, clips, time selections; merge stems)
-- **Checked against:** the Live 12 reference manual (online edition), chapter 22, read 18 October 2026, and Live 12 on macOS observed on 18 October 2026
+- **Checked against:** the Live 12 reference manual (online edition), chapter 22, read 18 October 2026 and again 30 October 2026, and Live 12 on macOS observed on 18 October 2026; ONNX Runtime's execution provider documentation, read 30 October 2026
 
 ## The behaviour
 
@@ -11,7 +11,7 @@ Separate Stems to New Audio Tracks splits an audio clip into its parts (vocals, 
 
 Beatlayer doesn't ship the network: the first time, the dialog lists the open-source packages it needs, with their project pages, sizes, and where they install, and downloads them when asked, with a progress bar. After that, the command goes straight to its options.
 
-This package builds the command for Arrangement clips, the dialog, the download, the separation, merging, the files, and the tracks. Separating a file from the browser, a Session clip, or a time selection, the stems' track colours, and copying the source track's devices and automation to the group come in later packages. Running the network on the GPU and its speed target are IMP-11's next step.
+IMP-11's first package built the command for Arrangement clips, the dialog, the download, the separation, merging, the files, and the tracks (R1 to R14). Phase 9 makes the first-use download one Packages manager that every on-device feature shares (R15 to R21); adds Session clips, files from the browser and Arrangement time selections as sources, the stems' track colours, and the source track's devices and automation copied to the group (R22 to R31); and runs the network on the GPU, through Core ML on macOS, DirectML on Windows and CUDA on Linux, with the CPU as the fallback and a speed target measured by a benchmark (R32 to R41).
 
 ## Sources
 
@@ -22,6 +22,11 @@ This package builds the command for Arrangement clips, the dialog, the download,
 | S3 | Observation | Live 12 on macOS, 18 October 2026, from a screenshot of an audio clip's menu in the Arrangement | After Crop Clip and Reverse Clip(s) and a separator: Convert Harmony to New MIDI Track, Convert Melody to New MIDI Track, Convert Drums to New MIDI Track, Separate Stems to New Audio Tracks; then the clip colours. |
 | S4 | Observation | Live 12 on macOS, 18 October 2026, from a screenshot of the dialog | The dialog is titled Separate Stems. It lists Vocals, Drums, Bass, and Others, each with a coloured icon and a check mark when chosen, all four chosen; then a High Speed / High Quality switch, set to High Speed; the note "This action will stop audio."; and Separate and Cancel. |
 | S5 | Beatlayer | [05-improvements.md](../05-improvements.md), IMP-11; the architecture's "Agent control" (D17) | Stem separation on this computer, its network run through ONNX Runtime; every action is a registered command with a schema, a description, a permission class, and a readback. |
+| S6 | Manual | Live 12 release notes, 12.3 and 12.4 | Stem Separation, its sources, and separating a time selection in the Arrangement |
+| S7 | Reference | [menus.md](../ui-parity/menus.md) C-CLIP-SES-020, C-BROWSER and C-TIME; [session context menus](session-context-menus.md) R2 | Where the command sits in a Session clip's, a browser item's and a time selection's menus |
+| S8 | Specification | ONNX Runtime's documentation of its execution providers (Core ML, DirectML, CUDA) and their release archives and packages | Which provider runs on which platform, what each needs on the computer, and that each build also runs on the CPU |
+| S9 | Paper | Rouard, Massa and Défossez, "Hybrid Transformers for Music Source Separation", ICASSP 2023 | HTDemucs: a waveform branch and a spectrogram branch, the spectrogram made by a short-time Fourier transform and turned back by its inverse |
+| S10 | Paper | Vincent, Gribonval and Févotte, "Performance Measurement in Blind Audio Source Separation", IEEE Transactions on Audio, Speech and Language Processing, 2006 | Signal-to-distortion ratio (SDR) as the measure of a separated source against the true one |
 
 ## Rules
 
@@ -39,6 +44,42 @@ This package builds the command for Arrangement clips, the dialog, the download,
 - **R12.** The network sees the mix normalised by its mono mean and deviation, in windows of 343,980 frames overlapping by a quarter, blended back with triangular weights; each part is scaled back by the same mean and deviation. Progress is the share of windows done. Beatlayer's own method, Demucs's. (S5)
 - **R13.** High Quality's second pass sees the mix after a quarter of a second of silence, and its result is shifted back by as much before the two passes are averaged. Beatlayer's own method. (S2)
 - **R14.** Under `bl-cli mcp`, with no window, a download or separation under way finishes and lands its tracks while an agent asks for `stems.status` and while no one asks anything: the transport polls the shell before every message and every 50 ms while it waits, as the window does every frame, and a poll never writes to standard output. A headless run keeps no application-data folder, so the packages it downloads go to `Packages` in the system's temporary folder, and a run that needs them again downloads them again; this keeps headless runs apart from the app's own settings and files. Beatlayer's own. (S5)
+
+### The Packages manager (WP-9.1)
+
+- **R15.** Every feature that runs an on-device model (stem separation, audio to MIDI, and Beatlayer's library) declares the packages it needs from one manifest built into Beatlayer: each package's ID, version, name, project page, what it does, platform, download size, SHA-256, URL, the files kept from an archive, and its role. Features share a package by its role: ONNX Runtime fills the role `onnx-runtime` for every feature that needs it, and a platform's GPU build of ONNX Runtime fills the same role in place of the CPU build. Beatlayer's own. (S5)
+- **R16.** R2 to R4 hold for every feature: the first time a feature's command runs while a package it needs is missing, the feature's dialog, or a dialog of its own for a feature without one, shows the package page R2 describes for the packages it lacks, worded as R2 has it; once they're installed, the command runs. Beatlayer's own. (S5)
+- **R17.** One installer thread downloads one package at a time, with progress and Cancel. A download goes to a hidden file in `Packages` and is renamed into place only once its size and SHA-256 are checked; Cancel, or a failure, removes the hidden file, so nothing of it is left. A package two features ask for at once downloads once. Beatlayer's own. (S5)
+- **R18.** `Packages` holds a record of each installed package: its ID, version, role, SHA-256 and files. A package is installed only once every file is whole and recorded; at start, a package whose files are missing or whose sizes differ shows as not installed. Beatlayer's own. (S5)
+- **R19.** ONNX Runtime's shared library is loaded at most once in a process, by the first feature that needs it, and every later feature uses the loaded library. A package that replaces a loaded library in its role takes effect at the next launch, and the package page says so. Beatlayer's own. (S5)
+- **R20.** `packages.list` (`read`) gives each package of the manifest for this platform: whether it's installed, downloading (with its share) or removed at the next launch, its version, size and role, and the features that need it. `packages.install` (`external`) installs packages by ID, as R17 says. `packages.remove` (`destructive`) removes an installed package's files and record; a package whose library is loaded is removed at the next launch. Each names `packages.list` as its readback. `stems.install` runs `packages.install` for stem separation's packages. Beatlayer's own. (S5)
+- **R21.** R14's headless rules hold for every feature's packages. A run where `BL_PACKAGES_MANIFEST` names a manifest file uses it in place of the built-in one, which is how tests install from `file://` URLs; nothing is fetched while Beatlayer builds. Beatlayer's own. (S5)
+
+### Session clips, files and time selections (WP-9.2)
+
+- **R22.** Separate Stems to New Audio Tracks is also in a Session audio clip's menu (C-CLIP-SES-020), in a browser audio file's menu after Show Similar Files, and in an Arrangement time selection's menu after Crop Clip on audio tracks; the Create menu's item (M-CREATE-015) acts on what is selected: one audio clip in either view, a time selection holding audio on audio tracks, or one audio file in the browser. Each is enabled exactly when its source can be separated. `stems.open` and `stems.separate` take a `source`: a clip by ID, a file by path, or a time selection by its tracks and range. The places in the browser's and the time selection's menus are Beatlayer's own. (S1, S6, S7)
+- **R23.** A Session clip's region is R8's, from its markers and loop. Its tracks are made as R9 says, after the clip's track, and each part's clip goes in its new track's slot in the source clip's scene, with the source's launch settings; the source clip is deactivated. Placing the clips in the scene's row is Beatlayer's own. (S1)
+- **R24.** A file from the browser is separated whole. Its tracks are made as R9 says, after the selected track, or after the last track with none selected, named after the file; each part's clip starts at the insert marker in the Arrangement, warped as a new clip of a file is ([warping](warping.md) R33 to R36). Where they go is Beatlayer's own. (S1)
+- **R25.** A time selection separates each audio track in it on its own, as one source: the audio its clips play inside the selection, rendered with their warping, gain, fades and clip envelopes (not the track's devices or mixer), from the selection's start to its end, at 44.1 kHz. Each part's clip spans exactly the selection on its new track. On the source track, the clips' parts inside the selection are split at its edges and deactivated, so the set sounds the same. A track with no audio in the selection is skipped. The render and the split are Beatlayer's own. (S1, S6)
+- **R26.** Each stem track takes its part's colour, the colour of the part's icon in the dialog (R5): Vocals, Drums, Bass and Others each a swatch of Beatlayer's palette; a merged track takes its first part's. The group takes the source clip's colour, or for a file or time selection the source track's. Beatlayer's own. (S4)
+- **R27.** The group track (or the one new track, with no group) holds a copy of the source track's devices, in order and with their states, and the source track's mixer settings and Arrangement automation, on the copied devices' parameters and the mixer, so the stems play as the source did. The source track keeps its own. With a Session clip, its own clip envelopes come with each copy (R11). (S1)
+- **R28.** Files from a Session clip are named as R10 says; from a browser file "<file> <part>.wav"; from a time selection "<track> <start bar>-<end bar> <part>.wav"; all in the project's `Samples/Processed/Stems` folder. Beatlayer's own. (S1)
+- **R29.** Each source's separation is one undo step, "Separate Stems"; R6, R7, R12 to R14 hold for every source. (S1)
+- **R30.** `stems.separate`'s result names the new group, tracks and clips, which read back through `song` `tracks` and `clip`. (S5)
+- **R31.** A time selection on MIDI tracks only, or a folder or preset in the browser, leaves the item disabled, with the reason in its description. (S1)
+
+### The GPU (WP-9.3, WP-9.4)
+
+- **R32.** On the GPU path the network runs without its STFT and inverse STFT, which Beatlayer works out in `bl-analysis` with the model's own settings, read from the model. On mixes generated from known sources, the split model's stems are no worse than the whole network's by more than 0.2 dB of SDR for any part, in both modes. Beatlayer's own. (S9, S10)
+- **R33.** On macOS, Beatlayer runs the network through ONNX Runtime's Core ML execution provider when it loads and accepts the model, and on the CPU otherwise; the files are the same within R32's tolerance. A provider that fails to load or to run falls back to the CPU for that run, and `stems.status` and the dialog's progress text name the provider used and the reason for a fallback. (S8)
+- **R34.** Core ML's compiled model is kept in Beatlayer's cache folder by the model's SHA-256 and ONNX Runtime's version, so only the first run compiles it; the dialog's progress text says when it compiles. Beatlayer's own. (S8)
+- **R35.** On an M-series Mac, High Speed separates a 3-minute mix in under 10 seconds, the first compile excluded (IMP-11); High Quality takes about twice as long. (S5)
+- **R36.** `bl-cli bench stems` separates a seeded, generated 3-minute mix in High Speed and High Quality and prints JSON giving the platform, the provider, the compile time and each mode's time; the release workflow attaches it to each release. Beatlayer's own. (S5)
+- **R37.** Separation on the GPU runs on R6's thread, as on the CPU: the main window keeps drawing and the audio thread is untouched. (S5)
+- **R38.** The split model's package fills the role `stems-model` in place of the whole network on platforms whose GPU path uses it. Beatlayer's own. (S5)
+- **R39.** On Windows, the manifest offers the DirectML build of ONNX Runtime in the role `onnx-runtime`, of which only its libraries and licence notices are kept; Beatlayer runs DirectML when it loads, and the CPU otherwise. (S8)
+- **R40.** On Linux, the manifest offers ONNX Runtime's CUDA build when an NVIDIA GPU and its driver are found; Beatlayer runs CUDA only when the CUDA and cuDNN libraries it needs are already on the computer, never downloading them, and the CPU otherwise, `stems.status` saying why. (S8)
+- **R41.** `bl-cli bench stems` names the provider it ran on, on every platform. (S5)
 
 ## Tests
 
@@ -58,5 +99,9 @@ This package builds the command for Arrangement clips, the dialog, the download,
 | R12 | `crates/analysis/src/stems.rs`, `overlapping_windows_blend_back_into_the_whole_mix`, `progress_rises_to_one_and_can_cancel`; `crates/analysis/tests/stems_model.rs`, `a_bass_line_and_a_hi_hat_separate_into_bass_and_drums` (where the packages are named) | unit |
 | R13 | `crates/analysis/src/stems.rs`, `high_quality_averages_a_shifted_second_pass` | unit |
 | R14 | `crates/agent/tests/stdio.rs`, `a_file_lands_while_an_agent_keeps_asking`, `a_file_lands_while_no_one_asks_anything` (a processed file stands in for the separation's, which lands by the same poll) | unit |
+| R15 to R21 | to be written in WP-9.1: `crates/shell/tests/packages.rs` (a test manifest from a `file://` URL, a tampered checksum, Cancel mid-download, two features sharing a runtime); the stems tests unchanged | unit, shell test |
+| R22 to R31 | to be written in WP-9.2: `crates/shell/tests/stems.rs` for each source, with the generated stem fixture standing in for the network's output; `crates/ui/tests/stems_dialog.rs` from each menu; `crates/agent/tests/stems.rs` | shell test, UI script, agent API |
+| R32 to R38 | to be written in WP-9.3: `crates/analysis/tests/stems_model.rs` against generated sources on both providers; the fallback by refusing the provider; `bl-cli bench stems` | unit, benchmark |
+| R39 to R41 | to be written in WP-9.4: the fallback and the manifest on Windows and Linux CI | unit |
 
 The tests that separate with the real network run where `BL_STEMS_RUNTIME` names ONNX Runtime's shared library and `BL_STEMS_MODEL` the model; without them they pass untested.

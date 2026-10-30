@@ -19,7 +19,7 @@ Menu-bar order on macOS: Live (application menu), File, Edit, Create, Playback, 
 
 | ID | Item | Keys shown | Shortcut | In a new set | Notes |
 |---|---|---|---|---|---|
-| M-APP-001 | About Live | | | | Beatlayer: About Beatlayer (D21) |
+| M-APP-001 | About Live | | | | Beatlayer: About Beatlayer (D21); it holds an Acknowledgements button opening the bundled third-party notices ([app shell](../specs/app-shell.md) R26, WP-10.35) |
 | | — | | | | |
 | M-APP-002 | Settings... | ⌘, | S-VIEW-019 | | On Windows: Options menu |
 | | — | | | | |
@@ -152,10 +152,10 @@ Commands the manual places in the Edit menu that didn't show with this focus, an
 | M-CREATE-010 | Create Fade | ⌥⌘F | S-ARR-008 | disabled | The manual names it Create Fade In/Out or Create Crossfade depending on the selection |
 | | — | | | | |
 | M-CREATE-011 | Slice to New MIDI Track | | | disabled | |
-| M-CREATE-012 | Convert Harmony to New MIDI Track | | | disabled | |
-| M-CREATE-013 | Convert Melody to New MIDI Track | | | disabled | |
-| M-CREATE-014 | Convert Drums to New MIDI Track | | | disabled | |
-| M-CREATE-015 | Separate Stems to New Audio Tracks | | | disabled | |
+| M-CREATE-012 | Convert Harmony to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; built in WP-9.7 |
+| M-CREATE-013 | Convert Melody to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; built in WP-9.7 |
+| M-CREATE-014 | Convert Drums to New MIDI Track | | | disabled | [audio to MIDI](../specs/audio-to-midi.md) R1; built in WP-9.7 |
+| M-CREATE-015 | Separate Stems to New Audio Tracks | | | disabled | [stem separation](../specs/stem-separation.md) R22; files, Session clips and time selections in WP-9.2 |
 | | — | | | | |
 | M-CREATE-016 | Add Locator | | | disabled | Reads "Delete Locator" with a locator selected (manual 6.4) |
 | M-CREATE-017 | Add Time Signature Change | | | disabled | Reads "Insert Time Signature Change", enabled, when the Arrangement has focus; it adds a marker at the insert marker (observed) |
@@ -202,7 +202,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-003c | Reset Zoom to 100% | | | | |
 | | — | | | | |
 | M-VIEW-004 | Info | ? | S-VIEW-008 | ticked | Info View. Whether it is shown is an application setting, not part of the set: hiding it doesn't mark the set as changed, and a new set and a relaunch keep it hidden (observed in 12.4.3 (macOS), 14 October 2026) |
-| M-VIEW-005 | Learn View | ⌥⌘7 | S-VIEW-018 | ticked | |
+| M-VIEW-005 | Learn View | ⌥⌘7 | S-VIEW-018 | ticked | Built in WP-10.23 ([Learn View](../specs/learn-view.md) R1, R3) |
 | M-VIEW-006 | Pack Overview | | | | Ableton pack service; Beatlayer's equivalent is its own content overview or nothing. Left out of Beatlayer's menu (D21) |
 | M-VIEW-007 | File Manager | | | | Built in WP-6.63 ([file management](../specs/file-management.md)) |
 | M-VIEW-008 | Undo History | ⌥⌘Z | S-VIEW-021 | | Opens in the right-hand column where the Learn View sits (L-OTH-001). Beatlayer ticks it while the panel shows, and running it again hides the panel (its own; [undo history](../specs/undo-history.md) R1) |
@@ -230,13 +230,13 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-VIEW-024 | Full-Height Browser | | | | Built in WP-6.32 ([browser](../specs/browser.md) R26) |
 | | — | | | | |
 | M-VIEW-025 | Search in Browser | ⌘F | S-BRW-006 | | |
-| M-VIEW-026 | Show Similar Files | ⇧⌘F | S-BRW-010 | disabled | |
+| M-VIEW-026 | Show Similar Files | ⇧⌘F | S-BRW-010 | disabled | [sound similarity](../specs/sound-similarity.md) R11; built in WP-9.9 |
 | M-VIEW-027 | Show Filter View | ⌥⌘G | S-BRW-013 | disabled | Built in WP-6.32 ([browser tags](../specs/browser-tags.md) R18) |
 | | — | | | | |
 | M-VIEW-028 | Plug-In Windows | ⌥⌘P | S-DEV-009 | ticked, disabled | Beatlayer's floating native devices' windows (IMP-14) follow it too (WP-2.5b), with every plug-in editor window the device's window button opens (L-DEV-010, WP-2.10) |
 | M-VIEW-029 | Video Window | ⌥⇧⌘V | S-VIEW-009 | ticked, disabled | Not the manual's ⌥⌘V, which Live shows for Paste Bounced Audio (M-EDIT-031) |
 | | — | | | | |
-| M-VIEW-030 | Show the Max for Live Window | ⌥⇧⌘M | S-VIEW-023 | | Max-specific; Beatlayer's extension host takes this place in M9 or drops it. Left out of Beatlayer's menu (D21) |
+| M-VIEW-030 | Show the Max for Live Window | ⌥⇧⌘M | S-VIEW-023 | | Max-specific; Beatlayer's extensions are managed elsewhere ([extensions](../specs/extensions.md) R6). Left out of Beatlayer's menu (D21) |
 | | — | | | | |
 | M-VIEW-031 | Mixer | ⌥⌘M | S-VIEW-014 | ticked | |
 | M-VIEW-032 | Mixer Controls ▸ | | | | Submenu, rows M-VIEW-032a to 032g; observed in 12.4.6, 11 October 2026. Each view's mixer keeps its own sections (release notes 12.0; [mixer view](../specs/mixer-view.md) R37) |
@@ -288,7 +288,7 @@ The View menu is taller than the screen at 1600 × 1000 and scrolls.
 | M-NAV-005 | Device View | ⌥4 | S-FOCUS-005 | | |
 | M-NAV-006 | Browser | ⌥5 | S-FOCUS-006 | | |
 | M-NAV-007 | Groove Pool | ⌥6 | S-FOCUS-007 | | |
-| M-NAV-008 | Learn View | ⌥7 | S-FOCUS-008 | | |
+| M-NAV-008 | Learn View | ⌥7 | S-FOCUS-008 | | Built in WP-10.23 ([Learn View](../specs/learn-view.md) R1, R3) |
 | M-NAV-009 | Tuning | | | | |
 | | — | | | | |
 | M-NAV-010 | Mixer | ⌥⇧M | S-ARR-035 | disabled | In the Arrangement, puts the keyboard focus in the mixer at the selected track; Right then moves the selection to the next track (observed in 12.4.6 (macOS), 11 October 2026) |
@@ -370,19 +370,19 @@ On macOS the system adds a search field at the top of the Help menu (S-MENU-005)
 | ID | Item | Keys shown | Shortcut | In a new set | Notes |
 |---|---|---|---|---|---|
 | IMP-16 | Search Commands… | ⇧⌘P | S-MENU-007 | | Beatlayer addition: opens the search field on its Commands scope; the menu's first item, after the system's search field, with a separator after it ([command palette](../specs/command-palette.md) R1) |
-| M-HELP-001 | Learn View | | S-VIEW-018 | | No key shown here; the View menu shows ⌥⌘7 |
+| M-HELP-001 | Learn View | | S-VIEW-018 | | No key shown here; the View menu shows ⌥⌘7; built in WP-10.23 ([Learn View](../specs/learn-view.md) R1, R3) |
 | M-HELP-002 | Pack Overview | | | | Ableton service; see M-VIEW-006. Left out of Beatlayer's menu (D21) |
 | | — | | | | |
-| M-HELP-003 | Load Demo Set | | | | Beatlayer: its own demo song |
-| M-HELP-004 | Read the Live Manual... | | | | Beatlayer: Read the Beatlayer Manual... (D21); its own manual |
+| M-HELP-003 | Load Demo Set | | | | Beatlayer: its own demo song, opened as an untitled copy ([Help menu](../specs/help-menu.md) R15); built in WP-10.24 |
+| M-HELP-004 | Read the Live Manual... | | | | Beatlayer: Read the Beatlayer Manual... (D21); its own manual, bundled and opened in the browser ([Help menu](../specs/help-menu.md) R2); built in WP-10.19 |
 | M-HELP-005 | Learn Live at ableton.com... | | | | Ableton website; Beatlayer links its own site. Left out of Beatlayer's menu (D21) |
 | | — | | | | |
-| M-HELP-006 | Join the User Forum... | | | | Beatlayer: its own community link |
-| M-HELP-007 | Get Support | | | | Beatlayer: its issue tracker |
+| M-HELP-006 | Join the User Forum... | | | | Beatlayer: its own community link: the project's forum page, a pinned address ([Help menu](../specs/help-menu.md) R3); built in WP-10.19 |
+| M-HELP-007 | Get Support | | | | Beatlayer: its issue tracker, a pinned address ([Help menu](../specs/help-menu.md) R3); built in WP-10.19 |
 | M-HELP-008 | User Account and Licenses... | | | | Ableton account; no Beatlayer equivalent (open source, no licence keys). Left out of Beatlayer's menu (D21) |
 | M-HELP-009 | Purchase License... | | | | Ableton store; no Beatlayer equivalent. Left out of Beatlayer's menu (D21) |
 | | — | | | | |
-| M-HELP-010 | Check for Updates... | | | | Beatlayer's updater |
+| M-HELP-010 | Check for Updates... | | | | Beatlayer's updater ([updates](../specs/updates.md) R9); built in WP-10.17 |
 
 ## Control Bar menus
 
@@ -547,7 +547,7 @@ Opened on a preset under the Sounds label.
 |---|---|---|---|---|---|
 | C-BROWSER-001 | Show in Places | | | | |
 | C-BROWSER-002 | Show in Finder | | | disabled | macOS |
-| C-BROWSER-003 | Show Similar Files | ⇧⌘F | S-BRW-010 | | |
+| C-BROWSER-003 | Show Similar Files | ⇧⌘F | S-BRW-010 | | [sound similarity](../specs/sound-similarity.md) R11; built in WP-9.9 |
 | | — | | | | |
 | C-BROWSER-004 | Clear All Colors | 0 | S-BRW-009 | | |
 | C-BROWSER-005 | Favorites | 1 | S-BRW-008 | | Collection labels 005 to 011 take the keys 1 to 7 |
@@ -563,7 +563,7 @@ Other states:
 | ID | Command | Source |
 |---|---|---|
 | C-BROWSER-012 | Rename, Delete (user files) | manual 4, 5.8 |
-| C-BROWSER-013 | Separate Stems to New Audio Tracks (audio files) | manual 22.2 |
+| C-BROWSER-013 | Separate Stems to New Audio Tracks (audio files); Beatlayer puts it after Show Similar Files ([stem separation](../specs/stem-separation.md) R22, WP-9.2) | manual 22.2 |
 | C-BROWSER-014 | Manage Project (project folders); built in WP-6.63 | manual 5.5.3 |
 | C-BROWSER-015 | Set Default Live Set (template sets) | manual 5.4.5 |
 | C-BROWSER-016 | Show Pack Info; Download, Pause, Resume, Cancel, Install (packs) | manual 4.7 |
@@ -608,8 +608,8 @@ Other states:
 
 | ID | Command | Source |
 |---|---|---|
-| C-CLIP-SES-019 | Slice to New MIDI Track and the three Convert ... to New MIDI Track commands (audio clips); Beatlayer puts them after Crop Clip and a separator, in C-CLIP-ARR-027's order ([session context menus](../specs/session-context-menus.md) R2) | manual 13 |
-| C-CLIP-SES-020 | Separate Stems to New Audio Tracks (audio clips); after C-CLIP-SES-019, as C-CLIP-ARR-027d follows the Convert items | manual 22.2 |
+| C-CLIP-SES-019 | Slice to New MIDI Track and the three Convert ... to New MIDI Track commands (audio clips); Beatlayer puts them after Crop Clip and a separator, in C-CLIP-ARR-027's order ([session context menus](../specs/session-context-menus.md) R2); the Convert commands built in WP-9.7 | manual 13 |
+| C-CLIP-SES-020 | Separate Stems to New Audio Tracks (audio clips); after C-CLIP-SES-019, as C-CLIP-ARR-027d follows the Convert items; built in WP-9.2 | manual 22.2 |
 
 ### Clip, in the Arrangement (C-CLIP-ARR)
 
@@ -711,6 +711,7 @@ Other states, including the scrub area's own menu:
 | C-TIME-025 | Edit Info Text (a locator) | manual 6.4 |
 | C-TIME-026 | Edit Value (an automation breakpoint); Add Value (the preview point on an envelope's line) | manual 25.5.2 |
 | C-TIME-027 | Edit Time Signature (a selected time-signature marker) | manual 6.5 |
+| C-TIME-028 | Separate Stems to New Audio Tracks (a selection holding audio on audio tracks); Beatlayer puts it after Crop Clip ([stem separation](../specs/stem-separation.md) R22, WP-9.2) | release notes 12.3, 12.4; manual 22 |
 
 ### Device title bar (C-DEVICE)
 
@@ -741,7 +742,9 @@ Other states:
 |---|---|---|
 | C-DEVICE-013 | Group to Drum Rack (several devices selected) | manual 25.2 |
 | C-DEVICE-014 | Lock to (a control surface): one Lock to <surface> item per running surface that can lock, ticked while locked, after Save as Default Preset and a separator; one disabled Lock to Control Surface with none ([device chains](../specs/device-chains.md) R41) | manual 34.1.1.1 |
-| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device; on plug-ins, MPE Mode, ticked while on, and MPE Settings…, then, while the set has a tuning and for every plug-in, Apply Tuning to Per-Note Pitch Bend, ticked while on (on in a new device), which with MPE Mode off is disabled like MPE Settings…, [tunings](../specs/tunings.md) R20; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad; Beatlayer's Autosample… on an instrument, IMP-27; and Simpler's Slice to Drum Rack and Slice to New MIDI Track in Slicing mode, also in its sample display's menu, [slice to MIDI](../specs/slice-to-midi.md) R15 to R17) | manual 23.2.1, 12.5, 12.6, 12.6.1, 31.4.5, 31.11.7; release notes 12.1 |
+| C-DEVICE-015 | Device-specific options (for example Mono Sidechain on the filter device; on plug-ins, MPE Mode, ticked while on, and MPE Settings…, then, while the set has a tuning and for every plug-in, Apply Tuning to Per-Note Pitch Bend, ticked while on (on in a new device), which with MPE Mode off is disabled like MPE Settings…, [tunings](../specs/tunings.md) R20; the Drum Sampler's Enable Per-Note Pitch Bend, Envelope Follows Pitch, a swap to Simpler, and Save as Default Pad; Beatlayer's Autosample… on an instrument, IMP-27; and Simpler's Slice to Drum Rack and Slice to New MIDI Track in Slicing mode, also in its sample display's menu, [slice to MIDI](../specs/slice-to-midi.md) R15 to R17; Hi-Quality on Wavetable and Drift, ticked while on and off in a new device, [instrument voices](../specs/instrument-voices.md) R19; on Operator, Enable Per-Note Pitch Bend (on in a new device), Copy Oscillator settings, Set All Envelope Levels to maximum, minimum or middle, the harmonics editor's Even Only, Odd Only and Normalize, and Play By Key in the filter frequency's menu, [Operator](../specs/operator.md) R20, R28; Echo's Equal-Loudness in its Dry/Wet control's menu, ticked while on; Pedal's Hi-Quality, ticked while on; Spectral Time's Zero Dry Signal Latency, ticked while on) | manual 23.2.1, 12.5, 12.6, 12.6.1, 31.4.5, 31.11.7; release notes 12.1; manual 29.14.4, 29.28, 29.37.4 |
+| C-DEVICE-016 | Plug-In Hosting (plug-in devices only): a submenu after Save as Default Preset and Lock to, with a separator: Default (the setting's mode), a separator, Within Beatlayer, Together, By Plug-In, Individually, the device's choice ticked; disabled with the reason for ARA and bridged plug-ins ([device chains](../specs/device-chains.md) R45, WP-10.5) | Beatlayer addition |
+| C-DEVICE-017 | Reload Plug-In (a plug-in device whose host has crashed): first, with a separator after it ([device chains](../specs/device-chains.md) R46, WP-10.5) | Beatlayer addition |
 
 ### Crossfader (C-XFADE)
 
@@ -901,7 +904,7 @@ Opened by the menu button beside the Filter View toggle on the browser's top row
 | C-FILTER-002 | Show All Filter Groups | manual 4.4.1 |
 | C-FILTER-003 | Reset Filter Groups to Default | manual 4.4.1 |
 | | — | |
-| C-FILTER-004 | Include Auto Tags, disabled until automatic tagging (M9) | release notes 12.2 |
+| C-FILTER-004 | Include Auto Tags, disabled until automatic tagging (WP-9.11), then on by default ([browser tags](../specs/browser-tags.md) R55); the online manual's 4.4.2 calls it Enable Auto Tags | release notes 12.2 |
 | C-FILTER-005 | Tag Editor (S-BRW-014), ticked while it shows | release notes 12.2 |
 | C-FILTER-006 | Show Quick Tags, ticked while Quick Tags shows | release notes 12.2 |
 

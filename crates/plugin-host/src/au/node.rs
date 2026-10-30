@@ -116,26 +116,42 @@ pub(crate) const ECHOES: usize = 256;
 /// What an empty slot of [`Echoes`] holds: a NaN, which no value matches.
 const NO_ECHO: u64 = u64::MAX;
 
+/// What a parameter's last value holds before anything is scheduled: a NaN.
+const NO_LATEST: u32 = u32::MAX;
+
 /// The last changes a node scheduled on its unit, as (address, value) pairs.
 /// The unit's parameter observers report a scheduled change like any other,
 /// and the editor's observer drops the ones found here. The node writes and
 /// the observer reads, both without locking.
-#[derive(Debug)]
+///
+/// It also keeps each parameter's last scheduled value: a unit may leave its
+/// `AUParameter` value alone for a scheduled change (Apple's AUDelay does), so
+/// the value the host reports for the unit's parameter is this one.
+#[derive(Debug, Default)]
 pub(crate) struct Echoes {
-    slots: [AtomicU64; ECHOES],
+    slots: Slots,
     next: AtomicUsize,
+    latest: Box<[AtomicU32]>,
 }
 
-impl Default for Echoes {
+#[derive(Debug)]
+struct Slots([AtomicU64; ECHOES]);
+
+impl Default for Slots {
     fn default() -> Self {
-        Self {
-            slots: std::array::from_fn(|_| AtomicU64::new(NO_ECHO)),
-            next: AtomicUsize::new(0),
-        }
+        Self(std::array::from_fn(|_| AtomicU64::new(NO_ECHO)))
     }
 }
 
 impl Echoes {
+    /// For a unit with `parameters` parameters.
+    pub(crate) fn new(parameters: usize) -> Self {
+        Self {
+            latest: (0..parameters).map(|_| AtomicU32::new(NO_LATEST)).collect(),
+            ..Self::default()
+        }
+    }
+
     // shortcut: the address keeps its low 32 bits, so two parameters whose
     // addresses differ only above them share an echo; worst case the person's
     // edit to the other parameter, to a value just scheduled, goes unreported.
@@ -143,16 +159,25 @@ impl Echoes {
         address << 32 | u64::from(value.to_bits())
     }
 
-    /// Remembers a change about to be scheduled.
-    pub(crate) fn push(&self, address: u64, value: f32) {
+    /// Remembers a change about to be scheduled for parameter `param`.
+    pub(crate) fn push(&self, param: u32, address: u64, value: f32) {
         let slot = self.next.fetch_add(1, Relaxed) % ECHOES;
-        self.slots[slot].store(Self::pack(address, value), Relaxed);
+        self.slots.0[slot].store(Self::pack(address, value), Relaxed);
+        if let Some(latest) = self.latest.get(param as usize) {
+            latest.store(value.to_bits(), Relaxed);
+        }
+    }
+
+    /// The last value scheduled for parameter `param`, if any.
+    pub(crate) fn latest(&self, param: u32) -> Option<f32> {
+        let bits = self.latest.get(param as usize)?.load(Relaxed);
+        (bits != NO_LATEST).then(|| f32::from_bits(bits))
     }
 
     /// Whether the node scheduled this change lately.
     pub(crate) fn contains(&self, address: u64, value: f32) -> bool {
         let packed = Self::pack(address, value);
-        self.slots.iter().any(|slot| slot.load(Relaxed) == packed)
+        self.slots.0.iter().any(|slot| slot.load(Relaxed) == packed)
     }
 }
 
@@ -832,12 +857,7 @@ impl Processor {
     /// Schedules a parameter's new value for the first frame of the next
     /// render call, through the unit's own scheduling block, noting it in
     /// `echoes` first. Returns whether it was scheduled.
-    pub(crate) fn set_param(
-        &mut self,
-        param: u32,
-        value: f64,
-        echoes: Option<&Echoes>,
-    ) -> bool {
+    pub(crate) fn set_param(&mut self, param: u32, value: f64, echoes: Option<&Echoes>) -> bool {
         let Some(&address) = self.addresses.get(param as usize) else {
             return false;
         };
@@ -845,7 +865,7 @@ impl Processor {
             return false;
         }
         if let Some(echoes) = echoes {
-            echoes.push(address, value as f32);
+            echoes.push(param, address, value as f32);
         }
         // SAFETY: the block belongs to this unit; Apple documents it as safe
         // to call from any thread context, a render thread included.

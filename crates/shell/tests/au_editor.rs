@@ -306,7 +306,11 @@ mod macos {
             std::thread::sleep(Duration::from_millis(20));
         }
         let changes = au.take_param_changes();
-        assert_eq!(changes, [], "the editor's observer saw the host's own change");
+        assert_eq!(
+            changes,
+            [],
+            "the editor's observer saw the host's own change"
+        );
         println!("au_editor: a scheduled change is not the person's edit");
         au.clear();
     }

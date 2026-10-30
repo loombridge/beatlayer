@@ -945,9 +945,13 @@ impl Instance {
         (has_editor, self.editor.is_some(), self.editor_hidden)
     }
 
-    /// A parameter's value, as the unit reports it.
+    /// A parameter's value: the last one the host scheduled for it, else as
+    /// the unit reports it.
     fn unit_value(&self, param: u32) -> Option<f64> {
         let (parameter, _) = self.params.get(param as usize)?;
+        if let Some(value) = self.echoes.latest(param) {
+            return Some(f64::from(value));
+        }
         // SAFETY: reading a value is a property read on the thread that
         // owns the unit, and the parameter belongs to its tree.
         Some(f64::from(unsafe { parameter.value() }))
@@ -1748,6 +1752,7 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
     };
     main.missing.remove(&device.id);
     let (descriptors, params, visible) = describe(&unit);
+    let param_count = params.len();
     let mut instance = Instance {
         plugin_id: plugin_id.clone(),
         unit,
@@ -1756,7 +1761,7 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
         descriptors,
         ends: None,
         retired: Vec::new(),
-        echoes: Arc::default(),
+        echoes: Arc::new(Echoes::new(param_count)),
         config: None,
         out: false,
         refused: None,
@@ -2098,14 +2103,30 @@ mod tests {
     fn echoes_recognise_the_changes_scheduled() {
         let echoes = Echoes::default();
         assert!(!echoes.contains(0, 0.0), "an empty ring matches nothing");
-        echoes.push(7, 0.5);
+        echoes.push(0, 7, 0.5);
         assert!(echoes.contains(7, 0.5));
         assert!(!echoes.contains(7, 0.25), "another value is the person's");
-        assert!(!echoes.contains(8, 0.5), "another parameter is the person's");
+        assert!(
+            !echoes.contains(8, 0.5),
+            "another parameter is the person's"
+        );
         for value in 0..node::ECHOES {
-            echoes.push(1, value as f32 + 1.0);
+            echoes.push(0, 1, value as f32 + 1.0);
         }
         assert!(!echoes.contains(7, 0.5), "the oldest slot was reused");
+    }
+
+    /// Spec: au-hosting R6. The value reported for a parameter is the last
+    /// one scheduled for it, whatever the unit's own value says.
+    #[test]
+    fn the_last_value_scheduled_is_kept_per_parameter() {
+        let echoes = Echoes::new(2);
+        assert_eq!(echoes.latest(1), None);
+        echoes.push(1, 9, 0.25);
+        echoes.push(1, 9, 0.75);
+        assert_eq!(echoes.latest(1), Some(0.75));
+        assert_eq!(echoes.latest(0), None);
+        assert_eq!(echoes.latest(2), None, "no such parameter");
     }
 
     #[test]

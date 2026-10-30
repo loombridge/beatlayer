@@ -268,13 +268,22 @@ fn an_automated_parameter_is_scheduled_on_the_unit_not_set() {
     // the block gets the last, in one render call. Nothing is set on the
     // unit's parameter from the render thread.
     assert_eq!(host.render_counts(id), Some((1, 1)));
-    // A scheduled change leaves the parameter's own value alone, which a
-    // setValue would have moved.
+    // The unit's own value stays where it was (Apple's AUDelay leaves it
+    // alone for a scheduled change, which a setValue would have moved); the
+    // host reports the value it scheduled.
     let status = host.status(id).expect("a status");
-    assert_eq!(status.values[MIX as usize], (ParamId(MIX), 0.0));
+    assert_eq!(status.values[MIX as usize], (ParamId(MIX), 100.0));
     let channel = &data[..FRAMES];
-    assert!(channel[10].abs() < 0.05, "the impulse is wet: {}", channel[10]);
-    assert!(channel[400].abs() < 0.05, "the impulse is wet: {}", channel[400]);
+    assert!(
+        channel[10].abs() < 0.05,
+        "the impulse is wet: {}",
+        channel[10]
+    );
+    assert!(
+        channel[400].abs() < 0.05,
+        "the impulse is wet: {}",
+        channel[400]
+    );
     let echo: f32 = channel[440..480].iter().map(|s| s.abs()).sum();
     assert!(echo > 0.5, "the wet delay sounds: {echo}");
 }

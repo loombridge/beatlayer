@@ -10,16 +10,12 @@
 //! node, so nothing on the audio thread allocates, locks, or blocks (the
 //! real-time rules); the unit's own code is its own.
 //!
-//! The unit renders one segment at a time, the block split at its parameter
-//! changes (the engine's segment pattern): a parameter change is scheduled
-//! for the segment's first frame, and a note on its own frame within the
-//! segment. Both go through the unit's `scheduleParameterBlock` and
-//! `scheduleMIDIEventBlock`, which Apple documents as safe to call on a
-//! render thread; a parameter's value is never set through its
-//! `AUParameter` on the audio thread. The split is what puts a unit's change
-//! on its exact sample: Apple's Audio Units ignore the frame offset of a
-//! scheduled parameter event (AUDelay's Dry/Wet Mix does), while their MIDI
-//! events land on the frames they're scheduled for.
+//! The unit renders the block in one call. Each parameter's last change in
+//! the block is scheduled for the block's first frame, as Live gives a unit
+//! its changes, and each note on its own frame. Both go through the unit's
+//! `scheduleParameterBlock` and `scheduleMIDIEventBlock`, which Apple
+//! documents as safe to call on a render thread; a parameter's value is
+//! never set through its `AUParameter` on the audio thread.
 
 use std::cell::{Cell, UnsafeCell};
 use std::ptr::NonNull;
@@ -464,45 +460,40 @@ impl Node for AuNode {
         );
         self.pending.clear();
 
-        // The unit renders one segment at a time, split at its parameter
-        // changes: a change is scheduled for the segment's first frame, and
-        // each note on its own frame within the segment.
+        // The unit renders the block in one call. Live gives a unit a
+        // parameter change at the start of the block holding it, so each
+        // parameter's last value in the block is scheduled for the first
+        // frame; each note goes on its own frame.
         let base = self.steady;
         let echoes = self.status.echoes.get().map(|echoes| &**echoes);
-        let clamp = |offset: u32| (offset as usize).min(frames - 1);
-        let mut at = 0;
-        let mut index = 0;
-        let mut failed = false;
-        while at < frames {
-            let end = self.events[index..]
-                .iter()
-                .find(|(offset, event)| matches!(event, In::Param(..)) && clamp(*offset) > at)
-                .map_or(frames, |(offset, _)| clamp(*offset));
-            while index < self.events.len() && clamp(self.events[index].0) < end {
-                let (offset, event) = self.events[index];
-                let scheduled = match event {
-                    In::Param(param, value) => {
-                        #[cfg(feature = "test-hooks")]
-                        self.status.scheduled.fetch_add(1, Relaxed);
-                        processor.set_param(param, value, echoes)
+        for (index, &(offset, event)) in self.events.iter().enumerate() {
+            let scheduled = match event {
+                In::Param(param, value) => {
+                    let later = self.events[index + 1..]
+                        .iter()
+                        .any(|(_, e)| matches!(e, In::Param(p, _) if *p == param));
+                    if later {
+                        continue;
                     }
-                    In::Note(note) => processor.midi(&note, clamp(offset) - at),
-                    In::Midi(message) => processor.midi_message(message, clamp(offset) - at),
-                };
-                if !scheduled {
-                    self.status.dropped.fetch_add(1, Relaxed);
+                    #[cfg(feature = "test-hooks")]
+                    self.status.scheduled.fetch_add(1, Relaxed);
+                    processor.set_param(param, value, echoes)
                 }
-                index += 1;
+                In::Note(note) => processor.midi(&note, (offset as usize).min(frames - 1)),
+                In::Midi(message) => {
+                    processor.midi_message(message, (offset as usize).min(frames - 1))
+                }
+            };
+            if !scheduled {
+                self.status.dropped.fetch_add(1, Relaxed);
             }
-            #[cfg(feature = "test-hooks")]
-            self.status.renders.fetch_add(1, Relaxed);
-            if processor.render(block, base, at, end, self.midi_effect) != 0 {
-                failed = true;
-                break;
-            }
-            let dropped = processor.take_midi_out(block, at, end);
+        }
+        #[cfg(feature = "test-hooks")]
+        self.status.renders.fetch_add(1, Relaxed);
+        let failed = processor.render(block, base, 0, frames, self.midi_effect) != 0;
+        if !failed {
+            let dropped = processor.take_midi_out(block, 0, frames);
             self.status.dropped.fetch_add(dropped, Relaxed);
-            at = end;
         }
         self.steady = self.steady.wrapping_add(frames as u64);
         if failed {

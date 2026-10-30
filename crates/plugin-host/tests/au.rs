@@ -182,10 +182,11 @@ fn an_audio_unit_loads_by_description_with_its_parameters() {
 
 // Spec: au-hosting R2, R3
 #[test]
-fn a_parameter_change_lands_on_its_frame() {
-    // Fully dry, a 1 ms delay, no feedback: the block's impulse sounds at
-    // its own frame, and a change to fully wet at frame 244 is heard from
-    // that exact frame (the wet path's echo lands about 48 frames later).
+fn a_parameter_change_reaches_the_unit_at_the_start_of_its_block() {
+    // Fully dry, a 1 ms delay, no feedback: a change to fully wet at frame
+    // 244 reaches the unit at the block's first frame, as Live gives a unit
+    // its changes, so the whole block is wet (the wet path's echo lands about
+    // 48 frames after each impulse).
     let (host, mut node) = running(&[
         (MIX, 0.0),
         (DELAY_TIME, 0.001),
@@ -203,13 +204,13 @@ fn a_parameter_change_lands_on_its_frame() {
             &channel[240..243]
         );
         assert!(
-            (channel[243] - 1.0).abs() < 0.05,
-            "the impulse at 243 is still dry: {}",
+            channel[243].abs() < 0.05,
+            "the change reached the unit at frame 0, so no dry impulse at 243: {}",
             channel[243]
         );
         assert!(
             channel[244].abs() < 0.05,
-            "the change landed at 244, so no dry impulse there: {}",
+            "and none at 244: {}",
             channel[244]
         );
         assert!(
@@ -228,9 +229,9 @@ fn a_parameter_change_lands_on_its_frame() {
 }
 
 // Spec: au-hosting R3, R6, R17. A playing ramp reaches the unit through its
-// scheduling block at each 32-frame step, one render call per segment, and
-// the unit hears it: the ramp has the mix fully wet by frame 256, so the
-// impulse at frame 400 is no longer dry.
+// scheduling block as one change, the last value in the block, for the
+// block's first frame: one render call, and the unit hears it from frame 0,
+// so the impulse at frame 10 is wet too.
 #[test]
 fn an_automated_parameter_is_scheduled_on_the_unit_not_set() {
     use bl_core::time::Ticks;
@@ -250,6 +251,7 @@ fn an_automated_parameter_is_scheduled_on_the_unit_not_set() {
         ],
     ));
     let mut input = vec![0.0; FRAMES];
+    input[10] = 1.0;
     input[400] = 1.0;
     let transport = TransportInfo {
         playing: true,
@@ -262,15 +264,16 @@ fn an_automated_parameter_is_scheduled_on_the_unit_not_set() {
             .with_notes(&[], &mut out);
         bl_rt::rt_test!({ node.process(&mut block) });
     }
-    // One value at each multiple of 32 frames up to the ramp's end at 256: 9
-    // changes, each starting a segment, the last running to the block's end.
-    // None is set on the unit's parameter from the render thread.
-    assert_eq!(host.render_counts(id), Some((9, 9)));
+    // The ramp has a value at each multiple of 32 frames up to its end at 256;
+    // the block gets the last, in one render call. Nothing is set on the
+    // unit's parameter from the render thread.
+    assert_eq!(host.render_counts(id), Some((1, 1)));
     // A scheduled change leaves the parameter's own value alone, which a
     // setValue would have moved.
     let status = host.status(id).expect("a status");
     assert_eq!(status.values[MIX as usize], (ParamId(MIX), 0.0));
     let channel = &data[..FRAMES];
+    assert!(channel[10].abs() < 0.05, "the impulse is wet: {}", channel[10]);
     assert!(channel[400].abs() < 0.05, "the impulse is wet: {}", channel[400]);
     let echo: f32 = channel[440..480].iter().map(|s| s.abs()).sum();
     assert!(echo > 0.5, "the wet delay sounds: {echo}");

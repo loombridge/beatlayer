@@ -60,6 +60,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // Down, and Dump is a button.
         ("control_surface.list", Exception(Query)),
         ("control_surface.surfaces", Exception(Query)),
+        ("control_surface.templates", Exception(Query)),
         (
             "control_surface.set",
             settings(

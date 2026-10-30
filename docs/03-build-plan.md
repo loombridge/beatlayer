@@ -783,7 +783,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.3 | todo |  |  |
 | 7.3b | todo |  |  |
 | 7.4 | todo |  |  |
-| 7.5 | todo |  |  |
+| 7.5 | done | 30 October 2026 | [#516](https://github.com/loombridge/beatlayer/pull/516): the `ControlSurface` trait and its host thread in `bl-control`, the Control Surfaces table with Dump on the Tempo & MIDI page kept in the preferences, surfaces owning their ports after manual mappings, surface notes reaching tracks, a test surface, and the `control_surface.*` commands |
 | 7.6 | todo |  |  |
 | 7.7 | todo |  |  |
 | 7.8 | todo |  |  |

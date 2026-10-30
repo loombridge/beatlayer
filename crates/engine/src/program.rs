@@ -11,6 +11,7 @@ use bl_model::{ChainId, Channel, DeviceId, ParamId, Scale, SceneId, Tap, TrackId
 
 use crate::disjoint::Shared;
 use crate::drum::DrumNotes;
+use crate::follower::{Ask, Follow};
 use crate::midi::{MidiRoutes, OutOwner, TrackMidiInput};
 use crate::mixer::{MeterReading, Route, TrackMixer};
 use crate::modbus::{Bus, Control, ROWS};
@@ -1717,12 +1718,22 @@ impl EngineProgram {
                 delivered += gather(events, slot, from, until, scratch);
             }
             let at = m * ROWS * stride;
+            // Spec: cv-tools R27. A CV input is read as the interface
+            // delivered it for these frames, before any track runs.
+            let cv_in = self.slots[slot as usize]
+                .cv
+                .and_then(|cv| self.cv_devices[cv as usize].in_channels.first().copied())
+                .flatten()
+                .and_then(|channel| usize::from(channel).checked_sub(1))
+                .filter(|&index| index < self.device_input_channels)
+                .map(|index| &self.device_input[index * stride + from as usize..][..frames]);
             let mut ctl = Control {
                 frames,
                 events: if signal { &[] } else { scratch.as_slice() },
                 transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
+                cv_in,
                 // SAFETY: no task runs yet, and the bus reads only the rows
                 // before the ones `out` holds.
                 earlier: unsafe { Bus::new(&self.bus, stride, frames) }.below(m * ROWS),
@@ -1755,6 +1766,7 @@ impl EngineProgram {
                 transport,
                 sample_rate: self.sample_rate,
                 tempo: &self.tempo,
+                cv_in: None,
                 earlier: Bus::EMPTY,
                 // SAFETY: no task runs yet, and nothing else reads these rows.
                 out: unsafe { self.bus.elements(at..at + ROWS * stride) },
@@ -1770,6 +1782,54 @@ impl EngineProgram {
             }
         }
         delivered
+    }
+
+    /// Asks each CV Clock In, in the order of the song's tracks and chains,
+    /// to follow the pulses on its input for the block `ask` describes,
+    /// before any track runs (`docs/specs/cv-tools.md`, R24, R25). `others`
+    /// says who leads already; the first CV Clock In to lead takes the
+    /// lead from the ones after it. Returns it, if one does.
+    pub(crate) fn follow_cv_clocks(
+        &mut self,
+        ask: &Ask,
+        looped: Option<(f64, f64)>,
+        mut others: crate::cv_clock::Others,
+        answer: &mut Follow,
+    ) -> Option<crate::cv_clock::Leader> {
+        let stride = self.max_frames;
+        let frames = ask.frames.min(stride);
+        let mut leader = None;
+        for cv in &self.cv_devices {
+            let Some(&channel) = cv.in_channels.first() else {
+                continue;
+            };
+            let input = channel
+                .and_then(|channel| usize::from(channel).checked_sub(1))
+                .filter(|&index| index < self.device_input_channels)
+                .map(|index| &self.device_input[index * stride..][..frames]);
+            let NodeSlot { node, bypass, .. } = &mut self.slots[cv.slot as usize];
+            let Some(node) = node
+                .as_mut()
+                .and_then(Instance::as_node)
+                .filter(|_| !*bypass)
+            else {
+                continue;
+            };
+            let cx = crate::cv_clock::Cx {
+                ask,
+                input,
+                looped,
+                others,
+            };
+            if let Some(tempo) = node.follow_cv(&cx, answer) {
+                leader = Some(crate::cv_clock::Leader {
+                    device: cv.device,
+                    tempo,
+                });
+                others = crate::cv_clock::Others::Cv;
+            }
+        }
+        leader
     }
 
     /// Sums sidechain `s`'s sources into its buffer, each through its

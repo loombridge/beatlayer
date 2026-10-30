@@ -16,6 +16,7 @@
 
 use bl_engine::NudgeDirection;
 use bl_shell::arrangement_commands::{AUTOMATION_ARM, FOLLOW};
+use bl_shell::link_commands as link;
 use bl_shell::transport::{self, Field, Group};
 use bl_shell::transport_commands as ids;
 use bl_shell::{Invocation, Shell};
@@ -107,6 +108,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::NudgeDown | Element::NudgeUp => Some(ids::PHASE_NUDGE),
         Element::TapTempo => Some(ids::TAP_TEMPO),
         Element::ExternalSync => Some(ids::SET_EXTERNAL_SYNC),
+        Element::LinkToggle => Some(link::SET_ENABLED),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -128,6 +130,10 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::ExternalSync => Some(Invocation::new(
             ids::SET_EXTERNAL_SYNC,
             json!({ "on": !shell.external_sync() }),
+        )),
+        Element::LinkToggle => Some(Invocation::new(
+            link::SET_ENABLED,
+            json!({ "on": !shell.link_enabled() }),
         )),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
@@ -175,6 +181,17 @@ pub fn automation_overridden(shell: &Shell) -> bool {
             .document()
             .tracks()
             .any(bl_model::Track::automation_overridden)
+}
+
+/// What the Link toggle reads: Link while Link is off, then the number of
+/// other peers, as in 0 Links, 1 Link, 2 Links (the Link spec, R18).
+#[must_use]
+pub fn link_text(on: bool, peers: u64) -> String {
+    match (on, peers) {
+        (false, _) => "Link".to_owned(),
+        (true, 1) => "1 Link".to_owned(),
+        (true, peers) => format!("{peers} Links"),
+    }
 }
 
 /// The Capture MIDI command (the capture MIDI spec).
@@ -351,6 +368,23 @@ impl TransportFields {
                     ..Look::default()
                 });
             }
+            Element::LinkToggle => {
+                // Spec: link R17, R18, R23. It reads Link while off, and
+                // the other peers' number while on.
+                let on = shell.link_enabled();
+                let text = link_text(on, shell.link_peers());
+                return Some(Look {
+                    on,
+                    value: Some(text.clone()),
+                    text: Some(text),
+                    description: Some(
+                        "Shares the tempo, beat and phase with other apps on the network \
+                         through Link."
+                            .to_owned(),
+                    ),
+                    ..Look::default()
+                });
+            }
             Element::NudgeDown | Element::NudgeUp => {
                 // Spec: transport R28, R29. Pressed while held, and off while
                 // an outside tempo leads.
@@ -410,7 +444,9 @@ impl TransportFields {
         let editable = transport::editable(shell, field.group);
         if !editable {
             // Spec: midi-clock R17. With EXT on, the clock sets the tempo.
-            let why = if field.group == Group::Tempo && shell.external_tempo().is_some() {
+            let why = if field.group == Group::Tempo && shell.cv_clock_leader().is_some() {
+                "a CV Clock In sets it"
+            } else if field.group == Group::Tempo && shell.external_tempo().is_some() {
                 "the incoming MIDI clock sets it"
             } else {
                 "the song changes it along the arrangement"

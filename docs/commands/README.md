@@ -8357,6 +8357,8 @@ A CV device's part of its routing section (L-DEV-026): the choosers of its outpu
 | `calibrated` | boolean | yes | Whether the device holds a calibration, which Clear takes away. |
 | `readout` | string | yes | What the readout under the buttons says: `Not calibrated`, `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps, worst 0.6 cents`. Empty where the device doesn't calibrate. |
 | `ports` | array of string | yes | The ports' names, outputs then inputs, in the order their choosers are drawn. |
+| `returns` | boolean | yes | Whether the device brings the hardware's sound back, with an Audio From and a Hardware Latency under its ports (the instruments): the CV effects and CV In have none. |
+| `lamp` | boolean or null | yes | CV Clock In's pulse light, lit for a moment after each pulse; null for any other device (the CV tools spec, R24). |
 
 <details><summary>JSON Schema</summary>
 
@@ -8372,6 +8374,14 @@ A CV device's part of its routing section (L-DEV-026): the choosers of its outpu
       "description": "Whether the device calibrates, with Calibrate and Clear buttons under its choosers (CV Instrument).",
       "type": "boolean"
     },
+    "lamp": {
+      "default": null,
+      "description": "CV Clock In's pulse light, lit for a moment after each pulse; null for any other device (the CV tools spec, R24).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "ports": {
       "description": "The ports' names, outputs then inputs, in the order their choosers are drawn.",
       "items": {
@@ -8382,13 +8392,20 @@ A CV device's part of its routing section (L-DEV-026): the choosers of its outpu
     "readout": {
       "description": "What the readout under the buttons says: `Not calibrated`, `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps, worst 0.6 cents`. Empty where the device doesn't calibrate.",
       "type": "string"
+    },
+    "returns": {
+      "default": true,
+      "description": "Whether the device brings the hardware's sound back, with an Audio From and a Hardware Latency under its ports (the instruments): the CV effects and CV In have none.",
+      "type": "boolean"
     }
   },
   "required": [
     "calibrates",
     "calibrated",
     "readout",
-    "ports"
+    "ports",
+    "returns",
+    "lamp"
   ],
   "type": "object"
 }
@@ -17825,6 +17842,7 @@ What `link.state` returns.
 | `phase` | number or null | yes | How far the session is through the quantum now, in quarter notes; null while Link has never been on. |
 | `session_playing` | boolean | yes | Whether the session's start and stop state is playing. |
 | `start_stop_sync` | boolean | yes | Whether starts and stops are shared with the peers that share them. |
+| `show_toggle` | boolean | yes | Whether the Control Bar shows the Link toggle and its menu. |
 | `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
 | `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
 
@@ -17861,6 +17879,10 @@ What `link.state` returns.
       "description": "Whether the session's start and stop state is playing.",
       "type": "boolean"
     },
+    "show_toggle": {
+      "description": "Whether the Control Bar shows the Link toggle and its menu.",
+      "type": "boolean"
+    },
     "start_stop_sync": {
       "description": "Whether starts and stops are shared with the peers that share them.",
       "type": "boolean"
@@ -17894,6 +17916,7 @@ What `link.state` returns.
     "phase",
     "session_playing",
     "start_stop_sync",
+    "show_toggle",
     "waiting_for_link",
     "starts_in"
   ],
@@ -24346,6 +24369,106 @@ What `clip_view.show_properties` returns.
 
 </details>
 
+### `PushBrowse`
+
+What Browse Mode shows (push-2-tracks R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `load` | string | yes | What Load does: `add`, `replace` or `add_track`. |
+| `replaces` | [`DeviceId`](#deviceid) or null | yes | With `replace`, the device Load replaces. |
+| `columns` | array of [`PushBrowseColumn`](#pushbrowsecolumn) | yes | The columns, from the leftmost. |
+| `in_use` | integer, at least 0 | yes | The column in use, from 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Browse Mode shows (push-2-tracks R14).",
+  "properties": {
+    "columns": {
+      "description": "The columns, from the leftmost.",
+      "items": {
+        "$ref": "#/$defs/PushBrowseColumn"
+      },
+      "type": "array"
+    },
+    "in_use": {
+      "description": "The column in use, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "load": {
+      "description": "What Load does: `add`, `replace` or `add_track`.",
+      "type": "string"
+    },
+    "replaces": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "With `replace`, the device Load replaces."
+    }
+  },
+  "required": [
+    "load",
+    "replaces",
+    "columns",
+    "in_use"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushBrowseColumn`
+
+One column of Browse Mode (push-2-tracks R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entries` | array of string | yes | The names of its entries, in order. |
+| `selected` | integer or null | yes | The selected entry, from 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One column of Browse Mode (push-2-tracks R14).",
+  "properties": {
+    "entries": {
+      "description": "The names of its entries, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected entry, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "entries",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -24520,6 +24643,7 @@ One connected Push 2.
 | `touch_strip` | [`PushTouchStrip`](#pushtouchstrip) | yes | The touch strip. |
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
+| `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
 
 <details><summary>JSON Schema</summary>
 
@@ -24527,6 +24651,17 @@ One connected Push 2.
 {
   "description": "One connected Push 2.",
   "properties": {
+    "browse": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushBrowse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Browse Mode shows, while it is the display mode."
+    },
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
@@ -24653,7 +24788,8 @@ One connected Push 2.
     "leds",
     "touch_strip",
     "setup",
-    "display"
+    "display",
+    "browse"
   ],
   "type": "object"
 }
@@ -32451,7 +32587,7 @@ What a command that switches something returns: its new state.
 
 ### `Switched`
 
-What `link.set_enabled` and `link.set_start_stop_sync` return.
+What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -32461,7 +32597,7 @@ What `link.set_enabled` and `link.set_start_stop_sync` return.
 
 ```json
 {
-  "description": "What `link.set_enabled` and `link.set_start_stop_sync` return.",
+  "description": "What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.",
   "properties": {
     "on": {
       "description": "Whether it's on now.",
@@ -35701,6 +35837,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `waiting_for_link` | boolean | yes | Whether a start waits for a Link session's phase (the Link spec, R7): `waiting_start`, with Link on and peers in the session. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 | `external_sync` | boolean | yes | Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on. |
+| `cv_clock_leader` | [`DeviceId`](#deviceid) or null | yes | The CV Clock In that leads the song's tempo, while one does and no MIDI clock leads (the CV tools spec, R24, R25, R31): then `tempo` is the tempo it measures. Null otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -35732,6 +35869,18 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "counting_in": {
       "description": "Whether the count-in is sounding, before playback and recording start.",
       "type": "boolean"
+    },
+    "cv_clock_leader": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The CV Clock In that leads the song's tempo, while one does and no MIDI clock leads (the CV tools spec, R24, R25, R31): then `tempo` is the tempo it measures. Null otherwise."
     },
     "engine_running": {
       "description": "Whether the audio engine runs on a device, so the transport can play. While it doesn't, the transport's commands are refused.",
@@ -35910,7 +36059,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "waiting_frame",
     "waiting_for_link",
     "tap_tempo",
-    "external_sync"
+    "external_sync",
+    "cv_clock_leader"
   ],
   "type": "object"
 }

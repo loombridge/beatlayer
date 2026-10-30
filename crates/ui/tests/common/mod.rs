@@ -179,7 +179,27 @@ impl Harness {
         Self::with_shell(window, shell)
     }
 
+    /// A harness on the preferences kept in `dir`, over a null stream paced
+    /// by hand, with the Link toggle as the preferences have it: a second
+    /// harness on the same directory is a relaunch.
+    pub fn manual_in(window: Window, dir: &std::path::Path) -> Self {
+        let (mut shell, control) = testing::rig_in(dir);
+        shell.start_audio();
+        let mut harness = Self::as_installed(window, shell);
+        harness.control = Some(control);
+        harness
+    }
+
     fn with_shell(window: Window, mut shell: Shell) -> Self {
+        // The harness's Control Bar has Live's measured positions (L-CTRL-002
+        // is hidden there); the tests of the Link toggle show it again.
+        shell
+            .run("link.set_show_toggle", json!({ "on": false }))
+            .unwrap();
+        Self::as_installed(window, shell)
+    }
+
+    fn as_installed(window: Window, mut shell: Shell) -> Self {
         if window == Window::Second {
             // The second window of a set opens on the other main view.
             shell.run("view.toggle_second_window", json!({})).unwrap();

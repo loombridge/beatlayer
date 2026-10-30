@@ -10,7 +10,7 @@ use bl_core::midi::MidiInputEvent;
 use bl_midi_io::{MidiPorts, OutputBus, input_queue};
 use bl_model::{Command, Editor, TrackId, TrackKind};
 use bl_push::content::{
-    Content, Contents, Ctx, Gesture, MakeContents, Pad, PadEvent, Paint, StripEvent, Turn,
+    Content, Ctx, Gesture, MakeContents, Pad, PadEvent, Paint, StripEvent, Turn,
 };
 use bl_push::content::{StripUse, Target};
 use bl_push::leds::Led;
@@ -144,6 +144,14 @@ impl Content for Recorder {
     }
 }
 
+/// Which contents a rig's modes have.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Contents {
+    Recorders,
+    Browse,
+    Placeholders,
+}
+
 pub struct Rig {
     pub clock: TestClock,
     pub ports: MidiPorts,
@@ -163,15 +171,21 @@ impl Rig {
     /// A rig with a set of eight MIDI tracks, a Push 2 not yet plugged in,
     /// and recording contents in every mode.
     pub fn new() -> Self {
-        Self::build(false)
+        Self::build(Contents::Recorders)
+    }
+
+    /// A rig whose Browse Mode is the real one, with the other modes
+    /// recording.
+    pub fn browsing() -> Self {
+        Self::build(Contents::Browse)
     }
 
     /// A rig whose modes have no content of their own yet: the placeholders.
     pub fn placeholders() -> Self {
-        Self::build(true)
+        Self::build(Contents::Placeholders)
     }
 
-    fn build(placeholders: bool) -> Self {
+    fn build(which: Contents) -> Self {
         let backend = bl_midi_io::TestBackend::new();
         let clock = TestClock::new();
         let (sender, engine) = input_queue(16_384);
@@ -194,18 +208,22 @@ impl Rig {
                         flags: Arc::clone(&flags),
                     }) as Box<dyn Content>
                 };
-                Contents {
+                bl_push::Contents {
                     pads: [recorder("Note"), recorder("Session")],
                     display: [
                         recorder("Device"),
-                        recorder("Browse"),
+                        if which == Contents::Browse {
+                            Box::new(bl_push::browse::Browse::new())
+                        } else {
+                            recorder("Browse")
+                        },
                         recorder("Mix"),
                         recorder("Clip"),
                     ],
                 }
             })
         };
-        let make = if placeholders {
+        let make = if which == Contents::Placeholders {
             bl_push::placeholder_contents()
         } else {
             make

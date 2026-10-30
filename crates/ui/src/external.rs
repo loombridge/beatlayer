@@ -448,6 +448,44 @@ fn draw_cv(
         );
     }
     let rows = ports.len();
+    if !cv.returns {
+        // A CV effect or CV In brings no sound back: below its ports, only
+        // CV Clock In's readout and pulse light (R24).
+        if !cv.readout.is_empty() {
+            let (_, readout) = cv_row(frame, rows);
+            let rect = Rect::from_min_max(
+                pos2(readout.left() - CV_NAME + 10.0, readout.top()),
+                pos2(readout.right(), readout.top() + 2.0 * CV_ROW),
+            );
+            let id = control_id(device, "clock");
+            ui.interact(rect, id, Sense::focusable_noninteractive());
+            let painter = ui.painter_at(section_rect(frame));
+            painter.circle_filled(
+                pos2(rect.left() - 5.0, rect.top() + CV_ROW / 2.0),
+                3.0,
+                if cv.lamp == Some(true) {
+                    c.text.0
+                } else {
+                    c.separator.0
+                },
+            );
+            painter.text(
+                pos2(rect.left(), rect.top()),
+                Align2::LEFT_TOP,
+                &cv.readout,
+                theme.small_font(),
+                c.text_dim.0,
+            );
+            describe(
+                ui,
+                id,
+                Role::Label,
+                "Clock",
+                &cv.readout.replace('\n', ", "),
+            );
+        }
+        return;
+    }
     let (label, control) = cv_row(frame, rows);
     name(label, "Audio From");
     draw_chooser(

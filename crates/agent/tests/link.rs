@@ -1,10 +1,10 @@
-//! Link through the agent API (WP-7.14, `docs/specs/link.md` R15):
-//! `link.set_enabled` talks on the network, so a headless agent is refused
-//! it unless it is autonomous; `link.set_start_stop_sync` is a kept
-//! preference. Both are run by ID, and `link.state` and `transport.state`
-//! read their effects back. Link runs on its own here, so no peer joins the
-//! session, and these tests run one at a time with `bl-link`'s
-//! (`.config/nextest.toml`).
+//! Link through the agent API (WP-7.14, WP-7.15, `docs/specs/link.md` R15,
+//! R24): `link.set_enabled` talks on the network, so a headless agent is
+//! refused it unless it is autonomous; `link.set_start_stop_sync` and
+//! `link.set_show_toggle` are kept preferences. Each is run by ID, and
+//! `link.state` and `transport.state` read their effects back. Link runs on
+//! its own here, so no peer joins the session, and these tests run one at a
+//! time with `bl-link`'s (`.config/nextest.toml`).
 
 use bl_agent::Agent;
 use bl_agent::client::{Client, InProcess};
@@ -87,4 +87,22 @@ fn link_set_start_stop_sync_is_set_by_id_and_read_back() {
     .unwrap();
     let state = run(&mut client, "link.state", json!({})).unwrap();
     assert_eq!(state["start_stop_sync"], false);
+}
+
+#[test]
+fn link_set_show_toggle_is_set_by_id_and_read_back() {
+    // Spec: link R17, R24. A kept preference, so no autonomy is needed, and
+    // the Control Bar's toggle shows in a new install.
+    let mut client = client(false);
+    let state = run(&mut client, "link.state", json!({})).unwrap();
+    assert_eq!(state["show_toggle"], true);
+    let off = run(&mut client, "link.set_show_toggle", json!({ "on": false })).unwrap();
+    assert_eq!(off["on"], false);
+    let state = run(&mut client, "link.state", json!({})).unwrap();
+    assert_eq!(state["show_toggle"], false, "link.state reads it back");
+    assert_eq!(state["enabled"], false, "hiding it leaves Link as it is");
+    let on = run(&mut client, "link.set_show_toggle", json!({})).unwrap();
+    assert_eq!(on["on"], true, "left out, it switches to the other state");
+    let state = run(&mut client, "link.state", json!({})).unwrap();
+    assert_eq!(state["show_toggle"], true);
 }

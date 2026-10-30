@@ -90,6 +90,21 @@ pub trait NativeDevice: Send + 'static {
         let _ = (modulation, params);
     }
 
+    /// Follows a clock on the device's CV input for a block, before any
+    /// track runs (`docs/specs/cv-tools.md`, R24): answers `answer` and
+    /// returns the tempo the device leads with, or `None` while it leads
+    /// nothing. `params` hold the controls as they stand at the block's
+    /// start. The default follows nothing.
+    fn follow_cv(
+        &mut self,
+        params: &ParamBank,
+        cx: &bl_engine::cv_clock::Cx<'_>,
+        answer: &mut bl_engine::Follow,
+    ) -> Option<f64> {
+        let _ = (params, cx, answer);
+        None
+    }
+
     /// Whether the device is a modulator driven by the audio, notes or MIDI
     /// it hears at its place in the chain (WP-5.11): it writes its rows in
     /// [`process`](Self::process), with [`Audio::row_mut`], while its track
@@ -130,6 +145,16 @@ pub trait NativeDevice: Send + 'static {
 pub struct Modulation<'c, 'a> {
     ctl: &'c mut Control<'a>,
     range: Range<usize>,
+}
+
+impl<'a> Modulation<'_, 'a> {
+    /// What the modulator's CV input reads over the stretch, in sample
+    /// values (1.0 is +10 V), or `None` for 0 V: an input at no channel, or
+    /// at one the interface lacks (`docs/specs/cv-tools.md`, R27).
+    #[must_use]
+    pub fn cv_in(&self) -> Option<&'a [f32]> {
+        self.ctl.cv_in.map(|data| &data[self.range.clone()])
+    }
 }
 
 impl Modulation<'_, '_> {
@@ -376,6 +401,13 @@ impl<'a> Audio<'_, 'a> {
     #[must_use]
     pub fn playing(&self) -> bool {
         self.block.transport().playing
+    }
+
+    /// The song frame that frame `frame` of the stretch plays
+    /// ([`TransportInfo::song_frame`]).
+    #[must_use]
+    pub fn song_frame(&self, frame: usize) -> i64 {
+        self.block.transport().song_frame(self.range.start + frame)
     }
 
     /// Row `index` of the rows a signal modulator writes ([`bl_engine::modbus::ROWS`] of them,
@@ -841,7 +873,20 @@ impl<D: NativeDevice> Node for NativeNode<D> {
             };
             self.device.control(&mut modulation, &self.params);
         }
+        // Spec: cv-tools R30. A modulator with display data publishes it
+        // after each part, as `process` does for any other device.
+        if let Some((writer, _)) = &mut self.display {
+            writer.publish(|out| self.device.display(out));
+        }
         true
+    }
+
+    fn follow_cv(
+        &mut self,
+        cx: &bl_engine::cv_clock::Cx<'_>,
+        answer: &mut bl_engine::Follow,
+    ) -> Option<f64> {
+        self.device.follow_cv(&self.params, cx, answer)
     }
 
     fn flush(&mut self, events: &[NodeEvent]) {

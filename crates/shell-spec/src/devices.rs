@@ -989,6 +989,19 @@ pub struct CvSection {
     /// The ports' names, outputs then inputs, in the order their choosers
     /// are drawn.
     pub ports: Vec<String>,
+    /// Whether the device brings the hardware's sound back, with an Audio
+    /// From and a Hardware Latency under its ports (the instruments): the
+    /// CV effects and CV In have none.
+    #[serde(default = "returns_default")]
+    pub returns: bool,
+    /// CV Clock In's pulse light, lit for a moment after each pulse; null
+    /// for any other device (the CV tools spec, R24).
+    #[serde(default)]
+    pub lamp: Option<bool>,
+}
+
+fn returns_default() -> bool {
+    true
 }
 
 /// A device's MIDI sidechain section, in the same left strip as a

@@ -54,7 +54,18 @@ pub(super) struct SurfaceHost {
     pub(super) selection_armed: std::collections::BTreeSet<bl_model::TrackId>,
     /// The track the selection last armed or found armed.
     pub(super) armed_for: Option<bl_model::TrackId>,
+    /// The browser's lists a surface that browses reads, what they were made
+    /// from and their revision (push-2-tracks R13).
+    catalogue: Option<CatalogueCopy>,
 }
+
+/// The lists as last copied, the browser's state they were made from, and
+/// how many times they have been copied.
+type CatalogueCopy = (
+    (u64, usize, Option<std::path::PathBuf>),
+    Arc<crate::browser::catalogue::Catalogue>,
+    u64,
+);
 
 fn info(report: RowReport, row: usize) -> ids::RowInfo {
     let port = |name: Option<String>, present: Option<bool>| {
@@ -360,6 +371,7 @@ impl Shell {
         let engine = self.audio.transport_state();
         let session = self.session.state();
         let rows = self.row_views();
+        let browse = self.surface_browse();
         let doc = self.editor.document();
         let drum = crate::devices::shown_track(&self.arrangement, doc)
             .and_then(|track| self.devices.drum_view(doc, track));
@@ -390,9 +402,36 @@ impl Shell {
             session_record: self.session_run.is_some(),
             metronome: self.editor.document().settings().metronome.enabled,
             drum,
+            browse: Some(browse),
+            selected_device: self.devices.selected().filter(|&device| {
+                doc.device_place(device)
+                    .is_some_and(|place| self.arrangement.selected_tracks().contains(&place.track))
+            }),
             session_view: self.main_view == MainView::Session,
             selection_armed: self.surface.selection_armed.iter().copied().collect(),
         }
+    }
+
+    /// The browser's lists and switches for the surfaces; the lists are
+    /// copied again only when what they come from changed.
+    fn surface_browse(&mut self) -> bl_control::browse::Browse {
+        let key = self.browser_view.catalogue_key();
+        let copied = match self.surface.catalogue.take() {
+            Some((made, catalogue, revision)) if made == key => (made, catalogue, revision),
+            old => (
+                key,
+                Arc::new(self.browser_view.catalogue()),
+                old.map_or(1, |(_, _, revision)| revision + 1),
+            ),
+        };
+
+        let browse = bl_control::browse::Browse {
+            revision: copied.2,
+            preview: self.browser_view.preview_on(),
+            catalogue: copied.1.clone(),
+        };
+        self.surface.catalogue = Some(copied);
+        browse
     }
 
     /// Lights the remote indicators for a moment when surfaces took or sent
@@ -464,7 +503,14 @@ impl Shell {
             None => self.end_surface_gesture(),
         }
         self.surface.applying = true;
-        let result = self.run(&request.id, request.args);
+        // Spec: push-2-tracks R12. A track a surface inserts goes where a
+        // person's goes, after the selected track and in its group, and is
+        // selected.
+        let result = if request.id == "track.create" && request.args.get("id").is_none() {
+            self.invoke_inner(&request.id, request.args)
+        } else {
+            self.run(&request.id, request.args)
+        };
         self.surface.applying = false;
         let ran = result.is_ok();
         if ran {

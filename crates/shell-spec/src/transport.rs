@@ -193,6 +193,11 @@ pub struct TransportState {
     /// clock spec, R15, R17). Off while no input has Sync on.
     #[serde(default)]
     pub external_sync: bool,
+    /// The CV Clock In that leads the song's tempo, while one does and no
+    /// MIDI clock leads (the CV tools spec, R24, R25, R31): then `tempo` is
+    /// the tempo it measures. Null otherwise.
+    #[serde(default)]
+    pub cv_clock_leader: Option<bl_model::DeviceId>,
 }
 
 /// Which Phase Nudge button nudges the song, in `transport.state`.

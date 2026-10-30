@@ -606,6 +606,9 @@ pub struct Shell {
     /// Whether a peer's change of the tempo took the tempo envelope's
     /// place, as the engine last published it (the Link spec, R4).
     tempo_override: bool,
+    /// Whether a start waits for the Link session's phase, as the engine last
+    /// published it (the Link spec, R22).
+    link_waiting_view: bool,
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
@@ -625,6 +628,9 @@ pub struct Shell {
     /// the quarter notes of it that had arrived when the upper sync lamp
     /// last lit (midi-clock R16, R17).
     sync_in: bl_engine::SyncInState,
+    /// The CV Clock In leading the song's tempo as [`Shell::poll`] last
+    /// heard of it (cv-tools R25).
+    cv_leader: Option<bl_engine::cv_clock::Leader>,
     sync_in_seen: u64,
     sync_in_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
@@ -1317,6 +1323,7 @@ impl Shell {
             link_peers_shown: 0,
             keep_tempo: false,
             tempo_override: false,
+            link_waiting_view: false,
             midi_listed: std::time::Instant::now(),
             push_display,
             midi_seen: (0, 0),
@@ -1324,6 +1331,7 @@ impl Shell {
             sync_seen: 0,
             sync_lit: None,
             sync_in: bl_engine::SyncInState::default(),
+            cv_leader: None,
             sync_in_seen: 0,
             sync_in_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),

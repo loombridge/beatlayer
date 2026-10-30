@@ -23,6 +23,7 @@
 //! The behaviour is in the browser spec.
 
 pub mod arrange;
+pub mod catalogue;
 pub mod collections;
 pub mod columns;
 pub mod db;

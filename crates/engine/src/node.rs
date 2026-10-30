@@ -581,6 +581,20 @@ pub trait Node: Send + 'static {
         false
     }
 
+    /// Follows a clock on the node's CV input for a block, before any track
+    /// runs (`docs/specs/cv-tools.md`, R24): the node answers `answer` with
+    /// the tempo it leads with and returns that tempo in BPM, or returns
+    /// `None` while it leads nothing. The default is no clock, and does
+    /// nothing.
+    fn follow_cv(
+        &mut self,
+        cx: &crate::cv_clock::Cx<'_>,
+        answer: &mut crate::follower::Follow,
+    ) -> Option<f64> {
+        let _ = (cx, answer);
+        None
+    }
+
     /// Takes parameter changes while the node is switched off and doesn't
     /// process, as CLAP's `flush` does; their offsets mean nothing here. A
     /// node that keeps parameter values should apply them, or it comes back

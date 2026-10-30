@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use bl_control::{Kind, Ring};
 
+pub mod browse;
 pub mod buttons;
 pub mod content;
 pub mod controls;
@@ -66,13 +67,15 @@ pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
 }
 
-/// The contents of the modes that are built: Note Mode's own, and the
-/// placeholders for the others (`docs/specs/push-2-notes.md`).
+/// The contents of the modes that are built: Note Mode's and Browse Mode's own,
+/// and the placeholders for the others (`docs/specs/push-2-notes.md`,
+/// `docs/specs/push-2-tracks.md` R5).
 #[must_use]
 pub fn contents() -> MakeContents {
     Arc::new(|| {
         let mut contents = Contents::placeholders();
         contents.pads[0] = Box::new(note::Note::new());
+        contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
         contents
     })
 }

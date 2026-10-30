@@ -19,6 +19,7 @@ use bl_shell::audio::{
 };
 use bl_shell::control_surface_commands as control_surface;
 use bl_shell::keymap::Origin;
+use bl_shell::link_commands as link_ids;
 use bl_shell::midi_io_commands as midi_ids;
 use bl_shell::settings::{
     Appearance, BRIGHTNESS, COLOR_HUE, COLOR_INTENSITY, ClipColour, DefaultWarpMode,
@@ -371,6 +372,7 @@ impl SettingsUi {
                         &mut self.assistant_key,
                     );
                 }
+                SettingsPage::Link => link_page(ui, shell, theme, &mut rows, &mut events),
                 SettingsPage::TempoMidi => {
                     tempo_midi_page(ui, shell, theme, &mut rows, &mut events);
                 }
@@ -1943,6 +1945,61 @@ fn library_page(
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_default();
     rows.copyable_row(ui, "Path", "user-library", &path);
+}
+
+/// Link (L-SET-013; the Link spec, R20): the Link section's Show Link Toggle
+/// and Start Stop Sync. While no audio engine runs it holds only a message,
+/// and Link stays as it is set. Link Audio's section comes with its package.
+fn link_page(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    if !shell.audio().engine_running() {
+        rows.read_note(
+            ui,
+            "Link needs the audio engine running. Switch it on in the Audio settings.",
+        );
+        return;
+    }
+    rows.heading(ui, "Link");
+    let choices = [("Show", true), ("Hide", false)].map(|(label, value)| Choice {
+        label: label.to_owned(),
+        value,
+        leds: NO_LEDS,
+    });
+    let rect = rows.row(ui, "Show Link Toggle", SettingsLayout::CHOOSER);
+    if let Some(on) = chooser(
+        ui,
+        theme,
+        "show-link-toggle",
+        "Show Link Toggle",
+        rect,
+        &choices,
+        Some(&shell.link_toggle_shown()),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_SHOW_TOGGLE,
+            json!({ "on": on }),
+        )));
+    }
+    let rect = rows.row(ui, "Start Stop Sync", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "link-start-stop-sync",
+        "Start Stop Sync",
+        rect,
+        shell.link_start_stop_sync(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_START_STOP_SYNC,
+            json!({ "on": on }),
+        )));
+    }
 }
 
 /// Tempo & MIDI (L-SET-014): the second section's Show Resync Button, and the

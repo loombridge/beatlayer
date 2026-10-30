@@ -6624,3 +6624,147 @@ fn an_agent_routes_the_cv_devices_calibrates_and_reads_external_and_cv_back() {
     let read = call(&mut client, "query", json!({ "id": instrument }));
     assert_eq!(read["cv"], json!({ "calibrated": false }));
 }
+
+// Spec: cv-tools R20, R30, R31. An agent adds CV Clock Out, CV Clock In, CV
+// In and CV Utility by their types, routes each with `device.set_external`,
+// maps CV In's slots, and reads back the choosers under `external`, the
+// mappings, each device's display data with `device.display`, and the leader
+// in `transport.state`.
+#[test]
+fn an_agent_routes_the_four_cv_devices_maps_cv_in_and_reads_everything_back() {
+    use bl_devices::{cv_clock_in_type, cv_clock_out_type, cv_in_type, cv_utility_type};
+
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    let mut host = EngineHost::with_registry(64, registry);
+    host.client
+        .transport()
+        .shell
+        .set_device_types(bl_devices::device_types());
+    host.call(
+        "run",
+        json!({ "commands": [{ "command": "track.create",
+            "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } }] }),
+    );
+    let track = host.call("query", json!({ "path": "tracks" }))["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "Track")
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let add = |host: &mut EngineHost, t: bl_engine::DeviceType| {
+        host.call(
+            "run",
+            json!({ "commands": [
+                { "command": "arrangement.select_tracks", "args": { "tracks": [track] } },
+            ] }),
+        );
+        host.call(
+            "run",
+            json!({ "commands": [
+                { "command": "device.add",
+                  "args": { "device": { "kind": t.kind, "name": t.name, "role": t.role } } },
+            ] }),
+        )["results"][0]["result"]["device"]
+            .clone()
+    };
+    let clock_out = add(&mut host, cv_clock_out_type());
+    let clock_in = add(&mut host, cv_clock_in_type());
+    let cv_in = add(&mut host, cv_in_type());
+    let utility = add(&mut host, cv_utility_type());
+
+    // Route them, and set the Utility to a fixed 2.5 V: A's Gain at 0 % and
+    // the sidechain off leave its Offset alone.
+    host.call(
+        "run",
+        json!({ "label": "Patch", "commands": [
+            { "command": "device.set_external",
+              "args": { "device": clock_out, "cv_outputs": [{ "name": "Clock", "channel": 1 }] } },
+            { "command": "device.set_external",
+              "args": { "device": clock_in, "cv_inputs": [{ "name": "Clock", "channel": 2 }] } },
+            { "command": "device.set_external",
+              "args": { "device": cv_in, "cv_inputs": [{ "name": "CV", "channel": 4 }] } },
+            { "command": "device.set_external",
+              "args": { "device": utility, "cv_outputs": [{ "name": "CV", "channel": 3 }] } },
+            { "command": "device.set_param", "args": { "device": utility, "param": 0, "value": 0.0 } },
+            { "command": "device.set_param", "args": { "device": utility, "param": 3, "value": 2.5 } },
+            { "command": "modulator.map",
+              "args": { "device": cv_in, "slot": 0,
+                        "target": { "type": "device", "device": utility, "param": 1 } } },
+            { "command": "modulator.map",
+              "args": { "device": cv_in, "slot": 1,
+                        "target": { "type": "mixer", "track": track, "param": "volume" } } },
+        ] }),
+    );
+
+    // The choosers read back under `external`, the slots under `mappings`.
+    let read = host.call("query", json!({ "id": cv_in }));
+    assert_eq!(
+        read["external"]["cv_inputs"][0],
+        json!({ "name": "CV", "channel": 4 })
+    );
+    assert_eq!(read["mappings"].as_array().unwrap().len(), 2, "{read}");
+    assert_eq!(read["mappings"][0]["target"]["type"], "device");
+    let read = host.call("query", json!({ "id": clock_out }));
+    assert_eq!(
+        read["external"]["cv_outputs"][0],
+        json!({ "name": "Clock", "channel": 1 })
+    );
+    let read = host.call("query", json!({ "id": clock_in }));
+    assert_eq!(
+        read["external"]["cv_inputs"][0],
+        json!({ "name": "Clock", "channel": 2 })
+    );
+    let read = host.call("query", json!({ "id": utility }));
+    assert_eq!(
+        read["external"]["cv_outputs"][0],
+        json!({ "name": "CV", "channel": 3 })
+    );
+
+    // Play: the display data is each device's last voltages, CV In reads 0 V
+    // with no interface, and CV Clock In has heard no pulse.
+    host.call("transport", json!({ "action": "play" }));
+    host.play_to(24_000 + 1_000);
+    host.publish_displays();
+    let display = |host: &mut EngineHost, device: &Value| {
+        host.call(
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let reading = |display: &Value, name: &str| -> Value {
+        display["readings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {display}"))
+            .clone()
+    };
+    let shown = display(&mut host, &utility);
+    assert_eq!(shown["live"], true);
+    assert_eq!(reading(&shown, "CV")["unit"], "V");
+    assert!((reading(&shown, "CV")["value"].as_f64().unwrap() - 2.5).abs() < 0.01);
+    let shown = display(&mut host, &clock_out);
+    let volts = reading(&shown, "Clock")["value"].as_f64().unwrap();
+    assert!(volts == 0.0 || volts == 5.0, "{volts}");
+    let shown = display(&mut host, &cv_in);
+    assert_eq!(reading(&shown, "CV")["value"], 0.0);
+    let shown = display(&mut host, &clock_in);
+    assert_eq!(reading(&shown, "Leads")["value"], 0.0);
+    assert_eq!(reading(&shown, "Last pulse")["text"], "None");
+    assert_eq!(reading(&shown, "Leader")["text"], "Nothing");
+
+    // Nothing leads the tempo.
+    let state = host.call(
+        "run",
+        json!({ "commands": [{ "command": "transport.state", "args": {} }] }),
+    );
+    assert_eq!(
+        state["results"][0]["result"]["cv_clock_leader"],
+        Value::Null
+    );
+}

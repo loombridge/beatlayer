@@ -144,6 +144,8 @@ pub struct Snapshot {
     pub setup: Setup,
     /// What the display shows.
     pub screen: Screen,
+    /// What Browse Mode shows, while it is the display mode.
+    pub browse: Option<crate::browse::State>,
     /// What the display's thread is doing.
     pub display: Status,
 }
@@ -168,6 +170,7 @@ impl Snapshot {
             strip_leds: [0; 31],
             setup: Setup::default(),
             screen: Screen::default(),
+            browse: None,
             display: Status::default(),
         }
     }

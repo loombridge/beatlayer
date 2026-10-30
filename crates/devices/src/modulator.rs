@@ -507,6 +507,58 @@ fn at(params: &ParamBank, id: ParamId, f: usize) -> f64 {
         .map_or(0.0, |index| f64::from(params.ramp(index)[f]))
 }
 
+/// The parameters of a modulator's mappings, looked up once, and the rows it
+/// writes from its output (R13, R14, R16).
+pub(crate) struct Mapper {
+    depth: usize,
+    mode: usize,
+    polarity: usize,
+    amounts: [usize; SLOTS as usize],
+    mins: [usize; SLOTS as usize],
+    maxes: [usize; SLOTS as usize],
+}
+
+impl Mapper {
+    pub(crate) fn new(params: &ParamBank) -> Self {
+        let index = |id: ParamId| params.index(id).expect("the description holds it");
+        Self {
+            depth: index(DEPTH),
+            mode: index(MODE),
+            polarity: index(POLARITY),
+            amounts: std::array::from_fn(|s| index(modulator::amount(s as u8))),
+            mins: std::array::from_fn(|s| index(modulator::min(s as u8))),
+            maxes: std::array::from_fn(|s| index(modulator::max(s as u8))),
+        }
+    }
+
+    /// Writes every slot's two rows for frame `f` of the stretch, from the
+    /// output `u` (0 to 1) of the modulator on that frame.
+    pub(crate) fn write(
+        &self,
+        modulation: &mut Modulation<'_, '_>,
+        params: &ParamBank,
+        f: usize,
+        u: f64,
+    ) {
+        let depth = f64::from(params.ramp(self.depth)[f]) / 100.0;
+        let remote = params.ramp(self.mode)[f] >= 0.5;
+        let unipolar = params.ramp(self.polarity)[f] >= 0.5;
+        for slot in 0..SLOTS as usize {
+            let amount = f64::from(params.ramp(self.amounts[slot])[f]) / 100.0;
+            let (contribution, hold) = if remote {
+                let low = f64::from(params.ramp(self.mins[slot])[f]) / 100.0;
+                let high = f64::from(params.ramp(self.maxes[slot])[f]) / 100.0;
+                (0.0, (low + depth * u * (high - low)).clamp(0.0, 1.0) as f32)
+            } else {
+                let swing = if unipolar { u } else { 2.0 * u - 1.0 };
+                ((depth * amount * swing) as f32, NOT_HELD)
+            };
+            modulation.row_mut(slot * 2)[f] = contribution;
+            modulation.row_mut(slot * 2 + 1)[f] = hold;
+        }
+    }
+}
+
 /// A modulator: a source, with the clock that places its output on the grid
 /// and the post-processing and slot rows every modulator shares.
 struct Modulator<S> {
@@ -629,13 +681,7 @@ impl<S: Source> NativeDevice for Modulator<S> {
             self.restart();
         }
         self.was_playing = playing;
-        let index = |id: ParamId| params.index(id).expect("the description holds it");
-        let (depth, mode, polarity) = (index(DEPTH), index(MODE), index(POLARITY));
-        let amounts: [usize; SLOTS as usize] =
-            std::array::from_fn(|s| index(modulator::amount(s as u8)));
-        let mins: [usize; SLOTS as usize] = std::array::from_fn(|s| index(modulator::min(s as u8)));
-        let maxes: [usize; SLOTS as usize] =
-            std::array::from_fn(|s| index(modulator::max(s as u8)));
+        let mapper = Mapper::new(params);
         for f in 0..modulation.frames() {
             if self.clock.is_multiple_of(GRID) {
                 if self.primed {
@@ -648,22 +694,7 @@ impl<S: Source> NativeDevice for Modulator<S> {
             }
             let t = (self.clock % GRID) as f64 / GRID as f64;
             let u = self.from + (self.to - self.from) * t;
-            let depth = f64::from(params.ramp(depth)[f]) / 100.0;
-            let remote = params.ramp(mode)[f] >= 0.5;
-            let unipolar = params.ramp(polarity)[f] >= 0.5;
-            for slot in 0..SLOTS as usize {
-                let amount = f64::from(params.ramp(amounts[slot])[f]) / 100.0;
-                let (contribution, hold) = if remote {
-                    let low = f64::from(params.ramp(mins[slot])[f]) / 100.0;
-                    let high = f64::from(params.ramp(maxes[slot])[f]) / 100.0;
-                    (0.0, (low + depth * u * (high - low)).clamp(0.0, 1.0) as f32)
-                } else {
-                    let swing = if unipolar { u } else { 2.0 * u - 1.0 };
-                    ((depth * amount * swing) as f32, NOT_HELD)
-                };
-                modulation.row_mut(slot * 2)[f] = contribution;
-                modulation.row_mut(slot * 2 + 1)[f] = hold;
-            }
+            mapper.write(modulation, params, f, u);
             self.clock += 1;
         }
     }

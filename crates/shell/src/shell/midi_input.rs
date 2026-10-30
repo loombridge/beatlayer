@@ -204,7 +204,13 @@ impl Shell {
         let sender = self.midi.sender().clone();
         let output = self.midi.output().clone();
         let clock = self.midi.test_clock();
-        self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
+        self.midi = MidiHost::new(
+            backend,
+            sender,
+            output,
+            &self.prefs.midi,
+            std::sync::Arc::clone(&self.push_display),
+        );
         self.midi
             .set_surface_templates(bl_control::template::kinds(&self.surface.templates));
         if let Some(clock) = clock {
@@ -220,6 +226,13 @@ impl Shell {
     pub fn use_test_clock(&mut self, clock: bl_core::clock::TestClock) {
         self.midi.set_test_clock(clock.clone());
         self.audio.set_test_clock(clock);
+    }
+
+    /// Claims Push 2's display interface with `claim` from now on, in place
+    /// of `nusb`'s: a test's sink.
+    pub fn use_push_display(&mut self, claim: bl_push::Claim) {
+        self.push_display = std::sync::Arc::clone(&claim);
+        self.midi.set_push_display(claim);
     }
 
     /// The MIDI ports and the computer MIDI keyboard.
@@ -244,6 +257,12 @@ impl Shell {
         let changed = before != self.midi.ports();
         if changed {
             self.send_sync();
+        }
+        // Spec: push-2 R2. A Push 2 that took a row keeps it for the next start.
+        let prefs = self.midi.prefs();
+        if prefs != self.prefs.midi {
+            self.prefs.midi = prefs;
+            self.save_preferences();
         }
         changed
     }

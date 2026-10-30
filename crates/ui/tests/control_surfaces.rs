@@ -153,7 +153,7 @@ fn a_missing_port_shows_by_name() {
 
 // Spec: supported-controllers R1. The Control Surface chooser lists None,
 // then the supported controllers by their product names in alphabetical
-// order (the Launchpads so far), and choosing one runs `control_surface.set`
+// order (the Launchkeys and Launchpads so far), and choosing one runs `control_surface.set`
 // with its ID.
 #[test]
 fn the_chooser_lists_the_launchpads_by_their_product_names() {
@@ -171,6 +171,8 @@ fn the_chooser_lists_the_launchpads_by_their_product_names() {
     };
     let order = [
         "None",
+        "Launchkey MK3",
+        "Launchkey MK4",
         "Launchpad Mini MK3",
         "Launchpad Pro MK3",
         "Launchpad X",

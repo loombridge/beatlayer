@@ -148,9 +148,15 @@ pub const PITCH_ENV_SUSTAIN: ParamId = ParamId(53);
 pub const PITCH_ENV_RELEASE: ParamId = ParamId(54);
 /// How far the pitch envelope moves the pitch, in semitones each way.
 pub const PITCH_ENV_AMOUNT: ParamId = ParamId(55);
+/// Slice mode: how slices sound together, Mono, Poly or Thru (the sampler
+/// spec, R23). Older sets lack it and open on Mono.
+pub const PLAYBACK: ParamId = ParamId(56);
 
 /// The Mode choices: Classic, One-Shot, then Slice.
 pub const MODES: [&str; 3] = ["Classic", "One-Shot", "Slice"];
+
+/// The Playback choices: Mono, Poly, then Thru.
+pub const PLAYBACKS: [&str; 3] = ["Mono", "Poly", "Thru"];
 
 /// The Slice By choices.
 pub const SLICE_BYS: [&str; 4] = ["Transient", "Beat", "Region", "Manual"];
@@ -525,6 +531,10 @@ pub fn sampler_type() -> DeviceType {
             ParamUnit::Semitones,
         )
         .describe("How far the pitch envelope moves the pitch, up to 48 semitones each way."),
+        ParamDescriptor::choice(PLAYBACK, "Playback", &PLAYBACKS, 0).describe(
+            "Slice only: Mono plays one slice at a time; Poly plays slices together, as many as \
+             Voices allows; Thru plays one slice at a time on past its end to the region's end.",
+        ),
     ];
     DeviceType::native(SAMPLER, "Simpler", DeviceRole::Instrument)
         .with_description(DeviceDescription::new(params).with_layout(layout()))
@@ -546,6 +556,7 @@ fn layout() -> DeviceLayout {
         BODY_HEIGHT,
         &[
             (SLICE_BY, Widget::Chooser),
+            (PLAYBACK, Widget::Chooser),
             (SLICE_SENSITIVITY, Widget::Knob),
             (SLICE_DIVISION, Widget::Number),
             (SLICE_REGIONS, Widget::Number),
@@ -658,6 +669,17 @@ enum Mode {
     OneShot,
     /// Monophonic, one slice per note.
     Slice,
+}
+
+/// How Slice mode's slices sound together (R23).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Playback {
+    /// One slice at a time, each to its own end.
+    Mono,
+    /// Several at once, as Classic's voices.
+    Poly,
+    /// One slice at a time, on past its end to the region's end.
+    Thru,
 }
 
 /// How Slicing places its slices.
@@ -847,6 +869,11 @@ impl Sampler {
             mode,
             region_start,
             region_end,
+            playback: match params.value(at(PLAYBACK)) as usize {
+                1 => Playback::Poly,
+                2 => Playback::Thru,
+                _ => Playback::Mono,
+            },
             looping: mode == Mode::Classic && params.value(at(LOOP)) >= 0.5,
             loop_start,
             loop_end: region_end,
@@ -986,9 +1013,10 @@ impl Sampler {
             return;
         }
         // One-Shot and Slice are monophonic: the new note fades any
-        // sounding voice out. Classic fades a voice on the same key with
-        // Retrig on, and past the voice limit the oldest sounding voice.
-        if s.mode != Mode::Classic {
+        // sounding voice out. Classic, and Slice under Poly (R23), fade a
+        // voice on the same key with Retrig on, and past the voice limit the
+        // oldest sounding voice.
+        if s.mode != Mode::Classic && !(sliced && s.playback == Playback::Poly) {
             for voice in self.playing() {
                 voice.fade(s);
             }
@@ -1026,7 +1054,9 @@ impl Sampler {
         voice.position = audition.map_or(region_start as f64, |(at, _)| at);
         voice.start_position = voice.position;
         voice.start_song_frame = song_frame;
-        voice.end = audition.map_or(region_end, |(_, end)| end);
+        // Thru plays a slice on to the region's end (R23).
+        let thru = sliced && s.playback == Playback::Thru;
+        voice.end = audition.map_or(if thru { s.region_end } else { region_end }, |(_, end)| end);
         voice.pitch = from;
         voice.target = pitch;
         voice.step = if s.glide_frames == 0 || sliced {
@@ -1454,6 +1484,8 @@ struct Settings {
     /// cycle read it.
     sample_rate: f64,
     mode: Mode,
+    /// Slice mode's Playback (R23).
+    playback: Playback,
     region_start: u64,
     region_end: u64,
     looping: bool,

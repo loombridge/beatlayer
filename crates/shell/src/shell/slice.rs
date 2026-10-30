@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use bl_core::time::{TempoMap, Ticks, TimeSignature};
+use bl_core::time::{TICKS_PER_QUARTER, TempoMap, Ticks, TimeSignature};
 use bl_devices::sampler as sampler_ids;
 use bl_model::{
     AudioData, Chain, ChainId, Clip, ClipData, ClipId, Command, ContentHash, Device, DeviceId,
@@ -19,8 +19,8 @@ use bl_model::{
 };
 use bl_project::rack_preset::{RackPreset, Samples, Saved};
 use bl_shell_spec::slice::{
-    self as ids, DRUM_RACK_PRESET, FACTORY_PRESETS, ONE_SAMPLER_PRESET, STEP, SliceArgs, SliceBy,
-    SliceDialogStatus, SliceResult,
+    self as ids, DRUM_RACK_PRESET, DRUM_RACK_STEP, DrumRackSliced, FACTORY_PRESETS,
+    ONE_SAMPLER_PRESET, STEP, SliceArgs, SliceBy, SliceDialogStatus, SliceResult,
 };
 use serde_json::Value;
 
@@ -46,6 +46,12 @@ const SAMPLER: &str = "beatlayer.snapshot";
 const SLICE_BY_MANUAL: f64 = 3.0;
 /// The Mode choice that plays one slice per note (sampler R13).
 const MODE_SLICE: f64 = 2.0;
+/// The Playback choices that sound slices together and play them on to the
+/// region's end (sampler R23).
+const PLAYBACK_POLY: usize = 1;
+const PLAYBACK_THRU: usize = 2;
+/// The choke group a Mono or Thru Simpler's slices share (slice-to-midi R15).
+const CHOKE_GROUP: u8 = 1;
 /// The Mode choice that plays the region straight through (sampler R10).
 const MODE_ONE_SHOT: f64 = 1.0;
 /// Where a user slicing preset's samples go when the set's media store
@@ -84,16 +90,22 @@ struct Plan {
     /// The file's own sample rate, which a sampler's flags and slices count
     /// frames at (the sampler spec, R22); the engine's for a rendered file.
     file_rate: u32,
-    /// Each note's start and end, in ticks from the clip's contents (R9).
-    notes: Vec<(Ticks, Ticks)>,
     /// How the preset shapes the track.
     preset: Preset,
-    /// The new track's name (the clip's), place, and scene.
+    /// Where the track goes and what its clip holds.
+    landing: Landing,
+}
+
+/// Where a new MIDI track goes and what its clip holds (R7, R9, R16).
+struct Landing {
+    /// Each note's start and end, in ticks from the clip's contents.
+    notes: Vec<(Ticks, Ticks)>,
+    /// The new track's name, place, and scene.
     name: String,
     parent: Option<TrackId>,
     index: usize,
     scene: Option<SceneId>,
-    /// The audio clip's place and length, and whether it loops (R9).
+    /// The clip's place and length, and whether it loops.
     start: Ticks,
     length: Ticks,
     looping: bool,
@@ -118,6 +130,15 @@ impl Shell {
                 self.slice_dialog = None;
                 Ok(to_value(&self.slice_status()))
             }
+            ids::SLICE_TO_DRUM_RACK | ids::SLICE_TO_MIDI_TRACK => {
+                let args: ids::SimplerArgs = Self::args(id, args)?;
+                let slices = self.simpler_slices(id, args.device)?;
+                if id == ids::SLICE_TO_DRUM_RACK {
+                    self.slice_to_drum_rack(id, &slices)
+                } else {
+                    self.slice_to_new_track(id, &slices)
+                }
+            }
             ids::SLICE => {
                 // Spec: R1. The dialog's OK runs the command and closes the
                 // dialog; a refusal leaves it open on the slice to fix.
@@ -135,6 +156,25 @@ impl Shell {
         match id {
             ids::SLICE | ids::OPEN => self.slice_clip(args).is_ok(),
             ids::CLOSE => true,
+            // Spec: R15. A Simpler in Slice mode with a slice.
+            ids::SLICE_TO_DRUM_RACK | ids::SLICE_TO_MIDI_TRACK => {
+                let device = args
+                    .get("device")
+                    .and_then(|value| serde_json::from_value::<DeviceId>(value.clone()).ok());
+                // Slice mode is the cheap part of R17's rule; whether
+                // there is a slice is left to the command, as finding
+                // transients on every frame a menu is open would stall the
+                // UI. Manual's slices are in the device, so it checks them.
+                // shortcut: Manual slices outside the region still enable
+                // the item, which the command then refuses; fix when the
+                // menus take a cached slice count.
+                self.slice_mode_simpler(id, device).is_ok_and(|found| {
+                    let by = sampler_ids::sampler_type()
+                        .description
+                        .value(&found.params, sampler_ids::SLICE_BY);
+                    by != Some(SLICE_BY_MANUAL) || !found.slices.is_empty()
+                })
+            }
             _ => false,
         }
     }
@@ -210,18 +250,7 @@ impl Shell {
             let track = doc
                 .clip_track(clip_id)
                 .ok_or_else(|| invalid(id, "no clip has that ID"))?;
-            let parent = doc.parent(track);
-            let siblings: Vec<TrackId> = match parent {
-                Some(group) => doc
-                    .track(group)
-                    .map(|group| group.children().collect())
-                    .unwrap_or_default(),
-                None => doc.top_level().collect(),
-            };
-            let index = siblings
-                .iter()
-                .position(|&other| other == track)
-                .map_or(0, |at| at + 1);
+            let (parent, index) = self.track_after(track);
             let scene = doc.track(track).and_then(|track| {
                 track
                     .slots()
@@ -309,15 +338,17 @@ impl Shell {
             ends,
             file_frames,
             file_rate,
-            notes,
             preset,
-            name: clip.name.clone(),
-            parent,
-            index,
-            scene,
-            start: clip.start,
-            length: clip.length,
-            looping: audio.looping,
+            landing: Landing {
+                notes,
+                name: clip.name.clone(),
+                parent,
+                index,
+                scene,
+                start: clip.start,
+                length: clip.length,
+                looping: audio.looping,
+            },
         };
         if warped {
             return self.render_slices(id, clip_id, song_region.0, song_region.1, plan);
@@ -325,6 +356,24 @@ impl Shell {
         let media = audio.media;
         let result = self.build_sliced_track(id, &plan, media)?;
         Ok(to_value(&result))
+    }
+
+    /// The group and position a track made directly after `track` takes.
+    fn track_after(&self, track: TrackId) -> (Option<TrackId>, usize) {
+        let doc = self.editor.document();
+        let parent = doc.parent(track);
+        let siblings: Vec<TrackId> = match parent {
+            Some(group) => doc
+                .track(group)
+                .map(|group| group.children().collect())
+                .unwrap_or_default(),
+            None => doc.top_level().collect(),
+        };
+        let index = siblings
+            .iter()
+            .position(|&other| other == track)
+            .map_or(0, |at| at + 1);
+        (parent, index)
     }
 
     /// The clip's file, decoded at the engine's rate, in frames: what the
@@ -572,7 +621,11 @@ impl Shell {
             *last = total;
         }
         plan.file_frames = total;
-        let name = format!("{} Slice [{}].wav", plan.name, crate::recording::stamp());
+        let name = format!(
+            "{} Slice [{}].wav",
+            plan.landing.name,
+            crate::recording::stamp()
+        );
         let request = Request {
             kind: Kind::Slice,
             name,
@@ -624,15 +677,32 @@ impl Shell {
         plan: &Plan,
         media: ContentHash,
     ) -> Result<SliceResult, ShellError> {
-        let track: TrackId = self.editor.new_id();
         let device: DeviceId = self.editor.new_id();
-        let clip: ClipId = self.editor.new_id();
         let device = self.slice_devices(device, plan, media);
         let base = match plan.preset {
             Preset::OneSampler => PLAY_NOTE,
             _ => FIRST_NOTE,
         };
-        let notes = plan
+        let result = self.insert_sliced_track(id, &plan.landing, device, base, STEP)?;
+        Ok(SliceResult {
+            slices: plan.frames.len(),
+            ..result
+        })
+    }
+
+    /// Makes the track `landing` describes, holding `device` and a clip whose
+    /// notes rise from `base`, as one undo step named `step`.
+    fn insert_sliced_track(
+        &mut self,
+        id: &str,
+        landing: &Landing,
+        device: Device,
+        base: u8,
+        step: &'static str,
+    ) -> Result<SliceResult, ShellError> {
+        let track: TrackId = self.editor.new_id();
+        let clip: ClipId = self.editor.new_id();
+        let notes = landing
             .notes
             .iter()
             .enumerate()
@@ -648,16 +718,16 @@ impl Shell {
             })
             .collect::<Vec<_>>();
         let mut data = MidiData::new(notes);
-        data.looping = plan.looping;
+        data.looping = landing.looping;
         let midi_clip = Clip {
             id: clip,
-            name: plan.name.clone(),
-            start: if plan.scene.is_some() {
+            name: landing.name.clone(),
+            start: if landing.scene.is_some() {
                 Ticks::ZERO
             } else {
-                plan.start
+                landing.start
             },
-            length: plan.length,
+            length: landing.length,
             offset: Ticks::ZERO,
             mute: false,
             data: ClipData::Midi(data),
@@ -668,15 +738,15 @@ impl Shell {
             colour: None,
             info_text: String::new(),
         };
-        self.editor.begin(STEP);
+        self.editor.begin(step);
         let outcome = (|| -> Result<(), ShellError> {
             self.editor
                 .apply(Command::CreateTrack {
                     id: track,
                     kind: TrackKind::Midi,
-                    name: plan.name.clone(),
-                    parent: plan.parent,
-                    index: plan.index,
+                    name: landing.name.clone(),
+                    parent: landing.parent,
+                    index: landing.index,
                 })
                 .map_err(|error| failed(id, error))?;
             self.editor
@@ -686,7 +756,7 @@ impl Shell {
                     device,
                 })
                 .map_err(|error| failed(id, error))?;
-            match plan.scene {
+            match landing.scene {
                 Some(scene) => self.editor.apply(Command::CreateSlotClip {
                     track,
                     scene,
@@ -715,7 +785,7 @@ impl Shell {
                 Ok(SliceResult {
                     track,
                     clip,
-                    slices: plan.frames.len(),
+                    slices: landing.notes.len(),
                 })
             }
             Err(error) => {
@@ -812,6 +882,229 @@ impl Shell {
             remap_macros(&mut rack, &preset.rack);
         }
         rack
+    }
+}
+
+/// A Simpler in Slice mode and the slices it plays (R15, R16), in frames of
+/// its edited sample at its own rate.
+struct SimplerSlices {
+    device: Device,
+    /// The slice boundaries: the region's start, each cut, the region's end.
+    bounds: Vec<u64>,
+    /// The edited sample's length in frames.
+    frames: u64,
+    /// The Playback choice (sampler R23): 0 Mono, 1 Poly, 2 Thru.
+    playback: usize,
+    /// The sample's own rate, for the clip's times.
+    rate: u32,
+}
+
+impl SimplerSlices {
+    fn thru(&self) -> bool {
+        self.playback == PLAYBACK_THRU
+    }
+
+    fn mono(&self) -> bool {
+        self.playback != PLAYBACK_POLY
+    }
+
+    /// The region's Start and End flags.
+    fn region(&self) -> (u64, u64) {
+        (self.bounds[0], self.bounds[self.bounds.len() - 1])
+    }
+}
+
+impl Shell {
+    /// The Simpler `device` (or the selected device) names, refused unless
+    /// it is in Slice mode (R17).
+    fn slice_mode_simpler(
+        &self,
+        id: &str,
+        device: Option<DeviceId>,
+    ) -> Result<&bl_model::Device, ShellError> {
+        let device = device
+            .or_else(|| self.devices.selected())
+            .ok_or_else(|| unavailable(id, "select a device first"))?;
+        let found = self
+            .editor
+            .document()
+            .device(device)
+            .filter(|found| is_sampler(found))
+            .ok_or_else(|| unavailable(id, "the device isn't Simpler"))?;
+        let description = sampler_ids::sampler_type().description;
+        match description.value(&found.params, sampler_ids::MODE) {
+            Some(mode) if mode as usize == MODE_SLICE as usize => Ok(found),
+            _ => Err(unavailable(id, "Simpler isn't in Slice mode")),
+        }
+    }
+
+    /// The Simpler `device` (or the selected device) names and its slices,
+    /// refused unless it is in Slice mode with a slice (R17).
+    fn simpler_slices(
+        &self,
+        id: &str,
+        device: Option<DeviceId>,
+    ) -> Result<SimplerSlices, ShellError> {
+        let found = self.slice_mode_simpler(id, device)?;
+        let doc = self.editor.document();
+        let description = sampler_ids::sampler_type().description;
+        let value = |param| description.value(&found.params, param).unwrap_or_default();
+        let media = found
+            .media_at(0)
+            .ok_or_else(|| unavailable(id, "load a sample first"))?;
+        let audio = self
+            .edited_audio(media, &found.sample_edits)
+            .ok_or_else(|| failed(id, "the sample's file is missing"))?;
+        let frames = audio.frames() as u64;
+        let region = found
+            .region
+            .map_or((0, frames), |region| region.frames_in(frames));
+        let bpm = if found.warp.warp {
+            found.warp.bpm.unwrap_or(120.0)
+        } else {
+            doc.settings().tempo.bpm_at(Ticks::ZERO).get()
+        };
+        let sixteenth = f64::from(audio.sample_rate()) * 60.0 / bpm / 4.0;
+        let bounds =
+            sampler_ids::slice_boundaries(&audio, region, &value, sixteenth, &found.slices);
+        if bounds.len() < 2 {
+            return Err(unavailable(id, "Simpler has no slice"));
+        }
+        Ok(SimplerSlices {
+            device: found.clone(),
+            bounds,
+            frames,
+            playback: value(sampler_ids::PLAYBACK) as usize,
+            rate: audio.sample_rate(),
+        })
+    }
+
+    /// A Drum Rack of `slices`, one chain per slice (R15): each receives the
+    /// note its slice played, plays C3 and holds a One-Shot copy of the
+    /// Simpler on its slice.
+    fn simpler_drum_rack(&mut self, id: DeviceId, slices: &SimplerSlices) -> Device {
+        let old = &slices.device;
+        let mut rack = Device::rack(id, RackKind::Drum);
+        rack.enabled = old.enabled;
+        if old.name != sampler_ids::sampler_type().name {
+            rack.name.clone_from(&old.name);
+        }
+        let end = slices.region().1;
+        for (at, bounds) in slices.bounds.windows(2).enumerate() {
+            let mut copy = old.clone();
+            copy.reassign_ids(&mut || self.editor.new_id());
+            copy.params.insert(sampler_ids::MODE, MODE_ONE_SHOT);
+            // Under Thru a slice plays on to the region's end (sampler R23).
+            let to = if slices.thru() { end } else { bounds[1] };
+            copy.region = ((bounds[0], to) != (0, slices.frames)).then_some(SampleRegion::Frames {
+                start: bounds[0],
+                end: to,
+            });
+            let chain_id: ChainId = self.editor.new_id();
+            let note = u8::try_from(usize::from(PLAY_NOTE) + at).expect("at most 64 slices");
+            let mut chain = Chain::for_pad(chain_id, format!("Slice {}", at + 1), note)
+                .with_devices(vec![copy]);
+            chain.play = PLAY_NOTE;
+            // Mono and Thru play one slice at a time: one choke group.
+            chain.choke = slices.mono().then_some(CHOKE_GROUP);
+            rack.chains.push(chain);
+        }
+        rack
+    }
+
+    /// `device.slice_to_drum_rack` (R15): the Simpler becomes the rack, in its
+    /// place.
+    fn slice_to_drum_rack(
+        &mut self,
+        id: &str,
+        slices: &SimplerSlices,
+    ) -> Result<Value, ShellError> {
+        let device = slices.device.id;
+        let place = self
+            .editor
+            .document()
+            .device_place(device)
+            .ok_or_else(|| failed(id, format!("{device} isn't in a chain")))?;
+        let rack_id: DeviceId = self.editor.new_id();
+        let rack = self.simpler_drum_rack(rack_id, slices);
+        let chains = rack.chains.iter().map(|chain| chain.id).collect();
+        // A chain holds one instrument, so the Simpler goes first, taking its
+        // automation and mappings with it.
+        self.editor
+            .transact(DRUM_RACK_STEP, |editor| {
+                editor.apply(Command::RemoveDevice { device })?;
+                match place.chain {
+                    None => editor.apply(Command::InsertDevice {
+                        track: place.track,
+                        index: place.index,
+                        device: rack,
+                    })?,
+                    Some(chain) => editor.apply(Command::InsertChainDevice {
+                        chain,
+                        index: place.index,
+                        device: rack,
+                    })?,
+                };
+                Ok::<_, bl_model::EditError>(())
+            })
+            .map_err(|error| failed(id, error))?;
+        self.devices.select_only(rack_id);
+        self.changed();
+        Ok(to_value(&DrumRackSliced {
+            device: rack_id,
+            chains,
+        }))
+    }
+
+    /// `device.slice_to_midi_track` (R16): a new track after the Simpler's
+    /// that plays its slices from a looping clip, the Simpler left as it is.
+    fn slice_to_new_track(
+        &mut self,
+        id: &str,
+        slices: &SimplerSlices,
+    ) -> Result<Value, ShellError> {
+        let doc = self.editor.document();
+        let track = doc
+            .device_place(slices.device.id)
+            .ok_or_else(|| failed(id, format!("{} isn't in a chain", slices.device.id)))?
+            .track;
+        let (parent, index) = self.track_after(track);
+        let scene = self.scene_view_scene();
+        let start = if scene.is_some() {
+            Ticks::ZERO
+        } else {
+            self.arrangement.insert_marker().max(Ticks::ZERO)
+        };
+        // The slices' times at the sample's tempo: its warp tempo while Warp
+        // is on, else the set's where the clip starts.
+        let bpm = if slices.device.warp.warp {
+            slices.device.warp.bpm.unwrap_or(120.0)
+        } else {
+            doc.settings().tempo.bpm_at(start).get()
+        };
+        let ticks = |frame: u64| {
+            let seconds = (frame - slices.bounds[0]) as f64 / f64::from(slices.rate.max(1));
+            Ticks((seconds * bpm / 60.0 * TICKS_PER_QUARTER as f64).round() as i64)
+        };
+        let notes = slices
+            .bounds
+            .windows(2)
+            .map(|bounds| (ticks(bounds[0]), ticks(bounds[1])))
+            .collect();
+        let landing = Landing {
+            notes,
+            name: slices.device.name.clone(),
+            parent,
+            index,
+            scene,
+            start,
+            length: ticks(slices.region().1).max(Ticks(1)),
+            looping: true,
+        };
+        let rack_id: DeviceId = self.editor.new_id();
+        let rack = self.simpler_drum_rack(rack_id, slices);
+        let result = self.insert_sliced_track(id, &landing, rack, PLAY_NOTE, STEP)?;
+        Ok(to_value(&result))
     }
 }
 

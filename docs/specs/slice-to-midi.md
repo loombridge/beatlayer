@@ -1,6 +1,6 @@
 # Slice to New MIDI Track
 
-- **Status:** partial (R1 to R14 implemented, R7 reworded for WP-7.33; R15 to R17 drafts for WP-7.33b)
+- **Status:** implemented
 - **Work packages:** WP-4.16 (R1 to R14); WP-7.33 (R7's samplers on frame-exact regions); WP-7.33b (Simpler's own Slice to Drum Rack and Slice to New MIDI Track, R15 to R17)
 - **Parity-matrix row:** Audio clips and warping: Slice to New MIDI Track (transients, warp markers, beat divisions, slicing presets)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026, and the UI parity reference's observations of Live 12.4.3 on macOS (10 October 2026); for R15 to R17, the online edition read 23 October 2026 (sections 13.1, 31.11.1.3 and 31.11.7)
@@ -64,6 +64,6 @@ This spec covers the command, the dialog, where slices fall, the track, devices,
 | R12 | `crates/shell/tests/slice_to_midi.rs`, `slicing_leaves_the_audio_clip_as_it_was` | shell test |
 | R13 | `crates/model/tests/command_registry.rs`, `every_command_is_complete`; `crates/shell/tests/slice_to_midi.rs`, `the_command_runs_by_id_and_reports_the_track`; `crates/cli/tests/agent_slice.rs`, `an_agent_slices_a_drum_loop_and_reads_the_track_back` | unit, shell test, agent API test |
 | R14 | `crates/shell/tests/slice_to_midi.rs`, `a_sliced_track_reopens_as_it_was`; `rtsan/tests/slice.rs`, `a_sliced_drum_rack_plays_under_rtsan` | shell test, RealtimeSanitizer |
-| R15 | to be written in WP-7.33b | shell test (the rack's chains, notes, regions to the frame and choke group; the track's clip plays the same slices within 1 ms, golden render), UI script (the menu items enabled only in Slice mode) |
-| R16 | to be written in WP-7.33b | shell test (the clip's notes, timing and loop, warped and unwarped), golden render |
-| R17 | to be written in WP-7.33b | agent API, `cargo xtask commands`, RealtimeSanitizer |
+| R15 | `crates/shell/tests/slice_to_midi.rs`, `slice_to_drum_rack_replaces_the_simpler_with_a_rack_that_plays_the_same_slices` (chains, notes, regions to the frame, choke group under Mono, one undo step, the track renders within a sample of before), `slice_to_drum_rack_follows_playback` (no choke group under Poly, Thru's regions to the End flag), `both_are_refused_outside_slice_mode_or_without_slices`; `crates/ui/tests/device_view.rs`, `simplers_menu_offers_the_slicing_commands_in_slice_mode_only`; `crates/ui/tests/sample_display.rs`, `the_displays_menu_offers_the_slicing_commands_in_slice_mode_only` | shell test, golden render, UI script (the menu items enabled only in Slice mode) |
+| R16 | `crates/shell/tests/slice_to_midi.rs`, `slice_to_new_midi_track_from_simpler_makes_the_track_and_its_looping_clip` (the clip's notes, timing, length and loop, warped and unwarped; the Simpler stays; one undo step), `the_new_track_plays_the_simplers_slices_within_a_millisecond` | shell test, golden render |
+| R17 | `crates/cli/tests/agent_slice.rs`, `an_agent_slices_a_simpler_and_reads_the_track_and_the_rack_back`; `crates/shell/tests/slice_to_midi.rs`, `both_are_refused_outside_slice_mode_or_without_slices`, `a_rack_and_a_track_from_simpler_reopen_as_they_were`; `rtsan/tests/slice.rs`, `a_slice_mode_simpler_and_the_rack_made_from_it_play_under_rtsan`; `crates/model/tests/command_registry.rs`, `every_command_is_complete` | agent API, `cargo xtask commands`, RealtimeSanitizer |

@@ -50,6 +50,13 @@ use crate::theme::Theme;
 pub const PLUGIN_WINDOW_BUTTON: &str = "Show/Hide Plug-In Window";
 
 /// `plugin.show_window`, which the window button runs.
+/// The contexts Simpler's own menu items are enabled in: its menus belong to
+/// the Device View, whatever has the keyboard.
+pub(crate) const MENU_CONTEXTS: [bl_commands::Context; 2] = [
+    bl_commands::Context::DeviceView,
+    bl_commands::Context::Global,
+];
+
 const PLUGIN_SHOW_WINDOW: &str = bl_shell::plugin_commands::SHOW_WINDOW;
 
 /// The Configure switch's name (L-DEV-010, manual 24.1.2): it opens and
@@ -1369,6 +1376,24 @@ impl DeviceViewUi {
                     json!({ "device": frame.id, "to": "multisampler" }),
                 );
                 ui.close();
+            }
+            // Spec: slice-to-midi R15, R16. In Slice mode with a slice.
+            for (label, id) in [
+                (
+                    "Slice to Drum Rack",
+                    bl_shell::slice_commands::SLICE_TO_DRUM_RACK,
+                ),
+                (
+                    "Slice to New MIDI Track",
+                    bl_shell::slice_commands::SLICE_TO_MIDI_TRACK,
+                ),
+            ] {
+                let args = json!({ "device": frame.id });
+                let enabled = shell.can_invoke_in(id, &args, &MENU_CONTEXTS);
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    invoke(events, id, args);
+                    ui.close();
+                }
             }
         }
         // Spec: multisampler R64. Autosample… is in an instrument's title

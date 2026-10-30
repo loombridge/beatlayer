@@ -10093,6 +10093,43 @@ A dropout a real-time render found.
 
 </details>
 
+### `DrumRackSliced`
+
+What `device.slice_to_drum_rack` made (R17).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The new Drum Rack, in the Simpler's place. |
+| `chains` | array of [`ChainId`](#chainid) | yes | Its chains, one per slice, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.slice_to_drum_rack` made (R17).",
+  "properties": {
+    "chains": {
+      "description": "Its chains, one per slice, in order.",
+      "items": {
+        "$ref": "#/$defs/ChainId"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The new Drum Rack, in the Simpler's place."
+    }
+  },
+  "required": [
+    "device",
+    "chains"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DrumRow`
 
 A drum chain's row in the chain list (drum racks spec, R21).

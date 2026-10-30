@@ -61,6 +61,7 @@ impl Shell {
         }
         changed |= self.learn_midi();
         changed |= self.poll_remote();
+        self.poll_feedback();
         changed |= self.poll_surfaces();
         self.expire_previews();
         changed |= self.track_midi_activity();

@@ -1,6 +1,6 @@
 # Control surfaces: the surface host, instant mappings, the session ring, and controller templates
 
-- **Status:** draft
+- **Status:** partial <!-- the host, the table, instant mappings, device banks, Lock to Control Surface, the session ring and track banks (R1 to R38) are implemented and tested (WP-7.5, WP-7.6); controller templates (R39 to R48) are drafted for WP-7.7 -->
 - **Work packages:** WP-7.5, the control-surface host and the Control Surfaces table (R1 to R16); WP-7.6, instant mappings, device banks, Lock to Control Surface, the session ring and track banks (R17 to R38); WP-7.7, Beatlayer's controller templates (R39 to R48). The device title bar's Lock to items and hand icon are [device chains](device-chains.md) R41 and R42, and the ring's border in the grid is [Session View](session-view.md) R36 to R38. The mappings a person makes in MIDI Map Mode, the value laws and Takeover Mode are [remote mapping](remote-mapping.md)'s and [map modes](map-modes.md)'; what each supported controller does is [supported controllers](supported-controllers.md)'; Push 2 is [Push 2](push-2.md)'s, on the same host
 - **Parity-matrix row:** Control and mapping: MIDI map mode, key map mode, takeover modes, relative controllers, instant mappings; Control surfaces: Control-surface scripts
 - **Checked against:** the Live 12 reference manual (online edition), read 23 October 2026 (chapter 2 section 2.3.5, chapter 3 section 3.20, chapter 23 section 23.2.1, chapter 25 section 25.6.1, chapter 34 sections 34.1 to 34.1.3 and 34.2, chapter 36 section 36.15); the UI parity reference rows L-SET-014, L-SES-001 to L-SES-013, L-DEV-004, L-DEV-009, L-CTRL-026 and C-DEVICE-014; the vendors' user guides listed in the sources
@@ -40,7 +40,7 @@ A surface's controls follow the context instead of a fixed list, which the manua
 - **R3.** A port a row names is open while the row names it, whatever its Track, Sync and Remote switches say, and a port serves one row at most: choosing a port another row uses is refused, naming that row (Beatlayer's own). Up to six surfaces run at once, several of the same kind among them, each on its own ports. (S2, S13)
 - **R4.** A message on a surface's input goes first to the manual mappings, while the port's Remote switch is on and a mapping matches it ([remote mapping](remote-mapping.md)); one no mapping takes goes to the surface. A message the surface takes never reaches a track or a mapping. A surface may hand a note or controller message back to the tracks, which then receive it as from its input port when that port's Track switch is on, and the Control Bar's track input indicator lights for it ([MIDI I/O](midi-io.md) R25). (S1, S3, S4, S7)
 - **R5.** A surface can play notes and controllers into the tracks as its own source: they reach every MIDI track whose input is All Ins or the surface's input port, on their channel, monitored and recorded as that port's messages are ([MIDI I/O](midi-io.md) R7 and R12), even when the port's Track switch is off (Beatlayer's own: how a controller's pads that arrive on its surface port play the selected instrument). (S3, S9, S13)
-- **R6.** A surface is an implementation of the `ControlSurface` trait (Beatlayer's own interface). The host gives it, in order: each message from its input, whole (a system-exclusive message included), with the time it arrived; a tick 50 times a second (Beatlayer's own rate); and, on each tick, a read model: the document as the main thread last published it, the engine's published state (the slots' states and playing positions, the transport, the tempo, the tracks' meters), the selection, and the surface's own ring, banks and lock (R17 to R38). The surface answers with messages for its output, in order, and the commands it wants run. It reads nothing else and changes nothing except through those commands. (S13)
+- **R6.** A surface is an implementation of the `ControlSurface` trait (Beatlayer's own interface). The host gives it, in order: each message from its input, whole (a system-exclusive message included), with the time it arrived; a tick 50 times a second (Beatlayer's own rate); and, on each tick, a read model: the document as the main thread last published it, the engine's published state (the slots' states and playing positions, the transport, the tempo, the tracks' meters), the selection, and the surface's own ring, banks and lock (R17 to R38). The surface answers with messages for its output, in order, and the commands it wants run, in the order it asks; instead of a command it may say which of its controls moved and how (`Cx::control`: a role from R40's list, how its values read, and what this message was), and the shell works out the parameter or track that role reaches when it runs the message, by R17 to R22 and R33. It reads nothing else and changes nothing except through those commands. (S13)
 - **R7.** The host runs every surface on one thread of its own, never the audio thread or the main thread. A command a surface asks for is queued to the main thread and run there in order, by ID with JSON arguments, exactly as the same command from the window or an agent: the same checks, the same undo step and its name, the same refusal. A surface's commands are the person's own, so a gesture on it (a knob turned, a fader moved, a button held while others are pressed) is one undo step from its first change until the control is released or, for a control with no release, until it has rested 500 ms (Beatlayer's own), and agents' calls wait while it lasts ([agent permissions](agent-permissions.md) R5). (S13)
 - **R8.** A surface's output is sent in the order the surface gave it, from the host thread straight to the port, at once; a surface that needs a message on a beat stamps it with the moment and the port's backend sends it then ([MIDI I/O](midi-io.md), scheduled output). A surface that sends faster than its port takes has its oldest unsent messages for the same control dropped first (Beatlayer's own). (S13)
 - **R9.** A surface starts when its row has it and its input is present (and its output, for a surface that needs one): the host makes it, gives it its ports, and calls its start, where it sends the controller whatever puts it into the state the surface drives, and fills every light it owns. It stops when its row changes, its input goes away, the set closes or Beatlayer quits: its stop sends what gives the controller back its own state, with its lights put out. Opening another set restarts every surface's ring and banks (R30) and keeps the rows. (S2, S13)
@@ -119,28 +119,28 @@ A surface's controls follow the context instead of a fixed list, which the manua
 | R14 | `bl-ui` `control_surfaces::choosing_runs_set_and_dump_runs_dump_enabled_only_with_a_setup_and_an_output` | UI script |
 | R15 | `bl-shell` `control_surfaces::a_surfaces_traffic_lights_the_remote_indicators` | unit |
 | R16 | `bl-control` `realtime::the_audio_thread_allocates_nothing_while_the_host_takes_ten_thousand_messages` | real-time trap, unit |
-| R17 | to be written in WP-7.6 | unit |
-| R18 | to be written in WP-7.6 | unit |
-| R19 | to be written in WP-7.6 | unit (every native device type) |
-| R20 | to be written in WP-7.6 | unit |
-| R21 | to be written in WP-7.6 | unit, test plug-in |
-| R22 | to be written in WP-7.6 | unit |
-| R23 | to be written in WP-7.6 | unit, UI script |
-| R24 | to be written in WP-7.6 | unit |
-| R25 | to be written in WP-7.6 | UI script |
-| R26 | to be written in WP-7.6 | unit |
-| R27 | to be written in WP-7.6 | unit, UI script |
-| R28 | to be written in WP-7.6 | unit |
-| R29 | to be written in WP-7.6 | unit, agent |
-| R30 | to be written in WP-7.6 | unit |
-| R31 | to be written in WP-7.6 | unit, UI script |
-| R32 | to be written in WP-7.6 | unit, UI script |
-| R33 | to be written in WP-7.6 | unit |
-| R34 | to be written in WP-7.6 | unit |
-| R35 | to be written in WP-7.6 | agent |
-| R36 | to be written in WP-7.6 | agent |
-| R37 | to be written in WP-7.6 | agent |
-| R38 | to be written in WP-7.6 | unit, test ports |
+| R17 | `bl-shell` `instant_mappings::knobs_follow_the_selected_device_and_step_through_banks`, `a_track_with_no_device_selected_gives_its_first_device` | unit |
+| R18 | `bl-shell` `instant_mappings::knobs_follow_the_selected_device_and_step_through_banks` | unit |
+| R19 | `bl-devices` `banks::every_native_device_types_banks_hold_every_parameter_and_none_more_than_eight`, `a_description_without_banks_has_the_generic_ones_named_by_position` | unit (every native device type) |
+| R20 | `bl-shell` `instant_mappings::a_racks_banks_are_its_macros_and_a_held_parameter_is_not_moved` | unit |
+| R21 | `bl-shell` `instant_mappings::a_plug_ins_banks_follow_its_configured_list` | unit, test plug-in |
+| R22 | `bl-shell` `instant_mappings::knobs_follow_the_selected_device_and_step_through_banks`, `a_relative_knob_steps_the_parameter_and_leaves_no_mapping`, `with_pick_up_a_knob_after_a_bank_change_moves_nothing_until_it_crosses_the_value`, `a_racks_banks_are_its_macros_and_a_held_parameter_is_not_moved`, `a_knob_turned_several_times_is_one_undo_step` | unit |
+| R23 | `bl-shell` `instant_mappings::locking_keeps_the_knobs_on_the_device_until_it_is_deleted`; `bl-ui` `instant_mappings::lock_to_items_follow_save_as_default_preset_and_tick_while_locked` | unit, UI script |
+| R24 | `bl-shell` `instant_mappings::locking_keeps_the_knobs_on_the_device_until_it_is_deleted` | unit |
+| R25 | `bl-ui` `instant_mappings::a_locked_device_shows_the_hand_icon_in_its_title_bar_and_folded` | UI script |
+| R26 | `bl-shell` `instant_mappings::arming_locks_the_instrument_and_a_hand_lock_survives_it` | unit |
+| R27 | `bl-shell` `instant_mappings::arming_locks_the_instrument_and_a_hand_lock_survives_it`; `bl-ui` `instant_mappings::lock_to_items_follow_save_as_default_preset_and_tick_while_locked` | unit, UI script |
+| R28 | `bl-shell` `instant_mappings::the_ring_moves_by_a_track_or_a_page_and_stops_at_the_last_track`, `a_ring_wider_than_the_set_stays_at_the_first_track` | unit |
+| R29 | `bl-shell` `instant_mappings::the_ring_moves_by_a_track_or_a_page_and_stops_at_the_last_track`; `bl-agent` `control_surfaces::an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back` | unit, agent |
+| R30 | `bl-shell` `instant_mappings::the_ring_keeps_its_first_track_by_id`, `folding_a_group_moves_a_ring_that_starts_inside_it_to_the_group` | unit |
+| R31 | `bl-shell` `instant_mappings::the_ring_moves_by_a_track_or_a_page_and_stops_at_the_last_track`; `bl-ui` `instant_mappings::a_moved_ring_scrolls_the_grid_to_show_it` | unit, UI script |
+| R32 | `bl-shell` `instant_mappings::mixer_controls_cover_the_rings_tracks`, `session_state_reports_each_rings_tracks_and_scenes`; `bl-ui` `instant_mappings::the_rings_border_surrounds_its_slots_in_its_rows_colour` | unit, UI script |
+| R33 | `bl-shell` `instant_mappings::mixer_controls_cover_the_rings_tracks` | unit |
+| R34 | `bl-shell` `instant_mappings::mixer_controls_cover_the_rings_tracks` | unit |
+| R35 | `bl-agent` `control_surfaces::an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back` | agent |
+| R36 | `bl-agent` `control_surfaces::an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back` | agent |
+| R37 | `bl-agent` `control_surfaces::an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back`; `bl-shell` `instant_mappings::knobs_follow_the_selected_device_and_step_through_banks` | agent |
+| R38 | `bl-control` `surfaces::the_instant_test_surface_turns_messages_into_controls_in_order`; every test in `bl-shell` `instant_mappings` | unit, test ports |
 | R39 | to be written in WP-7.7 | unit |
 | R40 | to be written in WP-7.7 | unit |
 | R41 | to be written in WP-7.7 | unit, test ports |

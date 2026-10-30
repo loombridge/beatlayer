@@ -24,7 +24,7 @@ use bl_core::clock::TestClock;
 use bl_core::midi::{MidiInputEvent, MidiSource, PortId};
 use bl_midi_io::{Direction, InputLive, InputSender, MidiPorts, OutputBus};
 
-use crate::surface::{ControlSurface, Cx, Kind, Out, ReadModel, Request, SurfaceState, TICK, kind};
+use crate::surface::{Ask, ControlSurface, Cx, Kind, Out, ReadModel, SurfaceState, TICK, kind};
 
 /// How many rows the Control Surfaces table has (R1).
 pub const ROWS: usize = 6;
@@ -90,13 +90,24 @@ pub struct RowReport {
     pub state: Option<SurfaceState>,
 }
 
-/// A command a surface asked for, and the row it came from.
+/// What a surface asked for, and the row it came from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CommandRequest {
     /// The row, from 0.
     pub row: usize,
-    /// The command.
-    pub request: Request,
+    /// The command, or the control that moved.
+    pub ask: Ask,
+}
+
+impl CommandRequest {
+    /// The command, if this asks for one.
+    #[must_use]
+    pub const fn command(&self) -> Option<&crate::surface::Request> {
+        match &self.ask {
+            Ask::Command(request) => Some(request),
+            Ask::Control(_) => None,
+        }
+    }
 }
 
 /// How many messages surfaces took and sent: the remote indicators light
@@ -215,7 +226,7 @@ impl Shared {
     ) -> Result<(R, Cx), Fault> {
         let started = Instant::now();
         *lock(&self.call) = Some((row, generation, started));
-        let mut cx = Cx::new(self.now());
+        let mut cx = Cx::new(row, self.now());
         let result = catch_unwind(AssertUnwindSafe(|| f(running.surface.as_mut(), &mut cx)));
         {
             let mut call = lock(&self.call);
@@ -264,7 +275,7 @@ impl Shared {
             lock(&self.requests).extend(
                 cx.requests
                     .into_iter()
-                    .map(|request| CommandRequest { row, request }),
+                    .map(|ask| CommandRequest { row, ask }),
             );
         }
         running.pending.extend(cx.out);

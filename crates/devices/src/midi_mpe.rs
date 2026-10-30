@@ -254,8 +254,85 @@ pub fn mpe_control_type() -> DeviceType {
         ParamDescriptor::toggle(NOTEPB_TO_PB, "NotePB to PB", false)
             .describe("Converts per-note pitch bend to a channel pitch bend."),
     ]);
-    DeviceType::native(MPE_CONTROL, "MPE Control", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params))
+    DeviceType::native(MPE_CONTROL, "MPE Control", DeviceRole::MidiEffect).with_description(
+        DeviceDescription::new(params).with_banks(&[
+            (
+                "Pressure",
+                &[
+                    "Press",
+                    "Press Min",
+                    "Press Max",
+                    "Press Smooth",
+                    "Press Rise",
+                    "Press Fall",
+                    "Press Default",
+                    "Press Default Value",
+                ],
+            ),
+            (
+                "Pressure Curve",
+                &[
+                    "Press Curve",
+                    "Press Curve A",
+                    "Press Curve B",
+                    "Press Curve Link",
+                    "Press X",
+                    "Press Y",
+                ],
+            ),
+            (
+                "Slide",
+                &[
+                    "Slide",
+                    "Slide Min",
+                    "Slide Max",
+                    "Slide Smooth",
+                    "Slide Rise",
+                    "Slide Fall",
+                    "Slide Default",
+                    "Slide Default Value",
+                ],
+            ),
+            (
+                "Slide Curve",
+                &[
+                    "Slide Curve",
+                    "Slide Curve A",
+                    "Slide Curve B",
+                    "Slide Curve Link",
+                    "Slide X",
+                    "Slide Y",
+                    "Slide Centered",
+                    "Slide Mode",
+                ],
+            ),
+            (
+                "Note Pitch Bend",
+                &[
+                    "NotePB",
+                    "NotePB Min",
+                    "NotePB Max",
+                    "NotePB Smooth",
+                    "NotePB Rise",
+                    "NotePB Fall",
+                    "Pitch Range",
+                    "NotePB to PB",
+                ],
+            ),
+            (
+                "Note PB Curve",
+                &[
+                    "NotePB Curve",
+                    "NotePB Curve A",
+                    "NotePB Curve B",
+                    "NotePB Curve Link",
+                    "NotePB X",
+                    "NotePB Y",
+                ],
+            ),
+            ("Routing", &["Swap to Slide", "Press to AT", "Slide to Mod"]),
+        ]),
+    )
 }
 
 /// Adds MPE Control to `registry`.

@@ -102,8 +102,20 @@ pub fn degrade_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(DEGRADE, "Erosion", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(DEGRADE, "Erosion", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[(
+                "Degrade",
+                &[
+                    "Freq",
+                    "Amount",
+                    "Noise Blend",
+                    "Filter Width",
+                    "Stereo Width",
+                ],
+            )]),
+    )
 }
 
 /// Adds Erosion to `registry`.

@@ -166,7 +166,24 @@ pub fn bus_compressor_type() -> DeviceType {
         .with_description(
             DeviceDescription::new(params)
                 .with_layout(layout())
-                .with_menu_options(&[OVERSAMPLING]),
+                .with_menu_options(&[OVERSAMPLING])
+                .with_banks(&[
+                    (
+                        "Compressor",
+                        &[
+                            "Threshold",
+                            "Ratio",
+                            "Attack",
+                            "Release",
+                            "Auto",
+                            "Range",
+                            "Makeup",
+                            "Dry/Wet",
+                        ],
+                    ),
+                    ("Sidechain", &["SC EQ", "Type", "Freq", "Res"]),
+                    ("Output", &["Soft Clip"]),
+                ]),
         )
 }
 

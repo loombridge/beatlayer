@@ -55,7 +55,8 @@ pub fn lift_type() -> DeviceType {
                  instead of semitones.",
             ),
         ])
-        .with_title_switch(USE_SCALE),
+        .with_title_switch(USE_SCALE)
+        .with_banks(&[("Pitch", &["Pitch", "Step Width", "Lowest", "Range", "Mode"])]),
     )
 }
 

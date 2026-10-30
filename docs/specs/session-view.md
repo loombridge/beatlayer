@@ -1,6 +1,6 @@
 # Session View: clip slots and scenes
 
-- **Status:** partial (R36 to R38 have no tests yet)
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-3.1, WP-3.7, WP-3.6, WP-3.5, WP-3.8, WP-3.16 (R33); WP-6.38 (R34: the return tracks scrolling with the tracks, IMP-01); WP-6.49b (R35: panning with the middle button); WP-7.6 (R36 to R38: the control surfaces' session rings drawn over the grid, [control surfaces](control-surfaces.md) R28 to R32); WP-6.29b (R39 to R43: Cut, Copy, Paste and Duplicate of slot clips and scenes, [the second window](second-window.md) R20 to R23)
 - **Parity-matrix row:** Views and workflow: Session View; Clips and launching; [the improvements](../05-improvements.md), IMP-01 (return tracks scrolling with tracks)
 - **Checked against:** the Live 12 reference manual, chapter 7 "Session View", read 15 October 2026, and Live 12.4.3 on macOS, observed on 15 October 2026; for R34 and R35, the manual's chapter 18 and the Live 12 release notes, read 20 October 2026; for R36 to R38, the manual's chapter 36 section 36.15 and chapter 34 section 34.1.1, read 23 October 2026; for R39 to R43, the manual's chapter 7 sections 7.2, 7.4.3 and 7.5 and chapter 42 section 42.5, read 24 October 2026.
@@ -118,9 +118,9 @@ This spec covers the grid's structure in the document, the scenes, the clips in 
 | R33 | `crates/shell/tests/clip_view_tabs.rs`, `the_clip_view_follows_the_clip_most_recently_selected_in_either_view` | unit |
 | R34 | `crates/ui/tests/session_view.rs`, `the_return_tracks_scroll_with_the_tracks_in_the_grid` | UI script |
 | R35 | `crates/ui/tests/session_view.rs`, `the_middle_button_pans_the_grid` | UI script |
-| R36 | to be written in WP-7.6 | UI script |
-| R37 | to be written in WP-7.6 | UI script |
-| R38 | to be written in WP-7.6 | UI script, agent |
+| R36 | `bl-ui` `instant_mappings::the_rings_border_surrounds_its_slots_in_its_rows_colour` | UI script |
+| R37 | `bl-ui` `instant_mappings::a_moved_ring_scrolls_the_grid_to_show_it` | UI script |
+| R38 | `bl-ui` `instant_mappings::a_slot_in_a_ring_names_the_surface_in_its_description`; `bl-shell` `instant_mappings::session_state_reports_each_rings_tracks_and_scenes`; `bl-agent` `control_surfaces::an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back` | UI script, agent |
 | R39 | `crates/shell/tests/session_clips.rs`, `slot_clips_are_copied_and_pasted_keeping_their_places`, `cut_removes_the_clips_and_paste_puts_them_back`, `scenes_are_copied_cut_and_pasted`; `crates/ui/tests/clips_between_views.rs`, `cut_copy_paste_and_duplicate_work_by_key_in_the_session_view`; `crates/ui/tests/keymap/views.rs`, `the_edit_keys_reach_the_session_views_commands` | unit, UI script |
 | R40 | `crates/shell/tests/session_clips.rs`, `slot_clips_are_copied_and_pasted_keeping_their_places`, `a_paste_skips_clips_for_tracks_of_the_wrong_kind`, `scenes_are_added_at_the_end_and_full_slots_are_replaced` | unit |
 | R41 | `crates/shell/tests/session_clips.rs`, `arrangement_clips_pasted_in_the_session_view_start_at_the_selected_slot`, `scenes_are_copied_cut_and_pasted` | unit |

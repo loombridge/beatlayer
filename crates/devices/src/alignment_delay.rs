@@ -129,8 +129,36 @@ pub fn alignment_delay_type() -> DeviceType {
             .describe("The side's delay as the distance in feet sound covers in that time."),
         ]);
     }
-    DeviceType::native(ALIGNMENT_DELAY, "Align Delay", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(ALIGNMENT_DELAY, "Align Delay", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Delay",
+                    &[
+                        "Delay Mode",
+                        "Link",
+                        "Left Time",
+                        "Left Samples",
+                        "Left Metres",
+                        "Left Feet",
+                    ],
+                ),
+                (
+                    "Right",
+                    &["Right Time", "Right Samples", "Right Metres", "Right Feet"],
+                ),
+                (
+                    "Units",
+                    &[
+                        "Distance Unit",
+                        "Temperature Unit",
+                        "Temperature °C",
+                        "Temperature °F",
+                    ],
+                ),
+            ]),
+    )
 }
 
 fn layout() -> DeviceLayout {

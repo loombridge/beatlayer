@@ -15,8 +15,10 @@ use std::time::{Duration, Instant};
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, Ticks};
 use bl_engine::{SlotStatus, TrackMeter};
-use bl_model::{Document, SceneId, TrackId};
+use bl_model::{DeviceId, Document, ParamId, RemoteMode, SceneId, TrackId};
 use serde_json::Value;
+
+use crate::Hit;
 
 /// How often a surface gets its tick: 50 times a second (R6).
 pub const TICK: Duration = Duration::from_millis(20);
@@ -66,6 +68,9 @@ pub struct ReadModel {
     pub meters: Vec<TrackMeter>,
     /// The selection.
     pub selection: Selection,
+    /// What each row of the Control Surfaces table holds: its ring, the
+    /// device its device controls reach and its bank (R17 to R35).
+    pub rows: Vec<RowView>,
 }
 
 impl ReadModel {
@@ -86,8 +91,96 @@ impl ReadModel {
             tempo: Bpm::DEFAULT,
             meters: Vec::new(),
             selection: Selection::default(),
+            rows: Vec::new(),
         }
     }
+
+    /// What `row`, counting from 0, holds.
+    #[must_use]
+    pub fn row(&self, row: usize) -> Option<&RowView> {
+        self.rows.get(row)
+    }
+}
+
+/// How a device came to be locked to a surface (R23, R26).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Lock {
+    /// By Lock to in the device's menu or `control_surface.lock`.
+    Hand,
+    /// By arming a track whose instrument it is.
+    Arming,
+}
+
+/// One parameter of the bank a surface shows (R22, R36).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ParamView {
+    /// The parameter.
+    pub param: ParamId,
+    /// Its name.
+    pub name: String,
+    /// Its value.
+    pub value: f64,
+    /// Its value as the device shows it.
+    pub text: String,
+    /// Whether a macro holds it, so the surface can't move it (R22).
+    pub held: bool,
+}
+
+/// The device a surface's device controls reach (R17 to R21, R35).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Focus {
+    /// The device.
+    pub device: DeviceId,
+    /// How it is locked to the surface, if it is.
+    pub lock: Option<Lock>,
+    /// The bank the surface shows, from 0.
+    pub bank: usize,
+    /// Every bank's name, in order.
+    pub banks: Vec<String>,
+    /// The parameters of the bank the surface shows, in the order its
+    /// device controls take them.
+    pub params: Vec<ParamView>,
+}
+
+/// The ways a ring can move (R29).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Moves {
+    /// A track to the left.
+    pub left: bool,
+    /// A track to the right.
+    pub right: bool,
+    /// A scene up.
+    pub up: bool,
+    /// A scene down.
+    pub down: bool,
+}
+
+/// A surface's session ring as it stands (R28 to R32).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RingView {
+    /// Its size.
+    pub size: Ring,
+    /// Its first track, by ID.
+    pub first_track: Option<TrackId>,
+    /// Its first scene, by ID.
+    pub first_scene: Option<SceneId>,
+    /// The tracks it covers, from its first, as many as exist inside its
+    /// width: a mixer control past the last does nothing (R33).
+    pub tracks: Vec<TrackId>,
+    /// The scenes it covers, from its first, as many as exist inside its
+    /// height.
+    pub scenes: Vec<SceneId>,
+    /// Which ways it can move.
+    pub moves: Moves,
+}
+
+/// What one running row holds: surface state, never saved (R12).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RowView {
+    /// The ring, for a surface that has one.
+    pub ring: Option<RingView>,
+    /// The device its device controls reach, if there is one.
+    pub focus: Option<Focus>,
 }
 
 /// A block of tracks and scenes a surface's grid controls (R28): its size.
@@ -132,6 +225,100 @@ pub struct Gesture {
     pub released: bool,
 }
 
+/// What a control does in the context the surface is in (R17 to R34):
+/// the place a role takes it to is the shell's to resolve when the control
+/// moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Role {
+    /// Device control 1 to 8, from 0: the parameter of the bank at that
+    /// place.
+    Device(u8),
+    /// The next bank of the device in focus (R18).
+    NextBank,
+    /// The previous bank.
+    PreviousBank,
+    /// The slot of the ring at a column and a row, from 0 (R32).
+    Slot {
+        /// The ring's column.
+        column: u8,
+        /// The ring's row.
+        row: u8,
+    },
+    /// The launch button of the scene at a ring row.
+    SceneLaunch(u8),
+    /// Stop All Clips.
+    StopAll,
+    /// A ring track's stop button, by column (R33).
+    Stop(u8),
+    /// A ring track's volume.
+    Volume(u8),
+    /// A ring track's pan.
+    Pan(u8),
+    /// A ring track's send to the return at this place among the returns,
+    /// from 0 (R33).
+    Send {
+        /// The ring's column.
+        column: u8,
+        /// The return, from 0.
+        send: u8,
+    },
+    /// A ring track's activator.
+    Mute(u8),
+    /// A ring track's Solo.
+    Solo(u8),
+    /// A ring track's Arm.
+    Arm(u8),
+    /// Selects a ring track, as a click on its title bar does.
+    Select(u8),
+    /// A ring track's crossfade assignment.
+    Crossfade(u8),
+    /// Moves the ring (R29).
+    Ring(RingStep),
+}
+
+/// How a ring moves (R29).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RingStep {
+    /// One track left.
+    Left,
+    /// One track right.
+    Right,
+    /// One scene up.
+    Up,
+    /// One scene down.
+    Down,
+    /// Its width left.
+    PageLeft,
+    /// Its width right.
+    PageRight,
+    /// Its height up.
+    PageUp,
+    /// Its height down.
+    PageDown,
+}
+
+/// A control the surface's person moved: its role, how its messages read,
+/// and what this one is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Control {
+    /// What the control is for.
+    pub role: Role,
+    /// How the controller's value reads: absolute, or relative in one of the
+    /// four encodings (remote mapping R20 to R27).
+    pub mode: RemoteMode,
+    /// What the message was to the control.
+    pub hit: Hit,
+}
+
+/// What a surface asks for, in the order it asks.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Ask {
+    /// A command.
+    Command(Request),
+    /// A control moved, which the shell takes to its place (R22).
+    Control(Control),
+}
+
 /// A command a surface asks for: run on the main thread, in order, by ID
 /// with JSON arguments (R7).
 #[derive(Clone, Debug, PartialEq)]
@@ -148,22 +335,31 @@ pub struct Request {
 /// asks for, and the messages it hands to tracks.
 #[derive(Debug)]
 pub struct Cx {
+    pub(crate) row: usize,
     pub(crate) now: Instant,
     pub(crate) out: Vec<Out>,
-    pub(crate) requests: Vec<Request>,
+    pub(crate) requests: Vec<Ask>,
     pub(crate) handed: Vec<(Instant, MidiMessage)>,
     pub(crate) played: Vec<MidiMessage>,
 }
 
 impl Cx {
-    pub(crate) fn new(now: Instant) -> Self {
+    pub(crate) fn new(row: usize, now: Instant) -> Self {
         Self {
+            row,
             now,
             out: Vec::new(),
             requests: Vec::new(),
             handed: Vec::new(),
             played: Vec::new(),
         }
+    }
+
+    /// The surface's row in the Control Surfaces table, from 0: where the
+    /// read model keeps what it holds.
+    #[must_use]
+    pub const fn row(&self) -> usize {
+        self.row
     }
 
     /// The time now, on the clock the host stamps messages with.
@@ -226,11 +422,21 @@ impl Cx {
     }
 
     fn request(&mut self, id: &str, args: Value, gesture: Option<Gesture>) {
-        self.requests.push(Request {
+        self.requests.push(Ask::Command(Request {
             id: id.to_owned(),
             args,
             gesture,
-        });
+        }));
+    }
+
+    /// Tells the shell a control moved: `role` is what it is for, `mode`
+    /// how its values read and `hit` what this message was. What the role
+    /// reaches (the parameter at its place in the bank, the ring's track)
+    /// is resolved there as the message is run, so it is the one the person
+    /// sees (R22, R33).
+    pub fn control(&mut self, role: Role, mode: RemoteMode, hit: Hit) {
+        self.requests
+            .push(Ask::Control(Control { role, mode, hit }));
     }
 
     /// Hands a message back to the tracks, as arriving at `at`: they
@@ -312,6 +518,8 @@ pub fn kinds() -> &'static [Kind] {
     static KINDS: &[Kind] = &[
         #[cfg(feature = "testing")]
         crate::testing::KIND,
+        #[cfg(feature = "testing")]
+        crate::testing::INSTANT,
     ];
     KINDS
 }

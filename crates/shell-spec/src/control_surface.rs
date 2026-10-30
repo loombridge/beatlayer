@@ -1,6 +1,9 @@
 //! The Control Surfaces table (WP-7.5; the control surfaces spec, R13 and
 //! R14): `control_surface.list`, `control_surface.set`,
-//! `control_surface.dump` and `control_surface.surfaces`, with their
+//! `control_surface.dump` and `control_surface.surfaces`, and the instant
+//! mappings' commands (WP-7.6, R23 to R37): `control_surface.lock`,
+//! `control_surface.unlock`, `control_surface.move_ring`,
+//! `control_surface.banks` and `control_surface.set_bank`, with their
 //! arguments and results.
 //!
 //! [`register`] adds their specs, which are pure data, so `cargo xtask` can
@@ -9,6 +12,7 @@
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_model::{DeviceId, ParamId, SceneId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -21,9 +25,23 @@ pub const DUMP: &str = "control_surface.dump";
 /// `control_surface.surfaces`: the surfaces the table's chooser offers.
 pub const SURFACES: &str = "control_surface.surfaces";
 
+/// `control_surface.lock`: lock a device to a row's surface.
+pub const LOCK: &str = "control_surface.lock";
+/// `control_surface.unlock`: give a row's surface back to the device in
+/// focus.
+pub const UNLOCK: &str = "control_surface.unlock";
+/// `control_surface.move_ring`: move a row's session ring.
+pub const MOVE_RING: &str = "control_surface.move_ring";
+/// `control_surface.banks`: a device's banks, as a surface reads them.
+pub const BANKS: &str = "control_surface.banks";
+/// `control_surface.set_bank`: put a row's surface on a bank.
+pub const SET_BANK: &str = "control_surface.set_bank";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[LIST, SET, DUMP, SURFACES];
+pub const IDS: &[&str] = &[
+    LIST, SET, DUMP, SURFACES, LOCK, UNLOCK, MOVE_RING, BANKS, SET_BANK,
+];
 
 /// Whether `id` is one of the control surface commands.
 #[must_use]
@@ -82,13 +100,123 @@ pub struct RingInfo {
     pub scenes: u8,
 }
 
+/// Which ways a ring can move.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RingMoves {
+    /// A track to the left.
+    pub left: bool,
+    /// A track to the right.
+    pub right: bool,
+    /// A scene up.
+    pub up: bool,
+    /// A scene down.
+    pub down: bool,
+}
+
+/// Where a surface's session ring is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RingState {
+    /// How many tracks wide.
+    pub tracks: u8,
+    /// How many scenes tall; 0 for a surface with no clip launching.
+    pub scenes: u8,
+    /// Its first track, by ID.
+    pub first_track: Option<TrackId>,
+    /// Its first scene, by ID.
+    pub first_scene: Option<SceneId>,
+    /// Its first track's place among the ring's tracks, from 0.
+    pub track_index: usize,
+    /// Its first scene's place among the scenes, from 0.
+    pub scene_index: usize,
+    /// Which ways it can move.
+    pub can_move: RingMoves,
+}
+
+/// How a device is locked to a surface.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LockKind {
+    /// By Lock to in the device's menu or `control_surface.lock`.
+    Hand,
+    /// By arming a MIDI track whose instrument the device is.
+    Arming,
+}
+
+/// The device a surface's device controls reach.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceFocus {
+    /// The device.
+    pub device: DeviceId,
+    /// How it is locked to the surface, if it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked: Option<LockKind>,
+    /// The bank the surface shows, from 0.
+    pub bank: usize,
+    /// That bank's name.
+    pub bank_name: String,
+    /// Every bank's name, in order.
+    pub banks: Vec<String>,
+}
+
 /// What a running surface reports of itself.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SurfaceStateInfo {
-    /// Its ring, if it has one.
-    pub ring: Option<RingInfo>,
+    /// Its session ring, if it has one.
+    pub ring: Option<RingState>,
+    /// The device its device controls reach, if there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceFocus>,
     /// Its own mode, by name.
     pub mode: Option<String>,
+}
+
+/// A surface a device is locked to: what `device_view.state` reports for a
+/// device and its title bar's hand icon names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DeviceLock {
+    /// The row of the Control Surfaces table, from 1 to 6.
+    pub row: u8,
+    /// The surface's name.
+    pub surface: String,
+    /// How the device is locked to it.
+    pub by: LockKind,
+}
+
+/// A running surface's ring as `session.state` reports it: the tracks and
+/// scenes inside it, by ID.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RingBox {
+    /// The row of the Control Surfaces table, from 1 to 6.
+    pub row: u8,
+    /// The surface's name.
+    pub surface: String,
+    /// The tracks it covers, left to right.
+    pub tracks: Vec<TrackId>,
+    /// The scenes it covers, top to bottom; none for a ring with no clip
+    /// launching.
+    pub scenes: Vec<SceneId>,
+}
+
+/// How `control_surface.move_ring` moves a ring by a step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RingStep {
+    /// One track left.
+    Left,
+    /// One track right.
+    Right,
+    /// One scene up.
+    Up,
+    /// One scene down.
+    Down,
+    /// Its width left.
+    PageLeft,
+    /// Its width right.
+    PageRight,
+    /// Its height up.
+    PageUp,
+    /// Its height down.
+    PageDown,
 }
 
 /// One row of the table.
@@ -186,6 +314,92 @@ pub struct DumpArgs {
     pub row: u8,
 }
 
+/// Arguments of `control_surface.lock`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LockArgs {
+    /// The row, from 1 to 6.
+    pub row: u8,
+    /// The device to lock.
+    pub device: DeviceId,
+}
+
+/// Arguments of `control_surface.unlock`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UnlockArgs {
+    /// The row, from 1 to 6.
+    pub row: u8,
+}
+
+/// Arguments of `control_surface.move_ring`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct MoveRingArgs {
+    /// The row, from 1 to 6.
+    pub row: u8,
+    /// The ring's new first track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track: Option<TrackId>,
+    /// The ring's new first scene.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<SceneId>,
+    /// A step instead of a place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<RingStep>,
+}
+
+/// Arguments of `control_surface.banks`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BanksArgs {
+    /// The device.
+    pub device: DeviceId,
+}
+
+/// One parameter of a bank, as a surface reads it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BankParam {
+    /// The parameter.
+    pub param: ParamId,
+    /// Its name.
+    pub name: String,
+    /// Its value.
+    pub value: f64,
+    /// Its value as the device shows it.
+    pub text: String,
+    /// Whether a macro holds it, so a surface doesn't move it.
+    pub held: bool,
+}
+
+/// One bank of a device.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BankInfo {
+    /// Its name.
+    pub name: String,
+    /// Its parameters, in the order a surface's device controls take them.
+    pub params: Vec<BankParam>,
+}
+
+/// What `control_surface.banks` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BanksResult {
+    /// The device.
+    pub device: DeviceId,
+    /// Its banks, in order.
+    pub banks: Vec<BankInfo>,
+}
+
+/// Arguments of `control_surface.set_bank`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetBankArgs {
+    /// The row, from 1 to 6.
+    pub row: u8,
+    /// The bank, from 0, as `control_surface.banks` lists them.
+    pub bank: usize,
+}
+
 /// What `control_surface.dump` returns.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DumpResult {
@@ -261,6 +475,83 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SurfacesResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(LOCK, "Lock Device to Control Surface")
+            .description(
+                "Locks a device to a running control surface that supports locking, as Lock to \
+                 in the device's menu does: the surface's device controls stay on that device \
+                 whatever is selected. A surface locks to one device at a time, so locking \
+                 another moves the lock; locking the device it is locked to gives it back. A \
+                 device may be locked to several surfaces. The lock is surface state: it is \
+                 never saved or an undo step, and ends when the device is deleted or the \
+                 surface stops. Arming a MIDI track locks the surfaces to its instrument unless \
+                 one was locked by hand. Read back by `control_surface.list` (`state.device`) \
+                 and `device_view.state` (`locks`).",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<LockArgs>()
+            .result::<RowInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(UNLOCK, "Unlock Device from Control Surface")
+            .description(
+                "Gives a row's surface back to the device in focus, ending the lock \
+                 `control_surface.lock` or arming made. Changes surface state only. Read back \
+                 by `control_surface.list`.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<UnlockArgs>()
+            .result::<RowInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(MOVE_RING, "Move Session Ring")
+            .description(
+                "Moves a row's session ring, the block of tracks and scenes its grid controls: \
+                 to a first `track` and `scene` by ID, either or both, or by a `step` (a track \
+                 or scene, or a page of its width or height). The ring stops where its last \
+                 column holds the last track and its last row the last scene; with fewer \
+                 tracks or scenes than its size it stays at the first. Its tracks are the \
+                 Session View's columns, a folded group's tracks left out, then the return \
+                 tracks. Selects nothing, launches nothing and adds no undo step; the Session \
+                 View scrolls to show it. Read back by `control_surface.list` \
+                 (`state.ring`) and `session.state` (`rings`).",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<MoveRingArgs>()
+            .result::<RowInfo>(),
+    )?;
+    registry.register(
+        CommandSpec::new(BANKS, "Device Banks")
+            .description(
+                "Lists a device's banks as a control surface reads them, each with its name \
+                 and its parameters by ID, name and value text, in the order the surface's \
+                 device controls take them (at most eight to a bank): a native device's own \
+                 banks, a rack's macros, a plug-in's configured list in eights, and last the \
+                 title bar's switch and the menu options. `held` marks a parameter a macro \
+                 holds. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<BanksArgs>()
+            .result::<BanksResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_BANK, "Set Control Surface Bank")
+            .description(
+                "Puts a running surface on a bank of the device its device controls reach, by \
+                 index as `control_surface.banks` lists them, as the surface's own bank \
+                 buttons do. The surface shows that bank of that device again whenever it \
+                 comes back to it while it runs. Changes surface state only. Read back by \
+                 `control_surface.list` (`state.device`).",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<SetBankArgs>()
+            .result::<RowInfo>(),
     )?;
     Ok(())
 }

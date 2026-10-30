@@ -513,7 +513,7 @@ impl Shell {
 
     /// The control's value as the laws read it: a continuous control's
     /// position on its travel and a radio button's option (R21, R23).
-    fn value_of(&self, mapping: &RemoteMapping) -> Option<f64> {
+    pub(super) fn value_of(&self, mapping: &RemoteMapping) -> Option<f64> {
         let value = self.current(&mapping.target)?;
         match mapping.kind {
             ControlKind::Continuous => Some(self.position_of(&mapping.target, value)),
@@ -524,7 +524,7 @@ impl Shell {
 
     /// One step of a stepped control as a share of its travel (R26); `None`
     /// for a control with no steps of its own.
-    fn step_of(&self, target: &RemoteTarget) -> Option<f64> {
+    pub(super) fn step_of(&self, target: &RemoteTarget) -> Option<f64> {
         if let Some(step) = self.step_of_other(target) {
             return Some(step);
         }
@@ -640,7 +640,7 @@ impl Shell {
     /// The command an action on a mapping's control runs, or `None` if the
     /// set no longer has the control or the action means nothing to it
     /// (R11).
-    fn command_for(&self, mapping: &RemoteMapping, action: Action) -> Option<Run> {
+    pub(super) fn command_for(&self, mapping: &RemoteMapping, action: Action) -> Option<Run> {
         if let Some(run) = self.command_other(mapping, action) {
             return run;
         }

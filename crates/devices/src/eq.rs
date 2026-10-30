@@ -269,8 +269,80 @@ pub fn eq_type() -> DeviceType {
             params.extend(band_descriptors(curve, band));
         }
     }
-    DeviceType::native(EQ, "EQ Eight", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(EQ, "EQ Eight", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "EQ",
+                    &["Mode", "Adaptive Q", "Oversample", "Analyze", "Gain"],
+                ),
+                (
+                    "Band A1",
+                    &["A1 On", "A1 Type", "A1 Freq", "A1 Gain", "A1 Q"],
+                ),
+                (
+                    "Band A2",
+                    &["A2 On", "A2 Type", "A2 Freq", "A2 Gain", "A2 Q"],
+                ),
+                (
+                    "Band A3",
+                    &["A3 On", "A3 Type", "A3 Freq", "A3 Gain", "A3 Q"],
+                ),
+                (
+                    "Band A4",
+                    &["A4 On", "A4 Type", "A4 Freq", "A4 Gain", "A4 Q"],
+                ),
+                (
+                    "Band A5",
+                    &["A5 On", "A5 Type", "A5 Freq", "A5 Gain", "A5 Q"],
+                ),
+                (
+                    "Band A6",
+                    &["A6 On", "A6 Type", "A6 Freq", "A6 Gain", "A6 Q"],
+                ),
+                (
+                    "Band A7",
+                    &["A7 On", "A7 Type", "A7 Freq", "A7 Gain", "A7 Q"],
+                ),
+                (
+                    "Band A8",
+                    &["A8 On", "A8 Type", "A8 Freq", "A8 Gain", "A8 Q"],
+                ),
+                (
+                    "Band B1",
+                    &["B1 On", "B1 Type", "B1 Freq", "B1 Gain", "B1 Q"],
+                ),
+                (
+                    "Band B2",
+                    &["B2 On", "B2 Type", "B2 Freq", "B2 Gain", "B2 Q"],
+                ),
+                (
+                    "Band B3",
+                    &["B3 On", "B3 Type", "B3 Freq", "B3 Gain", "B3 Q"],
+                ),
+                (
+                    "Band B4",
+                    &["B4 On", "B4 Type", "B4 Freq", "B4 Gain", "B4 Q"],
+                ),
+                (
+                    "Band B5",
+                    &["B5 On", "B5 Type", "B5 Freq", "B5 Gain", "B5 Q"],
+                ),
+                (
+                    "Band B6",
+                    &["B6 On", "B6 Type", "B6 Freq", "B6 Gain", "B6 Q"],
+                ),
+                (
+                    "Band B7",
+                    &["B7 On", "B7 Type", "B7 Freq", "B7 Gain", "B7 Q"],
+                ),
+                (
+                    "Band B8",
+                    &["B8 On", "B8 Type", "B8 Freq", "B8 Gain", "B8 Q"],
+                ),
+            ]),
+    )
 }
 
 /// Every control of `curve`'s bands, in band order.

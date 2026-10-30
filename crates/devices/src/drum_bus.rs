@@ -206,8 +206,29 @@ pub fn drum_buss_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(DRUM_BUSS, "Drum Buss", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(DRUM_BUSS, "Drum Buss", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[
+                (
+                    "Main",
+                    &[
+                        "Trim", "Comp", "Type", "Drive", "Crunch", "Damp", "Dry/Wet", "Output",
+                    ],
+                ),
+                (
+                    "Boom",
+                    &[
+                        "Transients",
+                        "Boom",
+                        "Freq",
+                        "Force To Note",
+                        "Decay",
+                        "Boom Audition",
+                    ],
+                ),
+            ]),
+    )
 }
 
 /// Adds Drum Buss to `registry`.

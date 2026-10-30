@@ -135,8 +135,23 @@ pub fn limiter_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(LIMITER, "Limiter", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(LIMITER, "Limiter", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[(
+                "Limiter",
+                &[
+                    "Ceiling",
+                    "Gain",
+                    "Release",
+                    "Auto",
+                    "Lookahead",
+                    "Ceiling Mode",
+                    "Routing Mode",
+                    "Link",
+                ],
+            )]),
+    )
 }
 
 /// Adds the Limiter to `registry`.

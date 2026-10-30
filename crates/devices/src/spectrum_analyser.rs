@@ -146,8 +146,26 @@ pub fn spectrum_type() -> DeviceType {
         )),
     ]));
 
-    DeviceType::native(SPECTRUM, "Spectrum", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(SPECTRUM, "Spectrum", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[
+                (
+                    "Display",
+                    &[
+                        "Block",
+                        "Channel",
+                        "Refresh",
+                        "Avg",
+                        "Graph",
+                        "Max",
+                        "Scale X",
+                        "Clear Max",
+                    ],
+                ),
+                ("Range", &["Range", "Range Min", "Range Max"]),
+            ]),
+    )
 }
 
 /// Adds Spectrum to `registry`.

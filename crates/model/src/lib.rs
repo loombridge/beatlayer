@@ -181,7 +181,9 @@ pub use layers::{
 };
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
-pub use param::{DeviceDescription, ParamDescriptor, ParamKind, ParamUnit};
+pub use param::{
+    BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
+};
 pub use rack::{
     CHAIN_COLOURS, CHAIN_SELECTOR, Chain, ChainMixer, ChainSend, ChainZones, DEFAULT_PLAY,
     DevicePlace, FILTER_MIDI_CTRL, FIRST_PAD, MACRO_BASE, MACRO_STEPS_DEFAULT, MACRO_STEPS_MAX,

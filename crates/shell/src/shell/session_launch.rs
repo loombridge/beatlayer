@@ -398,6 +398,9 @@ impl Shell {
             Self::args::<NoArgs>(id, args)?;
             let mut state = self.session.state();
             state.launches = self.session_launches();
+            // Spec: session-view R38. Each running surface's ring, by ID.
+            self.sync_instant();
+            state.rings = self.session_rings();
             return Ok(to_value(&state));
         }
         if crate::session_clips::handles(id) {

@@ -430,7 +430,63 @@ pub fn auto_filter_type() -> DeviceType {
         .with_description(
             DeviceDescription::new(params)
                 .with_layout(layout())
-                .with_menu_options(&[MONO_SIDECHAIN, HI_QUALITY]),
+                .with_menu_options(&[MONO_SIDECHAIN, HI_QUALITY])
+                .with_banks(&[
+                    (
+                        "Filter",
+                        &[
+                            "Type", "Slope", "Circuit", "Freq", "Res", "Morph", "Control", "Pitch",
+                        ],
+                    ),
+                    ("Output", &["Formant", "Drive", "Clip", "Output", "Dry/Wet"]),
+                    (
+                        "LFO",
+                        &[
+                            "LFO Amt",
+                            "LFO Wave",
+                            "LFO Morph",
+                            "LFO Mode",
+                            "LFO Rate",
+                            "LFO Time",
+                            "LFO Beats",
+                            "LFO 16ths",
+                        ],
+                    ),
+                    (
+                        "LFO Shape",
+                        &[
+                            "LFO Stereo",
+                            "LFO Phase",
+                            "LFO Spin",
+                            "LFO Offset",
+                            "LFO Quantize",
+                            "LFO Steps",
+                            "LFO S&H",
+                        ],
+                    ),
+                    (
+                        "Envelope",
+                        &[
+                            "Env Amt",
+                            "Env Attack",
+                            "Env Release",
+                            "Env Hold",
+                            "Env S&H",
+                            "Env S&H Rate",
+                        ],
+                    ),
+                    (
+                        "Sidechain",
+                        &[
+                            "SC Filter",
+                            "SC Type",
+                            "SC Freq",
+                            "SC Q",
+                            "SC Shelf Gain",
+                            "SC Peak Gain",
+                        ],
+                    ),
+                ]),
         )
 }
 

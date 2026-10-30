@@ -162,7 +162,94 @@ pub fn multiband_dynamics_type() -> DeviceType {
     .with_description(
         DeviceDescription::new(params)
             .with_layout(layout())
-            .with_views(&VIEWS),
+            .with_views(&VIEWS)
+            .with_banks(&[
+                (
+                    "Main",
+                    &[
+                        "Low Freq",
+                        "High Freq",
+                        "Soft Knee",
+                        "Detector",
+                        "Time",
+                        "Amount",
+                        "Output",
+                    ],
+                ),
+                (
+                    "Bands",
+                    &[
+                        "Low",
+                        "High",
+                        "Low Active",
+                        "Low Solo",
+                        "Mid Active",
+                        "Mid Solo",
+                        "High Active",
+                        "High Solo",
+                    ],
+                ),
+                (
+                    "Low Above",
+                    &[
+                        "Low Input",
+                        "Low Output",
+                        "Low Above Threshold",
+                        "Low Above Ratio",
+                        "Low Above Attack",
+                        "Low Above Release",
+                    ],
+                ),
+                (
+                    "Low Below",
+                    &[
+                        "Low Below Threshold",
+                        "Low Below Ratio",
+                        "Low Below Attack",
+                        "Low Below Release",
+                    ],
+                ),
+                (
+                    "Mid Above",
+                    &[
+                        "Mid Input",
+                        "Mid Output",
+                        "Mid Above Threshold",
+                        "Mid Above Ratio",
+                        "Mid Above Attack",
+                        "Mid Above Release",
+                    ],
+                ),
+                (
+                    "Mid Below",
+                    &[
+                        "Mid Below Threshold",
+                        "Mid Below Ratio",
+                        "Mid Below Attack",
+                        "Mid Below Release",
+                    ],
+                ),
+                (
+                    "High Above",
+                    &[
+                        "High Input",
+                        "High Output",
+                        "High Above Threshold",
+                        "High Above Ratio",
+                        "High Above Attack",
+                        "High Above Release",
+                    ],
+                ),
+                (
+                    "High Below",
+                    &[
+                        "High Below Threshold",
+                        "High Below Ratio",
+                        "High Below Attack",
+                        "High Below Release",
+                    ],
+                ),
+            ]),
     )
 }
 

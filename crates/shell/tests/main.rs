@@ -74,6 +74,7 @@ mod kitbag;
 mod linked_tracks;
 mod locator;
 mod macros;
+mod mapping_targets;
 mod menus;
 mod midi_controller_recording;
 mod midi_files;

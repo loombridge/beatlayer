@@ -1133,6 +1133,13 @@ impl AudioHost {
         let _ = self.send_transport(TransportCommand::Stop);
     }
 
+    /// Whether Arrangement Record was on in the last block the engine
+    /// published.
+    #[must_use]
+    pub fn recording(&self) -> bool {
+        self.memory.recording
+    }
+
     /// The transport as the engine last published it, all from the same
     /// block: whether the song plays, the playhead, and the insert marker.
     /// Reading takes no lock. Before a new engine's first block, and while

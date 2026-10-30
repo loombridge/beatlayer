@@ -1,6 +1,6 @@
 # Step recording: the Preview switch, MIDI step recording, and Step Input Mode
 
-- **Status:** partial (R1 to R11 and R13 have passing tests; R12 is built with the map modes, WP-7.3b)
+- **Status:** implemented (R1 to R13 each have a passing test)
 - **Work packages:** WP-6.5 (R1 to R11 and R13); WP-7.3b (R12). The insert marker and the editing grid it moves by are [piano-roll.md](piano-roll.md)'s; a track's MIDI input, monitoring and the computer MIDI keyboard [midi-io.md](midi-io.md)'s; recording while the transport runs [recording.md](recording.md)'s; mapping the step buttons to keys and MIDI is [map modes](map-modes.md) R21
 - **Parity-matrix row:** MIDI editing: Step input and step recording
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0 and 12.0.5; the UI parity reference's rows L-CLIP-012, M-OPT-004, M-OPT-005, M-OPT-018 and S-NOTE-044, recorded from Live 12.4.3 on macOS
@@ -65,5 +65,5 @@ This spec covers the Preview switch, step recording and Step Input Mode. It leav
 | R9 | `crates/shell/tests/step_recording.rs`, `step_input_mode_arms_the_track_focuses_the_clip_view_and_switches_the_keyboard`; `crates/ui/tests/keymap/editors.rs`, `cmd_shift_b_runs_step_input_mode_and_the_arrows_step_in_the_note_editor`; `crates/ui/tests/clip_view.rs`, `cmd_shift_b_arms_the_track_and_switches_the_computer_keyboard` | unit, UI script |
 | R10 | `crates/shell/tests/step_recording.rs`, `holding_two_keys_and_pressing_right_twice_adds_two_notes_two_steps_long` (the computer MIDI keyboard's keys); `crates/ui/tests/clip_view.rs`, `left_and_right_step_while_step_recording_and_move_the_marker_otherwise` | unit, UI script |
 | R11 | `crates/shell/tests/step_recording.rs`, `each_step_is_announced` | unit |
-| R12 | to be written in WP-7.3b, with [map modes](map-modes.md) R21 | UI script, integration |
+| R12 | `bl-shell` `mapping_targets::the_step_buttons_step_record_with_a_held_note`; `bl-ui` `mapping_targets::the_clip_views_controls_tint_the_scrub_shows_in_midi_map_mode_only_and_the_step_buttons_show` | UI script, integration |
 | R13 | `crates/shell-spec/src/notes.rs`, `every_listed_id_is_registered_and_complete`; `crates/shell/tests/step_recording.rs`, `step_record_by_id_takes_the_held_notes_as_keys_and_velocities`; `cargo xtask commands` (the readback table) | unit |

@@ -80,6 +80,7 @@ use bl_shell_spec::scales as scales_ids;
 use bl_shell_spec::search as search_ids;
 use bl_shell_spec::session_launch as session_launch_ids;
 use bl_shell_spec::session_record as session_record_ids;
+use bl_shell_spec::session_strip as session_strip_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::set_exchange as set_exchange_ids;
 use bl_shell_spec::settings::STATE as SETTINGS_STATE;
@@ -140,9 +141,11 @@ mod plugin_windows;
 mod recording_takes;
 mod recovery;
 mod remote;
+mod remote_targets;
 mod search;
 mod session_launch;
 mod session_recording;
+mod session_strip;
 mod set_exchange;
 mod set_files;
 mod slice;
@@ -1911,6 +1914,9 @@ impl Shell {
         }
         if mixer_ids::handles(id) {
             return self.run_mixer_view(id, args);
+        }
+        if session_strip_ids::handles(id) {
+            return self.run_session_strip(id, args);
         }
         if session_ids::handles(id) {
             return self.run_session_view(id, args);

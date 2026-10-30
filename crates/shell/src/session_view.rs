@@ -124,6 +124,11 @@ pub struct SessionView {
     /// Counts `session.focus` runs, so the window moves the focus once for
     /// each.
     focus_requests: u64,
+    /// The scene the grid is to scroll to the centre of the slot area, and
+    /// how many times it was asked to, so the window scrolls once for each
+    /// (map modes R16).
+    centre: Option<SceneId>,
+    centre_requests: u64,
 }
 
 impl SessionView {
@@ -137,6 +142,7 @@ impl SessionView {
     pub fn reset(&mut self) {
         *self = Self {
             focus_requests: self.focus_requests,
+            centre_requests: self.centre_requests,
             ..Self::new()
         };
     }
@@ -159,6 +165,30 @@ impl SessionView {
     #[must_use]
     pub fn focus_requests(&self) -> u64 {
         self.focus_requests
+    }
+
+    /// The highlighted scene (map modes R15): the selected scene, or else
+    /// the scene of the first selected slot.
+    #[must_use]
+    pub fn highlighted(&self) -> Option<SceneId> {
+        self.scenes
+            .first()
+            .copied()
+            .or_else(|| self.slots.first().map(|slot| slot.scene))
+    }
+
+    /// How many times the grid was asked to centre a scene, and which one it
+    /// was asked for last (map modes R16): the window scrolls when the count
+    /// has grown.
+    #[must_use]
+    pub fn centre_request(&self) -> (u64, Option<SceneId>) {
+        (self.centre_requests, self.centre)
+    }
+
+    /// Asks the grid to scroll to the centre of the slot area at `scene`.
+    pub(crate) fn request_centre(&mut self, scene: SceneId) {
+        self.centre = Some(scene);
+        self.centre_requests = self.centre_requests.wrapping_add(1);
     }
 
     /// The selected slots, in track then scene order.

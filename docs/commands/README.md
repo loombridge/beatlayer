@@ -3205,6 +3205,145 @@ What `control_surface.banks` returns.
 
 </details>
 
+### `BarControl`
+
+A control of the Control Bar that isn't a track's or a device's (map modes R11).
+
+One of:
+
+- `"tap_tempo"`: Tap Tempo.
+- `"phase_nudge_down"`: Phase Nudge Down, which nudges while it is held.
+- `"phase_nudge_up"`: Phase Nudge Up, which nudges while it is held.
+- `"play"`: Play.
+- `"stop"`: Stop.
+- `"re_enable_automation"`: Re-Enable Automation.
+- `"capture_midi"`: Capture MIDI.
+- `"new"`: New, which shows only in the map modes (map modes R20).
+- `"tempo"`: The Tempo field.
+- `"metronome"`: The Metronome switch.
+- `"follow"`: Follow.
+- `"arrangement_record"`: Arrangement Record.
+- `"midi_overdub"`: MIDI Arrangement Overdub.
+- `"automation_arm"`: Automation Arm.
+- `"session_record"`: Session Record.
+- `"punch_in"`: Punch-In.
+- `"arrangement_loop"`: The Arrangement Loop switch.
+- `"punch_out"`: Punch-Out.
+- `"draw_mode"`: Draw Mode.
+- `"quantization"`: The Quantization Menu: the global launch quantisation.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of the Control Bar that isn't a track's or a device's (map modes R11).",
+  "oneOf": [
+    {
+      "const": "tap_tempo",
+      "description": "Tap Tempo.",
+      "type": "string"
+    },
+    {
+      "const": "phase_nudge_down",
+      "description": "Phase Nudge Down, which nudges while it is held.",
+      "type": "string"
+    },
+    {
+      "const": "phase_nudge_up",
+      "description": "Phase Nudge Up, which nudges while it is held.",
+      "type": "string"
+    },
+    {
+      "const": "play",
+      "description": "Play.",
+      "type": "string"
+    },
+    {
+      "const": "stop",
+      "description": "Stop.",
+      "type": "string"
+    },
+    {
+      "const": "re_enable_automation",
+      "description": "Re-Enable Automation.",
+      "type": "string"
+    },
+    {
+      "const": "capture_midi",
+      "description": "Capture MIDI.",
+      "type": "string"
+    },
+    {
+      "const": "new",
+      "description": "New, which shows only in the map modes (map modes R20).",
+      "type": "string"
+    },
+    {
+      "const": "tempo",
+      "description": "The Tempo field.",
+      "type": "string"
+    },
+    {
+      "const": "metronome",
+      "description": "The Metronome switch.",
+      "type": "string"
+    },
+    {
+      "const": "follow",
+      "description": "Follow.",
+      "type": "string"
+    },
+    {
+      "const": "arrangement_record",
+      "description": "Arrangement Record.",
+      "type": "string"
+    },
+    {
+      "const": "midi_overdub",
+      "description": "MIDI Arrangement Overdub.",
+      "type": "string"
+    },
+    {
+      "const": "automation_arm",
+      "description": "Automation Arm.",
+      "type": "string"
+    },
+    {
+      "const": "session_record",
+      "description": "Session Record.",
+      "type": "string"
+    },
+    {
+      "const": "punch_in",
+      "description": "Punch-In.",
+      "type": "string"
+    },
+    {
+      "const": "arrangement_loop",
+      "description": "The Arrangement Loop switch.",
+      "type": "string"
+    },
+    {
+      "const": "punch_out",
+      "description": "Punch-Out.",
+      "type": "string"
+    },
+    {
+      "const": "draw_mode",
+      "description": "Draw Mode.",
+      "type": "string"
+    },
+    {
+      "const": "quantization",
+      "description": "The Quantization Menu: the global launch quantisation.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `BeatsSettings`
 
 Beats' controls.
@@ -5305,6 +5444,109 @@ One of:
     {
       "const": "random",
       "description": "The clip takes swatch `h mod 70`, `h` being a hash of its ID.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ClipControl`
+
+A control of the Clip View's panels (map modes R11, R17): the Audio Utilities panel's, which act on the audio clips it shows, and the Launch Properties panel's, which act on the clip it shows.
+
+One of:
+
+- `"warp"`: The Warp switch.
+- `"warp_mode"`: The Warp Mode chooser.
+- `"high_quality"`: The High Quality switch.
+- `"ram"`: The RAM switch.
+- `"gain"`: Gain, in decibels.
+- `"transpose"`: Transpose, in semitones.
+- `"detune"`: Detune, in cents.
+- `"launch_mode"`: The Launch Mode chooser.
+- `"legato"`: The Legato switch.
+- `"launch_quantization"`: The clip's Quantization chooser: Global, then the global menu's list.
+- `"velocity"`: The Velocity amount.
+- `"nudge_down"`: The nudge button that moves the playing clip back.
+- `"nudge_up"`: The nudge button that moves the playing clip forward.
+- `"scrub"`: The scrub control between the nudge buttons, which shows in MIDI Map Mode only: a relative controller's increments nudge the clip.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of the Clip View's panels (map modes R11, R17): the Audio Utilities panel's, which act on the audio clips it shows, and the Launch Properties panel's, which act on the clip it shows.",
+  "oneOf": [
+    {
+      "const": "warp",
+      "description": "The Warp switch.",
+      "type": "string"
+    },
+    {
+      "const": "warp_mode",
+      "description": "The Warp Mode chooser.",
+      "type": "string"
+    },
+    {
+      "const": "high_quality",
+      "description": "The High Quality switch.",
+      "type": "string"
+    },
+    {
+      "const": "ram",
+      "description": "The RAM switch.",
+      "type": "string"
+    },
+    {
+      "const": "gain",
+      "description": "Gain, in decibels.",
+      "type": "string"
+    },
+    {
+      "const": "transpose",
+      "description": "Transpose, in semitones.",
+      "type": "string"
+    },
+    {
+      "const": "detune",
+      "description": "Detune, in cents.",
+      "type": "string"
+    },
+    {
+      "const": "launch_mode",
+      "description": "The Launch Mode chooser.",
+      "type": "string"
+    },
+    {
+      "const": "legato",
+      "description": "The Legato switch.",
+      "type": "string"
+    },
+    {
+      "const": "launch_quantization",
+      "description": "The clip's Quantization chooser: Global, then the global menu's list.",
+      "type": "string"
+    },
+    {
+      "const": "velocity",
+      "description": "The Velocity amount.",
+      "type": "string"
+    },
+    {
+      "const": "nudge_down",
+      "description": "The nudge button that moves the playing clip back.",
+      "type": "string"
+    },
+    {
+      "const": "nudge_up",
+      "description": "The nudge button that moves the playing clip forward.",
+      "type": "string"
+    },
+    {
+      "const": "scrub",
+      "description": "The scrub control between the nudge buttons, which shows in MIDI Map Mode only: a relative controller's increments nudge the clip.",
       "type": "string"
     }
   ]
@@ -7901,6 +8143,43 @@ One of:
     {
       "const": "b",
       "description": "On the crossfader's B side.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `CrossfaderField`
+
+One of the crossfader's three mapping fields (map modes R19).
+
+One of:
+
+- `"left"`: The crossfader's left end.
+- `"centre"`: Its centre.
+- `"right"`: Its right end.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the crossfader's three mapping fields (map modes R19).",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "The crossfader's left end.",
+      "type": "string"
+    },
+    {
+      "const": "centre",
+      "description": "Its centre.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "Its right end.",
       "type": "string"
     }
   ]
@@ -14157,6 +14436,42 @@ A key held on the track's MIDI input, with the velocity it was played at.
 
 </details>
 
+### `Highlighted`
+
+What `session.highlight_scene` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The highlighted scene. |
+| `number` | integer, at least 0 | yes | Its number, counting from 1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.highlight_scene` returns.",
+  "properties": {
+    "number": {
+      "description": "Its number, counting from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The highlighted scene."
+    }
+  },
+  "required": [
+    "scene",
+    "number"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HistoryRow`
 
 A row, as `set.save_history` reports it.
@@ -20260,6 +20575,49 @@ The device `device.add` adds.
 
 </details>
 
+### `NewTake`
+
+What `session.new_take` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `scene` | [`SceneId`](#sceneid) | yes | The scene it highlighted. |
+| `inserted` | boolean | yes | Whether it inserted that scene. |
+| `stopped` | array of [`TrackId`](#trackid) | yes | The armed tracks whose clips it stopped. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `session.new_take` returns.",
+  "properties": {
+    "inserted": {
+      "description": "Whether it inserted that scene.",
+      "type": "boolean"
+    },
+    "scene": {
+      "$ref": "#/$defs/SceneId",
+      "description": "The scene it highlighted."
+    },
+    "stopped": {
+      "description": "The armed tracks whose clips it stopped.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "scene",
+    "inserted",
+    "stopped"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `NewTakeLane`
 
 A new take lane: its `name`, the `clips` it holds, and its `id`, issued when it's left out.
@@ -25287,7 +25645,7 @@ One of:
 
 ### `RemoteTarget`
 
-A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer `param`).
+A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: auto, apply, reset, or a `param`).
 
 One of:
 
@@ -25304,12 +25662,22 @@ One of:
 - an object with `type` = `"device"`, `device` ([`DeviceId`](#deviceid)), `param` ([`ParamId`](#paramid)): A parameter of a device, whose kind its description gives.
 - an object with `type` = `"device_on"`, `device` ([`DeviceId`](#deviceid)): A device's on/off switch.
 - an object with `type` = `"chain"`, `chain` ([`ChainId`](#chainid)), `param` ([`MixerParam`](#mixerparam)): A control of a rack chain's mixer.
+- an object with `type` = `"monitor"`, `track` ([`TrackId`](#trackid)): A track's Monitor switch: In, Auto, Off.
+- an object with `type` = `"cue_volume"`: The Cue Volume knob of Main's strip.
+- an object with `type` = `"track_launch"`, `track` ([`TrackId`](#trackid)): A track's Launch button in the relative Session mapping strip.
+- an object with `type` = `"strip"`, `control` ([`StripControl`](#stripcontrol)): A control of the relative Session mapping strip.
+- an object with `type` = `"crossfader_field"`, `field` ([`CrossfaderField`](#crossfaderfield)): One of the crossfader's three mapping fields.
+- an object with `type` = `"bar"`, `control` ([`BarControl`](#barcontrol)): A control of the Control Bar.
+- an object with `type` = `"step_back"`: The note editor's Step Back button.
+- an object with `type` = `"step_forward"`: The note editor's Step Forward button.
+- an object with `type` = `"clip"`, `control` ([`ClipControl`](#clipcontrol)): A control of the Clip View's panels.
+- an object with `type` = `"midi_tool"`, `tool` ([`ToolId`](#toolid)), `control` ([`ToolControl`](#toolcontrol)): A control of a MIDI Tool's panel, named by the tool and the control so one mapping acts whichever clip the Clip View shows.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), or `chain` (a `chain` and its mixer `param`).",
+  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: auto, apply, reset, or a `param`).",
   "oneOf": [
     {
       "description": "A Session slot of a track at a scene, not its clip.",
@@ -25557,6 +25925,176 @@ One of:
         "type",
         "chain",
         "param"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's Monitor switch: In, Auto, Off.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "monitor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Cue Volume knob of Main's strip.",
+      "properties": {
+        "type": {
+          "const": "cue_volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A track's Launch button in the relative Session mapping strip.",
+      "properties": {
+        "track": {
+          "$ref": "#/$defs/TrackId",
+          "description": "The track."
+        },
+        "type": {
+          "const": "track_launch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "track"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of the relative Session mapping strip.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/StripControl",
+          "description": "The control."
+        },
+        "type": {
+          "const": "strip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of the crossfader's three mapping fields.",
+      "properties": {
+        "field": {
+          "$ref": "#/$defs/CrossfaderField",
+          "description": "The field."
+        },
+        "type": {
+          "const": "crossfader_field",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "field"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of the Control Bar.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/BarControl",
+          "description": "The control."
+        },
+        "type": {
+          "const": "bar",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The note editor's Step Back button.",
+      "properties": {
+        "type": {
+          "const": "step_back",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The note editor's Step Forward button.",
+      "properties": {
+        "type": {
+          "const": "step_forward",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of the Clip View's panels.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ClipControl",
+          "description": "The control."
+        },
+        "type": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a MIDI Tool's panel, named by the tool and the control so one mapping acts whichever clip the Clip View shows.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ToolControl",
+          "description": "The control."
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolId",
+          "description": "The tool."
+        },
+        "type": {
+          "const": "midi_tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tool",
+        "control"
       ],
       "type": "object"
     }
@@ -30458,6 +30996,55 @@ A point inside a stretch's range that moves while both ends stay, as dragging th
 
 </details>
 
+### `StripControl`
+
+A control of the relative Session mapping strip (map modes R14): its Launch buttons, one for each track, are [`RemoteTarget::TrackLaunch`].
+
+One of:
+
+- `"scene_up"`: Highlights the scene before the highlighted one.
+- `"scene_down"`: Highlights the scene after the highlighted one.
+- `"scene_number"`: The scene number box: highlights the scene of its number.
+- `"launch_scene"`: Launches the highlighted scene.
+- `"cancel_launch"`: Cancels the launch of a scene that is queued.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of the relative Session mapping strip (map modes R14): its Launch buttons, one for each track, are [`RemoteTarget::TrackLaunch`].",
+  "oneOf": [
+    {
+      "const": "scene_up",
+      "description": "Highlights the scene before the highlighted one.",
+      "type": "string"
+    },
+    {
+      "const": "scene_down",
+      "description": "Highlights the scene after the highlighted one.",
+      "type": "string"
+    },
+    {
+      "const": "scene_number",
+      "description": "The scene number box: highlights the scene of its number.",
+      "type": "string"
+    },
+    {
+      "const": "launch_scene",
+      "description": "Launches the highlighted scene.",
+      "type": "string"
+    },
+    {
+      "const": "cancel_launch",
+      "description": "Cancels the launch of a scene that is queued.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `SurfaceInfo`
 
 One surface the chooser offers.
@@ -31461,6 +32048,70 @@ One of:
 
 </details>
 
+### `TargetInfo`
+
+One mappable control as `remote.targets` lists it (map modes R24).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `target` | [`RemoteTarget`](#remotetarget) | yes | The control, named by IDs: what `remote.map` and `remote.select` take and `remote.mappings` reports. |
+| `kind` | [`ControlKind`](#controlkind) | yes | The control's kind. |
+| `path` | string | yes | The path to the control: its track and device, or its view. |
+| `name` | string | yes | The control's name. |
+| `range` | pair of number and number | yes | The lowest and highest values of a continuous control, a radio button's first and last option, or a ranged switch's controller values, in the control's own units. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One mappable control as `remote.targets` lists it (map modes R24).",
+  "properties": {
+    "kind": {
+      "$ref": "#/$defs/ControlKind",
+      "description": "The control's kind."
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "path": {
+      "description": "The path to the control: its track and device, or its view.",
+      "type": "string"
+    },
+    "range": {
+      "description": "The lowest and highest values of a continuous control, a radio button's first and last option, or a ranged switch's controller values, in the control's own units.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "double",
+          "type": "number"
+        },
+        {
+          "format": "double",
+          "type": "number"
+        }
+      ],
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/RemoteTarget",
+      "description": "The control, named by IDs: what `remote.map` and `remote.select` take and `remote.mappings` reports."
+    }
+  },
+  "required": [
+    "target",
+    "kind",
+    "path",
+    "name",
+    "range"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TargetState`
 
 What a tool would act on now.
@@ -31533,6 +32184,43 @@ What a tool would act on now.
     "time_selection",
     "selected",
     "input"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TargetsResult`
+
+What `remote.targets` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `mode` | [`MapMode`](#mapmode) | yes | The list `mode` gives. |
+| `targets` | array of [`TargetInfo`](#targetinfo) | yes | Every control the mode maps that the set has, as the views show them: the Session View's slots, scene launch buttons and stop buttons and the relative Session mapping strip; the mixer; every device's parameters; the Control Bar; the crossfader's fields; the Clip View's panels and the step buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `remote.targets` returns.",
+  "properties": {
+    "mode": {
+      "$ref": "#/$defs/MapMode",
+      "description": "The list `mode` gives."
+    },
+    "targets": {
+      "description": "Every control the mode maps that the set has, as the views show them: the Session View's slots, scene launch buttons and stop buttons and the relative Session mapping strip; the mixer; every device's parameters; the Control Bar; the crossfader's fields; the Clip View's panels and the step buttons.",
+      "items": {
+        "$ref": "#/$defs/TargetInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "mode",
+    "targets"
   ],
   "type": "object"
 }
@@ -32459,6 +33147,105 @@ Changes to Tones' controls.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `ToolControl`
+
+A control of a MIDI Tool's panel (map modes R23).
+
+One of:
+
+- an object with `type` = `"auto"`: The Auto switch.
+- an object with `type` = `"apply"`: The Transform or Generate button.
+- an object with `type` = `"reset"`: The Reset button.
+- an object with `type` = `"param"`, `param` ([`ToolId`](#toolid)): One of the tool's parameters, whose kind its description gives.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of a MIDI Tool's panel (map modes R23).",
+  "oneOf": [
+    {
+      "description": "The Auto switch.",
+      "properties": {
+        "type": {
+          "const": "auto",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Transform or Generate button.",
+      "properties": {
+        "type": {
+          "const": "apply",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Reset button.",
+      "properties": {
+        "type": {
+          "const": "reset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of the tool's parameters, whose kind its description gives.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/ToolId",
+          "description": "Its ID."
+        },
+        "type": {
+          "const": "param",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ToolId`
+
+The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it.
+
+Type: string.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it.",
+  "maxLength": 32,
+  "minLength": 1,
+  "type": "string"
 }
 ```
 

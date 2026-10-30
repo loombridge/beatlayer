@@ -24057,6 +24057,106 @@ What `clip_view.show_properties` returns.
 
 </details>
 
+### `PushBrowse`
+
+What Browse Mode shows (push-2-tracks R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `load` | string | yes | What Load does: `add`, `replace` or `add_track`. |
+| `replaces` | [`DeviceId`](#deviceid) or null | yes | With `replace`, the device Load replaces. |
+| `columns` | array of [`PushBrowseColumn`](#pushbrowsecolumn) | yes | The columns, from the leftmost. |
+| `in_use` | integer, at least 0 | yes | The column in use, from 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Browse Mode shows (push-2-tracks R14).",
+  "properties": {
+    "columns": {
+      "description": "The columns, from the leftmost.",
+      "items": {
+        "$ref": "#/$defs/PushBrowseColumn"
+      },
+      "type": "array"
+    },
+    "in_use": {
+      "description": "The column in use, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "load": {
+      "description": "What Load does: `add`, `replace` or `add_track`.",
+      "type": "string"
+    },
+    "replaces": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "With `replace`, the device Load replaces."
+    }
+  },
+  "required": [
+    "load",
+    "replaces",
+    "columns",
+    "in_use"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushBrowseColumn`
+
+One column of Browse Mode (push-2-tracks R14).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `entries` | array of string | yes | The names of its entries, in order. |
+| `selected` | integer or null | yes | The selected entry, from 0. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One column of Browse Mode (push-2-tracks R14).",
+  "properties": {
+    "entries": {
+      "description": "The names of its entries, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "selected": {
+      "description": "The selected entry, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "entries",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -24231,6 +24331,7 @@ One connected Push 2.
 | `touch_strip` | [`PushTouchStrip`](#pushtouchstrip) | yes | The touch strip. |
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
+| `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
 
 <details><summary>JSON Schema</summary>
 
@@ -24238,6 +24339,17 @@ One connected Push 2.
 {
   "description": "One connected Push 2.",
   "properties": {
+    "browse": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushBrowse"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Browse Mode shows, while it is the display mode."
+    },
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
@@ -24364,7 +24476,8 @@ One connected Push 2.
     "leds",
     "touch_strip",
     "setup",
-    "display"
+    "display",
+    "browse"
   ],
   "type": "object"
 }

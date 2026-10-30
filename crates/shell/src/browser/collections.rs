@@ -293,7 +293,7 @@ impl BrowserView {
 
     /// The entry a collected file or folder lists as, or `None` when it
     /// isn't there or isn't a kind the browser lists.
-    fn collected_entry(key: &str) -> Option<Entry> {
+    pub(super) fn collected_entry(key: &str) -> Option<Entry> {
         let path = Path::new(key);
         let name = path.file_name()?.to_string_lossy().into_owned();
         if listing::is_hidden(&name) {

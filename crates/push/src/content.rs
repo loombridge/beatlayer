@@ -249,6 +249,15 @@ impl Target {
     }
 }
 
+/// Why a display mode's content is entered afresh.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Enter {
+    /// Its button was pressed.
+    Button,
+    /// Add Track was pressed (push-2-tracks R12).
+    AddTrack,
+}
+
 /// How the touch strip is configured (R11).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum StripUse {
@@ -392,6 +401,15 @@ pub trait Content: Send {
 
     /// The touch strip (R11).
     fn strip(&mut self, _event: StripEvent, _ctx: &mut Ctx<'_>) {}
+
+    /// The display mode is entered afresh, by its button or by another
+    /// control that leads to it.
+    fn enter(&mut self, _why: Enter, _ctx: &mut Ctx<'_>) {}
+
+    /// What Browse Mode shows, for `push.state` (push-2-tracks R14).
+    fn browse_state(&self) -> Option<crate::browse::State> {
+        None
+    }
 
     /// Draws the mode: the display's columns and labels, the pads, the
     /// buttons it owns.

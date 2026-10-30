@@ -47,6 +47,18 @@ pub mod cc {
     pub const SELECT: u8 = 48;
     /// Shift.
     pub const SHIFT: u8 = 49;
+    /// Left arrow.
+    pub const LEFT: u8 = 44;
+    /// Right arrow.
+    pub const RIGHT: u8 = 45;
+    /// Up arrow.
+    pub const UP: u8 = 46;
+    /// Down arrow.
+    pub const DOWN: u8 = 47;
+    /// Add Device.
+    pub const ADD_DEVICE: u8 = 52;
+    /// Add Track.
+    pub const ADD_TRACK: u8 = 53;
     /// Note.
     pub const NOTE: u8 = 50;
     /// Session.

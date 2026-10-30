@@ -13,8 +13,8 @@ use serde_json::{Value, json};
 
 use crate::buttons::{self, Buttons};
 use crate::content::{
-    Action, Content, Contents, Ctx, DisplayMode, Gesture, Lights, MakeContents, MixPage, Modifiers,
-    Pad, PadEvent, PadMode, Paint, StripEvent, StripUse, Target, Turn,
+    Action, Content, Contents, Ctx, DisplayMode, Enter, Gesture, Lights, MakeContents, MixPage,
+    Modifiers, Pad, PadEvent, PadMode, Paint, StripEvent, StripUse, Target, Turn,
 };
 use crate::controls::{self, BUTTONS, LedKind, STRIP_TOUCH, cc};
 use crate::curve::{Setup, Workflow};
@@ -625,6 +625,12 @@ impl Push {
                 self.with_contents(cx, Who::Both, |content, ctx| {
                     content.button(button, Gesture::Tap, ctx)
                 });
+                // Add Track leads to Browse Mode with the track kinds
+                // (push-2-tracks R12).
+                if button == cc::ADD_TRACK {
+                    self.display_mode = DisplayMode::Browse;
+                    self.enter(Enter::AddTrack, cx);
+                }
             }
             return;
         }
@@ -663,7 +669,7 @@ impl Push {
                             MixPage::Global => MixPage::Track,
                         };
                     }
-                    self.display_mode = mode;
+                    self.show_display(mode, cx);
                 } else if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
@@ -802,11 +808,11 @@ impl Push {
                     let now_value =
                         bl_model::fader::fader_position(model.document.settings().cue_volume);
                     let position = self.cue.turn(now, now_value, steps, true);
-                    cx.run_held(
-                        control,
-                        "mixer.set_cue_volume",
-                        json!({ "volume": bl_model::fader::fader_gain(position) }),
-                    );
+                    let volume = bl_model::fader::fader_gain(position);
+                    cx.run_held(control, "mixer.set_cue_volume", json!({ "volume": volume }));
+                    // The browser's preview keeps a volume of its own, which
+                    // follows the knob (push-2-tracks R10).
+                    cx.run_held(control, "browser.set_preview", json!({ "volume": volume }));
                 } else {
                     let main = model.document.main();
                     let now_value = bl_model::fader::fader_position(main.mixer().volume);
@@ -996,18 +1002,31 @@ impl Push {
 
     // ----- each tick -----
 
-    fn commands(&mut self) {
+    fn commands(&mut self, cx: &mut Cx) {
         for command in self.handle.take() {
             let Command::SetMode { pad, display } = command;
             if let Some(pad) = pad {
                 self.pad_mode = pad;
             }
             if let Some((mode, page)) = display {
-                self.display_mode = mode;
+                self.show_display(mode, cx);
                 self.mix_page = page;
             }
             self.menu = None;
         }
+    }
+
+    /// Makes `mode` the display mode, which its content enters afresh when
+    /// it is Browse (push-2-tracks R5).
+    fn show_display(&mut self, mode: DisplayMode, cx: &mut Cx) {
+        self.display_mode = mode;
+        if mode == DisplayMode::Browse {
+            self.enter(Enter::Button, cx);
+        }
+    }
+
+    fn enter(&mut self, why: Enter, cx: &mut Cx) {
+        self.with_contents(cx, Who::Display, |content, ctx| content.enter(why, ctx));
     }
 
     fn setup_changes(&mut self, cx: &mut Cx) {
@@ -1320,6 +1339,7 @@ impl Push {
         snapshot.strip_leds = *self.leds.strip();
         snapshot.setup = self.shared.setup();
         snapshot.screen = self.screen.clone();
+        snapshot.browse = self.display_content().browse_state();
         snapshot.display = self
             .display
             .as_ref()
@@ -1378,7 +1398,7 @@ impl ControlSurface for Push {
         self.model = Some(model.clone());
         self.wait_timeouts(cx);
         if matches!(self.phase, Phase::Live) {
-            self.commands();
+            self.commands(cx);
             if !self.user_mode {
                 for event in self.buttons.tick(cx.now()) {
                     self.button_event(event, cx);

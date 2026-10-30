@@ -160,6 +160,28 @@ pub struct PushDisplay {
     pub frames: u64,
 }
 
+/// One column of Browse Mode (push-2-tracks R14).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushBrowseColumn {
+    /// The names of its entries, in order.
+    pub entries: Vec<String>,
+    /// The selected entry, from 0.
+    pub selected: Option<usize>,
+}
+
+/// What Browse Mode shows (push-2-tracks R14).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushBrowse {
+    /// What Load does: `add`, `replace` or `add_track`.
+    pub load: String,
+    /// With `replace`, the device Load replaces.
+    pub replaces: Option<bl_model::DeviceId>,
+    /// The columns, from the leftmost.
+    pub columns: Vec<PushBrowseColumn>,
+    /// The column in use, from 0.
+    pub in_use: usize,
+}
+
 /// One connected Push 2.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PushInfo {
@@ -202,6 +224,8 @@ pub struct PushInfo {
     pub setup: PushSetup,
     /// The display.
     pub display: PushDisplay,
+    /// What Browse Mode shows, while it is the display mode.
+    pub browse: Option<PushBrowse>,
 }
 
 /// What `push.state` returns.
@@ -303,7 +327,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  locked; each LED's colour index and animation by control name; the touch \
                  strip's configuration and LEDs; the Setup menu's values; and the display's \
                  content as text, by band and column: labels, parameter names and values, \
-                 dots, notifications. Changes nothing.",
+                 dots, notifications; and, in Browse Mode, what Load does, its columns with their \
+                 entries and selection and the column in use. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

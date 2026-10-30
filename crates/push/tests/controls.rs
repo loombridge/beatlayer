@@ -120,6 +120,10 @@ fn every_control_in_the_table_decodes_and_lights_its_led_with_the_right_message(
             "{}: {heard:?}",
             button.name
         );
+        // Add Track leads to Browse Mode (push-2-tracks R12).
+        if button.name == "add_track" {
+            rig.tap("device");
+        }
     }
 
     // The eight track encoders: touch, turn both ways, release.
@@ -250,7 +254,7 @@ fn the_master_encoder_sets_main_volume_and_with_shift_the_cue_volume() {
     assert!(rig.sim.release(controls::MASTER));
     rig.advance(1);
     let commands = rig.commands();
-    assert_eq!(commands.len(), 2);
+    assert_eq!(commands.len(), 3);
     assert!(
         commands[0].starts_with("mixer.set_cue_volume "),
         "{commands:?}"
@@ -260,6 +264,14 @@ fn the_master_encoder_sets_main_volume_and_with_shift_the_cue_volume() {
     let expected =
         bl_model::fader::fader_gain(bl_model::fader::fader_position(1.0) + 10.0 / 2000.0);
     assert!((volume["volume"].as_f64().unwrap() - expected).abs() < 1e-9);
+    // Spec: push-2-tracks R10. The browser's preview volume follows it.
+    assert_eq!(
+        commands[1],
+        format!(
+            "browser.set_preview {}",
+            commands[0].trim_start_matches("mixer.set_cue_volume ")
+        )
+    );
 }
 
 // Spec: push-2 R10. The tempo encoder moves 1 BPM a step, 0.1 with Shift,
@@ -359,6 +371,7 @@ fn the_touch_strip_has_three_configurations_and_each_use_sends_its_flags() {
     );
 
     rig.tap("add_track");
+    rig.tap("device");
     assert_eq!(rig.sim.device.strip_config, 0x0C);
     rig.tap("add_device");
     assert_eq!(rig.sim.device.strip_config, 0x03);
@@ -372,6 +385,7 @@ fn the_touch_strip_has_three_configurations_and_each_use_sends_its_flags() {
     assert!(rig.sim.strip_move(0.5));
     assert!(rig.sim.strip_release());
     rig.tap("add_track");
+    rig.tap("device");
     rig.heard.take();
     assert!(rig.sim.strip_move(1.0));
     rig.advance(1);

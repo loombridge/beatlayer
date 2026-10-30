@@ -34,7 +34,7 @@ Nine groups, left to right (man 3.1). x positions are the left edges of each con
 | ID | Element | Placement at 1600 × 1000 | Shown or hidden by | Source |
 |---|---|---|---|---|
 | L-CTRL-001 | Show/Hide Browser toggle, with the Browser Config Menu (a small menu arrow) beside it | x 9 to 35 | Always present. The menu holds Full-Height Browser, Groove Pool, and Tuning; Beatlayer's Full-Height Browser item comes with WP-6.32 ([browser](../specs/browser.md) R26) | obs, man 3.1 |
-| L-CTRL-002 | Link toggle, showing the number of peers in the session, with the Link menu's arrow beside it (C-LINK) | In the tempo group, before Tap (L-CTRL-004) | Shown by default; Settings ▸ Link: Show Link Toggle hides it ([Link](../specs/link.md)) | man 3.1, 37.1.1, 37.1.2 |
+| L-CTRL-002 | Link toggle, showing the number of peers in the session, with the Link menu's arrow beside it (C-LINK) | In the tempo group, after the EXT items (L-CTRL-028, L-CTRL-029) and before Tap (L-CTRL-004): the toggle 44 pt wide at x 54, its arrow 10 pt wide 2 pt after it, and everything to their right in the group moves right by their widths and the 2 pt gaps (58 pt). Beatlayer's own sizes: Live's are not measured. Hidden where the Control Bar has no room for it (the smallest window and the second window) | Shown by default; Settings ▸ Link: Show Link Toggle hides it ([Link](../specs/link.md)) | man 3.1, 37.1.1, 37.1.2 |
 | L-CTRL-003 | Tempo Follower toggle | In the tempo group | Hidden by default; Settings, Tempo & MIDI: Show Tempo Follower Toggle | man 3.1, obs (setting) |
 | L-CTRL-004 | Tap tempo button | x 54, 28 pt wide | Always present | obs |
 | L-CTRL-005 | Tempo field | x 82 to 126 | Always present | obs |

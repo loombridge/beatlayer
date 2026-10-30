@@ -605,6 +605,9 @@ pub struct Shell {
     /// Whether a peer's change of the tempo took the tempo envelope's
     /// place, as the engine last published it (the Link spec, R4).
     tempo_override: bool,
+    /// Whether a start waits for the Link session's phase, as the engine last
+    /// published it (the Link spec, R22).
+    link_waiting_view: bool,
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
@@ -1316,6 +1319,7 @@ impl Shell {
             link_peers_shown: 0,
             keep_tempo: false,
             tempo_override: false,
+            link_waiting_view: false,
             midi_listed: std::time::Instant::now(),
             push_display,
             midi_seen: (0, 0),

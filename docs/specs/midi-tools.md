@@ -1,6 +1,6 @@
 # MIDI Tools: the Transform and Generate panels, applying a tool, what it acts on, and chains
 
-- **Status:** partial (R1 to R33 each have a passing test; R34 to R36, mapping tools and chains, are WP-7.3b's)
+- **Status:** implemented (R1 to R36 each have a passing test)
 - **Work packages:** WP-6.11 (the panels, choosing a tool, its settings, what a tool acts on, applying and Auto, undo, seeds, the commands: R1 to R26); WP-6.15 (chained MIDI Tools: R27 to R33); WP-7.3b (mapping tools and chains to keys and MIDI: R34 to R36). Each tool's own parameters and what it does are [midi-transformations.md](midi-transformations.md)'s (WP-6.12, WP-6.13, WP-6.13b) and [midi-generators.md](midi-generators.md)'s (WP-6.14, WP-6.14b); the Pitch and Time Utilities panel's controls are [pitch-and-time-utilities.md](pitch-and-time-utilities.md)'s (WP-6.16). Which of a tool's controls the map modes offer, and how a mapping is made, are [map modes](map-modes.md)'s (R11, R12 and R23); what a mapped message does to them is R34 to R36 here
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, transformations (…)", "MIDI Tools, generators (…)" and "Chained MIDI Tools, mapped to keys or MIDI"
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 8 (8.1.2, 8.2.4, 8.6), chapter 10 (10.5.2, 10.5.10) and chapter 11 (its introduction and 11.1); the Live 12 release notes, 12.0, 12.0.5, 12.1, 12.1.5 and 12.2; the UI parity reference's L-CLIP-003, L-CLIP-006, L-CLIP-007, L-STAT-002, M-EDIT-023 and S-NOTE-033
@@ -128,6 +128,6 @@ This spec covers the panels, choosing a tool, its settings, what it acts on, app
 | R31 | `crates/shell/tests/midi_tools.rs`, `r31_auto_off_on_the_middle_step_runs_the_third_on_the_firsts_output`, `r31_auto_off_on_the_last_step_leaves_the_rest_and_on_the_only_step_closes_the_chain` | shell test |
 | R32 | `crates/shell/tests/midi_tools.rs`, `r32_every_outside_edit_closes_the_chain` (a note move, `note.set_expression`, undo, a change of the selection); a chain isn't saved because the set's MIDI Tools settings (`bl-project`'s `MidiToolSettings`) have no place for one | shell test |
 | R33 | `crates/shell/tests/midi_tools.rs`, `r27_r33_two_transformations_in_turn_form_a_chain_the_state_reports`; `crates/agent/tests/midi_tools.rs`, `two_tools_chained_by_id_read_back_as_a_chain` | shell test, MCP script |
-| R34 | to be written in WP-7.3b | integration, UI script |
-| R35 | to be written in WP-7.3b | integration |
-| R36 | to be written in WP-7.3b | integration |
+| R34 | `bl-shell` `mapping_targets::a_midi_tools_controls_map_and_act_with_the_panel_hidden`, `mapping_targets::every_native_tools_id_and_parameter_id_fit_a_target`; `bl-ui` `mapping_targets::a_midi_tools_controls_are_tinted_and_a_click_selects_one_by_name` | integration, UI script |
+| R35 | `bl-shell` `mapping_targets::a_midi_tools_controls_map_and_act_with_the_panel_hidden` | integration |
+| R36 | `bl-shell` `mapping_targets::a_mapped_change_to_a_tool_in_the_chain_changes_its_step` | integration |

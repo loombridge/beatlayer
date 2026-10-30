@@ -25071,7 +25071,7 @@ One of:
 
 ### `RemoteTarget`
 
-A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, or `clip` (a Clip View `control`).
+A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: auto, apply, reset, or a `param`).
 
 One of:
 
@@ -25097,12 +25097,13 @@ One of:
 - an object with `type` = `"step_back"`: The note editor's Step Back button.
 - an object with `type` = `"step_forward"`: The note editor's Step Forward button.
 - an object with `type` = `"clip"`, `control` ([`ClipControl`](#clipcontrol)): A control of the Clip View's panels.
+- an object with `type` = `"midi_tool"`, `tool` ([`ToolId`](#toolid)), `control` ([`ToolControl`](#toolcontrol)): A control of a MIDI Tool's panel, named by the tool and the control so one mapping acts whichever clip the Clip View shows.
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, or `clip` (a Clip View `control`).",
+  "description": "A mappable control: `slot` (a `track` and a `scene`), `scene_launch` (a `scene`), `track_stop` (a `track`), `stop_all`, `mixer` (a `track` and a mixer `param`: volume, pan, mute for the track activator), `send` (a `track` and the return `to`), `solo` or `arm` (a `track`), `crossfade_assign` (a `track`), `crossfader`, `device` (a `device` and its `param`), `device_on` (a `device`), `chain` (a `chain` and its mixer `param`), `monitor` (a `track`), `cue_volume`, `track_launch` (a `track`'s Launch button in the relative Session mapping strip), `strip` (one of the strip's `control`s: scene_up, scene_down, scene_number, launch_scene, cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: auto, apply, reset, or a `param`).",
   "oneOf": [
     {
       "description": "A Session slot of a track at a scene, not its clip.",
@@ -25496,6 +25497,29 @@ One of:
       },
       "required": [
         "type",
+        "control"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A control of a MIDI Tool's panel, named by the tool and the control so one mapping acts whichever clip the Clip View shows.",
+      "properties": {
+        "control": {
+          "$ref": "#/$defs/ToolControl",
+          "description": "The control."
+        },
+        "tool": {
+          "$ref": "#/$defs/ToolId",
+          "description": "The tool."
+        },
+        "type": {
+          "const": "midi_tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "tool",
         "control"
       ],
       "type": "object"
@@ -32092,6 +32116,105 @@ Changes to Tones' controls.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `ToolControl`
+
+A control of a MIDI Tool's panel (map modes R23).
+
+One of:
+
+- an object with `type` = `"auto"`: The Auto switch.
+- an object with `type` = `"apply"`: The Transform or Generate button.
+- an object with `type` = `"reset"`: The Reset button.
+- an object with `type` = `"param"`, `param` ([`ToolId`](#toolid)): One of the tool's parameters, whose kind its description gives.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A control of a MIDI Tool's panel (map modes R23).",
+  "oneOf": [
+    {
+      "description": "The Auto switch.",
+      "properties": {
+        "type": {
+          "const": "auto",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Transform or Generate button.",
+      "properties": {
+        "type": {
+          "const": "apply",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The Reset button.",
+      "properties": {
+        "type": {
+          "const": "reset",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "One of the tool's parameters, whose kind its description gives.",
+      "properties": {
+        "param": {
+          "$ref": "#/$defs/ToolId",
+          "description": "Its ID."
+        },
+        "type": {
+          "const": "param",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "param"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
+### `ToolId`
+
+The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it.
+
+Type: string.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it.",
+  "maxLength": 32,
+  "minLength": 1,
+  "type": "string"
 }
 ```
 

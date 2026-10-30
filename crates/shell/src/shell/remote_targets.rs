@@ -389,7 +389,7 @@ impl Shell {
                     // shortcut: the release goes to the scene highlighted
                     // now, not the one pressed, if the highlight moved
                     // while the key was held
-                    Action::Release => scene.and_then(|s| {
+                    Action::Release => scene.map_or_else(nothing, |s| {
                         cmd("session.release", json!({ "track": track, "scene": s }))
                     }),
                     _ => None,

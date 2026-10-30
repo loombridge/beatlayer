@@ -147,6 +147,7 @@ impl Shell {
     pub(super) fn forget_remote_values(&mut self) {
         self.remote.memory.clear();
         self.remote.run = None;
+        self.remote.fields_held.clear();
         // Spec: map-modes R2. A map mode is off when a set opens.
         self.set_map_mode(MapMode::Off);
     }

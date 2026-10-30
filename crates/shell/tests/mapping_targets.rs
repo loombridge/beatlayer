@@ -1050,3 +1050,52 @@ fn the_scrub_nudges_the_playing_clip_by_what_the_controller_sends() {
     assert_eq!(nudged(&mut rig, before), 2, "two values up, two steps");
     assert_eq!(rig.refused(), 0);
 }
+
+// Spec: map-modes R18. A mapped slot belongs to its slot: a clip moved into
+// another slot leaves the mapping behind, and a slot that becomes empty keeps
+// its mapping.
+#[test]
+fn a_mapped_slot_keeps_its_mapping_when_its_clip_moves_or_goes() {
+    let mut rig = Rig::new();
+    let track = rig.track(TrackKind::Midi);
+    let scenes = rig.scenes();
+    rig.run(
+        "session.insert_empty_midi_clip",
+        json!({ "track": track, "scene": scenes[0] }),
+    );
+    let slot = |scene: SceneId| json!({ "type": "slot", "track": track, "scene": scene });
+    rig.map(key("s"), slot(scenes[0]));
+    let clip = rig
+        .shell
+        .editor()
+        .document()
+        .slot(track, scenes[0])
+        .unwrap()
+        .id;
+    let mapped =
+        |rig: &mut Rig| rig.run("remote.mappings", json!({}))["mappings"][0]["target"].clone();
+
+    rig.run(
+        "clip.move_to_slot",
+        json!({ "clip": clip, "track": track, "scene": scenes[1] }),
+    );
+    assert_eq!(
+        mapped(&mut rig),
+        slot(scenes[0]),
+        "the mapping stayed behind"
+    );
+    rig.run(
+        "session.select",
+        json!({ "track": track, "scene": scenes[1] }),
+    );
+    rig.run("session.delete", json!({}));
+    assert!(
+        rig.shell
+            .editor()
+            .document()
+            .slot(track, scenes[1])
+            .is_none()
+    );
+    assert_eq!(mapped(&mut rig), slot(scenes[0]), "an empty slot keeps it");
+    assert_eq!(rig.refused(), 0);
+}

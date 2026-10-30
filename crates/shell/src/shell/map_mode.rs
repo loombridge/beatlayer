@@ -135,6 +135,8 @@ impl Shell {
     /// rack's Map mode, which a map mode turns off.
     pub(super) fn set_map_mode(&mut self, mode: MapMode) {
         self.end_remote_run();
+        // A key held when the mode changed never reports its release.
+        self.remote.fields_held.clear();
         if mode != MapMode::Off
             && let Some(rack) = self.devices.map_mode()
         {

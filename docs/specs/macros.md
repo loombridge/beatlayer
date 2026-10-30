@@ -1,6 +1,6 @@
 # Macros: macro controls, Map mode, Randomize, and variations
 
-- **Status:** partial (WP-5.4 built R1 to R20, WP-5.5 R25 to R33, and WP-5.4b R21 to R24; R34 to R36 come with WP-7.3b)
+- **Status:** implemented (R1 to R36 each have a passing test)
 - **Work packages:** WP-5.4 (macros, Map mode, Randomize, names and colours, R1 to R20), WP-5.4b (the stepped and radio-button styles: R21 to R24), WP-5.5 (macro variations: R25 to R33), WP-7.3b (MIDI and key mapping of macros, and the Mapping Browser's modes: R34 to R36). The rack itself, its chains, its title bar and its view column are WP-5.1's and WP-5.2's ([racks.md](racks.md)); the map modes themselves are [map modes](map-modes.md)'s; rack presets are WP-5.8's; modulation of a macro or of a mapped parameter is [modulation.md](modulation.md)'s
 - **Parity-matrix row:** Automation and modulation: Macros (16 per rack), variations, randomise, map mode with per-mapping ranges; [the improvements](../05-improvements.md), IMP-30 (stepped and radio-button macro styles)
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026; the Live 12 release notes, 12.4
@@ -115,6 +115,6 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 | R31 | `crates/model/src/repr.rs`, `variations_save_with_the_set_and_load_back` | unit |
 | R32 | `crates/model/tests/command_registry.rs`, `every_command_runs_by_id`; `crates/cli/tests/agent_macros.rs`, `an_agent_stores_launches_and_reads_back_variations` | unit, agent test |
 | R33 | `rtsan/tests/macros.rs`, `a_variation_launch_runs_clean_under_the_sanitizer` | RealtimeSanitizer |
-| R34 | to be written in WP-7.3b | integration, UI script |
-| R35 | to be written in WP-7.3b | integration |
-| R36 | to be written in WP-7.3b | UI script |
+| R34 | `bl-shell` `mapping_targets::a_radio_button_macro_takes_a_key_and_a_held_parameter_refuses_a_mapping`; `bl-ui` `mapping_targets::a_radio_button_macro_takes_a_key_and_a_knob_macro_does_not` | integration, UI script |
+| R35 | `bl-shell` `mapping_targets::a_radio_button_macro_takes_a_key_and_a_held_parameter_refuses_a_mapping` (`remote.map` names the macro; `remote.targets` lists no held parameter) | integration |
+| R36 | `bl-ui` `map_modes::the_mapping_browser_replaces_the_browser_and_hides_with_it`, `map_modes::a_map_mode_and_a_racks_map_mode_exclude_each_other` | UI script |

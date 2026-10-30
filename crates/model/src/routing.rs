@@ -136,10 +136,6 @@ impl Document {
             if envelope.kind == crate::EnvelopeKind::Automation && !in_slot {
                 return Err(ModelError::NotSlotClip(clip.id));
             }
-            // A MIDI controller's envelope only modulates (WP-2.29).
-            if envelope.kind == crate::EnvelopeKind::Automation && envelope.target.is_midi() {
-                return Err(ModelError::MidiControllerNotAParameter);
-            }
             crate::command::check_clip_setting_kind(envelope.target, envelope.kind)?;
             self.check_clip_target(id, clip, envelope.target)?;
             envelope.envelope.check()?;

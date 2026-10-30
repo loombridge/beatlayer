@@ -5513,6 +5513,7 @@ impl Document {
         let mut mixer = self.chain_ref(chain)?.mixer;
         let changed = match param {
             MixerParam::Volume => {
+                check_value("volume", value, value.is_finite() && value >= 0.0)?;
                 if mixer.volume != value {
                     mixer.volume = value;
                     true
@@ -5521,6 +5522,7 @@ impl Document {
                 }
             }
             MixerParam::Pan => {
+                check_value("pan", value, (-1.0..=1.0).contains(&value))?;
                 if mixer.pan != value {
                     mixer.pan = value;
                     true
@@ -6394,10 +6396,9 @@ impl Document {
         moved.start = start;
         // An envelope names a parameter of the track the clip is on, so one
         // moving to another track keeps only those its new track has
-        // (WP-3.15).
-        if owner != track {
-            self.keep_fitting_envelopes(track, &mut moved);
-        }
+        // (WP-3.15); one leaving a slot loses its Automation envelopes
+        // (session automation R10).
+        self.keep_fitting_envelopes(track, &mut moved, false);
         self.remove_clip(id)?;
         self.track_mut(track)?.clips.insert(id, Shared::new(moved));
         self.index.clip_track.insert(id, track);
@@ -6413,7 +6414,6 @@ impl Document {
         lane: Option<TakeLaneId>,
         start: Ticks,
     ) -> Result<(), ModelError> {
-        let owner = self.clip_owner(id)?;
         let clip = self.clip_ref(id)?;
         check_clip_fits(self.track_ref(track)?, &clip.data)?;
         check_extent(start, clip.length)?;
@@ -6424,9 +6424,7 @@ impl Document {
         }
         let mut moved = clip.clone();
         moved.start = start;
-        if owner != track {
-            self.keep_fitting_envelopes(track, &mut moved);
-        }
+        self.keep_fitting_envelopes(track, &mut moved, false);
         self.remove_clip(id)?;
         match lane {
             Some(lane) => self.lane_mut(lane)?.clips.push(moved),
@@ -6441,12 +6439,17 @@ impl Document {
     /// Drops from `clip` the envelopes naming parameters `track` doesn't
     /// have: what moving a clip to another track does, since a clip envelope
     /// names a parameter of the track it's on (WP-3.15, as automation R11
-    /// drops a device's envelopes when it leaves a track).
-    fn keep_fitting_envelopes(&self, track: TrackId, clip: &mut Clip) {
+    /// drops a device's envelopes when it leaves a track). A clip that
+    /// isn't going to a Session slot (`to_slot`) also loses its Automation
+    /// envelopes, which only a Session clip holds (session automation R10).
+    fn keep_fitting_envelopes(&self, track: TrackId, clip: &mut Clip, to_slot: bool) {
         let envelopes = std::mem::take(&mut clip.envelopes);
         clip.envelopes = envelopes
             .into_iter()
-            .filter(|envelope| self.check_clip_target(track, clip, envelope.target).is_ok())
+            .filter(|envelope| {
+                (to_slot || envelope.kind != EnvelopeKind::Automation)
+                    && self.check_clip_target(track, clip, envelope.target).is_ok()
+            })
             .collect();
     }
 
@@ -6701,7 +6704,7 @@ impl Document {
         // An envelope names a parameter of the track the clip is on, so one
         // moving to another track keeps only those its new track has
         // (WP-3.15).
-        self.keep_fitting_envelopes(track, &mut moved);
+        self.keep_fitting_envelopes(track, &mut moved, true);
         self.track_mut(track)?
             .slots
             .insert(scene, Shared::new(moved));
@@ -7365,11 +7368,6 @@ impl Document {
         }
         self.check_clip_envelope_target(clip, target)?;
         check_clip_envelope_value(target, value)?;
-        // A MIDI controller's envelope only sends messages; it doesn't set a
-        // parameter as a Session clip's automation does (WP-2.29).
-        if kind == EnvelopeKind::Automation && target.is_midi() {
-            return Err(ModelError::MidiControllerNotAParameter);
-        }
         check_clip_setting_kind(target, kind)?;
         self.check_envelope_kind(clip, kind)?;
         clip_entry(&mut self.clip_mut(clip)?.envelopes, target, kind)
@@ -7868,6 +7866,18 @@ impl Document {
             forget_where(
                 self.track_mut(from)?,
                 |target| matches!(*target, AutomationTarget::ChainSend { chain, to } if chain == id || to == id),
+            );
+        }
+        // A MIDI effect rack's chains have no Volume or Pan, so their
+        // envelopes can't follow the chain there (racks spec, R5).
+        if !self
+            .device_ref(rack)?
+            .rack_kind()
+            .is_some_and(RackKind::chains_have_volume_and_pan)
+        {
+            forget_where(
+                self.track_mut(to)?,
+                |target| matches!(*target, AutomationTarget::Chain { chain, param } if chain == id && param != MixerParam::Mute),
             );
         }
         check_chain(self.track_ref(to)?)
@@ -8887,11 +8897,15 @@ pub(crate) fn check_clip_envelope_value(
 
 /// Refuses an Automation envelope for a clip sound setting: its envelopes
 /// modulate, and the track's automation drives the setting (the warp modes
-/// spec, R29 and R31).
+/// spec, R29 and R31). A MIDI controller's envelope only modulates too: it
+/// sends messages, it doesn't set a parameter (WP-2.29).
 pub(crate) fn check_clip_setting_kind(
     target: AutomationTarget,
     kind: EnvelopeKind,
 ) -> Result<(), ModelError> {
+    if kind == EnvelopeKind::Automation && target.is_midi() {
+        return Err(ModelError::MidiControllerNotAParameter);
+    }
     if kind == EnvelopeKind::Automation && target.is_clip() {
         return Err(ModelError::InvalidInput(
             "a clip setting's envelope only modulates; the track's automation drives the setting",
@@ -12305,6 +12319,63 @@ mod tests {
             clip.envelope_of(&volume, EnvelopeKind::Modulation)
                 .is_some()
         );
+    }
+
+    // Spec: session-automation R10
+    #[test]
+    fn a_session_clip_moved_to_the_arrangement_drops_its_automation_envelopes() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let volume = AutomationTarget::Mixer {
+            param: MixerParam::Volume,
+        };
+        let set = |clip, kind| Command::SetClipEnvelopeBreakpoint {
+            clip,
+            target: volume,
+            kind,
+            at: Ticks::ZERO,
+            value: 0.25,
+        };
+        for to_lane in [false, true] {
+            let scene: SceneId = song.fresh();
+            let index = song.doc.scenes().count();
+            song.apply(Command::CreateScene { id: scene, index })
+                .unwrap();
+            let slot: ClipId = song.fresh();
+            song.apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(slot, Ticks::ZERO, Ticks::WHOLE, midi()),
+            })
+            .unwrap();
+            song.apply(set(slot, EnvelopeKind::Automation)).unwrap();
+            song.apply(set(slot, EnvelopeKind::Modulation)).unwrap();
+            let start = Ticks::WHOLE * 4;
+            song.apply(if to_lane {
+                Command::MoveClipToLane {
+                    clip: slot,
+                    track,
+                    lane: None,
+                    start,
+                }
+            } else {
+                Command::MoveClip {
+                    clip: slot,
+                    track,
+                    start,
+                }
+            })
+            .unwrap();
+            let clip = song.doc.clip(slot).unwrap();
+            assert!(
+                clip.envelope_of(&volume, EnvelopeKind::Automation)
+                    .is_none()
+            );
+            assert!(
+                clip.envelope_of(&volume, EnvelopeKind::Modulation)
+                    .is_some()
+            );
+        }
     }
 
     // Spec: session-automation R9

@@ -268,6 +268,49 @@ fn a_96_khz_stream_reads_its_pitch_within_one_cent() {
     assert_eq!(node.device().note_name().as_deref(), Some("A4"));
 }
 
+// Spec: tuner R2. The difference function is spread over the blocks of an
+// interval, so no block pays for more than its share of the lags.
+#[test]
+fn the_pitch_analysis_costs_no_more_than_its_share_of_each_block() {
+    let rate = SampleRate::HZ_96000;
+    let desc = tuner_type();
+    let dev = device(&desc, &[(REFERENCE, 440.0)]);
+    let config = NodeConfig {
+        round_trip_latency: 0,
+        sample_rate: rate,
+        max_frames: 64,
+        channels: 2,
+    };
+    let mut node = NativeNode::new(Tuner::new(&config), &desc.description, &dev, &config);
+
+    let mut most = 0;
+    for start in (0..32_768).step_by(64) {
+        let mut data: Vec<f32> = (start..start + 64)
+            .map(|i| 0.5 * (TAU * 41.0 * i as f64 / rate.as_f64()).sin() as f32)
+            .collect();
+        data.extend_from_slice(&data.clone());
+        {
+            let mut block = Block::new(&mut data, 2, 64, 64, &[], TransportInfo::default(), rate);
+            bl_rt::rt_test!({
+                node.process(&mut block);
+            });
+        }
+        most = most.max(node.device().last_analysis_steps());
+    }
+
+    let lags =
+        (96_000.0f64 / 39.0).ceil() as usize + 2 - ((96_000.0f64 / 2150.0).floor() as usize - 1);
+    let budget = (lags * 64).div_ceil(2048) * 2048;
+    assert!(most > 0, "the analysis ran");
+    assert!(most <= budget, "a block took {most} steps, over {budget}");
+    let detected = node.device().detected_pitch().expect("the tone is heard");
+    let cents = 1200.0 * (detected / 41.0).log2();
+    assert!(
+        cents.abs() < 1.0,
+        "41 Hz reads {detected:.3} Hz ({cents:.2} cents)"
+    );
+}
+
 // Spec: tuner R5
 #[test]
 fn histogram_view_shows_pitch_history_and_auto_centring() {

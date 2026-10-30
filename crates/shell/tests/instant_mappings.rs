@@ -556,6 +556,17 @@ fn arming_locks_the_instrument_and_a_hand_lock_survives_it() {
         "back to the device in focus"
     );
 
+    // A lock by hand on an armed track's surface moves the lock: the
+    // instrument no longer reads as locked.
+    arm(&mut rig, first, true);
+    rig.run("control_surface.lock", json!({ "row": 1, "device": fx }));
+    rig.select(first);
+    let state = rig.shell.device_view_state();
+    let instrument = state.devices.iter().find(|d| d.id == one).unwrap();
+    assert!(instrument.locks.is_empty(), "{:?}", instrument.locks);
+    rig.run("control_surface.unlock", json!({ "row": 1 }));
+    arm(&mut rig, first, false);
+
     // A lock by hand isn't replaced by arming.
     rig.run("control_surface.lock", json!({ "row": 1, "device": fx }));
     arm(&mut rig, first, true);

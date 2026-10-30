@@ -855,13 +855,11 @@ impl Shell {
                     return Err(failed("the set has no such device".to_owned()));
                 }
                 let state = &mut self.instant.rows[row];
-                // Locking the locked device again gives it back (R23).
-                if state.hand == Some(args.device) {
-                    state.hand = None;
-                    state.arm = None;
-                } else {
-                    state.hand = Some(args.device);
-                }
+                // Locking the locked device again gives it back (R23); a
+                // lock by hand ends one arming made, so the instrument no
+                // longer reads as locked (R25).
+                state.hand = (state.hand != Some(args.device)).then_some(args.device);
+                state.arm = None;
                 Ok(row_info(self, row))
             }
             ids::UNLOCK => {

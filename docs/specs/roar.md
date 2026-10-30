@@ -1,0 +1,107 @@
+# Roar: multi-stage saturation with routing, modulation, feedback and compression
+
+- **Status:** draft
+- **Work packages:** WP-8.38 (part 1: the input section, the gain stages with their shapers and filters, the routing modes, oversampling, the global output and the shaper's display: R1 to R20); WP-8.39 (part 2: the modulation matrix and its sources, the feedback section with its Note mode, the compressor, the sidechains and the modulation displays: R21 to R36). The left strip with both an audio and a MIDI sidechain, and the MIDI sidechain's tapping point, are [routing](routing.md) R38 and R39; the filters it shares with [the Auto Filter](auto-filter.md) are the same code; the framework is WP-2.5's ([the native device framework](device-framework.md)), its LFO, envelope follower and seeded random source WP-5.42's
+- **Parity-matrix row:** Audio effects: Echo, Hybrid Reverb, Roar, Spectral Resonator, Spectral Time
+- **Checked against:** the Live 12 reference manual (online edition), chapter 29 "Live Audio Effect Reference", section 29.33 "Roar" with 29.33.1 to 29.33.6, read 30 October 2026; the Live 12.4 release notes
+
+## The behaviour
+
+Roar drives a signal through up to three gain stages, each a shaper (one of twelve curves, with an amount and a bias) and a filter before or after it. The routing mode decides how the stages are joined: one stage alone, two in series or in parallel, three on bands split by two crossovers, two on the mid and side, two with the second in a feedback path, or two as a distorted delay. An input section drives the signal and tilts its tone (with Color Compensation undoing the tilt after the stages), a global section compresses the result, sets its level and mixes it with the dry signal. Two LFOs, an envelope follower and a noise source move any stage control through a matrix; a feedback path returns the output to the input as a delay or as a resonance tuned to a note, which a MIDI track can play.
+
+The device takes Live's name with Beatlayer's own type ID, `beatlayer.roar`. Its shaper curves and filters are Beatlayer's own designs under Live's names, written here as formulas.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 29, section 29.33.1 "Input Section" | Drive; Tone Amount and Tone Frequency, a tilt; Color Compensation, which cuts the tone before the shapers and restores it after; the Routing Mode chooser (Single, Serial, Parallel, Multi Band, Mid Side, Feedback, Delay); Blend in every mode but Single and Multi Band; Multi Band's low and high crossovers |
+| S2 | Manual | Section 29.33.2 "Gain Stage Section" | Each stage's switch, Shaper Amount, Shaper Bias, Shaper Level, filter frequency and its Pre switch (the filter before the shaper); the twelve shaper types: Soft Sine, Digital Clip, Bit Crusher, Diode Clipper, Tube Preamp, Half Wave Rectifier, Full Wave Rectifier, Polynomial, Fractal, Tri Fold, Noise Injection, Shards; the nine filter types: LP, BP, HP, Notch, Peak, Morph, Comb, Resampling, Dispersion, with Resonance (not for Resampling), Peak Gain (Peak) and Morph (Morph); the shaper visualisation, a drag on which changes the amount |
+| S3 | Manual | Section 29.33.3 "Modulation Section" | Sources LFO 1, LFO 2, Env and Noise; the LFOs' waveforms (sine, triangle, square, up, down), modes (Free, Synced, Triplet, Dotted, Sixteenth), Rate, Morph and Smooth; the envelope follower's Attack, Release, Hold, Threshold, Gain, Frequency, Width and Input Listen; Noise's types Simplex, Wander, S & H and Brown; the matrix of amounts; Global Modulation Amount; each source's display and its column's lamp |
+| S4 | Manual | Section 29.33.4 "Feedback Section" | Feedback Mode (Time, Synced, Triplet, Dotted, Note), Time and the synced modes acting as a delay and Note ringing at a pitch; Amount; Invert; Gate, after which feedback fades once the input stops; the feedback filter's frequency and width, a band-pass |
+| S5 | Manual | Section 29.33.5 "Global Section" | Compression Amount, on the output and so on the feedback; the compressor's sidechain high-pass; Output Gain, then a hard clip, then Dry/Wet |
+| S6 | Manual | Section 29.33.6 "Sidechain Parameters" | An audio sidechain for the envelope follower (External, its source and tapping point, Mix, SC Gain, Listen) and a MIDI one (MIDI > FB Note, its source and tapping point) that sets the feedback's pitch from notes |
+| S7 | Release notes | Live 12.4 release notes, Roar | In Note mode, Shift with the up and down arrow keys moves the feedback pitch by an octave |
+| S8 | Beatlayer | [The Auto Filter](auto-filter.md); [Multiband Dynamics](multiband-dynamics.md) (Linkwitz-Riley crossovers); [the compressor](compressor.md); [the device framework](device-framework.md) R4, R8, R26 to R29, R35 to R39; [modulation](modulation.md) (the modulators' 32-frame grid); [routing](routing.md) R22 to R39; [control surfaces](control-surfaces.md) R19; [the improvements](../05-improvements.md) G1 and G2 | The filter types and circuits; crossovers that sum flat; a compressor's detector; smoothing, the oversampler, LFO, follower, seed, displays, channel messages; the grid modulation is worked out on; sidechains; banks; gains and automation |
+
+## Rules
+
+### The device and the input (WP-8.38)
+
+- **R1.** Roar (`beatlayer.roar`) is an audio effect with Live's name, Beatlayer's own layout and display cells for the shaper visualisation (R12) and, in part 2, the modulation sources (R31). Its body reads the input section, the stages, then the global section; a matrix view (R31) is view state saved with the set and not an undo step. (S1 to S5; saving the view is Beatlayer's own)
+- **R2.** Drive, 0 to +36 dB (0 dB by default), raises the signal into every stage. Tone Amount, −100 to +100 % (0 by default), tilts the spectrum about Tone Frequency (100 Hz to 10 kHz, 1 kHz by default) with a pair of first-order shelves, up to ±12 dB at the ends of the band. With Color Compensation on, the same tilt is applied with the opposite sign after the stages, so with the shapers at their lightest the device's response is flat within 0.5 dB at every Tone setting. (S1; ranges and the tilt's design are Beatlayer's own)
+
+### The stages (WP-8.38)
+
+- **R3.** Each stage has a switch (off passes it through untouched), a shaper type (Soft Sine in a new device), Shaper Amount (0 to 100 %, 0 by default), Shaper Bias (−100 to +100 %, 0), Shaper Level (a gain from −∞ to +12 dB, 0 dB, rule G1), a filter type (LP), the filter's frequency (20 Hz to 20 kHz, 20 kHz for LP), Resonance (0 to 100 %), Peak Gain (−24 to +24 dB, Peak only), Morph (0 to 100 %, Morph only) and Pre (off: the filter after the shaper; on: before it). (S2; ranges and defaults are Beatlayer's own)
+- **R4.** A shaper takes u = g·x + b, where g = 10^(Amount × 36 / 20) (0 to +36 dB) and b = Bias / 100, and gives y = f(u) − f(b), so silence in is silence out at any bias. Its curve f is, for each type, with c = max(−1, min(1, u)): Soft Sine, sin(π c / 2); Digital Clip, c; Bit Crusher, c quantised to 2^(n−1) steps a side with n = 16 − 14 × Amount bits (here Amount sets the bits and g is 1); Diode Clipper, u / (1 + |u|^2.5)^(1/2.5); Tube Preamp, tanh(u) for u ≥ 0 and 0.7 tanh(u / 0.7) below, so its negative side clips earlier; Half Wave Rectifier, tanh(max(u, 0)); Full Wave Rectifier, tanh(|u|); Polynomial, 1.5 (c − c³ / 3); Fractal, the sum over k from 0 to 3 of 0.5^k sin(2^k π c / 2), divided by 1.875; Tri Fold, (2/π) asin(sin(π u / 2)), a triangle folder; Noise Injection, tanh(u + Amount × n × |u|) with n a white noise from −1 to 1 drawn from the device's seed (device framework R29); Shards, (⌊8c⌋ + (8c − ⌊8c⌋)^4) / 8, a sloped staircase. Each curve, measured with a slow sine sweep at Amount 50 %, lies within 0.01 of its formula. (S2; every curve is Beatlayer's own)
+- **R5.** The rectifiers, Tube Preamp and a stage with a bias add DC; each stage's output passes a 5 Hz first-order high-pass after its shaper and filter, so a stage's output carries no DC above −80 dBFS. (Beatlayer's own)
+- **R6.** The filter types LP, BP, HP, Notch, Peak and Morph are the Auto Filter's filters ([the Auto Filter](auto-filter.md)) in its Clean circuit at 12 dB per octave, Resonance being its resonance and Morph its morph; they move into a module both devices use. Comb is a feedback comb at the filter's frequency (its delay one period, by a fractional delay), Resonance its feedback from 0 to 0.95; Resampling holds each sample for 1 / frequency seconds, a sample-rate reduction with no resonance; Dispersion is a chain of eight second-order allpasses at the frequency, Resonance their Q from 0.5 to 8, smearing the phase around it. Each type's measured response at small signal is within 0.5 dB of its design. (S2, S8; Comb's, Resampling's and Dispersion's designs are Beatlayer's own)
+- **R7.** Shaper Amount, Bias, the filter's frequency, Resonance, Peak Gain and Morph glide over 20 ms (device framework R4); a change of shaper or filter type crossfades over 10 ms. (S8; Beatlayer's own)
+
+### The routing modes (WP-8.38)
+
+- **R8.** Routing Mode decides how many stages run and how: Single runs stage 1 alone; Serial runs stage 1 into stage 2, Blend crossfading from stage 1's output (0 %) to stage 2's (100 %); Parallel runs both on the input, Blend crossfading from stage 1 (0 %) to stage 2 (100 %); Multi Band splits the input into low, mid and high bands at Low Crossover (50 Hz to 2 kHz, 250 Hz) and High Crossover (500 Hz to 16 kHz, 2.5 kHz), with fourth-order Linkwitz-Riley crossovers whose sum is flat within 0.1 dB with every stage off, stages 1, 2 and 3 on the low, mid and high bands; Mid Side runs stage 1 on the mid and stage 2 on the side, decoding after, so with the stages off the output equals the input; Feedback runs stage 1 on the input and stage 2 on the feedback path (R24), Blend crossfading from stage 1's output to the feedback path's; Delay runs stage 2 on stage 1's output delayed by the feedback time (R24), heard once at its level and then fed back through the feedback section, Blend crossfading from stage 1 to the delayed path. Stages a mode doesn't use keep their settings and show dimmed. (S1; the defaults, the slopes and the blends' laws are Beatlayer's own)
+- **R9.** Blend's crossfades follow equal-power laws, and Blend is dimmed in Single and Multi Band. (S1; the law is Beatlayer's own)
+- **R10.** In the Feedback and Delay modes the loop is at least one frame long and its length is fixed in frames by its parameters, never by the block size. (Beatlayer's own)
+
+### Oversampling, the output and the display (WP-8.38)
+
+- **R11.** The stages run at four times the sample rate through the oversampler (device framework R8), so a 5 kHz sine through any shaper at Amount 100 % leaves no alias above −70 dB below the fundamental in the band below 20 kHz, at 44.1 and 48 kHz; the device reports the oversampler's latency, and its dry path is delayed by the same. (S8; the factor and the level are Beatlayer's own)
+- **R12.** The shaper visualisation draws the selected stage's curve f (R4) with its bias, and the signal's recent level as a marker on it; a vertical drag on it changes that stage's Shaper Amount as one undo step. Its data (the curve in 128 points, the marker) is published and read by `device.display` (device framework R35 to R37), with a view per stage. (S2; the look is Beatlayer's own)
+- **R13.** Output Gain, a gain from −∞ to +12 dB (0 dB), sets the wet signal's level, which then passes a hard clip at 0 dBFS; Dry/Wet, 0 to 100 % (100 % by default), balances the dry signal (delayed by the latency) against it. (S5; ranges are Beatlayer's own)
+- **R14.** Nothing on the audio thread allocates, locks or blocks: the stages, filters, crossovers and the feedback line are made with the node. (S8)
+- **R15.** A render is bit-identical at block sizes 1, 64, 512 and 4,096 and run after run, Noise Injection included. (S8)
+- **R16.** Every parameter is automatable and modulatable (rule G2) and set and read back through the agent API; every gain reaches −∞ dB. (S8)
+- **R17.** Roar declares its banks of eight ([control surfaces](control-surfaces.md) R19): Main (Drive, Tone Amount, Routing Mode, Blend, stage 1's Shaper Amount and filter frequency, Output Gain, Dry/Wet), one bank per stage, Input and Global, and in part 2 a bank per modulation source and Feedback, so every automatable parameter is in a bank. (S8; the banks are Beatlayer's own)
+- **R18.** A set with Roar saves and reopens with every parameter and its view. (S8)
+- **R19.** Every control takes the keyboard focus in the Device View and assistive technology reads each with its name and value. (S8)
+- **R20.** Part 1 describes only part 1's parameters: the matrix's amounts, the sources, the feedback section and the compressor are added by WP-8.39, with new descriptor numbers, and a set saved between the two loads unchanged. (Beatlayer's own)
+
+### The modulation sources and matrix (WP-8.39)
+
+- **R21.** LFO 1 and LFO 2 each have a waveform (Sine, Triangle, Square, Up, Down: the effects LFO's Sine, Triangle, Rectangle, Saw Up and Saw Down, device framework R26), a Mode (Free, a rate from 0.01 to 40 Hz; Synced, Triplet and Dotted, divisions from 1/64 note to 8 bars; Sixteenth, 1 to 16 sixteenths), each mode's rate a parameter of its own, synced cycles on the beat grid as device framework R27 says; Morph, the wave's duty cycle as [the delay](delay.md) R11 has it; and Smooth, 0 to 100 %, a slew from none to a quarter of a cycle. (S3, S8; ranges and Morph's and Smooth's laws are Beatlayer's own)
+- **R22.** Env is an envelope follower (device framework R28) of the input, or of the audio sidechain while External is on (R29): its detector hears a band-pass at Frequency (20 Hz to 20 kHz) and Width (0.1 to 4 octaves), raised by Gain (−24 to +24 dB); it gives 0 below Threshold (−60 to 0 dBFS) and rises with the level above it, with Attack (0.1 to 100 ms), Release (1 to 2,000 ms) and Hold. Input Listen sends the detector's signal to the output while on, as view state, not an undo step. Noise is Simplex (smooth gradient noise), Wander (the LFO's Wander), S & H (stepped random) or Brown (integrated white noise, kept between −1 and 1), at a Rate of 0.01 to 40 Hz, from the device's seed. (S3, S8; the laws and ranges are Beatlayer's own)
+- **R23.** The matrix has an amount, −100 to +100 % (0 by default), for each source and each target: every continuous parameter of the input section, the stages and the feedback section, Dry/Wet and Output Gain aside. Each amount is an automatable parameter (rule G2). A target's value is its parameter's plus the sum over sources of amount × source value × Global Modulation Amount (0 to 100 %, 100 %) × the target's range, clamped to the range; sources run from −1 to 1 (Env from 0 to 1). The sources and the matrix are worked out on the modulators' 32-frame grid ([modulation](modulation.md)), each target gliding between grid points, so a render doesn't depend on the block size. The matrix moves only Roar's own parameters, never through the modulators' mapping, and a modulated target's parameter value doesn't change. (S3, S8; the law and the grid are Beatlayer's own)
+
+### The feedback section (WP-8.39)
+
+- **R24.** Feedback Mode sets the feedback path's delay: Time, 1 ms to 2 s; Synced, Triplet and Dotted, divisions from 1/64 note to 4 bars, landing on their frames through the tempo map; Note, a key from C-2 to G8 whose period, at the set's equal tuning from A3 = 440 Hz, is the delay, so the path rings at that pitch within 1 cent. Each mode's amount is a parameter of its own. Amount, 0 to 100 %, sets how much returns; Invert flips its sign; the path passes a band-pass at the feedback filter's frequency (20 Hz to 20 kHz) and Width (0.1 to 4 octaves); the compressor (R27) acts in the loop, so a loud signal feeds back less, and the loop's gain stays below 1. With Gate on, the feedback fades over 200 ms once the input stays below −60 dBFS for 50 ms; with it off it runs on. (S4; ranges, the reference pitch and the gate's law are Beatlayer's own)
+- **R25.** With MIDI > FB Note on and a MIDI sidechain source chosen, each note the source plays sets the Note mode's key on its frame (the newest held note leads), so the path rings at the note's pitch within 1 cent from that frame; a note-off leaves the last key; pitch bend moves the pitch by up to ±2 semitones (device framework R39). Without it, or with No Input, Note sets the key. (S6; the bend range and the note-off rule are Beatlayer's own)
+- **R26.** With the focus on the Note control, Up and Down step the key by a semitone, and Shift with Up or Down by an octave, each one undo step: the value-field keys every focused control takes (S-VAL-001 and S-VAL-002 in [the shortcut table](../ui-parity/shortcuts.md)), the octave being the Note control's coarse step. (S7)
+
+### The compressor and the sidechains (WP-8.39)
+
+- **R27.** Compression Amount, 0 to 100 % (0 by default), sets a feed-forward compressor on the stages' output, before Output Gain: its threshold falls from 0 to −30 dBFS and its ratio rises from 1 : 1 to 8 : 1 as the amount rises, with a 10 ms attack and a 150 ms release ([the compressor](compressor.md)'s detector); with the Sidechain HP switch on, its detector hears the signal through a 12 dB per octave high-pass at 150 Hz. Its measured gain reduction on a step is within 0.5 dB of the law. (S5; the law is Beatlayer's own)
+- **R28.** Roar has an audio sidechain ([routing](routing.md) R22 to R31) whose signal reaches only the envelope follower (R22), and a MIDI sidechain ([routing](routing.md) R32 to R35, R39) with MIDI > FB Note. Its left strip shows both, as [routing](routing.md) R38 says. (S6)
+- **R29.** While External is on, Env follows SC Gain × Mix × the sidechain plus (1 − Mix) × the input, as [routing](routing.md) R24 says; with No Input it follows silence for the sidechain's share. (S6, S8)
+- **R30.** Agents set the matrix's amounts with `device.set_param` and the MIDI source with `device.set_midi_sidechain_source` (and its `tap`), and read them back through `device.parameters` and the device's `midi_sidechain`. (S8)
+
+### The modulation displays (WP-8.39)
+
+- **R31.** Each source has a small display of its recent output (its last two seconds) and a lamp in its matrix column lit while any of its amounts is not 0; the matrix view shows every stage's controls with every source's amount for each at once. The displays' data is published and read by `device.display`. (S3; the look is Beatlayer's own)
+
+### Throughout part 2 (WP-8.39)
+
+- **R32.** A source moves each of its targets by its amount on the 32-frame grid at block sizes 1, 64, 512 and 4,096 alike, and a synced LFO's and a synced feedback time's cycles land on the beat. (S8)
+- **R33.** Nothing in part 2 allocates, locks or blocks on the audio thread. (S8)
+- **R34.** Part 2's banks join R17's, so every automatable parameter is in a bank. (S8)
+- **R35.** A set with Roar saves and reopens with the matrix, the feedback section, the compressor and both sidechains. (S8)
+- **R36.** The device view's state reports both sidechain sections ([routing](routing.md) R38). (S8)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 to R3 | to be written in WP-8.38 | unit (description, defaults; Tone and Color Compensation flat within 0.5 dB) |
+| R4, R5 | to be written in WP-8.38 | unit (each curve against its formula on a sine sweep; no DC after a stage) |
+| R6, R7 | to be written in WP-8.38 | unit (each filter type's measured response) |
+| R8 to R10 | to be written in WP-8.38 | unit, real-time trap (each mode's path; Multi Band's sum within 0.1 dB; Mid Side's round trip; the loop's length in frames) |
+| R11 | to be written in WP-8.38 | unit (aliasing under −70 dB; reported latency) |
+| R12 | to be written in WP-8.38 | agent API (`device.display`); UI script (a drag on the curve is one undo step) |
+| R13 to R20 | to be written in WP-8.38 | real-time trap, RealtimeSanitizer; golden renders at four block sizes; `crates/devices/tests/rules.rs`; agent API; `crates/devices/tests/banks.rs`; save and reopen; UI script |
+| R21 to R23 | to be written in WP-8.39 | unit (each source's law; the matrix on the 32-frame grid at four block sizes) |
+| R24 to R26 | to be written in WP-8.39 | unit (synced feedback on the beat; Note within 1 cent); engine test (a MIDI track's note sets the pitch on its frame); UI script and keymap test (Shift with the arrows) |
+| R27 to R30 | to be written in WP-8.39 | unit (gain reduction on a step); engine test (the external sidechain drives Env); agent API |
+| R31 | to be written in WP-8.39 | agent API (`device.display`); UI script |
+| R32 to R36 | to be written in WP-8.39 | golden renders; real-time trap; `crates/devices/tests/banks.rs`; save and reopen; shell test (`device_view.state`) |

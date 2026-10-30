@@ -105,7 +105,7 @@ impl CommandRequest {
     pub const fn command(&self) -> Option<&crate::surface::Request> {
         match &self.ask {
             Ask::Command(request) => Some(request),
-            Ask::Control(_) | Ask::EndGesture(_) => None,
+            Ask::Control(_) | Ask::Rest(_) | Ask::EndGesture(_) => None,
         }
     }
 }
@@ -872,18 +872,22 @@ impl Surfaces {
             let Some(recognise) = kind.recognise else {
                 continue;
             };
+            let mut after_taken = false;
             for input in inputs.iter().filter(|name| recognise.names(name)) {
+                let taken = self.named(input)
+                    || self.declined.contains(input)
+                    || self.silent.contains(input)
+                    || self.probes.iter().any(|p| &p.input == input);
+                // A controller's second port isn't its surface's.
+                let second = recognise.pair && after_taken;
+                after_taken = taken;
                 let Some(output) = outputs.iter().find(|name| recognise.names(name)) else {
                     continue;
                 };
-                if self.named(input)
-                    || self.named(output)
-                    || self.declined.contains(input)
-                    || self.silent.contains(input)
-                    || self.probes.iter().any(|p| &p.input == input)
-                {
+                if taken || second || self.named(output) {
                     continue;
                 }
+                after_taken = true;
                 let replies = Arc::new(Mutex::new(Vec::new()));
                 let sink = Arc::clone(&replies);
                 ports

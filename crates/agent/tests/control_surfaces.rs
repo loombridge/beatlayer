@@ -277,31 +277,61 @@ fn an_agents_call_waits_while_a_surface_gesture_lasts() {
     );
 }
 
-// Spec: supported-controllers R1, R2, R4. An agent finds the Launchpads in
-// the chooser's list, and reads each plugged-in controller's own mode by
-// name from the Control Surfaces table.
+// Spec: supported-controllers R1, R2, R4. An agent finds the supported
+// controllers in the chooser's list, and reads each plugged-in controller's
+// own mode by name from the Control Surfaces table.
 #[test]
-fn an_agent_reads_each_launchpads_mode() {
+fn an_agent_reads_each_controllers_mode() {
     use bl_control::grid::sim::Launchpad;
-    for (make, id, mode) in [
+    use bl_control::grid::sim_apc::Apc;
+
+    enum Device {
+        Pad(Launchpad),
+        Apc(Apc),
+    }
+    impl Device {
+        fn pump(&mut self) {
+            match self {
+                Self::Pad(pad) => pad.pump(),
+                Self::Apc(apc) => apc.pump(),
+            }
+        }
+    }
+
+    type Make = fn(&TestBackend) -> Device;
+    let cases: [(Make, &str, &str); 5] = [
         (
-            Launchpad::x as fn(&TestBackend) -> Launchpad,
-            "launchpad-x",
+            |t| Device::Apc(Apc::mini(t)),
+            "apc-mini-mk2",
+            "Session; track buttons: Clip Stop; faders: Volume",
+        ),
+        (
+            |t| Device::Apc(Apc::apc40(t)),
+            "apc40-mkii",
+            "Session; faders: Volume; track knobs: Pan; device knobs: Device",
+        ),
+        (|t| Device::Pad(Launchpad::x(t)), "launchpad-x", "Session"),
+        (
+            |t| Device::Pad(Launchpad::mini(t)),
+            "launchpad-mini-mk3",
             "Session",
         ),
-        (Launchpad::mini, "launchpad-mini-mk3", "Session"),
         (
-            Launchpad::pro,
+            |t| Device::Pad(Launchpad::pro(t)),
             "launchpad-pro-mk3",
             "Session; track buttons: Select",
         ),
-    ] {
+    ];
+    for (make, id, mode) in cases {
         let test = TestBackend::new();
-        let mut pad = make(&test);
-        pad.plug_in();
+        let mut device = make(&test);
+        match &device {
+            Device::Pad(pad) => pad.plug_in(),
+            Device::Apc(apc) => apc.plug_in(),
+        }
         let mut shell = Shell::headless();
         shell.use_midi_backend(Box::new(test.clone()));
-        pad.pump();
+        device.pump();
         let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
         client.initialize("test-agent").unwrap();
 
@@ -310,12 +340,14 @@ fn an_agent_reads_each_launchpads_mode() {
             .as_array()
             .unwrap()
             .iter()
-            .take(5)
+            .take(7)
             .map(|s| (s["id"].as_str().unwrap(), s["name"].as_str().unwrap()))
             .collect();
         assert_eq!(
             names,
             [
+                ("apc-mini-mk2", "APC mini mk2"),
+                ("apc40-mkii", "APC40 mkII"),
                 ("launchkey-mk3", "Launchkey MK3"),
                 ("launchkey-mk4", "Launchkey MK4"),
                 ("launchpad-mini-mk3", "Launchpad Mini MK3"),
@@ -329,7 +361,7 @@ fn an_agent_reads_each_launchpads_mode() {
         assert_eq!(row["surface"]["id"], id);
         assert_eq!(row["state"], "running");
         assert_eq!(row["surface_state"]["mode"], mode);
-        assert_eq!(row["surface_state"]["ring"]["tracks"], 8, "an 8 x 8 ring");
+        assert_eq!(row["surface_state"]["ring"]["tracks"], 8);
     }
 }
 

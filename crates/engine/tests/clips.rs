@@ -938,6 +938,61 @@ fn an_unwarped_clip_transposed_changes_speed_and_pitch() {
     }
 }
 
+/// Runs `render` on a thread of its own and returns what it did, or fails if
+/// it stalls: a render that never returns would hang the audio thread. The
+/// editor and media are built inside `render`, so neither needs to be `Send`.
+fn within_ten_seconds(render: impl FnOnce() -> Vec<f32> + Send + 'static) -> Vec<f32> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || tx.send(render()).unwrap());
+    rx.recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the render stalled once the clip read past its file")
+}
+
+// Spec: warp-modes R27. An unwarped clip read faster than the song runs out
+// of its file before its end and is silent from there; it never stalls.
+#[test]
+fn an_unwarped_clip_transposed_up_is_silent_past_its_file() {
+    let left = within_ten_seconds(|| {
+        let mut editor = Editor::new();
+        let track = track(&mut editor, TrackKind::Audio, None);
+        let mut media = MediaMap::new();
+        media.insert(hash(3), ramp(4_096, RATE.hz()));
+        let mut audio = AudioData::new(hash(3));
+        audio.transpose = 12;
+        clip(&mut editor, track, Ticks::ZERO, Ticks::WHOLE, audio);
+        let [left, _] = play(&editor, &media, 8_192, 64, &[]);
+        left
+    });
+    assert!(left[1_000] != 0.0, "the clip plays before its file ends");
+    // Twice as fast, the 4,096-frame file is read through by frame 2,048.
+    for (i, &s) in left.iter().enumerate().skip(2_048 + 64) {
+        assert_eq!(s, 0.0, "frame {i}");
+    }
+}
+
+// Spec: warp-modes R27. A run that ends part-way through a block, as a
+// detune of a cent makes the file's last frames do, is followed by a block
+// that starts past the end: neither stalls.
+#[test]
+fn an_unwarped_clip_detuned_is_silent_past_its_file() {
+    let left = within_ten_seconds(|| {
+        let mut editor = Editor::new();
+        let track = track(&mut editor, TrackKind::Audio, None);
+        let mut media = MediaMap::new();
+        media.insert(hash(3), ramp(4_096, RATE.hz()));
+        let mut audio = AudioData::new(hash(3));
+        audio.detune = 1.0;
+        let length = TempoMap::default().frames_to_ticks(Frames(4_096), RATE);
+        clip(&mut editor, track, Ticks::ZERO, length, audio);
+        let [left, _] = play(&editor, &media, 8_192, 512, &[]);
+        left
+    });
+    assert!(left[1_000] != 0.0, "the clip plays before its file ends");
+    for (i, &s) in left.iter().enumerate().skip(4_096) {
+        assert_eq!(s, 0.0, "frame {i}");
+    }
+}
+
 // Spec: warp-modes R12, R27. The interpolator reads the file where it is
 // read at a rate other than 1: HiQ on is the band-limited one.
 #[test]

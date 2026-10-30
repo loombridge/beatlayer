@@ -1424,6 +1424,9 @@ pub struct ClipPlayer {
     /// Planar scratch for one source read: `channels` channels of
     /// `max_frames` frames.
     scratch: Vec<f32>,
+    /// A clip's level for each frame of a run, worked out once for all the
+    /// channels: `max_frames` frames.
+    gains: Vec<f64>,
     max_frames: usize,
     /// Room for warped clips' playback (WP-4.2).
     warp: WarpScratch,
@@ -1523,6 +1526,7 @@ impl ClipPlayer {
             window: None,
             stretchers: None,
             scratch: vec![0.0; config.channels * config.max_frames],
+            gains: vec![0.0; config.max_frames],
             max_frames: config.max_frames,
             warp: WarpScratch::new(config.channels, config.max_frames, config.sample_rate),
             sounding: false,
@@ -1670,7 +1674,7 @@ fn render(
     block: &mut Block<'_>,
     range: core::ops::Range<usize>,
     elapsed: u64,
-    scratch: &mut [f32],
+    (scratch, gains): (&mut [f32], &mut [f64]),
     stride: usize,
     level: impl Fn(&PlacedClip, u64) -> f64,
     first: Transition,
@@ -1695,11 +1699,14 @@ fn render(
                 let last = (source_channels - 1) * stride;
                 to[..run].copy_from_slice(&from[last..last + run]);
             }
+            for (i, gain) in gains[..run].iter_mut().enumerate() {
+                *gain = level(clip, elapsed + i as u64);
+            }
             for c in 0..channels {
                 let read = &scratch[c * stride..c * stride + run];
                 let out = &mut block.channel_mut(c)[at..at + run];
-                for (i, (sum, &sample)) in out.iter_mut().zip(read).enumerate() {
-                    *sum += (f64::from(sample) * level(clip, elapsed + i as u64)) as f32;
+                for ((sum, &sample), &gain) in out.iter_mut().zip(read).zip(&*gains) {
+                    *sum += (f64::from(sample) * gain) as f32;
                 }
             }
         }
@@ -1763,7 +1770,7 @@ fn render_warped(
     (elapsed, key, pace): (u64, i64, Pace),
     warp: &mut WarpScratch,
     mut history: Option<&mut History>,
-    level: impl Fn(&PlacedClip, u64) -> f64,
+    (level, gains): (impl Fn(&PlacedClip, u64) -> f64, &mut [f64]),
     stretchers: &mut Stretchers,
     lane: usize,
     transpose: i8,
@@ -1818,13 +1825,23 @@ fn render_warped(
             stretchers,
             lane,
         );
+        // No arm of Positions gives a run of no frames; were one to, the rest
+        // of the range is silent rather than a loop that never ends.
+        let (n, sound) = if n == 0 {
+            (range.end - at, false)
+        } else {
+            (n, sound)
+        };
         if sound {
+            for (i, gain) in gains[..n].iter_mut().enumerate() {
+                let song = pace.song + i as f64 * pace.step;
+                *gain = level(clip, (song - origin).round().max(0.0) as u64);
+            }
             for c in 0..channels {
                 let out = &mut block.channel_mut(c)[at..at + n];
-                for (i, (sum, &sample)) in out.iter_mut().zip(warp.rendered(c, n)).enumerate() {
-                    let song = pace.song + i as f64 * pace.step;
-                    let elapsed = (song - origin).round().max(0.0) as u64;
-                    *sum += (f64::from(sample) * level(clip, elapsed)) as f32;
+                for ((sum, &sample), &gain) in out.iter_mut().zip(warp.rendered(c, n)).zip(&*gains)
+                {
+                    *sum += (f64::from(sample) * gain) as f32;
                 }
             }
         }
@@ -1953,7 +1970,10 @@ impl Node for ClipPlayer {
                     (since(song), key, pace),
                     &mut self.warp,
                     histories[at].as_deref_mut(),
-                    with_groove(warped, tempo, rate, launch, ticks, launch_level),
+                    (
+                        with_groove(warped, tempo, rate, launch, ticks, launch_level),
+                        &mut self.gains,
+                    ),
                     stretchers,
                     clip.lane as usize,
                     entry.transpose,
@@ -1985,7 +2005,7 @@ impl Node for ClipPlayer {
                         (elapsed, key, pace),
                         &mut self.warp,
                         histories[at].as_deref_mut(),
-                        launch_level,
+                        (launch_level, &mut self.gains),
                         stretchers,
                         clip.lane as usize,
                         entry.transpose,
@@ -1997,7 +2017,7 @@ impl Node for ClipPlayer {
                         block,
                         begin..frames,
                         elapsed,
-                        &mut self.scratch,
+                        (&mut self.scratch, &mut self.gains),
                         self.max_frames,
                         launch_level,
                         first,
@@ -2020,6 +2040,7 @@ impl Node for ClipPlayer {
             window,
             stretchers,
             scratch,
+            gains,
             max_frames,
             warp,
             ..
@@ -2139,13 +2160,16 @@ impl Node for ClipPlayer {
                     (elapsed, key + range.start as i64, pace),
                     warp,
                     history.as_deref_mut(),
-                    with_groove(
-                        warped,
-                        tempo,
-                        rate,
-                        clip.geometry.start,
-                        0.0,
-                        PlacedClip::level,
+                    (
+                        with_groove(
+                            warped,
+                            tempo,
+                            rate,
+                            clip.geometry.start,
+                            0.0,
+                            PlacedClip::level,
+                        ),
+                        gains,
                     ),
                     stretchers,
                     clip.lane as usize,
@@ -2171,7 +2195,7 @@ impl Node for ClipPlayer {
                     (elapsed, key + range.start as i64, pace),
                     warp,
                     history.as_deref_mut(),
-                    PlacedClip::level,
+                    (PlacedClip::level, gains),
                     stretchers,
                     clip.lane as usize,
                     0,
@@ -2184,7 +2208,7 @@ impl Node for ClipPlayer {
                 block,
                 range,
                 elapsed,
-                scratch,
+                (scratch, gains),
                 *max_frames,
                 PlacedClip::level,
                 Transition::Cut,
@@ -2757,6 +2781,123 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    /// A stereo ramp of `frames` frames, and a clip with a fade-in that plays
+    /// all of it, so every frame of a render has its own level.
+    fn ramp_clip(frames: usize) -> (PlacedClip, MemorySource) {
+        let left: Vec<f32> = (0..frames).map(|i| (i + 1) as f32 / 65_536.0).collect();
+        let right = left.iter().map(|s| -s).collect();
+        let source = MemorySource::new(Arc::new(
+            SampleData::new(48_000, vec![left, right]).unwrap(),
+        ));
+        let mut clip = clip(false);
+        clip.geometry.region_start = 0;
+        clip.geometry.region_end = frames as u64;
+        clip.geometry.end = clip.geometry.start + frames as i64;
+        clip.fade_in = 200;
+        (clip, source)
+    }
+
+    // A clip's level is the same on every channel, so a run works it out once
+    // a frame, not once a frame for each channel, and the sound is what the
+    // level says of each frame.
+    #[test]
+    fn render_works_out_a_clips_level_once_a_frame() {
+        let (clip, mut source) = ramp_clip(4_096);
+        let (mut data, mut scratch, mut gains) =
+            (vec![0.0f32; 2 * 512], vec![0.0f32; 2 * 512], vec![0.0; 512]);
+        let calls = std::cell::Cell::new(0usize);
+        let level = |c: &PlacedClip, e: u64| {
+            calls.set(calls.get() + 1);
+            c.level(e)
+        };
+        let mut block = Block::new(
+            &mut data,
+            2,
+            512,
+            512,
+            &[],
+            Default::default(),
+            SampleRate::HZ_48000,
+        );
+        render(
+            &clip,
+            &mut source,
+            &mut block,
+            0..512,
+            0,
+            (&mut scratch, &mut gains),
+            512,
+            level,
+            Transition::Cut,
+        );
+        assert_eq!(calls.get(), 512);
+        for i in 0..512 {
+            let want = (((i + 1) as f32 / 65_536.0) as f64 * clip.level(i as u64)) as f32;
+            assert_eq!(block.channel(0)[i], want, "frame {i}");
+            assert_eq!(block.channel(1)[i], -want, "frame {i}");
+        }
+    }
+
+    // The same for a run through the warp path: an unwarped clip an octave up
+    // reads its file at twice the speed.
+    #[test]
+    fn render_warped_works_out_a_clips_level_once_a_frame() {
+        let render_with = |level: &dyn Fn(&PlacedClip, u64) -> f64| {
+            let (mut clip, mut source) = ramp_clip(4_096);
+            clip.geometry.pitch = 2.0;
+            let positions = clip.geometry.transposed(clip.geometry.start, 0).unwrap();
+            let mut data = vec![0.0f32; 2 * 512];
+            let mut block = Block::new(
+                &mut data,
+                2,
+                512,
+                512,
+                &[],
+                Default::default(),
+                SampleRate::HZ_48000,
+            );
+            let mut gains = vec![0.0; 512];
+            render_warped(
+                &clip,
+                &positions,
+                None,
+                &mut source,
+                &mut WindowBuf::new(2, window_of(bl_model::WarpMode::RePitch, 48_000.0)),
+                &mut block,
+                0..512,
+                (
+                    0,
+                    0,
+                    Pace {
+                        song: clip.geometry.start as f64,
+                        step: 1.0,
+                    },
+                ),
+                &mut WarpScratch::new(2, 512, SampleRate::HZ_48000),
+                None,
+                (level, &mut gains),
+                &mut Stretchers::new(2, 48_000.0, 1, false, false),
+                0,
+                0,
+            );
+            (clip, [block.channel(0).to_vec(), block.channel(1).to_vec()])
+        };
+        let (_, plain) = render_with(&|_, _| 1.0);
+        let calls = std::cell::Cell::new(0usize);
+        let (clip, shaped) = render_with(&|c, e| {
+            calls.set(calls.get() + 1);
+            c.level(e)
+        });
+        assert_eq!(calls.get(), 512);
+        assert!(plain[0][300] != 0.0);
+        for c in 0..2 {
+            for i in 0..512 {
+                let want = (f64::from(plain[c][i]) * clip.level(i as u64)) as f32;
+                assert_eq!(shaped[c][i], want, "channel {c}, frame {i}");
             }
         }
     }

@@ -1,0 +1,72 @@
+# Physical models: modal resonators and waveguides in `bl-dsp`
+
+- **Status:** draft
+- **Work packages:** WP-8.5 (this spec, R1 to R18). Collision ([collision](collision.md), WP-8.21), Tension ([tension](tension.md), WP-8.22), Electric ([electric](electric.md), WP-8.23), Meld's Plate Resonator and Membrane Resonator filters ([meld](meld.md), WP-8.19) and the Corpus audio effect (WP-8.44) are built on these models, and their specs give the controls that drive them
+- **Parity-matrix row:** Instruments: Collision, Tension, Electric (physical modelling); Audio effects: Corpus
+- **Checked against:** the Live 12 reference manual (online edition), read 30 October 2026 (chapter 31, sections 31.2.4 to 31.2.4.2, 31.5.3 and 31.5.4, 31.8.9 and 31.12.2; chapter 29, the Corpus section); the published papers and references in the sources table
+
+## The behaviour
+
+Collision, Tension, Electric and Corpus make their sound by simulating an object that rings when something strikes, plucks, bows or blows it: a bar, a marimba's tuned bar, a stretched membrane, a plate, a string, a pipe or a tube. Beatlayer simulates them in two ways, both in `bl-dsp`, so an instrument and an effect share them without depending on each other. A modal resonator is a bank of decaying sine partials, each a two-pole resonator tuned to one of the object's natural frequencies, whose ratios come from the physics of its shape. A waveguide is a delay line that a wave travels round, losing a little at each pass, tuned to its note by a fractional delay and made inharmonic by an all-pass filter in its loop; its ends can reflect as a closed or an open end.
+
+Both kinds take an excitation signal, one per voice, and both read the controls the instruments' manuals describe: the decay, a material that makes high partials die faster, a radius or size, an inharmonicity that stretches or squeezes the partials, the position where the object is struck and the positions where it is heard. They stay stable at every setting and sample rate, run every voice in the plug-in kit's lanes and allocate nothing on the audio thread.
+
+Every partial ratio, decay law and position law here comes from acoustics references and published synthesis papers, never from Live's sound.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 31 "Live Instrument Reference", section 31.2.4 "Resonator Tabs", with 31.2.4.1 "Tuning Section" and 31.2.4.2 "Mixer Section" (Collision) | Seven resonator types: Beam (a beam of different materials and sizes), Marimba (a beam with a marimba bar's tuned overtones), String, Membrane (a rectangular membrane such as a drum head), Plate (a rectangular plate), Pipe (a cylinder open at one end with a variable opening at the other) and Tube (a cylinder closed at both ends); Quality from Eco to High trading processing for overtones, not for Pipe or Tube; Decay (internal damping), Material (frequency-dependent damping, low for wood, rubber or nylon and high for glass or metal), Radius for Pipe and Tube (larger lengthens the decay and the high partials, and at very large sizes moves the fundamental), Ratio for Membrane and Plate (the size along one axis against the other), Brightness, Inharm (negative values bring partials down, positive values push them up), Opening for Pipe (0 % closed at one end to 100 % open at both), Hit (from the centre towards the edge) with Rnd, Note Off, Pos. L and Pos. R (listening points from the centre towards the edge) |
+| S2 | Manual | Section 31.12.2 "String Tab" (Tension) | A string set moving by an exciter or a damper, with Decay, Ratio, Inharm and Damping; a termination with a finger and a fret; a pickup position; a body |
+| S3 | Manual | Sections 31.5.3 "Fork Section" and 31.5.4 "Damper/Pickup Section" (Electric) | A fork of a struck tine and a tone bar, with Color, Decay, Key and Release |
+| S4 | Manual | Section 31.8.9 "Filters" (Meld) | Plate Resonator, 32 modal resonators of a rectangular plate, and Membrane Resonator, 32 modal resonators of a circular membrane |
+| S5 | Manual | Chapter 29 "Live Audio Effect Reference", the Corpus section | Corpus applies Collision's resonator types to audio |
+| S6 | Paper | N. H. Fletcher and T. D. Rossing, *The Physics of Musical Instruments*, second edition, Springer, 1998: chapters 2 (bars and the tuning of marimba bars), 3 (membranes and plates) and 8 (pipes) | The natural frequencies of free and clamped bars, tuned marimba bars, rectangular and circular membranes, rectangular plates, and open and closed pipes with their end corrections |
+| S7 | Paper | J.-M. Adrien, "The missing link: modal synthesis", in G. De Poli, A. Piccialli and C. Roads (eds.), *Representations of Musical Signals*, MIT Press, 1991; S. Bilbao, *Numerical Sound Synthesis*, Wiley, 2009 | A resonating object as a sum of modes, each a damped resonator with a frequency, a decay and gains set by the excitation and listening points' places in its mode shape |
+| S8 | Paper | J. O. Smith III, "Physical Modeling Using Digital Waveguides", *Computer Music Journal* 16(4), 1992 | A string or bore as a delay loop with a loop filter for its losses, reflections at its ends, and dispersion for a stiff string |
+| S9 | Paper | T. I. Laakso, V. Välimäki, M. Karjalainen and U. K. Laine, "Splitting the Unit Delay", *IEEE Signal Processing Magazine* 13(1), 1996 | Fractional delays by Lagrange interpolation and Thiran all-pass filters, and their group delays |
+| S10 | Beatlayer | [The architecture](../02-architecture.md), "Requirements that shape the design" (Determinism) and "Real-time rules"; [the device framework](device-framework.md) R9 and R29 | Renders repeat run after run and at any block size; no allocation, lock or blocking call on the audio thread; seeded randomness |
+
+## Rules
+
+**Modal resonators**
+
+- **R1.** `bl_dsp::physical` has a modal resonator for six shapes, each a table of partial ratios to the fundamental: Beam, a free bar (1, 2.756, 5.404, 8.933, 13.34, 18.64, partial n at (2n + 1)² / 3.0112²); Marimba, a bar tuned so its second partial is two octaves up and its third about 10 times the fundamental (1, 4, 10, then the free bar's ratios scaled to follow); Cantilever, a bar clamped at one end, for a tine (1, 6.267, 17.55, 34.39, 56.84, the higher ones at (2n − 1)² / 1.194²); Membrane, a rectangular membrane whose mode (m, n) sits at √((m / a)² + (n / b)²) over the (1, 1) mode's, a and b its sides; Circular Membrane, at the zeros of Bessel functions over the first (1, 1.594, 2.136, 2.296, 2.653, 2.918, 3.156, 3.501, 3.600, 3.652, and on); and Plate, a simply supported rectangular plate whose mode (m, n) sits at ((m / a)² + (n / b)²) over the (1, 1) mode's. Each partial sounds within 1 cent of its table ratio times the fundamental. (S1, S4, S6)
+- **R2.** A Membrane's and a Plate's Ratio sets a / b, from 0.25 to 4 (1 by default, Beatlayer's own range), and their modes are taken in order of frequency. (S1, S6)
+- **R3.** A modal resonator has a number of partials set by its quality: 8, 16, 32 or 64 (Collision's Eco, Low, Medium and High), 32 for Meld's resonators; a partial whose frequency reaches 0.45 of the sample rate is left out, so a high note plays fewer partials and none aliases. (S1, S4; the counts are Beatlayer's own)
+- **R4.** Inharmonicity I, from −1 to 1 (0 by default), moves partial n's ratio rₙ to rₙ^(1 + I / 2): positive values push the upper partials up, negative values bring them down, and the fundamental stays. (S1; Beatlayer's own law)
+- **R5.** Decay sets the fundamental's time to fall 60 dB, from 1 ms to 60 s; Material m, from 0 to 1, sets how the other partials' times follow it: partial n falls 60 dB in Decay × rₙ^(−2(1 − m)), so at m = 1 (glass, metal) every partial lasts as long as the fundamental and at m = 0 (wood, rubber) a partial twice as high lasts a quarter as long. Measured on a struck resonator, each partial's time is within 5 % of this. (S1, S7; Beatlayer's own law)
+- **R6.** Brightness b, from −1 to 1 (0 by default), weights partial n's gain by rₙ^(b / 2), so positive values lift the upper partials and negative values cut them, without changing their decays. (S1; Beatlayer's own law)
+- **R7.** Partial n's gain is the product of the shape's mode shape at the excitation position and at the listening position, each from 0 (the centre) to 1 (the edge), as the references give the shapes: a bar's free modes, a membrane's and a plate's products of sines across each axis (a circular membrane's Bessel functions along a radius), and a string's sin(nπp). A partial whose mode has a node at the excitation position doesn't sound: struck at the centre of a string (p = 0.5), its even harmonics stay silent below −60 dB. A stereo resonator has two listening positions, one per channel. (S1, S7)
+
+**Waveguides**
+
+- **R8.** A waveguide has a delay loop whose length gives the note: an integer delay, a fractional delay by a Thiran all-pass, and the group delays of its loop filter and dispersion filter subtracted, so its fundamental is within 1 cent of the note for every key whose fundamental lies below a quarter of the sample rate, at 44.1 to 192 kHz. A loop filter (a one-pole low-pass in the loop and a gain) sets its decay, from Decay, and its damping of high harmonics, from Material or Damping; a dispersion all-pass in the loop stretches its partials, from Inharm, as a stiff string's fₙ = n f₁ √(1 + B n²) with B from 0 to 0.001 at Inharm 0 to 1. (S2, S8, S9)
+- **R9.** A String is a waveguide reflecting with inverted sign at both ends, so it plays every harmonic. A Tube, closed at both ends, plays every harmonic too, reflecting without inversion at both. A Pipe has a closed end and an end whose Opening, from 0 % to 100 %, moves its reflection from closed to open: at 0 % it plays the odd harmonics only, an octave below a Tube of its length, and at 100 % every harmonic, like an open pipe; between, the even harmonics rise as the opening grows. (S1, S6, S8)
+- **R10.** A Pipe's or Tube's Radius, from 0 to 1, lengthens its decay and keeps more of its high harmonics as it grows, and adds an end correction of 0.6 times the bore's radius to each open end's length, so a very large radius lowers the note: the loop's length is worked out with the correction, and at the largest radius on an open Pipe the fundamental falls by up to a semitone. (S1, S6; Beatlayer's own scale)
+- **R11.** A waveguide takes its excitation at a position along it, from 0 (an end) to 0.5 (the middle), and is heard at a pickup position, so its harmonics are shaped as a string struck and heard there. A waveguide can also be driven by a nonlinear interaction at its excitation position, a model that reads the guide's velocity there and returns a force (a bow's friction, a hammer's or a plectrum's contact), and can have a damper and a terminating finger or fret, each a loss and a partial reflection at its position; the laws of each are in the instrument's spec. (S2, S8)
+
+**Throughout**
+
+- **R12.** Both kinds take one excitation input per voice and run their voices in the plug-in kit's lanes; a resonator's state is made with it, its partial tables are worked out off the audio thread when the shape, quality, ratio or inharmonicity changes and handed over without freeing on the audio thread. (S10)
+- **R13.** No setting grows without bound: every modal partial's pole lies inside the unit circle and every waveguide's loop gain is below 1 at every frequency, at 44.1 to 192 kHz; two resonators in series, the first's output exciting the second, stay bounded too. A property test drives random settings and excitations for ten seconds of audio and finds the output's peak below +24 dBFS and falling after the excitation stops. (S7, S8)
+- **R14.** Denormals are flushed in every resonator's state, so a decay of 60 s that has fallen silent costs no more than silence. (S10)
+- **R15.** Sixteen resonators of 32 partials, or sixteen waveguides, render at 48 kHz inside the architecture's device budget, and nothing on the audio thread allocates, locks or blocks. (S10)
+- **R16.** A resonator's output for a frame depends only on its excitation, its settings and its seed (for a random hit position, device framework R29), never on how blocks fall: the same at any block size, run after run. (S10)
+- **R17.** A change of Decay, Material, Brightness, a position, Radius or Opening moves the running resonator smoothly, on its frame, without a click; a change of tuning moves a modal resonator's partials at once and a waveguide's delay through its fractional part without a click. (S10; Beatlayer's own)
+- **R18.** `bl-dsp` depends on no engine, model, device or UI crate; the models use the plug-in kit's SIMD lanes and nothing else of the kit. (S10)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1, R2, R3 | to be written in WP-8.5 | unit under the real-time trap (each shape struck; partials measured by FFT within 1 cent) |
+| R4, R5, R6 | to be written in WP-8.5 | unit (partial ratios with Inharm; decay times within 5 %; gains) |
+| R7, R11 | to be written in WP-8.5 | unit (a node at the hit position leaves its partial silent) |
+| R8, R9, R10 | to be written in WP-8.5 | unit (a waveguide's note within 1 cent across the keys; Pipe's harmonics against Opening) |
+| R12, R15 | to be written in WP-8.5 | benchmark against the device budget; real-time trap |
+| R13 | to be written in WP-8.5 | property test at 44.1 to 192 kHz, single and in series |
+| R14 | to be written in WP-8.5 | timing test of a decayed resonator |
+| R16, R17 | to be written in WP-8.5 | render at block sizes 1, 64, 512 and 4,096; a click detector on changes |
+| R18 | `cargo xtask layers` | layer check |

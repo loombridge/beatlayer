@@ -130,6 +130,7 @@ mod macos {
         the_editor_window_cannot_be_minimised(&mut shell, &au, track);
         a_deleted_device_closes_its_editor(&mut shell, &au, track);
         a_unit_let_go_of_closes_its_editor();
+        a_scheduled_change_is_not_the_persons_edit();
     }
 
     /// Loads AUDelay onto `track` and waits until it is running.
@@ -254,5 +255,59 @@ mod macos {
             drop(node);
         }
         println!("au_editor: a unit let go of closed its editor");
+    }
+
+    // Spec: au-hosting R6. The host's own automation, scheduled on the unit,
+    // is not reported back as the person's edit through the open editor.
+    fn a_scheduled_change_is_not_the_persons_edit() {
+        use bl_engine::{Block, NodeEvent, ParamValue, TransportInfo};
+        use bl_model::ParamId;
+        let au = AuHost::new();
+        au.load("aufx", "dely", "appl")
+            .expect("AUDelay is installed");
+        let device = Device::new(
+            DeviceId(Id::new(9).expect("an ID")),
+            "Test AU",
+            DeviceKind::Plugin {
+                format: PluginFormat::AudioUnit,
+                plugin_id: "aufx/dely/appl".to_owned(),
+            },
+        );
+        let config = NodeConfig {
+            round_trip_latency: 0,
+            sample_rate: SampleRate::HZ_48000,
+            max_frames: 512,
+            channels: 2,
+        };
+        let mut node = au.factory().create(&device, &config).expect("a node");
+        au.idle();
+        au.open_editor(device.id, "Test AU").expect("it opens");
+        while au.open_editors() != [device.id] {
+            au.idle();
+        }
+        let events = [NodeEvent {
+            offset: 100,
+            param: ParamId(0),
+            value: ParamValue::Set(50.0),
+        }];
+        let mut data = vec![0.0f32; 2 * 512];
+        for _ in 0..3 {
+            let mut block = Block::new(
+                &mut data,
+                2,
+                512,
+                512,
+                &events,
+                TransportInfo::default(),
+                SampleRate::HZ_48000,
+            );
+            node.process(&mut block);
+            au.idle();
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let changes = au.take_param_changes();
+        assert_eq!(changes, [], "the editor's observer saw the host's own change");
+        println!("au_editor: a scheduled change is not the person's edit");
+        au.clear();
     }
 }

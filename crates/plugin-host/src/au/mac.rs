@@ -71,7 +71,7 @@ use crate::scan::ScannedPlugin;
 use super::{AuError, description_id};
 #[path = "node.rs"]
 mod node;
-use node::{AuNode, HostEnds, MAX_CHANNELS, Processor};
+use node::{AuNode, Echoes, HostEnds, MAX_CHANNELS, Processor};
 
 /// An Audio Unit Beatlayer can make devices of.
 #[derive(Clone, Debug, PartialEq)]
@@ -162,6 +162,9 @@ struct Instance {
     /// processor back yet.
     ends: Option<HostEnds>,
     retired: Vec<HostEnds>,
+    /// What its nodes scheduled lately, which the editor's observer leaves
+    /// out of the person's changes.
+    echoes: Arc<Echoes>,
     config: Option<NodeConfig>,
     /// A node has its processor.
     out: bool,
@@ -710,6 +713,18 @@ impl AuHost {
         Ok(())
     }
 
+    /// How many render calls the device's node made, and how many parameter
+    /// changes it scheduled on its unit, for tests of how a block is split.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn render_counts(&self, device: DeviceId) -> Option<(u32, u32)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        let status = &main.instances.get(&device)?.ends.as_ref()?.status;
+        Some((status.renders.load(Relaxed), status.scheduled.load(Relaxed)))
+    }
+
     /// The editor windows the host holds, those of units being let go of
     /// included, for tests of what the person sees.
     #[cfg(feature = "test-hooks")]
@@ -1119,6 +1134,7 @@ fn finish_editor(
     let window = make_window(&controller, title);
     let events: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::with_capacity(EDITOR_EVENTS)));
     let sink = Arc::clone(&events);
+    let echoes = Arc::clone(&instance.echoes);
     let observer = RcBlock::new(
         move |count: isize, list: NonNull<AUParameterAutomationEvent>| {
             // Never block or allocate here: this may run on the audio
@@ -1131,6 +1147,10 @@ fn finish_editor(
             for event in events {
                 if out.len() >= EDITOR_EVENTS {
                     break;
+                }
+                // The host's own scheduled change, not the person's.
+                if echoes.contains(event.address, event.value) {
+                    continue;
                 }
                 out.push(RawEvent {
                     address: event.address,
@@ -1154,11 +1174,6 @@ fn finish_editor(
     });
     instance.editor_hidden = false;
     instance.editor_failure = None;
-    // The host's own parameter changes must not come back as the unit's:
-    // the node passes this token to setValue:originator:.
-    if let Some(ends) = &instance.ends {
-        ends.status.observer.store(token, Relaxed);
-    }
 }
 
 /// A window of its own holding `controller`, titled `title`, shown and made
@@ -1562,13 +1577,9 @@ fn serve(main: &mut Main, request: Request) {
     };
     if let Some(old) = instance.ends.take() {
         old.status.hand_back.store(true, Relaxed);
-        // An open editor's observer is the originator of the new node's own
-        // parameter sets too, so they don't come back as the unit's edits.
-        ends.status
-            .observer
-            .store(old.status.observer.load(Relaxed), Relaxed);
         instance.retired.push(old);
     }
+    let _ = ends.status.echoes.set(Arc::clone(&instance.echoes));
     instance.ends = Some(ends);
     instance.config = Some(config);
     instance.refused = None;
@@ -1630,12 +1641,8 @@ fn borrow(
         return Ok(());
     }
     // Spec: offline-plugin-renders R3. The rendered set's values, and the
-    // render's rate and block size. An open editor's observer is the
-    // originator, so it doesn't report the values as the unit's own.
-    let observer = instance.ends.as_ref().map_or(std::ptr::null_mut(), |ends| {
-        ends.status.observer.load(Relaxed)
-    });
-    lent.ends.status.observer.store(observer, Relaxed);
+    // render's rate and block size.
+    let _ = lent.ends.status.echoes.set(Arc::clone(&instance.echoes));
     set_values(instance, device);
     // Spec: au-hosting R12. One that won't activate for the render leaves
     // its node passing its input through.
@@ -1749,6 +1756,7 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
         descriptors,
         ends: None,
         retired: Vec::new(),
+        echoes: Arc::default(),
         config: None,
         out: false,
         refused: None,
@@ -1859,9 +1867,6 @@ fn teardown_editor(instance: &mut Instance) {
     instance.pending = None;
     instance.editor_failure = None;
     if let Some(editor) = instance.editor.take() {
-        for ends in instance.ends.iter().chain(&instance.retired) {
-            ends.status.observer.store(std::ptr::null_mut(), Relaxed);
-        }
         // SAFETY: the unit's tree is alive; removing an observer blocks
         // until in-flight callbacks finish, and ours never blocks.
         unsafe { editor.tree.removeParameterObserver(editor.token) };
@@ -1932,9 +1937,13 @@ fn activate(
     // runtime's method takes (the header's `AUAudioFrameCount` is the v2
     // name); the blocks are cached before activation, as Apple's
     // documentation asks.
-    let (render, midi) = unsafe {
+    let (render, midi, schedule) = unsafe {
         let _: () = msg_send![unit, setMaximumFramesToRender: max_frames as usize];
-        (unit.renderBlock(), unit.scheduleMIDIEventBlock())
+        (
+            unit.renderBlock(),
+            unit.scheduleMIDIEventBlock(),
+            unit.scheduleParameterBlock(),
+        )
     };
     if render.is_null() {
         return Err("it gives no render block".to_owned());
@@ -1974,8 +1983,7 @@ fn activate(
         config,
         params.to_vec(),
         drive,
-        render,
-        midi,
+        (render, midi, schedule),
         (input_channels, output_channels),
     );
     Ok((processor, latency))
@@ -2084,40 +2092,20 @@ mod tests {
         assert!(events.lock().unwrap().capacity() >= EDITOR_EVENTS);
     }
 
-    /// Spec: au-hosting R6. A node made after the editor opened sets the
-    /// unit's parameters with the editor's observer as their originator.
+    /// Spec: au-hosting R6. The editor's observer drops what the node
+    /// scheduled lately, and no other change, whatever the address.
     #[test]
-    fn a_new_node_keeps_the_open_editors_observer() {
-        let host = AuHost::new();
-        host.load("aufx", "dely", "appl")
-            .expect("AUDelay is installed");
-        let device = Device::new(
-            DeviceId(bl_core::id::Id::new(1).expect("an ID")),
-            "Test AU",
-            kind("aufx/dely/appl"),
-        );
-        let config = NodeConfig {
-            round_trip_latency: 0,
-            sample_rate: bl_core::time::SampleRate::HZ_48000,
-            max_frames: 512,
-            channels: 2,
-        };
-        let factory = host.factory();
-        let _first = factory.create(&device, &config).expect("a node");
-        let token = 0x10 as *mut std::ffi::c_void;
-        let observer = |set: Option<*mut std::ffi::c_void>| {
-            let mut guard = lock(&host.inner.main);
-            let instance = guard.get().unwrap().instances.get_mut(&device.id).unwrap();
-            let status = &instance.ends.as_ref().unwrap().status;
-            if let Some(token) = set {
-                status.observer.store(token, Relaxed);
-            }
-            status.observer.load(Relaxed)
-        };
-        // The first node's ends hold the token finish_editor stores.
-        observer(Some(token));
-        let _second = factory.create(&device, &config).expect("a node");
-        assert_eq!(observer(None), token);
+    fn echoes_recognise_the_changes_scheduled() {
+        let echoes = Echoes::default();
+        assert!(!echoes.contains(0, 0.0), "an empty ring matches nothing");
+        echoes.push(7, 0.5);
+        assert!(echoes.contains(7, 0.5));
+        assert!(!echoes.contains(7, 0.25), "another value is the person's");
+        assert!(!echoes.contains(8, 0.5), "another parameter is the person's");
+        for value in 0..node::ECHOES {
+            echoes.push(1, value as f32 + 1.0);
+        }
+        assert!(!echoes.contains(7, 0.5), "the oldest slot was reused");
     }
 
     #[test]

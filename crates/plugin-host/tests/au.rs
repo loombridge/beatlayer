@@ -227,6 +227,55 @@ fn a_parameter_change_lands_on_its_frame() {
     assert_eq!(status.failure, None);
 }
 
+// Spec: au-hosting R3, R6, R17. A playing ramp reaches the unit through its
+// scheduling block at each 32-frame step, one render call per segment, and
+// the unit hears it: the ramp has the mix fully wet by frame 256, so the
+// impulse at frame 400 is no longer dry.
+#[test]
+fn an_automated_parameter_is_scheduled_on_the_unit_not_set() {
+    use bl_core::time::Ticks;
+    let (host, mut node) = running(&[
+        (MIX, 0.0),
+        (DELAY_TIME, 0.001),
+        (FEEDBACK, 0.0),
+        (CUTOFF, 22050.0),
+    ]);
+    let id = device(1, "aufx/dely/appl", &[]).id;
+    node.receive_data(crate::common::modulation_for(
+        device(1, "aufx/dely/appl", &[]),
+        MIX,
+        &[
+            (Ticks::ZERO, 0.0),
+            (Ticks(Ticks::WHOLE.0 * 256 / crate::common::BAR), 1.0),
+        ],
+    ));
+    let mut input = vec![0.0; FRAMES];
+    input[400] = 1.0;
+    let transport = TransportInfo {
+        playing: true,
+        ..TransportInfo::default()
+    };
+    let mut data: Vec<f32> = (0..CHANNELS).flat_map(|_| input.iter().copied()).collect();
+    let mut out = NoteBuffer::with_capacity(64);
+    {
+        let mut block = Block::new(&mut data, CHANNELS, FRAMES, FRAMES, &[], transport, RATE)
+            .with_notes(&[], &mut out);
+        bl_rt::rt_test!({ node.process(&mut block) });
+    }
+    // One value at each multiple of 32 frames up to the ramp's end at 256: 9
+    // changes, each starting a segment, the last running to the block's end.
+    // None is set on the unit's parameter from the render thread.
+    assert_eq!(host.render_counts(id), Some((9, 9)));
+    // A scheduled change leaves the parameter's own value alone, which a
+    // setValue would have moved.
+    let status = host.status(id).expect("a status");
+    assert_eq!(status.values[MIX as usize], (ParamId(MIX), 0.0));
+    let channel = &data[..FRAMES];
+    assert!(channel[400].abs() < 0.05, "the impulse is wet: {}", channel[400]);
+    let echo: f32 = channel[440..480].iter().map(|s| s.abs()).sum();
+    assert!(echo > 0.5, "the wet delay sounds: {echo}");
+}
+
 // Spec: au-hosting R2
 #[test]
 fn a_node_passes_its_input_through_until_its_unit_arrives() {
@@ -284,6 +333,8 @@ fn a_note_reaches_the_unit_on_its_frame() {
     );
     let energy: f32 = channel[100..].iter().map(|s| s.abs()).sum();
     assert!(energy > 0.1, "the note sounds: {energy}");
+    // Notes are scheduled on their frames, so the block is one render call.
+    assert_eq!(host.render_counts(device.id), Some((1, 0)));
 }
 
 // Spec: au-hosting R18. A control change reaches the unit with its notes: the

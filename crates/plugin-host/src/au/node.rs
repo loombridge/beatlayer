@@ -11,18 +11,20 @@
 //! real-time rules); the unit's own code is its own.
 //!
 //! The unit renders one segment at a time, the block split at its parameter
-//! changes and notes (the engine's segment pattern): a parameter change is
-//! set on the unit before the segment it starts, and a note is scheduled
-//! for that segment's first frame. Setting the value at the segment is what
-//! puts a unit's change on its exact sample: Apple's Audio Units ignore
-//! scheduled parameter events (AUDelay's Dry/Wet Mix does), while their
-//! MIDI events land on the frames they're scheduled for.
+//! changes (the engine's segment pattern): a parameter change is scheduled
+//! for the segment's first frame, and a note on its own frame within the
+//! segment. Both go through the unit's `scheduleParameterBlock` and
+//! `scheduleMIDIEventBlock`, which Apple documents as safe to call on a
+//! render thread; a parameter's value is never set through its
+//! `AUParameter` on the audio thread. The split is what puts a unit's change
+//! on its exact sample: Apple's Audio Units ignore the frame offset of a
+//! scheduled parameter event (AUDelay's Dry/Wet Mix does), while their MIDI
+//! events land on the frames they're scheduled for.
 
 use std::cell::{Cell, UnsafeCell};
-use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering::Relaxed};
+use std::sync::{Arc, OnceLock};
 
 use bl_core::midi::MidiMessage;
 use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
@@ -35,7 +37,8 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2_audio_toolbox::{
     AUAudioUnit, AUAudioUnitStatus, AUEventSampleTimeImmediate, AUParameter, AURenderBlock,
-    AURenderPullInputBlock, AUScheduleMIDIEventBlock, AudioUnitRenderActionFlags,
+    AURenderPullInputBlock, AUScheduleMIDIEventBlock, AUScheduleParameterBlock,
+    AudioUnitRenderActionFlags,
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioTimeStamp, AudioTimeStampFlags};
 use rtrb::{Consumer, Producer, RingBuffer};
@@ -110,6 +113,53 @@ pub(crate) struct HostEnds {
     pub(crate) status: Arc<Status>,
 }
 
+/// How many scheduled changes [`Echoes`] remembers: more than a few blocks of
+/// automation on several parameters, as long as the observer's callbacks lag.
+pub(crate) const ECHOES: usize = 256;
+
+/// What an empty slot of [`Echoes`] holds: a NaN, which no value matches.
+const NO_ECHO: u64 = u64::MAX;
+
+/// The last changes a node scheduled on its unit, as (address, value) pairs.
+/// The unit's parameter observers report a scheduled change like any other,
+/// and the editor's observer drops the ones found here. The node writes and
+/// the observer reads, both without locking.
+#[derive(Debug)]
+pub(crate) struct Echoes {
+    slots: [AtomicU64; ECHOES],
+    next: AtomicUsize,
+}
+
+impl Default for Echoes {
+    fn default() -> Self {
+        Self {
+            slots: std::array::from_fn(|_| AtomicU64::new(NO_ECHO)),
+            next: AtomicUsize::new(0),
+        }
+    }
+}
+
+impl Echoes {
+    // shortcut: the address keeps its low 32 bits, so two parameters whose
+    // addresses differ only above them share an echo; worst case the person's
+    // edit to the other parameter, to a value just scheduled, goes unreported.
+    fn pack(address: u64, value: f32) -> u64 {
+        address << 32 | u64::from(value.to_bits())
+    }
+
+    /// Remembers a change about to be scheduled.
+    pub(crate) fn push(&self, address: u64, value: f32) {
+        let slot = self.next.fetch_add(1, Relaxed) % ECHOES;
+        self.slots[slot].store(Self::pack(address, value), Relaxed);
+    }
+
+    /// Whether the node scheduled this change lately.
+    pub(crate) fn contains(&self, address: u64, value: f32) -> bool {
+        let packed = Self::pack(address, value);
+        self.slots.iter().any(|slot| slot.load(Relaxed) == packed)
+    }
+}
+
 /// What a node and the main thread both see.
 #[derive(Debug, Default)]
 pub(crate) struct Status {
@@ -124,11 +174,16 @@ pub(crate) struct Status {
     pub(crate) silent: AtomicBool,
     /// Events dropped because a list was full.
     pub(crate) dropped: AtomicU64,
-    /// The editor's parameter-observer token, so the host's own parameter
-    /// changes aren't reported back as the unit's own (WP-2.8's second
-    /// part); null while no editor is open. Written on the main thread,
-    /// read on the audio thread.
-    pub(crate) observer: AtomicPtr<c_void>,
+    /// The parameter changes the node scheduled lately, so the editor's
+    /// observer can tell the host's own changes from the person's (WP-2.8's
+    /// second part). Set once by the main thread, read on the audio thread.
+    pub(crate) echoes: OnceLock<Arc<Echoes>>,
+    /// Render calls the node made, for tests of how a block is split.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) renders: AtomicU32,
+    /// Parameter changes the node scheduled on the unit.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) scheduled: AtomicU32,
 }
 
 /// An Audio Unit and everything the audio thread renders it with, made on
@@ -142,6 +197,10 @@ pub(crate) struct Processor {
     /// Its MIDI scheduling block, if it takes notes (a music device or
     /// effect); null otherwise.
     midi: AUScheduleMIDIEventBlock,
+    /// Its parameter scheduling block, safe to call on the audio thread.
+    schedule: AUScheduleParameterBlock,
+    /// The address of each parameter of `params`, to schedule it by.
+    addresses: Box<[u64]>,
     /// The block the unit calls with the MIDI it sends out (IMP-24), kept
     /// here so it outlives the render calls and drops before `midi_out`,
     /// which its closure points at; `None` while the unit names no MIDI
@@ -151,9 +210,8 @@ pub(crate) struct Processor {
     /// call.
     midi_out: Box<MidiOut>,
     /// Every parameter of the unit's tree, in order, with the value it had
-    /// when the unit was made: a parameter change is one `setValue` on its
-    /// own frame, and a `ParamValue::Default` event sets its captured
-    /// value, never read from the unit on the audio thread.
+    /// when the unit was made: a `ParamValue::Default` event schedules its
+    /// captured value, never read from the unit on the audio thread.
     params: Vec<(Retained<AUParameter>, f64)>,
     /// Its parameters' automation and modulation, played into it (the
     /// modulation spec, R10).
@@ -406,51 +464,45 @@ impl Node for AuNode {
         );
         self.pending.clear();
 
-        // The unit renders one segment at a time: the events at an offset
-        // are applied before the segment they start.
+        // The unit renders one segment at a time, split at its parameter
+        // changes: a change is scheduled for the segment's first frame, and
+        // each note on its own frame within the segment.
         let base = self.steady;
+        let echoes = self.status.echoes.get().map(|echoes| &**echoes);
+        let clamp = |offset: u32| (offset as usize).min(frames - 1);
         let mut at = 0;
         let mut index = 0;
         let mut failed = false;
-        while index < self.events.len() {
-            let offset = (self.events[index].0 as usize).min(frames - 1);
-            if offset > at {
-                if processor.render(block, base, at, offset, self.midi_effect) != 0 {
-                    failed = true;
-                    break;
-                }
-                let dropped = processor.take_midi_out(block, at, offset);
-                self.status.dropped.fetch_add(dropped, Relaxed);
-            }
-            while index < self.events.len() && self.events[index].0 as usize <= offset {
-                match self.events[index].1 {
+        while at < frames {
+            let end = self.events[index..]
+                .iter()
+                .find(|(offset, event)| matches!(event, In::Param(..)) && clamp(*offset) > at)
+                .map_or(frames, |(offset, _)| clamp(*offset));
+            while index < self.events.len() && clamp(self.events[index].0) < end {
+                let (offset, event) = self.events[index];
+                let scheduled = match event {
                     In::Param(param, value) => {
-                        if !processor.set_param(param, value, self.status.observer.load(Relaxed)) {
-                            self.status.dropped.fetch_add(1, Relaxed);
-                        }
+                        #[cfg(feature = "test-hooks")]
+                        self.status.scheduled.fetch_add(1, Relaxed);
+                        processor.set_param(param, value, echoes)
                     }
-                    In::Note(note) => {
-                        if !processor.midi(&note) {
-                            self.status.dropped.fetch_add(1, Relaxed);
-                        }
-                    }
-                    In::Midi(message) => {
-                        if !processor.midi_message(message) {
-                            self.status.dropped.fetch_add(1, Relaxed);
-                        }
-                    }
+                    In::Note(note) => processor.midi(&note, clamp(offset) - at),
+                    In::Midi(message) => processor.midi_message(message, clamp(offset) - at),
+                };
+                if !scheduled {
+                    self.status.dropped.fetch_add(1, Relaxed);
                 }
                 index += 1;
             }
-            at = offset;
-        }
-        if !failed && at < frames {
-            if processor.render(block, base, at, frames, self.midi_effect) != 0 {
+            #[cfg(feature = "test-hooks")]
+            self.status.renders.fetch_add(1, Relaxed);
+            if processor.render(block, base, at, end, self.midi_effect) != 0 {
                 failed = true;
-            } else {
-                let dropped = processor.take_midi_out(block, at, frames);
-                self.status.dropped.fetch_add(dropped, Relaxed);
+                break;
             }
+            let dropped = processor.take_midi_out(block, at, end);
+            self.status.dropped.fetch_add(dropped, Relaxed);
+            at = end;
         }
         self.steady = self.steady.wrapping_add(frames as u64);
         if failed {
@@ -616,11 +668,17 @@ impl Processor {
         config: &NodeConfig,
         params: Vec<(Retained<AUParameter>, f64)>,
         drive: Driver,
-        render: AURenderBlock,
-        midi: AUScheduleMIDIEventBlock,
+        (render, midi, schedule): (
+            AURenderBlock,
+            AUScheduleMIDIEventBlock,
+            AUScheduleParameterBlock,
+        ),
         (input_channels, output_channels): (usize, usize),
     ) -> Self {
         let max_frames = config.max_frames.max(1);
+        // SAFETY: reading a parameter's address is a property read on the
+        // thread that owns the unit.
+        let addresses = params.iter().map(|(p, _)| unsafe { p.address() }).collect();
         let pull = Box::new(Pull {
             data: vec![0.0; MAX_CHANNELS * max_frames].into_boxed_slice(),
             channels: input_channels,
@@ -725,6 +783,8 @@ impl Processor {
             unit,
             render,
             midi,
+            schedule,
+            addresses,
             _midi_out_block: midi_out_block,
             midi_out,
             params,
@@ -774,28 +834,34 @@ impl Processor {
         }
     }
 
-    /// Sets a parameter, before the segment it starts. `originator` is the
-    /// editor's parameter-observer token, so the host's own change isn't
-    /// reported back as the unit's own; null while no editor is open.
-    pub(crate) fn set_param(&mut self, param: u32, value: f64, originator: *mut c_void) -> bool {
-        let Some((parameter, _)) = self.params.get(param as usize) else {
+    /// Schedules a parameter's new value for the first frame of the next
+    /// render call, through the unit's own scheduling block, noting it in
+    /// `echoes` first. Returns whether it was scheduled.
+    pub(crate) fn set_param(
+        &mut self,
+        param: u32,
+        value: f64,
+        echoes: Option<&Echoes>,
+    ) -> bool {
+        let Some(&address) = self.addresses.get(param as usize) else {
             return false;
         };
-        // SAFETY: setting a value is a host call on the unit's own thread,
-        // for a parameter of its tree, between render calls.
-        if originator.is_null() {
-            // SAFETY: as above.
-            unsafe { parameter.setValue(value as f32) };
-        } else {
-            // SAFETY: as above; `originator` is the observer token while an
-            // editor is open, and setValue:originator: only compares it.
-            unsafe { parameter.setValue_originator(value as f32, originator) };
+        if self.schedule.is_null() {
+            return false;
+        }
+        if let Some(echoes) = echoes {
+            echoes.push(address, value as f32);
+        }
+        // SAFETY: the block belongs to this unit; Apple documents it as safe
+        // to call from any thread context, a render thread included.
+        unsafe {
+            (&*self.schedule).call((AUEventSampleTimeImmediate, 0, address, value as f32));
         }
         true
     }
 
-    /// Schedules a MIDI message for the next render call's first frame.
-    pub(crate) fn midi_message(&mut self, message: MidiMessage) -> bool {
+    /// Schedules a MIDI message for frame `offset` of the next render call.
+    pub(crate) fn midi_message(&mut self, message: MidiMessage, offset: usize) -> bool {
         if self.midi.is_null() {
             return false;
         }
@@ -807,19 +873,19 @@ impl Processor {
         // call is made between render calls, where Apple's documentation
         // allows it.
         unsafe {
-            (&*self.midi).call((AUEventSampleTimeImmediate, 0, length, data));
+            (&*self.midi).call((AUEventSampleTimeImmediate + offset as i64, 0, length, data));
         }
         true
     }
 
-    /// Schedules a note for the next render call's first frame.
-    pub(crate) fn midi(&mut self, note: &NoteEvent) -> bool {
+    /// Schedules a note for frame `offset` of the next render call.
+    pub(crate) fn midi(&mut self, note: &NoteEvent, offset: usize) -> bool {
         if self.midi.is_null() {
             return false;
         }
         // Spec: au-hosting R18. A channel message goes in as its MIDI bytes.
         if let Some(message) = note.message() {
-            return self.midi_message(message);
+            return self.midi_message(message, offset);
         }
         let channel = note.channel.min(15);
         let key = note.key.min(127);
@@ -846,7 +912,7 @@ impl Processor {
         // SAFETY: as above: the MIDI block takes these three valid bytes and
         // copies them before it returns.
         unsafe {
-            (&*self.midi).call((AUEventSampleTimeImmediate, 0, 3, data));
+            (&*self.midi).call((AUEventSampleTimeImmediate + offset as i64, 0, 3, data));
         }
         true
     }

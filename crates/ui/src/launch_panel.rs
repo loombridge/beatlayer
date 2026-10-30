@@ -171,7 +171,10 @@ fn scrub_control(ui: &mut Ui, theme: &Theme, rect: Rect, events: &mut Vec<UiEven
     ui.painter()
         .rect_filled(rect, theme.sizes.corner, c.control.0);
     ui.painter().line_segment(
-        [rect.left_center() + vec2(4.0, 0.0), rect.right_center() - vec2(4.0, 0.0)],
+        [
+            rect.left_center() + vec2(4.0, 0.0),
+            rect.right_center() - vec2(4.0, 0.0),
+        ],
         egui::Stroke::new(1.0, c.text_dim.0),
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Slider, true, "Scrub"));
@@ -394,7 +397,12 @@ pub fn show(
         events,
     );
     if scrub {
-        scrub_control(ui, theme, Rect::from_min_size(at + vec2(28.0, 0.0), vec2(40.0, SMALL.y)), events);
+        scrub_control(
+            ui,
+            theme,
+            Rect::from_min_size(at + vec2(28.0, 0.0), vec2(40.0, SMALL.y)),
+            events,
+        );
     }
     nudge_button(
         ui,

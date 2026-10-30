@@ -68,7 +68,7 @@ pub(super) struct Run {
     pub(super) id: &'static str,
     pub(super) args: Value,
     /// The undo step's name, for a command that moves a continuous control.
-    pub(super) gesture: Option<&'static str>,
+    pub(super) gesture: Option<String>,
     /// The same command for the other clips a Clip View control acts on
     /// (map modes R17).
     pub(super) more: Vec<Value>,
@@ -83,11 +83,11 @@ pub(super) fn cmd(id: &'static str, args: Value) -> Option<Run> {
     })
 }
 
-pub(super) fn drag(id: &'static str, args: Value, name: &'static str) -> Option<Run> {
+pub(super) fn drag(id: &'static str, args: Value, name: impl Into<String>) -> Option<Run> {
     Some(Run {
         id,
         args,
-        gesture: Some(name),
+        gesture: Some(name.into()),
         more: Vec::new(),
     })
 }
@@ -284,7 +284,7 @@ impl Shell {
         // Spec: map-modes R17. A Clip View control that acts on several
         // clips changes them in one undo step.
         let several = run.gesture.is_none() && !run.more.is_empty();
-        match run.gesture {
+        match &run.gesture {
             Some(name) => {
                 let key = RunKey::Source(mapping.source.clone());
                 if self.remote.run.as_ref().map(|(key, _)| key) != Some(&key) {
@@ -368,6 +368,15 @@ impl Shell {
         )
     }
 
+    /// The values at the ends of a control with no travel of its own, which
+    /// runs straight between them.
+    fn straight_range(&self, target: &RemoteTarget) -> (f64, f64) {
+        target
+            .natural_range()
+            .or_else(|| self.param_control(target).and_then(|(_, range)| range))
+            .unwrap_or((0.0, 1.0))
+    }
+
     /// The control's travel; `None` for the crossfader, which is straight.
     fn travel(&self, target: &RemoteTarget) -> Option<Travel<'_>> {
         match *target {
@@ -387,7 +396,7 @@ impl Shell {
     pub(super) fn position_of(&self, target: &RemoteTarget, value: f64) -> f64 {
         self.travel(target).map_or_else(
             || {
-                let (low, high) = target.natural_range().unwrap_or((0.0, 1.0));
+                let (low, high) = self.straight_range(target);
                 ((value - low) / (high - low)).clamp(0.0, 1.0)
             },
             |t| t.position(value),
@@ -397,7 +406,7 @@ impl Shell {
     pub(super) fn value_at(&self, target: &RemoteTarget, position: f64) -> f64 {
         self.travel(target).map_or_else(
             || {
-                let (low, high) = target.natural_range().unwrap_or((0.0, 1.0));
+                let (low, high) = self.straight_range(target);
                 low + position.clamp(0.0, 1.0) * (high - low)
             },
             |t| t.value(position),
@@ -711,6 +720,9 @@ impl Shell {
         &self,
         target: &RemoteTarget,
     ) -> Option<(ControlKind, Option<(f64, f64)>)> {
+        if let RemoteTarget::MidiTool { .. } = target {
+            return self.tool_param_control(target);
+        }
         let RemoteTarget::Device { device, param } = *target else {
             return None;
         };

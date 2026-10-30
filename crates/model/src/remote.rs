@@ -498,6 +498,95 @@ pub enum ClipControl {
     Scrub,
 }
 
+/// How long the ID of a MIDI Tool or one of its parameters may be.
+pub const TOOL_ID_MAX: usize = 32;
+
+/// The ID of a MIDI Tool or of one of its parameters, kept inline so that a
+/// [`RemoteTarget`] stays `Copy`.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ToolId {
+    bytes: [u8; TOOL_ID_MAX],
+    len: u8,
+}
+
+impl ToolId {
+    /// The ID `id`, or `None` if it is empty or longer than [`TOOL_ID_MAX`].
+    #[must_use]
+    pub fn new(id: &str) -> Option<Self> {
+        let source = id.as_bytes();
+        if source.is_empty() || source.len() > TOOL_ID_MAX {
+            return None;
+        }
+        let mut bytes = [0; TOOL_ID_MAX];
+        bytes[..source.len()].copy_from_slice(source);
+        Some(Self {
+            bytes,
+            len: u8::try_from(source.len()).ok()?,
+        })
+    }
+
+    /// The ID as text.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+impl std::fmt::Debug for ToolId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_str())
+    }
+}
+
+impl Serialize for ToolId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let id = String::deserialize(deserializer)?;
+        Self::new(&id).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "a MIDI Tool's or parameter's ID is 1 to {TOOL_ID_MAX} bytes"
+            ))
+        })
+    }
+}
+
+impl JsonSchema for ToolId {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "ToolId".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": TOOL_ID_MAX,
+            "description": "The ID of a MIDI Tool or of one of its parameters, as `midi_tool.list` gives it."
+        })
+    }
+}
+
+/// A control of a MIDI Tool's panel (map modes R23).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ToolControl {
+    /// The Auto switch.
+    Auto,
+    /// The Transform or Generate button.
+    Apply,
+    /// The Reset button.
+    Reset,
+    /// One of the tool's parameters, whose kind its description gives.
+    Param {
+        /// Its ID.
+        param: ToolId,
+    },
+}
+
 /// How many options the Quantization Menu has; a clip's Quantization chooser
 /// has one more, Global, first.
 pub const QUANTIZATION_OPTIONS: u32 = 14;
@@ -529,8 +618,9 @@ pub const GAIN_RANGE: (f64, f64) = (-96.0, 24.0);
                    Launch button in the relative Session mapping strip), `strip` (one of the \
                    strip's `control`s: scene_up, scene_down, scene_number, launch_scene, \
                    cancel_launch), `crossfader_field` (the crossfader's `field`: left, centre \
-                   or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, or \
-                   `clip` (a Clip View `control`)."
+                   or right), `bar` (a Control Bar `control`), `step_back`, `step_forward`, \
+                   `clip` (a Clip View `control`), or `midi_tool` (a `tool` and its `control`: \
+                   auto, apply, reset, or a `param`)."
 )]
 pub enum RemoteTarget {
     /// A Session slot of a track at a scene, not its clip.
@@ -638,6 +728,14 @@ pub enum RemoteTarget {
         /// The control.
         control: ClipControl,
     },
+    /// A control of a MIDI Tool's panel, named by the tool and the control so
+    /// one mapping acts whichever clip the Clip View shows.
+    MidiTool {
+        /// The tool.
+        tool: ToolId,
+        /// The control.
+        control: ToolControl,
+    },
 }
 
 /// The values a crossfade assignment's radio button takes: A, off, B.
@@ -685,6 +783,11 @@ impl RemoteTarget {
             },
             Self::Bar { control } => control.kind(),
             Self::Clip { control } => control.kind(),
+            Self::MidiTool { control, .. } => match control {
+                ToolControl::Auto => ControlKind::Switch,
+                ToolControl::Apply | ToolControl::Reset => ControlKind::Button,
+                ToolControl::Param { .. } => return None,
+            },
             Self::Device { .. } => return None,
         })
     }
@@ -979,11 +1082,14 @@ impl Document {
             | RemoteTarget::Bar { .. }
             | RemoteTarget::StepBack
             | RemoteTarget::StepForward
-            | RemoteTarget::Clip { .. } => true,
+            | RemoteTarget::Clip { .. }
+            | RemoteTarget::MidiTool { .. } => true,
             RemoteTarget::TrackLaunch { track } => self
                 .track(track)
                 .is_some_and(|t| matches!(t.kind(), TrackKind::Audio | TrackKind::Midi)),
-            RemoteTarget::Monitor { track } => self.track(track).is_some_and(|t| t.kind().has_arm()),
+            RemoteTarget::Monitor { track } => {
+                self.track(track).is_some_and(|t| t.kind().has_arm())
+            }
             RemoteTarget::Device { device, .. } | RemoteTarget::DeviceOn { device } => {
                 self.device(device).is_some()
             }

@@ -193,7 +193,7 @@ pub use rack::{
 pub use record_quantization::RecordQuantization;
 pub use remote::{
     BarControl, ClipControl, ControlKind, CrossfaderField, RelativeEncoding, RemoteMapping,
-    RemoteMode, RemoteSource, RemoteTarget, StripControl, TakeoverMode,
+    RemoteMode, RemoteSource, RemoteTarget, StripControl, TakeoverMode, ToolControl, ToolId,
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};

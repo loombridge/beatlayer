@@ -1708,7 +1708,12 @@ fn step_buttons(ui: &mut Ui, theme: &Theme, view: Rect, events: &mut Vec<UiEvent
     let colours = &theme.colors;
     for (rect, name, target, forwards) in [
         (back, "Step Back", bl_model::RemoteTarget::StepBack, false),
-        (forward, "Step Forward", bl_model::RemoteTarget::StepForward, true),
+        (
+            forward,
+            "Step Forward",
+            bl_model::RemoteTarget::StepForward,
+            true,
+        ),
     ] {
         let id = Id::new(("clip-view-step", name));
         let response = ui.interact(rect, id, Sense::hover());

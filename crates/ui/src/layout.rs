@@ -924,9 +924,8 @@ impl ShellLayout {
         // Spec: map-modes R20. The New button shows in a map mode, before
         // Session Record, out of the room the middle group's gap has; a
         // narrower window, and the second window, hide it.
-        let new_shown = detail_views.new_button
-            && !second
-            && w >= MINIMUM.x + NEW_SPACE / (1.0 - MIDDLE_SHARE);
+        let new_shown =
+            detail_views.new_button && !second && w >= MINIMUM.x + NEW_SPACE / (1.0 - MIDDLE_SHARE);
         let new_shift = if new_shown { NEW_SPACE } else { 0.0 };
         let new_at = placement(Element::SessionRecord).x;
         let middle_push = {

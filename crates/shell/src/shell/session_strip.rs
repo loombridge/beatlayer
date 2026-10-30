@@ -32,11 +32,7 @@ impl Shell {
     }
 
     /// Runs the strip's commands and New.
-    pub(super) fn run_session_strip(
-        &mut self,
-        id: &str,
-        args: Value,
-    ) -> Result<Value, ShellError> {
+    pub(super) fn run_session_strip(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let unavailable = |reason: &str| ShellError::Unavailable {
             command: id.to_owned(),
             reason: reason.to_owned(),
@@ -53,9 +49,10 @@ impl Shell {
         match id {
             ids::HIGHLIGHT_SCENE => {
                 let HighlightArgs { step, number } = Self::args(id, args)?;
-                let last = scenes.len().checked_sub(1).ok_or_else(|| {
-                    unavailable("the set has no scenes")
-                })?;
+                let last = scenes
+                    .len()
+                    .checked_sub(1)
+                    .ok_or_else(|| unavailable("the set has no scenes"))?;
                 let to = match (step, number) {
                     // Spec: map-modes R15. With none highlighted a step
                     // highlights the first.

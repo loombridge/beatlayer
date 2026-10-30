@@ -233,7 +233,9 @@ fn the_strips_controls_map_and_act_through_the_remote_input() {
 
     // The track's Launch button presses the slot at the highlight.
     tap(&mut h, &test, 40);
-    h.wait("the slot at the highlight to launch", |h| playing(h, scenes[1]));
+    h.wait("the slot at the highlight to launch", |h| {
+        playing(h, scenes[1])
+    });
 
     // Cancel Launch drops a launch that is queued and leaves what plays.
     h.shell
@@ -286,8 +288,8 @@ fn a_mapped_scene_down_centres_the_highlighted_scene_in_forty_scenes() {
     };
     for step in 1..=20_usize {
         tap(&mut h, &test, 36);
-        let expected = ((step as f32 - 0.5) * SLOT_ROW - slots_height / 2.0)
-            .clamp(0.0, 39.0 * SLOT_ROW);
+        let expected =
+            ((step as f32 - 0.5) * SLOT_ROW - slots_height / 2.0).clamp(0.0, 39.0 * SLOT_ROW);
         assert!(
             (scroll(&mut h) - expected).abs() < 0.5,
             "step {step}: {} against {expected}",
@@ -330,7 +332,10 @@ fn the_new_button_shows_only_in_the_map_modes_and_a_mapped_key_runs_it() {
         let nodes = tree(&mut h);
         let new = rect_of(Harness::node(&nodes, "New"));
         let record = rect_of(Harness::node(&nodes, "Session Record"));
-        assert!(new.right() <= record.left(), "{which}: before Session Record");
+        assert!(
+            new.right() <= record.left(),
+            "{which}: before Session Record"
+        );
         mode(&mut h, "off");
     }
 
@@ -362,7 +367,10 @@ fn the_new_button_shows_only_in_the_map_modes_and_a_mapped_key_runs_it() {
         )
         .unwrap();
     h.shell
-        .run("session.launch", json!({ "track": midi, "scene": scenes[0] }))
+        .run(
+            "session.launch",
+            json!({ "track": midi, "scene": scenes[0] }),
+        )
         .unwrap();
     h.shell
         .run("session.highlight_scene", json!({ "number": 1 }))
@@ -460,12 +468,7 @@ fn a_click_on_a_control_bar_control_selects_it_and_the_switches_are_not_mappable
         json!({ "type": "bar", "control": "metronome" })
     );
     assert!(
-        !h.shell
-            .editor()
-            .document()
-            .settings()
-            .metronome
-            .enabled,
+        !h.shell.editor().document().settings().metronome.enabled,
         "the click didn't switch it"
     );
     let output = h.settle();
@@ -519,7 +522,10 @@ fn the_clip_views_controls_tint_the_scrub_shows_in_midi_map_mode_only_and_the_st
     let mut h = session_clip();
     let before = tree(&mut h);
     for label in ["Scrub", "Step Back", "Step Forward"] {
-        assert!(!has(&before, label), "{label} is hidden outside the map modes");
+        assert!(
+            !has(&before, label),
+            "{label} is hidden outside the map modes"
+        );
     }
     for which in ["midi", "key"] {
         mode(&mut h, which);
@@ -535,7 +541,10 @@ fn the_clip_views_controls_tint_the_scrub_shows_in_midi_map_mode_only_and_the_st
         // The step buttons sit before the grid chooser.
         let grid = rect_of(Harness::node(&nodes, "Grid"));
         for label in ["Step Back", "Step Forward"] {
-            assert!(rect_of(Harness::node(&nodes, label)).right() <= grid.left(), "{label}");
+            assert!(
+                rect_of(Harness::node(&nodes, label)).right() <= grid.left(),
+                "{label}"
+            );
         }
         // The Launch Mode chooser and the nudge buttons are tinted; the
         // Velocity field is a continuous control, red mapping leaves it.
@@ -551,7 +560,10 @@ fn the_clip_views_controls_tint_the_scrub_shows_in_midi_map_mode_only_and_the_st
                 .iter()
                 .any(|(r, fill)| *fill == colour && r.contains(rect.center()))
         };
-        assert!(tinted(back) && tinted(forward), "{which}: the nudge buttons");
+        assert!(
+            tinted(back) && tinted(forward),
+            "{which}: the nudge buttons"
+        );
         let mode_chooser = rect_of(Harness::node(&nodes, "Launch Mode"));
         assert!(tinted(mode_chooser), "{which}: Launch Mode");
         // The panel's field reads a percentage; the editor's lane has the
@@ -609,9 +621,9 @@ fn a_radio_button_macro_takes_a_key_and_a_knob_macro_does_not() {
         let group = nodes
             .iter()
             .find(|n| n.label == label && n.role == Role::RadioGroup)?;
-        let button = nodes
-            .iter()
-            .find(|n| n.role == Role::RadioButton && Harness::descends_from(&nodes, n.id, group.id))?;
+        let button = nodes.iter().find(|n| {
+            n.role == Role::RadioButton && Harness::descends_from(&nodes, n.id, group.id)
+        })?;
         let rect = rect_of(button);
         Some(
             painted
@@ -619,7 +631,11 @@ fn a_radio_button_macro_takes_a_key_and_a_knob_macro_does_not() {
                 .any(|(r, fill)| *fill == tint && r.contains(rect.center())),
         )
     };
-    assert_eq!(tinted("Macro 1"), Some(true), "the radio-button macro is tinted red");
+    assert_eq!(
+        tinted("Macro 1"),
+        Some(true),
+        "the radio-button macro is tinted red"
+    );
     // Key Map Mode takes the radio macro by `remote.select`, and not the knob.
     h.shell
         .run("remote.select", json!({ "target": radio }))
@@ -632,7 +648,10 @@ fn a_radio_button_macro_takes_a_key_and_a_knob_macro_does_not() {
     );
     h.key(Key::R, Modifiers::NONE);
     let mapped = h.shell.run("remote.mappings", json!({})).unwrap();
-    assert_eq!(mapped["mappings"][0]["source"], json!({ "type": "key", "key": "R" }));
+    assert_eq!(
+        mapped["mappings"][0]["source"],
+        json!({ "type": "key", "key": "R" })
+    );
     assert_eq!(mapped["mappings"][0]["kind"]["type"], "radio");
     mode(&mut h, "off");
     let value = |h: &Harness| {
@@ -649,5 +668,58 @@ fn a_radio_button_macro_takes_a_key_and_a_knob_macro_does_not() {
     };
     let first = value(&h);
     h.key(Key::R, Modifiers::NONE);
-    assert!(value(&h) > first, "the key steps the macro to its next button");
+    assert!(
+        value(&h) > first,
+        "the key steps the macro to its next button"
+    );
+}
+
+// Spec: map-modes R23, R12. A MIDI Tool's apply button, Reset button and Auto
+// switch are tinted in both modes, a number parameter in MIDI Map Mode only,
+// and a click selects the control by the tool's and the control's names.
+#[test]
+fn a_midi_tools_controls_are_tinted_and_a_click_selects_one_by_name() {
+    let mut h = session_clip();
+    h.shell
+        .run("clip_view.show_panel", json!({ "panel": "transform" }))
+        .unwrap();
+    h.shell
+        .run("midi_tool.choose", json!({ "tool": "velocity_shaper" }))
+        .unwrap();
+    h.settle();
+    for which in ["midi", "key"] {
+        mode(&mut h, which);
+        let output = h.settle();
+        let nodes = Harness::nodes(&output);
+        let colour = if which == "key" {
+            h.theme.colors.key_map.0
+        } else {
+            h.theme.colors.midi_map.0
+        }
+        .gamma_multiply(0.3);
+        let painted = common::painted_rects(&output);
+        let tinted = |label: &str| {
+            let rect = rect_of(Harness::node(&nodes, label));
+            painted
+                .iter()
+                .any(|(r, fill)| *fill == colour && r.contains(rect.center()))
+        };
+        assert!(tinted("Transform"), "{which}: the apply button");
+        assert!(tinted("Reset"), "{which}: Reset");
+        assert!(tinted("Velocity Shaper Auto"), "{which}: Auto");
+        assert_eq!(
+            tinted("Maximum Velocity"),
+            which == "midi",
+            "{which}: a number parameter"
+        );
+        mode(&mut h, "off");
+    }
+    mode(&mut h, "midi");
+    let nodes = tree(&mut h);
+    h.click(rect_of(Harness::node(&nodes, "Transform")).center());
+    h.settle();
+    assert_eq!(
+        h.shell.run("remote.state", json!({})).unwrap()["selected"],
+        json!({ "type": "midi_tool", "tool": "velocity_shaper", "control": { "type": "apply" } })
+    );
 }

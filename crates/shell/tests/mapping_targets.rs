@@ -132,17 +132,29 @@ fn the_strip_highlights_scenes_stops_at_the_ends_and_asks_the_grid_to_centre() {
     assert_eq!(rig.highlighted(), None);
     let (asked, _) = rig.shell.session().centre_request();
     rig.key("d");
-    assert_eq!(rig.highlighted(), Some(scenes[0]), "none highlighted: the first");
+    assert_eq!(
+        rig.highlighted(),
+        Some(scenes[0]),
+        "none highlighted: the first"
+    );
     rig.key("d");
     assert_eq!(rig.highlighted(), Some(scenes[1]));
     rig.key("u");
     rig.key("u");
-    assert_eq!(rig.highlighted(), Some(scenes[0]), "Scene Up stops at the first");
+    assert_eq!(
+        rig.highlighted(),
+        Some(scenes[0]),
+        "Scene Up stops at the first"
+    );
     let (now, centred) = rig.shell.session().centre_request();
     assert_eq!((now, centred), (asked + 4, Some(scenes[0])));
 
     rig.cc(20, 3);
-    assert_eq!(rig.highlighted(), Some(scenes[3]), "the controller value plus one");
+    assert_eq!(
+        rig.highlighted(),
+        Some(scenes[3]),
+        "the controller value plus one"
+    );
     rig.cc(20, 127);
     assert_eq!(
         rig.highlighted(),
@@ -186,7 +198,9 @@ fn launch_scene_and_a_tracks_launch_button_act_at_the_highlight() {
     rig.map(key("t"), json!({ "type": "track_launch", "track": track }));
     let playing = |shell: &Shell, scene: SceneId| {
         shell.session_states().iter().any(|slot| {
-            slot.track == track && slot.scene == scene && slot.state == bl_engine::SlotState::Playing
+            slot.track == track
+                && slot.scene == scene
+                && slot.state == bl_engine::SlotState::Playing
         })
     };
 
@@ -241,12 +255,17 @@ fn cancel_launch_drops_a_queued_scene_launch_and_leaves_what_plays() {
             .any(|slot| slot.state == bl_engine::SlotState::Queued)
     });
     rig.key("c");
-    testing::wait_for(&rig.control, &mut rig.shell, "the launch dropped", |shell| {
-        shell
-            .session_states()
-            .iter()
-            .all(|slot| slot.state != bl_engine::SlotState::Queued)
-    });
+    testing::wait_for(
+        &rig.control,
+        &mut rig.shell,
+        "the launch dropped",
+        |shell| {
+            shell
+                .session_states()
+                .iter()
+                .all(|slot| slot.state != bl_engine::SlotState::Queued)
+        },
+    );
     assert!(
         rig.shell
             .session_states()
@@ -276,7 +295,10 @@ fn new_stops_the_armed_tracks_and_highlights_or_inserts_a_scene() {
     }
     rig.run("mixer.set_arm", json!({ "track": track, "arm": true }));
     rig.map(key("n"), bar("new"));
-    rig.run("session.launch", json!({ "track": track, "scene": scenes[0] }));
+    rig.run(
+        "session.launch",
+        json!({ "track": track, "scene": scenes[0] }),
+    );
     testing::wait_for(&rig.control, &mut rig.shell, "the clip", |shell| {
         shell
             .session_states()
@@ -287,7 +309,11 @@ fn new_stops_the_armed_tracks_and_highlights_or_inserts_a_scene() {
 
     let steps = rig.steps();
     rig.key("n");
-    assert_eq!(rig.highlighted(), Some(scenes[2]), "the first scene with free slots");
+    assert_eq!(
+        rig.highlighted(),
+        Some(scenes[2]),
+        "the first scene with free slots"
+    );
     assert_eq!(rig.steps(), steps, "highlighting is no undo step");
     testing::wait_for(&rig.control, &mut rig.shell, "the clip stopped", |shell| {
         shell
@@ -323,9 +349,15 @@ fn the_crossfaders_one_field_toggles_and_two_fields_snap_back() {
     rig.map(key("a"), field("left"));
     assert!((position(&rig) - 0.5).abs() < 1e-9);
     rig.key("a");
-    assert!(position(&rig).abs() < 1e-9, "from the centre to the left end");
+    assert!(
+        position(&rig).abs() < 1e-9,
+        "from the centre to the left end"
+    );
     rig.key("a");
-    assert!((position(&rig) - 1.0).abs() < 1e-9, "from the left end to the right");
+    assert!(
+        (position(&rig) - 1.0).abs() < 1e-9,
+        "from the left end to the right"
+    );
     rig.key("a");
     assert!(position(&rig).abs() < 1e-9);
 
@@ -545,7 +577,9 @@ fn shell_with_a_midi_clip() -> (Shell, ClipId) {
             json!({ "clip": clip, "beat": 0 }),
         ),
     ] {
-        shell.run(id, args).unwrap_or_else(|error| panic!("{id}: {error}"));
+        shell
+            .run(id, args)
+            .unwrap_or_else(|error| panic!("{id}: {error}"));
     }
     // The frame that turns the input's copy on.
     shell.poll();
@@ -567,16 +601,11 @@ fn a_mapped_clip_view_transpose_moves_both_selected_clips() {
             }),
         )
         .unwrap();
-    let transpose = |shell: &Shell, clip: ClipId| match &shell
-        .editor()
-        .document()
-        .clip(clip)
-        .unwrap()
-        .data
-    {
-        ClipData::Audio(audio) => audio.transpose,
-        ClipData::Midi(_) => unreachable!(),
-    };
+    let transpose =
+        |shell: &Shell, clip: ClipId| match &shell.editor().document().clip(clip).unwrap().data {
+            ClipData::Audio(audio) => audio.transpose,
+            ClipData::Midi(_) => unreachable!(),
+        };
     let steps = shell.editor().undo_history().count();
     shell
         .run("remote.input", json!({ "bytes": [0xB0, 24, 127] }))
@@ -589,7 +618,9 @@ fn a_mapped_clip_view_transpose_moves_both_selected_clips() {
         "both clips change in one step"
     );
     // With no clip shown it does nothing and is counted.
-    shell.run("arrangement.select_clips", json!({ "clips": [] })).unwrap();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [] }))
+        .unwrap();
     let refused = shell.remote_counts().1;
     shell
         .run("remote.input", json!({ "bytes": [0xB0, 24, 0] }))
@@ -645,14 +676,12 @@ fn a_radio_button_macro_takes_a_key_and_a_held_parameter_refuses_a_mapping() {
 
     // A knob macro is a continuous control, mapped to MIDI only.
     let knob = json!({ "type": "device", "device": rack, "param": bl_model::macro_param(2) });
-    assert_eq!(
-        rig.map(cc(30), knob.clone())["kind"]["type"],
-        "continuous"
+    assert_eq!(rig.map(cc(30), knob.clone())["kind"]["type"], "continuous");
+    assert!(
+        rig.shell
+            .run("remote.map", json!({ "source": key("k"), "target": knob }))
+            .is_err()
     );
-    assert!(rig
-        .shell
-        .run("remote.map", json!({ "source": key("k"), "target": knob }))
-        .is_err());
 }
 
 // Spec: map-modes R24. `remote.targets` lists the controls of each view with
@@ -663,12 +692,16 @@ fn remote_targets_lists_each_kind_and_a_mapping_reads_back() {
     let mut rig = Rig::new();
     let targets = rig.run("remote.targets", json!({ "mode": "midi" }));
     let list = targets["targets"].as_array().unwrap().clone();
-    let kinds_of = |kind: &str| -> Vec<&Value> {
-        list.iter()
-            .filter(|t| t["kind"]["type"] == kind)
-            .collect()
-    };
-    for kind in ["slot", "button", "switch", "ranged_switch", "radio", "continuous"] {
+    let kinds_of =
+        |kind: &str| -> Vec<&Value> { list.iter().filter(|t| t["kind"]["type"] == kind).collect() };
+    for kind in [
+        "slot",
+        "button",
+        "switch",
+        "ranged_switch",
+        "radio",
+        "continuous",
+    ] {
         assert!(!kinds_of(kind).is_empty(), "no {kind}");
     }
     let named = |name: &str| list.iter().any(|t| t["name"] == name);
@@ -698,7 +731,14 @@ fn remote_targets_lists_each_kind_and_a_mapping_reads_back() {
     // One of each kind maps by the target the list gave and reads back.
     let mut source = 0_u8;
     let mut mapped = 0;
-    for kind in ["slot", "button", "switch", "ranged_switch", "radio", "continuous"] {
+    for kind in [
+        "slot",
+        "button",
+        "switch",
+        "ranged_switch",
+        "radio",
+        "continuous",
+    ] {
         let target = kinds_of(kind)[0]["target"].clone();
         source += 1;
         rig.map(cc(source), target.clone());
@@ -714,4 +754,299 @@ fn remote_targets_lists_each_kind_and_a_mapping_reads_back() {
         mapped += 1;
     }
     assert_eq!(mapped, 6);
+}
+
+fn tool_param(tool: &str, param: &str) -> Value {
+    json!({ "type": "midi_tool", "tool": tool,
+            "control": { "type": "param", "param": param } })
+}
+
+fn tool_control(tool: &str, control: &str) -> Value {
+    json!({ "type": "midi_tool", "tool": tool, "control": { "type": control } })
+}
+
+// Spec: map-modes R23; midi-tools R34, R35. A MIDI Tool's parameter, Auto
+// switch, apply button and Reset button are mappable by their kinds; a run of
+// messages to a parameter with Auto on applies the tool in one undo step named
+// after it, the apply button applies it once, and Reset puts the settings back.
+#[test]
+fn a_midi_tools_controls_map_and_act_with_the_panel_hidden() {
+    let (mut shell, clip) = shell_with_a_midi_clip();
+    let pads = bl_midi_io::TestBackend::new();
+    pads.add_port(bl_midi_io::Direction::Input, "Pads");
+    shell.use_midi_backend(Box::new(pads.clone()));
+    shell
+        .run(
+            "midi.set_port",
+            json!({ "direction": "input", "name": "Pads", "remote": true, "track": false }),
+        )
+        .unwrap();
+    let run = |shell: &mut Shell, id: &str, args: Value| {
+        shell
+            .run(id, args)
+            .unwrap_or_else(|error| panic!("{id}: {error}"))
+    };
+    for at in 0..3 {
+        run(
+            &mut shell,
+            "note.add",
+            json!({ "clip": clip, "key": 60 + at, "start": at * 705_600, "length": 705_600, "velocity": 100 }),
+        );
+    }
+    run(
+        &mut shell,
+        "clip_view.select_notes",
+        json!({ "notes": [0, 1, 2] }),
+    );
+    run(
+        &mut shell,
+        "midi_tool.choose",
+        json!({ "tool": "velocity_shaper" }),
+    );
+    for (source, target) in [
+        (cc(40), tool_param("velocity_shaper", "maximum_velocity")),
+        (key("a"), tool_control("velocity_shaper", "auto")),
+        (key("t"), tool_control("velocity_shaper", "apply")),
+        (key("r"), tool_control("velocity_shaper", "reset")),
+    ] {
+        run(
+            &mut shell,
+            "remote.map",
+            json!({ "source": source, "target": target }),
+        );
+    }
+    let kinds: Vec<Value> = run(&mut shell, "remote.mappings", json!({}))["mappings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["kind"]["type"].clone())
+        .collect();
+    assert_eq!(kinds, ["continuous", "switch", "button", "button"]);
+    let velocities = |shell: &Shell| match &shell.editor().document().clip(clip).unwrap().data {
+        ClipData::Midi(midi) => bl_shell::clip_view::notes_in_order(midi)
+            .iter()
+            .map(|n| n.velocity)
+            .collect::<Vec<_>>(),
+        ClipData::Audio(_) => unreachable!(),
+    };
+    let setting = |shell: &mut Shell| {
+        run(shell, "midi_tool.state", json!({}))["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["tool"] == "velocity_shaper")
+            .unwrap()["values"]["maximum_velocity"]
+            .clone()
+    };
+
+    // Auto starts on; the Auto key switches it off, and then a change of the
+    // parameter changes no notes.
+    let auto = |shell: &mut Shell| {
+        run(shell, "midi_tool.state", json!({}))["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["tool"] == "velocity_shaper")
+            .unwrap()["auto"]
+            .clone()
+    };
+    assert_eq!(auto(&mut shell), json!(true));
+    run(&mut shell, "remote.input", json!({ "key": "a" }));
+    assert_eq!(auto(&mut shell), json!(false));
+    let before = velocities(&shell);
+    run(
+        &mut shell,
+        "remote.input",
+        json!({ "bytes": [0xB0, 40, 64] }),
+    );
+    assert_eq!(velocities(&shell), before);
+    assert_ne!(setting(&mut shell), json!(127), "the setting moved");
+
+    // The apply key applies the tool once, as one undo step named after it.
+    let steps = shell.editor().undo_history().count();
+    run(&mut shell, "remote.input", json!({ "key": "t" }));
+    assert_ne!(
+        velocities(&shell),
+        before,
+        "the apply button applied the tool"
+    );
+    assert_eq!(shell.editor().undo_history().count(), steps + 1);
+
+    // With Auto on again, a run of messages applies the tool, and is one undo
+    // step named after it.
+    run(&mut shell, "remote.input", json!({ "key": "a" }));
+    assert_eq!(auto(&mut shell), json!(true));
+    let steps = shell.editor().undo_history().count();
+    // From a controller, as a run of messages on the remote input.
+    for value in [30_u8, 60, 90] {
+        assert!(pads.send("Pads", shell.midi().now(), &[0xB0, 40, value]));
+        shell.poll();
+    }
+    // Anything else ends the run, which is then one undo step.
+    run(&mut shell, "remote.input", json!({ "key": "unmapped" }));
+    assert_eq!(shell.editor().undo_history().count(), steps + 1);
+    assert_eq!(
+        shell.editor().undo_history().next().map(str::to_owned),
+        Some("Velocity Shaper".to_owned())
+    );
+    assert_eq!(shell.remote_counts().1, 0);
+
+    // Reset puts the settings back, with no undo step.
+    run(&mut shell, "remote.input", json!({ "key": "r" }));
+    assert_eq!(setting(&mut shell), json!(127));
+}
+
+// Spec: map-modes R23, R24. Every native tool's controls are in the list and
+// their IDs fit a target.
+#[test]
+fn every_native_tools_id_and_parameter_id_fit_a_target() {
+    let mut rig = Rig::new();
+    let list = rig.run("midi_tool.list", json!({}));
+    for tool in list["tools"].as_array().unwrap() {
+        let id = tool["id"].as_str().unwrap();
+        assert!(bl_model::ToolId::new(id).is_some(), "{id}");
+        for param in tool["parameters"].as_array().unwrap() {
+            let param = param["id"].as_str().unwrap();
+            assert!(bl_model::ToolId::new(param).is_some(), "{id}: {param}");
+        }
+    }
+    let targets = rig.run("remote.targets", json!({}))["targets"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert!(targets.iter().any(|t| t["target"]["type"] == "midi_tool"));
+}
+
+// Spec: midi-tools R36. A mapped change to a tool that is in the open chain
+// changes that tool's step and runs the chain again from it, and doesn't
+// close the chain.
+#[test]
+fn a_mapped_change_to_a_tool_in_the_chain_changes_its_step() {
+    let (mut shell, clip) = shell_with_a_midi_clip();
+    let run = |shell: &mut Shell, id: &str, args: Value| {
+        shell
+            .run(id, args)
+            .unwrap_or_else(|error| panic!("{id}: {error}"))
+    };
+    for at in 0..3 {
+        run(
+            &mut shell,
+            "note.add",
+            json!({ "clip": clip, "key": 60 + at, "start": at * 705_600, "length": 705_600, "velocity": 100 }),
+        );
+    }
+    run(
+        &mut shell,
+        "clip_view.select_notes",
+        json!({ "notes": [0, 1, 2] }),
+    );
+    run(
+        &mut shell,
+        "midi_tool.apply",
+        json!({ "tool": "velocity_shaper" }),
+    );
+    run(&mut shell, "midi_tool.apply", json!({ "tool": "strum" }));
+    let chain = |shell: &mut Shell| {
+        run(shell, "midi_tool.state", json!({}))["application"]["chain"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        chain(&mut shell).len(),
+        2,
+        "the second tool joined the chain"
+    );
+    run(
+        &mut shell,
+        "remote.map",
+        json!({ "source": cc(41), "target": tool_param("velocity_shaper", "maximum_velocity") }),
+    );
+    run(
+        &mut shell,
+        "remote.input",
+        json!({ "bytes": [0xB0, 41, 0] }),
+    );
+    let steps = chain(&mut shell);
+    assert_eq!(steps.len(), 2, "the mapped change didn't close the chain");
+    assert_eq!(steps[0]["tool"], "velocity_shaper");
+    assert_eq!(steps[0]["values"]["maximum_velocity"], json!(1));
+    assert_eq!(shell.remote_counts().1, 0);
+}
+
+// Spec: map-modes R22; launch-quantisation R35. The scrub control nudges the
+// playing Session clip the Clip View shows: a relative controller's increment
+// of n steps nudges n steps in an accelerated mode and one in a linear mode, a
+// decrement the other way, and an absolute controller by the change from its
+// last value, its first message nudging nothing.
+#[test]
+fn the_scrub_nudges_the_playing_clip_by_what_the_controller_sends() {
+    let mut rig = Rig::new();
+    let track = rig.track(TrackKind::Midi);
+    let scene = rig.scenes()[0];
+    rig.run(
+        "session.insert_empty_midi_clip",
+        json!({ "track": track, "scene": scene }),
+    );
+    rig.run("session.select", json!({ "track": track, "scene": scene }));
+    rig.run("session.launch", json!({ "track": track, "scene": scene }));
+    testing::wait_for(&rig.control, &mut rig.shell, "the clip to play", |shell| {
+        shell
+            .session_states()
+            .iter()
+            .any(|slot| slot.state == bl_engine::SlotState::Playing)
+    });
+    // With the transport stopped the clip's time stands still, so what a
+    // nudge moves can be read.
+    rig.run("transport.stop", json!({}));
+    testing::settle(&rig.control, &mut rig.shell);
+    let clip_time = |rig: &mut Rig| -> i64 {
+        let state = rig.run("session.state", json!({}));
+        state["launches"][0]["clip_time"].as_i64().unwrap_or(0)
+    };
+    let step = Ticks::WHOLE.get() / 32;
+    // How many steps the clip moved since `before`, to the nearest.
+    let nudged = |rig: &mut Rig, before: i64| {
+        testing::settle(&rig.control, &mut rig.shell);
+        ((clip_time(rig) - before) as f64 / step as f64).round() as i64
+    };
+
+    // A relative controller (Signed Bit): 66 is an increment of 2, 62 a
+    // decrement of 2.
+    rig.run(
+        "remote.map",
+        json!({ "source": cc(50), "target": { "type": "clip", "control": "scrub" },
+                "mode": { "type": "relative", "encoding": "signed_bit", "accelerated": true } }),
+    );
+    let before = clip_time(&mut rig);
+    rig.cc(50, 66);
+    assert_eq!(nudged(&mut rig, before), 2, "accelerated: two steps");
+    let before = clip_time(&mut rig);
+    rig.cc(50, 62);
+    assert_eq!(nudged(&mut rig, before), -2, "a decrement goes back");
+
+    // In a linear mode an increment of any size is one step.
+    rig.run(
+        "remote.set_mode",
+        json!({ "source": cc(50),
+                "mode": { "type": "relative", "encoding": "signed_bit", "accelerated": false } }),
+    );
+    let before = clip_time(&mut rig);
+    rig.cc(50, 70);
+    assert_eq!(nudged(&mut rig, before), 1, "linear: one step");
+
+    // An absolute controller nudges by the change from its last value; its
+    // first message nudges nothing.
+    rig.map(cc(51), json!({ "type": "clip", "control": "scrub" }));
+    let before = clip_time(&mut rig);
+    rig.cc(51, 20);
+    assert_eq!(
+        nudged(&mut rig, before),
+        0,
+        "the first message nudges nothing"
+    );
+    let before = clip_time(&mut rig);
+    rig.cc(51, 22);
+    assert_eq!(nudged(&mut rig, before), 2, "two values up, two steps");
+    assert_eq!(rig.refused(), 0);
 }

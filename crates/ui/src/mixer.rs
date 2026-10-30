@@ -1768,8 +1768,11 @@ impl StripParts<'_> {
             let id = Id::new(("mixer-crossfader-field", self.place, field));
             let response = ui.interact(rect, id, Sense::hover());
             response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
-            ui.painter_at(rect)
-                .rect_filled(rect, self.theme.sizes.corner, self.theme.colors.control.0);
+            ui.painter_at(rect).rect_filled(
+                rect,
+                self.theme.sizes.corner,
+                self.theme.colors.control.0,
+            );
             crate::mapping::remote_overlay(
                 ui,
                 self.theme,

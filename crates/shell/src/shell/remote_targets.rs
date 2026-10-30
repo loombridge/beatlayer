@@ -5,9 +5,10 @@
 //! it, and the list `remote.targets` gives.
 
 use bl_control::Action;
+use bl_midi_tools::{ParamKind, ParamSpec, ParamValue, Registry, ToolDescriptor, ToolKind};
 use bl_model::{
     BarControl, ClipControl, ClipData, ClipId, ControlKind, CrossfaderField, LaunchMode,
-    LaunchQuantization, Monitor, RemoteMapping, RemoteTarget, StripControl,
+    LaunchQuantization, Monitor, RemoteMapping, RemoteTarget, StripControl, ToolControl, ToolId,
     TrackKind, WarpMode,
 };
 use bl_shell_spec::remote::{MapMode, TargetInfo, TargetsResult};
@@ -99,6 +100,11 @@ const fn on_audio(control: ClipControl) -> bool {
     )
 }
 
+/// The IDs of the parameter `spec` of `tool` as a target names them.
+fn tool_ids(tool: &ToolDescriptor, spec: &ParamSpec) -> Option<(ToolId, ToolId)> {
+    Some((ToolId::new(&tool.id)?, ToolId::new(&spec.id)?))
+}
+
 impl Shell {
     /// The clips the Audio Utilities panel acts on: the Arrangement's
     /// selected audio clips, or the Session clip the Clip View shows.
@@ -120,7 +126,12 @@ impl Shell {
             .selected_clips()
             .iter()
             .copied()
-            .filter(|id| matches!(doc.clip(*id).map(|clip| &clip.data), Some(ClipData::Audio(_))))
+            .filter(|id| {
+                matches!(
+                    doc.clip(*id).map(|clip| &clip.data),
+                    Some(ClipData::Audio(_))
+                )
+            })
             .collect();
         if selected.is_empty() {
             vec![shown]
@@ -193,6 +204,14 @@ impl Shell {
                 .macro_of(target)
                 .filter(|m| m.style == bl_model::MacroStyle::Stepped)
                 .map(|m| 1.0 / f64::from(m.steps.saturating_sub(1).max(1))),
+            // A whole number of a MIDI Tool steps by one.
+            RemoteTarget::MidiTool {
+                control: ToolControl::Param { .. },
+                ..
+            } => match self.tool_param(target)?.2.kind {
+                ParamKind::Whole { min, max } if max > min => Some(1.0 / (max - min) as f64),
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -227,9 +246,27 @@ impl Shell {
                 BarControl::DrawMode => flag(self.clip_view.draw_mode()),
                 BarControl::Quantization => LaunchQuantization::ALL
                     .iter()
-                    .position(|q| *q == self.store.launch().quantization)? as f64,
+                    .position(|q| *q == self.store.launch().quantization)?
+                    as f64,
                 _ => return None,
             }),
+            RemoteTarget::MidiTool { tool, control } => {
+                let view = self.clip_view.midi_tools().view_by_id(tool.as_str())?;
+                match control {
+                    ToolControl::Auto => Some(flag(view.auto)),
+                    ToolControl::Param { .. } => {
+                        let (_, at, _) = self.tool_param(target)?;
+                        match view.values.get(at)? {
+                            ParamValue::Number(n) => Some(*n),
+                            ParamValue::Whole(n) => Some(*n as f64),
+                            ParamValue::Switch(on) => Some(flag(*on)),
+                            ParamValue::Choice(n) => Some(*n as f64),
+                            _ => None,
+                        }
+                    }
+                    ToolControl::Apply | ToolControl::Reset => None,
+                }
+            }
             RemoteTarget::Clip { control } => {
                 if control == ClipControl::Scrub {
                     return Some(0.5);
@@ -259,7 +296,8 @@ impl Shell {
                     ClipControl::Detune => audio?.detune,
                     ClipControl::LaunchMode => LaunchMode::ALL
                         .iter()
-                        .position(|m| *m == clip.launch.mode)? as f64,
+                        .position(|m| *m == clip.launch.mode)?
+                        as f64,
                     ClipControl::Legato => flag(clip.launch.legato),
                     ClipControl::LaunchQuantization => clip.launch.quantization.map_or(0.0, |q| {
                         1.0 + LaunchQuantization::ALL
@@ -351,25 +389,28 @@ impl Shell {
                     // shortcut: the release goes to the scene highlighted
                     // now, not the one pressed, if the highlight moved
                     // while the key was held
-                    Action::Release => {
-                        scene.and_then(|s| cmd("session.release", json!({ "track": track, "scene": s })))
-                    }
+                    Action::Release => scene.and_then(|s| {
+                        cmd("session.release", json!({ "track": track, "scene": s }))
+                    }),
                     _ => None,
                 })
             }
             RemoteTarget::Strip { control } => Some(match control {
                 StripControl::SceneUp | StripControl::SceneDown => {
-                    let step = if control == StripControl::SceneUp { -1 } else { 1 };
+                    let step = if control == StripControl::SceneUp {
+                        -1
+                    } else {
+                        1
+                    };
                     return press(cmd("session.highlight_scene", json!({ "step": step })));
                 }
                 StripControl::LaunchScene => {
                     return press(cmd("session.launch_highlighted_scene", json!({})));
                 }
                 StripControl::CancelLaunch => {
-                    return press(
-                        self.last_launched
-                            .and_then(|scene| cmd("session.cancel_scene_launch", json!({ "scene": scene }))),
-                    );
+                    return press(self.last_launched.and_then(|scene| {
+                        cmd("session.cancel_scene_launch", json!({ "scene": scene }))
+                    }));
                 }
                 StripControl::SceneNumber => {
                     let scenes = self.editor.document().scenes().len();
@@ -385,9 +426,109 @@ impl Shell {
             }),
             RemoteTarget::StepBack => press(cmd("note.step_record", json!({ "back": true }))),
             RemoteTarget::StepForward => press(cmd("note.step_record", json!({ "back": false }))),
-            RemoteTarget::Bar { control } => Some(self.bar_command(control, current, action, &want, &option, &value)),
+            RemoteTarget::Bar { control } => {
+                Some(self.bar_command(control, current, action, &want, &option, &value))
+            }
             RemoteTarget::Clip { control } => {
                 Some(self.clip_command(control, current, action, &want, &option, &value))
+            }
+            RemoteTarget::MidiTool { tool, control } => {
+                let id = tool.as_str();
+                Some(match control {
+                    ToolControl::Auto => want(current).and_then(|on| {
+                        cmd("midi_tool.set_auto", json!({ "tool": id, "auto": on }))
+                    }),
+                    ToolControl::Apply => {
+                        return press(cmd("midi_tool.apply", json!({ "tool": id })));
+                    }
+                    ToolControl::Reset => {
+                        return press(cmd("midi_tool.reset", json!({ "tool": id })));
+                    }
+                    ToolControl::Param { param } => {
+                        self.tool_command(target, tool, param, &want, &option, &value, current)
+                    }
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// The MIDI Tool a target names, its parameter's place and the
+    /// parameter.
+    fn tool_param(
+        &self,
+        target: &RemoteTarget,
+    ) -> Option<(&'static ToolDescriptor, usize, &'static ParamSpec)> {
+        let RemoteTarget::MidiTool {
+            tool,
+            control: ToolControl::Param { param },
+        } = target
+        else {
+            return None;
+        };
+        let descriptor = Registry::native().find(tool.as_str())?.descriptor();
+        let at = descriptor
+            .parameters
+            .iter()
+            .position(|spec| spec.id == param.as_str())?;
+        Some((descriptor, at, &descriptor.parameters[at]))
+    }
+
+    /// The kind and range of a MIDI Tool's parameter as a control (map modes
+    /// R23): a number a continuous control, a choice a radio button, a switch
+    /// a ranged switch; the pitches, divisions and displays aren't mappable.
+    pub(super) fn tool_param_control(
+        &self,
+        target: &RemoteTarget,
+    ) -> Option<(ControlKind, Option<(f64, f64)>)> {
+        Some(match &self.tool_param(target)?.2.kind {
+            ParamKind::Number { min, max, .. } => (ControlKind::Continuous, Some((*min, *max))),
+            ParamKind::Whole { min, max } => {
+                (ControlKind::Continuous, Some((*min as f64, *max as f64)))
+            }
+            ParamKind::Choice { options } => (
+                ControlKind::Radio {
+                    options: u32::try_from(options.len()).ok()?,
+                },
+                None,
+            ),
+            ParamKind::Switch => (ControlKind::RangedSwitch, None),
+            _ => return None,
+        })
+    }
+
+    /// What a message runs on a MIDI Tool's parameter: `midi_tool.set` with
+    /// its value, a run of messages one undo step named after the tool (map
+    /// modes R23, MIDI Tools R35).
+    #[expect(clippy::too_many_arguments, reason = "the message's whole context")]
+    fn tool_command(
+        &self,
+        target: RemoteTarget,
+        tool: ToolId,
+        param: ToolId,
+        want: &dyn Fn(Option<f64>) -> Option<bool>,
+        option: &dyn Fn(u32) -> Option<u32>,
+        value: &dyn Fn(&Self) -> Option<f64>,
+        current: Option<f64>,
+    ) -> Option<Run> {
+        let (descriptor, _, spec) = self.tool_param(&target)?;
+        let set =
+            |json: Value| json!({ "tool": tool.as_str(), "values": { param.as_str(): json } });
+        match &spec.kind {
+            ParamKind::Number { .. } => drag(
+                "midi_tool.set",
+                set(json!(value(self)?)),
+                descriptor.name.clone(),
+            ),
+            ParamKind::Whole { .. } => drag(
+                "midi_tool.set",
+                set(json!(value(self)?.round() as i64)),
+                descriptor.name.clone(),
+            ),
+            ParamKind::Switch => cmd("midi_tool.set", set(json!(want(current)?))),
+            ParamKind::Choice { options } => {
+                let at = option(u32::try_from(options.len()).ok()?)? as usize;
+                cmd("midi_tool.set", set(json!(options.get(at)?.id)))
             }
             _ => None,
         }
@@ -412,7 +553,11 @@ impl Shell {
         let to = match action {
             Action::Press(_) if !several => {
                 // One mapped field toggles between the two ends.
-                if doc.settings().crossfader <= 0.0 { 1.0 } else { 0.0 }
+                if doc.settings().crossfader <= 0.0 {
+                    1.0
+                } else {
+                    0.0
+                }
             }
             Action::Press(_) => field.position(),
             // A release moves the crossfader back to the field still held.
@@ -453,7 +598,11 @@ impl Shell {
         // A switch whose command turns it over, run only to change it.
         let turn = |id: &'static str| {
             let on = want(current)?;
-            if on == (current? >= 0.5) { nothing() } else { cmd(id, json!({})) }
+            if on == (current? >= 0.5) {
+                nothing()
+            } else {
+                cmd(id, json!({}))
+            }
         };
         match control {
             BarControl::TapTempo => button("transport.tap_tempo"),
@@ -507,8 +656,11 @@ impl Shell {
         // control that is dragged.
         let each = |id: &'static str, args: Value, gesture: Option<&'static str>| {
             let mut run = cmd(id, clip_args(first, args.clone()))?;
-            run.gesture = gesture;
-            run.more = rest.iter().map(|clip| clip_args(clip, args.clone())).collect();
+            run.gesture = gesture.map(str::to_owned);
+            run.more = rest
+                .iter()
+                .map(|clip| clip_args(clip, args.clone()))
+                .collect();
             Some(run)
         };
         let set = |id: &'static str, key: &str| each(id, json!({ key: want(current)? }), None);
@@ -522,27 +674,44 @@ impl Shell {
                 each("clip.set_warp_mode", json!({ "mode": mode }), None)
             }
             ClipControl::LaunchMode => {
-                let mode = LaunchMode::ALL[option(bl_model::remote::LAUNCH_MODE_OPTIONS)? as usize % 4];
+                let mode =
+                    LaunchMode::ALL[option(bl_model::remote::LAUNCH_MODE_OPTIONS)? as usize % 4];
                 each("clip.set_launch_mode", json!({ "mode": mode }), None)
             }
             ClipControl::LaunchQuantization => {
                 let at = option(bl_model::remote::QUANTIZATION_OPTIONS + 1)? as usize;
-                let step = at.checked_sub(1).map(|i| LaunchQuantization::ALL[i % LaunchQuantization::ALL.len()]);
-                each("clip.set_launch_quantization", json!({ "quantization": step }), None)
+                let step = at
+                    .checked_sub(1)
+                    .map(|i| LaunchQuantization::ALL[i % LaunchQuantization::ALL.len()]);
+                each(
+                    "clip.set_launch_quantization",
+                    json!({ "quantization": step }),
+                    None,
+                )
             }
             ClipControl::Gain => {
                 let db = value(self)?;
-                let gain = if db <= GAIN_FLOOR { 0.0 } else { 10.0_f64.powf(db / 20.0) };
-                each("clip.set_gain", json!({ "gain": gain }), Some("Change gain"))
+                let gain = if db <= GAIN_FLOOR {
+                    0.0
+                } else {
+                    10.0_f64.powf(db / 20.0)
+                };
+                each(
+                    "clip.set_gain",
+                    json!({ "gain": gain }),
+                    Some("Change gain"),
+                )
             }
             ClipControl::Transpose => each(
                 "clip.set_pitch",
                 json!({ "transpose": value(self)?.round() as i32 }),
                 Some("Change transpose"),
             ),
-            ClipControl::Detune => {
-                each("clip.set_pitch", json!({ "detune": value(self)? }), Some("Change detune"))
-            }
+            ClipControl::Detune => each(
+                "clip.set_pitch",
+                json!({ "detune": value(self)? }),
+                Some("Change detune"),
+            ),
             ClipControl::Velocity => each(
                 "clip.set_velocity_amount",
                 json!({ "amount": value(self)? }),
@@ -553,7 +722,11 @@ impl Shell {
                     return None;
                 }
                 let (track, scene) = self.slot_of(*first)?;
-                let steps = if control == ClipControl::NudgeUp { 1 } else { -1 };
+                let steps = if control == ClipControl::NudgeUp {
+                    1
+                } else {
+                    -1
+                };
                 cmd(
                     "session.nudge",
                     json!({ "track": track, "scene": scene, "steps": steps }),
@@ -626,10 +799,33 @@ impl Shell {
                 }
                 .to_owned(),
             ),
-            RemoteTarget::Bar { control } => ("Control Bar".to_owned(), bar_name(control).to_owned()),
+            RemoteTarget::Bar { control } => {
+                ("Control Bar".to_owned(), bar_name(control).to_owned())
+            }
             RemoteTarget::StepBack => ("Note Editor".to_owned(), "Step Back".to_owned()),
             RemoteTarget::StepForward => ("Note Editor".to_owned(), "Step Forward".to_owned()),
-            RemoteTarget::Clip { control } => ("Clip View".to_owned(), clip_name(control).to_owned()),
+            RemoteTarget::Clip { control } => {
+                ("Clip View".to_owned(), clip_name(control).to_owned())
+            }
+            RemoteTarget::MidiTool { tool, control } => {
+                let descriptor = Registry::native()
+                    .find(tool.as_str())
+                    .map(bl_midi_tools::MidiTool::descriptor);
+                let named = descriptor.map_or_else(|| tool.as_str().to_owned(), |d| d.name.clone());
+                let what = match control {
+                    ToolControl::Auto => "Auto".to_owned(),
+                    ToolControl::Reset => "Reset".to_owned(),
+                    ToolControl::Apply => match descriptor.map(|d| d.kind) {
+                        Some(ToolKind::Generator) => "Generate".to_owned(),
+                        _ => "Transform".to_owned(),
+                    },
+                    ToolControl::Param { param } => self.tool_param(target).map_or_else(
+                        || param.as_str().to_owned(),
+                        |(_, _, spec)| spec.name.clone(),
+                    ),
+                };
+                ("MIDI Tools".to_owned(), format!("{named}: {what}"))
+            }
             _ => (String::new(), String::new()),
         }
     }
@@ -678,7 +874,13 @@ impl Shell {
             let kind = track.kind();
             if kind.holds_clips() {
                 for scene in &scenes {
-                    add(self, RemoteTarget::Slot { track: id, scene: *scene });
+                    add(
+                        self,
+                        RemoteTarget::Slot {
+                            track: id,
+                            scene: *scene,
+                        },
+                    );
                 }
                 add(self, RemoteTarget::TrackStop { track: id });
                 add(self, RemoteTarget::TrackLaunch { track: id });
@@ -695,7 +897,13 @@ impl Shell {
                 }
             }
             if kind.has_mute_and_solo() {
-                add(self, RemoteTarget::Mixer { track: id, param: bl_model::MixerParam::Mute });
+                add(
+                    self,
+                    RemoteTarget::Mixer {
+                        track: id,
+                        param: bl_model::MixerParam::Mute,
+                    },
+                );
                 add(self, RemoteTarget::Solo { track: id });
             }
             if kind.has_arm() {
@@ -727,14 +935,30 @@ impl Shell {
                     for param in &description.params {
                         // Spec: macros R35. A parameter a macro holds has
                         // no control to map.
-                        if self.devices.macro_holding(doc, device.id, param.id).is_none() {
-                            add(self, RemoteTarget::Device { device: device.id, param: param.id });
+                        if self
+                            .devices
+                            .macro_holding(doc, device.id, param.id)
+                            .is_none()
+                        {
+                            add(
+                                self,
+                                RemoteTarget::Device {
+                                    device: device.id,
+                                    param: param.id,
+                                },
+                            );
                         }
                     }
                 }
                 for chain in &device.chains {
                     for param in [bl_model::MixerParam::Volume, bl_model::MixerParam::Pan] {
-                        add(self, RemoteTarget::Chain { chain: chain.id, param });
+                        add(
+                            self,
+                            RemoteTarget::Chain {
+                                chain: chain.id,
+                                param,
+                            },
+                        );
                     }
                 }
             }
@@ -748,6 +972,26 @@ impl Shell {
             // The scrub shows in MIDI Map Mode only (map modes R22).
             if control != ClipControl::Scrub || mode == MapMode::Midi {
                 add(self, RemoteTarget::Clip { control });
+            }
+        }
+        // Spec: map-modes R23. Every native tool's Auto switch, apply button,
+        // Reset button and the parameters that have a kind to map.
+        for tool in Registry::native()
+            .tools(ToolKind::Transformation)
+            .chain(Registry::native().tools(ToolKind::Generator))
+        {
+            let descriptor = tool.descriptor();
+            let Some(id) = ToolId::new(&descriptor.id) else {
+                continue;
+            };
+            for control in [ToolControl::Auto, ToolControl::Apply, ToolControl::Reset] {
+                add(self, RemoteTarget::MidiTool { tool: id, control });
+            }
+            for spec in &descriptor.parameters {
+                if let Some((tool, param)) = tool_ids(descriptor, spec) {
+                    let control = ToolControl::Param { param };
+                    add(self, RemoteTarget::MidiTool { tool, control });
+                }
             }
         }
         TargetsResult { mode, targets }

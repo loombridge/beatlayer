@@ -829,7 +829,11 @@ impl SessionLayout {
             rows.push(super::row("L-SES-009", "Session Mixer", mixer));
         }
         if let Some(strip) = self.strip {
-            rows.push(super::row("L-SES-015", "Relative Session Mapping Strip", strip));
+            rows.push(super::row(
+                "L-SES-015",
+                "Relative Session Mapping Strip",
+                strip,
+            ));
         }
         rows
     }

@@ -39,6 +39,9 @@ pub const SELECT: &str = "remote.select";
 /// Browser's rows.
 pub const STATE: &str = "remote.state";
 
+/// `remote.targets`: list every control the set has that a map mode maps.
+pub const TARGETS: &str = "remote.targets";
+
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
@@ -52,6 +55,7 @@ pub const IDS: &[&str] = &[
     MAP_MODE,
     SELECT,
     STATE,
+    TARGETS,
 ];
 
 /// Whether `id` is one of the remote mapping commands.
@@ -243,6 +247,48 @@ pub struct SelectArgs {
     pub target: Option<RemoteTarget>,
 }
 
+/// One mappable control as `remote.targets` lists it (map modes R24).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TargetInfo {
+    /// The control, named by IDs: what `remote.map` and `remote.select` take
+    /// and `remote.mappings` reports.
+    pub target: RemoteTarget,
+    /// The control's kind.
+    pub kind: ControlKind,
+    /// The path to the control: its track and device, or its view.
+    pub path: String,
+    /// The control's name.
+    pub name: String,
+    /// The lowest and highest values of a continuous control, a radio
+    /// button's first and last option, or a ranged switch's controller
+    /// values, in the control's own units.
+    pub range: (f64, f64),
+}
+
+/// Arguments of `remote.targets`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct TargetsArgs {
+    /// Whose list: `midi` for MIDI Map Mode's, `key` for Key Map Mode's,
+    /// which leaves out the continuous controls. Left out, the map mode that
+    /// is on, or MIDI Map Mode's with none on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<MapMode>,
+}
+
+/// What `remote.targets` returns.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TargetsResult {
+    /// The list `mode` gives.
+    pub mode: MapMode,
+    /// Every control the mode maps that the set has, as the views show them:
+    /// the Session View's slots, scene launch buttons and stop buttons and
+    /// the relative Session mapping strip; the mixer; every device's
+    /// parameters; the Control Bar; the crossfader's fields; the Clip View's
+    /// panels and the step buttons.
+    pub targets: Vec<TargetInfo>,
+}
+
 /// What `remote.map_mode`, `remote.select` and `remote.state` return.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct StateResult {
@@ -420,6 +466,25 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<NoArgs>()
             .result::<StateResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(TARGETS, "Mappable Controls")
+            .description(
+                "Lists every control of the set that a map mode maps, so an agent maps \
+                 controls with `remote.map` without the window: each one's `target` ID (the \
+                 same ID `remote.mappings` reports), its kind, its path and name, and its \
+                 range. They are the Session View's slots, scene launch buttons, stop \
+                 buttons and the relative Session mapping strip, the mixer's controls (a \
+                 control that shows in several places is listed once), every device's \
+                 parameters and a rack's macros by their kinds, the Control Bar's controls, \
+                 the crossfader's three fields, the Clip View's controls and the step \
+                 buttons. `mode` gives Key Map Mode's list, which has no continuous \
+                 controls; left out, it is the map mode that is on. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<TargetsArgs>()
+            .result::<TargetsResult>(),
     )?;
     Ok(())
 }

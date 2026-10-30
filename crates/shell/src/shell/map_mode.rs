@@ -172,7 +172,7 @@ impl Shell {
 
     /// The kind of control `target` is, or `None` if the set has no such
     /// control.
-    fn kind_of(&self, target: &RemoteTarget) -> Option<ControlKind> {
+    pub(super) fn kind_of(&self, target: &RemoteTarget) -> Option<ControlKind> {
         if !self.editor.document().has_remote_target(target) {
             return None;
         }

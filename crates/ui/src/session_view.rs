@@ -18,7 +18,7 @@
 
 use bl_core::time::TICKS_PER_QUARTER;
 use bl_engine::SlotState;
-use bl_model::{ClipId, Document, SceneId, TrackId, TrackKind};
+use bl_model::{ClipId, Document, RemoteTarget, SceneId, TrackId, TrackKind};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::mixer_view::MixerOf;
 use bl_shell::mixer_view_commands as mixer_ids;
@@ -475,6 +475,16 @@ impl GridUi {
                 json!({ "track": track }),
             );
         }
+        // Spec: map-modes R3, R11. The map modes tint every slot.
+        crate::mapping::remote_overlay(
+            ui,
+            theme,
+            cell,
+            slot_id(track, scene),
+            RemoteTarget::Slot { track, scene },
+            false,
+            events,
+        );
 
         let modifiers = ui.input(|i| i.modifiers);
         self.focus_ids.push(response.id);
@@ -617,6 +627,16 @@ impl GridUi {
                 "session.stop_track",
                 json!({ "track": track }),
             );
+            // Spec: map-modes R3, R11. The map modes tint the stop buttons.
+            crate::mapping::remote_overlay(
+                ui,
+                theme,
+                stop,
+                track_stop_id(track),
+                RemoteTarget::TrackStop { track },
+                false,
+                events,
+            );
             painter.rect_filled(cells.field.shrink(1.0), 0.0, colours.lane.0);
             // The playing clip's length in beats at the status display's
             // right (observed); the counter and the progress circle wait
@@ -661,6 +681,15 @@ impl GridUi {
             events,
             "session.stop_all",
             json!({}),
+        );
+        crate::mapping::remote_overlay(
+            ui,
+            theme,
+            main.stop_all,
+            stop_all_id(),
+            RemoteTarget::StopAll,
+            false,
+            events,
         );
         // Spec: follow-actions R8. The global follow-action switch (L-SES-008):
         // outlined in the accent colour while follow actions are on.
@@ -793,6 +822,15 @@ impl GridUi {
             events,
             "session.launch_scene",
             json!({ "scene": scene }),
+        );
+        crate::mapping::remote_overlay(
+            ui,
+            theme,
+            row.launch,
+            scene_launch_id(scene),
+            RemoteTarget::SceneLaunch { scene },
+            false,
+            events,
         );
         if response.clicked() {
             response.request_focus();

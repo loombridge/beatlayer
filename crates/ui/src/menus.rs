@@ -55,7 +55,11 @@ pub fn item_state_in(
             .dynamic_label(id)
             .unwrap_or_else(|| item.label.to_owned()),
         enabled: shell.can_invoke_in(id, &args, contexts),
-        checked: shell.switch_state(id),
+        // Spec: map-modes R1. A shortcut's own arguments can say which of a
+        // command's states its item is the switch of.
+        checked: shell
+            .switch_state(id)
+            .or_else(|| shell.choice_state(id, &args)),
         chord: chord.cloned(),
         invocation: Some(Invocation::new(id, args)),
     };

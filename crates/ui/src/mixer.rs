@@ -15,7 +15,8 @@ use bl_engine::{MeterOwner, MeterSite};
 use bl_model::modulator::ModTarget;
 use bl_model::{
     AutomationTarget, ChainId, CrossfadeAssign, Document, MAX_TRACK_DELAY_MS,
-    MAX_TRACK_DELAY_SAMPLES, MixerParam, PanMode, RackKind, TrackDelay, TrackId, TrackKind,
+    MAX_TRACK_DELAY_SAMPLES, MixerParam, PanMode, RackKind, RemoteTarget, TrackDelay, TrackId,
+    TrackKind,
 };
 use bl_shell::arrangement_commands::SELECT_TRACKS;
 use bl_shell::mixer_controls::{
@@ -1337,6 +1338,19 @@ impl StripParts<'_> {
                 track: self.track,
                 to,
             },
+            events,
+        );
+        // Spec: map-modes R3, R11. The map modes tint the send's level.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            rect,
+            send_id(self.place, self.track, to),
+            RemoteTarget::Send {
+                track: self.track,
+                to,
+            },
+            true,
             events,
         );
         // Spec: automation R29. The control's automation items.
@@ -2864,6 +2878,19 @@ impl StripParts<'_> {
             },
             events,
         );
+        // Spec: map-modes R3, R11. The map modes tint the track's volume.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            rect,
+            fader_id(self.place, self.track),
+            RemoteTarget::Mixer {
+                track: self.track,
+                param: MixerParam::Volume,
+            },
+            true,
+            events,
+        );
         // Spec: automation R29. The control's automation items.
         crate::param_menu::ParamMenu::new(
             self.shell,
@@ -2947,6 +2974,19 @@ impl StripParts<'_> {
                 track: self.track,
                 param: MixerParam::Pan,
             },
+            events,
+        );
+        // Spec: map-modes R3, R11. The map modes tint the track's pan.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            rect,
+            pan_id(self.place, self.track),
+            RemoteTarget::Mixer {
+                track: self.track,
+                param: MixerParam::Pan,
+            },
+            true,
             events,
         );
     }
@@ -3262,6 +3302,27 @@ impl StripParts<'_> {
     /// on grey (observed).
     pub fn switch(&self, ui: &mut Ui, switch: Switch, rect: Rect, events: &mut Vec<UiEvent>) {
         self.switch_control(ui, switch, rect, events);
+        // Spec: map-modes R3, R11. The map modes tint the switches a track
+        // has.
+        if switch.on_track(self.doc(), self.track) {
+            let track = self.track;
+            crate::mapping::remote_overlay(
+                ui,
+                self.theme,
+                rect,
+                switch_id(self.place, switch, track),
+                match switch {
+                    Switch::Activator => RemoteTarget::Mixer {
+                        track,
+                        param: MixerParam::Mute,
+                    },
+                    Switch::Solo => RemoteTarget::Solo { track },
+                    Switch::Arm => RemoteTarget::Arm { track },
+                },
+                false,
+                events,
+            );
+        }
         // Spec: modulation R15. A lit Map button maps the Track Activator.
         if switch == Switch::Activator && switch.on_track(self.doc(), self.track) {
             crate::mapping::overlay(

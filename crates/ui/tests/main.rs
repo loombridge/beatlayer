@@ -49,6 +49,7 @@ mod locator;
 mod macros;
 mod main_properties;
 mod main_window;
+mod map_modes;
 mod midi_input;
 mod midi_meters;
 mod midi_tools;

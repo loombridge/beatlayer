@@ -385,8 +385,8 @@ fn ticks_bring_the_read_model_and_commands_queue_in_order() {
         .map(|r| {
             (
                 r.row,
-                r.request.args["volume"].as_f64().unwrap(),
-                r.request.gesture,
+                r.command().unwrap().args["volume"].as_f64().unwrap(),
+                r.command().unwrap().gesture,
             )
         })
         .collect();
@@ -404,7 +404,11 @@ fn ticks_bring_the_read_model_and_commands_queue_in_order() {
             (0, 0.0, gesture(true))
         ]
     );
-    assert!(requests.iter().all(|r| r.request.id == "mixer.set_volume"));
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.command().unwrap().id == "mixer.set_volume")
+    );
 }
 
 // Spec: control-surfaces R11. Dump sends the setup the surface declares to
@@ -491,4 +495,94 @@ fn a_row_keeps_a_surface_that_is_not_offered() {
     let report = &rig.surfaces.report(&rig.ports)[0];
     assert_eq!(report.run, RunState::Stopped);
     assert!(report.error.as_deref().unwrap().contains("elsewhere"));
+}
+
+// Spec: control-surfaces R38. The instant test surface turns each message
+// into the control it is, in order, and the host hands the shell what moved
+// with its row; a message that is no control asks for nothing.
+#[test]
+fn the_instant_test_surface_turns_messages_into_controls_in_order() {
+    use bl_control::testing::{RELATIVE, role_of};
+    use bl_control::{Ask, Control, Hit, RingStep, Role};
+    use bl_core::midi::MidiMessage;
+    use bl_model::RemoteMode;
+
+    let mut rig = Rig::with_ports();
+    rig.set(2, Some("test-instant"), "Pads", "Pads Out")
+        .unwrap();
+    let now = TestClock::new().now();
+    for bytes in [
+        [0xB0, 3, 100],
+        [0xB0, 8, 1],
+        [0x90, 1, 90],
+        [0x80, 1, 0],
+        [0x90, 3, 90],
+        [0xB0, 100, 1],
+    ] {
+        rig.send("Pads", now, &bytes);
+    }
+    rig.surfaces.settle();
+    let mut requests = Vec::new();
+    rig.surfaces.take_requests(&mut requests);
+    let controls: Vec<(usize, Control)> = requests
+        .iter()
+        .map(|r| match &r.ask {
+            Ask::Control(control) => (r.row, *control),
+            Ask::Command(_) => panic!("a control, not a command"),
+        })
+        .collect();
+    let value = |value| Hit::Value { value, full: 127 };
+    assert_eq!(
+        controls,
+        [
+            (
+                2,
+                Control {
+                    role: Role::Device(3),
+                    mode: RemoteMode::Absolute,
+                    hit: value(100)
+                }
+            ),
+            (
+                2,
+                Control {
+                    role: Role::Device(0),
+                    mode: RELATIVE,
+                    hit: value(1)
+                }
+            ),
+            (
+                2,
+                Control {
+                    role: Role::NextBank,
+                    mode: RemoteMode::Absolute,
+                    hit: Hit::NoteOn {
+                        key: 1,
+                        velocity: 90
+                    }
+                }
+            ),
+            (
+                2,
+                Control {
+                    role: Role::NextBank,
+                    mode: RemoteMode::Absolute,
+                    hit: Hit::NoteOff { key: 1 }
+                }
+            ),
+            (
+                2,
+                Control {
+                    role: Role::Ring(RingStep::Right),
+                    mode: RemoteMode::Absolute,
+                    hit: Hit::NoteOn {
+                        key: 3,
+                        velocity: 90
+                    }
+                }
+            ),
+        ],
+        "the controller with no role asks for nothing"
+    );
+    assert!(role_of(&MidiMessage::from_bytes(&[0xB0, 100, 1]).unwrap()).is_none());
 }

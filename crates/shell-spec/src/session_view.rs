@@ -178,6 +178,12 @@ pub struct SessionViewState {
     /// is doing. Empty in the grid's own state; `session.state` fills it in.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub launches: Vec<SlotLaunch>,
+    /// The control surfaces' session rings, by track and scene ID, in the
+    /// Control Surfaces table's row order (control surfaces R28, session
+    /// view R38). Empty in the grid's own state; `session.state` fills it
+    /// in.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rings: Vec<crate::control_surface::RingBox>,
     /// Whether the selection is track title bars, so Esc has already gone
     /// up as far as it can.
     pub title_tracks: bool,

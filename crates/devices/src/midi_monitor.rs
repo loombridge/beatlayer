@@ -72,7 +72,8 @@ pub fn midi_monitor_type() -> DeviceType {
                 .describe("Empties the display on the frame it turns on."),
         ])
         .with_layout(layout)
-        .with_views(&VIEWS),
+        .with_views(&VIEWS)
+        .with_banks(&[("Monitor", &["Freeze", "Clear"])]),
     )
 }
 

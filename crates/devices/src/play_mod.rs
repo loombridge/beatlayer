@@ -170,8 +170,144 @@ pub fn play_mod_type() -> DeviceType {
             "In Modulation mode, how far the modulator reaches: 0 % none, 100 % full.",
         ),
     ));
-    DeviceType::native(PLAY_MOD, "Expression Control", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(PLAY_MOD, "Expression Control", DeviceRole::MidiEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                ("Mapping", &["Mod", "Polarity", "Output Range Max"]),
+                // Each tab's curve and each slot's mapping have a Min
+                // and a Max of the same name: they are given by number.
+                (
+                    "Targets 1-2",
+                    &["Amount 1", "#68", "#69", "Amount 2", "#71", "#72"],
+                ),
+                (
+                    "Targets 3-4",
+                    &["Amount 3", "#74", "#75", "Amount 4", "#77", "#78"],
+                ),
+                ("Target 5", &["Amount 5", "#80", "#81"]),
+                (
+                    "Source 1",
+                    &[
+                        "Source 1",
+                        "Random Amount 1",
+                        "Increment Steps 1",
+                        "Smoothing 1",
+                        "Rise 1",
+                        "Fall 1",
+                    ],
+                ),
+                (
+                    "Curve 1",
+                    &[
+                        "Curve 1",
+                        "Curve A 1",
+                        "Curve B 1",
+                        "Curve Link 1",
+                        "Curve X 1",
+                        "Curve Y 1",
+                        "#109",
+                        "#110",
+                    ],
+                ),
+                (
+                    "Source 2",
+                    &[
+                        "Source 2",
+                        "Random Amount 2",
+                        "Increment Steps 2",
+                        "Smoothing 2",
+                        "Rise 2",
+                        "Fall 2",
+                    ],
+                ),
+                (
+                    "Curve 2",
+                    &[
+                        "Curve 2",
+                        "Curve A 2",
+                        "Curve B 2",
+                        "Curve Link 2",
+                        "Curve X 2",
+                        "Curve Y 2",
+                        "#125",
+                        "#126",
+                    ],
+                ),
+                (
+                    "Source 3",
+                    &[
+                        "Source 3",
+                        "Random Amount 3",
+                        "Increment Steps 3",
+                        "Smoothing 3",
+                        "Rise 3",
+                        "Fall 3",
+                    ],
+                ),
+                (
+                    "Curve 3",
+                    &[
+                        "Curve 3",
+                        "Curve A 3",
+                        "Curve B 3",
+                        "Curve Link 3",
+                        "Curve X 3",
+                        "Curve Y 3",
+                        "#141",
+                        "#142",
+                    ],
+                ),
+                (
+                    "Source 4",
+                    &[
+                        "Source 4",
+                        "Random Amount 4",
+                        "Increment Steps 4",
+                        "Smoothing 4",
+                        "Rise 4",
+                        "Fall 4",
+                    ],
+                ),
+                (
+                    "Curve 4",
+                    &[
+                        "Curve 4",
+                        "Curve A 4",
+                        "Curve B 4",
+                        "Curve Link 4",
+                        "Curve X 4",
+                        "Curve Y 4",
+                        "#157",
+                        "#158",
+                    ],
+                ),
+                (
+                    "Source 5",
+                    &[
+                        "Source 5",
+                        "Random Amount 5",
+                        "Increment Steps 5",
+                        "Smoothing 5",
+                        "Rise 5",
+                        "Fall 5",
+                    ],
+                ),
+                (
+                    "Curve 5",
+                    &[
+                        "Curve 5",
+                        "Curve A 5",
+                        "Curve B 5",
+                        "Curve Link 5",
+                        "Curve X 5",
+                        "Curve Y 5",
+                        "#173",
+                        "#174",
+                    ],
+                ),
+            ]),
+    )
 }
 
 /// One tab: its controls, its curve's display and its slot's mapping.

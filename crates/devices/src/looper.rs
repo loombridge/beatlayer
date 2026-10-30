@@ -235,8 +235,26 @@ pub fn looper_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(LOOPER, "Looper", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(LOOPER, "Looper", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[
+                (
+                    "Transport",
+                    &[
+                        "Transport",
+                        "Quantization",
+                        "Record Length",
+                        "Play/Overdub",
+                        "Speed",
+                        "Reverse",
+                        "Feedback",
+                        "Input → Output",
+                    ],
+                ),
+                ("Control", &["Tempo Control", "Song Control"]),
+            ]),
+    )
 }
 
 /// The Quantization chooser's choices: the launch quantisation menu's steps.

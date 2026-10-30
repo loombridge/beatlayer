@@ -531,6 +531,7 @@ impl MainWindowUi {
         // the Status Bar names the macro under the pointer.
         crate::mapping::set_held(ctx, held_params(shell));
         crate::mapping::set_hover_hold(ctx, None);
+        crate::mapping::rotate_hover_lock(ctx);
         crate::mapping::escape(ctx, self.is_typing(), &mut events);
         // Spec: grooves R32. Esc ends a hot-swap of a groove, as a device's
         // ends.
@@ -1623,14 +1624,19 @@ impl MainWindowUi {
         }
         // Spec: macros R11. The macro that holds the parameter under the
         // pointer is named here.
-        if let Some(name) = crate::mapping::hover_hold(ui.ctx()) {
+        let hint = crate::mapping::hover_hold(ui.ctx())
+            .map(|name| format!("Held by macro \"{name}\""))
+            // Spec: device-chains R42. The surfaces a locked device's hand
+            // icon names.
+            .or_else(|| crate::mapping::hover_lock(ui.ctx()));
+        if let Some(text) = hint {
             ui.painter().text(
                 pos2(
                     layout.status_bar.right() - 8.0,
                     layout.status_bar.center().y,
                 ),
                 Align2::RIGHT_CENTER,
-                format!("Held by macro \"{name}\""),
+                text,
                 theme.small_font(),
                 theme.colors.text.0,
             );

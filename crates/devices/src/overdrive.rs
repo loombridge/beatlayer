@@ -117,8 +117,14 @@ pub fn overdrive_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(OVERDRIVE, "Overdrive", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(OVERDRIVE, "Overdrive", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[(
+                "Grit",
+                &["Drive", "Tone", "Frequency", "Width", "Dynamics", "Dry/Wet"],
+            )]),
+    )
 }
 
 /// Adds Overdrive to `registry`.

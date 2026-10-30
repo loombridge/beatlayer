@@ -322,7 +322,41 @@ pub fn drum_sampler_type() -> DeviceType {
     DeviceType::native(DRUM_SAMPLER, "Drum Sampler", DeviceRole::Instrument).with_description(
         DeviceDescription::new(params)
             .with_layout(layout())
-            .with_menu_options(&[PER_NOTE_BEND, ENV_FOLLOWS_PITCH]),
+            .with_menu_options(&[PER_NOTE_BEND, ENV_FOLLOWS_PITCH])
+            .with_banks(&[
+                (
+                    "Sample",
+                    &[
+                        "Start",
+                        "Length",
+                        "Sample Gain",
+                        "Transpose",
+                        "Detune",
+                        "Volume",
+                        "Pan",
+                        "Velocity to Volume",
+                    ],
+                ),
+                (
+                    "Envelope",
+                    &["Attack", "Hold", "Hold Inf", "Decay", "Env Mode"],
+                ),
+                ("Effect", &["Effect", "Effect Type", "FX1", "FX2"]),
+                (
+                    "Filter",
+                    &[
+                        "Filter",
+                        "Filter Type",
+                        "Frequency",
+                        "Resonance",
+                        "Peak Gain",
+                    ],
+                ),
+                (
+                    "Modulation",
+                    &["Mod Source", "Mod Destination", "Mod Amount"],
+                ),
+            ]),
     )
 }
 

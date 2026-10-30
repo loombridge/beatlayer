@@ -81,6 +81,103 @@ fn an_agent_sets_lists_dumps_and_reads_the_surfaces_back() {
     assert!(refused.text.contains("row 1"), "{}", refused.text);
 }
 
+// Spec: control-surfaces R23, R29, R35, R36, R37; session-view R38. An agent
+// locks a device, moves the ring, reads the banks and changes the bank
+// through the API, and reads every one back.
+#[test]
+fn an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back() {
+    let (mut shell, _test) = shell_with_ports();
+    for n in 0..10 {
+        shell
+            .invoke(
+                "track.create",
+                json!({ "kind": "audio", "name": format!("T{n}") }),
+            )
+            .unwrap();
+    }
+    let audio = shell.editor().document().top_level().nth(2).unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [audio] }))
+        .unwrap();
+    let device: bl_model::DeviceId = serde_json::from_value(
+        shell
+            .invoke(
+                "device.add",
+                json!({ "device": {
+                    "kind": { "native": { "device_type": "beatlayer.utility" } },
+                    "name": "Utility", "role": "audio_effect" } }),
+            )
+            .unwrap()["device"]
+            .clone(),
+    )
+    .unwrap();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    run(
+        &mut client,
+        "control_surface.set",
+        json!({ "row": 1, "surface": "test-instant", "input": "Pads", "output": "Pads Out" }),
+    );
+    let surfaces = run(&mut client, "control_surface.surfaces", json!({}));
+    assert_eq!(surfaces["surfaces"][1]["can_lock"], true);
+
+    // control_surface.banks: each bank by name, its parameters by ID, name
+    // and value text, at most eight to a bank.
+    let banks = run(
+        &mut client,
+        "control_surface.banks",
+        json!({ "device": device }),
+    );
+    assert_eq!(banks["banks"][0]["name"], "Utility");
+    assert_eq!(banks["banks"][0]["params"].as_array().unwrap().len(), 8);
+    assert!(banks["banks"][0]["params"][0]["text"].is_string());
+
+    // lock and unlock, read back by control_surface.list and device_view.state.
+    let locked = run(
+        &mut client,
+        "control_surface.lock",
+        json!({ "row": 1, "device": device }),
+    );
+    let listed = run(&mut client, "control_surface.list", json!({}));
+    assert_eq!(listed["rows"][0], locked);
+    assert_eq!(locked["surface_state"]["device"]["locked"], "hand");
+    assert_eq!(locked["surface_state"]["device"]["device"], json!(device));
+    let state = run(&mut client, "device_view.state", json!({}));
+    assert_eq!(state["devices"][0]["locks"][0]["by"], "hand");
+
+    // set_bank, read back.
+    let set = run(
+        &mut client,
+        "control_surface.set_bank",
+        json!({ "row": 1, "bank": 1 }),
+    );
+    assert_eq!(set["surface_state"]["device"]["bank_name"], "Bass");
+    let listed = run(&mut client, "control_surface.list", json!({}));
+    assert_eq!(listed["rows"][0]["surface_state"]["device"]["bank"], 1);
+    run(&mut client, "control_surface.unlock", json!({ "row": 1 }));
+    let listed = run(&mut client, "control_surface.list", json!({}));
+    assert!(listed["rows"][0]["surface_state"]["device"]["locked"].is_null());
+
+    // move_ring, read back by list and by session.state.
+    let moved = run(
+        &mut client,
+        "control_surface.move_ring",
+        json!({ "row": 1, "step": "right" }),
+    );
+    assert_eq!(moved["surface_state"]["ring"]["track_index"], 1);
+    let listed = run(&mut client, "control_surface.list", json!({}));
+    assert_eq!(
+        listed["rows"][0]["surface_state"]["ring"],
+        moved["surface_state"]["ring"]
+    );
+    let session = run(&mut client, "session.state", json!({}));
+    assert_eq!(
+        session["rings"][0]["tracks"][0],
+        moved["surface_state"]["ring"]["first_track"]
+    );
+    assert_eq!(session["rings"][0]["scenes"].as_array().unwrap().len(), 2);
+}
+
 /// The app's agent API on `shell`, as the permissions tests have it: calls
 /// go to `Agent::handle`, and calls that wait are resumed.
 struct Host {

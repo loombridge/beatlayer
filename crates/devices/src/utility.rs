@@ -78,6 +78,22 @@ pub fn utility_type() -> DeviceType {
             ParamDescriptor::gain(GAIN, "Gain", 35.0, 0.0)
                 .describe("Scales the signal, down to silence."),
             ParamDescriptor::toggle(MUTE, "Mute", false).describe("Silences the input."),
+        ])
+        .with_banks(&[
+            (
+                "Utility",
+                &[
+                    "Gain",
+                    "Width",
+                    "Balance",
+                    "Mute",
+                    "Mono",
+                    "Phase Left",
+                    "Phase Right",
+                    "Channel Mode",
+                ],
+            ),
+            ("Bass", &["Bass Mono", "Bass Mono Frequency", "DC"]),
         ]),
     )
 }

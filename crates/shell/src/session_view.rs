@@ -149,6 +149,7 @@ impl SessionView {
             scenes: self.scenes.clone(),
             tracks: self.tracks.clone(),
             launches: Vec::new(),
+            rings: Vec::new(),
             title_tracks: self.title_tracks,
             scroll_y: self.scroll_y,
         }

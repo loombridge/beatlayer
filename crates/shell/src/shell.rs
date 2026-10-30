@@ -120,6 +120,7 @@ mod audio_device;
 mod browser_commands;
 mod clip_scale;
 mod control_surface;
+mod instant;
 mod device_commands;
 mod document_edits;
 mod focus;
@@ -604,6 +605,8 @@ pub struct Shell {
     /// The control surfaces: what the host was last given and the gesture a
     /// surface has open (WP-7.5).
     surface: control_surface::SurfaceHost,
+    /// The instant mappings' state: locks, rings and banks per row.
+    instant: instant::Instant,
     /// The keys held on the MIDI input and the previews sounding, for the
     /// MIDI Note Editor's step recording and Preview (WP-6.5).
     step: step_input::StepInput,
@@ -1284,6 +1287,7 @@ impl Shell {
             chord_learn: crate::chord_learn::ChordLearn::default(),
             remote: remote::RemoteState::default(),
             surface: control_surface::SurfaceHost::default(),
+            instant: instant::Instant::default(),
             step: step_input::StepInput::default(),
             keymap: crate::keymap::Keymap::live12(),
             user_keymap: crate::keymap::UserKeymap::default(),
@@ -1570,6 +1574,9 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        // Spec: control-surfaces R24, R26, R30. Locks and rings follow the
+        // set.
+        self.sync_instant();
         self.clip_view.sync_sample(self.editor.document());
         // The kit plug-ins' instances first, so a node the engine makes at once
         // finds its device's.

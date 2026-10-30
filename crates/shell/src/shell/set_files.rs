@@ -97,6 +97,8 @@ impl Shell {
     pub(super) fn set_replaced(&mut self) {
         self.editor_replaced();
         self.forget_remote_values();
+        // Spec: control-surfaces R9, R30. Every ring starts again.
+        self.instant_reset();
         // What a DAWproject import said about the set that's gone (R11, R12).
         self.pending_name = None;
         self.import_report = None;

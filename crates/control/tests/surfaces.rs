@@ -385,8 +385,8 @@ fn ticks_bring_the_read_model_and_commands_queue_in_order() {
         .map(|r| {
             (
                 r.row,
-                r.request.args["volume"].as_f64().unwrap(),
-                r.request.gesture,
+                r.command().unwrap().args["volume"].as_f64().unwrap(),
+                r.command().unwrap().gesture,
             )
         })
         .collect();
@@ -404,7 +404,7 @@ fn ticks_bring_the_read_model_and_commands_queue_in_order() {
             (0, 0.0, gesture(true))
         ]
     );
-    assert!(requests.iter().all(|r| r.request.id == "mixer.set_volume"));
+    assert!(requests.iter().all(|r| r.command().unwrap().id == "mixer.set_volume"));
 }
 
 // Spec: control-surfaces R11. Dump sends the setup the surface declares to

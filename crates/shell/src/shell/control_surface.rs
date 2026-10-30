@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use bl_commands::{NoArgs, Permission};
 use bl_control::{
-    CommandRequest, ReadModel, RowConfig, RowReport, RunState, Selection, SurfaceState, Transport,
+    Ask, CommandRequest, ReadModel, RowConfig, RowReport, RunState, Selection, Transport,
 };
 use bl_shell_spec::control_surface as ids;
 use serde_json::Value;
@@ -41,7 +41,7 @@ pub(super) struct SurfaceHost {
     seen: (u64, u64),
     lit: [Option<Instant>; 2],
     applied: u64,
-    refused: u64,
+    pub(super) refused: u64,
 }
 
 fn info(report: RowReport, row: usize) -> ids::RowInfo {
@@ -49,12 +49,6 @@ fn info(report: RowReport, row: usize) -> ids::RowInfo {
         name.map(|name| ids::PortRef {
             name,
             present: present.unwrap_or(false),
-        })
-    };
-    let ring = |state: &SurfaceState| {
-        state.ring.map(|ring| ids::RingInfo {
-            tracks: ring.tracks,
-            scenes: ring.scenes,
         })
     };
     ids::RowInfo {
@@ -73,10 +67,7 @@ fn info(report: RowReport, row: usize) -> ids::RowInfo {
         },
         error: report.error,
         can_dump: report.can_dump,
-        surface_state: report.state.map(|state| ids::SurfaceStateInfo {
-            ring: ring(&state),
-            mode: state.mode,
-        }),
+        surface_state: None,
     }
 }
 
@@ -113,12 +104,25 @@ impl Shell {
     /// reports them, for the Settings window to draw.
     #[must_use]
     pub fn control_surface_rows(&self) -> Vec<ids::RowInfo> {
-        self.midi
-            .surface_rows()
-            .into_iter()
-            .enumerate()
-            .map(|(row, report)| info(report, row))
-            .collect()
+        (0..bl_control::ROWS).map(|row| self.row_info(row)).collect()
+    }
+
+    /// One row of the table as `control_surface.list` reports it, with the
+    /// state a running surface holds: its ring, the device it reaches, its
+    /// own mode (R13, R35).
+    pub(super) fn row_info(&self, row: usize) -> ids::RowInfo {
+        let report = self.midi.surface_rows().swap_remove(row);
+        let mode = report.state.as_ref().and_then(|state| state.mode.clone());
+        let running = report.run == RunState::Running;
+        let mut info = info(report, row);
+        if running {
+            info.surface_state = Some(ids::SurfaceStateInfo {
+                ring: self.ring_state(row),
+                device: self.device_focus(row),
+                mode,
+            });
+        }
+        info
     }
 
     /// How many commands a surface asked for ran, and how many were
@@ -133,6 +137,7 @@ impl Shell {
     /// (R6, R7). Returns whether the set changed.
     pub(super) fn poll_surfaces(&mut self) -> bool {
         let revision = self.document_revision;
+        self.sync_instant();
         if self.midi.surfaces().running() {
             let model = self.surface_model();
             self.midi.surfaces().publish(model);
@@ -140,7 +145,15 @@ impl Shell {
         let mut requests = Vec::new();
         self.midi.surfaces().take_requests(&mut requests);
         for request in requests {
-            self.run_surface_request(request);
+            match request.ask {
+                Ask::Command(command) => {
+                    self.run_surface_request(CommandRequest {
+                        row: request.row,
+                        ask: Ask::Command(command),
+                    });
+                }
+                Ask::Control(control) => self.run_control(request.row, control),
+            }
         }
         if let Some((_, _, at)) = self.surface.gesture
             && self.midi.now().saturating_duration_since(at) >= REST
@@ -181,6 +194,7 @@ impl Shell {
                 slots: session.slots.iter().map(|s| (s.track, s.scene)).collect(),
                 scenes: session.scenes,
             },
+            rows: self.row_views(),
         }
     }
 
@@ -204,9 +218,13 @@ impl Shell {
         changed
     }
 
-    /// Runs one command a surface asked for, inside its gesture (R7).
-    fn run_surface_request(&mut self, request: CommandRequest) {
-        let CommandRequest { row, request } = request;
+    /// Runs one command a surface asked for, inside its gesture (R7);
+    /// whether it ran.
+    pub(super) fn run_surface_request(&mut self, request: CommandRequest) -> bool {
+        let CommandRequest { row, ask } = request;
+        let Ask::Command(request) = ask else {
+            return false;
+        };
         match request.gesture {
             Some(gesture) => {
                 let mut held = self
@@ -237,7 +255,8 @@ impl Shell {
         self.surface.applying = true;
         let result = self.run(&request.id, request.args);
         self.surface.applying = false;
-        if result.is_ok() {
+        let ran = result.is_ok();
+        if ran {
             self.surface.applied += 1;
         } else {
             self.surface.refused += 1;
@@ -245,6 +264,7 @@ impl Shell {
         if request.gesture.is_some_and(|gesture| gesture.released) {
             self.end_surface_gesture();
         }
+        ran
     }
 
     /// Ends the gesture that is one undo step, if one is open.
@@ -310,8 +330,7 @@ impl Shell {
                 self.prefs.midi = self.midi.prefs();
                 self.save_preferences();
                 self.touch();
-                let report = self.midi.surface_rows().swap_remove(row);
-                Ok(to_value(&info(report, row)))
+                Ok(to_value(&self.row_info(row)))
             }
             ids::DUMP => {
                 let args = Self::args::<ids::DumpArgs>(id, args)?;
@@ -325,6 +344,9 @@ impl Shell {
                 Ok(to_value(&ids::SurfacesResult {
                     surfaces: Self::control_surface_choices(),
                 }))
+            }
+            ids::LOCK | ids::UNLOCK | ids::MOVE_RING | ids::SET_BANK | ids::BANKS => {
+                self.run_instant(id, args)
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }

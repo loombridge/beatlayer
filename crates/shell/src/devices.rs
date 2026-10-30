@@ -1421,6 +1421,7 @@ impl DeviceView {
             mpe: matches!(d.kind, DeviceKind::Plugin { .. }).then_some(d.mpe),
             tuning_loaded: doc.settings().tuning.is_some(),
             selected: self.selected == Some(d.id),
+            locks: Vec::new(),
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),
             panel: self.panel(d).map(|panel| {

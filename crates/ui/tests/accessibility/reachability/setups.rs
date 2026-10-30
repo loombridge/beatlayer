@@ -466,6 +466,46 @@ pub(crate) fn a_hardware_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// A CV Instrument on a new MIDI track, its section showing, no device
+/// selected (WP-7.17).
+pub(crate) fn a_cv_instrument(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::cv_instrument_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
+/// A CV Instrument that holds a calibration (WP-7.17).
+pub(crate) fn a_calibrated_cv_instrument(h: &mut Harness) {
+    a_cv_instrument(h);
+    let device = h
+        .shell
+        .editor()
+        .document()
+        .tracks()
+        .flat_map(|track| track.devices_deep())
+        .find(|device| device.external.as_ref().is_some_and(|e| e.is_cv()))
+        .expect("the CV Instrument")
+        .id;
+    let calibration = bl_model::CvCalibration::fit(&[(0.0, 130.0), (1.0, 260.0)]).unwrap();
+    h.shell
+        .run(
+            "cv.set_calibration",
+            json!({ "device": device, "calibration": calibration }),
+        )
+        .unwrap();
+}
+
 /// An LFO and a test utility on the selected audio track (WP-5.10),
 /// with the LFO's slot 1 mapped to the utility's gain when `mapped`
 /// and its Map button lit when `lit`.

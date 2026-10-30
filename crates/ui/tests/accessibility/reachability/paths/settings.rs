@@ -89,6 +89,18 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             Exception(Equivalent("a surface's bank buttons")),
         ),
         ("control_surface.banks", Exception(Query)),
+        // Push 2 (WP-7.19): its own buttons and encoders set its modes and
+        // its Setup menu; an agent reads what it shows.
+        ("push.state", Exception(Query)),
+        ("push.display_frame", Exception(Query)),
+        (
+            "push.set_mode",
+            Exception(Equivalent("Push 2's own mode buttons")),
+        ),
+        (
+            "push.set_setup",
+            Exception(Equivalent("Push 2's Setup menu, set with its own encoders")),
+        ),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (

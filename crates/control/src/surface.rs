@@ -40,6 +40,8 @@ pub struct Transport {
     pub loop_start: Ticks,
     /// How long the loop brace is.
     pub loop_length: Ticks,
+    /// Whether a count-in runs before the recording.
+    pub counting_in: bool,
 }
 
 /// What is selected in the set: the Arrangement's tracks, and the Session
@@ -72,6 +74,8 @@ pub struct ReadModel {
     pub meters: Vec<TrackMeter>,
     /// The selection.
     pub selection: Selection,
+    /// Where each track's playing Session clip is in its loop, from 0 to 1.
+    pub progress: Vec<(TrackId, f32)>,
     /// What each row of the Control Surfaces table holds: its ring, the
     /// device its device controls reach and its bank (R17 to R35).
     pub rows: Vec<RowView>,
@@ -105,10 +109,12 @@ impl ReadModel {
                 recording: false,
                 loop_start: Ticks::ZERO,
                 loop_length: Ticks::ZERO,
+                counting_in: false,
             },
             tempo: Bpm::DEFAULT,
             meters: Vec::new(),
             selection: Selection::default(),
+            progress: Vec::new(),
             rows: Vec::new(),
             columns: Vec::new(),
             session_record: false,
@@ -363,6 +369,9 @@ pub enum Ask {
     Command(Request),
     /// A control moved, which the shell takes to its place (R22).
     Control(Control),
+    /// The control's gesture ended without a last command: its touch was
+    /// let go, so the changes since it was touched are one undo step (R7).
+    EndGesture(u32),
 }
 
 /// A command a surface asks for: run on the main thread, in order, by ID
@@ -498,6 +507,12 @@ impl Cx {
     pub fn control(&mut self, role: Role, mode: RemoteMode, hit: Hit) {
         self.requests
             .push(Ask::Control(Control { role, mode, hit }));
+    }
+
+    /// Ends the gesture on `control` where it has no last command to carry
+    /// the release, as an encoder's touch being let go does (R7).
+    pub fn end_gesture(&mut self, control: u32) {
+        self.requests.push(Ask::EndGesture(control));
     }
 
     /// Hands a message back to the tracks, as arriving at `at`: they

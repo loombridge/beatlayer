@@ -105,7 +105,7 @@ impl CommandRequest {
     pub const fn command(&self) -> Option<&crate::surface::Request> {
         match &self.ask {
             Ask::Command(request) => Some(request),
-            Ask::Control(_) => None,
+            Ask::Control(_) | Ask::EndGesture(_) => None,
         }
     }
 }
@@ -668,6 +668,9 @@ pub struct Surfaces {
     /// The controller templates the chooser offers after the native
     /// surfaces (R43).
     templates: Vec<Arc<Kind>>,
+    /// Native surfaces that live in crates above this one, such as Push 2's,
+    /// which the chooser lists with the native ones (R1).
+    natives: Vec<Arc<Kind>>,
 }
 
 impl Surfaces {
@@ -691,7 +694,13 @@ impl Surfaces {
             silent: HashSet::new(),
             filled: false,
             templates: Vec::new(),
+            natives: Vec::new(),
         }
+    }
+
+    /// Sets the native surfaces that live in crates above this one (R1).
+    pub fn set_natives(&mut self, natives: Vec<Arc<Kind>>) {
+        self.natives = natives;
     }
 
     /// Sets the controller templates the chooser offers (R43). A row that
@@ -705,7 +714,12 @@ impl Surfaces {
     /// (R1).
     #[must_use]
     pub fn kinds(&self) -> Vec<Arc<Kind>> {
-        kinds().iter().chain(&self.templates).cloned().collect()
+        // The native surfaces in alphabetical order, those of this crate and
+        // those of the crates above it together.
+        let mut natives: Vec<Arc<Kind>> = kinds().iter().chain(&self.natives).cloned().collect();
+        natives.sort_by(|a, b| a.id.cmp(&b.id));
+        natives.extend(self.templates.iter().cloned());
+        natives
     }
 
     /// The surface with this ID, native or a template.
@@ -713,6 +727,7 @@ impl Surfaces {
     pub fn kind(&self, id: &str) -> Option<Arc<Kind>> {
         kinds()
             .iter()
+            .chain(&self.natives)
             .chain(&self.templates)
             .find(|kind| kind.id == id)
             .cloned()

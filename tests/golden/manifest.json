@@ -297,6 +297,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:953624a4115faf85"
     },
+    "cv-instrument-and-triggers": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 8,
+      "frames": 168000,
+      "bits": 24,
+      "render_hash": "fnv1a64:51194da2bdab6760"
+    },
     "device-modulation": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

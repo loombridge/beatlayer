@@ -68,7 +68,7 @@ impl Object {
                 "checkpoints",
                 "tracks",
             ],
-            Self::Device => &["compare"],
+            Self::Device => &["compare", "cv"],
             Self::Track => &["linked"],
             _ => &[],
         }

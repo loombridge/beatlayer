@@ -83,7 +83,7 @@ use std::str::FromStr;
 pub use bl_rt::{Priority, Promotion, ThreadReport, Workgroup, WorkgroupJoin};
 pub use buffer::{AudioBuffer, AudioBufferMut};
 pub use error::{Error, ErrorKind};
-pub use null::{NullBackend, NullControl, NullOptions, NullPower, Pacing};
+pub use null::{Cable, NullBackend, NullControl, NullOptions, NullPower, Pacing};
 pub use power::{ClockJump, ClockReading, DEFAULT_SLEEP_THRESHOLD, PowerEvent, PowerMonitor};
 pub use stats::{DROPOUT_MERGE, StreamStats};
 pub use supervisor::{

@@ -606,6 +606,22 @@ impl Drop for Host {
     }
 }
 
+/// How long a controller has to answer the device inquiry before it is left
+/// to be chosen by hand (supported controllers R2).
+const PROBE_WAIT: Duration = Duration::from_secs(2);
+
+/// The universal device inquiry (supported controllers R2).
+const INQUIRY: [u8; 6] = [0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7];
+
+/// A controller whose ports appeared, asked for its identity.
+struct Probe {
+    kind: Arc<Kind>,
+    input: String,
+    output: String,
+    replies: Arc<Mutex<Vec<Vec<u8>>>>,
+    since: Instant,
+}
+
 /// What the main thread keeps of a surface it started: the row it started
 /// with.
 struct Started {
@@ -637,6 +653,15 @@ pub struct Surfaces {
     /// row is chosen again (R10).
     halted: [bool; ROWS],
     sessions: u64,
+    /// Controllers asked for their identity, waiting for the answer.
+    probes: Vec<Probe>,
+    /// Inputs a person took off a row, which stay off while Beatlayer runs
+    /// (supported controllers R2).
+    declined: HashSet<String>,
+    /// Inputs whose controller didn't answer, until the port goes.
+    silent: HashSet<String>,
+    /// Whether a row was filled since the last call of [`Surfaces::filled`].
+    filled: bool,
     /// The controller templates the chooser offers after the native
     /// surfaces (R43).
     templates: Vec<Arc<Kind>>,
@@ -661,6 +686,10 @@ impl Surfaces {
             started: Default::default(),
             halted: [false; ROWS],
             sessions: 0,
+            probes: Vec::new(),
+            declined: HashSet::new(),
+            silent: HashSet::new(),
+            filled: false,
             templates: Vec::new(),
             natives: Vec::new(),
         }
@@ -682,12 +711,12 @@ impl Surfaces {
     /// (R1).
     #[must_use]
     pub fn kinds(&self) -> Vec<Arc<Kind>> {
-        kinds()
-            .iter()
-            .chain(&self.natives)
-            .chain(&self.templates)
-            .cloned()
-            .collect()
+        // The native surfaces in alphabetical order, those of this crate and
+        // those of the crates above it together.
+        let mut natives: Vec<Arc<Kind>> = kinds().iter().chain(&self.natives).cloned().collect();
+        natives.sort_by(|a, b| a.id.cmp(&b.id));
+        natives.extend(self.templates.iter().cloned());
+        natives
     }
 
     /// The surface with this ID, native or a template.
@@ -756,15 +785,135 @@ impl Surfaces {
                 other + 1
             ));
         }
+        // A row a person emptied isn't filled again for its ports.
+        if config.surface.is_none()
+            && self.rows[row].surface.is_some()
+            && let Some(input) = self.rows[row].input.clone()
+        {
+            self.declined.insert(input);
+        }
         self.rows[row] = config;
         self.halted[row] = false;
         Ok(())
+    }
+
+    /// Whether a controller was asked for its identity and hasn't answered.
+    #[must_use]
+    pub fn probing(&self) -> bool {
+        !self.probes.is_empty()
+    }
+
+    /// Whether a row was filled by a controller's being recognised since the
+    /// last call, so the preferences keep it.
+    pub fn filled(&mut self) -> bool {
+        std::mem::take(&mut self.filled)
+    }
+
+    fn named(&self, name: &str) -> bool {
+        self.rows
+            .iter()
+            .any(|r| r.input.as_deref() == Some(name) || r.output.as_deref() == Some(name))
+    }
+
+    /// Finds the controllers whose ports appeared (supported controllers
+    /// R2): asks the ones no row names for their identity with the MIDI
+    /// device inquiry, and fills the first free row with each whose reply
+    /// names its maker.
+    fn recognise(&mut self, ports: &mut MidiPorts) {
+        let present = |ports: &MidiPorts, direction, name: &str| {
+            ports.port(direction, name).is_some_and(|port| port.present)
+        };
+        for probe in std::mem::take(&mut self.probes) {
+            let answered = lock(&probe.replies)
+                .iter()
+                .any(|reply| probe.kind.recognise.is_some_and(|r| r.replies(reply)));
+            let gone = !present(ports, Direction::Input, &probe.input)
+                || !present(ports, Direction::Output, &probe.output);
+            if !(answered || gone) && probe.since.elapsed() < PROBE_WAIT {
+                self.probes.push(probe);
+                continue;
+            }
+            ports.release(Direction::Input, &probe.input);
+            ports.release(Direction::Output, &probe.output);
+            if answered
+                && !gone
+                && !self.named(&probe.input)
+                && let Some(row) = self.rows.iter().position(|r| r.surface.is_none())
+            {
+                self.rows[row] = RowConfig {
+                    surface: Some(probe.kind.id.clone()),
+                    input: Some(probe.input),
+                    output: Some(probe.output),
+                };
+                self.halted[row] = false;
+                self.filled = true;
+            } else if !gone && !answered {
+                self.silent.insert(probe.input);
+            }
+        }
+        self.silent
+            .retain(|name| present(ports, Direction::Input, name));
+        if self.rows.iter().all(|r| r.surface.is_some()) {
+            return;
+        }
+        let states = ports.ports();
+        let names = |direction| {
+            states
+                .iter()
+                .filter(move |p| p.present && p.direction == direction)
+                .map(|p| p.name.clone())
+                .collect::<Vec<_>>()
+        };
+        let (inputs, outputs) = (names(Direction::Input), names(Direction::Output));
+        for kind in kinds() {
+            let Some(recognise) = kind.recognise else {
+                continue;
+            };
+            for input in inputs.iter().filter(|name| recognise.names(name)) {
+                let Some(output) = outputs.iter().find(|name| recognise.names(name)) else {
+                    continue;
+                };
+                if self.named(input)
+                    || self.named(output)
+                    || self.declined.contains(input)
+                    || self.silent.contains(input)
+                    || self.probes.iter().any(|p| &p.input == input)
+                {
+                    continue;
+                }
+                let replies = Arc::new(Mutex::new(Vec::new()));
+                let sink = Arc::clone(&replies);
+                ports
+                    .claim(Direction::Input, input)
+                    .hold(Some(Box::new(move |_, bytes| {
+                        lock(&sink).push(bytes.to_vec());
+                    })));
+                ports.claim(Direction::Output, output);
+                let sent = self
+                    .output
+                    .send_to(PortId::from_name(output), &INQUIRY, None);
+                if sent.is_err() {
+                    ports.release(Direction::Input, input);
+                    ports.release(Direction::Output, output);
+                    self.silent.insert(input.clone());
+                    continue;
+                }
+                self.probes.push(Probe {
+                    kind: Arc::clone(kind),
+                    input: input.clone(),
+                    output: output.clone(),
+                    replies,
+                    since: Instant::now(),
+                });
+            }
+        }
     }
 
     /// Makes what runs follow the rows and the ports: stops a surface whose
     /// row or ports changed or went away, holds the ports the rows name, and
     /// starts the surfaces whose ports are there (R3, R9).
     pub fn reconcile(&mut self, ports: &mut MidiPorts) {
+        self.recognise(ports);
         // What the watchdog or a panic stopped stays stopped.
         for row in 0..ROWS {
             if self.started[row].is_some() && self.error_of(row).is_some() {

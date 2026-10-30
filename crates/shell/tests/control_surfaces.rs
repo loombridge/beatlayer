@@ -116,19 +116,39 @@ impl Rig {
 fn rows_are_set_listed_dumped_and_stopped_by_command() {
     let mut rig = Rig::new();
     let surfaces = rig.run("control_surface.surfaces", json!({}));
+    // The native surfaces come first in alphabetical order (the Launchpads
+    // and Push 2, and the test surfaces, which only test builds offer).
+    let listed: Vec<Value> = surfaces["surfaces"].as_array().unwrap().clone();
+    let ids: Vec<&str> = listed.iter().map(|s| s["id"].as_str().unwrap()).collect();
     assert_eq!(
-        surfaces["surfaces"],
-        json!([{
-            "id": "test", "name": "Test Surface", "needs_output": true, "can_lock": false,
-            "ring": { "tracks": 8, "scenes": 2 }, "has_setup": true
-        }, {
-            "id": "test-instant", "name": "Test Instant Surface", "needs_output": true,
-            "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
-        }, {
+        ids,
+        [
+            "launchpad-mini-mk3",
+            "launchpad-pro-mk3",
+            "launchpad-x",
+            "push-2",
+            "test",
+            "test-instant",
+            "template:Generic 8 + 8"
+        ]
+    );
+    assert_eq!(
+        listed[4..],
+        [
+            json!({
+                "id": "test", "name": "Test Surface", "needs_output": true, "can_lock": false,
+                "ring": { "tracks": 8, "scenes": 2 }, "has_setup": true
+            }),
+            json!({
+                "id": "test-instant", "name": "Test Instant Surface", "needs_output": true,
+                "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
+            }),
             // The bundled controller template comes after the native surfaces.
-            "id": "template:Generic 8 + 8", "name": "Generic 8 + 8", "needs_output": true,
-            "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
-        }])
+            json!({
+                "id": "template:Generic 8 + 8", "name": "Generic 8 + 8", "needs_output": true,
+                "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
+            })
+        ]
     );
     let rows = rig.rows();
     assert_eq!(rows.len(), 6);

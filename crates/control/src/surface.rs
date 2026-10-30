@@ -77,6 +77,16 @@ pub struct ReadModel {
     /// What each row of the Control Surfaces table holds: its ring, the
     /// device its device controls reach and its bank (R17 to R35).
     pub rows: Vec<RowView>,
+    /// The tracks a ring runs along, in order: the Session View's columns
+    /// with a folded group's tracks left out, then the returns (R28).
+    pub columns: Vec<TrackId>,
+    /// Whether Session Record is on (session recording).
+    pub session_record: bool,
+    /// Whether the metronome is on.
+    pub metronome: bool,
+    /// The drum rack on the selected track, if its first instrument at the
+    /// top level is one (supported controllers R15, R16).
+    pub drum: Option<DrumView>,
 }
 
 impl ReadModel {
@@ -101,6 +111,10 @@ impl ReadModel {
             selection: Selection::default(),
             progress: Vec::new(),
             rows: Vec::new(),
+            columns: Vec::new(),
+            session_record: false,
+            metronome: false,
+            drum: None,
         }
     }
 
@@ -109,6 +123,20 @@ impl ReadModel {
     pub fn row(&self, row: usize) -> Option<&RowView> {
         self.rows.get(row)
     }
+}
+
+/// The drum rack a grid controller follows: the rack on the selected track
+/// and what its pad view shows (supported controllers R15, R16).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DrumView {
+    /// The rack.
+    pub rack: DeviceId,
+    /// The note of the pad view's first pad (its lower left one).
+    pub first: u8,
+    /// The note of the selected pad, if one is.
+    pub selected: Option<u8>,
+    /// The notes whose pad holds a chain: bit n is note n.
+    pub filled: u128,
 }
 
 /// How a device came to be locked to a surface (R23, R26).
@@ -190,6 +218,10 @@ pub struct RowView {
     pub ring: Option<RingView>,
     /// The device its device controls reach, if there is one.
     pub focus: Option<Focus>,
+    /// Where each role the surface watches stands on its travel, from 0 to
+    /// 1, so it can show a fader whatever moved it (supported controllers
+    /// R14). A role that reaches nothing isn't listed.
+    pub positions: Vec<(Role, f64)>,
 }
 
 /// A block of tracks and scenes a surface's grid controls (R28): its size.
@@ -209,6 +241,9 @@ pub struct SurfaceState {
     pub ring: Option<Ring>,
     /// The surface's own mode, by name.
     pub mode: Option<String>,
+    /// The roles whose positions the surface wants in its row's
+    /// [`RowView::positions`].
+    pub watch: Vec<Role>,
 }
 
 /// One message for the surface's output: its bytes, whole (a system
@@ -518,6 +553,9 @@ pub struct Kind {
     /// The messages Dump sends the controller; none for a surface with no
     /// setup to send (R11).
     pub dump: Vec<Vec<u8>>,
+    /// How the surface's controller is found when it is plugged in
+    /// (supported controllers R2); none for a surface chosen by hand.
+    pub recognise: Option<Recognise>,
     make: Arc<dyn Fn() -> Box<dyn ControlSurface> + Send + Sync>,
 }
 
@@ -539,7 +577,17 @@ impl Kind {
             can_lock,
             ring,
             dump,
+            recognise: None,
             make: Arc::new(make),
+        }
+    }
+
+    /// The surface, found by `recognise` when its controller is plugged in.
+    #[must_use]
+    pub fn recognised(self, recognise: Recognise) -> Self {
+        Self {
+            recognise: Some(recognise),
+            ..self
         }
     }
 
@@ -547,6 +595,34 @@ impl Kind {
     #[must_use]
     pub fn make(&self) -> Box<dyn ControlSurface> {
         (self.make)()
+    }
+}
+
+/// How a controller is recognised by its ports and its identity reply
+/// (supported controllers R2, R72).
+#[derive(Clone, Copy, Debug)]
+pub struct Recognise {
+    /// Text, in lower case, that the name of the controller's surface ports
+    /// contains.
+    pub port: &'static str,
+    /// The maker's three bytes in the device inquiry's reply.
+    pub maker: [u8; 3],
+}
+
+impl Recognise {
+    /// Whether a port's name is one of the controller's surface ports,
+    /// whatever the case (R72).
+    #[must_use]
+    pub fn names(&self, port: &str) -> bool {
+        port.to_lowercase().contains(self.port)
+    }
+
+    /// Whether `bytes` is a device inquiry's reply from the maker.
+    #[must_use]
+    pub fn replies(&self, bytes: &[u8]) -> bool {
+        bytes.len() > 8
+            && bytes[..5] == [0xF0, 0x7E, bytes[2], 0x06, 0x02]
+            && bytes[5..8] == self.maker
     }
 }
 
@@ -559,13 +635,17 @@ impl std::fmt::Debug for Kind {
     }
 }
 
-/// Every native surface the chooser offers, by name (R1). The test surfaces
+/// Every native surface the chooser offers, by name (R1): the native
+/// surfaces first in alphabetical order. The test surfaces
 /// are there in test builds only (R16).
 #[must_use]
 pub fn kinds() -> &'static [Arc<Kind>] {
     static KINDS: std::sync::OnceLock<Vec<Arc<Kind>>> = std::sync::OnceLock::new();
     KINDS.get_or_init(|| {
         vec![
+            Arc::new(crate::grid::mini()),
+            Arc::new(crate::grid::pro()),
+            Arc::new(crate::grid::launchpad_x()),
             #[cfg(feature = "testing")]
             Arc::new(crate::testing::kind()),
             #[cfg(feature = "testing")]

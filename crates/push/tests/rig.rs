@@ -246,6 +246,7 @@ impl Rig {
                 moves: bl_control::Moves::default(),
             }),
             focus: None,
+            positions: Vec::new(),
         }];
         Self {
             clock,

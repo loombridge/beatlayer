@@ -463,6 +463,7 @@ impl ControlSurface for TemplateSurface {
                 scenes: self.template.ring_height,
             }),
             mode: None,
+            watch: Vec::new(),
         }
     }
 }

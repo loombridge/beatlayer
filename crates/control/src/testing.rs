@@ -372,6 +372,7 @@ impl ControlSurface for TestSurface {
         SurfaceState {
             ring: Some(RING),
             mode: Some("Test".to_owned()),
+            watch: Vec::new(),
         }
     }
 

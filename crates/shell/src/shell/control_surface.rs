@@ -275,6 +275,13 @@ impl Shell {
         let revision = self.document_revision;
         let changed = self.poll_push();
         self.sync_instant();
+        // Spec: supported-controllers R2. A controller's answer to the
+        // device inquiry fills its row, which the preferences keep.
+        if self.midi.follow_surfaces() {
+            self.sync_instant();
+            self.prefs.midi = self.midi.prefs();
+            self.save_preferences();
+        }
         if self.midi.surfaces().running() {
             let model = self.surface_model();
             self.midi.surfaces().publish(model);
@@ -347,6 +354,10 @@ impl Shell {
         };
         let view = self.arrangement.transport();
         let session = self.session.state();
+        let rows = self.row_views();
+        let doc = self.editor.document();
+        let drum = crate::devices::shown_track(&self.arrangement, doc)
+            .and_then(|track| self.devices.drum_view(doc, track));
         ReadModel {
             document,
             slots: self.session_states().to_vec(),
@@ -367,7 +378,11 @@ impl Shell {
                 scenes: session.scenes,
             },
             progress: self.clip_progress(),
-            rows: self.row_views(),
+            rows,
+            columns: self.ring_columns(),
+            session_record: self.session_run.is_some(),
+            metronome: self.editor.document().settings().metronome.enabled,
+            drum,
         }
     }
 

@@ -1158,6 +1158,7 @@ dependencies = [
  "bl-midi-tools",
  "bl-model",
  "bl-project",
+ "bl-push",
  "bl-shell",
  "bl-test-clap",
  "bytemuck",

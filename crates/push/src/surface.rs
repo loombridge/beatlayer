@@ -1411,6 +1411,7 @@ impl ControlSurface for Push {
                 }
                 (_, mode, _) => format!("{}, {}", self.pad_mode.name(), mode.name()),
             }),
+            watch: Vec::new(),
         }
     }
 

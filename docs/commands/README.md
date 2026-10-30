@@ -32228,6 +32228,141 @@ What `remote.targets` returns.
 
 </details>
 
+### `TemplateErrorInfo`
+
+One thing wrong in a controller template file.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `line` | integer, at least 0 | yes | The line, from 1. |
+| `message` | string | yes | What is wrong. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One thing wrong in a controller template file.",
+  "properties": {
+    "line": {
+      "description": "The line, from 1.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "message": {
+      "description": "What is wrong.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "line",
+    "message"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TemplateInfo`
+
+One controller template file, bundled or in the User Library.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `bundled` | boolean | yes | Whether it is the template bundled with Beatlayer. |
+| `listed` | boolean | yes | Whether the chooser lists it: not a broken file, not a bundled template a User Library one of the same name replaces, and not a second file of one name. |
+| `errors` | array of [`TemplateErrorInfo`](#templateerrorinfo) | yes | Each mistake in the file, with its line; empty for a whole file. |
+| `matches` | array of string | yes | The ports present that the template names and no row uses, which the Settings mark "Matches" (R45). |
+| `name` | string or null | no | The template's name; left out for a file that doesn't parse. |
+| `path` | string or null | no | The file's path; left out for the bundled template. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One controller template file, bundled or in the User Library.",
+  "properties": {
+    "bundled": {
+      "description": "Whether it is the template bundled with Beatlayer.",
+      "type": "boolean"
+    },
+    "errors": {
+      "description": "Each mistake in the file, with its line; empty for a whole file.",
+      "items": {
+        "$ref": "#/$defs/TemplateErrorInfo"
+      },
+      "type": "array"
+    },
+    "listed": {
+      "description": "Whether the chooser lists it: not a broken file, not a bundled template a User Library one of the same name replaces, and not a second file of one name.",
+      "type": "boolean"
+    },
+    "matches": {
+      "description": "The ports present that the template names and no row uses, which the Settings mark \"Matches\" (R45).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The template's name; left out for a file that doesn't parse.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "path": {
+      "description": "The file's path; left out for the bundled template.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "bundled",
+    "listed",
+    "errors",
+    "matches"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TemplatesResult`
+
+What `control_surface.templates` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `templates` | array of [`TemplateInfo`](#templateinfo) | yes | Every template file found, the bundled one first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.templates` returns.",
+  "properties": {
+    "templates": {
+      "description": "Every template file found, the bundled one first.",
+      "items": {
+        "$ref": "#/$defs/TemplateInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "templates"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `TempoMap`
 
 The song's tempo over time, as segments in order of position. The first starts at tick 0, each starts after the one before it, and the last is constant. A song at one tempo is a single constant segment.

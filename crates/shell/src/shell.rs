@@ -1422,6 +1422,7 @@ impl Shell {
         shell.give_agents_tokens();
         shell.publish_plugins();
         shell.load_user_keymap();
+        shell.refresh_templates();
         // Spec: mixer-view R21. The return tracks scroll with the tracks as
         // the application setting says, in the mixers and in the
         // Arrangement's lanes.

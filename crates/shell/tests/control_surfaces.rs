@@ -124,6 +124,10 @@ fn rows_are_set_listed_dumped_and_stopped_by_command() {
         }, {
             "id": "test-instant", "name": "Test Instant Surface", "needs_output": true,
             "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
+        }, {
+            // The bundled controller template comes after the native surfaces.
+            "id": "template:Generic 8 + 8", "name": "Generic 8 + 8", "needs_output": true,
+            "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
         }])
     );
     let rows = rig.rows();

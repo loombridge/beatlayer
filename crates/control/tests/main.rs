@@ -8,3 +8,4 @@ bl_rt::install_trap!();
 
 mod realtime;
 mod surfaces;
+mod templates;

@@ -207,6 +207,13 @@ impl MidiHost {
         &self.surfaces
     }
 
+    /// Sets the controller templates the chooser offers (control surfaces
+    /// R43).
+    pub fn set_surface_templates(&mut self, templates: Vec<std::sync::Arc<bl_control::Kind>>) {
+        self.surfaces.set_templates(templates);
+        self.refresh();
+    }
+
     /// The six rows as the Control Surfaces table shows them.
     #[must_use]
     pub fn surface_rows(&self) -> Vec<RowReport> {

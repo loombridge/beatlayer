@@ -11,6 +11,7 @@
 
 use std::collections::HashMap;
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 
 use bl_control::{
     Ask, CommandRequest, Control, Focus, Gesture, Hit, Kind, Lock, Memory, Moves, ParamView, ROWS,
@@ -75,7 +76,7 @@ pub(super) struct Instant {
     /// show it when it changes (session view R37).
     moved: [u64; ROWS],
     /// The kind of surface each row ran when the state last synced.
-    kinds: [Option<&'static Kind>; ROWS],
+    kinds: [Option<Arc<Kind>>; ROWS],
 }
 
 /// A device's banks: a name and the parameters it takes.
@@ -124,16 +125,20 @@ fn role_id(role: Role) -> u32 {
 impl Shell {
     /// The kind of surface each row ran at the last sync, or `None` for a
     /// row that doesn't run one.
-    fn running_kinds(&self) -> [Option<&'static Kind>; ROWS] {
-        self.instant.kinds
+    fn running_kinds(&self) -> &[Option<Arc<Kind>>; ROWS] {
+        &self.instant.kinds
     }
 
     /// The kind of surface each row runs now.
-    fn current_kinds(&self) -> [Option<&'static Kind>; ROWS] {
-        let mut kinds = [None; ROWS];
+    fn current_kinds(&self) -> [Option<Arc<Kind>>; ROWS] {
+        let mut kinds: [Option<Arc<Kind>>; ROWS] = Default::default();
         for (row, report) in self.midi.surface_rows().into_iter().enumerate() {
             if report.run == RunState::Running {
-                kinds[row] = report.config.surface.as_deref().and_then(bl_control::kind);
+                kinds[row] = report
+                    .config
+                    .surface
+                    .as_deref()
+                    .and_then(|id| self.midi.surfaces().kind(id));
             }
         }
         kinds
@@ -148,7 +153,7 @@ impl Shell {
         self.running_kinds()
             .iter()
             .enumerate()
-            .filter(|(_, kind)| kind.is_some_and(|k| k.can_lock))
+            .filter(|(_, kind)| kind.as_ref().is_some_and(|k| k.can_lock))
             .filter_map(|(row, _)| {
                 Some((
                     u8::try_from(row + 1).ok()?,
@@ -169,7 +174,7 @@ impl Shell {
     /// set.
     pub(super) fn sync_instant(&mut self) {
         let kinds = self.current_kinds();
-        self.instant.kinds = kinds;
+        self.instant.kinds = kinds.clone();
         let tracks = ring_tracks(self);
         let doc = self.editor.document();
         let scenes: Vec<SceneId> = doc.scenes().map(|s| s.id).collect();
@@ -288,7 +293,7 @@ impl Shell {
 
     /// A row's ring as `control_surface.list` reports it.
     pub(super) fn ring_state(&self, row: usize) -> Option<RingState> {
-        let size = self.running_kinds()[row]?.ring?;
+        let size = self.running_kinds()[row].as_ref()?.ring?;
         let place = self.instant.rows[row].place?;
         let (tracks, scenes) = (
             ring_tracks(self).len(),
@@ -313,7 +318,7 @@ impl Shell {
 
     /// The ring's tracks and scenes: the ones its block covers.
     fn ring_cover(&self, row: usize) -> Option<(Vec<TrackId>, Vec<SceneId>)> {
-        let size = self.running_kinds()[row]?.ring?;
+        let size = self.running_kinds()[row].as_ref()?.ring?;
         let place = self.instant.rows[row].place?;
         let tracks = ring_tracks(self);
         let scenes: Vec<SceneId> = self.editor.document().scenes().map(|s| s.id).collect();
@@ -339,7 +344,7 @@ impl Shell {
         scene: Option<SceneId>,
         step: Option<ids::RingStep>,
     ) -> Result<(), String> {
-        let Some(size) = self.running_kinds()[row].and_then(|k| k.ring) else {
+        let Some(size) = self.running_kinds()[row].as_ref().and_then(|k| k.ring) else {
             return Err("the row's surface has no session ring".to_owned());
         };
         let tracks = ring_tracks(self);
@@ -405,7 +410,7 @@ impl Shell {
     /// The device a row's device controls reach: the locked one, or the
     /// device in focus (R17, R23).
     fn reach(&self, row: usize) -> Option<Reach> {
-        self.running_kinds()[row]?;
+        self.running_kinds()[row].as_ref()?;
         let doc = self.editor.document();
         let state = &self.instant.rows[row];
         let (device, lock) = if let Some(device) = state.hand {
@@ -500,7 +505,7 @@ impl Shell {
         let doc = self.editor.document();
         (0..ROWS)
             .map(|row| {
-                let Some(kind) = kinds[row] else {
+                let Some(kind) = &kinds[row] else {
                     return RowView::default();
                 };
                 let ring = kind.ring.and_then(|size| {
@@ -711,6 +716,10 @@ impl Shell {
                 scene: *self.ring_cover(row)?.1.get(usize::from(r))?,
             },
             Role::StopAll => RemoteTarget::StopAll,
+            Role::MainVolume => RemoteTarget::Mixer {
+                track: doc.main_id(),
+                param: MixerParam::Volume,
+            },
             Role::Stop(c) => RemoteTarget::TrackStop {
                 track: track(self, c)?,
             },
@@ -846,7 +855,10 @@ impl Shell {
             ids::LOCK => {
                 let args = Self::args::<ids::LockArgs>(id, args)?;
                 let row = self.running_row(id, args.row)?;
-                if !self.running_kinds()[row].is_some_and(|k| k.can_lock) {
+                if !self.running_kinds()[row]
+                    .as_ref()
+                    .is_some_and(|k| k.can_lock)
+                {
                     return Err(failed(
                         "that surface can't be locked to a device".to_owned(),
                     ));

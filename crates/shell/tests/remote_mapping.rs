@@ -607,6 +607,74 @@ fn a_mapped_note_launches_at_its_velocity_and_session_launch_checks_it() {
     );
 }
 
+// Spec: remote-mapping R33 to R37. A slot mapped to C2 to C4 with root C3
+// launches on E3 four semitones up at E3's velocity and the root as it is; a
+// Gate clip stops on the release of the latest key, a release of an earlier
+// key does nothing, and the clip in the set doesn't change.
+#[test]
+fn a_chromatic_slot_launches_transposed_and_only_the_latest_keys_release_stops_it() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", false);
+    let track = rig.track("midi");
+    let scene = rig.scene();
+    rig.run(
+        "session.insert_empty_midi_clip",
+        json!({ "track": track, "scene": scene }),
+    );
+    let clip = rig.shell.editor().document().slot(track, scene).unwrap().id;
+    rig.run(
+        "clip.set_launch_mode",
+        json!({ "clip": clip, "mode": LaunchMode::Gate }),
+    );
+    // Live names middle C C3: C2 is 48, C3 60 and C4 72.
+    rig.map(
+        json!({ "type": "note_range", "channel": 1, "low": 48, "high": 72, "root": 60 }),
+        json!({ "type": "slot", "track": track, "scene": scene }),
+    );
+    let before = rig.shell.editor().document().clone();
+    let slot = |shell: &Shell| {
+        shell
+            .session_states()
+            .iter()
+            .find(|s| s.track == track && s.state == bl_engine::SlotState::Playing)
+            .map(|s| (s.velocity, s.transpose))
+    };
+    let launched = |rig: &mut Rig, what: &str, want| {
+        testing::wait_for(&rig.control, &mut rig.shell, what, |shell| {
+            slot(shell) == Some(want)
+        });
+    };
+
+    rig.send("Pads", &[0x90, 64, 90]);
+    launched(&mut rig, "E3 to launch four up at 90", (90, 4));
+    rig.send("Pads", &[0x90, 67, 100]);
+    launched(&mut rig, "G3 to relaunch seven up at 100", (100, 7));
+    // E3 is released after G3 was pressed: nothing happens.
+    rig.send("Pads", &[0x80, 64, 0]);
+    testing::advance(&rig.control, &mut rig.shell, 100);
+    assert_eq!(slot(&rig.shell), Some((100, 7)));
+    rig.send("Pads", &[0x80, 67, 0]);
+    testing::wait_for(
+        &rig.control,
+        &mut rig.shell,
+        "G3's release to stop it",
+        |shell| slot(shell).is_none(),
+    );
+    // The root plays the clip as it is.
+    rig.send("Pads", &[0x90, 60, 127]);
+    launched(&mut rig, "C3 to launch untransposed", (127, 0));
+    assert_eq!(
+        rig.shell.remote_counts(),
+        (4, 0),
+        "E3's release isn't a message to act on"
+    );
+    assert_eq!(
+        rig.shell.editor().document(),
+        &before,
+        "nothing in the set changed"
+    );
+}
+
 // Spec: remote-mapping R29. A mapping that is changed forgets where its
 // controller was.
 #[test]

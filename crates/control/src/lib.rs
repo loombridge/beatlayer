@@ -10,8 +10,8 @@
 //!
 //! [`act`] holds the value laws of R15 to R31: a note or a key, an absolute
 //! controller (with Takeover Mode) and a relative one, on each kind of
-//! control. [`guess`] is the mode guess of R27. A chromatic slot's
-//! transposition (WP-7.2b) builds on [`Hit`].
+//! control, a chromatic slot's (R33 to R36) included. [`guess`] is the mode
+//! guess of R27.
 
 use bl_core::midi::MidiMessage;
 use bl_midi_io::RemoteBits;
@@ -85,6 +85,9 @@ pub struct Memory {
     /// Whether the control follows the controller, as with Takeover Mode
     /// None.
     following: bool,
+    /// The key of a chromatic slot's latest launch, whose release is the
+    /// only one that acts (R36).
+    latest: Option<u8>,
 }
 
 impl Memory {
@@ -168,6 +171,9 @@ pub fn hit(mapping: &RemoteMapping, message: &MidiMessage, memory: &mut Memory) 
 pub enum Action {
     /// A slot's or a button's press, at a velocity from 1 to 127.
     Press(u8),
+    /// A chromatic slot's press at a velocity from 1 to 127, with the
+    /// semitones its key is from the root (R34).
+    PressTransposed(u8, i8),
     /// A slot's or a button's release.
     Release,
     /// A switch turns over.
@@ -200,6 +206,8 @@ pub struct Law {
     pub mode: RemoteMode,
     /// How many keys the mapping's range has; 1 for a single note or key.
     pub keys: u32,
+    /// The root key of a slot's note range (R33).
+    pub root: Option<u8>,
     /// What an absolute controller does when it and its control disagree
     /// (R29 to R31).
     pub takeover: TakeoverMode,
@@ -214,9 +222,11 @@ impl Law {
     /// no stepped control.
     #[must_use]
     pub fn of(mapping: &RemoteMapping, min: f64, max: f64) -> Self {
-        let keys = match mapping.source {
-            RemoteSource::NoteRange { low, high, .. } => u32::from(high - low) + 1,
-            _ => 1,
+        let (keys, root) = match mapping.source {
+            RemoteSource::NoteRange {
+                low, high, root, ..
+            } => (u32::from(high - low) + 1, root),
+            _ => (1, None),
         };
         Self {
             kind: mapping.kind,
@@ -224,6 +234,7 @@ impl Law {
             max,
             mode: mapping.mode,
             keys,
+            root,
             takeover: TakeoverMode::None,
             step: None,
         }
@@ -246,12 +257,26 @@ impl Law {
 /// `memory`; `key` is the offset of the hit note from the range's lowest and
 /// `at` the control's value as the laws read it: a continuous control's
 /// position on its travel, a radio button's option, `None` when the control
-/// can't be read. A slot's chromatic transposition belongs to WP-7.2b.
-// shortcut: a note range on a slot presses it untransposed until WP-7.2b
+/// can't be read.
 #[must_use]
 pub fn act(law: &Law, hit: Hit, key: u32, at: Option<f64>, memory: &mut Memory) -> Option<Action> {
     let range = |share: f64| law.min + share * (law.max - law.min);
     match (hit, law.kind) {
+        // Spec: remote-mapping R34, R36. A key of a slot's range launches
+        // its clip transposed by the key less the root, and only the latest
+        // key's release lets go.
+        (Hit::NoteOn { key, velocity }, ControlKind::Slot) if law.root.is_some() => {
+            let transpose = i16::from(key) - i16::from(law.root?);
+            memory.latest = Some(key);
+            Some(Action::PressTransposed(
+                velocity,
+                i8::try_from(transpose).ok()?,
+            ))
+        }
+        (Hit::NoteOff { key }, ControlKind::Slot) if law.root.is_some() => memory
+            .latest
+            .take_if(|latest| *latest == key)
+            .map(|_| Action::Release),
         (Hit::NoteOn { velocity, .. }, ControlKind::Slot | ControlKind::Button) => {
             Some(Action::Press(velocity))
         }
@@ -610,6 +635,44 @@ mod tests {
         );
     }
 
+    // Spec: remote-mapping R33 to R36. A key of a slot's range presses it
+    // transposed by the key less the root, at the key's velocity; the root
+    // is not transposed; and only the release of the latest key acts.
+    #[test]
+    fn a_slots_range_presses_transposed_and_only_the_latest_keys_release_acts() {
+        let slot = mapping(
+            RemoteSource::NoteRange {
+                channel: 1,
+                low: 36,
+                high: 60,
+                root: Some(48),
+            },
+            RemoteTarget::Slot {
+                track: track(),
+                scene: bl_model::SceneId(Id::new(3).unwrap()),
+            },
+            None,
+        );
+        let law = Law::of(&slot, 0.0, 1.0);
+        let mut memory = Memory::default();
+        let mut act_on = |hit| act(&law, hit, 0, None, &mut memory);
+        let on = |key, velocity| Hit::NoteOn { key, velocity };
+        let off = |key| Hit::NoteOff { key };
+        assert_eq!(
+            act_on(on(52, 90)),
+            Some(Action::PressTransposed(90, 4)),
+            "four above the root"
+        );
+        assert_eq!(act_on(on(48, 100)), Some(Action::PressTransposed(100, 0)));
+        assert_eq!(act_on(on(36, 1)), Some(Action::PressTransposed(1, -12)));
+        // Three keys are down; the latest is 36, so the earlier ones' releases
+        // do nothing, and 36's lets go once.
+        assert_eq!(act_on(off(52)), None);
+        assert_eq!(act_on(off(48)), None);
+        assert_eq!(act_on(off(36)), Some(Action::Release));
+        assert_eq!(act_on(off(36)), None);
+    }
+
     // Spec: remote-mapping R20
     #[test]
     fn an_absolute_controller_presses_a_slot_on_the_way_up_and_releases_on_the_way_down() {
@@ -751,6 +814,7 @@ mod tests {
             max,
             mode,
             keys: 1,
+            root: None,
             takeover: TakeoverMode::None,
             step: None,
         }

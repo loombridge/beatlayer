@@ -395,6 +395,8 @@ mod tests {
             state: SlotState::Playing,
             started: Some(Frames(BAR)),
             offset: bl_engine::ClipOffset::ZERO,
+            velocity: 127,
+            transpose: 0,
         }];
         // A second set has the same IDs, and the clip as it was.
         let (before, same, ..) = set();

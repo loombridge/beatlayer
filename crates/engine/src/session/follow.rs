@@ -397,7 +397,7 @@ impl SessionLauncher {
                     scene,
                     button,
                     true,
-                    super::VELOCITY_MAX,
+                    super::Played::PLAIN,
                     (line, at),
                 );
                 // A target waiting for its own grid leaves the track silent
@@ -457,7 +457,7 @@ impl SessionLauncher {
                         scene,
                         button,
                         true,
-                        super::VELOCITY_MAX,
+                        super::Played::PLAIN,
                         (line, at),
                     );
                 }

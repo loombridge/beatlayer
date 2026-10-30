@@ -572,7 +572,7 @@ pub fn sampler_type() -> DeviceType {
                 ),
                 (
                     "Slicing",
-                    &["Slice By", "Sensitivity", "Division", "Regions"],
+                    &["Slice By", "Playback", "Sensitivity", "Division", "Regions"],
                 ),
                 ("Filter", &["Filter", "Type", "Freq", "Res", "Key"]),
                 (

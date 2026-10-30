@@ -87,7 +87,12 @@ const MAKER: [u8; 3] = [0x00, 0x20, 0x29];
 /// The Launchpad Mini MK3 as the chooser offers it (R1, R25).
 #[must_use]
 pub fn mini() -> Kind {
-    kind(Model::Mini, "launchpad-mini-mk3", "lpminimk3 daw", make_mini)
+    kind(
+        Model::Mini,
+        "launchpad-mini-mk3",
+        "lpminimk3 daw",
+        make_mini,
+    )
 }
 /// The Launchpad Pro MK3 as the chooser offers it (R1, R29).
 #[must_use]

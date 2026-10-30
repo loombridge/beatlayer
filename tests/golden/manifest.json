@@ -247,7 +247,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:83c08e55c395979a"
+      "render_hash": "fnv1a64:3ac1e4c6f26226e6"
     },
     "complex-90": {
       "made_on": "macos-aarch64",
@@ -255,7 +255,7 @@
       "channels": 2,
       "frames": 144000,
       "bits": 24,
-      "render_hash": "fnv1a64:67fac7d8b13e2e72"
+      "render_hash": "fnv1a64:ce064a51c4e3ace3"
     },
     "complex-pro-180": {
       "made_on": "macos-aarch64",
@@ -279,7 +279,7 @@
       "channels": 2,
       "frames": 204000,
       "bits": 24,
-      "render_hash": "fnv1a64:142d88232ff25068"
+      "render_hash": "fnv1a64:379d4aec2dfbaa94"
     },
     "complex-pro-90": {
       "made_on": "macos-aarch64",
@@ -287,7 +287,7 @@
       "channels": 2,
       "frames": 144000,
       "bits": 24,
-      "render_hash": "fnv1a64:7e0cefa66f03e55e"
+      "render_hash": "fnv1a64:0fac31bbd28e1a55"
     },
     "crossfade": {
       "made_on": "macos-aarch64",

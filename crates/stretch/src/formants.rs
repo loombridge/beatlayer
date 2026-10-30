@@ -13,6 +13,10 @@
 //! the pitch moves and Formants is above 0 %. The filter's gain is set so the
 //! frame's energy is what it was, so the clip's level (R35) stays.
 //!
+//! The filter runs as a zero-latency partitioned convolution: its first
+//! [`PART`] taps directly, the rest in blocks of [`PART`] frames by FFT, so
+//! the cost per frame is a small fraction of the filter's length.
+//!
 //! Everything is made in [`Corrector::new`]; running allocates and locks
 //! nothing (R5).
 
@@ -31,6 +35,14 @@ const BINS: usize = FRAME / 2 + 1;
 const TAPS: usize = 1_024;
 /// The frames a new filter takes to fade in over the last.
 const FADE: usize = 256;
+/// The frames in a block of the convolution, and the taps it runs directly:
+/// the filter's later taps are convolved a block at a time, which they can
+/// wait for, so the output is not delayed.
+const PART: usize = 64;
+/// The blocks the filter's later taps make.
+const PARTS: usize = TAPS / PART - 1;
+/// The bins of a block's spectrum, a transform of `2 * PART` frames.
+const PBINS: usize = PART + 1;
 /// The quietest a bin's power may be, against the loudest in its frame:
 /// without it the valleys between harmonics, which no formant lives in, would
 /// weigh on the envelope.
@@ -59,6 +71,18 @@ struct Channel {
     /// runs along the history.
     now: Vec<f32>,
     before: Vec<f32>,
+    /// The spectra of the two filters' taps from [`PART`] on, a block of taps
+    /// each, scaled for the inverse transform.
+    now_spectra: Vec<Complex<f32>>,
+    before_spectra: Vec<Complex<f32>>,
+    /// The spectra of the last [`PARTS`] blocks of input, a ring that
+    /// `newest` marks the start of.
+    blocks: Vec<Complex<f32>>,
+    newest: usize,
+    /// The output block's share from the taps of the filters, which is
+    /// computed as the block begins.
+    tail: Vec<f32>,
+    tail_before: Vec<f32>,
     /// The frames seen since the stage began.
     count: usize,
 }
@@ -70,6 +94,12 @@ impl Channel {
             len: FRAME,
             now: vec![0.0; TAPS],
             before: vec![0.0; TAPS],
+            now_spectra: vec![Complex::new(0.0, 0.0); PARTS * PBINS],
+            before_spectra: vec![Complex::new(0.0, 0.0); PARTS * PBINS],
+            blocks: vec![Complex::new(0.0, 0.0); PARTS * PBINS],
+            newest: 0,
+            tail: vec![0.0; PART],
+            tail_before: vec![0.0; PART],
             count: 0,
         };
         channel.reset();
@@ -83,6 +113,17 @@ impl Channel {
             filter.fill(0.0);
             filter[TAPS - 1] = 1.0;
         }
+        // The identity filter's one tap is in the direct part.
+        for spectra in [
+            &mut self.now_spectra,
+            &mut self.before_spectra,
+            &mut self.blocks,
+        ] {
+            spectra.fill(Complex::new(0.0, 0.0));
+        }
+        self.tail.fill(0.0);
+        self.tail_before.fill(0.0);
+        self.newest = 0;
         self.count = 0;
     }
 }
@@ -91,6 +132,13 @@ impl Channel {
 struct Work {
     forward: Arc<dyn RealToComplex<f32>>,
     inverse: Arc<dyn ComplexToReal<f32>>,
+    block_forward: Arc<dyn RealToComplex<f32>>,
+    block_inverse: Arc<dyn ComplexToReal<f32>>,
+    block_in: Vec<f32>,
+    block_out: Vec<f32>,
+    block_sum: Vec<Complex<f32>>,
+    scratch_block_forward: Vec<Complex<f32>>,
+    scratch_block_inverse: Vec<Complex<f32>>,
     window: Vec<f32>,
     frame: Vec<f32>,
     cepstrum: Vec<f32>,
@@ -109,7 +157,16 @@ impl Work {
         let mut planner = RealFftPlanner::<f32>::new();
         let forward = planner.plan_fft_forward(FRAME);
         let inverse = planner.plan_fft_inverse(FRAME);
+        let block_forward = planner.plan_fft_forward(2 * PART);
+        let block_inverse = planner.plan_fft_inverse(2 * PART);
         Self {
+            block_in: vec![0.0; 2 * PART],
+            block_out: vec![0.0; 2 * PART],
+            block_sum: vec![Complex::new(0.0, 0.0); PBINS],
+            scratch_block_forward: block_forward.make_scratch_vec(),
+            scratch_block_inverse: block_inverse.make_scratch_vec(),
+            block_forward,
+            block_inverse,
             window: (0..FRAME)
                 .map(|n| 0.5 - 0.5 * (2.0 * PI * n as f32 / FRAME as f32).cos())
                 .collect(),
@@ -126,6 +183,52 @@ impl Work {
             forward,
             inverse,
         }
+    }
+
+    /// The spectra of `taps` (last tap first) from tap [`PART`] on, a block
+    /// of taps at a time, into `into`.
+    fn tap_spectra(&mut self, taps: &[f32], into: &mut [Complex<f32>]) {
+        let scale = 1.0 / (2 * PART) as f32;
+        for (m, spectrum) in into.chunks_mut(PBINS).enumerate() {
+            self.block_in.fill(0.0);
+            for (i, frame) in self.block_in[..PART].iter_mut().enumerate() {
+                *frame = taps[TAPS - 1 - (m + 1) * PART - i] * scale;
+            }
+            let _ = self.block_forward.process_with_scratch(
+                &mut self.block_in,
+                spectrum,
+                &mut self.scratch_block_forward,
+            );
+            count(2 * PART * PART_LOG);
+        }
+    }
+
+    /// The next [`PART`] frames of the output that the taps from [`PART`] on
+    /// make, from the spectra of the last [`PARTS`] blocks of input in
+    /// `blocks` (the newest at `newest`), into `tail`.
+    fn multiply(
+        &mut self,
+        blocks: &[Complex<f32>],
+        newest: usize,
+        spectra: &[Complex<f32>],
+        tail: &mut [f32],
+    ) {
+        self.block_sum.fill(Complex::new(0.0, 0.0));
+        for (m, spectrum) in spectra.chunks(PBINS).enumerate() {
+            let block = &blocks[(newest + m) % PARTS * PBINS..][..PBINS];
+            for ((sum, &input), &tap) in self.block_sum.iter_mut().zip(block).zip(spectrum) {
+                *sum += input * tap;
+            }
+        }
+        count(4 * PARTS * PBINS + 2 * PART * PART_LOG);
+        self.block_sum[0].im = 0.0;
+        self.block_sum[PBINS - 1].im = 0.0;
+        let _ = self.block_inverse.process_with_scratch(
+            &mut self.block_sum,
+            &mut self.block_out,
+            &mut self.scratch_block_inverse,
+        );
+        tail.copy_from_slice(&self.block_out[PART..]);
     }
 
     /// The spectrum of the windowed `samples`, in `into`.
@@ -272,8 +375,28 @@ fn lifter(cepstrum: &mut [f32], cutoff: usize) {
     }
 }
 
+/// The log2 of the convolution's transform size.
+const PART_LOG: usize = 7;
+
+#[cfg(test)]
+thread_local! {
+    /// The multiply-adds the convolution has done on this thread.
+    static MULTIPLY_ADDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Counts `n` multiply-adds of the convolution, for the test that bounds its
+/// cost: a complex one is 4, a real transform of `n` frames about `n log2 n`.
+#[cfg(test)]
+fn count(n: usize) {
+    MULTIPLY_ADDS.with(|total| total.set(total.get() + n as u64));
+}
+
+#[cfg(not(test))]
+fn count(_: usize) {}
+
 /// The sum of the products of `a` and `b`, in eight lanes so it vectorises.
 fn dot(a: &[f32], b: &[f32]) -> f32 {
+    count(a.len());
     let mut lanes = [0.0f32; 8];
     let (a, b) = (a.as_chunks::<8>().0, b.as_chunks::<8>().0);
     for (a, b) in a.iter().zip(b) {
@@ -290,6 +413,10 @@ pub(crate) struct Corrector {
     channels: Vec<Channel>,
     /// Whether the correction has run since the last reset.
     dirty: bool,
+    /// Whether to convolve the filter's every tap in time, as a test's
+    /// reference.
+    #[cfg(test)]
+    reference: bool,
 }
 
 impl Corrector {
@@ -300,6 +427,8 @@ impl Corrector {
             work: Work::new(),
             channels: (0..channels).map(|_| Channel::new()).collect(),
             dirty: false,
+            #[cfg(test)]
+            reference: false,
         }
     }
 
@@ -334,8 +463,16 @@ impl Corrector {
             if at == 0 {
                 // A hop begins: the filter made in it fades in over this one.
                 state.before.copy_from_slice(&state.now);
+                state.before_spectra.copy_from_slice(&state.now_spectra);
             }
-            convolve(state, part, at);
+            #[cfg(test)]
+            if self.reference {
+                convolve_reference(state, part, at);
+            } else {
+                convolve(&mut self.work, state, part, at);
+            }
+            #[cfg(not(test))]
+            convolve(&mut self.work, state, part, at);
             done += frames;
             if state.count.is_multiple_of(HOP)
                 && state.count >= FRAME
@@ -346,20 +483,82 @@ impl Corrector {
                 self.work.analyse(heard, Target::Output);
                 self.work.smooth(Target::Source, tune.cutoff);
                 self.work.filter(tune, &mut state.now);
+                self.work.tap_spectra(&state.now, &mut state.now_spectra);
             }
         }
     }
 }
 
 /// Filters `part`, the frames from `at` frames into a hop, through the
-/// channel's filters, the new one fading in over the last.
-fn convolve(channel: &mut Channel, part: &mut [f32], at: usize) {
-    if channel.len + part.len() > channel.history.len() {
+/// channel's filters, the new one fading in over the last. The filter's first
+/// [`PART`] taps run on each frame; the rest run by FFT a block at a time, as
+/// the block begins, from the input before it.
+fn convolve(work: &mut Work, channel: &mut Channel, part: &mut [f32], at: usize) {
+    make_room(channel, part.len());
+    let first = channel.len;
+    channel.history[first..first + part.len()].copy_from_slice(part);
+    for (n, sample) in part.iter_mut().enumerate() {
+        let place = at + n;
+        let slot = place % PART;
+        if slot == 0 {
+            // FADE is a whole number of blocks, so a block fades or doesn't.
+            begin_block(work, channel, first + n, place < FADE);
+        }
+        let end = first + n + 1;
+        let recent = &channel.history[end - PART..end];
+        let now = dot(&channel.now[TAPS - PART..], recent) + channel.tail[slot];
+        *sample = if place < FADE {
+            let share = (place + 1) as f32 / FADE as f32;
+            let before = dot(&channel.before[TAPS - PART..], recent) + channel.tail_before[slot];
+            before * (1.0 - share) + now * share
+        } else {
+            now
+        };
+    }
+    channel.len += part.len();
+    channel.count += part.len();
+}
+
+/// Makes room in the history for `frames` more, keeping the last [`FRAME`].
+fn make_room(channel: &mut Channel, frames: usize) {
+    if channel.len + frames > channel.history.len() {
         channel
             .history
             .copy_within(channel.len - FRAME..channel.len, 0);
         channel.len = FRAME;
     }
+}
+
+/// Starts a block of output at history frame `end`: takes in the block of
+/// input before it, and works out what the filters' later taps make of it,
+/// for the old filter too while `fading`.
+fn begin_block(work: &mut Work, channel: &mut Channel, end: usize, fading: bool) {
+    channel.newest = (channel.newest + PARTS - 1) % PARTS;
+    work.block_in
+        .copy_from_slice(&channel.history[end - 2 * PART..end]);
+    let _ = work.block_forward.process_with_scratch(
+        &mut work.block_in,
+        &mut channel.blocks[channel.newest * PBINS..][..PBINS],
+        &mut work.scratch_block_forward,
+    );
+    count(2 * PART * PART_LOG);
+    let (blocks, newest) = (&channel.blocks, channel.newest);
+    work.multiply(blocks, newest, &channel.now_spectra, &mut channel.tail);
+    if fading {
+        work.multiply(
+            blocks,
+            newest,
+            &channel.before_spectra,
+            &mut channel.tail_before,
+        );
+    }
+}
+
+/// [`convolve`] with every tap run in time on every frame: the filter's
+/// definition, which the test of the FFT convolution compares with.
+#[cfg(test)]
+fn convolve_reference(channel: &mut Channel, part: &mut [f32], at: usize) {
+    make_room(channel, part.len());
     let first = channel.len;
     channel.history[first..first + part.len()].copy_from_slice(part);
     for (n, sample) in part.iter_mut().enumerate() {
@@ -383,5 +582,129 @@ impl std::fmt::Debug for Corrector {
         f.debug_struct("Corrector")
             .field("channels", &self.channels.len())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `frames` of seeded white noise in -1..1.
+    fn noise(seed: u64, frames: usize) -> Vec<f32> {
+        let mut state = seed;
+        (0..frames)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                (state >> 40) as f32 / (1u64 << 23) as f32 - 1.0
+            })
+            .collect()
+    }
+
+    const TUNE: Tune = Tune {
+        shift: 1.12,
+        cutoff: 64,
+    };
+
+    /// Runs `corrector` over `input` (a channel of noise per channel) in
+    /// blocks of `blocks` frames in turn, comparing each with `source`.
+    fn correct(
+        corrector: &mut Corrector,
+        input: &[Vec<f32>],
+        source: &[Vec<f32>],
+        blocks: &[usize],
+    ) -> Vec<Vec<f32>> {
+        let mut out = input.to_vec();
+        let (mut at, mut next) = (0, 0);
+        while at < out[0].len() {
+            let n = blocks[next % blocks.len()].min(out[0].len() - at);
+            next += 1;
+            for (channel, samples) in out.iter_mut().enumerate() {
+                let source = &source[channel][..FRAME];
+                corrector.run(channel, &mut samples[at..at + n], &TUNE, |_| Some(source));
+            }
+            at += n;
+        }
+        out
+    }
+
+    // Spec: warp-modes R5, R35. The FFT convolution makes the samples the
+    // filter's definition does, at any block size.
+    #[test]
+    fn the_fft_convolution_makes_the_samples_the_definition_does() {
+        let input = [noise(1, 48_000), noise(2, 48_000)];
+        let source = [noise(3, FRAME), noise(4, FRAME)];
+        let blocks = [17, 512, 1_000, 64];
+        let mut reference = Corrector::new(2);
+        reference.reference = true;
+        let expected = correct(&mut reference, &input, &source, &blocks);
+        let got = correct(&mut Corrector::new(2), &input, &source, &blocks);
+        let worst = expected
+            .iter()
+            .flatten()
+            .zip(got.iter().flatten())
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-5, "the largest difference is {worst}");
+        assert!(
+            got[0].iter().zip(&input[0]).any(|(a, b)| a != b),
+            "the filter changed nothing"
+        );
+    }
+
+    // Spec: warp-modes R5. The convolution's work per frame is a small part of
+    // the filter's length: a second of stereo took 123 million multiply-adds
+    // when every tap ran on every frame.
+    #[test]
+    fn a_second_of_stereo_takes_under_twenty_million_multiply_adds() {
+        let input = [noise(5, 48_000), noise(6, 48_000)];
+        let source = [noise(7, FRAME), noise(8, FRAME)];
+        let mut corrector = Corrector::new(2);
+        MULTIPLY_ADDS.with(|total| total.set(0));
+        correct(&mut corrector, &input, &source, &[480]);
+        let total = MULTIPLY_ADDS.with(std::cell::Cell::get);
+        assert!(total < 20_000_000, "{total} multiply-adds");
+    }
+
+    // Spec: warp-modes R5. The fade from the old filter to the new is the
+    // definition's too, with two different filters and a block that starts
+    // anywhere in a hop.
+    #[test]
+    fn the_fft_convolution_fades_between_two_filters_as_the_definition_does() {
+        let mut work = Work::new();
+        let mut channels = [Channel::new(), Channel::new()];
+        for channel in &mut channels {
+            for (taps, seed) in [(&mut channel.before, 9), (&mut channel.now, 10)] {
+                taps.copy_from_slice(
+                    &noise(seed, TAPS)
+                        .iter()
+                        .map(|t| t * 0.1)
+                        .collect::<Vec<_>>(),
+                );
+            }
+            work.tap_spectra(&channel.now, &mut channel.now_spectra);
+            work.tap_spectra(&channel.before, &mut channel.before_spectra);
+        }
+        let input = noise(11, 4 * HOP);
+        let (mut a, mut b) = (input.clone(), input);
+        let mut at = HOP - 100;
+        let mut done = 0;
+        for n in [100, 17, 300, 1, 63, 64, 500] {
+            convolve(
+                &mut work,
+                &mut channels[0],
+                &mut a[done..done + n],
+                at % HOP,
+            );
+            convolve_reference(&mut channels[1], &mut b[done..done + n], at % HOP);
+            (at, done) = (at + n, done + n);
+        }
+        let worst = a[..done]
+            .iter()
+            .zip(&b)
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0f32, f32::max);
+        assert!(worst < 1e-5, "the largest difference is {worst}");
     }
 }

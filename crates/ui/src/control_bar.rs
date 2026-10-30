@@ -106,6 +106,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::CaptureMidi => Some(CAPTURE_MIDI),
         Element::NudgeDown | Element::NudgeUp => Some(ids::PHASE_NUDGE),
         Element::TapTempo => Some(ids::TAP_TEMPO),
+        Element::ExternalSync => Some(ids::SET_EXTERNAL_SYNC),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -124,6 +125,10 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::AutomationArm => Some(Invocation::new(AUTOMATION_ARM, json!({}))),
         Element::CaptureMidi => Some(Invocation::new(CAPTURE_MIDI, json!({}))),
         Element::TapTempo => Some(Invocation::new(ids::TAP_TEMPO, json!({}))),
+        Element::ExternalSync => Some(Invocation::new(
+            ids::SET_EXTERNAL_SYNC,
+            json!({ "on": !shell.external_sync() }),
+        )),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
         Element::Loop => Some(Invocation::new(
@@ -328,6 +333,22 @@ impl TransportFields {
                     ..Look::default()
                 });
             }
+            Element::ExternalSync => {
+                // Spec: midi-clock R15, R27. The song follows the incoming
+                // clock while it is on.
+                let on = shell.external_sync();
+                return Some(Look {
+                    on,
+                    text: Some("EXT".to_owned()),
+                    value: Some(if on { "on" } else { "off" }.to_owned()),
+                    description: Some(
+                        "Makes the song follow the tempo, start, stop and position of the \
+                         MIDI clock an input with Sync on receives."
+                            .to_owned(),
+                    ),
+                    ..Look::default()
+                });
+            }
             Element::NudgeDown | Element::NudgeUp => {
                 // Spec: transport R28, R29. Pressed while held, and off while
                 // an outside tempo leads.
@@ -384,9 +405,16 @@ impl TransportFields {
             group_name(field.group),
             transport::group_text(shell, field.group)
         );
-        if !transport::editable(shell, field.group) {
+        let editable = transport::editable(shell, field.group);
+        if !editable {
+            // Spec: midi-clock R17. With EXT on, the clock sets the tempo.
+            let why = if field.group == Group::Tempo && shell.external_tempo().is_some() {
+                "the incoming MIDI clock sets it"
+            } else {
+                "the song changes it along the arrangement"
+            };
             description = format!(
-                "{} {}: the song changes it along the arrangement, so it can't be set here.",
+                "{} {}: {why}, so it can't be set here.",
                 group_name(field.group),
                 transport::group_text(shell, field.group)
             );
@@ -406,6 +434,7 @@ impl TransportFields {
         }
         Some(Look {
             automated,
+            disabled: !editable,
             entry: typed.is_some(),
             text: Some(typed.unwrap_or_else(|| shown.clone())),
             value: Some(shown),

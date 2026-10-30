@@ -24,7 +24,10 @@ fn every_control_has_a_role_a_name_and_a_value_or_a_note() {
         // (tests/midi_input.rs).
         if matches!(
             placement.element,
-            Element::SyncLamps | Element::ResyncExternalHardware
+            Element::ExternalSync
+                | Element::SyncInput
+                | Element::SyncOutput
+                | Element::ResyncExternalHardware
         ) {
             continue;
         }
@@ -313,7 +316,10 @@ fn controls_are_drawn_where_the_layout_places_them() {
         // Sync on or Show Resync Button is on (tests/midi_input.rs).
         if matches!(
             placement.element,
-            Element::SyncLamps | Element::ResyncExternalHardware
+            Element::ExternalSync
+                | Element::SyncInput
+                | Element::SyncOutput
+                | Element::ResyncExternalHardware
         ) {
             continue;
         }

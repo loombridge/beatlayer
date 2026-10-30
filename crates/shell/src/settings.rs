@@ -222,6 +222,9 @@ pub struct MidiPrefs {
     /// R10): the Control Bar shows Resync External Hardware. Off in a new
     /// install.
     pub show_resync_button: bool,
+    /// Whether EXT is on: the song follows the incoming MIDI clock (the MIDI
+    /// clock spec, R15). Off in a new install.
+    pub external_sync: bool,
     /// The Control Surfaces table's rows, by the surface's ID and the ports'
     /// names, so they apply again whatever set is open (control surfaces
     /// R2). A file from before the table has none, which reads as six empty

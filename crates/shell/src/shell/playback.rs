@@ -239,6 +239,11 @@ impl Shell {
         if std::mem::replace(&mut self.nudge_view, nudge_view) != nudge_view {
             self.touch();
         }
+        // Spec: midi-clock R17. The Tempo field shows the clock the song
+        // follows.
+        if self.hear_sync_in() {
+            self.touch();
+        }
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);

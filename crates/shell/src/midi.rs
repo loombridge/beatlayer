@@ -34,6 +34,9 @@ pub struct MidiHost {
     clock: Option<bl_core::clock::TestClock>,
     /// Show Resync Button (the MIDI clock spec, R10).
     show_resync_button: bool,
+    /// Whether EXT is on (R15); the song follows only while an input has
+    /// Sync on.
+    external_sync: bool,
 }
 
 impl std::fmt::Debug for MidiHost {
@@ -115,6 +118,7 @@ impl MidiHost {
             sender,
             clock: None,
             show_resync_button: prefs.show_resync_button,
+            external_sync: prefs.external_sync,
         };
         // Spec: control-surfaces R2. The rows apply again at once, and
         // wait for ports that aren't there.
@@ -193,6 +197,7 @@ impl MidiHost {
                 rows
             },
             show_resync_button: self.show_resync_button,
+            external_sync: self.external_sync,
         }
     }
 
@@ -350,6 +355,24 @@ impl MidiHost {
     #[must_use]
     pub fn sync_outputs(&self) -> Vec<bl_core::midi::SyncOutput> {
         self.ports.sync_outputs()
+    }
+
+    /// The open inputs with Sync on and their Sync Delay: where the engine
+    /// follows MIDI clock from.
+    #[must_use]
+    pub fn sync_inputs(&self) -> Vec<bl_core::midi::SyncInput> {
+        self.ports.sync_inputs()
+    }
+
+    /// Whether EXT is kept on; it takes effect while an input has Sync on.
+    #[must_use]
+    pub fn external_sync(&self) -> bool {
+        self.external_sync
+    }
+
+    /// Switches the kept EXT preference.
+    pub fn set_external_sync(&mut self, on: bool) {
+        self.external_sync = on;
     }
 
     /// Whether Show Resync Button is on.

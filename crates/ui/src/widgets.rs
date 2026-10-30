@@ -149,10 +149,7 @@ fn paint(
         }
     } else if matches!(
         placement.element,
-        Element::KeyIndicators
-            | Element::RemoteIndicators
-            | Element::MidiIndicators
-            | Element::SyncLamps
+        Element::KeyIndicators | Element::RemoteIndicators | Element::MidiIndicators
     ) && live
     {
         lamps(
@@ -162,6 +159,15 @@ fn paint(
             c.accent.0,
             ink,
         );
+    } else if matches!(placement.element, Element::SyncInput | Element::SyncOutput) && live {
+        // Spec: midi-clock R16, R12, R27. One lamp, lit or dark.
+        let lamp = Rect::from_center_size(rect.center(), vec2(rect.width().min(8.0) - 2.0, 3.0));
+        let colour = if look.number.unwrap_or_default() == 0.0 {
+            ink.gamma_multiply(0.6)
+        } else {
+            c.accent.0
+        };
+        painter.rect_filled(lamp, 1.0, colour);
     } else {
         icon(&painter, placement.element, rect, ink, look.on, theme);
     }
@@ -330,7 +336,8 @@ fn icon(
         Element::KeyIndicators
         | Element::RemoteIndicators
         | Element::MidiIndicators
-        | Element::SyncLamps
+        | Element::SyncInput
+        | Element::SyncOutput
         | Element::Overload => {
             let lamp = Rect::from_center_size(
                 pos2(c.x, c.y - 2.5),

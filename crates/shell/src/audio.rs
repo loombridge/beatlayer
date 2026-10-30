@@ -478,6 +478,10 @@ pub struct AudioHost {
     /// The output ports with Sync on, which every engine's clock out goes to
     /// (WP-7.11).
     sync_outputs: Vec<bl_core::midi::SyncOutput>,
+    /// The input ports with Sync on and EXT, which every engine's clock
+    /// follower reads (midi-clock R14, R15).
+    sync_inputs: Vec<bl_core::midi::SyncInput>,
+    external_sync: bool,
     /// The output latency and round trip, in frames, the engine was last
     /// told (WP-5.34).
     latency_sent: (u32, u32),
@@ -566,6 +570,8 @@ impl AudioHost {
             midi: None,
             midi_out: None,
             sync_outputs: Vec::new(),
+            sync_inputs: Vec::new(),
+            external_sync: false,
             latency_sent: (0, 0),
             test_clock: None,
         }
@@ -601,6 +607,39 @@ impl AudioHost {
             engine.sync_outputs(&outputs);
         }
         self.sync_outputs = outputs;
+    }
+
+    /// Sets the input ports with Sync on and their Sync Delay, which the
+    /// engine follows MIDI clock from (the MIDI clock spec, R14): now, and
+    /// for every engine that starts.
+    pub fn set_sync_inputs(&mut self, inputs: Vec<bl_core::midi::SyncInput>) {
+        if inputs == self.sync_inputs {
+            return;
+        }
+        if let Some(engine) = &self.engine {
+            engine.sync_inputs(&inputs);
+        }
+        self.sync_inputs = inputs;
+    }
+
+    /// Switches EXT: whether the engine follows the incoming MIDI clock (R15,
+    /// R17): now, and for every engine that starts.
+    pub fn set_external_sync(&mut self, on: bool) {
+        if on == self.external_sync {
+            return;
+        }
+        if let Some(engine) = &self.engine {
+            engine.set_external_sync(on);
+        }
+        self.external_sync = on;
+    }
+
+    /// What the engine reports of the MIDI clock it follows; all zeros while
+    /// none runs.
+    pub fn sync_in_state(&mut self) -> bl_engine::SyncInState {
+        self.engine
+            .as_mut()
+            .map_or_else(Default::default, |engine| engine.state().sync_in)
     }
 
     /// What the engine reports of the MIDI clock it sends; all zeros while
@@ -1497,6 +1536,8 @@ impl AudioHost {
         // launching waits for the right grid from the first block.
         engine.session(SessionCommand::SetQuantization(self.launch));
         engine.sync_outputs(&self.sync_outputs);
+        engine.sync_inputs(&self.sync_inputs);
+        engine.set_external_sync(self.external_sync);
         let _ = engine.flush(ENGINE_START_TIMEOUT);
         handoff
             .push(processor)

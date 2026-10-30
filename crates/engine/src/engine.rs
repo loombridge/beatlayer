@@ -129,6 +129,33 @@ impl Sender {
         }
     }
 
+    /// Sends the input ports with Sync on and their Sync Delay, which the
+    /// clock follower reads (`docs/specs/midi-clock.md`, R14). The engine
+    /// keeps the first [`MAX_SYNC_INPUTS`](crate::MAX_SYNC_INPUTS).
+    pub fn sync_inputs(&mut self, inputs: &[bl_core::midi::SyncInput]) {
+        let count = inputs.len().min(crate::MAX_SYNC_INPUTS) as u8;
+        if count == 0 {
+            self.push(Message::SyncInput {
+                index: 0,
+                count,
+                input: None,
+            });
+        }
+        for (index, &input) in inputs.iter().take(usize::from(count)).enumerate() {
+            self.push(Message::SyncInput {
+                index: index as u8,
+                count,
+                input: Some(input),
+            });
+        }
+    }
+
+    /// Switches EXT: whether the song follows the incoming clock
+    /// (`docs/specs/midi-clock.md`, R17).
+    pub fn external_sync(&mut self, on: bool) {
+        self.push(Message::ExternalSync(on));
+    }
+
     /// Sends a parameter change.
     pub fn send_param(&mut self, event: ParamEvent) {
         self.push(Message::Param(event));
@@ -274,6 +301,8 @@ enum Request {
     /// The output ports with Sync on and their options (WP-7.11), kept for
     /// every processor that follows.
     SyncOutputs(Vec<bl_core::midi::SyncOutput>),
+    SyncInputs(Vec<bl_core::midi::SyncInput>),
+    ExternalSync(bool),
     /// A Session View command (WP-3.2).
     Session(SessionCommand),
     /// What the audio thread says a launched scene put in place: compile
@@ -384,6 +413,8 @@ impl std::fmt::Debug for Request {
             Self::Schedule(_) => "Schedule",
             Self::Cancel(_) => "Cancel",
             Self::SyncOutputs(_) => "SyncOutputs",
+            Self::SyncInputs(_) => "SyncInputs",
+            Self::ExternalSync(_) => "ExternalSync",
             Self::Session(_) => "Session",
             Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
@@ -659,6 +690,20 @@ impl Engine {
         self.request(Request::SyncOutputs(outputs.to_vec()));
     }
 
+    /// Sets the input ports with Sync on and their Sync Delay, which the
+    /// clock follower reads (`docs/specs/midi-clock.md`, R14). They go to
+    /// the processor running now and to every one after it.
+    pub fn sync_inputs(&self, inputs: &[bl_core::midi::SyncInput]) {
+        self.request(Request::SyncInputs(inputs.to_vec()));
+    }
+
+    /// Switches EXT: whether the song follows the incoming clock
+    /// (`docs/specs/midi-clock.md`, R17). It goes to the processor running
+    /// now and to every one after it.
+    pub fn set_external_sync(&self, on: bool) {
+        self.request(Request::ExternalSync(on));
+    }
+
     /// Schedules a command at a musical position (D17).
     pub fn schedule(&self, command: ScheduledCommand) {
         self.request(Request::Schedule(command));
@@ -793,6 +838,8 @@ fn compile_loop(
     let mut flushes: Vec<mpsc::Sender<()>> = Vec::new();
     let mut detached = Detached::new();
     let mut sync_outputs = Vec::new();
+    let mut sync_inputs = Vec::new();
+    let mut external_sync = false;
     loop {
         // While messages wait for room, look again every millisecond.
         let first = if sender.as_ref().is_some_and(|s| s.backlog() > 0) {
@@ -906,6 +953,18 @@ fn compile_loop(
                     }
                     sync_outputs = outputs;
                 }
+                Request::SyncInputs(inputs) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.sync_inputs(&inputs);
+                    }
+                    sync_inputs = inputs;
+                }
+                Request::ExternalSync(on) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.external_sync(on);
+                    }
+                    external_sync = on;
+                }
                 Request::Session(command) => match sender.as_mut() {
                     Some(sender) => sender.session(command),
                     // Spec: device-changes R7. Nothing plays while no device
@@ -973,6 +1032,8 @@ fn compile_loop(
                     if reply.send(processor).is_ok() {
                         let mut next = next;
                         next.sync_outputs(&sync_outputs);
+                        next.sync_inputs(&sync_inputs);
+                        next.external_sync(external_sync);
                         sender = Some(next);
                     } else {
                         // Nobody waits for it any more, so nothing runs it,

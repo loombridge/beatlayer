@@ -785,7 +785,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 7.4 | done | 30 October 2026 | [#528](https://github.com/loombridge/beatlayer/pull/528): feedback to Remote outputs through each law's inverse, once per poll with no echo and a full send on load, on a new mapping and when Remote turns on, the Control Bar's remote and key indicator lamps, and mapped record and slot controls acting as clicks, with the lamps in `remote.state` |
 | 7.5 | done | 30 October 2026 | [#516](https://github.com/loombridge/beatlayer/pull/516): the `ControlSurface` trait and its host thread in `bl-control`, the Control Surfaces table with Dump on the Tempo & MIDI page kept in the preferences, surfaces owning their ports after manual mappings, surface notes reaching tracks, a test surface, and the `control_surface.*` commands |
 | 7.6 | done | 30 October 2026 | [#531](https://github.com/loombridge/beatlayer/pull/531): instant mappings in the shell, with named banks of eight for every native device, rack macros and plug-in configured lists, Lock to Control Surface with the hand icon and the armed instrument locked, session rings drawn over the Session View, track banks, and the `control_surface.lock`, `unlock`, `move_ring`, `banks` and `set_bank` commands |
-| 7.7 | todo |  |  |
+| 7.7 | done | 30 October 2026 | [#537](https://github.com/loombridge/beatlayer/pull/537): controller templates, with Beatlayer's TOML surface files and their line-numbered errors, the template surface, the bundled Generic 8 + 8, the User Library's Controller Templates folder, `template:<name>` surface IDs and the `control_surface.templates` command |
 | 7.8 | todo |  |  |
 | 7.9 | todo |  |  |
 | 7.10 | todo |  |  |

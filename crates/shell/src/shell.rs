@@ -1689,6 +1689,15 @@ impl Shell {
                 ),
             });
         }
+        if id == bl_shell_spec::transport::SET_RECORD_QUANTIZATION
+            && let Some(reason) = self.record_quantization_locked()
+        {
+            // Spec: recording R21.
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: reason.to_owned(),
+            });
+        }
         if self.edit_gesture.is_some()
             && (model::handles(id)
                 || audio_ids::handles(id)

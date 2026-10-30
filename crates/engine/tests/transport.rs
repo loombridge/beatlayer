@@ -662,6 +662,11 @@ fn every_transport_command_runs_by_id() {
     );
     run(
         &mut rig,
+        "transport.set_record_quantization",
+        json!({ "quantization": "1/16" }),
+    );
+    run(
+        &mut rig,
         "transport.set_recording",
         json!({ "recording": true }),
     );

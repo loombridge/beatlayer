@@ -65,6 +65,7 @@ mod plugin_panel;
 mod rack_presets;
 mod rack_view;
 mod realtime_dialog;
+mod record_quantization;
 mod recovery;
 mod sample_display;
 mod sample_editor;

@@ -23764,6 +23764,79 @@ One of:
 
 </details>
 
+### `RecordQuantization`
+
+A Record Quantization value: No Quantization or the note values of the Edit menu's submenu, in the menu's order.
+
+One of:
+
+- `"none"`: No Quantization: recorded notes stay where they were played.
+- `"1/4"`: Quarter notes.
+- `"1/8"`: Eighth notes.
+- `"1/8t"`: Eighth-note triplets.
+- `"1/8+1/8t"`: Eighth notes and eighth-note triplets together.
+- `"1/16"`: Sixteenth notes.
+- `"1/16t"`: Sixteenth-note triplets.
+- `"1/16+1/16t"`: Sixteenth notes and sixteenth-note triplets together.
+- `"1/32"`: Thirty-second notes.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A Record Quantization value: No Quantization or the note values of the Edit menu's submenu, in the menu's order.",
+  "oneOf": [
+    {
+      "const": "none",
+      "description": "No Quantization: recorded notes stay where they were played.",
+      "type": "string"
+    },
+    {
+      "const": "1/4",
+      "description": "Quarter notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/8",
+      "description": "Eighth notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/8t",
+      "description": "Eighth-note triplets.",
+      "type": "string"
+    },
+    {
+      "const": "1/8+1/8t",
+      "description": "Eighth notes and eighth-note triplets together.",
+      "type": "string"
+    },
+    {
+      "const": "1/16",
+      "description": "Sixteenth notes.",
+      "type": "string"
+    },
+    {
+      "const": "1/16t",
+      "description": "Sixteenth-note triplets.",
+      "type": "string"
+    },
+    {
+      "const": "1/16+1/16t",
+      "description": "Sixteenth notes and sixteenth-note triplets together.",
+      "type": "string"
+    },
+    {
+      "const": "1/32",
+      "description": "Thirty-second notes.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `RecordedFileReport`
 
 A file a recording wrote.
@@ -32233,6 +32306,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `punch_in` | boolean | yes | Whether Punch-In is on. |
 | `punch_out` | boolean | yes | Whether Punch-Out is on. |
 | `midi_overdub` | boolean | yes | Whether MIDI Arrangement Overdub is on. |
+| `record_quantization` | [`RecordQuantization`](#recordquantization) | yes | Record Quantization, the grid recorded notes are moved onto (the recording spec, R17): `none` or a note value such as `1/16`. |
+| `record_quantization_last` | [`RecordQuantization`](#recordquantization) | yes | The last Record Quantization value other than `none` that was chosen, which `transport.set_record_quantization` with `on` set to true returns to. |
 | `automation_arm` | boolean | yes | Whether Automation Arm is on (view state, not saved with the set). |
 | `automation_record_mode` | [`AutomationRecordMode`](#automationrecordmode) | yes | The mode an Arrangement recording writes control moves in, as `settings.set_automation_record_mode` sets it (the automation spec, R18). |
 | `recording` | [`RunningRecording`](#runningrecording) or null | yes | The recording under way, from the moment recording starts until its clips are made; null when none is. |
@@ -32334,6 +32409,14 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether Punch-Out is on.",
       "type": "boolean"
     },
+    "record_quantization": {
+      "$ref": "#/$defs/RecordQuantization",
+      "description": "Record Quantization, the grid recorded notes are moved onto (the recording spec, R17): `none` or a note value such as `1/16`."
+    },
+    "record_quantization_last": {
+      "$ref": "#/$defs/RecordQuantization",
+      "description": "The last Record Quantization value other than `none` that was chosen, which `transport.set_record_quantization` with `on` set to true returns to."
+    },
     "recording": {
       "anyOf": [
         {
@@ -32398,6 +32481,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "punch_in",
     "punch_out",
     "midi_overdub",
+    "record_quantization",
+    "record_quantization_last",
     "automation_arm",
     "automation_record_mode",
     "recording",

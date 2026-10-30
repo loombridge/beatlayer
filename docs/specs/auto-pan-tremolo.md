@@ -67,4 +67,4 @@ Tremolo mode adds Harmonic (modulating high and low frequencies in antiphase acr
 ## Not built yet
 
 - The display cell's real-time waveform drawing and visual handles: display cell remains a black frame.
-- Auto Pan Legacy mapping (M9).
+- Auto Pan Legacy, which isn't built: a Live set or preset holding it maps it to Auto Pan-Tremolo ([Live device mapping](live-device-mapping.md) R15).

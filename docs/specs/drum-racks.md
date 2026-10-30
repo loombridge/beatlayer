@@ -1,7 +1,7 @@
 # Drum racks
 
-- **Status:** implemented (WP-5.6: R1 to R28; WP-6.17: R29; every rule has a passing test)
-- **Work packages:** WP-5.6; WP-6.17 (per-note expressions in a drum rack: R29). What every rack has (the rack in the document and the engine, chains and their mixers, the chain list, presets and hot-swap) is [racks](racks.md)' (WP-5.1, WP-5.2, WP-5.7, WP-5.8); a drum rack's Macro Controls are [macros](macros.md)'; Slice to New MIDI Track's drum rack of samplers is WP-4.16's; pad controllers that follow the visible pads come with control surfaces (Phase 7); similar-sample swapping (S-SWAP-001 to S-SWAP-005) is Phase 9's
+- **Status:** partial (WP-5.6: R1 to R28; WP-6.17: R29; each has a passing test; R30 and R31 are WP-9.10's)
+- **Work packages:** WP-5.6; the Drum Synths play on its pads ([the Drum Synths](drum-synths.md), WP-8.24 and WP-8.25); WP-6.17 (per-note expressions in a drum rack: R29). What every rack has (the rack in the document and the engine, chains and their mixers, the chain list, presets and hot-swap) is [racks](racks.md)' (WP-5.1, WP-5.2, WP-5.7, WP-5.8); a drum rack's Macro Controls are [macros](macros.md)'; Slice to New MIDI Track's drum rack of samplers is WP-4.16's; pad controllers that follow the visible pads come with control surfaces (Phase 7); similar-sample swapping on pads (S-SWAP-001 to S-SWAP-005) is WP-9.10's, R30 and R31, with [sound similarity](sound-similarity.md) R20 to R30
 - **Parity-matrix row:** Racks and device features: Drum Rack pads, choke groups, return chains, extract chains
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026 (chapters 17, 23, 25 and 42), and the UI parity reference's rows [L-DEV-008](../ui-parity/layout.md), [C-DEVICE-013](../ui-parity/menus.md) and [S-VIEW-007](../ui-parity/shortcuts.toml)
 
@@ -28,6 +28,7 @@ This spec covers the drum rack's notes and chains, choke groups, previews, sends
 | S9 | Beatlayer | [Racks](racks.md) R1, R5, R9, R10, R16, R18 to R24, R38 and R42 to R45; [sampler](sampler.md) R2 and R11; [mixer](mixer.md) R7, R11 and R18; [routing](routing.md) R7, R14 and R16; [MIDI I/O](midi-io.md) R19 and R20; [delay compensation](delay-compensation.md) R2 | What every rack has; the sampler plays its sample at its own pitch at C3 and loads samples by content hash; sends start at −∞ dB and glide; returns under Solo in Place; routing order and labels; Live's octave numbering (C3 is note 60) and the computer keyboard's velocity of 100 |
 | S10 | Beatlayer | [The improvements](../05-improvements.md), rules G1 and G2; [the architecture](../02-architecture.md), D17 and "Real-time rules" | Every gain reaches −∞ dB; every parameter is automatable and modulatable; every action is a registered command whose effect reads back; nothing on the audio thread allocates, locks or blocks |
 | S11 | Beatlayer | [MPE](mpe.md) R5 to R7 and [device framework](device-framework.md) R33 | A note's per-note expressions reach devices with its key and note ID, and follow a note that a device moves |
+| S12 | Manual | Live 12 reference manual, chapter 3, section 3.4 "Sound Similarity", and chapter 42, section 42.23 (S-SWAP-001 to 005, I-HOLD-004) | Similar sample swapping replaces the samples in a Drum Rack's pads with similar sounds; Option held over a Drum Rack shows the swap controls on its pads |
 
 ## Rules
 
@@ -90,6 +91,9 @@ This spec covers the drum rack's notes and chains, choke groups, previews, sends
 
 - **R29.** A per-note expression reaches every chain the note's note-on reached, at the key that chain played the note on (its Play note, or the note's own key on All Notes), with the note's ID; one for a note no chain received goes nowhere. The pitch, slide and pressure a clip or an MPE controller gives a note therefore reach the pad's instrument as that note's own. (S2, S11)
 
+- **R30.** While Option (Alt on Windows and Linux) is held over the pad view (S-SWAP-005), each pad whose chain plays one Simpler or Drum Sampler shows Previous Similar and Next Similar arrows over its left and right edges; a click swaps that pad's sample ([sound similarity](sound-similarity.md) R21, R26). With a pad selected and the pads focused, Cmd-Right, Cmd-Left, Cmd-Up and Cmd-Down (S-SWAP-001 to 004) act on its sampler. (S12)
+- **R31.** A pad swap replaces only the sample in the pad's sampler: the pad's Receive and Play notes, choke group, chain mixer, sends and the sampler's parameters stay; the chain's name follows the new sample's when it was the old sample's name. One undo step. (Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -123,3 +127,4 @@ This spec covers the drum rack's notes and chains, choke groups, previews, sends
 | R27 | `crates/model/src/repr.rs`, `drum_racks_save_and_load_with_returns`; `crates/cli/tests/agent.rs`, `an_agent_builds_a_kit_and_reads_it_back` | unit; agent test |
 | R28 | `crates/engine/tests/drum_racks.rs`, `a_kit_renders_the_same_at_every_block_size`; `rtsan/tests/drum_racks.rs` | golden render; RealtimeSanitizer |
 | R29 | `crates/engine/tests/drum_racks.rs`, `a_bend_reaches_the_chain_the_note_reached_at_its_played_key_only` | real-time trap |
+| R30, R31 | to be written in WP-9.10: `crates/shell/tests/sample_swap.rs`, `crates/ui/tests/sample_swap.rs` | shell test, UI script |

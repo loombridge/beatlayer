@@ -1,7 +1,7 @@
 # Chorus-Ensemble
 
 - **Status:** implemented
-- **Work packages:** WP-5.20b
+- **Work packages:** WP-5.20b; Poli's built-in chorus reuses this chorus in its two-voice mode (WP-8.16, [Bass and Poli](bass-and-poli.md) R14)
 - **Parity-matrix row:** Audio effects: Chorus-Ensemble, to Live's current version (the 12.4 Chorus-Ensemble, with its ensemble mode)
 - **Checked against:** Live 12's reference manual, chapter 29 "Live Audio Effect Reference", section 29.8 "Chorus-Ensemble" and 29.8.1, read on 18 October 2026; the Live 12.4 release notes (5 May 2026); the ranges, defaults and algorithms the manual does not give are Beatlayer's own
 

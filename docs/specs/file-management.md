@@ -1,7 +1,7 @@
 # Templates and file management
 
 - **Status:** partial (R1 to R21 each have a passing test, but for the parts of R10 to R17 listed under "Not built yet")
-- **Work packages:** WP-2.25 (R1 to R6); WP-6.34 (Collect Files on Export, R7 to R9); WP-6.63 (the File Manager, Open Beatlayer Set Backups and Save a Copy..., R10 to R21). The save history, which lists a set's backups too, is [crash recovery](crash-recovery.md)'s (WP-6.39); the list of a set's plug-ins, which opens in the File Manager's place, is [the plug-in list](plugin-list.md)'s (WP-6.41); Create Pack, in the Manage Project view, is [set exchange](set-exchange.md)'s (WP-6.35b)
+- **Work packages:** WP-2.25 (R1 to R6); WP-6.34 (Collect Files on Export, R7 to R9); WP-6.63 (the File Manager, Open Beatlayer Set Backups and Save a Copy..., R10 to R21). The save history, which lists a set's backups too, is [crash recovery](crash-recovery.md)'s (WP-6.39); the list of a set's plug-ins, which opens in the File Manager's place, is [the plug-in list](plugin-list.md)'s (WP-6.41); Create Pack, in the Manage Project view, is [set exchange](set-exchange.md)'s (WP-6.35b); WP-9.25 (a video clip's movie, R22)
 - **Parity-matrix row:** Files and export: Sets, templates, Collect All and Save, File Manager (missing files); Clip, device preset, and rack preset files (the copying of a clip's files)
 - **Checked against:** the Live 12 reference manual (online edition), read on 14 October 2026, and for R7 to R21 on 20 October 2026; the Live 12 release notes, 12.2; the UI parity reference's rows L-SET-016, L-OTH-002, M-FILE-007, M-FILE-008, M-FILE-011, M-VIEW-007, C-BROWSER-014 and I-DROP-012
 
@@ -62,6 +62,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 - **R20.** Every action above is a registered command: `view.toggle_file_manager` (read) shows and hides the File Manager on a view; `file_manager.state` reports a view's sections and rows (external, as it lists files outside the project); `file_manager.replace_file` replaces or relinks a file (edit, or external when the new file is outside the project); `file_manager.hot_swap` arms the browser to replace a file, `file_manager.edit_file` opens one in the external sample editor and `file_manager.set_search_folder` names the folder the Automatic Search looks in; `set.relink_missing` takes the Automatic Search's switches and folder and returns each file's candidates; `set.collect_all_and_save` takes the groups to collect, and the project to collect for; `file_manager.delete_unused` moves files to the trash (destructive); `set.backups` (read) lists the backups, `set.open_backup` opens one, refusing while the open set has unsaved changes as `set.open` does, and `set.save_copy` saves a copy (both external). Each reads back in `file_manager.state`, `set.backups`, the query tool's `song`, or its result. (S16)
 - **R21.** The File Manager builds only the rows on screen, and every part reaches assistive technology: its view buttons as a tab list, each section as a group with its name and count, each row as a list item naming its file, its location and what uses it, and the switches and buttons with their names and states. The keyboard moves through it as through the browser's list (browser R7, R17). (S16)
+- **R22.** A video clip's movie is a media file: collected, relinked and listed by the File Manager as audio files are ([video](video.md) R14). (Beatlayer's own)
 
 ## Tests
 
@@ -88,6 +89,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 | R19 | `crates/shell/tests/file_manager.rs`, `save_a_copy_leaves_the_open_set_alone` | unit, through `Shell::run` on real folders |
 | R20 | `crates/shell/tests/file_manager.rs`, `the_file_manager_commands_are_registered_and_reach_the_agent_api` | unit |
 | R21 | `crates/ui/tests/file_manager.rs`, `accesskit_reaches_the_file_managers_tabs_sections_and_rows` | UI script |
+| R22 | to be written in WP-9.25 | shell test |
 
 ## Not built yet
 

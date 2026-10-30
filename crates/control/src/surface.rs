@@ -30,6 +30,8 @@ pub struct Transport {
     pub playing: bool,
     /// The playhead.
     pub position: Ticks,
+    /// The insert marker, where Play starts.
+    pub insert_marker: Ticks,
     /// Whether the Arrangement loop is on.
     pub loop_on: bool,
     /// Whether the transport is recording.
@@ -87,6 +89,8 @@ pub struct ReadModel {
     /// The drum rack on the selected track, if its first instrument at the
     /// top level is one (supported controllers R15, R16).
     pub drum: Option<DrumView>,
+    /// Whether the Session View is the main view, not the Arrangement.
+    pub session_view: bool,
 }
 
 impl ReadModel {
@@ -100,6 +104,7 @@ impl ReadModel {
             transport: Transport {
                 playing: false,
                 position: Ticks::ZERO,
+                insert_marker: Ticks::ZERO,
                 loop_on: false,
                 recording: false,
                 loop_start: Ticks::ZERO,
@@ -115,6 +120,7 @@ impl ReadModel {
             session_record: false,
             metronome: false,
             drum: None,
+            session_view: false,
         }
     }
 
@@ -385,6 +391,7 @@ pub struct Request {
 #[derive(Debug)]
 pub struct Cx {
     pub(crate) row: usize,
+    input: String,
     pub(crate) now: Instant,
     pub(crate) out: Vec<Out>,
     pub(crate) requests: Vec<Ask>,
@@ -396,12 +403,26 @@ impl Cx {
     pub(crate) fn new(row: usize, now: Instant) -> Self {
         Self {
             row,
+            input: String::new(),
             now,
             out: Vec::new(),
             requests: Vec::new(),
             handed: Vec::new(),
             played: Vec::new(),
         }
+    }
+
+    /// Names the input the surface runs on.
+    pub(crate) fn on(mut self, input: &str) -> Self {
+        self.input = input.to_owned();
+        self
+    }
+
+    /// The name of the surface's input port: a controller's size can be in
+    /// it.
+    #[must_use]
+    pub fn input(&self) -> &str {
+        &self.input
     }
 
     /// The surface's row in the Control Surfaces table, from 0: where the
@@ -605,6 +626,9 @@ pub struct Recognise {
     /// Text, in lower case, that the name of the controller's surface ports
     /// contains.
     pub port: &'static str,
+    /// A match of its own for a controller whose ports go by more than one
+    /// name, in place of `port`; given the name in lower case.
+    pub test: Option<fn(&str) -> bool>,
     /// The maker's three bytes in the device inquiry's reply.
     pub maker: [u8; 3],
 }
@@ -614,7 +638,9 @@ impl Recognise {
     /// whatever the case (R72).
     #[must_use]
     pub fn names(&self, port: &str) -> bool {
-        port.to_lowercase().contains(self.port)
+        let port = port.to_lowercase();
+        self.test
+            .map_or_else(|| port.contains(self.port), |test| test(&port))
     }
 
     /// Whether `bytes` is a device inquiry's reply from the maker.
@@ -643,6 +669,8 @@ pub fn kinds() -> &'static [Arc<Kind>] {
     static KINDS: std::sync::OnceLock<Vec<Arc<Kind>>> = std::sync::OnceLock::new();
     KINDS.get_or_init(|| {
         vec![
+            Arc::new(crate::launchkey::mk3()),
+            Arc::new(crate::launchkey::mk4()),
             Arc::new(crate::grid::mini()),
             Arc::new(crate::grid::pro()),
             Arc::new(crate::grid::launchpad_x()),

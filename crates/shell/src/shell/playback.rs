@@ -61,6 +61,7 @@ impl Shell {
         }
         changed |= self.learn_midi();
         changed |= self.poll_remote();
+        self.poll_feedback();
         changed |= self.poll_surfaces();
         self.expire_previews();
         changed |= self.track_midi_activity();
@@ -232,6 +233,12 @@ impl Shell {
             );
         }
         self.scene_override = self.audio.scene_override();
+        // Spec: transport R28, R29. The Phase Nudge buttons show pressed
+        // while held and are off while an outside tempo leads.
+        let nudge_view = (engine.phase_nudge, engine.following);
+        if std::mem::replace(&mut self.nudge_view, nudge_view) != nudge_view {
+            self.touch();
+        }
         // Spec: session-view R24. The tracks a Session clip has taken over,
         // which the Back to Arrangement buttons light from.
         self.audio.session_over_into(&mut self.session_over);
@@ -274,6 +281,20 @@ impl Shell {
             }
         }
         engine
+    }
+
+    /// The Phase Nudge button held, as the shell last heard from the engine
+    /// (the transport spec, R27).
+    #[must_use]
+    pub fn phase_nudge(&self) -> Option<bl_engine::NudgeDirection> {
+        self.nudge_view.0
+    }
+
+    /// Whether an outside tempo leads, so the Phase Nudge buttons are off, as
+    /// the shell last heard from the engine (the transport spec, R29).
+    #[must_use]
+    pub fn following(&self) -> bool {
+        self.nudge_view.1
     }
 
     /// Whether the song is playing, as the shell last heard from the
@@ -433,6 +454,19 @@ impl Shell {
             } else if let Err(reason) = self.begin_recording() {
                 self.set_message(reason, true);
             }
+        }
+        if matches!(
+            command,
+            bl_engine::TransportCommand::PhaseNudge { held: true, .. }
+        ) && self.audio.transport_state().following
+        {
+            // Spec: transport R29. A release is still accepted, so a held
+            // nudge can end.
+            return Err(
+                "an incoming clock or Link session leads the tempo and keeps the \
+                        phase, so Phase Nudge is refused"
+                    .to_owned(),
+            );
         }
         self.audio.send_transport(command)
     }

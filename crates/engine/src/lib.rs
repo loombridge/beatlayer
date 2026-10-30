@@ -93,6 +93,7 @@ mod disjoint;
 pub mod display;
 pub mod drum;
 mod engine;
+pub mod follower;
 mod gc;
 mod input;
 mod layers;
@@ -147,11 +148,13 @@ pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use drum::ChainHits;
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};
+pub use follower::{Ask, Follow, Follower};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
 pub use message::{
-    Action, LoopRegion, ParamEvent, Punch, Report, ScheduledCommand, TransportCommand, When,
+    Action, LoopRegion, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
+    TransportCommand, When,
 };
 pub use midi::{
     MIDI_EVENTS_PER_BLOCK, MIDI_EVENTS_PER_TRACK, MIDI_PREVIEWS_PER_TRACK, MidiCounters, MidiEvent,

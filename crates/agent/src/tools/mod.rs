@@ -41,7 +41,9 @@ pub(crate) use checkpoint::Checkpoints;
 pub(crate) use lspk_agent::permission::class_names;
 pub(crate) use lspk_agent::tool_definition;
 pub use time::EngineMessage;
-pub(crate) use time::{Playhead, Schedule};
+pub(crate) use time::{
+    Playhead, Schedule, number_session, release_orphaned_nudges, session_numbers,
+};
 
 use crate::permission::{Decision, Mode, decide};
 use crate::server::Deferred;
@@ -60,6 +62,12 @@ pub(crate) struct State {
     pub(crate) engine_attached: bool,
     /// Where the engine last said the transport was.
     pub(crate) playhead: Option<Playhead>,
+    /// The Phase Nudge buttons agents hold, each with the number of the
+    /// session that pressed it, so the nudge ends with the session (the
+    /// transport spec, R28).
+    pub(crate) nudges: Vec<(u64, bl_engine::NudgeDirection)>,
+    /// How many sessions have been given a number.
+    pub(crate) sessions_numbered: u64,
 }
 
 /// The transport's playback commands (WP-1.5) and the Session View's

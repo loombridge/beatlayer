@@ -261,6 +261,7 @@ impl Program for Beatlayer {
         name: &str,
         args: Value,
     ) -> Result<ToolOutcome, String> {
+        tools::number_session(&mut self.state, call.session);
         let mut ctx = Ctx {
             mode: call.mode,
             shell: call.host,
@@ -670,6 +671,12 @@ impl Agent {
     /// the engine's transport for `transport`'s `status`. A new engine, after
     /// the device changed, gets every command still scheduled.
     pub fn sync_engine(&mut self, shell: &mut Shell) {
+        // Spec: transport R28. A Phase Nudge ends with the session that
+        // pressed it, however the session closed.
+        if !self.server.program().state.nudges.is_empty() {
+            let open = tools::session_numbers(self.server.sessions().map(|(_, session)| session));
+            tools::release_orphaned_nudges(&mut self.program().state, &open);
+        }
         let running = shell.audio().engine_running();
         if running != self.server.program().state.engine_attached {
             self.set_engine_attached(running);
@@ -724,6 +731,7 @@ impl Agent {
             transport.playing,
             transport.position,
             transport.insert_marker,
+            transport.following,
         ));
     }
 

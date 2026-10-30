@@ -815,6 +815,9 @@ pub struct Shell {
     /// The tempo and time signature a launched scene put in place of the
     /// set's, as the engine last published them (WP-3.5).
     scene_override: bl_engine::SceneOverride,
+    /// The Phase Nudge button held and whether an outside tempo leads, as the
+    /// engine last published them (the transport spec, R27 to R29).
+    nudge_view: (Option<bl_engine::NudgeDirection>, bool),
     /// The scene launched last since the set opened, which Capture and
     /// Insert Scene goes after.
     last_launched: Option<bl_model::SceneId>,
@@ -1358,6 +1361,7 @@ impl Shell {
             launched: BTreeMap::new(),
             playing_clip: None,
             scene_override: bl_engine::SceneOverride::default(),
+            nudge_view: (None, false),
             last_launched: None,
             session_over: Vec::new(),
             modulated: Vec::new(),

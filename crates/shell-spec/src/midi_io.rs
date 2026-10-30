@@ -177,8 +177,8 @@ pub struct PortInfo {
     /// sends clock. Kept now, acted on when sync is built.
     pub sync: bool,
     /// Remote: an input controls Beatlayer through the set's MIDI mappings
-    /// (the remote mapping spec, R7 and R8); an output sends feedback, kept
-    /// now and acted on when feedback is built.
+    /// (the remote mapping spec, R7 and R8); an output gets the values of
+    /// the mapped controls as feedback (R38 to R40).
     pub remote: bool,
     /// MPE: an input's messages reach tracks as MPE, each note on a channel of
     /// its own; an output has no MPE switch, and reads false.

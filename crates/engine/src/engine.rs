@@ -17,6 +17,7 @@ use crate::capture::{CAPTURE_RING, CapturedMidi};
 use crate::compiler::{Compiler, Update};
 use crate::display::Displays;
 use crate::drum::ChainHits;
+use crate::follower::Follower;
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
@@ -99,6 +100,12 @@ impl Sender {
     /// Sends the audio device's output latency in frames now (WP-5.34).
     pub fn output_latency(&mut self, frames: u32) {
         self.push(Message::OutputLatency(frames));
+    }
+
+    /// Sends the outside tempo the song follows from the next block on, or
+    /// `None` to follow none (the transport spec, R24).
+    pub fn follower(&mut self, follower: Option<Owned<Box<dyn Follower>>>) {
+        self.push(Message::Follower(follower));
     }
 
     /// Sends the output ports with Sync on and their options, which clock
@@ -277,6 +284,8 @@ enum Request {
     Record(Box<Owned<RecordingPlan>>),
     /// What to capture while the song plays a range in real time (WP-5.35).
     Render(Box<Owned<crate::render::RenderPlan>>),
+    /// The outside tempo the song follows (the transport spec, R24).
+    Follower(Box<Option<Owned<Box<dyn Follower>>>>),
     /// No processor runs any more: stop sending to it.
     Detach,
     /// Make a processor for these settings.
@@ -380,6 +389,7 @@ impl std::fmt::Debug for Request {
             Self::Flush(_) => "Flush",
             Self::Record(_) => "Record",
             Self::Render(_) => "Render",
+            Self::Follower(_) => "Follower",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
             Self::Loaded(_) => "Loaded",
@@ -570,6 +580,15 @@ impl Engine {
     /// the render is over.
     pub fn render(&self, plan: crate::render::RenderPlan) {
         self.request(Request::Render(Box::new(self.gc.wrap(plan))));
+    }
+
+    /// Sets the outside tempo the song follows (the transport spec, R24 to
+    /// R26), or with `None` stops following. The audio thread asks it once
+    /// per block and hands the one it replaces to the drop thread. An engine
+    /// restarted on another device starts with none.
+    pub fn set_follower(&self, follower: Option<Box<dyn Follower>>) {
+        let follower = follower.map(|follower| self.gc.wrap(follower));
+        self.request(Request::Follower(Box::new(follower)));
     }
 
     /// Reports `device`'s node's latency now, as a plug-in that restarted
@@ -920,6 +939,13 @@ fn compile_loop(
                     // While no processor runs, nothing renders in real time.
                     if let Some(sender) = sender.as_mut() {
                         sender.render(*plan);
+                    }
+                }
+                Request::Follower(follower) => {
+                    // While no processor runs, nothing follows; the one that
+                    // takes over starts with none.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.follower(*follower);
                     }
                 }
                 Request::Detach => {

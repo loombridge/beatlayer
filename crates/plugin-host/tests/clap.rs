@@ -571,6 +571,7 @@ fn playing(position: i64) -> TransportInfo {
     TransportInfo {
         playing: true,
         position: Frames(position),
+        ..TransportInfo::default()
     }
 }
 

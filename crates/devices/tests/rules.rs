@@ -220,6 +220,7 @@ fn every_parameter_is_modulatable_to_the_frame() {
                 TransportInfo {
                     playing: true,
                     position: Frames(0),
+                    ..TransportInfo::default()
                 },
             );
             let want = param.clamp(Travel::Param(param).played(param.default, 0.5)) as f32;

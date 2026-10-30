@@ -118,6 +118,7 @@ pub fn run_blocks(
         let transport = TransportInfo {
             playing: true,
             position: Frames(done as i64),
+            ..TransportInfo::default()
         };
         for (all, chunk) in out
             .iter_mut()
@@ -195,6 +196,8 @@ pub fn control(
                     position: Frames(
                         transport.position.get() + if transport.playing { done as i64 } else { 0 },
                     ),
+                    speed: transport.speed,
+                    ..TransportInfo::default()
                 },
                 sample_rate: RATE,
                 tempo,

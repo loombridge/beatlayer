@@ -1257,6 +1257,9 @@ impl MainWindowUi {
             {
                 self.transport.interact(ui, shell, field, &response, events);
             }
+            if placement.pending.is_none() {
+                self.transport.nudge(ui, shell, *el, &response, events);
+            }
             if response.has_focus() && strip == Strip::ControlBar {
                 self.last_control = *el;
             }
@@ -2268,6 +2271,41 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                     "The upper light flashes when MIDI reaches a track's input, the lower \
                      when a track sends MIDI to a port."
                         .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
+        Element::RemoteIndicators => {
+            // Spec: remote-mapping R41. The number holds the two lamps: 1 for
+            // the upper (a message taken), 2 for the lower (feedback sent).
+            let (taken, sent) = shell.remote_indicators();
+            Look {
+                number: Some(f64::from(u8::from(taken) | u8::from(sent) << 1)),
+                value: Some(
+                    [(taken, "receiving"), (sent, "sending")]
+                        .into_iter()
+                        .filter_map(|(on, what)| on.then_some(what))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ),
+                description: Some(
+                    "The upper light flashes when a mapping or a control surface takes a MIDI \
+                     message, or one is taken for learning, the lower when feedback or a \
+                     surface's message leaves for a port."
+                        .to_owned(),
+                ),
+                ..Look::default()
+            }
+        }
+        Element::KeyIndicators => {
+            // Spec: remote-mapping R41. The upper lamp flashes for a key a key
+            // mapping takes; the lower stays dark.
+            let (taken, _) = shell.key_indicators();
+            Look {
+                number: Some(f64::from(u8::from(taken))),
+                value: Some(if taken { "receiving" } else { "" }.to_owned()),
+                description: Some(
+                    "The upper light flashes when a key mapping takes a key.".to_owned(),
                 ),
                 ..Look::default()
             }

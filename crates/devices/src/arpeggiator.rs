@@ -510,10 +510,7 @@ impl Arpeggiator {
 impl NativeDevice for Arpeggiator {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let sample_rate = audio.sample_rate().as_f64();
-        let tempo = audio.tempo();
-        let bpm = tempo
-            .bpm_at(tempo.frames_to_ticks(audio.song_position(), audio.sample_rate()))
-            .get();
+        let bpm = audio.bpm();
 
         let hold_mode = value(params, HOLD) >= 0.5;
         if self.was_held_mode && !hold_mode {

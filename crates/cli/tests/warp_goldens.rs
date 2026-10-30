@@ -276,3 +276,61 @@ fn a_preview_against_a_running_song_lands_on_its_bar_lines() {
         "preview starts playing on bar line"
     );
 }
+
+/// Plays `name`'s song on the engine's real-time path, following `bpm`
+/// (the transport spec, R24), and returns its interleaved samples. An
+/// offline render has no follower.
+fn render_following(name: &str, bpm: f64, frames: usize) -> Vec<f32> {
+    let scene = fixture(name).expect("the fixture exists").scene();
+    let config = bl_engine::EngineConfig::new(SAMPLE_RATE, 512);
+    let mut registry = bl_engine::Registry::new();
+    bl_devices::register(&mut registry);
+    let registry = registry.with_media(std::sync::Arc::new(scene.media.clone()));
+    let collector = bl_engine::Collector::new();
+    let mut compiler = bl_engine::Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, _monitor) = bl_engine::channel(&config);
+    sender.send_update(compiler.sync(scene.document()));
+    let follower: Box<dyn bl_engine::Follower> = Box::new(bl_engine::testing::following(bpm));
+    sender.follower(Some(collector.handle().wrap(follower)));
+    for cue in &scene.cues {
+        sender.transport_at(cue.command, bl_engine::When::Frame(cue.at));
+    }
+    assert!(sender.flush());
+    let mut out = Vec::new();
+    let mut done = 0;
+    while done < frames {
+        let n = 512.min(frames - done);
+        processor.process(n);
+        let output = processor.output();
+        for i in 0..n {
+            out.push(output.channel(0)[i]);
+            out.push(output.channel(1)[i]);
+        }
+        done += n;
+    }
+    out
+}
+
+// Spec: transport R24
+#[test]
+fn a_warped_set_following_140_nulls_against_its_render_at_140() {
+    let (_, at_140) = render("warped-loop-140");
+    let following = render_following("warped-loop-120", 140.0, at_140.samples.len() / 2);
+    assert_eq!(following.len(), at_140.samples.len());
+    // Where the loop starts again, the set following 140 and the set at 140
+    // can start it a frame apart; every other frame reads the file where the
+    // maps put it, to within the golden tolerance.
+    let (mut worst, mut off) = (0.0f32, 0usize);
+    for (got, want) in following.iter().zip(&at_140.samples) {
+        let gap = (got - want).abs();
+        if gap > 5e-4 {
+            off += 1;
+        } else {
+            worst = worst.max(gap);
+        }
+    }
+    assert!(
+        off < 64,
+        "{off} samples differ by more than 5e-4 (worst of the rest {worst})"
+    );
+}

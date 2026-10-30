@@ -11,13 +11,15 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use bl_commands::{NoArgs, Permission};
-use bl_control::{Action, Hit, Law, Memory};
-use bl_core::midi::MidiMessage;
+use bl_control::{Action, Hit, Law, Memory, State};
+use bl_core::midi::{MidiMessage, PortId};
+use bl_engine::SlotState;
 use bl_model::modulation::Travel;
 use bl_model::{
     Command, ControlKind, CrossfadeAssign, MixerParam, ParamDescriptor, ParamKind, RemoteMapping,
-    RemoteSource, RemoteTarget,
+    RemoteMode, RemoteSource, RemoteTarget,
 };
+use bl_shell_spec::midi_io::PortDirection;
 use bl_shell_spec::remote as ids;
 use bl_shell_spec::remote::{MapMode, MappingInfo, MappingsResult};
 use serde_json::{Value, json};
@@ -55,6 +57,14 @@ pub(super) struct RemoteState {
     pub(super) map: MapState,
     applied: u64,
     pub(super) refused: u64,
+    /// What each mapping last told the outputs with Remote on (R39).
+    fed: HashMap<RemoteSource, Vec<MidiMessage>>,
+    /// The outputs with Remote on at the last poll.
+    outputs: Vec<PortId>,
+    /// The feedback messages sent, and the keys key mappings took (R41,
+    /// R43).
+    sent: u64,
+    keys: u64,
 }
 
 /// A command a mapped message runs.
@@ -118,6 +128,11 @@ impl Shell {
         // Spec: remote-mapping R29. A mapping that is new or changed starts
         // takeover afresh.
         let before = std::mem::replace(&mut self.remote.published, mappings.clone());
+        // Spec: remote-mapping R39. A mapping that is made or changed sends
+        // every value.
+        if mappings.iter().any(|m| !before.contains(m)) {
+            self.remote.fed.clear();
+        }
         self.remote.memory.retain(|source, _| {
             mappings
                 .iter()
@@ -130,8 +145,163 @@ impl Shell {
     pub(super) fn forget_remote_values(&mut self) {
         self.remote.memory.clear();
         self.remote.run = None;
+        // Spec: remote-mapping R39. A set that loads sends every value.
+        self.remote.fed.clear();
         // Spec: map-modes R2. A map mode is off when a set opens.
         self.set_map_mode(MapMode::Off);
+    }
+
+    /// The feedback and indicator counts: messages sent to outputs with
+    /// Remote on, and keys key mappings took (R41, R43).
+    pub(super) fn remote_traffic(&self) -> (u64, u64) {
+        (self.remote.sent, self.remote.keys)
+    }
+
+    /// The remote input's counts, lamps and takeover states, for
+    /// `remote.state` (R43).
+    pub(super) fn remote_report(&self) -> (ids::Counts, ids::Lamps, Vec<ids::TakeoverInfo>) {
+        let stats = self.midi.sender().stats().snapshot();
+        let [remote_input, remote_output, key_input] = self.remote_lamps();
+        let takeover = self
+            .editor
+            .document()
+            .settings()
+            .remote
+            .iter()
+            .filter(|m| {
+                m.kind == ControlKind::Continuous
+                    && matches!(m.mode, RemoteMode::Absolute | RemoteMode::Absolute14)
+            })
+            .map(|m| {
+                let memory = self.remote.memory.get(&m.source);
+                ids::TakeoverInfo {
+                    source: m.source.clone(),
+                    state: if memory.is_none_or(Memory::following) {
+                        ids::TakeoverState::Following
+                    } else {
+                        ids::TakeoverState::Waiting
+                    },
+                    last: memory.and_then(Memory::last),
+                }
+            })
+            .collect();
+        let counts = ids::Counts {
+            taken: stats.remote_taken,
+            dropped: stats.remote_dropped,
+            unmapped: stats.remote_unmapped,
+            applied: self.remote.applied,
+            refused: self.remote.refused,
+            feedback_sent: self.remote.sent,
+        };
+        let lamps = ids::Lamps {
+            remote_input,
+            remote_output,
+            key_input,
+        };
+        (counts, lamps, takeover)
+    }
+
+    /// What a mapping's control is now, as feedback shows it (R38).
+    fn state_of(&self, mapping: &RemoteMapping) -> Option<State> {
+        if let RemoteTarget::Slot { track, scene } = mapping.target {
+            let lit = self.session_states.iter().any(|slot| {
+                slot.track == track
+                    && slot.scene == scene
+                    && matches!(
+                        slot.state,
+                        SlotState::Queued | SlotState::Playing | SlotState::QueuedToStop
+                    )
+            });
+            return Some(State::On(lit));
+        }
+        match mapping.kind {
+            ControlKind::Continuous | ControlKind::Radio { .. } => {
+                self.value_of(mapping).map(State::Value)
+            }
+            ControlKind::Switch | ControlKind::RangedSwitch => {
+                let on = self.current(&mapping.target)? >= 0.5;
+                // The activator is on while the track isn't muted.
+                let muted = matches!(
+                    mapping.target,
+                    RemoteTarget::Mixer {
+                        param: MixerParam::Mute,
+                        ..
+                    }
+                );
+                Some(State::On(on != muted))
+            }
+            ControlKind::Slot | ControlKind::Button => None,
+        }
+    }
+
+    /// The messages that show a mapping's control to its controller (R38).
+    fn feedback_of(&self, mapping: &RemoteMapping) -> Vec<MidiMessage> {
+        let Some(state) = self.state_of(mapping) else {
+            return Vec::new();
+        };
+        let (min, max) = self.law_range(mapping);
+        bl_control::feedback(mapping, min, max, state)
+    }
+
+    /// Sends the mappings' values to the outputs with Remote on: each
+    /// mapping's latest value if it changed since the last poll, and every
+    /// value to an output whose Remote switch just turned on (R38, R39).
+    /// It leaves from this thread, on the output bus's own path, and never
+    /// waits for the engine (R40).
+    pub(super) fn poll_feedback(&mut self) {
+        // With no mapping there is nothing to send; every output then counts
+        // as new when the first one is made, which sends the same.
+        if self.editor.document().settings().remote.is_empty() {
+            self.remote.fed.clear();
+            self.remote.outputs.clear();
+            return;
+        }
+        let outputs: Vec<PortId> = self
+            .midi
+            .ports()
+            .iter()
+            .filter(|p| p.direction == PortDirection::Output && p.remote && p.open)
+            .map(|p| PortId::from_name(&p.name))
+            .collect();
+        let (old, new): (Vec<PortId>, Vec<PortId>) = outputs
+            .iter()
+            .partition(|port| self.remote.outputs.contains(port));
+        self.remote.outputs = outputs;
+        if self.remote.outputs.is_empty() {
+            self.remote.fed.clear();
+            return;
+        }
+        let now: HashMap<RemoteSource, Vec<MidiMessage>> = self
+            .editor
+            .document()
+            .settings()
+            .remote
+            .iter()
+            .map(|m| (m.source.clone(), self.feedback_of(m)))
+            .filter(|(_, messages)| !messages.is_empty())
+            .collect();
+        for (source, messages) in &now {
+            self.send_feedback(&new, messages);
+            if self.remote.fed.get(source) != Some(messages) {
+                self.send_feedback(&old, messages);
+            }
+        }
+        self.remote.fed = now;
+    }
+
+    fn send_feedback(&mut self, ports: &[PortId], messages: &[MidiMessage]) {
+        for &port in ports {
+            for message in messages {
+                if self
+                    .midi
+                    .output()
+                    .send_to(port, message.bytes(), None)
+                    .is_ok()
+                {
+                    self.remote.sent += 1;
+                }
+            }
+        }
     }
 
     /// Applies the messages mappings took since the last poll, in the order
@@ -208,6 +378,7 @@ impl Shell {
         for mapping in self.editor.document().settings().remote.clone() {
             if matches!(&mapping.source, RemoteSource::Key { key: k } if k == key) {
                 taken = true;
+                self.remote.keys += u64::from(pressed);
                 self.apply_hit(&mapping, if pressed { Hit::KeyDown } else { Hit::KeyUp });
             }
         }
@@ -235,8 +406,11 @@ impl Shell {
         let Some(action) = bl_control::act(&law, hit, key, at, memory) else {
             return;
         };
-        // A button's release has nothing to do, and isn't a refusal.
-        if action == Action::Release && mapping.kind == ControlKind::Button {
+        // A button's release has nothing to do, and isn't a refusal; nor is
+        // the release of an empty slot's press.
+        let empty_slot = matches!(mapping.target, RemoteTarget::Slot { track, scene }
+            if self.editor.document().slot(track, scene).is_none());
+        if action == Action::Release && (mapping.kind == ControlKind::Button || empty_slot) {
             return;
         }
         let Some(run) = self.command_for(mapping, action) else {
@@ -260,6 +434,12 @@ impl Shell {
         self.remote.applying = false;
         if result.is_ok() {
             self.remote.applied += 1;
+            // Spec: remote-mapping R39. What the mapping's own message did
+            // isn't sent back to it.
+            let shown = self.feedback_of(mapping);
+            if !shown.is_empty() {
+                self.remote.fed.insert(mapping.source.clone(), shown);
+            }
             // Spec: remote-mapping R29. Where a stepped control really is
             // after the command is where the mapping left it.
             if let (Action::Position(_), Some(at)) = (action, self.value_of(mapping))
@@ -387,10 +567,28 @@ impl Shell {
         match (target, action) {
             // Spec: remote-mapping R16. The launch carries the note's
             // velocity.
-            (RemoteTarget::Slot { track, scene }, Action::Press(velocity)) => cmd(
-                "session.launch",
-                json!({ "track": track, "scene": scene, "velocity": velocity }),
-            ),
+            (RemoteTarget::Slot { track, scene }, Action::Press(velocity)) => {
+                let doc = self.editor.document();
+                let track_of = doc.track(track)?;
+                if doc.slot(track, scene).is_some() {
+                    cmd(
+                        "session.launch",
+                        json!({ "track": track, "scene": scene, "velocity": velocity }),
+                    )
+                // Spec: remote-mapping R15, R42. An empty slot's press does what
+                // clicking it does: its record button on an armed track, its
+                // stop button where it has one.
+                } else if track_of.mixer().arm {
+                    cmd(
+                        "session.record_slot",
+                        json!({ "track": track, "scene": scene }),
+                    )
+                } else if track_of.has_stop_button(scene) {
+                    cmd("session.stop_track", json!({ "track": track }))
+                } else {
+                    None
+                }
+            }
             // Spec: remote-mapping R34. A chromatic slot's key also carries
             // its distance from the root.
             (RemoteTarget::Slot { track, scene }, Action::PressTransposed(velocity, transpose)) => {

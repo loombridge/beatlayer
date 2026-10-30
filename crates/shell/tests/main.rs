@@ -8,6 +8,7 @@
 bl_rt::install_trap!();
 
 mod agent_settings;
+mod apcs;
 mod ara;
 mod arrangement;
 mod articulation_map;

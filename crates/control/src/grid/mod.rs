@@ -28,11 +28,18 @@ use crate::surface::{
     ControlSurface, Cx, DrumView, Kind, ReadModel, Recognise, Ring, RingStep, Role, SurfaceState,
 };
 
+mod apc;
+mod apc40;
+mod apc_mini;
 mod palette;
 #[cfg(feature = "testing")]
 pub mod sim;
+#[cfg(feature = "testing")]
+pub mod sim_apc;
 
-pub use palette::{PALETTE, nearest};
+pub use apc_mini::apc_mini;
+pub use apc40::apc40;
+pub use palette::{APC, PALETTE, apc_nearest, nearest};
 use palette::{colour, dimmed};
 
 /// How long a press of Capture MIDI may last and still be Session Record
@@ -111,8 +118,11 @@ fn kind(
     port: &'static str,
     make: fn() -> Box<dyn ControlSurface>,
 ) -> Kind {
-    Kind::new(id, model.name(), true, true, Some(RING), Vec::new(), make)
-        .recognised(Recognise { port, maker: MAKER })
+    Kind::new(id, model.name(), true, true, Some(RING), Vec::new(), make).recognised(Recognise {
+        port,
+        maker: &MAKER,
+        pair: false,
+    })
 }
 
 fn make_x() -> Box<dyn ControlSurface> {
@@ -432,6 +442,26 @@ struct Peek {
     used: bool,
 }
 
+/// What a slot looks like (R9): the controller's profile gives each its own
+/// lights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Look {
+    /// No clip, and the track isn't armed.
+    Empty,
+    /// No clip, on an armed track.
+    Armed,
+    /// A clip that doesn't play.
+    Stopped,
+    /// A clip waiting to play.
+    Queued,
+    /// A launch waiting to record into an empty slot.
+    QueuedToRecord { armed: bool },
+    /// A clip playing, or waiting to stop.
+    Playing,
+    /// A clip recording.
+    Recording,
+}
+
 /// What the surface knows of the controller's state, and what it has told
 /// the controller.
 struct Grid {
@@ -594,12 +624,16 @@ impl Grid {
         swatch_rgb(&DEFAULT_TRACK_PALETTE, swatch)
     }
 
-    fn clip_colour(doc: &Document, track: TrackId, scene: SceneId) -> u8 {
-        let rgb = match doc.slot(track, scene).and_then(|clip| clip.colour) {
+    /// The colour of the clip in a slot, or of its track.
+    fn clip_rgb(doc: &Document, track: TrackId, scene: SceneId) -> [u8; 3] {
+        match doc.slot(track, scene).and_then(|clip| clip.colour) {
             Some(swatch) => swatch_rgb(&DEFAULT_TRACK_PALETTE, swatch),
             None => Self::track_colour(doc, track),
-        };
-        nearest(rgb)
+        }
+    }
+
+    fn clip_colour(doc: &Document, track: TrackId, scene: SceneId) -> u8 {
+        nearest(Self::clip_rgb(doc, track, scene))
     }
 
     // Rendering ----------------------------------------------------------
@@ -613,99 +647,112 @@ impl Grid {
             .map(|s| s.state)
     }
 
-    /// A pad's slot as it shows (R9).
-    fn slot_light(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Light> {
+    /// What a slot looks like, whatever controller shows it (R9).
+    fn slot_look(model: &ReadModel, track: TrackId, scene: SceneId) -> Look {
         let doc = &model.document;
         let clip = doc.slot(track, scene).is_some();
         let armed = doc.track(track).is_some_and(|t| t.mixer().arm);
-        let colour_of = || Self::clip_colour(doc, track, scene);
         match (Self::state_of(model, track, scene), clip) {
-            (Some(SlotState::Queued), true) => Some(Light::Flash {
-                a: colour_of(),
-                b: colour::GREEN,
-            }),
+            (Some(SlotState::Queued), true) => Look::Queued,
             // A launch that waits for a slot with no clip is a recording.
-            (Some(SlotState::Queued), false) => Some(Light::Flash {
-                a: if armed { colour::DIM_RED } else { 0 },
-                b: colour::RED,
-            }),
-            (Some(SlotState::Playing | SlotState::QueuedToStop), _) => {
-                Some(Light::Pulse(colour::GREEN))
-            }
-            (Some(SlotState::Recording), _) => Some(Light::Pulse(colour::RED)),
-            (None, true) => Some(Light::Static(colour_of())),
-            (None, false) if armed => Some(Light::Static(colour::DIM_RED)),
-            (None, false) => None,
+            (Some(SlotState::Queued), false) => Look::QueuedToRecord { armed },
+            (Some(SlotState::Playing | SlotState::QueuedToStop), _) => Look::Playing,
+            (Some(SlotState::Recording), _) => Look::Recording,
+            (None, true) => Look::Stopped,
+            (None, false) if armed => Look::Armed,
+            (None, false) => Look::Empty,
         }
     }
 
-    /// A scene button as it shows (R9).
-    fn scene_light(model: &ReadModel, scene: SceneId) -> Option<Light> {
+    /// A pad's slot as it shows on a Launchpad (R9).
+    fn slot_light(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Light> {
+        let colour_of = || Self::clip_colour(&model.document, track, scene);
+        match Self::slot_look(model, track, scene) {
+            Look::Queued => Some(Light::Flash {
+                a: colour_of(),
+                b: colour::GREEN,
+            }),
+            Look::QueuedToRecord { armed } => Some(Light::Flash {
+                a: if armed { colour::DIM_RED } else { 0 },
+                b: colour::RED,
+            }),
+            Look::Playing => Some(Light::Pulse(colour::GREEN)),
+            Look::Recording => Some(Light::Pulse(colour::RED)),
+            Look::Stopped => Some(Light::Static(colour_of())),
+            Look::Armed => Some(Light::Static(colour::DIM_RED)),
+            Look::Empty => None,
+        }
+    }
+
+    /// Whether a scene holds a clip, and if so whether one of its clips
+    /// plays (R9).
+    fn scene_look(model: &ReadModel, scene: SceneId) -> Option<bool> {
         let doc = &model.document;
         if model
             .slots
             .iter()
             .any(|s| s.scene == scene && s.state == SlotState::Playing)
         {
-            return Some(Light::Static(colour::GREEN));
+            return Some(true);
         }
         doc.tracks()
             .any(|t| doc.slot(t.id(), scene).is_some())
-            .then_some(Light::Static(colour::DIM_WHITE))
+            .then_some(false)
     }
 
-    /// A track button as it shows its track's state (R13).
-    fn track_fn_light(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<Light> {
-        let doc = &model.document;
-        let t = doc.track(track)?;
+    /// A scene button as it shows on a Launchpad (R9).
+    fn scene_light(model: &ReadModel, scene: SceneId) -> Option<Light> {
+        Some(Light::Static(if Self::scene_look(model, scene)? {
+            colour::GREEN
+        } else {
+            colour::DIM_WHITE
+        }))
+    }
+
+    /// Whether a track function is on for a track (R13): the track plays a
+    /// clip, is soloed, is heard, is armed or is selected; `None` where the
+    /// track has no such control, so its button is dark.
+    fn track_fn_on(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<bool> {
+        let t = model.document.track(track)?;
         let kind = t.kind();
-        let lit = match f {
+        Some(match f {
             TrackFn::Stop => {
                 if !(kind.holds_clips() || kind == TrackKind::Group) {
                     return None;
                 }
-                let playing = model.slots.iter().any(|s| {
+                model.slots.iter().any(|s| {
                     s.track == track
                         && matches!(
                             s.state,
                             SlotState::Playing | SlotState::QueuedToStop | SlotState::Recording
                         )
-                });
-                if playing {
-                    colour::RED
-                } else {
-                    colour::DIM_RED
-                }
+                })
             }
-            TrackFn::Solo => {
-                let on = t.mixer().solo;
-                if on { colour::BLUE } else { colour::DIM_BLUE }
-            }
-            TrackFn::Mute => {
-                let on = !t.mixer().mute;
-                if on {
-                    colour::YELLOW
-                } else {
-                    colour::DIM_YELLOW
-                }
-            }
+            TrackFn::Solo => t.mixer().solo,
+            TrackFn::Mute => !t.mixer().mute,
             TrackFn::Arm => {
                 if !kind.holds_clips() {
                     return None;
                 }
-                if t.mixer().arm {
-                    colour::RED
-                } else {
-                    colour::DIM_RED
-                }
+                t.mixer().arm
             }
+            TrackFn::Select => model.selection.tracks.contains(&track),
+        })
+    }
+
+    /// A track button as it shows its track's state on a Launchpad (R13).
+    fn track_fn_light(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<Light> {
+        let on = Self::track_fn_on(model, f, track)?;
+        let (bright, dim) = match f {
+            TrackFn::Stop | TrackFn::Arm => (colour::RED, colour::DIM_RED),
+            TrackFn::Solo => (colour::BLUE, colour::DIM_BLUE),
+            TrackFn::Mute => (colour::YELLOW, colour::DIM_YELLOW),
             TrackFn::Select => {
-                let rgb = Self::track_colour(doc, track);
-                let selected = model.selection.tracks.contains(&track);
-                if selected { nearest(rgb) } else { dimmed(rgb) }
+                let rgb = Self::track_colour(&model.document, track);
+                (nearest(rgb), dimmed(rgb))
             }
         };
-        Some(Light::Static(lit))
+        Some(Light::Static(if on { bright } else { dim }))
     }
 
     /// The ring of a row, if the read model has one.

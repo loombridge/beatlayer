@@ -19,8 +19,8 @@ use bl_control::{
 };
 use bl_model::{
     ControlKind, Device, DeviceId, DeviceKind, DeviceRole, Document, MACROS, MixerParam, ParamId,
-    RemoteMapping, RemoteSource, RemoteTarget, SHOWN_MACROS, SceneId, TrackId, TrackKind,
-    macro_number, macro_param, numbered,
+    RemoteMapping, RemoteMode, RemoteSource, RemoteTarget, SHOWN_MACROS, SceneId, TrackId,
+    TrackKind, macro_number, macro_param, numbered,
 };
 use bl_shell_spec::control_surface as ids;
 use bl_shell_spec::control_surface::{
@@ -811,38 +811,71 @@ impl Shell {
             Role::Crossfade(c) => RemoteTarget::CrossfadeAssign {
                 track: track(self, c)?,
             },
+            Role::Crossfader => RemoteTarget::Crossfader,
+            Role::CueVolume => RemoteTarget::CueVolume,
             Role::NextBank | Role::PreviousBank | Role::Ring(_) | Role::Select(_) => return None,
         })
+    }
+
+    /// The mapping a role's `target` stands for and the laws it moves by,
+    /// under Takeover Mode.
+    fn law_of(
+        &mut self,
+        target: RemoteTarget,
+        mode: RemoteMode,
+    ) -> Option<(RemoteMapping, bl_control::Law, ControlKind)> {
+        let (kind, range) = match target.natural_kind() {
+            Some(kind) => (kind, target.natural_range()),
+            None => self.param_control(&target)?,
+        };
+        let source = RemoteSource::Cc {
+            channel: 1,
+            controller: 0,
+        };
+        let mapping = RemoteMapping::new(source, target, kind, range, Some(mode)).ok()?;
+        let (min, max) = self.law_range(&mapping);
+        let law = bl_control::Law {
+            takeover: self.prefs.takeover_mode,
+            step: self.step_of(&target),
+            ..bl_control::Law::of(&mapping, min, max)
+        };
+        Some((mapping, law, kind))
+    }
+
+    /// Keeps where an absolute control that hasn't moved rests, as Takeover
+    /// Mode needs it when the control first does (supported controllers R35).
+    pub(super) fn rest_control(&mut self, row: usize, control: Control) {
+        self.track_reach();
+        let Hit::Value { value, full } = control.hit else {
+            return;
+        };
+        let Some(target) = self.target_of(row, control.role) else {
+            return;
+        };
+        let held = &self.instant.rows[row].held;
+        if held.get(&control.role).is_some_and(|h| h.target == target) {
+            return;
+        }
+        let Some((_, law, _)) = self.law_of(target, control.mode) else {
+            return;
+        };
+        let at = law.min + f64::from(value) / f64::from(full) * (law.max - law.min);
+        self.instant.rows[row].held.insert(
+            control.role,
+            Held {
+                target,
+                memory: Memory::resting(at),
+            },
+        );
     }
 
     /// Applies a control's message to the control `target` its role reaches,
     /// by the value laws and Takeover Mode as a mapping does, and runs the
     /// command that sets it (R22).
     fn drive(&mut self, row: usize, role: Role, target: RemoteTarget, control: Control) {
-        let (kind, range) = match target.natural_kind() {
-            Some(kind) => (kind, target.natural_range()),
-            None => match self.param_control(&target) {
-                Some(found) => found,
-                None => {
-                    self.surface.refused += 1;
-                    return;
-                }
-            },
-        };
-        let source = RemoteSource::Cc {
-            channel: 1,
-            controller: 0,
-        };
-        let Ok(mapping) = RemoteMapping::new(source, target, kind, range, Some(control.mode))
-        else {
+        let Some((mapping, law, kind)) = self.law_of(target, control.mode) else {
             self.surface.refused += 1;
             return;
-        };
-        let (min, max) = self.law_range(&mapping);
-        let law = bl_control::Law {
-            takeover: self.prefs.takeover_mode,
-            step: self.step_of(&target),
-            ..bl_control::Law::of(&mapping, min, max)
         };
         let at = self.value_of(&mapping);
         // Spec: control-surfaces R22. Takeover starts afresh whenever the

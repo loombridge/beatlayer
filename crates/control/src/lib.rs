@@ -109,6 +109,17 @@ pub struct Memory {
 }
 
 impl Memory {
+    /// The memory of a controller known to rest at `position`, as the
+    /// position in the mapping's range its value gives, before it has sent a
+    /// message (supported controllers R35).
+    #[must_use]
+    pub fn resting(position: f64) -> Self {
+        Self {
+            previous: Some(position),
+            ..Self::default()
+        }
+    }
+
     /// Whether the control follows the controller (R29).
     #[must_use]
     pub fn following(&self) -> bool {

@@ -138,8 +138,41 @@ pub fn stack_type() -> DeviceType {
              made it.",
         ),
     ]);
-    DeviceType::native(STACK, "Chord", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params).with_title_switch(USE_SCALE))
+    DeviceType::native(STACK, "Chord", DeviceRole::MidiEffect).with_description(
+        DeviceDescription::new(params)
+            .with_title_switch(USE_SCALE)
+            .with_banks(&[
+                (
+                    "Shift",
+                    &[
+                        "Shift 1", "Shift 2", "Shift 3", "Shift 4", "Shift 5", "Shift 6", "Strum",
+                        "Tension",
+                    ],
+                ),
+                (
+                    "Velocity",
+                    &[
+                        "Velocity 1",
+                        "Velocity 2",
+                        "Velocity 3",
+                        "Velocity 4",
+                        "Velocity 5",
+                        "Velocity 6",
+                        "Crescendo",
+                    ],
+                ),
+                (
+                    "Chance",
+                    &[
+                        "Chance 1", "Chance 2", "Chance 3", "Chance 4", "Chance 5", "Chance 6",
+                    ],
+                ),
+                (
+                    "Playing",
+                    &["Learn", "Play Duplicate Notes", "Per-Note Events"],
+                ),
+            ]),
+    )
 }
 
 /// Adds Chord to `registry`.

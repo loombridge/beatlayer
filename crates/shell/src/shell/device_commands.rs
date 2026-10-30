@@ -186,8 +186,21 @@ impl Shell {
     #[must_use]
     pub fn device_view_state(&self) -> device_ids::DeviceViewState {
         let doc = self.editor.document();
-        self.devices
-            .state(doc, devices::shown_track(&self.arrangement, doc))
+        let mut state = self
+            .devices
+            .state(doc, devices::shown_track(&self.arrangement, doc));
+        // Spec: control-surfaces R35, device-chains R42. The surfaces each
+        // device is locked to.
+        fn locks(shell: &Shell, frames: &mut [device_ids::DeviceFrame]) {
+            for frame in frames {
+                frame.locks = shell.device_locks(frame.id);
+                if let Some(rack) = &mut frame.rack {
+                    locks(shell, &mut rack.devices);
+                }
+            }
+        }
+        locks(self, &mut state.devices);
+        state
     }
 
     /// What `device_view.state` returns: [`Shell::device_view_state`] with

@@ -193,6 +193,38 @@ pub fn hover_hold(ctx: &Context) -> Option<String> {
         .flatten()
 }
 
+fn hover_lock_id(shown: bool) -> Id {
+    Id::new(if shown {
+        "surface-lock-hover-shown"
+    } else {
+        "surface-lock-hover-next"
+    })
+}
+
+/// Notes what the locked device's hand icon under the pointer says, for the
+/// Status Bar to read in the next frame: the Status Bar draws before the
+/// detail area that notes it.
+pub fn set_hover_lock(ctx: &Context, text: Option<String>) {
+    ctx.data_mut(|d| d.insert_temp(hover_lock_id(false), text));
+}
+
+/// Starts a frame: what the last frame noted is what the Status Bar shows.
+pub fn rotate_hover_lock(ctx: &Context) {
+    ctx.data_mut(|d| {
+        let next = d.get_temp::<Option<String>>(hover_lock_id(false)).flatten();
+        d.insert_temp(hover_lock_id(true), next);
+        d.insert_temp(hover_lock_id(false), None::<String>);
+    });
+}
+
+/// What the hand icon the pointer was over in the last frame says, if there
+/// was one (device chains R42).
+#[must_use]
+pub fn hover_lock(ctx: &Context) -> Option<String> {
+    ctx.data(|d| d.get_temp::<Option<String>>(hover_lock_id(true)))
+        .flatten()
+}
+
 /// Selects the parameter Map mode's next Map button maps, or none.
 pub fn set_macro_target(ctx: &Context, target: Option<(DeviceId, ParamId)>) {
     ctx.data_mut(|d| d.insert_temp(macro_target_id(), target));

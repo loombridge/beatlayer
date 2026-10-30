@@ -113,8 +113,17 @@ pub fn crusher_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(CRUSHER, "Redux", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout))
+    DeviceType::native(CRUSHER, "Redux", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_banks(&[
+                (
+                    "Crush",
+                    &["Rate", "Jitter", "Bits", "Shape", "DC Shift", "Dry/Wet"],
+                ),
+                ("Filter", &["Pre", "Post", "Post Octave"]),
+            ]),
+    )
 }
 
 /// Adds Redux to `registry`.

@@ -68,11 +68,11 @@ pub(super) struct RemoteState {
 }
 
 /// A command a mapped message runs.
-struct Run {
-    id: &'static str,
-    args: Value,
+pub(super) struct Run {
+    pub(super) id: &'static str,
+    pub(super) args: Value,
     /// The undo step's name, for a command that moves a continuous control.
-    gesture: Option<&'static str>,
+    pub(super) gesture: Option<&'static str>,
 }
 
 fn cmd(id: &'static str, args: Value) -> Option<Run> {
@@ -454,7 +454,7 @@ impl Shell {
 
     /// The control's value as the laws read it: a continuous control's
     /// position on its travel and a radio button's option (R21, R23).
-    fn value_of(&self, mapping: &RemoteMapping) -> Option<f64> {
+    pub(super) fn value_of(&self, mapping: &RemoteMapping) -> Option<f64> {
         let value = self.current(&mapping.target)?;
         match mapping.kind {
             ControlKind::Continuous => Some(self.position_of(&mapping.target, value)),
@@ -465,7 +465,7 @@ impl Shell {
 
     /// One step of a stepped control as a share of its travel (R26); `None`
     /// for a control with no steps of its own.
-    fn step_of(&self, target: &RemoteTarget) -> Option<f64> {
+    pub(super) fn step_of(&self, target: &RemoteTarget) -> Option<f64> {
         let descriptor = self.descriptor(target)?;
         let span = descriptor.max() - descriptor.min();
         (descriptor.is_stepped() && span > 0.0).then(|| 1.0 / span)
@@ -483,7 +483,7 @@ impl Shell {
 
     /// A mapping's Min and Max as the laws take them: positions on the
     /// control's travel for a continuous control, as they are otherwise.
-    fn law_range(&self, mapping: &RemoteMapping) -> (f64, f64) {
+    pub(super) fn law_range(&self, mapping: &RemoteMapping) -> (f64, f64) {
         if mapping.kind != ControlKind::Continuous {
             return (mapping.min, mapping.max);
         }
@@ -556,7 +556,7 @@ impl Shell {
     /// The command an action on a mapping's control runs, or `None` if the
     /// set no longer has the control or the action means nothing to it
     /// (R11).
-    fn command_for(&self, mapping: &RemoteMapping, action: Action) -> Option<Run> {
+    pub(super) fn command_for(&self, mapping: &RemoteMapping, action: Action) -> Option<Run> {
         let target = mapping.target;
         let current = self.current(&target);
         let on = |current: Option<f64>| match action {

@@ -87,8 +87,24 @@ pub fn remap_type() -> DeviceType {
              the scale note nearest it, counted from Base.",
         ),
     );
-    DeviceType::native(REMAP, "Scale", DeviceRole::MidiEffect)
-        .with_description(DeviceDescription::new(params).with_title_switch(USE_SCALE))
+    DeviceType::native(REMAP, "Scale", DeviceRole::MidiEffect).with_description(
+        DeviceDescription::new(params)
+            .with_title_switch(USE_SCALE)
+            .with_banks(&[
+                (
+                    "Scale",
+                    &["Base", "Transpose", "Scale Name", "Fold", "Lowest", "Range"],
+                ),
+                (
+                    "Map 1-6",
+                    &["Map 1", "Map 2", "Map 3", "Map 4", "Map 5", "Map 6"],
+                ),
+                (
+                    "Map 7-12",
+                    &["Map 7", "Map 8", "Map 9", "Map 10", "Map 11", "Map 12"],
+                ),
+            ]),
+    )
 }
 
 /// Adds Scale to `registry`.

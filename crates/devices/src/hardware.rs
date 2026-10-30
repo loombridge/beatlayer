@@ -30,11 +30,14 @@ pub fn hardware_instrument_type() -> DeviceType {
         DeviceRole::Instrument,
     )
     .with_external()
-    .with_description(DeviceDescription::new(vec![
-        // Spec: external-devices R11. -inf to +24 dB, 0 dB on a new device.
-        ParamDescriptor::gain(GAIN, "Gain", 24.0, 0.0)
-            .describe("Scales the sound that comes back from the hardware."),
-    ]))
+    .with_description(
+        DeviceDescription::new(vec![
+            // Spec: external-devices R11. -inf to +24 dB, 0 dB on a new device.
+            ParamDescriptor::gain(GAIN, "Gain", 24.0, 0.0)
+                .describe("Scales the sound that comes back from the hardware."),
+        ])
+        .with_banks(&[("Gain", &["Gain"])]),
+    )
 }
 
 /// Adds the External Instrument to `registry`.

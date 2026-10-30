@@ -121,6 +121,9 @@ fn rows_are_set_listed_dumped_and_stopped_by_command() {
         json!([{
             "id": "test", "name": "Test Surface", "needs_output": true, "can_lock": false,
             "ring": { "tracks": 8, "scenes": 2 }, "has_setup": true
+        }, {
+            "id": "test-instant", "name": "Test Instant Surface", "needs_output": true,
+            "can_lock": true, "ring": { "tracks": 8, "scenes": 2 }, "has_setup": false
         }])
     );
     let rows = rig.rows();
@@ -145,10 +148,8 @@ fn rows_are_set_listed_dumped_and_stopped_by_command() {
     );
     assert_eq!(rows[0]["input"], json!({ "name": "Pads", "present": true }));
     assert_eq!(rows[0]["can_dump"], true);
-    assert_eq!(
-        rows[0]["surface_state"]["ring"],
-        json!({ "tracks": 8, "scenes": 2 })
-    );
+    let ring = &rows[0]["surface_state"]["ring"];
+    assert_eq!((&ring["tracks"], &ring["scenes"]), (&json!(8), &json!(2)));
     assert_eq!(rig.test.sent("Pads Out"), [HELLO]);
 
     // A port serves one row, and the refusal names it.

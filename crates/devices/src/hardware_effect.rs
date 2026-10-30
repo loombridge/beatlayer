@@ -38,18 +38,27 @@ pub fn hardware_effect_type() -> DeviceType {
         DeviceRole::AudioEffect,
     )
     .with_external_output()
-    .with_description(DeviceDescription::new(vec![
-        // Spec: external-devices R17, R21. -inf to +24 dB, 0 dB on a new
-        // device.
-        ParamDescriptor::gain(GAIN_OUT, "Out Gain", 24.0, 0.0)
-            .describe("Scales the signal sent to the hardware."),
-        ParamDescriptor::gain(GAIN_IN, "In Gain", 24.0, 0.0)
-            .describe("Scales the signal coming back from the hardware."),
-        ParamDescriptor::continuous(DRY_WET, "Dry/Wet", (0.0, 100.0), 100.0, ParamUnit::Percent)
+    .with_description(
+        DeviceDescription::new(vec![
+            // Spec: external-devices R17, R21. -inf to +24 dB, 0 dB on a new
+            // device.
+            ParamDescriptor::gain(GAIN_OUT, "Out Gain", 24.0, 0.0)
+                .describe("Scales the signal sent to the hardware."),
+            ParamDescriptor::gain(GAIN_IN, "In Gain", 24.0, 0.0)
+                .describe("Scales the signal coming back from the hardware."),
+            ParamDescriptor::continuous(
+                DRY_WET,
+                "Dry/Wet",
+                (0.0, 100.0),
+                100.0,
+                ParamUnit::Percent,
+            )
             .describe("Balances the dry signal against the processed one."),
-        ParamDescriptor::toggle(INVERT, "Invert", false)
-            .describe("Flips the phase of the signal coming back."),
-    ]))
+            ParamDescriptor::toggle(INVERT, "Invert", false)
+                .describe("Flips the phase of the signal coming back."),
+        ])
+        .with_banks(&[("Gain", &["Out Gain", "In Gain", "Dry/Wet", "Invert"])]),
+    )
 }
 
 /// Adds the External Audio Effect to `registry`.

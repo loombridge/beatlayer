@@ -67,6 +67,7 @@ mod freeze;
 mod gain_reduction;
 mod grooves;
 mod info_text;
+mod instant_mappings;
 mod interface_zoom;
 mod keymap;
 mod kitbag;

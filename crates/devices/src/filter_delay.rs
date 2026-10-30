@@ -140,8 +140,55 @@ pub fn filter_delay_type() -> DeviceType {
         ParamDescriptor::gain(DRY, "Dry", 0.0, 0.0)
             .describe("The level of the unprocessed signal."),
     );
-    DeviceType::native(FILTER_DELAY, "Filter Delay", DeviceRole::AudioEffect)
-        .with_description(DeviceDescription::new(params).with_layout(layout()))
+    DeviceType::native(FILTER_DELAY, "Filter Delay", DeviceRole::AudioEffect).with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout())
+            .with_banks(&[
+                (
+                    "Output",
+                    &["Feedback", "Dry", "1 Volume", "2 Volume", "3 Volume"],
+                ),
+                (
+                    "Delay 1",
+                    &[
+                        "1 On",
+                        "1 Sync",
+                        "1 Division",
+                        "1 Time %",
+                        "1 Time",
+                        "1 Pan",
+                        "1 Volume",
+                    ],
+                ),
+                ("Filter 1", &["1 Filter", "1 Freq", "1 Width"]),
+                (
+                    "Delay 2",
+                    &[
+                        "2 On",
+                        "2 Sync",
+                        "2 Division",
+                        "2 Time %",
+                        "2 Time",
+                        "2 Pan",
+                        "2 Volume",
+                    ],
+                ),
+                ("Filter 2", &["2 Filter", "2 Freq", "2 Width"]),
+                (
+                    "Delay 3",
+                    &[
+                        "3 On",
+                        "3 Sync",
+                        "3 Division",
+                        "3 Time %",
+                        "3 Time",
+                        "3 Pan",
+                        "3 Volume",
+                    ],
+                ),
+                ("Filter 3", &["3 Filter", "3 Freq", "3 Width"]),
+            ]),
+    )
 }
 
 /// Per line, a band of switches and times, an X–Y cell whose two controls

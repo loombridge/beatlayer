@@ -178,7 +178,24 @@ pub fn compressor_type() -> DeviceType {
         .with_description(
             DeviceDescription::new(params)
                 .with_layout(layout())
-                .with_views(&VIEWS),
+                .with_views(&VIEWS)
+                .with_banks(&[
+                    (
+                        "Compressor",
+                        &[
+                            "Threshold",
+                            "Ratio",
+                            "Attack",
+                            "Release",
+                            "Auto Release",
+                            "Knee",
+                            "Out",
+                            "Dry/Wet",
+                        ],
+                    ),
+                    ("Character", &["Mode", "Env", "Look", "Makeup"]),
+                    ("Sidechain", &["SC Filter", "Type", "Freq", "Res"]),
+                ]),
         )
 }
 

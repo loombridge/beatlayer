@@ -2952,6 +2952,43 @@ One octave band.
 
 </details>
 
+### `Bank`
+
+A named run of up to [`BANK_SIZE`] of a device's parameters, which a control surface's device controls take in order (control surfaces spec, R18, R19).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The bank's name. |
+| `params` | array of [`ParamId`](#paramid) | yes | Its parameters, in the order the controls take them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A named run of up to [`BANK_SIZE`] of a device's parameters, which a control surface's device controls take in order (control surfaces spec, R18, R19).",
+  "properties": {
+    "name": {
+      "description": "The bank's name.",
+      "type": "string"
+    },
+    "params": {
+      "description": "Its parameters, in the order the controls take them.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "params"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BankEntryState`
 
 One entry of Stacks' chord bank.
@@ -2998,6 +3035,96 @@ One entry of Stacks' chord bank.
 
 </details>
 
+### `BankInfo`
+
+One bank of a device.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `params` | array of [`BankParam`](#bankparam) | yes | Its parameters, in the order a surface's device controls take them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One bank of a device.",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "params": {
+      "description": "Its parameters, in the order a surface's device controls take them.",
+      "items": {
+        "$ref": "#/$defs/BankParam"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "params"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BankParam`
+
+One parameter of a bank, as a surface reads it.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter. |
+| `name` | string | yes | Its name. |
+| `value` | number | yes | Its value. |
+| `text` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so a surface doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One parameter of a bank, as a surface reads it.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so a surface doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter."
+    },
+    "text": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "param",
+    "name",
+    "value",
+    "text",
+    "held"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `BankState`
 
 Stacks' chord bank.
@@ -3034,6 +3161,43 @@ Stacks' chord bank.
     "name",
     "built_in",
     "chords"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `BanksResult`
+
+What `control_surface.banks` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `banks` | array of [`BankInfo`](#bankinfo) | yes | Its banks, in order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `control_surface.banks` returns.",
+  "properties": {
+    "banks": {
+      "description": "Its banks, in order.",
+      "items": {
+        "$ref": "#/$defs/BankInfo"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    }
+  },
+  "required": [
+    "device",
+    "banks"
   ],
   "type": "object"
 }
@@ -8272,6 +8436,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
@@ -8282,6 +8447,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 {
   "description": "What a kind of device is to the framework: its parameters' descriptors, in the order its generic UI and agents list them, and its layout.",
   "properties": {
+    "banks": {
+      "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
+      "items": {
+        "$ref": "#/$defs/Bank"
+      },
+      "type": "array"
+    },
     "layout": {
       "$ref": "#/$defs/DeviceLayout",
       "description": "Where its controls and display cells sit (IMP-14)."
@@ -8398,6 +8570,69 @@ A device's display now, as `device.display` reports it.
 
 </details>
 
+### `DeviceFocus`
+
+The device a surface's device controls reach.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `bank` | integer, at least 0 | yes | The bank the surface shows, from 0. |
+| `bank_name` | string | yes | That bank's name. |
+| `banks` | array of string | yes | Every bank's name, in order. |
+| `locked` | [`LockKind`](#lockkind) or null | no | How it is locked to the surface, if it is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The device a surface's device controls reach.",
+  "properties": {
+    "bank": {
+      "description": "The bank the surface shows, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_name": {
+      "description": "That bank's name.",
+      "type": "string"
+    },
+    "banks": {
+      "description": "Every bank's name, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "locked": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LockKind"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "How it is locked to the surface, if it is."
+    }
+  },
+  "required": [
+    "device",
+    "bank",
+    "bank_name",
+    "banks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DeviceFrame`
 
 One device as the Device View shows it.
@@ -8425,6 +8660,7 @@ One device as the Device View shows it.
 | `sidechain` | [`SidechainSection`](#sidechainsection) or null | yes | Its sidechain section, if it has a sidechain input (WP-2.19b). |
 | `display_view` | string or null | no | The view its display shows, if its display has views (WP-5.43): one of its description's `views`. |
 | `external` | [`ExternalSection`](#externalsection) or null | no | Its routing to hardware, if it is an external device (WP-5.34). |
+| `locks` | array of [`DeviceLock`](#devicelock) | no | The control surfaces locked to it, in the Control Surfaces table's row order: its title bar's hand icon (device chains R42, control surfaces R35). Surface state, never saved with the set. |
 | `midi_sidechain` | [`MidiSidechainSection`](#midisidechainsection) or null | no | Its MIDI sidechain section, if it has a MIDI sidechain input (WP-5.27). |
 | `modulator` | [`ModulatorFrame`](#modulatorframe) or null | no | For a modulator, what it maps and which Map button is armed (WP-5.10). |
 | `mpe` | [`PluginMpe`](#pluginmpe) or null | no | A plug-in's MPE Mode and settings (the MPE spec, R14, R18), which its title bar menu's MPE Mode and MPE Settings… edit; left out for a device that isn't a plug-in. |
@@ -8500,6 +8736,13 @@ One device as the Device View shows it.
     "kind": {
       "$ref": "#/$defs/DeviceKind",
       "description": "What it is."
+    },
+    "locks": {
+      "description": "The control surfaces locked to it, in the Control Surfaces table's row order: its title bar's hand icon (device chains R42, control surfaces R35). Surface state, never saved with the set.",
+      "items": {
+        "$ref": "#/$defs/DeviceLock"
+      },
+      "type": "array"
     },
     "midi_sidechain": {
       "anyOf": [
@@ -8962,6 +9205,49 @@ One device, as `audio.devices` lists it.
     "buffer_sizes",
     "buffer_range",
     "default_buffer_size"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DeviceLock`
+
+A surface a device is locked to: what `device_view.state` reports for a device and its title bar's hand icon names.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row of the Control Surfaces table, from 1 to 6. |
+| `surface` | string | yes | The surface's name. |
+| `by` | [`LockKind`](#lockkind) | yes | How the device is locked to it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A surface a device is locked to: what `device_view.state` reports for a device and its title bar's hand icon names.",
+  "properties": {
+    "by": {
+      "$ref": "#/$defs/LockKind",
+      "description": "How the device is locked to it."
+    },
+    "row": {
+      "description": "The row of the Control Surfaces table, from 1 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "surface": {
+      "description": "The surface's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "row",
+    "surface",
+    "by"
   ],
   "type": "object"
 }
@@ -17140,6 +17426,37 @@ What a locator command did: the locators selected afterwards, and whether it was
     "undo_step"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `LockKind`
+
+How a device is locked to a surface.
+
+One of:
+
+- `"hand"`: By Lock to in the device's menu or `control_surface.lock`.
+- `"arming"`: By arming a MIDI track whose instrument the device is.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a device is locked to a surface.",
+  "oneOf": [
+    {
+      "const": "hand",
+      "description": "By Lock to in the device's menu or `control_surface.lock`.",
+      "type": "string"
+    },
+    {
+      "const": "arming",
+      "description": "By arming a MIDI track whose instrument the device is.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -25746,6 +26063,61 @@ What `clip.reverse` did.
 
 </details>
 
+### `RingBox`
+
+A running surface's ring as `session.state` reports it: the tracks and scenes inside it, by ID.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row of the Control Surfaces table, from 1 to 6. |
+| `surface` | string | yes | The surface's name. |
+| `tracks` | array of [`TrackId`](#trackid) | yes | The tracks it covers, left to right. |
+| `scenes` | array of [`SceneId`](#sceneid) | yes | The scenes it covers, top to bottom; none for a ring with no clip launching. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A running surface's ring as `session.state` reports it: the tracks and scenes inside it, by ID.",
+  "properties": {
+    "row": {
+      "description": "The row of the Control Surfaces table, from 1 to 6.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes": {
+      "description": "The scenes it covers, top to bottom; none for a ring with no clip launching.",
+      "items": {
+        "$ref": "#/$defs/SceneId"
+      },
+      "type": "array"
+    },
+    "surface": {
+      "description": "The surface's name.",
+      "type": "string"
+    },
+    "tracks": {
+      "description": "The tracks it covers, left to right.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "row",
+    "surface",
+    "tracks",
+    "scenes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `RingInfo`
 
 The size of a surface's ring: the block of tracks and scenes its grid controls.
@@ -25781,6 +26153,207 @@ The size of a surface's ring: the block of tracks and scenes its grid controls.
     "scenes"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `RingMoves`
+
+Which ways a ring can move.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `left` | boolean | yes | A track to the left. |
+| `right` | boolean | yes | A track to the right. |
+| `up` | boolean | yes | A scene up. |
+| `down` | boolean | yes | A scene down. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which ways a ring can move.",
+  "properties": {
+    "down": {
+      "description": "A scene down.",
+      "type": "boolean"
+    },
+    "left": {
+      "description": "A track to the left.",
+      "type": "boolean"
+    },
+    "right": {
+      "description": "A track to the right.",
+      "type": "boolean"
+    },
+    "up": {
+      "description": "A scene up.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "left",
+    "right",
+    "up",
+    "down"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RingState`
+
+Where a surface's session ring is.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `tracks` | integer from 0 to 255 | yes | How many tracks wide. |
+| `scenes` | integer from 0 to 255 | yes | How many scenes tall; 0 for a surface with no clip launching. |
+| `first_track` | [`TrackId`](#trackid) or null | yes | Its first track, by ID. |
+| `first_scene` | [`SceneId`](#sceneid) or null | yes | Its first scene, by ID. |
+| `track_index` | integer, at least 0 | yes | Its first track's place among the ring's tracks, from 0. |
+| `scene_index` | integer, at least 0 | yes | Its first scene's place among the scenes, from 0. |
+| `can_move` | [`RingMoves`](#ringmoves) | yes | Which ways it can move. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a surface's session ring is.",
+  "properties": {
+    "can_move": {
+      "$ref": "#/$defs/RingMoves",
+      "description": "Which ways it can move."
+    },
+    "first_scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its first scene, by ID."
+    },
+    "first_track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its first track, by ID."
+    },
+    "scene_index": {
+      "description": "Its first scene's place among the scenes, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "scenes": {
+      "description": "How many scenes tall; 0 for a surface with no clip launching.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "track_index": {
+      "description": "Its first track's place among the ring's tracks, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "tracks": {
+      "description": "How many tracks wide.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "tracks",
+    "scenes",
+    "first_track",
+    "first_scene",
+    "track_index",
+    "scene_index",
+    "can_move"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `RingStep`
+
+How `control_surface.move_ring` moves a ring by a step.
+
+One of:
+
+- `"left"`: One track left.
+- `"right"`: One track right.
+- `"up"`: One scene up.
+- `"down"`: One scene down.
+- `"page_left"`: Its width left.
+- `"page_right"`: Its width right.
+- `"page_up"`: Its height up.
+- `"page_down"`: Its height down.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How `control_surface.move_ring` moves a ring by a step.",
+  "oneOf": [
+    {
+      "const": "left",
+      "description": "One track left.",
+      "type": "string"
+    },
+    {
+      "const": "right",
+      "description": "One track right.",
+      "type": "string"
+    },
+    {
+      "const": "up",
+      "description": "One scene up.",
+      "type": "string"
+    },
+    {
+      "const": "down",
+      "description": "One scene down.",
+      "type": "string"
+    },
+    {
+      "const": "page_left",
+      "description": "Its width left.",
+      "type": "string"
+    },
+    {
+      "const": "page_right",
+      "description": "Its width right.",
+      "type": "string"
+    },
+    {
+      "const": "page_up",
+      "description": "Its height up.",
+      "type": "string"
+    },
+    {
+      "const": "page_down",
+      "description": "Its height down.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -27965,6 +28538,7 @@ What `session.state` and its commands return: what the grid has selected.
 | `title_tracks` | boolean | yes | Whether the selection is track title bars, so Esc has already gone up as far as it can. |
 | `scroll_y` | number | yes | How far the scenes are scrolled down, in points at 100%. |
 | `launches` | array of [`SlotLaunch`](#slotlaunch) | no | The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in. |
+| `rings` | array of [`RingBox`](#ringbox) | no | The control surfaces' session rings, by track and scene ID, in the Control Surfaces table's row order (control surfaces R28, session view R38). Empty in the grid's own state; `session.state` fills it in. |
 
 <details><summary>JSON Schema</summary>
 
@@ -27976,6 +28550,13 @@ What `session.state` and its commands return: what the grid has selected.
       "description": "The slots the engine has queued, playing or recording, with what each is doing. Empty in the grid's own state; `session.state` fills it in.",
       "items": {
         "$ref": "#/$defs/SlotLaunch"
+      },
+      "type": "array"
+    },
+    "rings": {
+      "description": "The control surfaces' session rings, by track and scene ID, in the Control Surfaces table's row order (control surfaces R28, session view R38). Empty in the grid's own state; `session.state` fills it in.",
+      "items": {
+        "$ref": "#/$defs/RingBox"
       },
       "type": "array"
     },
@@ -29985,8 +30566,9 @@ What a running surface reports of itself.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `ring` | [`RingInfo`](#ringinfo) or null | yes | Its ring, if it has one. |
+| `ring` | [`RingState`](#ringstate) or null | yes | Its session ring, if it has one. |
 | `mode` | string or null | yes | Its own mode, by name. |
+| `device` | [`DeviceFocus`](#devicefocus) or null | no | The device its device controls reach, if there is one. |
 
 <details><summary>JSON Schema</summary>
 
@@ -29994,6 +30576,17 @@ What a running surface reports of itself.
 {
   "description": "What a running surface reports of itself.",
   "properties": {
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceFocus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The device its device controls reach, if there is one."
+    },
     "mode": {
       "description": "Its own mode, by name.",
       "type": [
@@ -30004,13 +30597,13 @@ What a running surface reports of itself.
     "ring": {
       "anyOf": [
         {
-          "$ref": "#/$defs/RingInfo"
+          "$ref": "#/$defs/RingState"
         },
         {
           "type": "null"
         }
       ],
-      "description": "Its ring, if it has one."
+      "description": "Its session ring, if it has one."
     }
   },
   "required": [

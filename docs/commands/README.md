@@ -17535,6 +17535,7 @@ What `link.state` returns.
 | `phase` | number or null | yes | How far the session is through the quantum now, in quarter notes; null while Link has never been on. |
 | `session_playing` | boolean | yes | Whether the session's start and stop state is playing. |
 | `start_stop_sync` | boolean | yes | Whether starts and stops are shared with the peers that share them. |
+| `show_toggle` | boolean | yes | Whether the Control Bar shows the Link toggle and its menu. |
 | `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
 | `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
 
@@ -17571,6 +17572,10 @@ What `link.state` returns.
       "description": "Whether the session's start and stop state is playing.",
       "type": "boolean"
     },
+    "show_toggle": {
+      "description": "Whether the Control Bar shows the Link toggle and its menu.",
+      "type": "boolean"
+    },
     "start_stop_sync": {
       "description": "Whether starts and stops are shared with the peers that share them.",
       "type": "boolean"
@@ -17604,6 +17609,7 @@ What `link.state` returns.
     "phase",
     "session_playing",
     "start_stop_sync",
+    "show_toggle",
     "waiting_for_link",
     "starts_in"
   ],
@@ -31414,7 +31420,7 @@ What a command that switches something returns: its new state.
 
 ### `Switched`
 
-What `link.set_enabled` and `link.set_start_stop_sync` return.
+What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -31424,7 +31430,7 @@ What `link.set_enabled` and `link.set_start_stop_sync` return.
 
 ```json
 {
-  "description": "What `link.set_enabled` and `link.set_start_stop_sync` return.",
+  "description": "What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.",
   "properties": {
     "on": {
       "description": "Whether it's on now.",

@@ -26,6 +26,26 @@ pub fn rig() -> (Shell, NullControl) {
 /// [`rig`] with the audio settings `settings`, such as a buffer size.
 #[must_use]
 pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
+    rig_kept(settings, Preferences::default(), None)
+}
+
+/// [`rig`] on the preferences kept in `dir`, as the app starts: a second
+/// rig on the same directory is a relaunch.
+///
+/// # Panics
+///
+/// If the preferences in `dir` can't be read.
+#[must_use]
+pub fn rig_in(dir: &std::path::Path) -> (Shell, NullControl) {
+    let prefs = Preferences::load(dir).expect("readable preferences");
+    rig_kept(prefs.audio.clone(), prefs, Some(dir.to_owned()))
+}
+
+fn rig_kept(
+    settings: AudioSettings,
+    prefs: Preferences,
+    dir: Option<std::path::PathBuf>,
+) -> (Shell, NullControl) {
     let (backend, control) = NullBackend::with_devices(
         NullOptions {
             pacing: Pacing::Manual,
@@ -38,12 +58,7 @@ pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
         Box::new(move |_| Ok(Box::new(backend.clone()))),
         settings,
     );
-    let mut shell = Shell::new(
-        Preferences::default(),
-        None,
-        audio,
-        Box::new(ProjectFiles::new()),
-    );
+    let mut shell = Shell::new(prefs, dir, audio, Box::new(ProjectFiles::new()));
     // Headless runs and tests touch no real keychain.
     shell.use_keychain(std::sync::Arc::new(
         bl_assistant::keychain::MemoryKeychain::new(),

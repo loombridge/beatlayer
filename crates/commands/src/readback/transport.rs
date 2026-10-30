@@ -6,6 +6,7 @@ use super::{Readback, read};
 #[rustfmt::skip]
 pub(super) const ROWS: &[(&str, Readback)] = &[
     ("link.set_enabled", read("link.state", "enabled")),
+    ("link.set_show_toggle", read("link.state", "show_toggle")),
     ("link.set_start_stop_sync", read("link.state", "start_stop_sync")),
     ("transport.set_external_sync", read("transport.state", "external_sync")),
     ("transport.set_loop", read("transport.state", "loop_start")),

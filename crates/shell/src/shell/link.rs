@@ -4,6 +4,7 @@
 use std::time::Instant;
 
 use super::{Shell, ShellError, to_value};
+use crate::settings::OnByDefault;
 use bl_commands::NoArgs;
 use bl_shell_spec::link as ids;
 use serde_json::Value;
@@ -25,6 +26,27 @@ impl Shell {
     #[must_use]
     pub fn link_start_stop_sync(&self) -> bool {
         self.prefs.link.start_stop_sync
+    }
+
+    /// Whether the Control Bar shows the Link toggle and its menu (the Link
+    /// spec, R17).
+    #[must_use]
+    pub fn link_toggle_shown(&self) -> bool {
+        self.prefs.link.show_toggle.0
+    }
+
+    /// How far the session is through the quantum, from 0 to 1, while the
+    /// Arrangement Position fields show the quantum's progress bar: with a
+    /// peer, and the transport stopped or waiting for a start (the Link
+    /// spec, R22, R25). Read from what Link and the engine last published.
+    #[must_use]
+    pub fn link_progress(&self) -> Option<f64> {
+        if !self.link_leads() || (self.playing() && !self.link_waiting_view) {
+            return None;
+        }
+        let quantum = self.link_quantum();
+        let session = self.link.snapshot(quantum)?;
+        Some((session.phase / quantum).clamp(0.0, 1.0))
     }
 
     /// Whether a peer's change of the tempo took the set's tempo envelope's
@@ -88,6 +110,14 @@ impl Shell {
                 self.touch();
                 Ok(to_value(&ids::Switched { on }))
             }
+            ids::SET_SHOW_TOGGLE => {
+                let ids::SetArgs { on } = Self::args(id, args)?;
+                let on = on.unwrap_or(!self.link_toggle_shown());
+                self.prefs.link.show_toggle = OnByDefault(on);
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&ids::Switched { on }))
+            }
             _ => {
                 let ids::SetArgs { on } = Self::args(id, args)?;
                 let on = on.unwrap_or(!self.prefs.link.start_stop_sync);
@@ -120,6 +150,7 @@ impl Shell {
             phase: session.map(|session| session.phase),
             session_playing: session.is_some_and(|session| session.playing),
             start_stop_sync: self.prefs.link.start_stop_sync,
+            show_toggle: self.link_toggle_shown(),
             waiting_for_link,
             starts_in,
         }

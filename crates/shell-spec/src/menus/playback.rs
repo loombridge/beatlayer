@@ -25,7 +25,11 @@ pub(super) const PLAYBACK: &[Row] = &[
         "Start Transport With Tap Tempo",
         Cmd(crate::commands::SETTINGS_SET_START_TRANSPORT_WITH_TAP_TEMPO),
     ),
-    ("M-PLAY-006d", "Link Start Stop Sync", Pending(None)),
+    (
+        "M-PLAY-006d",
+        "Link Start Stop Sync",
+        Cmd(crate::link::SET_START_STOP_SYNC),
+    ),
     SEPARATOR,
     ("M-PLAY-007", "Record to Arrangement", Key(&["S-TRANS-006"])),
     (

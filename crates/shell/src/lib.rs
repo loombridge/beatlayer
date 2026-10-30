@@ -155,6 +155,9 @@ pub use bl_shell_spec::devices as device_commands;
 /// The Arrangement's editing command IDs and their argument and result
 /// types (WP-1.8b).
 pub use bl_shell_spec::editing as editing_commands;
+/// The Link commands' IDs and their argument and result types (WP-7.14,
+/// WP-7.15).
+pub use bl_shell_spec::link as link_commands;
 
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).

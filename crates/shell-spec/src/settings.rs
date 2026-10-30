@@ -128,6 +128,7 @@ impl SettingsPage {
                 | Self::Agents
                 | Self::TempoMidi
                 | Self::FileFolder
+                | Self::Link
         )
     }
 

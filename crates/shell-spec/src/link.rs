@@ -13,8 +13,11 @@ pub const SET_ENABLED: &str = "link.set_enabled";
 /// `link.set_start_stop_sync`: switches Start Stop Sync.
 pub const SET_START_STOP_SYNC: &str = "link.set_start_stop_sync";
 
+/// `link.set_show_toggle`: shows or hides the Control Bar's Link toggle.
+pub const SET_SHOW_TOGGLE: &str = "link.set_show_toggle";
+
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[STATE, SET_ENABLED, SET_START_STOP_SYNC];
+pub const IDS: &[&str] = &[STATE, SET_ENABLED, SET_START_STOP_SYNC, SET_SHOW_TOGGLE];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -22,7 +25,8 @@ pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
 }
 
-/// Arguments of `link.set_enabled` and `link.set_start_stop_sync`.
+/// Arguments of `link.set_enabled`, `link.set_start_stop_sync` and
+/// `link.set_show_toggle`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetArgs {
@@ -31,7 +35,8 @@ pub struct SetArgs {
     pub on: Option<bool>,
 }
 
-/// What `link.set_enabled` and `link.set_start_stop_sync` return.
+/// What `link.set_enabled`, `link.set_start_stop_sync` and
+/// `link.set_show_toggle` return.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Switched {
     /// Whether it's on now.
@@ -58,6 +63,8 @@ pub struct LinkState {
     pub session_playing: bool,
     /// Whether starts and stops are shared with the peers that share them.
     pub start_stop_sync: bool,
+    /// Whether the Control Bar shows the Link toggle and its menu.
+    pub show_toggle: bool,
     /// Whether a start waits for the session's phase.
     pub waiting_for_link: bool,
     /// How many seconds until a waiting start begins, once it has been
@@ -77,8 +84,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Reports Link: whether it is on, how many other peers are in the session, the \
                  session's tempo, the quantum (the global launch quantisation's length at the \
                  play position, in quarter notes) and how far the session is through it, \
-                 whether the session plays, whether Start Stop Sync is on, and whether a start \
-                 waits for the session's phase and how many seconds until it begins. Changes \
+                 whether the session plays, whether Start Stop Sync is on, whether the Control \
+                 Bar shows the Link toggle, and whether a start waits for the session's phase and how many seconds until it begins. Changes \
                  nothing. Switch Link with `link.set_enabled` and Start Stop Sync with \
                  `link.set_start_stop_sync`.",
             )
@@ -114,6 +121,19 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Switching it on while the session plays doesn't start the song. `on` left \
                  out switches to the other state. It is a preference kept between starts, \
                  not part of the set. `link.state` reports it.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<SetArgs>()
+            .result::<Switched>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SHOW_TOGGLE, "Show Link Toggle")
+            .description(
+                "Shows or hides the Control Bar's Link toggle and its menu, as Settings' Link \
+                 page's Show Link Toggle does. Hiding it leaves Link as it is. `on` is whether \
+                 it shows; left out, it switches to the other state. It is a preference kept \
+                 between starts, not part of the set. `link.state` reports it.",
             )
             .permission(Permission::Edit)
             .context(Global)

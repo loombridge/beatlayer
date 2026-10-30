@@ -224,6 +224,22 @@ impl Shell {
         })
     }
 
+    /// Where each track's playing Session clip is in its loop, from 0 to 1:
+    /// what a control surface's progress bars show (push-2 R19).
+    pub(super) fn clip_progress(&self) -> Vec<(TrackId, f32)> {
+        let doc = self.editor.document();
+        self.session_states
+            .iter()
+            .filter(|status| status.state == SlotState::Playing)
+            .filter_map(|status| {
+                let clip = doc.slot(status.track, status.scene)?;
+                let since = self.clip_played(clip)?.since.get();
+                let length = clip.length.get();
+                (length > 0).then(|| (status.track, since.rem_euclid(length) as f32 / length as f32))
+            })
+            .collect()
+    }
+
     /// `since`, rounded down to a step of the global launch quantisation
     /// (Spec: clip-properties R5): exactly as it is with quantisation off or
     /// None. A bar step is a bar of the clip's Signature, or the song's.

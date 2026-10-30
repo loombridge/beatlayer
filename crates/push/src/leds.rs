@@ -316,14 +316,6 @@ impl Palette {
         out.push(sysex::reapply_palette());
         out
     }
-
-    /// Queues a write of every entry the allocator has given out, as after
-    /// Push 2 was set to its own state.
-    pub fn rewrite_all(&mut self) {
-        self.writes = (1..122u8)
-            .filter(|&i| !Self::is_fixed(i) && self.entries[usize::from(i)].is_some())
-            .collect();
-    }
 }
 
 /// A colour's brightness, 0 to 255, for the white LEDs.

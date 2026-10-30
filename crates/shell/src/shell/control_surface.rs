@@ -286,6 +286,11 @@ impl Shell {
                     });
                 }
                 Ask::Control(control) => self.run_control(request.row, control),
+                Ask::EndGesture(control) => {
+                    if self.surface.gesture.is_some_and(|(row, held, _)| row == request.row && held == control) {
+                        self.end_surface_gesture();
+                    }
+                }
             }
         }
         if let Some((_, _, at)) = self.surface.gesture
@@ -320,6 +325,7 @@ impl Shell {
                 recording: self.audio.transport_state().recording,
                 loop_start: view.loop_start,
                 loop_length: view.loop_length,
+                counting_in: self.audio.transport_state().counting_in,
             },
             tempo: self.current_tempo(),
             meters: self.meters().to_vec(),
@@ -328,6 +334,7 @@ impl Shell {
                 slots: session.slots.iter().map(|s| (s.track, s.scene)).collect(),
                 scenes: session.scenes,
             },
+            progress: self.clip_progress(),
             rows: self.row_views(),
         }
     }

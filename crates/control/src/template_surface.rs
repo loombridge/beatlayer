@@ -10,7 +10,7 @@ use std::time::Instant;
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, TempoMap};
 use bl_engine::SlotState;
-use bl_model::fader::{TOP_DB, db_gain};
+use bl_model::fader::fader_position;
 use bl_model::{DeviceId, Document, RemoteMode, TrackId};
 use serde_json::{Value, json};
 
@@ -307,7 +307,8 @@ impl TemplateSurface {
         let mixer = mixer(role)?.mixer();
         match role {
             Role::Pan(_) => Some((mixer.pan + 1.0) / 2.0),
-            _ => Some(mixer.volume / db_gain(TOP_DB)),
+            // The fader's own law, as a control's moves are read by it.
+            _ => Some(fader_position(mixer.volume)),
         }
         .map(|position| position.clamp(0.0, 1.0))
     }

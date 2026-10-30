@@ -225,7 +225,9 @@ impl Template {
     /// Whether the template names a port whose name is `port` (R45).
     #[must_use]
     pub fn matches(&self, port: &str) -> bool {
-        self.ports.iter().any(|text| port.contains(text.as_str()))
+        self.ports
+            .iter()
+            .any(|text| !text.is_empty() && port.contains(text.as_str()))
     }
 
     /// The surface the chooser offers for it (R43).

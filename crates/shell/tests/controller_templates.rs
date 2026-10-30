@@ -576,9 +576,11 @@ fn a_fader_and_a_transport_lamp_follow_the_set() {
     rig.pass(40);
     let sent = rig.fed();
     let fader = sent.iter().rev().find(|m| m[..2] == [0xB0, 7]).unwrap();
-    assert!(
-        fader[2] > 0 && fader[2] < 127,
-        "unity is part way: {fader:?}"
+    // Unity sits where the fader's law puts it, as a move is read.
+    let unity = (bl_model::fader::fader_position(1.0) * 127.0).round() as u8;
+    assert_eq!(
+        fader[2], unity,
+        "unity is where the fader puts it: {fader:?}"
     );
     rig.tap_cc(62);
     rig.pass(100);

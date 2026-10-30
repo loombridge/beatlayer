@@ -114,6 +114,27 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             leds: snapshot.strip_leds.to_vec(),
         },
         setup: setup_info(snapshot.setup),
+        browse: snapshot.browse.as_ref().map(|browse| ids::PushBrowse {
+            load: match browse.load {
+                bl_push::browse::LoadKind::Add => "add",
+                bl_push::browse::LoadKind::Replace(_) => "replace",
+                bl_push::browse::LoadKind::AddTrack => "add_track",
+            }
+            .to_owned(),
+            replaces: match browse.load {
+                bl_push::browse::LoadKind::Replace(device) => Some(device),
+                _ => None,
+            },
+            columns: browse
+                .columns
+                .iter()
+                .map(|column| ids::PushBrowseColumn {
+                    entries: column.entries.clone(),
+                    selected: column.selected,
+                })
+                .collect(),
+            in_use: browse.in_use,
+        }),
         display: ids::PushDisplay {
             text: snapshot.screen.text(),
             claimed: snapshot.display.claimed,

@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use bl_control::{Kind, Ring};
 
+pub mod browse;
 pub mod buttons;
 pub mod content;
 pub mod controls;
@@ -63,4 +64,15 @@ pub fn kind(shared: Arc<Shared>, claim: Claim, contents: MakeContents) -> Kind {
 #[must_use]
 pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
+}
+
+/// The contents of the modes that are built: Browse Mode's own, and the
+/// placeholders for the others (`docs/specs/push-2-tracks.md` R5).
+#[must_use]
+pub fn contents() -> MakeContents {
+    Arc::new(|| {
+        let mut contents = Contents::placeholders();
+        contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
+        contents
+    })
 }

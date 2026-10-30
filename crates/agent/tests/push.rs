@@ -75,6 +75,10 @@ fn an_agent_reads_and_sets_a_simulated_push_2() {
         .unwrap();
     assert!(reply.is_error || reply.ok().unwrap()["results"][0].get("error").is_some());
 
+    // Spec: push-2-tracks R14. Browse Mode's fields are part of the state,
+    // empty while another mode is shown.
+    assert!(push["browse"].is_null());
+
     let frame = run(&mut client, "push.display_frame", json!({}));
     assert_eq!(frame["width"], 960);
     assert!(frame["png"].as_str().unwrap().starts_with("iVBOR"));

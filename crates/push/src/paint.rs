@@ -10,7 +10,7 @@ use skrifa::{FontRef, MetadataProvider};
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::frame::{HEIGHT, RGB_BYTES, WIDTH};
-use crate::screen::{Column, Dot, Graphic, Label, Screen};
+use crate::screen::{Column, Dot, Graphic, Label, List, Screen};
 
 /// The columns' width.
 const COLUMN: f32 = 120.0;
@@ -224,6 +224,11 @@ impl Painter<'_> {
         for (n, column) in screen.columns.iter().enumerate() {
             self.column(column, n);
         }
+        for (n, list) in screen.lists.iter().enumerate() {
+            if let Some(list) = list {
+                self.list(list, n);
+            }
+        }
         for (n, progress) in screen.progress.iter().enumerate() {
             if let Some(progress) = progress {
                 let colour = screen.lower[n].colour;
@@ -322,6 +327,42 @@ impl Painter<'_> {
             Graphic::Choice(entry) => {
                 self.centred(entry, centre, BAND + 76.0, 16.0, COLUMN - 12.0, TEXT);
             }
+        }
+    }
+
+    /// A browser column: eight rows, scrolled to keep the selected one in
+    /// view, which is on a band of its own (push-2-tracks R6).
+    fn list(&mut self, list: &List, n: usize) {
+        const ROW: f32 = 14.0;
+        const ROWS: usize = 8;
+        let x = n as f32 * COLUMN;
+        let top = list
+            .selected
+            .map_or(0, |at| at.saturating_sub(ROWS - 1))
+            .min(list.rows.len().saturating_sub(ROWS));
+        for (slot, (name, folder)) in list.rows.iter().skip(top).take(ROWS).enumerate() {
+            let y = BAND + 2.0 + slot as f32 * ROW;
+            let selected = list.selected == Some(top + slot);
+            if selected {
+                let band = if list.in_use {
+                    [255, 255, 255]
+                } else {
+                    [90, 90, 90]
+                };
+                self.rect(x + 2.0, y, COLUMN - 4.0, ROW, band, 255);
+            }
+            let colour = match (selected, list.in_use) {
+                (true, true) => [0, 0, 0],
+                (true, false) => TEXT,
+                _ => DIM,
+            };
+            let text = if *folder {
+                format!("{name} ›")
+            } else {
+                name.clone()
+            };
+            let text = self.fit(&text, 11.0, COLUMN - 10.0);
+            self.text(&text, x + 6.0, y + 11.0, 11.0, colour);
         }
     }
 

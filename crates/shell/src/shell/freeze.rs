@@ -611,7 +611,7 @@ pub(super) fn render_markers(
     let mut beat = clip_start + Ticks::QUARTER;
     while beat < clip_end {
         at.insert(beat);
-        beat = beat + Ticks::QUARTER;
+        beat += Ticks::QUARTER;
     }
     at.into_iter()
         .map(|tick| bl_model::WarpMarker {

@@ -570,6 +570,33 @@ fn a_launched_audio_slot_clip_plays_its_file_from_the_launch_frame() {
     }
 }
 
+// Spec: warp-modes R27, remote-mapping R35. An unwarped slot clip launched
+// transposed up reads its file faster than the song and is silent once the
+// file runs out; the render never stalls.
+#[test]
+fn a_transposed_launch_of_an_unwarped_audio_clip_is_silent_past_its_file() {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let out = render_session_launch(
+            ramp(4_096),
+            ClipLaunch::default(),
+            AudioData::new(ContentHash([7; 32])),
+            3 * 4_096,
+            512,
+            |track, scene| vec![(0, Cue::Session(transposed(track, scene, 12)))],
+        );
+        tx.send(out).unwrap();
+    });
+    let out = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the render stalled once the clip read past its file");
+    assert!(out[1_000] != 0.0, "the clip plays before its file ends");
+    // An octave up reads the 4,096-frame file through by frame 2,048.
+    for (i, &s) in out.iter().enumerate().skip(2_048 + 64) {
+        assert_eq!(s, 0.0, "frame {i}");
+    }
+}
+
 // Spec: remote-mapping R16. A launch at velocity v plays the clip at a gain of
 // 1 - a * (127 - v) / 126: silent at velocity 1 with the amount at 100 %,
 // unchanged at 127 and with the amount at 0, and the gain holds until the clip

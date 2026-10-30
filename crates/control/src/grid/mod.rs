@@ -658,7 +658,7 @@ impl Grid {
         let doc = &model.document;
         let t = doc.track(track)?;
         let kind = t.kind();
-        let (bright, dim) = match f {
+        let lit = match f {
             TrackFn::Stop => {
                 if !(kind.holds_clips() || kind == TrackKind::Group) {
                     return None;
@@ -671,45 +671,40 @@ impl Grid {
                         )
                 });
                 if playing {
-                    (colour::RED, colour::RED)
+                    colour::RED
                 } else {
-                    (colour::DIM_RED, colour::DIM_RED)
+                    colour::DIM_RED
                 }
             }
             TrackFn::Solo => {
                 let on = t.mixer().solo;
-                let c = if on { colour::BLUE } else { colour::DIM_BLUE };
-                (c, c)
+                if on { colour::BLUE } else { colour::DIM_BLUE }
             }
             TrackFn::Mute => {
                 let on = !t.mixer().mute;
-                let c = if on {
+                if on {
                     colour::YELLOW
                 } else {
                     colour::DIM_YELLOW
-                };
-                (c, c)
+                }
             }
             TrackFn::Arm => {
                 if !kind.holds_clips() {
                     return None;
                 }
-                let c = if t.mixer().arm {
+                if t.mixer().arm {
                     colour::RED
                 } else {
                     colour::DIM_RED
-                };
-                (c, c)
+                }
             }
             TrackFn::Select => {
                 let rgb = Self::track_colour(doc, track);
                 let selected = model.selection.tracks.contains(&track);
-                let c = if selected { nearest(rgb) } else { dimmed(rgb) };
-                (c, c)
+                if selected { nearest(rgb) } else { dimmed(rgb) }
             }
         };
-        let _ = dim;
-        Some(Light::Static(bright))
+        Some(Light::Static(lit))
     }
 
     /// The ring of a row, if the read model has one.

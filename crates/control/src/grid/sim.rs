@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use bl_midi_io::{Direction, TestBackend};
 
-use super::{FADER_CC, Layer, Light, Model, SCENE, light_bytes, pad_note};
+use super::{FADER_CC, Layer, Light, Model, SCENE, pad_note};
 
 /// How a grid fader is set up and where it stands.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -122,18 +122,6 @@ impl Launchpad {
         for name in names {
             self.backend.add_port(Direction::Input, name);
             self.backend.add_port(Direction::Output, name);
-        }
-    }
-
-    /// Unplugs it.
-    pub fn unplug(&self) {
-        let mut names = vec![self.daw_port(), self.midi_port()];
-        if self.model == Model::Pro {
-            names.push("LPProMK3 DIN");
-        }
-        for name in names {
-            self.backend.remove_port(Direction::Input, name);
-            self.backend.remove_port(Direction::Output, name);
         }
     }
 
@@ -386,13 +374,6 @@ impl Launchpad {
     #[must_use]
     pub fn messages(&self) -> &[Vec<u8>] {
         &self.messages
-    }
-
-    /// The light messages that would show `light` on a pad, for a test that
-    /// checks the bytes.
-    #[must_use]
-    pub fn bytes_for(layer: Layer, number: u8, light: Option<Light>) -> Vec<Vec<u8>> {
-        light_bytes(layer, number, light)
     }
 
     // What it sends ---------------------------------------------------------

@@ -267,7 +267,7 @@ impl Grid {
                     cx.run(id, json!({}));
                 }
             }
-            Button::Scene(row) if self.model == Model::X => {
+            Button::Scene(_) if self.model == Model::X => {
                 // A Mixer button held while other controls were pressed
                 // gives the view before it back (R20).
                 if self.peek_button == Some(cc)
@@ -279,7 +279,6 @@ impl Grid {
                         self.layout_dirty = true;
                     }
                 }
-                let _ = row;
             }
             _ => {}
         }

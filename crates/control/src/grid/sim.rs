@@ -56,6 +56,7 @@ pub struct Launchpad {
     leds: BTreeMap<(Layer, u8), Led>,
     banks: [Bank; 4],
     messages: Vec<Vec<u8>>,
+    lit_when_left: Option<usize>,
 }
 
 impl Launchpad {
@@ -70,6 +71,7 @@ impl Launchpad {
             leds: BTreeMap::new(),
             banks: [Bank::default(); 4],
             messages: Vec::new(),
+            lit_when_left: None,
         }
     }
 
@@ -214,6 +216,9 @@ impl Launchpad {
         match body {
             // DAW mode, or Standalone, which clears the DAW's state.
             [0x10, mode] => {
+                if *mode == 0 {
+                    self.lit_when_left = Some(self.lit());
+                }
                 self.daw_mode = *mode == 1;
                 self.leds.clear();
                 self.banks = [Bank::default(); 4];
@@ -307,12 +312,26 @@ impl Launchpad {
         self.button(SCENE[row])
     }
 
+    /// How many pads and buttons are lit.
+    #[must_use]
+    pub fn lit(&self) -> usize {
+        self.leds
+            .keys()
+            .filter(|(layer, number)| self.light(*layer, *number).is_some())
+            .count()
+    }
+
+    /// How many were still lit when the controller was sent back to
+    /// Standalone, or `None` while it hasn't been.
+    #[must_use]
+    pub const fn lit_when_left(&self) -> Option<usize> {
+        self.lit_when_left
+    }
+
     /// Whether nothing is lit.
     #[must_use]
     pub fn all_dark(&self) -> bool {
-        self.leds
-            .keys()
-            .all(|(layer, number)| self.light(*layer, *number).is_none())
+        self.lit() == 0
     }
 
     /// Whether the controller is in DAW mode.

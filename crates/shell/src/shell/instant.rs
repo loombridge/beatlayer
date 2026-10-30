@@ -709,15 +709,23 @@ impl Shell {
             }
             Role::Select(column) => {
                 if pressed && let Some(track) = self.ring_track(row, column) {
-                    let request = Request {
-                        id: "session.select".to_owned(),
-                        args: json!({ "track": track }),
-                        gesture: None,
-                    };
-                    self.run_surface_request(CommandRequest {
-                        row,
-                        ask: Ask::Command(request),
-                    });
+                    // Spec: supported-controllers R13. The track is selected
+                    // as a click on its title bar selects it, and is the one
+                    // the devices and the drum layout follow.
+                    for (id, args) in [
+                        ("session.select", json!({ "track": track })),
+                        ("arrangement.select_tracks", json!({ "tracks": [track] })),
+                    ] {
+                        let request = Request {
+                            id: id.to_owned(),
+                            args,
+                            gesture: None,
+                        };
+                        self.run_surface_request(CommandRequest {
+                            row,
+                            ask: Ask::Command(request),
+                        });
+                    }
                 }
             }
             role => {

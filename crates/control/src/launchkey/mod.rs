@@ -76,7 +76,8 @@ fn kind(
     Kind::new(id, name, true, true, Some(RING), Vec::new(), make).recognised(Recognise {
         port: "daw",
         test: Some(test),
-        maker: MAKER,
+        maker: &MAKER,
+        pair: false,
     })
 }
 

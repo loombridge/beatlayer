@@ -9,7 +9,7 @@
 
 Erosion is Beatlayer's version of Live's Erosion. It delays the signal by a few milliseconds and moves that delay with a modulation made of a sine wave and band-filtered noise, which smears the signal: from a warble when the sine leads, through sidebands around every partial, to a gritty, noisy roughness when the noise leads. The user sets the modulation's frequency (the sine's frequency, and the centre of the noise's band), how far it moves the delay, the balance between sine and noise, the width of the noise's band, and how different the two channels' modulation is. A display shows the spectrum of the input.
 
-This spec covers the device's behaviour. The device framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md), and delay compensation is [its own spec](delay-compensation.md). Live's older Erosion, which sets from before 12.4 load as Erosion Legacy, is not built; set import maps it later.
+This spec covers the device's behaviour. The device framework (parameters, smoothing, layout, automation) is the [device framework spec](device-framework.md), and delay compensation is [its own spec](delay-compensation.md). Live's older Erosion, which sets from before 12.4 load as Erosion Legacy, is not built; a Live set or preset holding it maps it to Erosion ([Live device mapping](live-device-mapping.md) R15).
 
 ## Sources
 
@@ -52,4 +52,4 @@ Everything below that the manual doesn't state (the ranges, the defaults, the de
 ## Not built yet
 
 - The display as an X–Y control: dragging horizontally to set Freq, vertically to set Amount, and with the modifier key vertically to set Filter Width. Until then the display cell is a frame that shows the spectrum, and Freq, Amount and Filter Width are ordinary controls. Live also lights icons under the display to show which carrier is dominant, and draws the sine as a line and the noise as dotted lines; this spec doesn't cover that drawing.
-- Erosion Legacy, the version before 12.4.
+- Erosion Legacy, the version before 12.4, which Live set import maps to Erosion ([Live device mapping](live-device-mapping.md) R15).

@@ -331,6 +331,10 @@ pub enum Role {
     Crossfade(u8),
     /// The Main track's volume.
     MainVolume,
+    /// The crossfader.
+    Crossfader,
+    /// The Cue Volume knob of Main's strip.
+    CueVolume,
     /// Moves the ring (R29).
     Ring(RingStep),
 }
@@ -376,6 +380,10 @@ pub enum Ask {
     Command(Request),
     /// A control moved, which the shell takes to its place (R22).
     Control(Control),
+    /// An absolute control the surface knows rests at a value, which the
+    /// shell keeps for Takeover Mode without running anything (supported
+    /// controllers R35).
+    Rest(Control),
     /// The control's gesture ended without a last command: its touch was
     /// let go, so the changes since it was touched are one undo step (R7).
     EndGesture(u32),
@@ -516,6 +524,21 @@ impl Cx {
             .push(Ask::Control(Control { role, mode, hit }));
     }
 
+    /// Tells the shell where an absolute control rests that the surface hasn't
+    /// moved yet, as the position of its role's parameter in its range, so
+    /// Takeover Mode knows where the controller is before its first message
+    /// (R35).
+    pub fn rest(&mut self, role: Role, value: u8) {
+        self.requests.push(Ask::Rest(Control {
+            role,
+            mode: RemoteMode::Absolute,
+            hit: Hit::Value {
+                value: u16::from(value),
+                full: 127,
+            },
+        }));
+    }
+
     /// Ends the gesture on `control` where it has no last command to carry
     /// the release, as an encoder's touch being let go does (R7).
     pub fn end_gesture(&mut self, control: u32) {
@@ -636,8 +659,13 @@ pub struct Recognise {
     /// A match of its own for a controller whose ports go by more than one
     /// name, in place of `port`; given the name in lower case.
     pub test: Option<fn(&str) -> bool>,
-    /// The maker's three bytes in the device inquiry's reply.
-    pub maker: [u8; 3],
+    /// The bytes that follow the reply's header: the maker's, and where the
+    /// maker puts the model in the same place, the model's.
+    pub maker: &'static [u8],
+    /// Whether the controller has two ports of this name, the first of which
+    /// is its surface's: the one after a port that is taken, or being asked,
+    /// isn't offered.
+    pub pair: bool,
 }
 
 impl Recognise {
@@ -650,12 +678,13 @@ impl Recognise {
             .map_or_else(|| port.contains(self.port), |test| test(&port))
     }
 
-    /// Whether `bytes` is a device inquiry's reply from the maker.
+    /// Whether `bytes` is a device inquiry's reply from the controller's
+    /// maker.
     #[must_use]
     pub fn replies(&self, bytes: &[u8]) -> bool {
-        bytes.len() > 8
+        bytes.len() > 5 + self.maker.len()
             && bytes[..5] == [0xF0, 0x7E, bytes[2], 0x06, 0x02]
-            && bytes[5..8] == self.maker
+            && bytes[5..].starts_with(self.maker)
     }
 }
 
@@ -676,6 +705,8 @@ pub fn kinds() -> &'static [Arc<Kind>] {
     static KINDS: std::sync::OnceLock<Vec<Arc<Kind>>> = std::sync::OnceLock::new();
     KINDS.get_or_init(|| {
         vec![
+            Arc::new(crate::grid::apc_mini()),
+            Arc::new(crate::grid::apc40()),
             Arc::new(crate::launchkey::mk3()),
             Arc::new(crate::launchkey::mk4()),
             Arc::new(crate::grid::mini()),

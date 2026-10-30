@@ -15,6 +15,8 @@ Cite only the allowed sources in the clean-room policy, and name each one precis
 - **Manual.** A chapter and section of Ableton's reference manual, or a set of release notes, with the Live version. Paraphrase it; never copy its text into the repository.
 - **Observation.** What you saw while running Live: the Live version, the operating system, the steps you took, and what happened. Reading a running Live's UI through the operating system's accessibility interface counts as observation.
 - **Measurement.** Live's output from your own input material: the method, the input, the settings, the tool, and the result with its tolerance. Generate the input with a script in `tests/fixtures/gen/` where you can. Record numbers, not audio, because Live's renders stay on your own machine.
+- **Product page.** Ableton's public page for a device or pack (its URL and the date read), for devices the reference manual doesn't describe, such as Granulator III and the Creative Extensions pack's Bass and Poli. Paraphrase it.
+- **Paper.** A published paper, book or standard reference (authors, title, venue, year) for the physics and signal processing a behaviour rests on, such as the partial ratios of a bar or the bowed-string friction curve; never for what Live does.
 
 ## Write a spec
 

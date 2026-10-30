@@ -308,6 +308,7 @@ impl Shell {
                     });
                 }
                 Ask::Control(control) => self.run_control(request.row, control),
+                Ask::Rest(control) => self.rest_control(request.row, control),
                 Ask::EndGesture(control) => {
                     if self
                         .surface

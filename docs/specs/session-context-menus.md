@@ -1,7 +1,7 @@
 # The Session View's context menus and the Clip View title bar's
 
 - **Status:** implemented
-- **Work packages:** WP-6.56 (R1 to R16). The items other packages bring are listed in R13 with the package that brings them
+- **Work packages:** WP-6.56 (R1 to R16). The items other packages bring are listed in R13 with the package that brings them; WP-9.7 (Convert Harmony, Melody and Drums to New MIDI Track on a Session clip) and WP-9.2 (Separate Stems to New Audio Tracks on a Session clip), each taking its items out of R13's list
 - **Parity-matrix row:** Interface placement and key bindings: Menu bar and context menus: structure, order, and wording of generic commands
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026, chapters 7 "Session View" (7.1, 7.2, 7.2.1, 7.2.2, 7.4, 7.5), 8 "Clip View" (8.1.1.1 to 8.1.1.3, 8.1.2), 13, 20 and 22; the UI parity reference's [menus.md](../ui-parity/menus.md) C-SLOT, C-SCENE and C-CLIP-SES, recorded from Live 12.4.3 on macOS
 
@@ -47,8 +47,9 @@ This spec covers the four menus, their rows, which item runs which command, the 
 **What waits on other packages**
 
 - **R13.** An item whose command isn't built is drawn disabled in its place and names its package in its AccessKit description and its hover text, as "Not built yet: arrives with …" ([track-context-menu.md](track-context-menu.md) R6). Freeze Track (WP-4.14), Bounce Track in Place, Bounce to New Track, Paste Bounced Audio and Bounce Group to New Track (WP-4.15), Slice to New MIDI Track (WP-4.16), Extract Groove(s) (WP-6.20) and Edit Info Text (WP-6.58, which opens the Info View's field, [info-view.md](info-view.md) R10) were built before this package and run their commands on the selection, as the clipboard items do (R11). What still waits:
-  - Convert Harmony, Melody and Drums to New MIDI Track (C-CLIP-SES-019): Phase 9 (audio to MIDI, IMP-06).
-  - Separate Stems to New Audio Tracks on a Session clip (C-CLIP-SES-020): Phase 9 (stem separation of Session clips, IMP-11).
+  - Convert Harmony, Melody and Drums to New MIDI Track (C-CLIP-SES-019): WP-9.7, which runs them as [audio to MIDI](audio-to-midi.md) R1 to R10 say.
+  - Separate Stems to New Audio Tracks on a Session clip (C-CLIP-SES-020): WP-9.2, which runs it as [stem separation](stem-separation.md) R22 and R23 say.
+  Once each package lands, its items run their commands on the selection and leave this list.
   Duplicate as Linked Clip and Unlink Clip, straight after Duplicate in the Session clip's menu, are added by WP-6.44 ([linked-clips.md](linked-clips.md) R1, R8) and aren't drawn before it. (S1, S2, S5)
 
 **Keys, assistive technology and readback**

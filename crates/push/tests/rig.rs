@@ -366,7 +366,7 @@ impl Rig {
             .map(|r| match &r.ask {
                 bl_control::Ask::Command(c) => format!("{} {}", c.id, c.args),
                 bl_control::Ask::EndGesture(control) => format!("end {control:#x}"),
-                bl_control::Ask::Control(_) => "control".to_owned(),
+                bl_control::Ask::Control(_) | bl_control::Ask::Rest(_) => "control".to_owned(),
             })
             .collect()
     }

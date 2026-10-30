@@ -1,7 +1,7 @@
 # The multisampler, sample editing in the sampler devices, and the autosampler
 
-- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built)
-- **Work packages:** WP-5.13 (zones, the zone editor, the Sample tab, the volume envelope and voices), WP-5.14 (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs, and SFZ import), WP-5.15 (sample editing in the sampler devices' displays, IMP-28), WP-5.16 (the autosampler, IMP-27), WP-6.9 (tuning systems: R74)
+- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built; R75, the tabs on device pages, and R76, the filter's circuits and per-frame values, are drafted for WP-8.1 and WP-8.3 and have no tests yet)
+- **Work packages:** WP-5.13 (zones, the zone editor, the Sample tab, the volume envelope and voices), WP-5.14 (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs, and SFZ import), WP-5.15 (sample editing in the sampler devices' displays, IMP-28), WP-5.16 (the autosampler, IMP-27), WP-6.9 (tuning systems: R74); WP-8.1 (the tabs on [the device framework](device-framework.md)'s pages: R75); WP-8.3 (the filter on [the instruments' filter](instrument-filter.md): R37 and R76)
 - **Parity-matrix row:** Instruments: Sampler (multisample, zones, modulation), plus SFZ import; Instruments: Simpler (the display's edits); [the improvements](../05-improvements.md), IMP-27 and IMP-28
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 31, sections 31.10 "Sampler" (31.10.1 to 31.10.11) and 31.11 "Simpler" (its sample display and 31.11.7 "Context Menu Options for Simpler"); chapter 23, sections 23.2 and 23.2.4.1; and the SFZ format reference at sfzformat.com, read 17 October 2026
 
@@ -94,7 +94,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 
 **The Filter/Global tab (WP-5.14)**
 
-- **R37.** The filter (off by default) runs per voice after the shaper or before it (R39). Its Type is low-pass, high-pass, band-pass, notch or Morph, each at 12 or 24 dB per octave; Freq is logarithmic from 20 Hz to 20 kHz (default 1 kHz) and Res 0 to 100 % (default 0); Morph (0 to 100 %, default 0) sweeps the Morph type from low-pass at 0 through band-pass at 25 %, high-pass at 50 % and notch at 75 % back to low-pass at 100 %, each stop the pure type and the places between a crossfade of the two neighbours, its context menu snapping it to any of the four. The circuit is Clean, the kit's state-variable filter, as Simpler's is (the sampler spec, R15); Drive (0 to 24 dB, default 0) drives the signal into it for low-pass, high-pass and band-pass. (S11, S19)
+- **R37.** The filter (off by default) runs per voice after the shaper or before it (R39). Its Type is low-pass, high-pass, band-pass, notch or Morph, each at 12 or 24 dB per octave; Freq is logarithmic from 20 Hz to 20 kHz (default 1 kHz) and Res 0 to 100 % (default 0); Morph (0 to 100 %, default 0) sweeps the Morph type from low-pass at 0 through band-pass at 25 %, high-pass at 50 % and notch at 75 % back to low-pass at 100 %, each stop the pure type and the places between a crossfade of the two neighbours, its context menu snapping it to any of the four. Its Circuit is Clean (the default), OSR, MS2, SMP or PRD on the types each plays, as [the instruments' filter](instrument-filter.md) gives them, as Simpler's is (the sampler spec, R15); Drive (0 to 24 dB, default 0) drives the signal into it for the non-Clean low-pass, high-pass and band-pass. (S11, S19)
 - **R38.** The filter envelope (F. Env, off by default) is R24's envelope with its levels from −100 to 100 %, moving the cutoff by its value times Amount (0 to 72 semitones, default 0), so it does nothing at 0. (S11)
 - **R39.** The shaper (Shaper, off by default) shapes each voice with Soft (tanh), Hard (a clip at full scale), Sine (a sine fold) or 4bit (sixteen levels), driven by Amount (0 to 100 %, default 0, a drive of up to 24 dB; Beatlayer's own curves and drive); its direction switch puts it before the filter (the default) or after it. (S11)
 
@@ -147,6 +147,11 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 **Tuning systems (WP-6.9)**
 
 - **R74.** On a track that plays the set's tuning ([tunings.md](tunings.md) R12, R14), a layer's voice reads its sample at the pitch R15 gives with its key's tuned pitch in place of the key, its Root Key still naming the twelve-step pitch at which the sample plays as recorded; Transpose, Detune, Spread, Glide, the pitch envelope, the routings to Pitch and the pitch wheel add to it as they add to a key without a tuning (R32 to R35, R44, R45). The zones choose layers by key number (R4, R33), and the Key modulation source and Time < Key (R26) follow the key number too (Beatlayer's own). (S23, S24)
+
+**Device pages and the instruments' filter (WP-8.1, WP-8.3)**
+
+- **R75.** The five tabs Sample to MIDI are a pages node in the tab style, in the title bar ([device framework](device-framework.md) R41 to R45), drawn and placed as R1 and L-DEV-017 say; which tab shows is the node's page, view state saved with the set, and `device.set_page` shows one by its name. A set saved before WP-8.1 opens on the tab it was saved on. Zone keeps showing and hiding the zone editor, apart from the pages. (S3, S4)
+- **R76.** The filter is the instruments' filter (instrument filter R1 to R13) per voice: Freq, Res, Morph and Drive, and the Filter Freq, Filter Res, Filter Morph and Filter Drive destinations (R46), act per frame on each voice, as the shaper's Amount does. A set saved before WP-8.3 opens on Clean and renders as it did (instrument filter R15). (S11)
 
 ## Tests
 
@@ -226,6 +231,8 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R72 | `crates/shell/tests/autosample.rs`, `three_octaves_and_two_layers_match_the_synth` | shell test (golden comparison) |
 | R73 | `crates/shell/tests/autosample.rs`, `cancel_deletes_the_files_and_changes_nothing` | shell test |
 | R74 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_sounding_note_does_not_move_when_the_tuning_changes` | unit |
+| R75 | to be written in WP-8.1 | UI script and layout test (the tabs unchanged); shell test (an older set opens on its tab); agent API (`device.set_page`) |
+| R76 | to be written in WP-8.3 | engine test under the allocation trap (per-frame values; the circuits); golden render of an older set |
 
 ## Not built yet
 
@@ -235,10 +242,9 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 - The zone editor overlays the foot of the main view rather than making the detail area taller; the layer list's menu items, zone drags and marker drags have no keyboard form (the accessibility spec lists them); Manage Sample waits on the File Manager (WP-2.25), and Convert to Simpler on WP-5.15.
 - The Best interpolation does not band-limit content above half the output rate when a layer is transposed up, so a sample with energy near the top of the spectrum can alias an octave up.
 
-- The filter's circuit models other than Clean (OSR, MS2, SMP and PRD) are not built, as in Simpler; the multisampler's filter is the kit's state-variable filter with Drive in front.
 - The formats the manual's import names (REX files, ACID Loops and Soundtrack Loops) are not read; SFZ is Beatlayer's multisample import.
 - The tabs' controls are the generic panel's (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs draw every parameter as a knob, switch, chooser or number field in the order R32 to R46 list them); the envelopes have no graph to drag, and the device is as wide as its widest tab.
-- The filter's Res, Morph and Drive (and the Filter Res, Filter Morph and Filter Drive destinations) and the shaper's Amount reach the kit's filter once a block, from each note's last frame (`shortcut:` in the device, upgrade with per-frame values in the kit's filter bank); the filter runs over a note's layers together, after their volume envelopes and pans, so the shaper after the filter sees the released envelope.
+- The filter runs over a note's layers together, after their volume envelopes and pans, so the shaper after the filter sees the released envelope.
 - Sample Start, Loop Length and the Sample Selector as destinations (R45) are read as a note starts, from its MIDI sources and the auxiliary envelope's Initial level; a source that moves later (a controller, an LFO) doesn't move them.
 - A multisampler has 96 notes at a time (32 sounding, the rest fading out); one past that is dropped.
 - SFZ: the opcodes beyond R48 to R53's list are left unread and reported, among them `trigger` other than `attack`, key switches, `group` and `off_by`, controller ranges, effects, curves and the format's v2 opcodes; the SFZ drop on the Session view's slots and drop area isn't covered; a crossfade needs both its ends; `lorand` and `hirand` only switch Random mode on, their windows aren't read.

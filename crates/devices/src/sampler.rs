@@ -10,6 +10,7 @@
 //! when the node is made, and the sampler reads it at the positions its
 //! voices need, so nothing here reads a file or allocates.
 
+use std::mem;
 use std::sync::Arc;
 
 use bl_core::time::{Frames, SampleRate, TempoMap};
@@ -223,6 +224,11 @@ const TRANSIENT_FALL_MS: f64 = 20.0;
 /// window within 40 dB of the loudest is an onset, at 0 % only the loudest
 /// is.
 const TRANSIENT_RANGE_DB: f64 = 40.0;
+
+/// How many frames of the region a Transient scan reads for each frame of a
+/// block, so the scan costs a block a few per cent of its time whatever the
+/// region's length, and a short sample is done in the block it loads in.
+const SCAN_FRAMES_PER_FRAME: u64 = 256;
 
 /// How far the filter envelope moves the cutoff at full amount, in
 /// octaves each way (Beatlayer's own).
@@ -1014,9 +1020,9 @@ impl Sampler {
     }
 
     /// Takes a note: starts, releases or chokes voices by the mode's rules.
-    fn play(&mut self, note: NoteEvent, settings: &Settings, song_frame: Frames) {
+    fn play(&mut self, note: NoteEvent, settings: &Settings) {
         match note.kind {
-            NoteKind::On => self.note_on(note, settings, None, song_frame),
+            NoteKind::On => self.note_on(note, settings, None),
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
             // The sampler plays no per-note expression (MPE): today only
@@ -1031,13 +1037,7 @@ impl Sampler {
     /// Starts a voice for `note`. An audition (R54) passes where in the
     /// sample the voice starts and the frame it ends at: it plays the whole
     /// region's rules from there at the sample's root pitch, slices or not.
-    fn note_on(
-        &mut self,
-        note: NoteEvent,
-        s: &Settings,
-        audition: Option<(f64, u64)>,
-        song_frame: Frames,
-    ) {
+    fn note_on(&mut self, note: NoteEvent, s: &Settings, audition: Option<(f64, u64)>) {
         // Slicing plays the slice the note names; Classic and One-Shot the
         // whole region.
         let sliced = s.mode == Mode::Slice && audition.is_none();
@@ -1136,9 +1136,8 @@ impl Sampler {
         voice.tuned = tuned;
         voice.counter = counter;
         voice.audition = audition.is_some();
+        voice.fresh = true;
         voice.position = audition.map_or(region_start as f64, |(at, _)| at);
-        voice.start_position = voice.position;
-        voice.start_song_frame = song_frame;
         // Thru plays a slice on to the region's end (R23).
         let thru = sliced && s.playback == Playback::Thru;
         voice.end = audition.map_or(if thru { s.region_end } else { region_end }, |(_, end)| end);
@@ -1175,7 +1174,7 @@ impl Sampler {
     /// A click in the display (R54): the button going down starts a voice
     /// at C3, the sample's own pitch, from the clicked point; going up fades
     /// it out whatever the mode's Trigger says.
-    fn audition(&mut self, audition: Audition, s: &Settings, frames: usize, song_frame: Frames) {
+    fn audition(&mut self, audition: Audition, s: &Settings, frames: usize) {
         if audition.down {
             let at = audition.from.clamp(0.0, 1.0) * frames as f64;
             let end = if at < s.region_end as f64 {
@@ -1191,7 +1190,7 @@ impl Sampler {
                 velocity: 1.0,
                 note_id: None,
             };
-            self.note_on(note, s, Some((at, end)), song_frame);
+            self.note_on(note, s, Some((at, end)));
         } else {
             for voice in self.voices.iter_mut() {
                 if voice.active && voice.audition && !voice.fading {
@@ -1282,6 +1281,17 @@ impl Sampler {
                 self.free_phase -= 1.0;
             }
         }
+        // The song ticks this frame covers, from the block's song position
+        // (which stands still while stopped, so the block's own frames count).
+        let warp_ticks = if s.warped {
+            let seconds = |frame: usize| {
+                (song_position.get() as f64 + frame as f64 * s.speed) / rate.as_f64()
+            };
+            tempo.seconds_to_ticks_exact(seconds(frame + 1))
+                - tempo.seconds_to_ticks_exact(seconds(frame))
+        } else {
+            0.0
+        };
         let stride = self.stride;
         for slot in 0..SLOTS {
             let voice = &mut self.voices[slot];
@@ -1374,19 +1384,19 @@ impl Sampler {
                     + pitch_env_semitones)
                     / 12.0,
             );
-            if s.warped {
-                let current_frame = song_position + song_frames(frame, s.speed);
-                let now_ticks =
-                    tempo.seconds_to_ticks_exact(current_frame.get() as f64 / rate.as_f64());
-                let start_ticks = tempo
-                    .seconds_to_ticks_exact(voice.start_song_frame.get() as f64 / rate.as_f64());
-                let played_ticks = (now_ticks - start_ticks).max(0.0);
-                let sample_time = played_ticks / (s.warp_bpm * (705_600.0 / 60.0));
-                let offset = sample_time * s.sample_rate * ratio * bend;
-                voice.position = voice.start_position + offset;
+            // A warped voice moves by this frame's share of the song's
+            // ticks, so ratio and bend scale the step, not the time played.
+            // The note's first frame stays on its start, as it always has.
+            voice.position += if s.warped {
+                let ticks = if mem::take(&mut voice.fresh) {
+                    0.0
+                } else {
+                    warp_ticks
+                };
+                ticks / (s.warp_bpm * (705_600.0 / 60.0)) * s.sample_rate * ratio * bend
             } else {
-                voice.position += ratio * bend;
-            }
+                ratio * bend
+            };
             if s.looping && s.loop_end > s.loop_start && voice.position >= s.loop_end as f64 {
                 // The wrap resumes past the head the crossfade already
                 // played, so the fade's end and the resumed audio meet.
@@ -1496,7 +1506,7 @@ impl NativeDevice for Sampler {
         let tempo = audio.tempo();
         let settings = self.settings(params, rate, tempo, song_position, audio.speed());
         if let Some(audition) = self.audition.take() {
-            self.audition(audition, &settings, sample.frames(), song_position);
+            self.audition(audition, &settings, sample.frames());
         }
         // Slices are Slicing mode's alone: working them out in Classic or
         // One-Shot would scan the region on the audio thread for nothing.
@@ -1506,6 +1516,7 @@ impl NativeDevice for Sampler {
                 &settings.cut(),
                 Arc::as_ptr(&sample) as usize,
                 &manual_slices,
+                SCAN_FRAMES_PER_FRAME * frames as u64,
             );
         }
         let gain = params.ramp(at(GAIN));
@@ -1523,13 +1534,12 @@ impl NativeDevice for Sampler {
         // 1. The notes and the voices: each voice's sample into its lane,
         //    with its cutoff and LFO.
         for frame in 0..frames {
-            let current_frame = song_position + song_frames(frame, settings.speed);
             while notes
                 .peek()
                 .is_some_and(|note| note.offset as usize <= frame)
             {
                 let note = notes.next().expect("peeked");
-                self.play(note, &settings, current_frame);
+                self.play(note, &settings);
             }
             let gain = gain.get(frame).copied().unwrap_or(1.0);
             self.voices_frame(&settings, &sample, frame, gain, tempo, rate, song_position);
@@ -1558,16 +1568,6 @@ impl NativeDevice for Sampler {
         {
             self.data = Some(data);
         }
-    }
-}
-
-/// The song frames `frame` frames of a stretch cover at `speed` song frames
-/// per frame.
-fn song_frames(frame: usize, speed: f64) -> Frames {
-    if speed == 1.0 {
-        Frames(frame as i64)
-    } else {
-        Frames((frame as f64 * speed).round() as i64)
     }
 }
 
@@ -1715,8 +1715,29 @@ pub(crate) fn random(state: &mut u32) -> f32 {
 /// slice runs from its boundary to the next, so `count` slices have
 /// `count + 1` boundaries.
 struct Slices {
+    /// What `bounds` were worked out from.
     signature: Option<SliceSignature>,
     bounds: [u64; MAX_SLICES + 1],
+    count: usize,
+    /// A Transient scan under way for a newer signature; `bounds` keep
+    /// serving the old one until it finishes.
+    scan: Option<Scan>,
+}
+
+/// A Transient scan that resumes where the last block left it, so the
+/// region's length never lands on one block of the audio thread. It reads
+/// the samples the way one pass over the region would.
+#[derive(Clone, Copy)]
+struct Scan {
+    signature: SliceSignature,
+    /// The next frame to read.
+    at: u64,
+    env: f64,
+    peak: f64,
+    /// The threshold, once the peak pass is done and the onset pass runs.
+    threshold: Option<f64>,
+    above: bool,
+    found: [u64; MAX_SLICES + 1],
     count: usize,
 }
 
@@ -1776,7 +1797,7 @@ pub fn slice_boundaries(
         rate: f64::from(sample.sample_rate()),
     };
     let mut slices = Slices::new();
-    slices.update(sample, &cut, 0, manual);
+    slices.update(sample, &cut, 0, manual, u64::MAX);
     slices.bounds[..slices.count].to_vec()
 }
 
@@ -1802,6 +1823,7 @@ impl Slices {
             signature: None,
             bounds: [0; MAX_SLICES + 1],
             count: 0,
+            scan: None,
         }
     }
 
@@ -1815,8 +1837,17 @@ impl Slices {
 
     /// Works the boundaries out again when their inputs changed. The
     /// signature holds the sensitivity to the nearest per cent, so
-    /// automation that sweeps it doesn't re-slice on every block.
-    fn update(&mut self, sample: &SampleData, s: &Cut, address: usize, manual: &[u64]) {
+    /// automation that sweeps it doesn't re-slice on every block. A
+    /// Transient scan reads at most `budget` frames a call, and the old
+    /// boundaries stand until it finishes.
+    fn update(
+        &mut self,
+        sample: &SampleData,
+        s: &Cut,
+        address: usize,
+        manual: &[u64],
+        budget: u64,
+    ) {
         let signature = SliceSignature {
             by: s.by,
             sensitivity: (s.sensitivity * 100.0).round(),
@@ -1836,19 +1867,22 @@ impl Slices {
             manual_sum: manual.iter().sum(),
         };
         if self.signature == Some(signature) {
+            self.scan = None;
             return;
         }
+        let empty = s.region_end <= s.region_start || sample.frames() == 0;
+        if s.by == SliceBy::Transient && !empty {
+            return self.transient(sample, s, signature, manual, budget);
+        }
+        self.scan = None;
         self.signature = Some(signature);
         self.count = 0;
-        if s.region_end <= s.region_start || sample.frames() == 0 {
+        if empty {
             return;
         }
         match s.by {
             SliceBy::Manual => self.manual(s, manual),
-            SliceBy::Transient => {
-                self.detect(sample, s);
-                self.merge_manual(s, manual);
-            }
+            SliceBy::Transient => {}
             SliceBy::Beat => {
                 self.beat(s);
                 self.merge_manual(s, manual);
@@ -1888,10 +1922,15 @@ impl Slices {
         }
     }
 
+    /// Adds the manual slices inside the region to the automatic ones.
+    /// `push` only appends past the last boundary, which is the region's
+    /// end, so the end comes off and goes back on after the sort.
     fn merge_manual(&mut self, s: &Cut, manual: &[u64]) {
+        self.count = self.count.saturating_sub(1);
         for &m in manual {
-            if m > s.region_start && m < s.region_end {
-                self.push(m);
+            if m > s.region_start && m < s.region_end && self.count < MAX_SLICES {
+                self.bounds[self.count] = m;
+                self.count += 1;
             }
         }
         self.bounds[..self.count].sort_unstable();
@@ -1905,15 +1944,13 @@ impl Slices {
         if self.count > 0 {
             self.count = j + 1;
         }
+        self.push(s.region_end);
     }
 
     /// Pushes one boundary, keeping the list sorted and capped: duplicates
     /// and boundaries past the cap don't make empty slices.
     fn push(&mut self, at: u64) {
-        if self.count < MAX_SLICES + 1 && (self.count == 0 || at > self.bounds[self.count - 1]) {
-            self.bounds[self.count] = at;
-            self.count += 1;
-        }
+        push_bound(&mut self.bounds, &mut self.count, at);
     }
 
     /// Equal slices: the Regions parameter's count.
@@ -1946,39 +1983,120 @@ impl Slices {
     /// and an onset where it rises past the threshold Sensitivity sets.
     /// Beatlayer's own detector; up to 64 slices, the first found. The
     /// region's start and end are boundaries of their own, so the slices
-    /// cover it.
-    fn detect(&mut self, sample: &SampleData, s: &Cut) {
-        let samples = sample.channel(0).unwrap_or(&[]);
+    /// cover it. The scan reads `budget` frames a call; when it finishes,
+    /// its boundaries (and the manual slices) replace the old ones.
+    fn transient(
+        &mut self,
+        sample: &SampleData,
+        s: &Cut,
+        signature: SliceSignature,
+        manual: &[u64],
+        budget: u64,
+    ) {
+        if self
+            .scan
+            .as_ref()
+            .is_none_or(|scan| scan.signature != signature)
+        {
+            // Another sample or region has no use for the old boundaries;
+            // a change of Sensitivity or manual slices keeps them until
+            // the new ones are ready.
+            if self.signature.is_none_or(|old| {
+                (old.sample, old.frames, old.region_start, old.region_end)
+                    != (
+                        signature.sample,
+                        signature.frames,
+                        signature.region_start,
+                        signature.region_end,
+                    )
+            }) {
+                self.count = 0;
+            }
+            self.scan = Some(Scan::new(signature, s.region_start));
+        }
+        let Some(scan) = self.scan.as_mut() else {
+            return;
+        };
+        if !scan.run(sample.channel(0).unwrap_or(&[]), s, budget) {
+            return;
+        }
+        self.bounds = scan.found;
+        self.count = scan.count;
+        self.signature = Some(signature);
+        self.scan = None;
+        self.merge_manual(s, manual);
+    }
+}
+
+/// Pushes one boundary onto a sorted, capped list.
+fn push_bound(bounds: &mut [u64; MAX_SLICES + 1], count: &mut usize, at: u64) {
+    if *count < MAX_SLICES + 1 && (*count == 0 || at > bounds[*count - 1]) {
+        bounds[*count] = at;
+        *count += 1;
+    }
+}
+
+impl Scan {
+    fn new(signature: SliceSignature, start: u64) -> Self {
+        Self {
+            signature,
+            at: start,
+            env: 0.0,
+            peak: 0.0,
+            threshold: None,
+            above: false,
+            found: [0; MAX_SLICES + 1],
+            count: 0,
+        }
+    }
+
+    /// Reads up to `budget` more frames; true once the scan is done.
+    fn run(&mut self, samples: &[f32], s: &Cut, budget: u64) -> bool {
         let (start, end) = (s.region_start, s.region_end);
         let fall = (-1.0 / (TRANSIENT_FALL_MS / 1000.0 * s.rate)).exp();
+        let mut left = budget;
         // First, the loudest the envelope gets, for the threshold.
-        let mut env = 0.0f64;
-        let mut peak = 0.0f64;
-        for i in start..end {
-            env = (env * fall).max(f64::from(samples[i as usize].abs()));
-            peak = peak.max(env);
-        }
-        self.push(start);
-        if peak > 0.0 {
-            let threshold = peak * 10f64.powf(-TRANSIENT_RANGE_DB / 20.0 * s.sensitivity);
-            let mut env = 0.0f64;
-            let mut above = false;
-            for i in start..end {
-                if self.count >= MAX_SLICES {
-                    break;
-                }
-                env = (env * fall).max(f64::from(samples[i as usize].abs()));
-                if env >= threshold {
-                    if !above {
-                        self.push(i);
-                    }
-                    above = true;
-                } else {
-                    above = false;
-                }
+        if self.threshold.is_none() {
+            let stop = self.at + left.min(end - self.at);
+            left -= stop - self.at;
+            for i in self.at..stop {
+                self.env = (self.env * fall).max(f64::from(samples[i as usize].abs()));
+                self.peak = self.peak.max(self.env);
             }
+            self.at = stop;
+            if self.at < end {
+                return false;
+            }
+            push_bound(&mut self.found, &mut self.count, start);
+            self.threshold =
+                Some(self.peak * 10f64.powf(-TRANSIENT_RANGE_DB / 20.0 * s.sensitivity));
+            self.at = if self.peak > 0.0 { start } else { end };
+            self.env = 0.0;
         }
-        self.push(end);
+        let threshold = self.threshold.unwrap_or(f64::INFINITY);
+        let stop = self.at + left.min(end - self.at);
+        while self.at < stop {
+            if self.count >= MAX_SLICES {
+                self.at = end;
+                break;
+            }
+            let i = self.at;
+            self.env = (self.env * fall).max(f64::from(samples[i as usize].abs()));
+            if self.env >= threshold {
+                if !self.above {
+                    push_bound(&mut self.found, &mut self.count, i);
+                }
+                self.above = true;
+            } else {
+                self.above = false;
+            }
+            self.at += 1;
+        }
+        if self.at < end {
+            return false;
+        }
+        push_bound(&mut self.found, &mut self.count, end);
+        true
     }
 }
 
@@ -2103,10 +2221,8 @@ struct Voice {
     filter_env: Env,
     /// The pitch envelope, which moves the pitch.
     pitch_env: Env,
-    /// The song frame the voice started sounding on.
-    start_song_frame: Frames,
-    /// The sample frame the voice started on.
-    start_position: f64,
+    /// Whether it has yet to take its first frame.
+    fresh: bool,
     /// Its LFO's place in its cycle.
     lfo_phase: f64,
     /// Frames since the note started, for the LFO's Attack.
@@ -2135,8 +2251,7 @@ impl Voice {
             env: Env::idle(),
             filter_env: Env::idle(),
             pitch_env: Env::idle(),
-            start_song_frame: Frames(0),
-            start_position: 0.0,
+            fresh: false,
             lfo_phase: 0.0,
             lfo_age: 0,
             lfo_random: 0.0,

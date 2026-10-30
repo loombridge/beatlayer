@@ -150,6 +150,9 @@ enum Event {
 
 /// The ports a running surface talks on.
 struct Link {
+    /// The input's name, which a surface reads to tell the controller's
+    /// size apart.
+    name: String,
     input: PortId,
     live: Arc<InputLive>,
     output: Option<PortId>,
@@ -226,7 +229,7 @@ impl Shared {
     ) -> Result<(R, Cx), Fault> {
         let started = Instant::now();
         *lock(&self.call) = Some((row, generation, started));
-        let mut cx = Cx::new(row, self.now());
+        let mut cx = Cx::new(row, self.now()).on(&running.link.name);
         let result = catch_unwind(AssertUnwindSafe(|| f(running.surface.as_mut(), &mut cx)));
         {
             let mut call = lock(&self.call);
@@ -992,6 +995,7 @@ impl Surfaces {
         let session = self.sessions;
         let output = config.output.as_deref().map(PortId::from_name);
         let link = Link {
+            name: input.to_owned(),
             input: PortId::from_name(input),
             live: Arc::clone(&live),
             output,

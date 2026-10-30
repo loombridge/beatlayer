@@ -7,6 +7,7 @@
 bl_rt::install_trap!();
 
 mod grid;
+mod launchkey;
 mod realtime;
 mod surfaces;
 mod templates;

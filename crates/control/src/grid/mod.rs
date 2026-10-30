@@ -28,7 +28,7 @@ use crate::surface::{
     ControlSurface, Cx, DrumView, Kind, ReadModel, Recognise, Ring, RingStep, Role, SurfaceState,
 };
 
-mod palette;
+pub(crate) mod palette;
 #[cfg(feature = "testing")]
 pub mod sim;
 
@@ -111,8 +111,11 @@ fn kind(
     port: &'static str,
     make: fn() -> Box<dyn ControlSurface>,
 ) -> Kind {
-    Kind::new(id, model.name(), true, true, Some(RING), Vec::new(), make)
-        .recognised(Recognise { port, maker: MAKER })
+    Kind::new(id, model.name(), true, true, Some(RING), Vec::new(), make).recognised(Recognise {
+        port,
+        test: None,
+        maker: MAKER,
+    })
 }
 
 fn make_x() -> Box<dyn ControlSurface> {
@@ -272,7 +275,7 @@ enum Layout {
 
 /// What a row of track buttons does (R13).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TrackFn {
+pub(crate) enum TrackFn {
     Stop,
     Solo,
     Mute,
@@ -281,7 +284,7 @@ enum TrackFn {
 }
 
 impl TrackFn {
-    const fn name(self) -> &'static str {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Stop => "Clip Stop",
             Self::Solo => "Solo",
@@ -291,7 +294,7 @@ impl TrackFn {
         }
     }
 
-    const fn role(self, column: u8) -> Role {
+    pub(crate) const fn role(self, column: u8) -> Role {
         match self {
             Self::Stop => Role::Stop(column),
             Self::Solo => Role::Solo(column),
@@ -434,7 +437,7 @@ struct Peek {
 
 /// What the surface knows of the controller's state, and what it has told
 /// the controller.
-struct Grid {
+pub(crate) struct Grid {
     model: Model,
     layout: Layout,
     /// The Launchpad X's Mixer function, if Mixer shows.
@@ -589,7 +592,7 @@ impl Grid {
 
     // Colours ------------------------------------------------------------
 
-    fn track_colour(doc: &Document, track: TrackId) -> [u8; 3] {
+    pub(crate) fn track_colour(doc: &Document, track: TrackId) -> [u8; 3] {
         let swatch = doc.track(track).map_or(0, bl_model::Track::colour);
         swatch_rgb(&DEFAULT_TRACK_PALETTE, swatch)
     }
@@ -605,7 +608,7 @@ impl Grid {
     // Rendering ----------------------------------------------------------
 
     /// The state of a slot, from what the engine reports.
-    fn state_of(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<SlotState> {
+    pub(crate) fn state_of(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<SlotState> {
         model
             .slots
             .iter()
@@ -614,7 +617,7 @@ impl Grid {
     }
 
     /// A pad's slot as it shows (R9).
-    fn slot_light(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Light> {
+    pub(crate) fn slot_light(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Light> {
         let doc = &model.document;
         let clip = doc.slot(track, scene).is_some();
         let armed = doc.track(track).is_some_and(|t| t.mixer().arm);
@@ -640,7 +643,7 @@ impl Grid {
     }
 
     /// A scene button as it shows (R9).
-    fn scene_light(model: &ReadModel, scene: SceneId) -> Option<Light> {
+    pub(crate) fn scene_light(model: &ReadModel, scene: SceneId) -> Option<Light> {
         let doc = &model.document;
         if model
             .slots
@@ -655,7 +658,7 @@ impl Grid {
     }
 
     /// A track button as it shows its track's state (R13).
-    fn track_fn_light(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<Light> {
+    pub(crate) fn track_fn_light(model: &ReadModel, f: TrackFn, track: TrackId) -> Option<Light> {
         let doc = &model.document;
         let t = doc.track(track)?;
         let kind = t.kind();

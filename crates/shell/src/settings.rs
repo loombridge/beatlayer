@@ -206,6 +206,19 @@ pub struct Preferences {
     pub default_set: Option<PathBuf>,
     /// The MIDI ports' switches and the computer MIDI keyboard (WP-2.2).
     pub midi: MidiPrefs,
+    /// Link's switches (the Link spec, R1 and R8).
+    pub link: LinkPrefs,
+}
+
+/// What the app keeps of Link between starts (the Link spec, R1 and R8):
+/// both off in a new install.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LinkPrefs {
+    /// Whether Link is on: the app joins the Link session on its networks.
+    pub enabled: bool,
+    /// Whether starts and stops are shared with the peers that share them.
+    pub start_stop_sync: bool,
 }
 
 /// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3
@@ -346,6 +359,16 @@ pub struct PortPrefs {
     /// An output's Hardware Resync.
     #[serde(default)]
     pub hardware_resync: bl_shell_spec::midi_io::HardwareResyncChoice,
+    /// An input's MIDI Sync Type (the MIDI Timecode spec, R1).
+    #[serde(default)]
+    pub sync_type: bl_shell_spec::midi_io::SyncTypeChoice,
+    /// An input's MIDI Timecode Frame Rate.
+    #[serde(default)]
+    pub timecode_rate: bl_shell_spec::midi_io::TimecodeRateChoice,
+    /// An input's MIDI Timecode Offset, as `hh:mm:ss:ff`; a preferences file
+    /// from before it has none, which is 00:00:00:00.
+    #[serde(default)]
+    pub timecode_offset: String,
 }
 
 /// A switch that's on unless the preferences say otherwise, read and

@@ -108,6 +108,7 @@ mod file_manager;
 mod freeze;
 mod grooves;
 mod keymap;
+mod link;
 mod multisampler;
 mod plugin_list;
 mod processed_files;
@@ -591,6 +592,18 @@ pub struct Shell {
     audio: AudioHost,
     /// The MIDI ports and the computer MIDI keyboard (WP-2.2).
     midi: MidiHost,
+    /// The Link instance and what the engine tells the main thread of its
+    /// session (the Link spec, R1).
+    link: crate::link::LinkHost,
+    /// Whether the set that was just made or opened takes the Link session's
+    /// tempo (the Link spec, R2).
+    keep_tempo: bool,
+    /// How many peers the Link toggle last showed, so a peer joining or
+    /// leaving redraws it.
+    link_peers_shown: u64,
+    /// Whether a peer's change of the tempo took the tempo envelope's
+    /// place, as the engine last published it (the Link spec, R4).
+    tempo_override: bool,
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
@@ -1298,6 +1311,10 @@ impl Shell {
             store,
             audio,
             midi,
+            link: crate::link::LinkHost::default(),
+            link_peers_shown: 0,
+            keep_tempo: false,
+            tempo_override: false,
             midi_listed: std::time::Instant::now(),
             push_display,
             midi_seen: (0, 0),
@@ -1425,6 +1442,7 @@ impl Shell {
         // Spec: second-window R14. A saved default set keeps its main view
         // and the second window.
         shell.apply_window_views(window_views);
+        shell.start_link();
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();
         shell.publish_plugins();
@@ -1590,6 +1608,11 @@ impl Shell {
     /// tracks that are gone, and gives the engine the new document, so it
     /// plays the set as it is now (its tempo, loop, and tracks).
     fn document_changed(&mut self) {
+        // Spec: link R2. A set that replaced the last keeps the session's
+        // tempo, before the engine hears it.
+        if std::mem::take(&mut self.keep_tempo) {
+            self.keep_session_tempo();
+        }
         self.document_revision = self.document_revision.wrapping_add(1);
         // Spec: remote-mapping R9. The MIDI thread's table follows the set's
         // mappings.
@@ -1893,6 +1916,9 @@ impl Shell {
         if id == SETTINGS_STATE {
             Self::args::<NoArgs>(id, args)?;
             return Ok(to_value(&self.settings_state()));
+        }
+        if bl_shell_spec::link::handles(id) {
+            return self.run_link(id, args);
         }
         if id == transport_ids::TAP_TEMPO {
             return self.run_tap_tempo(args);

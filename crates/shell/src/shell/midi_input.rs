@@ -33,6 +33,7 @@ impl Shell {
         self.midi_seen = seen;
         // The lamp follows the test clock when a test paces the engine by
         // hand.
+        changed |= self.track_link(self.midi.now());
         changed | self.track_sync_activity(self.midi.now())
     }
 
@@ -158,6 +159,14 @@ impl Shell {
             clocks_received: incoming.clocks,
             clocks_set_aside: incoming.glitches,
             sync_dropped: incoming.dropped,
+            timecode: incoming
+                .timecode
+                .map(|t| bl_shell_spec::sync::TimecodeReport {
+                    time: t.time.to_string(),
+                    rate: t.rate.into(),
+                    running: t.running,
+                    position_ticks: t.position.get(),
+                }),
         }))
     }
 

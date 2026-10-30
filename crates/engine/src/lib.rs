@@ -98,6 +98,7 @@ pub mod follower;
 mod gc;
 mod input;
 mod layers;
+pub mod link;
 mod message;
 mod metronome;
 mod midi;
@@ -125,6 +126,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 mod sync_out;
+mod timecode_in;
 pub mod transport;
 mod tuned;
 mod tuned_notes;
@@ -145,7 +147,7 @@ pub use clips::{
     Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
     SourceCues, media_edits,
 };
-pub use clock_in::{MAX_SYNC_INPUTS, SyncInState};
+pub use clock_in::{MAX_SYNC_INPUTS, SyncInState, TimecodeState};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use drum::ChainHits;
@@ -154,6 +156,7 @@ pub use follower::{Ask, Follow, Follower};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
+pub use link::{LinkFollower, Session};
 pub use message::{
     Action, LoopRegion, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,

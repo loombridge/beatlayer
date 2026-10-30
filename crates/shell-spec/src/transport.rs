@@ -181,6 +181,10 @@ pub struct TransportState {
     /// otherwise.
     #[serde(default)]
     pub waiting_frame: Option<u64>,
+    /// Whether a start waits for a Link session's phase (the Link spec, R7):
+    /// `waiting_start`, with Link on and peers in the session.
+    #[serde(default)]
+    pub waiting_for_link: bool,
     /// The run of taps Tap Tempo has now (the control bar transport spec,
     /// R22).
     #[serde(default)]

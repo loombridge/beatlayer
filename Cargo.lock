@@ -908,6 +908,7 @@ name = "bl-link"
 version = "0.2.0"
 dependencies = [
  "bl-core",
+ "cc",
 ]
 
 [[package]]
@@ -1061,6 +1062,7 @@ dependencies = [
  "bl-devices",
  "bl-engine",
  "bl-interop",
+ "bl-link",
  "bl-media",
  "bl-midi-io",
  "bl-midi-tools",

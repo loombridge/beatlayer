@@ -50,6 +50,7 @@ The commands, by the part of their ID before its first dot:
 - [`focus`](focus.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
+- [`link`](link.md)
 - [`locator`](locator.md)
 - [`midi`](midi.md)
 - [`midi_tool`](midi_tool.md)
@@ -17522,6 +17523,97 @@ Type: integer, at least 1.
 
 </details>
 
+### `LinkState`
+
+What `link.state` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Link is on: the app is in a Link session on its networks. |
+| `peers` | integer, at least 0 | yes | How many other peers are in the session; 0 while Link is off. |
+| `tempo` | number or null | yes | The session's tempo, in quarter notes per minute; null while Link has never been on. |
+| `quantum` | number | yes | The quantum, in quarter notes: the global launch quantisation's length at the play position, one quarter note with None. |
+| `phase` | number or null | yes | How far the session is through the quantum now, in quarter notes; null while Link has never been on. |
+| `session_playing` | boolean | yes | Whether the session's start and stop state is playing. |
+| `start_stop_sync` | boolean | yes | Whether starts and stops are shared with the peers that share them. |
+| `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
+| `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.state` returns.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Link is on: the app is in a Link session on its networks.",
+      "type": "boolean"
+    },
+    "peers": {
+      "description": "How many other peers are in the session; 0 while Link is off.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "phase": {
+      "description": "How far the session is through the quantum now, in quarter notes; null while Link has never been on.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "quantum": {
+      "description": "The quantum, in quarter notes: the global launch quantisation's length at the play position, one quarter note with None.",
+      "format": "double",
+      "type": "number"
+    },
+    "session_playing": {
+      "description": "Whether the session's start and stop state is playing.",
+      "type": "boolean"
+    },
+    "start_stop_sync": {
+      "description": "Whether starts and stops are shared with the peers that share them.",
+      "type": "boolean"
+    },
+    "starts_in": {
+      "description": "How many seconds until a waiting start begins, once it has been worked out; null otherwise.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "tempo": {
+      "description": "The session's tempo, in quarter notes per minute; null while Link has never been on.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "waiting_for_link": {
+      "description": "Whether a start waits for the session's phase.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled",
+    "peers",
+    "tempo",
+    "quantum",
+    "phase",
+    "session_playing",
+    "start_stop_sync",
+    "waiting_for_link",
+    "starts_in"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ListResult`
 
 What `control_surface.list` returns.
@@ -23473,6 +23565,9 @@ One MIDI port as the Settings window's table shows it.
 | `sync_delay_ms` | integer from -32768 to 32767 | yes | MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to the clock an output sends; kept while Sync is off. |
 | `clock_type` | [`ClockTypeChoice`](#clocktypechoice) | yes | An output's MIDI Clock Type: Song or Pattern. |
 | `hardware_resync` | [`HardwareResyncChoice`](#hardwareresyncchoice) | yes | An output's Hardware Resync: what Resync External Hardware sends it. |
+| `sync_type` | [`SyncTypeChoice`](#synctypechoice) | yes | An input's MIDI Sync Type: whether its Sync follows clock or timecode. An output's reads MIDI Clock. |
+| `timecode_rate` | [`TimecodeRateChoice`](#timecoderatechoice) | yes | An input's MIDI Timecode Frame Rate, kept while its type is clock. |
+| `timecode_offset` | string | yes | An input's MIDI Timecode Offset, as `hh:mm:ss:ff`: the time at which the Arrangement starts. Kept while its type is clock. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
 | `error` | string or null | no | Why it couldn't be opened, if it couldn't. |
@@ -23537,6 +23632,21 @@ One MIDI port as the Settings window's table shows it.
       "minimum": -32768,
       "type": "integer"
     },
+    "sync_type": {
+      "$ref": "#/$defs/SyncTypeChoice",
+      "default": "midi_clock",
+      "description": "An input's MIDI Sync Type: whether its Sync follows clock or timecode. An output's reads MIDI Clock."
+    },
+    "timecode_offset": {
+      "default": "00:00:00:00",
+      "description": "An input's MIDI Timecode Offset, as `hh:mm:ss:ff`: the time at which the Arrangement starts. Kept while its type is clock.",
+      "type": "string"
+    },
+    "timecode_rate": {
+      "$ref": "#/$defs/TimecodeRateChoice",
+      "default": "smpte_all",
+      "description": "An input's MIDI Timecode Frame Rate, kept while its type is clock."
+    },
     "track": {
       "description": "Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI.",
       "type": "boolean"
@@ -23552,6 +23662,9 @@ One MIDI port as the Settings window's table shows it.
     "sync_delay_ms",
     "clock_type",
     "hardware_resync",
+    "sync_type",
+    "timecode_rate",
+    "timecode_offset",
     "present",
     "open"
   ],
@@ -32047,6 +32160,34 @@ What a command that switches something returns: its new state.
 
 </details>
 
+### `Switched`
+
+What `link.set_enabled` and `link.set_start_stop_sync` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether it's on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_enabled` and `link.set_start_stop_sync` return.",
+  "properties": {
+    "on": {
+      "description": "Whether it's on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SyncState`
 
 What `sync.state` returns.
@@ -32069,6 +32210,7 @@ What `sync.state` returns.
 | `clocks_received` | integer, at least 0 | yes | Timing Clocks that arrived from the leading input since the audio engine started. |
 | `clocks_set_aside` | integer, at least 0 | yes | Timing Clocks set aside as glitches: doubled or missing. |
 | `sync_dropped` | integer, at least 0 | yes | Incoming sync messages dropped because the audio thread's list was full. |
+| `timecode` | [`TimecodeReport`](#timecodereport) or null | no | The last whole time of an input set to MIDI Timecode, if one came (the MIDI Timecode spec, R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -32172,6 +32314,17 @@ What `sync.state` returns.
         "number",
         "null"
       ]
+    },
+    "timecode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimecodeReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The last whole time of an input set to MIDI Timecode, if one came (the MIDI Timecode spec, R12)."
     }
   },
   "required": [
@@ -32193,6 +32346,37 @@ What `sync.state` returns.
     "sync_dropped"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SyncTypeChoice`
+
+An input's MIDI Sync Type: what its Sync follows (the MIDI Timecode spec, R1).
+
+One of:
+
+- `"midi_clock"`: Timing Clock, Start, Continue, Stop and Song Position Pointer.
+- `"midi_timecode"`: Quarter-frame and full-frame time code.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An input's MIDI Sync Type: what its Sync follows (the MIDI Timecode spec, R1).",
+  "oneOf": [
+    {
+      "const": "midi_clock",
+      "description": "Timing Clock, Start, Continue, Stop and Song Position Pointer.",
+      "type": "string"
+    },
+    {
+      "const": "midi_timecode",
+      "description": "Quarter-frame and full-frame time code.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -33900,6 +34084,102 @@ Type: array of [`TimeSignatureChange`](#timesignaturechange), at least 1.
 
 </details>
 
+### `TimecodeRateChoice`
+
+An input's MIDI Timecode Frame Rate (the MIDI Timecode spec, R1, R3).
+
+One of:
+
+- `"fps_24"`: 24 frames a second.
+- `"fps_25"`: 25 frames a second.
+- `"fps_29_97_drop"`: 29.97 frames a second, drop frame.
+- `"fps_30"`: 30 frames a second.
+- `"smpte_all"`: Each time at the rate its own message names.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An input's MIDI Timecode Frame Rate (the MIDI Timecode spec, R1, R3).",
+  "oneOf": [
+    {
+      "const": "fps_24",
+      "description": "24 frames a second.",
+      "type": "string"
+    },
+    {
+      "const": "fps_25",
+      "description": "25 frames a second.",
+      "type": "string"
+    },
+    {
+      "const": "fps_29_97_drop",
+      "description": "29.97 frames a second, drop frame.",
+      "type": "string"
+    },
+    {
+      "const": "fps_30",
+      "description": "30 frames a second.",
+      "type": "string"
+    },
+    {
+      "const": "smpte_all",
+      "description": "Each time at the rate its own message names.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TimecodeReport`
+
+A timecode input's last whole time.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | string | yes | The time, as `hh:mm:ss:ff`. |
+| `rate` | [`TimecodeRateChoice`](#timecoderatechoice) | yes | The rate it is counted at. |
+| `running` | boolean | yes | Whether the timecode runs and the song follows it: whole times arrive in order and the time has reached the offset. |
+| `position_ticks` | integer | yes | The song position the time gives, in ticks: the time less the offset, through the tempo map; 0 before the offset. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A timecode input's last whole time.",
+  "properties": {
+    "position_ticks": {
+      "description": "The song position the time gives, in ticks: the time less the offset, through the tempo map; 0 before the offset.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "rate": {
+      "$ref": "#/$defs/TimecodeRateChoice",
+      "description": "The rate it is counted at."
+    },
+    "running": {
+      "description": "Whether the timecode runs and the song follows it: whole times arrive in order and the time has reached the offset.",
+      "type": "boolean"
+    },
+    "time": {
+      "description": "The time, as `hh:mm:ss:ff`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "time",
+    "rate",
+    "running",
+    "position_ticks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Tone`
 
 How a theme's neutral colours are tinted (themes R4).
@@ -35129,6 +35409,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `phase_nudge` | [`PhaseNudge`](#phasenudge) | yes | The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28). |
 | `waiting_start` | boolean | yes | Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25). |
 | `waiting_frame` | integer or null | yes | The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise. |
+| `waiting_for_link` | boolean | yes | Whether a start waits for a Link session's phase (the Link spec, R7): `waiting_start`, with Link on and peers in the session. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 | `external_sync` | boolean | yes | Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on. |
 
@@ -35285,6 +35566,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether the song has one time signature throughout, so the time-signature fields can set it.",
       "type": "boolean"
     },
+    "waiting_for_link": {
+      "default": false,
+      "description": "Whether a start waits for a Link session's phase (the Link spec, R7): `waiting_start`, with Link on and peers in the session.",
+      "type": "boolean"
+    },
     "waiting_frame": {
       "default": null,
       "description": "The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise.",
@@ -35333,6 +35619,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "phase_nudge",
     "waiting_start",
     "waiting_frame",
+    "waiting_for_link",
     "tap_tempo",
     "external_sync"
   ],

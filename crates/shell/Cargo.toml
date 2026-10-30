@@ -33,6 +33,9 @@ bl-devices.workspace = true
 bl-engine.workspace = true
 # Standard MIDI File import and export (WP-2.21).
 bl-interop.workspace = true
+# Link 4.1.1: the audio host gives the engine a Link session to follow, and
+# the shell switches it (WP-7.14).
+bl-link.workspace = true
 # The browser decodes previews and registers the files it adds to the set
 # in the media store (WP-1.10).
 bl-media.workspace = true

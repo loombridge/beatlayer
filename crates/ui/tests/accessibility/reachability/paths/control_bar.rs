@@ -344,6 +344,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("transport.state", Exception(Query)),
+        ("link.state", Exception(Query)),
+        (
+            "link.set_enabled",
+            Exception(LaterView("the Control Bar's Link toggle (WP-7.15)")),
+        ),
+        (
+            "link.set_start_stop_sync",
+            Exception(LaterView(
+                "the Link page and Playback > Options > Link Start Stop Sync (WP-7.15)",
+            )),
+        ),
         ("song.scales", Exception(Query)),
         (
             "song.unfollow_tempo_automation",

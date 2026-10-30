@@ -12,3 +12,4 @@ pub mod scale;
 #[cfg(feature = "schemars")]
 mod schema;
 pub mod time;
+pub mod timecode;

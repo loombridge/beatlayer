@@ -22,37 +22,40 @@ pub const GOODBYE: &[u8] = &[0xF0, 0x7D, 0x02, 0xF7];
 /// What Dump sends.
 pub const SETUP: &[u8] = &[0xF0, 0x7D, 0x03, 0xF7];
 
-/// The test surface as the chooser offers it.
-pub const KIND: Kind = Kind {
-    id: "test",
-    name: "Test Surface",
-    needs_output: true,
-    can_lock: false,
-    ring: Some(Ring {
-        tracks: 8,
-        scenes: 2,
-    }),
-    dump: &[SETUP],
-    recognise: None,
-    make,
+const RING: Ring = Ring {
+    tracks: 8,
+    scenes: 2,
 };
+
+/// The test surface as the chooser offers it.
+#[must_use]
+pub fn kind() -> Kind {
+    Kind::new(
+        "test",
+        "Test Surface",
+        true,
+        false,
+        Some(RING),
+        vec![SETUP.to_vec()],
+        make,
+    )
+}
 
 /// The test surface that has instant mappings and can be locked to a device
 /// (control surfaces R17 to R38): its messages are controls of a roles
 /// table, [`role_of`].
-pub const INSTANT: Kind = Kind {
-    id: "test-instant",
-    name: "Test Instant Surface",
-    needs_output: true,
-    can_lock: true,
-    ring: Some(Ring {
-        tracks: 8,
-        scenes: 2,
-    }),
-    dump: &[],
-    recognise: None,
-    make: make_instant,
-};
+#[must_use]
+pub fn instant() -> Kind {
+    Kind::new(
+        "test-instant",
+        "Test Instant Surface",
+        true,
+        true,
+        Some(RING),
+        Vec::new(),
+        make_instant,
+    )
+}
 
 fn make() -> Box<dyn ControlSurface> {
     Box::new(TestSurface::new().0)
@@ -367,7 +370,7 @@ impl ControlSurface for TestSurface {
 
     fn state(&self) -> SurfaceState {
         SurfaceState {
-            ring: KIND.ring,
+            ring: Some(RING),
             mode: Some("Test".to_owned()),
             watch: Vec::new(),
         }

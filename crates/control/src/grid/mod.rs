@@ -85,33 +85,29 @@ impl Model {
 const MAKER: [u8; 3] = [0x00, 0x20, 0x29];
 
 /// The Launchpad Mini MK3 as the chooser offers it (R1, R25).
-pub const MINI: Kind = kind(
-    Model::Mini,
-    "launchpad-mini-mk3",
-    "lpminimk3 daw",
-    make_mini,
-);
+#[must_use]
+pub fn mini() -> Kind {
+    kind(Model::Mini, "launchpad-mini-mk3", "lpminimk3 daw", make_mini)
+}
 /// The Launchpad Pro MK3 as the chooser offers it (R1, R29).
-pub const PRO: Kind = kind(Model::Pro, "launchpad-pro-mk3", "lppromk3 daw", make_pro);
+#[must_use]
+pub fn pro() -> Kind {
+    kind(Model::Pro, "launchpad-pro-mk3", "lppromk3 daw", make_pro)
+}
 /// The Launchpad X as the chooser offers it (R1, R18).
-pub const LAUNCHPAD_X: Kind = kind(Model::X, "launchpad-x", "lpx daw", make_x);
+#[must_use]
+pub fn launchpad_x() -> Kind {
+    kind(Model::X, "launchpad-x", "lpx daw", make_x)
+}
 
-const fn kind(
+fn kind(
     model: Model,
     id: &'static str,
     port: &'static str,
     make: fn() -> Box<dyn ControlSurface>,
 ) -> Kind {
-    Kind {
-        id,
-        name: model.name(),
-        needs_output: true,
-        can_lock: true,
-        ring: Some(RING),
-        dump: &[],
-        recognise: Some(Recognise { port, maker: MAKER }),
-        make,
-    }
+    Kind::new(id, model.name(), true, true, Some(RING), Vec::new(), make)
+        .recognised(Recognise { port, maker: MAKER })
 }
 
 fn make_x() -> Box<dyn ControlSurface> {

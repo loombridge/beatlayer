@@ -10,7 +10,7 @@ use bl_model::modulator::{
     ModTarget, STRIKE_MOD, ShapePoint, shape_preset, shape_value, with_bend, with_point_added,
     with_point_moved, with_sustain, without_point,
 };
-use bl_model::{DeviceId, DeviceKind, ParamId, RemoteTarget};
+use bl_model::{ClipControl, ControlKind, DeviceId, DeviceKind, ParamId, RemoteTarget};
 use bl_shell::Invocation;
 use bl_shell::device_commands::{ArmedMap, DeviceFrame, MappingRow, ModulatorFrame};
 use bl_shell::remote_commands::MapMode;
@@ -379,6 +379,27 @@ pub fn remote_overlay(
         )));
     }
     true
+}
+
+/// The map modes' overlay on one of the Clip View's controls, `control`
+/// (map modes R3, R11, R17): a mapping acts on the clips the Clip View shows.
+pub fn clip_overlay(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    id: Id,
+    control: ClipControl,
+    events: &mut Vec<UiEvent>,
+) -> bool {
+    remote_overlay(
+        ui,
+        theme,
+        rect,
+        id,
+        RemoteTarget::Clip { control },
+        control.kind() == ControlKind::Continuous,
+        events,
+    )
 }
 
 /// The ID of a slot's Unmap button.

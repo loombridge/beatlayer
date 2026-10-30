@@ -25,6 +25,8 @@ use bl_model::{
 pub mod grid;
 mod host;
 mod surface;
+pub mod template;
+mod template_surface;
 #[cfg(feature = "testing")]
 pub mod testing;
 

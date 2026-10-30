@@ -330,3 +330,57 @@ fn an_agent_reads_each_launchpads_mode() {
         assert_eq!(row["surface_state"]["ring"]["tracks"], 8, "an 8 x 8 ring");
     }
 }
+
+// Spec: control-surfaces R43, R44, R47. An agent lists the controller
+// templates, a broken file with its error and line, and chooses the bundled
+// template by its `template:<name>` ID, read back by `control_surface.list`.
+#[test]
+fn an_agent_lists_the_templates_and_chooses_one() {
+    let library = std::env::temp_dir().join(format!("bl-agent-templates-{}", std::process::id()));
+    let folder = library.join("Controller Templates");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(
+        folder.join("broken.bltemplate.toml"),
+        "format = 1\n[surface]\nname = \"Broken\"\n[[control]]\nid = \"a\"\nmessage = \"note\"\nchannel = 1\nnumber = 1\nkind = \"button\"\nrole = \"fly\"\n",
+    )
+    .unwrap();
+    let (mut shell, _test) = shell_with_ports();
+    shell.set_user_library(Some(library.clone()));
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+
+    let found = run(&mut client, "control_surface.templates", json!({}));
+    let templates = found["templates"].as_array().unwrap();
+    assert_eq!(templates[0]["name"], "Generic 8 + 8");
+    assert_eq!(templates[0]["bundled"], true);
+    assert_eq!(templates[0]["listed"], true);
+    let broken = &templates[1];
+    assert!(
+        broken["path"]
+            .as_str()
+            .unwrap()
+            .ends_with("broken.bltemplate.toml")
+    );
+    assert_eq!(broken["listed"], false);
+    assert_eq!(broken["errors"][0]["line"], 10);
+    assert!(
+        broken["errors"][0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("fly")
+    );
+
+    let set = run(
+        &mut client,
+        "control_surface.set",
+        json!({ "row": 1, "surface": "template:Generic 8 + 8", "input": "Pads", "output": "Pads Out" }),
+    );
+    assert_eq!(set["surface"]["id"], "template:Generic 8 + 8");
+    let listed = run(&mut client, "control_surface.list", json!({}));
+    assert_eq!(listed["rows"][0], set, "`list` reads back what `set` did");
+    assert_eq!(listed["rows"][0]["surface"]["name"], "Generic 8 + 8");
+    assert_eq!(listed["rows"][0]["state"], "running");
+    let ring = &listed["rows"][0]["surface_state"]["ring"];
+    assert_eq!((&ring["tracks"], &ring["scenes"]), (&json!(8), &json!(2)));
+    let _ = std::fs::remove_dir_all(&library);
+}

@@ -32,6 +32,8 @@ pub struct Transport {
     pub position: Ticks,
     /// Whether the Arrangement loop is on.
     pub loop_on: bool,
+    /// Whether the transport is recording.
+    pub recording: bool,
     /// Where the loop brace starts.
     pub loop_start: Ticks,
     /// How long the loop brace is.
@@ -95,6 +97,7 @@ impl ReadModel {
                 playing: false,
                 position: Ticks::ZERO,
                 loop_on: false,
+                recording: false,
                 loop_start: Ticks::ZERO,
                 loop_length: Ticks::ZERO,
             },
@@ -307,6 +310,8 @@ pub enum Role {
     Select(u8),
     /// A ring track's crossfade assignment.
     Crossfade(u8),
+    /// The Main track's volume.
+    MainVolume,
     /// Moves the ring (R29).
     Ring(RingStep),
 }
@@ -516,13 +521,14 @@ pub trait ControlSurface: Send {
     }
 }
 
-/// A surface the chooser offers.
-#[derive(Clone, Copy)]
+/// A surface the chooser offers: a native surface, or a controller template
+/// (R43).
+#[derive(Clone)]
 pub struct Kind {
     /// The surface's ID, as the preferences and commands keep it.
-    pub id: &'static str,
+    pub id: String,
     /// The name the chooser shows.
-    pub name: &'static str,
+    pub name: String,
     /// Whether the surface needs an output to start (R9).
     pub needs_output: bool,
     /// Whether a device can be locked to the surface (R23).
@@ -531,12 +537,50 @@ pub struct Kind {
     pub ring: Option<Ring>,
     /// The messages Dump sends the controller; none for a surface with no
     /// setup to send (R11).
-    pub dump: &'static [&'static [u8]],
+    pub dump: Vec<Vec<u8>>,
     /// How the surface's controller is found when it is plugged in
     /// (supported controllers R2); none for a surface chosen by hand.
     pub recognise: Option<Recognise>,
+    make: Arc<dyn Fn() -> Box<dyn ControlSurface> + Send + Sync>,
+}
+
+impl Kind {
+    /// A surface the chooser offers, made by `make`.
+    pub fn new(
+        id: impl Into<String>,
+        name: impl Into<String>,
+        needs_output: bool,
+        can_lock: bool,
+        ring: Option<Ring>,
+        dump: Vec<Vec<u8>>,
+        make: impl Fn() -> Box<dyn ControlSurface> + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            needs_output,
+            can_lock,
+            ring,
+            dump,
+            recognise: None,
+            make: Arc::new(make),
+        }
+    }
+
+    /// The surface, found by `recognise` when its controller is plugged in.
+    #[must_use]
+    pub fn recognised(self, recognise: Recognise) -> Self {
+        Self {
+            recognise: Some(recognise),
+            ..self
+        }
+    }
+
     /// Makes the surface.
-    pub make: fn() -> Box<dyn ControlSurface>,
+    #[must_use]
+    pub fn make(&self) -> Box<dyn ControlSurface> {
+        (self.make)()
+    }
 }
 
 /// How a controller is recognised by its ports and its identity reply
@@ -576,25 +620,27 @@ impl std::fmt::Debug for Kind {
     }
 }
 
-/// Every surface the chooser offers, by name (R1): the native surfaces
-/// first in alphabetical order. The test surface is there in test builds
-/// only (R16).
+/// Every native surface the chooser offers, by name (R1): the native
+/// surfaces first in alphabetical order. The test surfaces
+/// are there in test builds only (R16).
 #[must_use]
-pub fn kinds() -> &'static [Kind] {
-    static KINDS: &[Kind] = &[
-        crate::grid::MINI,
-        crate::grid::PRO,
-        crate::grid::LAUNCHPAD_X,
-        #[cfg(feature = "testing")]
-        crate::testing::KIND,
-        #[cfg(feature = "testing")]
-        crate::testing::INSTANT,
-    ];
-    KINDS
+pub fn kinds() -> &'static [Arc<Kind>] {
+    static KINDS: std::sync::OnceLock<Vec<Arc<Kind>>> = std::sync::OnceLock::new();
+    KINDS.get_or_init(|| {
+        vec![
+            Arc::new(crate::grid::mini()),
+            Arc::new(crate::grid::pro()),
+            Arc::new(crate::grid::launchpad_x()),
+            #[cfg(feature = "testing")]
+            Arc::new(crate::testing::kind()),
+            #[cfg(feature = "testing")]
+            Arc::new(crate::testing::instant()),
+        ]
+    })
 }
 
-/// The surface with this ID.
+/// The native surface with this ID.
 #[must_use]
-pub fn kind(id: &str) -> Option<&'static Kind> {
-    kinds().iter().find(|kind| kind.id == id)
+pub fn kind(id: &str) -> Option<Arc<Kind>> {
+    kinds().iter().find(|kind| kind.id == id).cloned()
 }

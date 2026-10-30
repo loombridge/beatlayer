@@ -127,10 +127,7 @@ impl Rig {
         let mut cv = vec![0.0f32; 4 * pitch];
         let mut sink = NoteBuffer::with_capacity(notes.len().max(1));
         {
-            let transport = TransportInfo {
-                playing: self.playing,
-                position: Frames(self.position),
-            };
+            let transport = TransportInfo::at(self.playing, Frames(self.position));
             let mut block = Block::new(&mut data, CHANNELS, len, len, &[], transport, RATE)
                 .with_notes(notes, &mut sink)
                 .with_cv_out(&mut cv);

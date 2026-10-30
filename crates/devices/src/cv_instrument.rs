@@ -175,7 +175,32 @@ pub fn cv_instrument_type() -> DeviceType {
     }
     DeviceType::native(CV_INSTRUMENT, "CV Instrument", DeviceRole::Instrument)
         .with_cv(&OUTPUTS, &[])
-        .with_description(DeviceDescription::new(params))
+        .with_description(DeviceDescription::new(params).with_banks(&[
+            (
+                "Pitch",
+                &[
+                    "Gain",
+                    "Note Priority",
+                    "Transpose",
+                    "Fine",
+                    "Bend Range",
+                    "Glide",
+                    "Gate Level",
+                    "Retrigger",
+                ],
+            ),
+            (
+                "Mod",
+                &[
+                    "Mod 1 Source",
+                    "Mod 1 Min",
+                    "Mod 1 Max",
+                    "Mod 2 Source",
+                    "Mod 2 Min",
+                    "Mod 2 Max",
+                ],
+            ),
+        ]))
 }
 
 /// Adds CV Instrument to `registry`.

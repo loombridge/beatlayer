@@ -99,9 +99,29 @@ pub fn cv_triggers_type() -> DeviceType {
                 .describe("Scales the level by the velocity of the note."),
         ]);
     }
+    // A bank per field, the eight outputs across it; Gain on its own.
+    let fields = ["Level", "Note", "Mode", "Length", "Velocity"];
+    let names: Vec<Vec<String>> = fields
+        .iter()
+        .map(|field| {
+            (1..=OUTPUTS)
+                .map(|n| format!("Trigger {n} {field}"))
+                .collect()
+        })
+        .collect();
+    let refs: Vec<Vec<&str>> = names
+        .iter()
+        .map(|bank| bank.iter().map(String::as_str).collect())
+        .collect();
+    let mut banks: Vec<(&str, &[&str])> = fields
+        .iter()
+        .zip(&refs)
+        .map(|(field, bank)| (*field, bank.as_slice()))
+        .collect();
+    banks.push(("Gain", &["Gain"]));
     DeviceType::native(CV_TRIGGERS, "CV Triggers", DeviceRole::Instrument)
         .with_cv(&OUTPUT_NAMES, &[])
-        .with_description(DeviceDescription::new(params))
+        .with_description(DeviceDescription::new(params).with_banks(&banks))
 }
 
 /// Adds CV Triggers to `registry`.

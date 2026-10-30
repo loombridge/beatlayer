@@ -61,10 +61,7 @@ fn render(
         let mut cv = vec![0.0f32; OUTPUTS * pitch];
         let mut sink = NoteBuffer::with_capacity(block_notes.len().max(1));
         {
-            let transport = TransportInfo {
-                playing: true,
-                position: Frames(start as i64),
-            };
+            let transport = TransportInfo::at(true, Frames(start as i64));
             let mut block = Block::new(&mut data, CHANNELS, len, len, &[], transport, RATE)
                 .with_notes(&block_notes, &mut sink)
                 .with_cv_out(&mut cv);

@@ -418,13 +418,16 @@ impl CrossfaderField {
 }
 
 /// A control of the Control Bar that isn't a track's or a device's (map
-/// modes R11). Phase Nudge Down and Up have no command yet, so they aren't
-/// mappable.
+/// modes R11).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum BarControl {
     /// Tap Tempo.
     TapTempo,
+    /// Phase Nudge Down, which nudges while it is held.
+    PhaseNudgeDown,
+    /// Phase Nudge Up, which nudges while it is held.
+    PhaseNudgeUp,
     /// Play.
     Play,
     /// Stop.
@@ -824,6 +827,8 @@ impl BarControl {
     pub const fn kind(self) -> ControlKind {
         match self {
             Self::TapTempo
+            | Self::PhaseNudgeDown
+            | Self::PhaseNudgeUp
             | Self::Play
             | Self::Stop
             | Self::ReEnableAutomation

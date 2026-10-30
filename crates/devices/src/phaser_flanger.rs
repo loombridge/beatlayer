@@ -477,7 +477,7 @@ impl NativeDevice for PhaserFlanger {
         let lfo2_effective_hz = if lfo2_mode_idx == 0 {
             lfo2_hz
         } else {
-            let bpm = audio.tempo().bpm_at(bl_core::time::Ticks(0)).get();
+            let bpm = audio.tempo().bpm_at(bl_core::time::Ticks(0)).get() * audio.speed();
             bpm / 60.0 / DIVISIONS[lfo2_div_idx].1.max(1e-9)
         };
 

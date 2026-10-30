@@ -550,6 +550,134 @@ fn an_agent_launches_legato_swaps_and_nudges_by_command_id_and_reads_each_back()
     }
 }
 
+/// What `transport.state` says of the Phase Nudge buttons, through the tool
+/// an agent reads it with.
+fn phase_nudge(control: &NullControl, client: &mut Client<InProcess>) -> Value {
+    call(
+        control,
+        client,
+        "run",
+        json!({ "commands": [{ "command": "transport.state", "args": {} }] }),
+    )["results"][0]["result"]["phase_nudge"]
+        .clone()
+}
+
+fn nudge_args(direction: &str, held: bool) -> Value {
+    json!({ "commands": [{
+        "command": "transport.phase_nudge",
+        "args": { "direction": direction, "held": held },
+    }] })
+}
+
+#[test]
+fn an_agent_nudges_by_id_reads_it_back_and_its_nudge_ends_when_it_disconnects() {
+    // Spec: transport R27, R28. Only the nudges the agent started end with it.
+    let (mut client, control) = host();
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
+    wait(&control, &mut client, "playback", |c| {
+        status(&control, c)["playing"] == true
+    });
+    assert_eq!(phase_nudge(&control, &mut client), "none");
+    let sent = call(&control, &mut client, "run", nudge_args("up", true));
+    assert_eq!(sent["ran"], 1, "{sent}");
+    wait(&control, &mut client, "the nudge", |c| {
+        phase_nudge(&control, c) == "up"
+    });
+    call(&control, &mut client, "run", nudge_args("up", false));
+    wait(&control, &mut client, "the release", |c| {
+        phase_nudge(&control, c) == "none"
+    });
+    // The person holds Down; the agent holds Up and disconnects.
+    client
+        .transport()
+        .shell
+        .invoke(
+            "transport.phase_nudge",
+            json!({ "direction": "down", "held": true }),
+        )
+        .unwrap();
+    wait(&control, &mut client, "the person's nudge", |c| {
+        phase_nudge(&control, c) == "down"
+    });
+    call(&control, &mut client, "run", nudge_args("up", true));
+    wait(&control, &mut client, "the agent's nudge", |c| {
+        phase_nudge(&control, c) == "up"
+    });
+    let session = client
+        .transport()
+        .agent
+        .sessions()
+        .next()
+        .map(|(id, _)| id.to_owned())
+        .unwrap();
+    client.transport().agent.close_session(&session);
+    wait(&control, &mut client, "the agent's nudge to end", |c| {
+        let host = c.transport();
+        host.shell.poll_engine().phase_nudge == Some(bl_engine::NudgeDirection::Down)
+    });
+    // The person's nudge goes on.
+    let state = client
+        .transport()
+        .shell
+        .run("transport.state", json!({}))
+        .unwrap();
+    assert_eq!(state["phase_nudge"], "down");
+    client
+        .transport()
+        .shell
+        .invoke(
+            "transport.phase_nudge",
+            json!({ "direction": "down", "held": false }),
+        )
+        .unwrap();
+    client.transport().shell.audio_mut().stop();
+}
+
+#[test]
+fn an_agent_s_phase_nudge_is_refused_while_an_outside_tempo_leads_but_its_release_is_taken() {
+    // Spec: transport R29.
+    let (mut client, control) = host();
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
+    wait(&control, &mut client, "playback", |c| {
+        status(&control, c)["playing"] == true
+    });
+    call(&control, &mut client, "run", nudge_args("down", true));
+    wait(&control, &mut client, "the nudge", |c| {
+        phase_nudge(&control, c) == "down"
+    });
+    client
+        .transport()
+        .shell
+        .audio()
+        .set_follower(Some(Box::new(bl_engine::testing::following(140.0))));
+    wait(&control, &mut client, "the follower", |c| {
+        c.transport().shell.poll_engine().following
+    });
+    // The host hands the agent API the engine's transport after every event.
+    pump(&control, &mut client);
+    let refused = client
+        .call("run", nudge_args("up", true))
+        .unwrap()
+        .ok()
+        .unwrap_err();
+    assert!(refused.contains("leads the tempo"), "{refused}");
+    call(&control, &mut client, "run", nudge_args("down", false));
+    wait(&control, &mut client, "the release", |c| {
+        phase_nudge(&control, c) == "none"
+    });
+    client.transport().shell.audio_mut().stop();
+}
+
 #[test]
 fn an_agent_s_scene_launch_moves_the_selection_as_the_person_s_does() {
     // Spec: agent-permissions R10; launch-quantisation R9, R16. Select Next

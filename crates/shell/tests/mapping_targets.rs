@@ -1099,3 +1099,28 @@ fn a_mapped_slot_keeps_its_mapping_when_its_clip_moves_or_goes() {
     assert_eq!(mapped(&mut rig), slot(scenes[0]), "an empty slot keeps it");
     assert_eq!(rig.refused(), 0);
 }
+
+// Spec: map-modes R11; transport R28. A mapped key holds a Phase Nudge button
+// down while it is held and lets go when it is released.
+#[test]
+fn the_phase_nudge_buttons_nudge_while_a_mapped_key_is_held() {
+    let mut rig = Rig::new();
+    rig.map(key("d"), bar("phase_nudge_down"));
+    rig.map(key("u"), bar("phase_nudge_up"));
+    rig.run("transport.play", json!({}));
+    testing::settle(&rig.control, &mut rig.shell);
+    let held = |rig: &mut Rig| {
+        testing::settle(&rig.control, &mut rig.shell);
+        rig.run("transport.state", json!({}))["phase_nudge"].clone()
+    };
+    assert_eq!(held(&mut rig), json!("none"));
+    rig.press("d");
+    assert_eq!(held(&mut rig), json!("down"), "held down while the key is");
+    rig.release("d");
+    assert_eq!(held(&mut rig), json!("none"), "let go with the key");
+    rig.press("u");
+    assert_eq!(held(&mut rig), json!("up"));
+    rig.release("u");
+    assert_eq!(held(&mut rig), json!("none"));
+    assert_eq!(rig.refused(), 0);
+}

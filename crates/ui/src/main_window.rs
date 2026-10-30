@@ -1261,6 +1261,9 @@ impl MainWindowUi {
             {
                 self.transport.interact(ui, shell, field, &response, events);
             }
+            if placement.pending.is_none() {
+                self.transport.nudge(ui, shell, *el, &response, events);
+            }
             // Spec: map-modes R3, R11. The map modes tint the Control Bar's
             // mappable controls.
             if let Some((target, continuous)) = bar_target(*el) {
@@ -2409,6 +2412,8 @@ pub fn sample_rate_text(rate: u32) -> String {
 fn bar_target(element: Element) -> Option<(RemoteTarget, bool)> {
     let control = match element {
         Element::TapTempo => BarControl::TapTempo,
+        Element::NudgeDown => BarControl::PhaseNudgeDown,
+        Element::NudgeUp => BarControl::PhaseNudgeUp,
         Element::Tempo => BarControl::Tempo,
         Element::Metronome => BarControl::Metronome,
         Element::Quantization => BarControl::Quantization,

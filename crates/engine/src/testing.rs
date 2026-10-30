@@ -35,7 +35,9 @@ use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 use bl_model::{Device, DeviceDescription, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 
-use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, ParamValue, segments};
+use crate::node::{
+    Block, Node, NodeConfig, NodeData, NodeEvent, NoteEvent, NoteKind, ParamValue, segments,
+};
 use crate::registry::{DeviceType, Registry};
 
 /// The DC node's device type.
@@ -64,6 +66,9 @@ pub const KEY: &str = "test.key";
 pub const HEAR: &str = "test.hear";
 /// The test instrument device type (WP-2.1).
 pub const INSTRUMENT: &str = "test.instrument";
+/// The note pulse instrument's device type: it writes a pulse on the frame of
+/// each note, so a test hears when the notes played.
+pub const NOTE_PULSE: &str = "test.note_pulse";
 /// The delay node's device type (WP-2.11).
 pub const DELAY: &str = "test.delay";
 /// The external instrument stand-in's device type (WP-5.34).
@@ -284,6 +289,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
         p.note_consumers.lock().unwrap().push(consumer);
         Box::new(TestInstrument {
             producer,
+            _tracked: Tracked::new(&p),
+        })
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(NOTE_PULSE, move |_, _| {
+        Box::new(NotePulse {
             _tracked: Tracked::new(&p),
         })
     });
@@ -509,7 +520,7 @@ impl Node for PositionProbe {
         for channel in block.channels_mut() {
             for (i, sample) in channel.iter_mut().enumerate() {
                 *sample += if transport.playing {
-                    (transport.position.get() + i as i64) as f32
+                    transport.song_frame(i) as f32
                 } else {
                     -1.0
                 };
@@ -671,6 +682,31 @@ impl Node for Key {
     }
 }
 
+/// Writes, on the frame of each note it receives, the key plus one: positive
+/// for a note-on, negative for a note-off.
+#[derive(Debug)]
+struct NotePulse {
+    _tracked: Tracked,
+}
+
+impl Node for NotePulse {
+    fn process(&mut self, block: &mut Block<'_>) {
+        for i in 0..block.notes().len() {
+            let event = block.notes()[i];
+            let pulse = f32::from(event.key) + 1.0;
+            let pulse = match event.kind {
+                NoteKind::On => pulse,
+                NoteKind::Off => -pulse,
+                _ => continue,
+            };
+            let at = event.offset as usize;
+            for channel in block.channels_mut() {
+                channel[at] += pulse;
+            }
+        }
+    }
+}
+
 /// Records all note events it receives with their song frames.
 struct TestInstrument {
     producer: rtrb::Producer<RecordedNote>,
@@ -807,4 +843,32 @@ impl Node for DelayNode {
     fn latency(&self) -> u32 {
         self.frames as u32
     }
+}
+
+/// A stand-in follower for tests (the transport spec, R24, R25): `answer`
+/// says, for each block it is asked about, what an incoming clock or a Link
+/// session would.
+pub struct StandIn<F>(F);
+
+/// A stand-in follower that answers each block as `answer` says.
+pub fn stand_in<F>(answer: F) -> StandIn<F>
+where
+    F: FnMut(&crate::Ask, &mut crate::Follow) + Send,
+{
+    StandIn(answer)
+}
+
+impl<F> crate::Follower for StandIn<F>
+where
+    F: FnMut(&crate::Ask, &mut crate::Follow) + Send,
+{
+    fn block(&mut self, ask: &crate::Ask, answer: &mut crate::Follow) {
+        (self.0)(ask, answer);
+    }
+}
+
+/// A stand-in follower that plays every block at `bpm`.
+#[must_use]
+pub fn following(bpm: f64) -> impl crate::Follower {
+    stand_in(move |_, answer| answer.tempo(bpm))
 }

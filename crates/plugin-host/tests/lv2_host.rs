@@ -313,6 +313,7 @@ fn the_transport_reaches_the_plugin_as_a_position() {
     let at = |frames: i64, playing| TransportInfo {
         playing,
         position: Frames(frames),
+        ..TransportInfo::default()
     };
     // 120 BPM at 48 kHz: a beat is 24,000 frames. Two and a half beats in.
     let out = run_at(
@@ -534,6 +535,7 @@ fn gain_render(data: &NodeData, from: i64, blocks: usize) -> Vec<f32> {
             let transport = TransportInfo {
                 playing: true,
                 position: Frames(from + (i * each) as i64),
+                ..TransportInfo::default()
             };
             run_at(node.as_mut(), &vec![1.0; each], &[], &[], transport).channels[0].clone()
         })
@@ -594,6 +596,7 @@ fn an_lv2_parameter_takes_the_played_value() {
     let transport = TransportInfo {
         playing: true,
         position: Frames(from),
+        ..TransportInfo::default()
     };
     run_at(node.as_mut(), &[1.0; FRAMES], &[], &[], transport);
     let stopped = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);

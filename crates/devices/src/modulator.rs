@@ -377,6 +377,8 @@ struct Eval<'a> {
     /// The song frame of the instant while the song plays; its position
     /// otherwise.
     song: i64,
+    /// Song frames per frame of the stretch (the transport spec, R24).
+    speed: f64,
     /// The frame of the stretch whose parameters the instant is worked out
     /// from.
     f: usize,
@@ -487,10 +489,11 @@ impl<S: Source> Modulator<S> {
             rate: self.rate,
             tempo: modulation.tempo(),
             song: if modulation.playing() {
-                song + f as i64 + lookahead
+                song + ((f as i64 + lookahead) as f64 * modulation.speed()).round() as i64
             } else {
                 song
             },
+            speed: modulation.speed(),
             f,
         };
         let hz = e.param(params, RATE_HZ)
@@ -813,7 +816,9 @@ impl Source for CurveSource {
                 let step = match c.rate {
                     Rate::Hz(hz) => hz * GRID as f64 / e.rate.as_f64(),
                     Rate::Beats(beats) => {
-                        (e.quarters(e.song + GRID as i64) - e.quarters(e.song)) / beats
+                        (e.quarters(e.song + (GRID as f64 * e.speed).round() as i64)
+                            - e.quarters(e.song))
+                            / beats
                     }
                 };
                 if self.running {

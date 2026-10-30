@@ -23,6 +23,7 @@ fn playing() -> TransportInfo {
     TransportInfo {
         playing: true,
         position: Frames(0),
+        ..TransportInfo::default()
     }
 }
 

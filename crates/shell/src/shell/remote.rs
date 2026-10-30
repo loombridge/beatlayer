@@ -16,7 +16,7 @@ use bl_core::midi::{MidiMessage, PortId};
 use bl_engine::SlotState;
 use bl_model::modulation::Travel;
 use bl_model::{
-    ClipControl, Command, ControlKind, CrossfadeAssign, CrossfaderField, MixerParam,
+    BarControl, ClipControl, Command, ControlKind, CrossfadeAssign, CrossfaderField, MixerParam,
     ParamDescriptor, ParamKind, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
 };
 use bl_shell_spec::midi_io::PortDirection;
@@ -428,14 +428,19 @@ impl Shell {
             self.hold_field(field, action);
         }
         // A button's release has nothing to do, and isn't a refusal; nor is
-        // the release of an empty slot's press. A crossfader field's release
-        // does something.
+        // the release of an empty slot's press. A crossfader field's and a
+        // Phase Nudge button's release does something.
         let empty_slot = matches!(mapping.target, RemoteTarget::Slot { track, scene }
             if self.editor.document().slot(track, scene).is_none());
+        let held = matches!(
+            mapping.target,
+            RemoteTarget::CrossfaderField { .. }
+                | RemoteTarget::Bar {
+                    control: BarControl::PhaseNudgeDown | BarControl::PhaseNudgeUp
+                }
+        );
         if action == Action::Release
-            && ((mapping.kind == ControlKind::Button
-                && !matches!(mapping.target, RemoteTarget::CrossfaderField { .. }))
-                || empty_slot)
+            && ((mapping.kind == ControlKind::Button && !held) || empty_slot)
         {
             return;
         }

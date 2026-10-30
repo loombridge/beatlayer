@@ -24,6 +24,7 @@ fn playing(position: i64) -> TransportInfo {
     TransportInfo {
         playing: true,
         position: Frames(position),
+        ..TransportInfo::default()
     }
 }
 
@@ -177,6 +178,7 @@ fn a_synced_lfo_holds_still_while_the_song_is_stopped() {
     let stopped = TransportInfo {
         playing: false,
         position: Frames(1_000),
+        ..TransportInfo::default()
     };
     let out = control(
         node.as_mut(),

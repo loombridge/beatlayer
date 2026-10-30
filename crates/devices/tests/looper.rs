@@ -75,6 +75,7 @@ impl Rig {
         let transport = TransportInfo {
             playing: self.playing,
             position: Frames(self.position),
+            ..TransportInfo::default()
         };
         let out = common::run_at(&mut *self.node, input, events, &self.tempo, transport);
         if self.playing {
@@ -661,6 +662,7 @@ fn renders_are_bit_identical_at_any_block_size() {
             let transport = TransportInfo {
                 playing: true,
                 position: Frames(done as i64),
+                ..TransportInfo::default()
             };
             let part = common::run_at(&mut *rig.node, &input, &here, &rig.tempo, transport);
             out.extend(part[0].clone());

@@ -25,6 +25,7 @@ use rtrb::Producer;
 use crate::controller_take::is_controller;
 use crate::midi::MidiEvent;
 use crate::mpe::MpeRole;
+use crate::node::TransportInfo;
 use crate::program::EngineProgram;
 use crate::session::SessionEvent;
 
@@ -146,7 +147,8 @@ impl RecordingPlan {
     /// holds `device` channels `stride` frames apart; a track whose Audio
     /// From names a channel the device doesn't have records silence, as it
     /// hears), and for MIDI tracks, the note and controller messages their input received
-    /// in that part, stamped `position` for the part's first frame. The
+    /// in that part, stamped `position` for the part's first frame and, for
+    /// the rest, the song frame `transport` plays them on. The
     /// audio tracks leave out the part's first `skip` frames, which the
     /// recording's delay moves it past (WP-2.13).
     ///
@@ -161,6 +163,7 @@ impl RecordingPlan {
         offset: usize,
         frames: usize,
         skip: usize,
+        transport: TransportInfo,
     ) -> bool {
         let (planar, device, stride) = (
             &program.device_input,
@@ -225,7 +228,13 @@ impl RecordingPlan {
             };
             for event in input.events.iter().filter(in_part) {
                 let _ = track.producer.push(RecordedMidi {
-                    frame: position + Frames((event.offset as usize - offset) as i64),
+                    // Spec: transport R24. A message lands on the song frame its
+                    // frame of the part plays, whatever the part's speed.
+                    frame: position
+                        + Frames(
+                            transport.song_frame(event.offset as usize - offset)
+                                - transport.position.get(),
+                        ),
                     message: event.message,
                     mpe: event.mpe,
                 });

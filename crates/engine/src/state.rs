@@ -5,7 +5,7 @@ use bl_model::{ChainId, DeviceId, ParamId, TrackId};
 use rtrb::Consumer;
 
 use crate::capture::CapturedMidi;
-use crate::message::{LoopRegion, Report};
+use crate::message::{LoopRegion, NudgeDirection, Report};
 use crate::midi::TimeBase;
 #[cfg(doc)]
 use crate::mixer::{METER_RELEASE_DB_PER_SECOND, RMS_SECONDS};
@@ -195,6 +195,17 @@ pub struct EngineState {
     pub cpu_load: f32,
     /// The highest `cpu_load` so far.
     pub cpu_load_max: f32,
+    /// The outside tempo the song plays at, in BPM, while a follower gives
+    /// one (the transport spec, R24): it leads, so Phase Nudge is refused
+    /// (R29).
+    pub following: Option<f64>,
+    /// Whether a start waits for the frame the follower gives (R25).
+    pub waiting_start: bool,
+    /// The frame of the engine clock a waiting start begins on, once the
+    /// follower has given it.
+    pub waiting_frame: Option<u64>,
+    /// The Phase Nudge button that nudges the song while held (R27).
+    pub phase_nudge: Option<NudgeDirection>,
     /// The Session slots the engine is doing something with (WP-3.2), one
     /// entry per queued, playing, or stopping slot; a slot that stopped
     /// isn't listed, so an empty list is a Session View at rest.
@@ -266,6 +277,10 @@ impl EngineState {
             swaps: 0,
             cpu_load: 0.0,
             cpu_load_max: 0.0,
+            following: None,
+            waiting_start: false,
+            waiting_frame: None,
+            phase_nudge: None,
             session: Vec::with_capacity(slots),
             scene_override: SceneOverride::default(),
             session_over: Vec::with_capacity(tracks),
@@ -360,6 +375,10 @@ impl Clone for EngineState {
             swaps: self.swaps,
             cpu_load: self.cpu_load,
             cpu_load_max: self.cpu_load_max,
+            following: self.following,
+            waiting_start: self.waiting_start,
+            waiting_frame: self.waiting_frame,
+            phase_nudge: self.phase_nudge,
             session,
             scene_override: self.scene_override,
             session_over,

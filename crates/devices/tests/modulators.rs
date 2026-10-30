@@ -5,8 +5,8 @@
 //! real-time section under the allocation trap.
 
 use crate::common;
-use bl_core::time::{Frames, TempoMap};
-use bl_devices::modulator::{RATE_HZ, WAVE, curve_mod_type, wave_mod_type};
+use bl_core::time::{Bpm, Frames, TempoMap};
+use bl_devices::modulator::{RATE_HZ, TIME_MODE, WAVE, curve_mod_type, wave_mod_type};
 use bl_engine::modbus::NOT_HELD;
 use bl_engine::{Registry, TransportInfo};
 use bl_model::ParamId;
@@ -23,10 +23,7 @@ fn registry() -> Registry {
     registry
 }
 
-const PLAYING: TransportInfo = TransportInfo {
-    playing: true,
-    position: Frames(0),
-};
+const PLAYING: TransportInfo = TransportInfo::at(true, Frames(0));
 
 /// A LFO's node on the rising ramp at 10 Hz (a 4,800-frame cycle) with
 /// `params` over those.
@@ -207,4 +204,27 @@ fn remote_control_holds_the_target_between_min_and_max() {
     let mut node = ramp(&[]);
     let rows = control(node.as_mut(), 512, 512, &[], &TempoMap::default(), PLAYING);
     assert!(rows.hold(0).iter().all(|&h| h == NOT_HELD));
+}
+
+// Spec: transport R24
+#[test]
+fn a_synced_modulator_follows_the_played_tempo() {
+    let run_with = |bpm: f64, speed: f64| {
+        let mut node = ramp(&[
+            (modulator::amount(0), 100.0),
+            (POLARITY, 1.0),
+            (TIME_MODE, 1.0),
+        ]);
+        let tempo = TempoMap::constant(Bpm::new(bpm).expect("a tempo in range"));
+        let transport = TransportInfo { speed, ..PLAYING };
+        control(node.as_mut(), 4_800, 4_800, &[], &tempo, transport)
+            .contribution(0)
+            .to_vec()
+    };
+    // A quarter note at 240 BPM is 12,000 frames, so the ramp reaches 0.4.
+    let followed = run_with(120.0, 2.0);
+    assert!((followed[4_799] - 0.4).abs() < 0.01, "{}", followed[4_799]);
+    for (a, b) in followed.iter().zip(run_with(240.0, 1.0)) {
+        assert!((a - b).abs() < 1e-3, "{a} against {b}");
+    }
 }

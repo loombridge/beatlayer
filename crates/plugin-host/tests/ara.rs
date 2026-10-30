@@ -221,6 +221,7 @@ impl World {
             TransportInfo {
                 playing,
                 position: Frames(at),
+                ..TransportInfo::default()
             },
         )
         .channels
@@ -464,6 +465,7 @@ fn an_offline_render_borrows_the_plugin_and_renders_its_clips(bundle: &Path) {
                 TransportInfo {
                     playing: true,
                     position: Frames(at),
+                    ..TransportInfo::default()
                 },
             );
             for (channel, block) in heard.channels.iter().enumerate() {

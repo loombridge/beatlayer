@@ -32,7 +32,9 @@ use bl_model::{CrossfadeAssign, Document, Mixer, PanMode, ParamId, Tap, TrackId,
 
 use crate::automation::{AutomationList, SessionNow, Song};
 use crate::modbus::Bus;
-use crate::node::{Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, segments};
+use crate::node::{
+    Block, Node, NodeConfig, NodeData, NodeEvent, ParamValue, TransportInfo, segments,
+};
 use crate::routing::{Edge, Graph, Via};
 
 /// How long a mixer gain takes to reach a new value: 20 ms, along a straight
@@ -657,7 +659,7 @@ impl Node for TrackMixer {
             .as_ref()
             .and_then(|d| d.downcast_ref::<AutomationList>())
             .filter(|list| !list.is_empty());
-        let song = transport.playing.then(|| transport.position.get());
+        let song = transport.playing.then_some(transport);
         let driven = automation.filter(|list| song.is_some() || list.has_mapped());
         if driven.is_none() {
             self.modulated = [None; 5];
@@ -770,15 +772,15 @@ impl TrackMixer {
     /// Scales `range`, a frame at a time, by the gains the envelopes and the
     /// modulators ask for: an automated parameter's own value on the exact
     /// frame, at the pan law, and the controls where they are for the rest.
-    /// `from` is the song frame of the block's first frame, none while the
-    /// song is stopped. The mixer comes to rest at the last frame's gains, so
+    /// `from` is the transport as the block starts, none while the song is
+    /// stopped: each frame reads the song frame it plays through it. The mixer comes to rest at the last frame's gains, so
     /// a stop carries on from where the automation left off, and a control
     /// whose envelopes are gone heads back to what it asks for from there.
     fn scale_envelopes(
         &mut self,
         block: &mut Block<'_>,
         range: core::ops::Range<usize>,
-        from: Option<i64>,
+        from: Option<TransportInfo>,
         list: &AutomationList,
         now: &SessionNow<'_>,
         bus: Bus<'_>,
@@ -810,7 +812,7 @@ impl TrackMixer {
             let samples = &mut block.channel_mut(c)[range.clone()];
             for (i, sample) in samples.iter_mut().enumerate() {
                 let at = range.start + i;
-                let song = from.map(|from| from + at as i64);
+                let song = from.map(|t| t.song_frame(at));
                 let fade = crossfade_gain(crossfader.next(), crossfade);
                 let controls = [volume.next(), pan.next(), mute];
                 let gate = if free_mute { gate.next() } else { 1.0 };
@@ -840,7 +842,7 @@ impl TrackMixer {
         } else {
             1.0
         };
-        let (last, last_song) = (range.end - 1, from.map(|from| from + range.end as i64 - 1));
+        let (last, last_song) = (range.end - 1, from.map(|t| t.song_frame(range.end - 1)));
         for (index, ramp) in self.gains.iter_mut().enumerate() {
             *ramp = Ramp::at(
                 gain_at(list, now, last_song, bus, last, index, controls, fixed) * unmuted,
@@ -868,7 +870,7 @@ impl TrackMixer {
         &mut self,
         block: &mut Block<'_>,
         range: core::ops::Range<usize>,
-        from: Option<i64>,
+        from: Option<TransportInfo>,
         list: &AutomationList,
         now: &SessionNow<'_>,
         bus: Bus<'_>,
@@ -883,7 +885,7 @@ impl TrackMixer {
         let (crossfade, start) = (self.crossfade, self.crossfader);
         let mut crossfader = start;
         for at in range.clone() {
-            let song = from.map(|from| from + at as i64);
+            let song = from.map(|t| t.song_frame(at));
             let fade = crossfade_gain(crossfader.next(), crossfade);
             controls = [
                 self.controls[0].next(),
@@ -925,7 +927,7 @@ impl TrackMixer {
         }
         self.crossfader = crossfader;
         self.controls[1].skip(range.len());
-        let (last, last_song) = (range.end - 1, from.map(|from| from + range.end as i64 - 1));
+        let (last, last_song) = (range.end - 1, from.map(|t| t.song_frame(range.end - 1)));
         self.split_level =
             Ramp::at(split_level_at(list, now, last_song, bus, last, controls) * gate);
         self.modulated[0] =
@@ -1215,7 +1217,7 @@ impl Route {
             (Some(list), Some(song)) => list.now(song.session, song.tempo, song.rate),
             _ => SessionNow::NONE,
         };
-        let song = song.map(|song| song.frame);
+        let song = song.map(|song| song.transport);
         let driven = song.is_some() && list.is_some_and(|list| list.drives(route::LEVEL));
         let modulated = list.is_some_and(|list| list.modulates(route::LEVEL));
         let follows = list.is_some()
@@ -1243,13 +1245,13 @@ impl Route {
                     let at = c * stride + segment.range.start..c * stride + segment.range.end;
                     for (i, sample) in to[at.clone()].iter_mut().enumerate() {
                         let frame = segment.range.start + i;
-                        let at_song = song.map(|song| song + frame as i64);
+                        let at_song = song.map(|t| t.song_frame(frame));
                         let gain = self.envelope_gain(list, &now, at_song, bus, frame);
                         *sample += (f64::from(from[at.start + i]) * gain) as f32;
                     }
                 }
                 let last = segment.range.end - 1;
-                let at_song = song.map(|song| song + last as i64);
+                let at_song = song.map(|t| t.song_frame(last));
                 self.gain = Ramp::at(self.envelope_gain(list, &now, at_song, bus, last));
                 let (base, played, held) = self.level_at(list, &now, at_song, bus, last);
                 self.modulated = (modulated || list.maps(route::LEVEL))

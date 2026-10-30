@@ -45,6 +45,8 @@ fn flag(on: bool) -> f64 {
 const fn bar_name(control: BarControl) -> &'static str {
     match control {
         BarControl::TapTempo => "Tap Tempo",
+        BarControl::PhaseNudgeDown => "Phase Nudge Down",
+        BarControl::PhaseNudgeUp => "Phase Nudge Up",
         BarControl::Play => "Play",
         BarControl::Stop => "Stop",
         BarControl::ReEnableAutomation => "Re-Enable Automation",
@@ -606,6 +608,25 @@ impl Shell {
         };
         match control {
             BarControl::TapTempo => button("transport.tap_tempo"),
+            // Spec: transport R28. A nudge lasts while the button is held.
+            BarControl::PhaseNudgeDown | BarControl::PhaseNudgeUp => {
+                let direction = if control == BarControl::PhaseNudgeUp {
+                    "up"
+                } else {
+                    "down"
+                };
+                match action {
+                    Action::Press(_) => cmd(
+                        "transport.phase_nudge",
+                        json!({ "direction": direction, "held": true }),
+                    ),
+                    Action::Release => cmd(
+                        "transport.phase_nudge",
+                        json!({ "direction": direction, "held": false }),
+                    ),
+                    _ => None,
+                }
+            }
             BarControl::Play => button("transport.play"),
             BarControl::Stop => button("transport.stop"),
             BarControl::ReEnableAutomation => button(bl_model::registry::RE_ENABLE_AUTOMATION),
@@ -999,8 +1020,10 @@ impl Shell {
 }
 
 /// Every Control Bar control a map mode maps.
-const ALL_BAR: [BarControl; 18] = [
+const ALL_BAR: [BarControl; 20] = [
     BarControl::TapTempo,
+    BarControl::PhaseNudgeDown,
+    BarControl::PhaseNudgeUp,
     BarControl::Tempo,
     BarControl::Metronome,
     BarControl::Quantization,

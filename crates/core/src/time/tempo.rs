@@ -456,6 +456,28 @@ impl TempoMap {
         piece.start_seconds + piece.seconds_at(tau)
     }
 
+    /// The time of the position `ticks` in seconds from tick zero, where
+    /// `ticks` isn't rounded to a whole tick: the inverse of
+    /// [`TempoMap::seconds_to_ticks_exact`]. A player that follows an outside
+    /// tempo (the transport spec, R24) advances a fractional position and
+    /// reads the song's frames through this.
+    #[must_use]
+    pub fn ticks_to_seconds_exact(&self, ticks: f64) -> f64 {
+        if ticks.is_nan() {
+            return 0.0;
+        }
+        if ticks < 0.0 {
+            return ticks * self.pieces[0].seconds_per_tick;
+        }
+        let index = self
+            .pieces
+            .partition_point(|piece| piece.segment.start().get() as f64 <= ticks)
+            - 1;
+        let piece = &self.pieces[index];
+        let tau = ticks - piece.segment.start().get() as f64;
+        piece.start_seconds + piece.seconds_at(tau)
+    }
+
     /// The tick nearest in time to `seconds` from tick zero, with halves
     /// rounded away from zero. Values beyond the range of [`Ticks`] saturate,
     /// and NaN gives tick zero.

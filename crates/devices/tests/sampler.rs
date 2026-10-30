@@ -9,7 +9,7 @@
 use crate::common;
 use std::sync::Arc;
 
-use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
+use bl_core::time::{Bpm, Frames, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_devices::sampler::{
     ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_ENV_AMOUNT, FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN,
     FILTER_FREQ, FILTER_KEY, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
@@ -1880,5 +1880,196 @@ fn pitch_envelope_moves_pitch_by_amount_rule_by_rule() {
     assert!(
         (rel_diff - 1.0).abs() < 0.1,
         "released back to 1x: {rel_diff}"
+    );
+}
+
+/// Runs one block of `frames` frames through `node` on `transport`, with
+/// `notes` and `events`, as a real-time section, and returns each channel.
+fn run_block(
+    node: &mut dyn Node,
+    frames: usize,
+    notes: &[NoteEvent],
+    events: &[NodeEvent],
+    transport: TransportInfo,
+) -> Vec<Vec<f32>> {
+    let mut data = vec![0.0f32; CHANNELS * frames];
+    let mut out = NoteBuffer::with_capacity(notes.len().max(1));
+    {
+        let mut block = Block::new(&mut data, CHANNELS, frames, frames, events, transport, RATE)
+            .with_notes(notes, &mut out);
+        bl_rt::rt_test!({ node.process(&mut block) });
+    }
+    data.chunks(frames).map(<[f32]>::to_vec).collect()
+}
+
+// Spec: sampler R18
+#[test]
+fn a_warped_note_held_while_stopped_keeps_moving_through_the_sample() {
+    let ramp = sample(96_000, |i| (i + 1) as f32 / 96_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(&[(ATTACK, 0.0)], 256);
+    let mut slot = SlotSample::new(0, ramp);
+    slot.warp.warp = true;
+    slot.warp.bpm = Some(120.0);
+    node.receive_data(collector.handle().data(slot));
+    let at_120 = TempoMap::constant(Bpm::new(120.0).unwrap());
+    let b1 = run_notes_at(
+        node.as_mut(),
+        256,
+        &[note(0, NoteKind::On, 60, 1.0)],
+        &at_120,
+    );
+    let b2 = run_notes_at(node.as_mut(), 256, &[], &at_120);
+    // The ramp carries on into the second block; it once began again at the
+    // note's start.
+    assert!(
+        b2[0][0] > b1[0][255],
+        "block 2 began at {} after block 1 ended at {}",
+        b2[0][0],
+        b1[0][255]
+    );
+    assert!(b2[0][255] > b2[0][0]);
+}
+
+// Spec: sampler R18
+#[test]
+fn a_warped_note_goes_on_through_a_locate_back() {
+    let ramp = sample(96_000, |i| (i + 1) as f32 / 96_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(&[(ATTACK, 0.0)], 256);
+    let mut slot = SlotSample::new(0, ramp);
+    slot.warp.warp = true;
+    slot.warp.bpm = Some(120.0);
+    node.receive_data(collector.handle().data(slot));
+    let on = [note(0, NoteKind::On, 60, 1.0)];
+    let at = |frame| TransportInfo::at(true, Frames(frame));
+    let b1 = run_block(node.as_mut(), 256, &on, &[], at(48_000));
+    let b2 = run_block(node.as_mut(), 256, &[], &[], at(0));
+    assert!(b2[0][0] > b1[0][255], "the note goes on after the locate");
+    assert!(
+        b2[0][1] > b2[0][0],
+        "the note carries on, not back to its start"
+    );
+}
+
+// Spec: sampler R18
+#[test]
+fn warped_pitch_envelope_never_reads_backwards() {
+    let ramp = sample(192_000, |i| (i + 1) as f32 / 192_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(
+        &[
+            (ATTACK, 0.0),
+            (SUSTAIN, 100.0),
+            (PITCH_ENV_AMOUNT, 48.0),
+            (PITCH_ENV_ATTACK, 0.0),
+            (PITCH_ENV_DECAY, 100.0),
+            (PITCH_ENV_SUSTAIN, 0.0),
+        ],
+        256,
+    );
+    let mut slot = SlotSample::new(0, ramp);
+    slot.warp.warp = true;
+    slot.warp.mode = WarpMode::RePitch;
+    slot.warp.bpm = Some(120.0);
+    node.receive_data(collector.handle().data(slot));
+    let mut out = Vec::new();
+    for block in 0..57 {
+        let notes = [note(0, NoteKind::On, 60, 1.0)];
+        let transport = TransportInfo::at(true, Frames(block * 256));
+        let notes: &[NoteEvent] = if block == 0 { &notes } else { &[] };
+        out.extend(run_block(node.as_mut(), 256, notes, &[], transport).remove(0));
+    }
+    let first = out.iter().position(|v| *v != 0.0).unwrap();
+    assert!(
+        out[first..].windows(2).all(|w| w[1] >= w[0] - 1e-6),
+        "a pitch envelope only speeds the read up or slows it down"
+    );
+}
+
+// Spec: sampler R20
+#[test]
+fn manual_slices_merge_into_automatic_slicing() {
+    use bl_devices::slice_boundaries;
+    let clicks = sample(48_000, |i| if i % 24_000 < 20 { 1.0 } else { 0.0 });
+    let value = |by: f64| {
+        move |id: ParamId| match id {
+            SLICE_BY => by,
+            SLICE_SENSITIVITY => 50.0,
+            SLICE_DIVISION => 4.0,
+            SLICE_REGIONS => 2.0,
+            _ => 0.0,
+        }
+    };
+    let cut = |by: f64| slice_boundaries(&clicks, (0, 48_000), &value(by), 6_000.0, &[12_000]);
+    assert_eq!(cut(2.0), [0, 12_000, 24_000, 48_000], "Region");
+    assert_eq!(cut(0.0), [0, 12_000, 24_000, 48_000], "Transient");
+    assert_eq!(cut(1.0), [0, 12_000, 24_000, 48_000], "Beat");
+    // A full list still closes the region.
+    let many: Vec<u64> = (1..100).map(|k| k * 400 + 1).collect();
+    let full = slice_boundaries(&clicks, (0, 48_000), &value(0.0), 6_000.0, &many);
+    assert_eq!(full.len(), 65);
+    assert_eq!(full.last(), Some(&48_000));
+
+    // The device plays the merged slices: key 61 starts at the manual one.
+    let ramp = sample(48_000, |i| i as f32 / 48_000.0);
+    let collector = Collector::new();
+    let mut node = sampler(
+        &[(MODE, 2.0), (SLICE_BY, 2.0), (SLICE_REGIONS, 2.0)],
+        48_000,
+    );
+    let mut slot = SlotSample::new(0, ramp);
+    slot.slices = Arc::from([12_000u64]);
+    node.receive_data(collector.handle().data(slot));
+    let out = run_notes(node.as_mut(), 48_000, &[note(0, NoteKind::On, 61, 1.0)]);
+    let want = (12_000.0 + 10.0) / 48_000.0;
+    assert!((out[0][10] as f64 - want).abs() < 1e-4, "{}", out[0][10]);
+}
+
+// Spec: sampler R14
+#[test]
+fn a_long_samples_transient_slices_are_found_over_several_blocks() {
+    // A loud click at the start and the middle and a quiet one between:
+    // the quiet one is an onset from Sensitivity 51 % up, not at 50 %.
+    let quiet = 10f32.powf(-1.01);
+    let long = sample(20_000_000, |i| match i {
+        0 | 10_000_000 => 1.0,
+        5_000_000 => quiet,
+        _ => 0.0,
+    });
+    let collector = Collector::new();
+    let mut node = sampler(&[(MODE, 2.0), (SLICE_SENSITIVITY, 50.0)], 128);
+    give(node.as_mut(), &collector, &long);
+    let on = [note(0, NoteKind::On, 61, 1.0)];
+    let play = |node: &mut dyn Node, events: &[NodeEvent]| {
+        run_block(node, 128, &on, events, TransportInfo::default())[0][0]
+    };
+    let idle = |node: &mut dyn Node, events: &[NodeEvent]| {
+        run_block(node, 128, &[], events, TransportInfo::default());
+    };
+    // The first scan takes more than a block, and no slice plays until it
+    // is done.
+    assert_eq!(play(node.as_mut(), &[]), 0.0);
+    for _ in 0..2_000 {
+        idle(node.as_mut(), &[]);
+    }
+    let loud = play(node.as_mut(), &[]);
+    assert!(loud > 0.0, "the second slice starts on the loud click");
+    // A new Sensitivity doesn't stop the old slices playing, nor does it
+    // rescan the sample in the block it arrives in.
+    let sensitivity = [NodeEvent {
+        offset: 0,
+        param: SLICE_SENSITIVITY,
+        value: ParamValue::Set(51.0),
+    }];
+    idle(node.as_mut(), &sensitivity);
+    assert_eq!(play(node.as_mut(), &[]), loud, "the old slices still play");
+    for _ in 0..2_000 {
+        idle(node.as_mut(), &[]);
+    }
+    let now = play(node.as_mut(), &[]);
+    assert!(
+        (now / loud - quiet).abs() < 1e-3,
+        "the second slice now starts on the quiet click"
     );
 }

@@ -24,7 +24,10 @@ fn device_harness() -> (Harness, DeviceId) {
     h.settle();
     let tracks: Vec<TrackId> = h.shell.editor().document().top_level().collect();
     h.shell
-        .invoke("arrangement.select_tracks", json!({ "tracks": [tracks[2]] }))
+        .invoke(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[2]] }),
+        )
         .unwrap();
     h.settle();
     let t = testing::gain_type();
@@ -118,7 +121,10 @@ fn lock_to_items_follow_save_as_default_preset_and_tick_while_locked() {
     let item = Harness::node(&nodes, "Lock to Control Surface");
     assert!(item.disabled);
     let save = Harness::node(&nodes, "Save as Default Preset");
-    assert!(item.bounds.unwrap().y0 > save.bounds.unwrap().y0, "after it");
+    assert!(
+        item.bounds.unwrap().y0 > save.bounds.unwrap().y0,
+        "after it"
+    );
     h.key(egui::Key::Escape, Modifiers::NONE);
     h.settle();
 
@@ -140,11 +146,18 @@ fn lock_to_items_follow_save_as_default_preset_and_tick_while_locked() {
     let item = Harness::node(&nodes, &format!("Lock to {SURFACE}"));
     assert!(!item.disabled);
     let save = Harness::node(&nodes, "Save as Default Preset");
-    assert!(item.bounds.unwrap().y0 > save.bounds.unwrap().y0, "after it");
+    assert!(
+        item.bounds.unwrap().y0 > save.bounds.unwrap().y0,
+        "after it"
+    );
     h.click(centre(item));
     h.settle();
     assert_eq!(locks(&h).len(), 1, "locked");
-    assert_eq!(h.shell.editor().undo_history().count(), steps, "no undo step");
+    assert_eq!(
+        h.shell.editor().undo_history().count(),
+        steps,
+        "no undo step"
+    );
 
     // Ticked while locked; choosing it again unlocks.
     let out = right_click(&mut h, title_rect(frame, false).center());
@@ -188,7 +201,10 @@ fn a_locked_device_shows_the_hand_icon_in_its_title_bar_and_folded() {
     assert!(find(&mut h).is_none(), "no icon while nothing is locked");
 
     h.shell
-        .run("control_surface.lock", json!({ "row": 1, "device": device }))
+        .run(
+            "control_surface.lock",
+            json!({ "row": 1, "device": device }),
+        )
         .unwrap();
     h.settle();
     let frame = frame_of(&mut h, device);
@@ -221,7 +237,10 @@ fn a_locked_device_shows_the_hand_icon_in_its_title_bar_and_folded() {
     let frame = frame_of(&mut h, device);
     let icon = find(&mut h).expect("the icon in the strip");
     let (hot_swap, bounds) = (button_rects(frame, true)[0], icon.bounds.unwrap());
-    assert!(f64::from(hot_swap.top()) >= bounds.y1, "above Hot-Swap Presets");
+    assert!(
+        f64::from(hot_swap.top()) >= bounds.y1,
+        "above Hot-Swap Presets"
+    );
     assert!(f64::from(title_rect(frame, true).top()) <= bounds.y0);
 }
 
@@ -290,8 +309,14 @@ fn the_rings_border_surrounds_its_slots_in_its_rows_colour() {
         pos2(first.rect.left(), session.scene_row(0, 0.0).top()),
         pos2(last.rect.right(), session.scene_row(1, 0.0).bottom()),
     );
-    assert!((rect.min - want.min).abs().max_elem() < 1.5, "{rect:?} {want:?}");
-    assert!((rect.max - want.max).abs().max_elem() < 1.5, "{rect:?} {want:?}");
+    assert!(
+        (rect.min - want.min).abs().max_elem() < 1.5,
+        "{rect:?} {want:?}"
+    );
+    assert!(
+        (rect.max - want.max).abs().max_elem() < 1.5,
+        "{rect:?} {want:?}"
+    );
 
     // A second ring: each is drawn, the lower row's on top (drawn later).
     run_surface(&mut h, 2, "test");
@@ -325,7 +350,10 @@ fn a_moved_ring_scrolls_the_grid_to_show_it() {
     run_surface(&mut h, 1, "test-instant");
     for n in 0..30 {
         h.shell
-            .invoke("track.create", json!({ "kind": "audio", "name": format!("T{n}") }))
+            .invoke(
+                "track.create",
+                json!({ "kind": "audio", "name": format!("T{n}") }),
+            )
             .unwrap();
     }
     for _ in 0..40 {
@@ -344,7 +372,10 @@ fn a_moved_ring_scrolls_the_grid_to_show_it() {
         )
         .unwrap();
     h.settle();
-    assert!(scroll(&h) > 0.0, "scrolled sideways to the ring's first track");
+    assert!(
+        scroll(&h) > 0.0,
+        "scrolled sideways to the ring's first track"
+    );
     let before = scroll(&h);
     // Moving the ring within view scrolls nothing more.
     h.shell
@@ -356,13 +387,7 @@ fn a_moved_ring_scrolls_the_grid_to_show_it() {
     h.settle();
     assert!(scroll(&h) >= before);
 
-    let scenes: Vec<_> = h
-        .shell
-        .editor()
-        .document()
-        .scenes()
-        .map(|s| s.id)
-        .collect();
+    let scenes: Vec<_> = h.shell.editor().document().scenes().map(|s| s.id).collect();
     h.shell
         .run(
             "control_surface.move_ring",
@@ -370,7 +395,10 @@ fn a_moved_ring_scrolls_the_grid_to_show_it() {
         )
         .unwrap();
     h.settle();
-    assert!(h.shell.session().state().scroll_y > 0.0, "scrolled down to it");
+    assert!(
+        h.shell.session().state().scroll_y > 0.0,
+        "scrolled down to it"
+    );
 }
 
 // Spec: session-view R38. A slot inside a ring says whose in its description.
@@ -379,7 +407,11 @@ fn a_slot_in_a_ring_names_the_surface_in_its_description() {
     let mut h = session_harness();
     run_surface(&mut h, 1, "test-instant");
     let doc = h.shell.editor().document();
-    let first = doc.track(h.shell.mixer_columns()[0]).unwrap().name().to_owned();
+    let first = doc
+        .track(h.shell.mixer_columns()[0])
+        .unwrap()
+        .name()
+        .to_owned();
     let nodes = Harness::nodes(&h.settle());
     let slot = |scene: usize| {
         nodes

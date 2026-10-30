@@ -603,7 +603,10 @@ impl Shell {
 
     /// The kind and the range a device parameter's control has, from its
     /// description: a toggle is a ranged switch, a choice a radio button.
-    pub(super) fn param_control(&self, target: &RemoteTarget) -> Option<(ControlKind, Option<(f64, f64)>)> {
+    pub(super) fn param_control(
+        &self,
+        target: &RemoteTarget,
+    ) -> Option<(ControlKind, Option<(f64, f64)>)> {
         let RemoteTarget::Device { device, param } = *target else {
             return None;
         };

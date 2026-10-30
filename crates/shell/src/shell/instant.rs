@@ -229,7 +229,10 @@ impl Shell {
             // Spec: control-surfaces R30. A track or scene the set still has
             // keeps the ring by ID; one that is gone leaves it at the place
             // it had, on whatever is there now, or the last.
-            place.track_at = match place.track.and_then(|t| tracks.iter().position(|x| *x == t)) {
+            place.track_at = match place
+                .track
+                .and_then(|t| tracks.iter().position(|x| *x == t))
+            {
                 Some(at) => at,
                 None => {
                     let hidden = place.track.and_then(|t| {
@@ -248,7 +251,10 @@ impl Shell {
                 }
             };
             place.track = tracks.get(place.track_at).copied();
-            place.scene_at = match place.scene.and_then(|s| scenes.iter().position(|x| *x == s)) {
+            place.scene_at = match place
+                .scene
+                .and_then(|s| scenes.iter().position(|x| *x == s))
+            {
                 Some(at) => at,
                 None => place.scene_at.min(scenes.len().saturating_sub(1)),
             };
@@ -265,7 +271,9 @@ impl Shell {
             let state = &mut self.instant.rows[row];
             if state.reached != now {
                 state.reached = now;
-                state.held.retain(|role, _| !matches!(role, Role::Device(_)));
+                state
+                    .held
+                    .retain(|role, _| !matches!(role, Role::Device(_)));
             }
         }
     }
@@ -274,7 +282,10 @@ impl Shell {
     pub(super) fn ring_state(&self, row: usize) -> Option<RingState> {
         let size = self.running_kinds()[row]?.ring?;
         let place = self.instant.rows[row].place?;
-        let (tracks, scenes) = (ring_tracks(self).len(), self.editor.document().scenes().len());
+        let (tracks, scenes) = (
+            ring_tracks(self).len(),
+            self.editor.document().scenes().len(),
+        );
         let (width, height) = (usize::from(size.tracks), usize::from(size.scenes));
         Some(RingState {
             tracks: size.tracks,
@@ -299,7 +310,11 @@ impl Shell {
         let tracks = ring_tracks(self);
         let scenes: Vec<SceneId> = self.editor.document().scenes().map(|s| s.id).collect();
         fn cover<T: Copy>(all: &[T], at: usize, size: u8) -> Vec<T> {
-            all.iter().skip(at).take(usize::from(size)).copied().collect()
+            all.iter()
+                .skip(at)
+                .take(usize::from(size))
+                .copied()
+                .collect()
         }
         Some((
             cover(&tracks, place.track_at, size.tracks),
@@ -338,7 +353,10 @@ impl Shell {
                 .position(|s| *s == scene)
                 .ok_or("the set has no such scene")?;
         }
-        let (across, down) = (isize::try_from(width).unwrap_or(0), isize::try_from(height).unwrap_or(0));
+        let (across, down) = (
+            isize::try_from(width).unwrap_or(0),
+            isize::try_from(height).unwrap_or(0),
+        );
         let (dx, dy) = match step {
             None => (0, 0),
             Some(ids::RingStep::Left) => (-1, 0),
@@ -497,11 +515,14 @@ impl Shell {
                 });
                 let focus = self.reach(row).and_then(|reach| {
                     let device = doc.device(reach.device)?;
-                    let params = reach.banks.get(reach.bank).map_or_else(Vec::new, |(_, ids)| {
-                        ids.iter()
-                            .filter_map(|id| self.param_view(device, *id))
-                            .collect()
-                    });
+                    let params = reach
+                        .banks
+                        .get(reach.bank)
+                        .map_or_else(Vec::new, |(_, ids)| {
+                            ids.iter()
+                                .filter_map(|id| self.param_view(device, *id))
+                                .collect()
+                        });
                     Some(Focus {
                         device: reach.device,
                         lock: reach.lock,
@@ -660,7 +681,11 @@ impl Shell {
                 let param = *reach.banks.get(reach.bank)?.1.get(usize::from(n))?;
                 // Spec: control-surfaces R22. A parameter a macro holds
                 // isn't moved.
-                if self.devices.macro_holding(doc, reach.device, param).is_some() {
+                if self
+                    .devices
+                    .macro_holding(doc, reach.device, param)
+                    .is_some()
+                {
                     self.surface.refused += 1;
                     return None;
                 }
@@ -807,9 +832,7 @@ impl Shell {
             command: id.to_owned(),
             message,
         };
-        let row_info = |shell: &Self, row: usize| {
-            to_value(&shell.row_info(row))
-        };
+        let row_info = |shell: &Self, row: usize| to_value(&shell.row_info(row));
         match id {
             ids::LOCK => {
                 let args = Self::args::<ids::LockArgs>(id, args)?;
@@ -850,9 +873,9 @@ impl Shell {
             ids::SET_BANK => {
                 let args = Self::args::<ids::SetBankArgs>(id, args)?;
                 let row = self.running_row(id, args.row)?;
-                let reach = self
-                    .reach(row)
-                    .ok_or_else(|| failed("the surface's device controls reach no device".to_owned()))?;
+                let reach = self.reach(row).ok_or_else(|| {
+                    failed("the surface's device controls reach no device".to_owned())
+                })?;
                 if args.bank >= reach.banks.len() {
                     return Err(failed(format!(
                         "the device has {} banks, so {} is out of range",

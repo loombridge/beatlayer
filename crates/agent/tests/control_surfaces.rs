@@ -89,7 +89,10 @@ fn an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back() {
     let (mut shell, _test) = shell_with_ports();
     for n in 0..10 {
         shell
-            .invoke("track.create", json!({ "kind": "audio", "name": format!("T{n}") }))
+            .invoke(
+                "track.create",
+                json!({ "kind": "audio", "name": format!("T{n}") }),
+            )
             .unwrap();
     }
     let audio = shell.editor().document().top_level().nth(2).unwrap();
@@ -120,7 +123,11 @@ fn an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back() {
 
     // control_surface.banks: each bank by name, its parameters by ID, name
     // and value text, at most eight to a bank.
-    let banks = run(&mut client, "control_surface.banks", json!({ "device": device }));
+    let banks = run(
+        &mut client,
+        "control_surface.banks",
+        json!({ "device": device }),
+    );
     assert_eq!(banks["banks"][0]["name"], "Utility");
     assert_eq!(banks["banks"][0]["params"].as_array().unwrap().len(), 8);
     assert!(banks["banks"][0]["params"][0]["text"].is_string());
@@ -139,7 +146,11 @@ fn an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back() {
     assert_eq!(state["devices"][0]["locks"][0]["by"], "hand");
 
     // set_bank, read back.
-    let set = run(&mut client, "control_surface.set_bank", json!({ "row": 1, "bank": 1 }));
+    let set = run(
+        &mut client,
+        "control_surface.set_bank",
+        json!({ "row": 1, "bank": 1 }),
+    );
     assert_eq!(set["surface_state"]["device"]["bank_name"], "Bass");
     let listed = run(&mut client, "control_surface.list", json!({}));
     assert_eq!(listed["rows"][0]["surface_state"]["device"]["bank"], 1);
@@ -155,7 +166,10 @@ fn an_agent_locks_moves_the_ring_and_sets_banks_and_reads_them_back() {
     );
     assert_eq!(moved["surface_state"]["ring"]["track_index"], 1);
     let listed = run(&mut client, "control_surface.list", json!({}));
-    assert_eq!(listed["rows"][0]["surface_state"]["ring"], moved["surface_state"]["ring"]);
+    assert_eq!(
+        listed["rows"][0]["surface_state"]["ring"],
+        moved["surface_state"]["ring"]
+    );
     let session = run(&mut client, "session.state", json!({}));
     assert_eq!(
         session["rings"][0]["tracks"][0],

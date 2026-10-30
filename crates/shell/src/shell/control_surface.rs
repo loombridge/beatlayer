@@ -104,7 +104,9 @@ impl Shell {
     /// reports them, for the Settings window to draw.
     #[must_use]
     pub fn control_surface_rows(&self) -> Vec<ids::RowInfo> {
-        (0..bl_control::ROWS).map(|row| self.row_info(row)).collect()
+        (0..bl_control::ROWS)
+            .map(|row| self.row_info(row))
+            .collect()
     }
 
     /// One row of the table as `control_surface.list` reports it, with the

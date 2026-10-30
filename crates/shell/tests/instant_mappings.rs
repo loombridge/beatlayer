@@ -190,7 +190,13 @@ impl Rig {
     }
 
     fn volume(&self, track: TrackId) -> f64 {
-        self.shell.editor().document().track(track).unwrap().mixer().volume
+        self.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .volume
     }
 
     /// The tracks the ring runs along, as `session.state` reports the ring
@@ -207,7 +213,10 @@ impl Rig {
 #[test]
 fn knobs_follow_the_selected_device_and_step_through_banks() {
     let mut rig = Rig::new();
-    let (first, second) = (rig.track(TrackKind::Audio), rig.new_track("audio", "Second"));
+    let (first, second) = (
+        rig.track(TrackKind::Audio),
+        rig.new_track("audio", "Second"),
+    );
     rig.select(first);
     let on_first = rig.add(UTILITY, "audio_effect");
     rig.select(second);
@@ -229,7 +238,8 @@ fn knobs_follow_the_selected_device_and_step_through_banks() {
     let high = rig.param(on_second, gain).unwrap();
     assert!(high > low, "{low} to {high}");
     assert!(
-        rig.param(on_first, gain).is_none_or(|v| (v - high).abs() > 1e-9),
+        rig.param(on_first, gain)
+            .is_none_or(|v| (v - high).abs() > 1e-9),
         "the other device is untouched"
     );
     rig.cc(1, 127);
@@ -250,9 +260,16 @@ fn knobs_follow_the_selected_device_and_step_through_banks() {
     assert_eq!(rig.focus(1)["bank"], 1, "stops at the last");
     let bass = banks[1].1[0];
     rig.cc(0, 127);
-    assert!(rig.param(on_second, bass).is_some(), "the bank's first parameter");
+    assert!(
+        rig.param(on_second, bass).is_some(),
+        "the bank's first parameter"
+    );
     rig.select(first);
-    assert_eq!(rig.focus(1)["bank"], 0, "the other device is on its own bank");
+    assert_eq!(
+        rig.focus(1)["bank"],
+        0,
+        "the other device is on its own bank"
+    );
     rig.select(second);
     assert_eq!(rig.focus(1)["bank"], 1, "remembered");
     rig.tap(0);
@@ -301,7 +318,9 @@ fn a_racks_banks_are_its_macros_and_a_held_parameter_is_not_moved() {
     assert_eq!(banks.len(), 1);
     assert_eq!(
         banks[0].1,
-        (1..=8).map(|n| bl_model::macro_param(n).0).collect::<Vec<_>>()
+        (1..=8)
+            .map(|n| bl_model::macro_param(n).0)
+            .collect::<Vec<_>>()
     );
 
     rig.cc(0, 127);
@@ -402,7 +421,11 @@ fn with_pick_up_a_knob_after_a_bank_change_moves_nothing_until_it_crosses_the_va
     rig.tap(1);
     rig.tap(0);
     rig.cc(1, 127);
-    assert_eq!(rig.param(utility, 6), Some(100.0), "moves nothing until it crosses");
+    assert_eq!(
+        rig.param(utility, 6),
+        Some(100.0),
+        "moves nothing until it crosses"
+    );
     rig.cc(1, 0);
     assert_ne!(rig.param(utility, 6), Some(100.0), "crossed");
 }
@@ -413,7 +436,10 @@ fn with_pick_up_a_knob_after_a_bank_change_moves_nothing_until_it_crosses_the_va
 #[test]
 fn locking_keeps_the_knobs_on_the_device_until_it_is_deleted() {
     let mut rig = Rig::new();
-    let (first, second) = (rig.track(TrackKind::Audio), rig.new_track("audio", "Second"));
+    let (first, second) = (
+        rig.track(TrackKind::Audio),
+        rig.new_track("audio", "Second"),
+    );
     rig.select(first);
     let locked = rig.add(UTILITY, "audio_effect");
     rig.select(second);
@@ -432,7 +458,11 @@ fn locking_keeps_the_knobs_on_the_device_until_it_is_deleted() {
     let gain = rig.banks(locked)[0].1[0];
     rig.cc(0, 127);
     assert!(rig.param(locked, gain).is_some(), "the locked device moved");
-    assert_eq!(rig.param(other, gain), None, "the selected device isn't touched");
+    assert_eq!(
+        rig.param(other, gain),
+        None,
+        "the selected device isn't touched"
+    );
 
     // device_view.state names the surface each device is locked to.
     rig.select(first);
@@ -460,16 +490,25 @@ fn locking_keeps_the_knobs_on_the_device_until_it_is_deleted() {
     assert_eq!(rig.focus(1)["locked"], "hand");
 
     // Locking again gives it back; locking another moves the lock.
-    rig.run("control_surface.lock", json!({ "row": 1, "device": locked }));
+    rig.run(
+        "control_surface.lock",
+        json!({ "row": 1, "device": locked }),
+    );
     assert!(rig.focus(1)["locked"].is_null());
-    rig.run("control_surface.lock", json!({ "row": 1, "device": locked }));
+    rig.run(
+        "control_surface.lock",
+        json!({ "row": 1, "device": locked }),
+    );
     rig.run("control_surface.lock", json!({ "row": 1, "device": other }));
     assert_eq!(rig.focus(1)["device"], json!(other));
     rig.run("control_surface.unlock", json!({ "row": 1 }));
     assert!(rig.focus(1)["locked"].is_null());
 
     // Deleting the device ends its lock, and undo doesn't bring it back.
-    rig.run("control_surface.lock", json!({ "row": 1, "device": locked }));
+    rig.run(
+        "control_surface.lock",
+        json!({ "row": 1, "device": locked }),
+    );
     rig.run("device.remove", json!({ "device": locked }));
     assert!(rig.focus(1)["locked"].is_null(), "the lock ended");
     assert_ne!(rig.focus(1)["device"], json!(locked));
@@ -511,7 +550,11 @@ fn arming_locks_the_instrument_and_a_hand_lock_survives_it() {
     assert_eq!(rig.focus(1)["device"], json!(one), "disarming falls back");
     arm(&mut rig, first, false);
     assert_ne!(rig.focus(1)["locked"], "arming");
-    assert_eq!(rig.focus(1)["device"], json!(fx), "back to the device in focus");
+    assert_eq!(
+        rig.focus(1)["device"],
+        json!(fx),
+        "back to the device in focus"
+    );
 
     // A lock by hand isn't replaced by arming.
     rig.run("control_surface.lock", json!({ "row": 1, "device": fx }));
@@ -568,17 +611,34 @@ fn the_ring_moves_by_a_track_or_a_page_and_stops_at_the_last_track() {
     let start = ring(&mut rig);
     assert_eq!(start["track_index"], 0);
     assert_eq!(start["scene_index"], 0);
-    assert_eq!((start["tracks"].as_u64(), start["scenes"].as_u64()), (Some(8), Some(2)));
-    assert_eq!(start["can_move"], json!({ "left": false, "right": true, "up": false, "down": true }));
+    assert_eq!(
+        (start["tracks"].as_u64(), start["scenes"].as_u64()),
+        (Some(8), Some(2))
+    );
+    assert_eq!(
+        start["can_move"],
+        json!({ "left": false, "right": true, "up": false, "down": true })
+    );
 
-    let (steps, selected) = (rig.steps(), rig.shell.arrangement().selected_tracks().to_vec());
+    let (steps, selected) = (
+        rig.steps(),
+        rig.shell.arrangement().selected_tracks().to_vec(),
+    );
     rig.tap(3);
     assert_eq!(first_track(&mut rig), all[1], "one track");
     rig.tap(7);
-    assert_eq!(ring(&mut rig)["track_index"], 9, "a page is the ring's width");
+    assert_eq!(
+        ring(&mut rig)["track_index"],
+        9,
+        "a page is the ring's width"
+    );
     rig.tap(7);
     rig.tap(7);
-    assert_eq!(ring(&mut rig)["track_index"], last, "a page stops at the last");
+    assert_eq!(
+        ring(&mut rig)["track_index"],
+        last,
+        "a page stops at the last"
+    );
     assert_eq!(first_track(&mut rig), all[last]);
     assert_eq!(ring(&mut rig)["can_move"]["right"], false);
     rig.tap(3);
@@ -614,7 +674,10 @@ fn the_ring_moves_by_a_track_or_a_page_and_stops_at_the_last_track() {
         "control_surface.move_ring",
         json!({ "row": 1, "step": "page_right" }),
     );
-    assert_eq!(stepped["surface_state"]["ring"]["track_index"], 10.min(last));
+    assert_eq!(
+        stepped["surface_state"]["ring"]["track_index"],
+        10.min(last)
+    );
 }
 
 // Spec: control-surfaces R28. With fewer tracks than its width the ring stays
@@ -692,7 +755,11 @@ fn mixer_controls_cover_the_rings_tracks() {
     let columns = long_set(&mut rig);
     let before: Vec<f64> = columns.iter().map(|t| rig.volume(*t)).collect();
     rig.cc(16, 20);
-    assert_ne!(rig.volume(columns[0]), before[0], "column 1 is the ring's first track");
+    assert_ne!(
+        rig.volume(columns[0]),
+        before[0],
+        "column 1 is the ring's first track"
+    );
     assert_eq!(rig.volume(columns[1]), before[1]);
 
     // Moved one track along, the same control reaches the next track.
@@ -702,7 +769,15 @@ fn mixer_controls_cover_the_rings_tracks() {
     assert_eq!(rig.volume(columns[2]), before[2]);
 
     // Mute, Solo and Arm are toggles over the ring's tracks.
-    let doc = |rig: &Rig, track: TrackId| rig.shell.editor().document().track(track).unwrap().mixer().clone();
+    let doc = |rig: &Rig, track: TrackId| {
+        rig.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .clone()
+    };
     assert!(!doc(&rig, columns[1]).solo);
     rig.tap(48);
     assert!(doc(&rig, columns[1]).solo);
@@ -715,11 +790,21 @@ fn mixer_controls_cover_the_rings_tracks() {
     let ring_at = ring(&mut rig)["track_index"].clone();
     rig.tap(66);
     assert!(rig.shell.session().state().tracks.contains(&columns[3]));
-    assert_eq!(ring(&mut rig)["track_index"], ring_at, "selecting moves no ring");
+    assert_eq!(
+        ring(&mut rig)["track_index"],
+        ring_at,
+        "selecting moves no ring"
+    );
 
     // Past the last track a control does nothing, and isn't refused.
-    rig.run("control_surface.move_ring", json!({ "row": 1, "step": "page_right" }));
-    rig.run("control_surface.move_ring", json!({ "row": 1, "step": "page_right" }));
+    rig.run(
+        "control_surface.move_ring",
+        json!({ "row": 1, "step": "page_right" }),
+    );
+    rig.run(
+        "control_surface.move_ring",
+        json!({ "row": 1, "step": "page_right" }),
+    );
     let counts = rig.shell.surface_counts();
     let last = ring(&mut rig)["track_index"].as_u64().unwrap();
     assert!(last + 8 >= rig.shell.mixer_columns().len() as u64);

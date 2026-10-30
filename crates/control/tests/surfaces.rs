@@ -404,7 +404,11 @@ fn ticks_bring_the_read_model_and_commands_queue_in_order() {
             (0, 0.0, gesture(true))
         ]
     );
-    assert!(requests.iter().all(|r| r.command().unwrap().id == "mixer.set_volume"));
+    assert!(
+        requests
+            .iter()
+            .all(|r| r.command().unwrap().id == "mixer.set_volume")
+    );
 }
 
 // Spec: control-surfaces R11. Dump sends the setup the surface declares to
@@ -504,7 +508,8 @@ fn the_instant_test_surface_turns_messages_into_controls_in_order() {
     use bl_model::RemoteMode;
 
     let mut rig = Rig::with_ports();
-    rig.set(2, Some("test-instant"), "Pads", "Pads Out").unwrap();
+    rig.set(2, Some("test-instant"), "Pads", "Pads Out")
+        .unwrap();
     let now = TestClock::new().now();
     for bytes in [
         [0xB0, 3, 100],

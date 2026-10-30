@@ -435,7 +435,8 @@ impl Cx {
     /// is resolved there as the message is run, so it is the one the person
     /// sees (R22, R33).
     pub fn control(&mut self, role: Role, mode: RemoteMode, hit: Hit) {
-        self.requests.push(Ask::Control(Control { role, mode, hit }));
+        self.requests
+            .push(Ask::Control(Control { role, mode, hit }));
     }
 
     /// Hands a message back to the tracks, as arriving at `at`: they

@@ -29,9 +29,9 @@ pub mod testing;
 
 pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, Traffic};
 pub use surface::{
-    Ask, Control, ControlSurface, Cx, Focus, Gesture, Kind, Lock, Moves, Out, ParamView,
-    ReadModel, Request, Ring, RingStep, RingView, Role, RowView, Selection, SurfaceState, TICK,
-    Transport, kind, kinds,
+    Ask, Control, ControlSurface, Cx, Focus, Gesture, Kind, Lock, Moves, Out, ParamView, ReadModel,
+    Request, Ring, RingStep, RingView, Role, RowView, Selection, SurfaceState, TICK, Transport,
+    kind, kinds,
 };
 
 /// The messages `mappings` take, for the MIDI system's thread to judge by

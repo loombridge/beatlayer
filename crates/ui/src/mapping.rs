@@ -210,9 +210,7 @@ pub fn set_hover_lock(ctx: &Context, text: Option<String>) {
 /// Starts a frame: what the last frame noted is what the Status Bar shows.
 pub fn rotate_hover_lock(ctx: &Context) {
     ctx.data_mut(|d| {
-        let next = d
-            .get_temp::<Option<String>>(hover_lock_id(false))
-            .flatten();
+        let next = d.get_temp::<Option<String>>(hover_lock_id(false)).flatten();
         d.insert_temp(hover_lock_id(true), next);
         d.insert_temp(hover_lock_id(false), None::<String>);
     });

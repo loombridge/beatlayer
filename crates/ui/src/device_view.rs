@@ -1981,7 +1981,10 @@ fn hand_icon(ui: &mut Ui, frame: &DeviceFrame, ink: Color32, rect: Rect) {
         let top = c.y - r * (if i == 1 || i == 2 { 0.95 } else { 0.8 });
         painter.line_segment([pos2(x, top), pos2(x, c.y)], stroke);
     }
-    painter.line_segment([c + vec2(-r * 0.6, r * 0.1), c + vec2(-r, -r * 0.3)], stroke);
+    painter.line_segment(
+        [c + vec2(-r * 0.6, r * 0.1), c + vec2(-r, -r * 0.3)],
+        stroke,
+    );
     let text = locked_to(frame);
     if response.hovered() {
         crate::mapping::set_hover_lock(ui.ctx(), Some(text.clone()));

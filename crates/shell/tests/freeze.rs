@@ -484,3 +484,171 @@ fn a_frozen_track_s_clips_arent_reversed() {
         "a selection on a frozen track isn't reversed"
     );
 }
+
+/// A MIDI track holding a utility device, with one Arrangement clip of one
+/// note.
+fn midi_track_with_a_note(shell: &mut Shell) -> (TrackId, ClipId) {
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+        .unwrap();
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.name() == "Keys")
+        .map(Track::id)
+        .expect("the MIDI track");
+    let device: bl_model::DeviceId = shell.new_id();
+    shell
+        .run(
+            "device.insert",
+            json!({ "track": track, "index": 0, "device": {
+                "id": device, "name": "Utility", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": "beatlayer.utility" } } } }),
+        )
+        .unwrap();
+    let clip: ClipId = shell.new_id();
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": track, "clip": { "id": clip, "name": "A", "start": 0,
+                    "length": 705_600, "mute": false, "data": { "midi": { "notes": [
+                        { "key": 60, "velocity": 100, "start": 0, "length": 352_800 }
+                    ] } } } }),
+        )
+        .unwrap();
+    (track, clip)
+}
+
+// Spec: freeze-and-bounce R1, R10. A frozen MIDI track keeps MIDI clips, so
+// its saved set opens.
+#[test]
+fn a_frozen_midi_track_saves_and_reopens() {
+    let scratch = Scratch::new("midi-reopen");
+    let mut shell = new_shell(&scratch);
+    let (midi, clip) = midi_track_with_a_note(&mut shell);
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": midi, "scene": scene }),
+        )
+        .unwrap();
+    let before = shell.editor().document().clip(clip).unwrap().data.clone();
+    saved(&scratch, &mut shell);
+    freeze(&mut shell, midi);
+    assert!(shell.editor().document().track(midi).unwrap().is_frozen());
+    assert!(shell.editor().document().check_invariants().is_ok());
+
+    let path = saved(&scratch, &mut shell);
+    shell
+        .run("set.open", json!({ "path": path.display().to_string() }))
+        .unwrap();
+    let doc = shell.editor().document();
+    assert!(doc.track(midi).unwrap().is_frozen());
+
+    shell.run(ids::FREEZE, json!({ "tracks": [midi] })).unwrap();
+    let doc = shell.editor().document();
+    assert!(!doc.track(midi).unwrap().is_frozen());
+    assert!(!doc.clip(clip).unwrap().data.is_audio());
+    assert_eq!(doc.clip(clip).unwrap().data, before);
+}
+
+// Spec: freeze-and-bounce R1, R10. Freezing again must not replace the
+// originals the first freeze kept.
+#[test]
+fn refreezing_a_mixed_selection_keeps_the_frozen_tracks_originals() {
+    let scratch = Scratch::new("refreeze");
+    let mut shell = new_shell(&scratch);
+    let a = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let ca = place(&mut shell, a, &file, 0);
+    shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    let b = shell
+        .editor()
+        .document()
+        .tracks()
+        .filter(|track| track.kind() == TrackKind::Audio)
+        .map(Track::id)
+        .find(|track| *track != a)
+        .unwrap();
+    let other = scratch.path("other.wav");
+    wav(&other, 1.0, 2);
+    place(&mut shell, b, &other, 0);
+    let (midi, cm) = midi_track_with_a_note(&mut shell);
+    let audio_before = shell.editor().document().clip(ca).unwrap().data.clone();
+    let midi_before = shell.editor().document().clip(cm).unwrap().data.clone();
+
+    freeze(&mut shell, a);
+    freeze(&mut shell, midi);
+    shell
+        .run(ids::FREEZE, json!({ "tracks": [a, b, midi] }))
+        .unwrap();
+    assert!(shell.editor().document().track(b).unwrap().is_frozen());
+    shell
+        .run(ids::UNFREEZE, json!({ "tracks": [a, midi] }))
+        .unwrap();
+
+    let doc = shell.editor().document();
+    assert_eq!(doc.clip(ca).unwrap().data, audio_before);
+    assert_eq!(doc.clip(cm).unwrap().data, midi_before);
+    assert!(doc.track(b).unwrap().is_frozen());
+}
+
+// Spec: freeze-and-bounce R4. A Session clip freezes as a render of its own,
+// with no Arrangement clip on the track.
+#[test]
+fn a_track_with_only_session_clips_freezes_each_slot() {
+    let scratch = Scratch::new("slots");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    shell
+        .run(
+            "session.drop_files",
+            json!({ "paths": [file.display().to_string()], "track": track, "scene": scene }),
+        )
+        .unwrap();
+    saved(&scratch, &mut shell);
+
+    let result = freeze(&mut shell, track);
+    assert_eq!(result["files"].as_array().unwrap().len(), 1);
+    let doc = shell.editor().document();
+    let frozen = doc.track(track).unwrap().frozen().unwrap();
+    assert_eq!(frozen.clips.len(), 1);
+    assert_eq!(frozen.clips[0].scene, Some(scene));
+}
+
+// Spec: freeze-and-bounce R4. A frozen MIDI track's slot plays its render,
+// and its clip stays MIDI.
+#[test]
+fn a_midi_track_with_only_a_session_clip_plays_its_render() {
+    let scratch = Scratch::new("midi-slots");
+    let mut shell = new_shell(&scratch);
+    let (midi, clip) = midi_track_with_a_note(&mut shell);
+    shell.run("clip.delete", json!({ "clip": clip })).unwrap();
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": midi, "scene": scene }),
+        )
+        .unwrap();
+    saved(&scratch, &mut shell);
+
+    freeze(&mut shell, midi);
+    let doc = shell.editor().document();
+    let held = doc.track(midi).unwrap();
+    assert_eq!(held.frozen().unwrap().clips.len(), 1);
+    assert!(!doc.slot(midi, scene).unwrap().data.is_audio());
+    let played = held.playback_slots();
+    assert!(
+        played[0].1.data.is_audio(),
+        "the slot plays the freeze file"
+    );
+}

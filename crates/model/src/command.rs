@@ -449,8 +449,9 @@ pub enum Command {
         tracks: Vec<TrackId>,
     },
     /// Replaces a track with the audio track a bounce made (WP-4.15, R21,
-    /// R23). The track keeps its ID, so its colour and the routing that
-    /// points at it stay, and undoing the bounce gives the source track
+    /// R23). The track keeps its ID, so its colour and the audio routing
+    /// that points at it stay; routes that needed a MIDI track or its devices
+    /// are forgotten. Undoing the bounce gives the source track
     /// back exactly, with every device's state.
     BounceTrackInPlace {
         /// The track that was bounced.
@@ -3541,79 +3542,53 @@ impl Document {
             }
             Command::FreezeTracks { frozen } => {
                 for (track, audio) in frozen {
-                    if self.track_ref(*track)?.kind == TrackKind::Main {
+                    let held = self.track_ref(*track)?;
+                    if held.kind == TrackKind::Main {
                         return Err(ModelError::MainTrack);
                     }
-                    // The clips play the freeze files: their own data is
-                    // kept in the frozen record and restored on unfreezing
-                    // (R6, R10).
-                    let mut played: Vec<(crate::ids::ClipId, Option<SceneId>, crate::clip::Clip)> =
-                        Vec::new();
-                    for region in &audio.clips {
-                        let Some(held) = self.track_ref(*track).ok() else {
-                            continue;
-                        };
-                        let Some(clip) = (match region.scene {
-                            None => held.clips.get(&region.clip),
-                            Some(scene) => held.slots.get(&scene),
-                        }) else {
-                            continue;
-                        };
-                        let mut clip = (**clip).clone();
-                        clip.data = audio.audio_for(region);
-                        played.push((region.clip, region.scene, clip));
+                    // A second freeze would replace the stored originals.
+                    if held.is_frozen() {
+                        return Err(ModelError::InvalidInput("the track is already frozen"));
                     }
-                    let held = self.track_mut(*track)?;
-                    held.frozen = Some(audio.clone());
-                    for (clip, scene, played) in played {
-                        match scene {
-                            None => {
-                                held.clips.insert(clip, Shared::new(played));
-                            }
-                            Some(scene) => {
-                                held.slots.insert(scene, Shared::new(played));
-                            }
-                        }
-                    }
+                    // The clips keep their own data: the engine builds the
+                    // frozen audio from `audio` when it plays them, and
+                    // unfreezing only drops the record (R6, R10).
+                    self.track_mut(*track)?.frozen = Some(audio.clone());
                 }
                 Ok(())
             }
             Command::UnfreezeTracks { tracks } => {
                 for track in tracks {
-                    let originals: Vec<(
-                        crate::ids::ClipId,
-                        crate::clip::ClipData,
-                        Option<SceneId>,
-                    )> = self
+                    // A set saved before frozen clips kept their own data holds
+                    // the freeze audio in them: put the originals back there.
+                    let regions: Vec<crate::freeze::FrozenClip> = self
                         .track_ref(*track)?
                         .frozen
                         .as_ref()
-                        .map(|frozen| {
-                            frozen
-                                .clips
-                                .iter()
-                                .map(|region| (region.clip, region.original.clone(), region.scene))
-                                .collect()
-                        })
+                        .map(|frozen| frozen.clips.clone())
                         .unwrap_or_default();
                     let held = self.track_mut(*track)?;
-                    for (clip, data, scene) in originals {
-                        match scene {
-                            None => {
-                                if let Some(existing) = held.clips.get(&clip).cloned() {
-                                    let mut back = (*existing).clone();
-                                    back.data = data;
-                                    held.clips.insert(clip, Shared::new(back));
-                                }
-                            }
-                            Some(scene) => {
-                                if let Some(existing) = held.slots.get(&scene).cloned() {
-                                    let mut back = (*existing).clone();
-                                    back.data = data;
-                                    held.slots.insert(scene, Shared::new(back));
-                                }
-                            }
+                    for region in regions {
+                        let existing = match region.scene {
+                            None => held.clips.get(&region.clip),
+                            Some(scene) => held.slots.get(&scene),
+                        };
+                        let Some(existing) = existing.cloned() else {
+                            continue;
+                        };
+                        let frozen_audio = matches!(
+                            &existing.data,
+                            crate::clip::ClipData::Audio(audio) if audio.media == region.media
+                        );
+                        if !frozen_audio {
+                            continue;
                         }
+                        let mut back = (*existing).clone();
+                        back.data = region.original;
+                        match region.scene {
+                            None => held.clips.insert(region.clip, Shared::new(back)),
+                            Some(scene) => held.slots.insert(scene, Shared::new(back)),
+                        };
                     }
                     held.frozen = None;
                 }
@@ -3626,7 +3601,10 @@ impl Document {
                 for child in children {
                     self.delete_track(child)?;
                 }
-                self.replace_with_bounced(*track, bounced.clone())
+                self.replace_with_bounced(*track, bounced.clone())?;
+                self.end_single_links();
+                self.prune_mappings();
+                Ok(())
             }
             Command::BounceToNewTrack {
                 source,
@@ -5920,6 +5898,17 @@ impl Document {
         for lane in lanes {
             self.index.lane_track.remove(&lane);
         }
+        // The dropped devices and chains leave the lookups, and so does every
+        // route that named them. A MIDI track's own routes go with its kind:
+        // audio routes to the track stay valid (R21).
+        let mut gone = Gone::default();
+        for device in self.track_ref(id)?.devices.clone() {
+            gone.add_device(&device);
+            self.index.remove_device(&device);
+        }
+        self.forget_chain_taps(&gone.chains);
+        self.forget_device_outputs(&gone.devices);
+        self.forget_midi_routes_to(id);
         {
             let track = self.track_mut(id)?;
             track.devices = Vector::new();
@@ -9349,7 +9338,7 @@ mod tests {
     use crate::follow::FollowAction;
     use crate::ids::ContentHash;
     use crate::scene::DEFAULT_SCENE_COUNT;
-    use crate::track::Routing;
+    use crate::track::{DeviceOutput, Routing};
     use crate::warp::WarpMarker;
 
     /// A document and the allocator for its IDs.
@@ -9452,6 +9441,206 @@ mod tests {
                 device_type: "beatlayer.utility".to_owned(),
             },
         )
+    }
+
+    fn track_input(track: TrackId, chain: Option<ChainId>, output: Option<DeviceOutput>) -> Input {
+        Input::Track {
+            track,
+            tap: crate::track::Tap::default(),
+            chain,
+            output,
+        }
+    }
+
+    // Spec: freeze-and-bounce R21. The bounced track forgets the routes that
+    // needed a MIDI track or its devices, and keeps the audio ones.
+    #[test]
+    fn bouncing_a_midi_track_forgets_the_routes_to_its_devices_and_to_it_as_midi() {
+        let mut song = Song::new();
+        let source = song.track(TrackKind::Midi, None);
+        let rack_id: DeviceId = song.fresh();
+        let chain: ChainId = song.fresh();
+        let mut rack = Device::rack(rack_id, crate::rack::RackKind::Instrument)
+            .with_chain(crate::rack::Chain::new(chain, "Chain"));
+        rack.role = DeviceRole::Instrument;
+        song.apply(Command::InsertDevice {
+            track: source,
+            index: 0,
+            device: rack,
+        })
+        .unwrap();
+        let layered = song.track(TrackKind::Midi, None);
+        song.apply(Command::SetInput {
+            track: layered,
+            input: track_input(source, None, None),
+            channel: None,
+        })
+        .unwrap();
+        let forwarding = song.track(TrackKind::Midi, None);
+        song.apply(Command::SetMidiOutput {
+            track: forwarding,
+            to: Some(MidiTo::Track(source)),
+        })
+        .unwrap();
+        let listener = DeviceId(song.ids.allocate());
+        song.apply(Command::InsertDevice {
+            track: forwarding,
+            index: 0,
+            device: utility(listener).with_midi_sidechain(),
+        })
+        .unwrap();
+        song.apply(Command::SetMidiSidechainSource {
+            device: listener,
+            track: Some(source),
+        })
+        .unwrap();
+        let tapping = song.track(TrackKind::Audio, None);
+        song.apply(Command::SetInput {
+            track: tapping,
+            input: track_input(source, Some(chain), None),
+            channel: None,
+        })
+        .unwrap();
+        let taking_output = song.track(TrackKind::Audio, None);
+        let output = DeviceOutput {
+            device: rack_id,
+            output: 0,
+        };
+        song.apply(Command::SetInput {
+            track: taking_output,
+            input: track_input(source, None, Some(output)),
+            channel: None,
+        })
+        .unwrap();
+        let hearing = song.track(TrackKind::Audio, None);
+        song.apply(Command::SetInput {
+            track: hearing,
+            input: track_input(source, None, None),
+            channel: None,
+        })
+        .unwrap();
+
+        let bounced = crate::bounce::BouncedTrack {
+            clips: vec![Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, audio())],
+            ..Default::default()
+        };
+        song.apply(Command::BounceTrackInPlace {
+            track: source,
+            bounced,
+        })
+        .unwrap();
+
+        let doc = &song.doc;
+        Document::try_from(crate::repr::DocumentRepr::from(doc)).unwrap();
+        assert_eq!(doc.track(source).unwrap().kind(), TrackKind::Audio);
+        assert!(doc.device(rack_id).is_none());
+        assert!(doc.device_ids().all(|device| device != rack_id));
+        assert_eq!(doc.device_count(), 1, "only the listener is left");
+        let routing = |track| doc.track(track).unwrap().routing().clone();
+        assert_eq!(routing(layered).input, Input::None);
+        assert_eq!(routing(forwarding).midi_output, None);
+        assert_eq!(
+            doc.device(listener)
+                .unwrap()
+                .midi_sidechain
+                .as_ref()
+                .unwrap()
+                .source,
+            None
+        );
+        assert_eq!(routing(tapping).input, Input::None);
+        assert_eq!(routing(taking_output).input, Input::None);
+        assert_eq!(
+            routing(hearing).input,
+            track_input(source, None, None),
+            "an audio route to the track stays"
+        );
+    }
+
+    fn frozen_region(clip: &Clip, scene: Option<SceneId>) -> crate::freeze::FrozenClip {
+        crate::freeze::FrozenClip {
+            clip: clip.id,
+            media: ContentHash([9; 32]),
+            start: 0.0,
+            end: 1.0,
+            tempo: 120.0,
+            length: clip.length,
+            original: clip.data.clone(),
+            scene,
+            cycle: None,
+        }
+    }
+
+    /// A song with a frozen MIDI track holding a lane clip and a slot clip.
+    fn frozen_midi_song() -> (Song, TrackId, crate::freeze::FrozenTrack) {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let lane = song.clip(track, 0);
+        let scene = song.doc.scenes().next().unwrap().id;
+        let slot = Clip::new(song.fresh(), Ticks::ZERO, Ticks::WHOLE, midi());
+        song.apply(Command::CreateSlotClip {
+            track,
+            scene,
+            clip: slot.clone(),
+        })
+        .unwrap();
+        let regions = vec![
+            frozen_region(song.doc.clip(lane).unwrap(), None),
+            frozen_region(&slot, Some(scene)),
+        ];
+        let frozen = crate::freeze::FrozenTrack {
+            clips: regions,
+            ..Default::default()
+        };
+        song.apply(Command::FreezeTracks {
+            frozen: vec![(track, frozen.clone())],
+        })
+        .unwrap();
+        (song, track, frozen)
+    }
+
+    // Spec: freeze-and-bounce R1, R6, R10. A frozen MIDI track keeps MIDI
+    // clips, so its saved set loads, and it plays the freeze file.
+    #[test]
+    fn a_frozen_midi_track_keeps_midi_clips_and_cannot_be_frozen_again() {
+        let (mut song, track, frozen) = frozen_midi_song();
+
+        let saved = serde_json::to_string(&crate::repr::DocumentRepr::from(&song.doc)).unwrap();
+        let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
+        assert_eq!(Document::try_from(loaded).unwrap(), song.doc);
+        let held = song.doc.track(track).unwrap();
+        assert!(!held.clips().next().unwrap().data.is_audio());
+        assert!(held.playback_clips()[0].data.is_audio());
+        assert!(held.playback_slots()[0].1.data.is_audio());
+
+        let error = song.reject(Command::FreezeTracks {
+            frozen: vec![(track, frozen)],
+        });
+        assert!(matches!(error, ModelError::InvalidInput(_)));
+    }
+
+    // A set saved while frozen clips held the freeze audio holds it on a MIDI
+    // track: loading gives the clips their own data back.
+    #[test]
+    fn a_set_saved_with_freeze_audio_on_a_midi_track_still_loads() {
+        let (mut song, track, frozen) = frozen_midi_song();
+        let expected = song.doc.clone();
+        let held = song.doc.track_mut(track).unwrap();
+        for region in &frozen.clips {
+            let mut clip = match region.scene {
+                None => (**held.clips.get(&region.clip).unwrap()).clone(),
+                Some(scene) => (**held.slots.get(&scene).unwrap()).clone(),
+            };
+            clip.data = frozen.audio_for(region);
+            match region.scene {
+                None => held.clips.insert(region.clip, Shared::new(clip)),
+                Some(scene) => held.slots.insert(scene, Shared::new(clip)),
+            };
+        }
+
+        let saved = serde_json::to_string(&crate::repr::DocumentRepr::from(&song.doc)).unwrap();
+        let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
+        assert_eq!(Document::try_from(loaded).unwrap(), expected);
     }
 
     #[test]

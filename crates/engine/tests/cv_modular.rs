@@ -296,11 +296,15 @@ fn settled(rig: &mut Rig) -> (f32, f32) {
     (output.ext_channel(0)[63], output.ext_channel(2)[63])
 }
 
+/// A signal on the track, one on the sidechain, the controls set and the
+/// voltage wanted.
+type Case<'a> = (f64, f64, &'a [(ParamId, f64)], f32);
+
 // Spec: cv-tools R28
 #[test]
 fn utility_gives_a_plus_b_and_a_times_b_with_gains_and_offset_clamped_on_both_outputs() {
     use cv_utility::{GAIN_A, GAIN_B, MODE as MODE_PARAM, OFFSET};
-    let cases: [(f64, f64, &[(ParamId, f64)], f32); 6] = [
+    let cases: [Case<'_>; 6] = [
         (0.2, 0.1, &[], 0.3),
         (0.2, 0.1, &[(GAIN_A, 200.0), (GAIN_B, -50.0)], 0.35),
         // A volt of Offset is a tenth of full scale.

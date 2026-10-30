@@ -60,7 +60,9 @@ pub fn cv_clock_out_type() -> DeviceType {
     ];
     DeviceType::native(CV_CLOCK_OUT, "CV Clock Out", DeviceRole::AudioEffect)
         .with_cv(&OUTPUT_NAMES, &[])
-        .with_description(DeviceDescription::new(params))
+        .with_description(
+            DeviceDescription::new(params).with_banks(&[("Clock", &["Rate", "Width", "Level"])]),
+        )
 }
 
 /// Adds CV Clock Out to `registry`.

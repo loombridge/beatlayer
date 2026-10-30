@@ -50,7 +50,9 @@ pub fn cv_clock_in_type() -> DeviceType {
     ];
     DeviceType::native(CV_CLOCK_IN, "CV Clock In", DeviceRole::AudioEffect)
         .with_cv(&[], &INPUT_NAMES)
-        .with_description(DeviceDescription::new(params))
+        .with_description(
+            DeviceDescription::new(params).with_banks(&[("Clock", &["Sync", "Rate", "Threshold"])]),
+        )
 }
 
 /// Adds CV Clock In to `registry`.

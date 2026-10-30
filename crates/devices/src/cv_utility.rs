@@ -60,7 +60,10 @@ pub fn cv_utility_type() -> DeviceType {
     DeviceType::native(CV_UTILITY, "CV Utility", DeviceRole::AudioEffect)
         .with_sidechain()
         .with_cv(&OUTPUT_NAMES, &[])
-        .with_description(DeviceDescription::new(params))
+        .with_description(
+            DeviceDescription::new(params)
+                .with_banks(&[("Utility", &["Gain A", "Gain B", "Mode", "Offset"])]),
+        )
 }
 
 /// Adds CV Utility to `registry`.

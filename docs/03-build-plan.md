@@ -779,7 +779,7 @@ Total to 1.0: 293 packages planned in Phases 0 to 7, and about 95 estimated in P
 | 6.76 | todo |  |  |
 | 7.1 | done | 29 October 2026 | [#501](https://github.com/loombridge/beatlayer/pull/501): MIDI and key mappings are saved with the set and leave with a deleted target, the remote input keeps mapped messages off tracks through a lock-free table on the MIDI thread, mapped messages are applied on the main thread as hand moves with placeholder value laws for WP-7.2 to replace, and the `remote.*` commands read back |
 | 7.2 | done | 29 October 2026 | [#514](https://github.com/loombridge/beatlayer/pull/514): the value laws replace WP-7.1's placeholders: notes carry their velocity to a clip launch, absolute and relative controllers with the relative encodings and the mode guess, and Takeover Mode with its preference, command and readback |
-| 7.2b | todo |  |  |
+| 7.2b | done | 30 October 2026 | [#526](https://github.com/loombridge/beatlayer/pull/526): a Session slot mapped to a note range launches its clip transposed by the key minus the root at the key's velocity, MIDI notes moved and audio pitched through its warp mode, a later key relaunching and an earlier key's release ignored, and `session.launch` takes `transpose` |
 | 7.3 | todo |  |  |
 | 7.3b | todo |  |  |
 | 7.4 | todo |  |  |

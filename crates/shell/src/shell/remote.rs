@@ -391,6 +391,19 @@ impl Shell {
                 "session.launch",
                 json!({ "track": track, "scene": scene, "velocity": velocity }),
             ),
+            // Spec: remote-mapping R34. A chromatic slot's key also carries
+            // its distance from the root.
+            (RemoteTarget::Slot { track, scene }, Action::PressTransposed(velocity, transpose)) => {
+                cmd(
+                    "session.launch",
+                    json!({
+                        "track": track,
+                        "scene": scene,
+                        "velocity": velocity,
+                        "transpose": transpose,
+                    }),
+                )
+            }
             (RemoteTarget::Slot { track, scene }, Action::Release) => {
                 cmd("session.release", json!({ "track": track, "scene": scene }))
             }

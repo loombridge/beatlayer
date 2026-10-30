@@ -680,10 +680,12 @@ impl Geometry {
 
     /// Where an unwarped clip transposed reads (the warp modes spec, R27):
     /// its file at the pitch ratio, from the song frame `origin` it starts
-    /// playing at. `None` where it isn't transposed, and then it plays the
-    /// file frame for frame.
-    pub(crate) fn transposed(&self, origin: i64) -> Option<Positions<'_>> {
-        (self.pitch != 1.0).then(|| {
+    /// playing at, with a launch's `transpose` in semitones added (remote-mapping
+    /// R35). `None` where it isn't transposed, and then it plays the file
+    /// frame for frame.
+    pub(crate) fn transposed(&self, origin: i64, transpose: i8) -> Option<Positions<'_>> {
+        let ratio = launch_pitch(self.pitch, transpose);
+        (ratio != 1.0).then(|| {
             Positions::Flat(Flat {
                 origin,
                 start: self.region_start as f64,
@@ -691,7 +693,7 @@ impl Geometry {
                 loop_brace: self
                     .looping
                     .then_some((self.loop_start as f64, self.loop_end as f64)),
-                ratio: self.pitch,
+                ratio,
             })
         })
     }
@@ -1706,6 +1708,19 @@ fn render(
     }
 }
 
+/// The pitch ratio of a clip whose own is `pitch` once a launch moves it by
+/// `transpose` semitones, the sum held to the 48 either way that Transpose
+/// allows (remote-mapping R35).
+// shortcut: the clip's Detune and envelopes count in the 48, a cent or two at
+// the limit; upgrade if a chromatic slot is heard to miss there.
+fn launch_pitch(pitch: f64, transpose: i8) -> f64 {
+    if transpose == 0 {
+        return pitch;
+    }
+    let semitones = 12.0 * pitch.log2() + f64::from(transpose);
+    2f64.powf(semitones.clamp(-48.0, 48.0) / 12.0)
+}
+
 /// The gain a launch of `velocity` gives a clip whose velocity amount is
 /// `amount`: full at 127, and silent at 1 with the amount at 1 (the remote
 /// mapping spec, R16).
@@ -1751,6 +1766,7 @@ fn render_warped(
     level: impl Fn(&PlacedClip, u64) -> f64,
     stretchers: &mut Stretchers,
     lane: usize,
+    transpose: i8,
 ) {
     let channels = block.channels();
     // A plan's segments lie on the Arrangement's song frames, so a launched
@@ -1780,6 +1796,10 @@ fn render_warped(
                 ),
             ),
             None => (clip.playing, range.end - at),
+        };
+        let playing = Playing {
+            pitch: launch_pitch(playing.pitch, transpose),
+            ..playing
         };
         // Spec: warping R12, warp-modes R9, R14
         let (n, sound) = warp.render(
@@ -1909,7 +1929,15 @@ impl Node for ClipPlayer {
                 let tempo = block.tempo();
                 let rate = block.sample_rate().as_f64();
                 let ticks = offset.ticks.get() as f64;
-                let positions = warped.launched(tempo, launch, rate, ticks);
+                // Spec: remote-mapping R35, warp-modes R10. Re-Pitch ignores the
+                // clip's pitch, so a transposed launch reads its file faster or
+                // slower, as the tape of an unwarped clip does.
+                let speed = if clip.playing.mode == WarpMode::RePitch {
+                    launch_pitch(1.0, entry.transpose)
+                } else {
+                    1.0
+                };
+                let positions = warped.launched(tempo, launch, rate, ticks, speed);
                 let pace = Pace {
                     song,
                     step: transport.speed,
@@ -1928,6 +1956,7 @@ impl Node for ClipPlayer {
                     with_groove(warped, tempo, rate, launch, ticks, launch_level),
                     stretchers,
                     clip.lane as usize,
+                    entry.transpose,
                 );
             } else if let Some(source) = bank[at].as_mut() {
                 // Spec: transport R24. A clip that isn't warped plays at its own
@@ -1937,7 +1966,10 @@ impl Node for ClipPlayer {
                 let elapsed = before.unwrap_or(seed);
                 // Spec: warp-modes R27. An unwarped clip transposed reads
                 // its file at the pitch ratio, from its launch frame.
-                if let Some(positions) = clip.geometry.transposed(launch - offset.frames) {
+                if let Some(positions) = clip
+                    .geometry
+                    .transposed(launch - offset.frames, entry.transpose)
+                {
                     let pace = Pace {
                         song: (launch - offset.frames) as f64 + elapsed as f64,
                         step: 1.0,
@@ -1956,6 +1988,7 @@ impl Node for ClipPlayer {
                         launch_level,
                         stretchers,
                         clip.lane as usize,
+                        entry.transpose,
                     );
                 } else {
                     render(
@@ -2116,12 +2149,13 @@ impl Node for ClipPlayer {
                     ),
                     stretchers,
                     clip.lane as usize,
+                    0,
                 );
                 continue;
             }
             // Spec: warp-modes R27. An unwarped clip transposed reads its
             // file at the pitch ratio.
-            if let Some(positions) = clip.geometry.transposed(clip.geometry.start) {
+            if let Some(positions) = clip.geometry.transposed(clip.geometry.start, 0) {
                 let pace = Pace {
                     song: (clip.geometry.start as u64 + elapsed) as f64,
                     step: 1.0,
@@ -2140,6 +2174,7 @@ impl Node for ClipPlayer {
                     PlacedClip::level,
                     stretchers,
                     clip.lane as usize,
+                    0,
                 );
                 continue;
             }

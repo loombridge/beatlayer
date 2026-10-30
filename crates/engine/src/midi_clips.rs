@@ -70,7 +70,11 @@ impl Rng {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ActiveNote {
     clip_id: ClipId,
+    /// The key sounding, which a transposed launch moves from the note's own
+    /// (remote-mapping R35).
     key: u8,
+    /// The key of the clip's note that sounds it.
+    source: u8,
     channel: u8,
     note_id: Option<u32>,
     release_velocity: u8,
@@ -294,6 +298,7 @@ fn play_session_clip(
     tempo: &TempoMap,
     sample_rate: SampleRate,
     roll: Roll,
+    transpose: i8,
     rng: &mut Rng,
     next_note_id: &mut u32,
     scratch_notes: &mut Vec<NoteEvent>,
@@ -333,6 +338,7 @@ fn play_session_clip(
             tempo,
             sample_rate,
             roll,
+            transpose,
             rng,
             next_note_id,
             scratch_notes,
@@ -392,6 +398,7 @@ fn play_session_clip(
                 tempo,
                 sample_rate,
                 roll,
+                transpose,
                 rng,
                 next_note_id,
                 scratch_notes,
@@ -445,9 +452,10 @@ pub struct MidiClipPlayer {
     audible: bool,
     last_position: Option<i64>,
     /// The Session slot clip sounding in the last block and the frame it
-    /// launched on: when the engine stops it, restarts it or another slot
-    /// takes over, its notes are let go.
-    session: Option<(ClipId, Ticks)>,
+    /// launched on, and its launch's transposition: when the engine stops
+    /// it, restarts it or another slot takes over, or the transposition
+    /// changes, its notes are let go.
+    session: Option<(ClipId, Ticks, i8)>,
     /// Whether a Session clip has taken the track over from the Arrangement
     /// (WP-3.6).
     taken_over: bool,
@@ -677,6 +685,7 @@ fn process_clip_segment(
     tempo: &TempoMap,
     sample_rate: SampleRate,
     roll: Roll,
+    transpose: i8,
     rng: &mut Rng,
     next_note_id: &mut u32,
     scratch_notes: &mut Vec<NoteEvent>,
@@ -783,6 +792,11 @@ fn process_clip_segment(
             rng.next_in_range((base + dev).max(1), base) as u8
         };
 
+        // Spec: remote-mapping R35. A launch's transposition moves the key on
+        // its way out; a note moved outside 0 to 127 doesn't play.
+        let Some(key) = note.key.checked_add_signed(transpose).filter(|&k| k <= 127) else {
+            continue;
+        };
         let note_song_end = (note_song_start + note.length).min(segment_song_end);
         let mut note_off_frame = tempo.ticks_to_frames(note_song_end, sample_rate).get();
         if note_off_frame <= note_on_frame {
@@ -808,7 +822,7 @@ fn process_clip_segment(
             offset: (note_on_frame - from_frame) as u32,
             kind: NoteKind::On,
             channel: 0,
-            key: note.key,
+            key,
             velocity: vel as f32 / 127.0,
             note_id,
         });
@@ -817,14 +831,15 @@ fn process_clip_segment(
                 offset: (note_off_frame - from_frame) as u32,
                 kind: NoteKind::Off,
                 channel: 0,
-                key: note.key,
+                key,
                 velocity: note.release_velocity as f32 / 127.0,
                 note_id,
             });
         } else {
             sounding.push(ActiveNote {
                 clip_id: clip.id,
-                key: note.key,
+                key,
+                source: note.key,
                 channel: 0,
                 note_id,
                 release_velocity: note.release_velocity,
@@ -962,7 +977,7 @@ impl Node for MidiClipPlayer {
                 .iter()
                 .find(|c| c.id == active.clip_id)
                 .and_then(|c| c.notes.get(active.index))
-                .filter(|n| n.key == active.key);
+                .filter(|n| n.key == active.source);
             if let Some(note) = note {
                 play_expressions(
                     note,
@@ -986,7 +1001,7 @@ impl Node for MidiClipPlayer {
             let still_valid = list.clips.iter().any(|c| {
                 c.id == active.clip_id
                     && !c.mute
-                    && c.notes.iter().any(|n| n.key == active.key && !n.mute)
+                    && c.notes.iter().any(|n| n.key == active.source && !n.mute)
             });
             if !still_valid {
                 self.sounding.swap_remove(i);
@@ -1076,6 +1091,7 @@ impl Node for MidiClipPlayer {
             (
                 clip.id,
                 tempo.frames_to_ticks(entry.frame, sample_rate) - entry.offset.ticks,
+                entry.transpose,
             )
         });
         let slack = (tempo.frames_to_ticks(Frames(from_frame + 2), sample_rate)
@@ -1084,12 +1100,14 @@ impl Node for MidiClipPlayer {
         .abs();
         let same = match (self.session, started) {
             (None, None) => true,
-            (Some((old, a)), Some((new, b))) => old == new && (a - b).get().abs() <= slack,
+            (Some((old, a, from)), Some((new, b, to))) => {
+                old == new && from == to && (a - b).get().abs() <= slack
+            }
             _ => false,
         };
         let launched_id = started;
         if !same {
-            if let Some((old, _)) = self.session {
+            if let Some((old, ..)) = self.session {
                 stop_clip_sounding(old, 0, &mut self.sounding, &mut self.scratch_notes);
             }
             self.session = launched_id;
@@ -1116,6 +1134,7 @@ impl Node for MidiClipPlayer {
                     run: noise(self.seed, self.launches, 1).to_bits(),
                     entry: None,
                 },
+                entry.transpose,
                 &mut self.rng,
                 &mut self.next_note_id,
                 &mut self.scratch_notes,
@@ -1170,6 +1189,7 @@ impl Node for MidiClipPlayer {
                         tempo,
                         sample_rate,
                         arrangement,
+                        0,
                         &mut self.rng,
                         &mut self.next_note_id,
                         &mut self.scratch_notes,
@@ -1212,6 +1232,7 @@ impl Node for MidiClipPlayer {
                             tempo,
                             sample_rate,
                             arrangement,
+                            0,
                             &mut self.rng,
                             &mut self.next_note_id,
                             &mut self.scratch_notes,
@@ -1269,6 +1290,7 @@ impl Node for MidiClipPlayer {
                                     tempo,
                                     sample_rate,
                                     arrangement,
+                                    0,
                                     &mut self.rng,
                                     &mut self.next_note_id,
                                     &mut self.scratch_notes,

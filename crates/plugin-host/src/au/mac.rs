@@ -573,11 +573,9 @@ impl AuHost {
                 Some((*param, value))
             })
             .collect();
-        // SAFETY: reading a unit property is a read on the thread that owns
-        // the unit.
-        let provides_interface = unsafe { instance.unit.providesUserInterface() };
-        let has_editor =
-            instance.editor.is_some() || (instance.editor_failure.is_none() && provides_interface);
+        #[cfg(feature = "test-hooks")]
+        crate::count_value_reads(values.len());
+        let (has_editor, editor_open, editor_hidden) = instance.editor_state();
         Some(PluginStatus {
             plugin_id: instance.plugin_id.clone(),
             path: PathBuf::new(),
@@ -589,12 +587,26 @@ impl AuHost {
                 .clone()
                 .or_else(|| instance.refused.clone()),
             has_editor,
-            editor_open: instance.editor.is_some(),
-            editor_hidden: instance.editor_hidden,
+            editor_open,
+            editor_hidden,
             editor_scale: None,
             editor_size: None,
             values,
         })
+    }
+
+    /// Whether the device's unit has an editor, whether it's open, and
+    /// whether it's hidden, or `None` if the device has no Audio Unit: what
+    /// [`AuHost::status`] says of the editor, without reading the
+    /// parameters.
+    #[must_use]
+    pub fn editor_state(&self, device: DeviceId) -> Option<(bool, bool, bool)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        if main.missing.contains_key(&device) {
+            return Some((false, false, false));
+        }
+        Some(main.instances.get(&device)?.editor_state())
     }
 
     /// Opens the device's unit's own editor in a window of its own, titled
@@ -891,6 +903,17 @@ impl Drop for Instance {
 }
 
 impl Instance {
+    /// Whether the unit has an editor, whether it's open, and whether it's
+    /// hidden.
+    fn editor_state(&self) -> (bool, bool, bool) {
+        // SAFETY: reading a unit property is a read on the thread that owns
+        // the unit.
+        let provides_interface = unsafe { self.unit.providesUserInterface() };
+        let has_editor =
+            self.editor.is_some() || (self.editor_failure.is_none() && provides_interface);
+        (has_editor, self.editor.is_some(), self.editor_hidden)
+    }
+
     /// A parameter's value, as the unit reports it.
     fn unit_value(&self, param: u32) -> Option<f64> {
         let (parameter, _) = self.params.get(param as usize)?;

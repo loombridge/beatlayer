@@ -504,3 +504,30 @@ fn an_aumi_unit_passes_its_notes_on() {
         "the unit's notes go on: {played:?}"
     );
 }
+
+// Spec: au-hosting R10. The editor query says what `status` says of the
+// editor, without reading a single parameter.
+#[test]
+fn the_editor_query_reads_no_parameters() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let host = AuHost::new();
+    host.load("aumu", "dls ", "appl").expect("the DLS synth");
+    let device = device(1, "aumu/dls /appl", &[]);
+    let _node = host
+        .factory()
+        .create(&device, &config())
+        .expect("a node for an instrument");
+
+    bl_plugin_host::STATUS_VALUE_READS.store(0, Relaxed);
+    for _ in 0..100 {
+        assert!(host.editor_state(device.id).is_some());
+    }
+    assert_eq!(bl_plugin_host::STATUS_VALUE_READS.load(Relaxed), 0);
+
+    let status = host.status(device.id).expect("a status");
+    assert_eq!(
+        host.editor_state(device.id),
+        Some((status.has_editor, status.editor_open, status.editor_hidden))
+    );
+    assert!(bl_plugin_host::STATUS_VALUE_READS.load(Relaxed) > 0);
+}

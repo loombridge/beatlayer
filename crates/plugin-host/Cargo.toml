@@ -15,6 +15,11 @@ publish.workspace = true
 name = "beatlayer-scan"
 path = "src/bin/beatlayer-scan.rs"
 
+[features]
+# `STATUS_VALUE_READS`, which a test reads to tell a cheap query from a full
+# status report.
+test-hooks = []
+
 [dependencies]
 bl-ara-sys = { path = "../ara-sys" }
 bl-commands.workspace = true
@@ -66,6 +71,8 @@ windows-sys = { version = "0.52", features = [
 x11rb = { version = "0.13", default-features = false }
 
 [dev-dependencies]
+# The crate's own tests read the status counter.
+bl-plugin-host = { path = ".", features = ["test-hooks"] }
 # The test plug-ins, built from source; their cdylibs are what the tests
 # load.
 bl-test-ara = { path = "../test-ara" }

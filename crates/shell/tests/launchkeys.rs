@@ -1049,6 +1049,25 @@ fn the_transport_encoders_reach_position_zoom_height_loop_locators_and_tempo() {
     assert_eq!(state["scenes"][0], json!(scenes[1]), "{state}");
 }
 
+// Spec: supported-controllers R65. Turning the loop's start on a loop shorter
+// than a beat leaves the start where it is, and the surface runs on.
+#[test]
+fn the_loop_start_encoder_keeps_a_loop_shorter_than_a_beat() {
+    let mut rig = Rig::new(Which::Mk4(Size::K61));
+    rig.keys.set_pot_mode(5);
+    rig.settle();
+    let beat = 705_600;
+    rig.invoke(
+        "transport.set_loop",
+        json!({ "start": 0, "length": beat / 4 }),
+    );
+    rig.settle();
+    rig.keys.encoder_turn(3, 1);
+    rig.settle();
+    assert_eq!(transport(&mut rig)["loop_start"], 0);
+    assert_eq!(rig.row()["state"], "running");
+}
+
 fn ran(rig: &Rig) -> u64 {
     let (applied, refused) = rig.shell.surface_counts();
     applied + refused

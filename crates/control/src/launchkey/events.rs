@@ -263,7 +263,8 @@ impl Keys {
             3 => {
                 let (start, length) = self.brace(brace, now);
                 let end = start + length;
-                let new = (start + beats).clamp(0, end - BEAT);
+                // A loop shorter than a beat keeps its start.
+                let new = (start + beats).clamp(0, (end - BEAT).max(start));
                 self.pending.insert(3, (new as f64, now));
                 self.pending.insert(4, ((end - new) as f64, now));
                 let args = json!({ "start": Ticks(new), "length": Ticks(end - new) });

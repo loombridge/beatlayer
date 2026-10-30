@@ -194,7 +194,7 @@ Everything a controller does runs Beatlayer's registered commands; everything it
 | R62 | `bl-shell` `launchkeys::the_pads_launch_record_and_stop_in_a_two_row_ring_and_the_arrows_move_it`, `the_track_buttons_select_and_move_the_ring_past_its_edge` | simulated device, against a running engine |
 | R63 | `bl-shell` `launchkeys::the_bottom_row_cycles_through_its_track_functions` | simulated device |
 | R64 | `bl-shell` `launchkeys::the_pots_follow_the_reported_mode_and_the_display_shows_what_they_reach`, `the_mk4_bank_buttons_step_banks_and_with_shift_devices` | simulated device |
-| R65 | `bl-shell` `launchkeys::the_transport_encoders_reach_position_zoom_height_loop_locators_and_tempo` | simulated device, against a running engine |
+| R65 | `bl-shell` `launchkeys::the_transport_encoders_reach_position_zoom_height_loop_locators_and_tempo`, `the_loop_start_encoder_keeps_a_loop_shorter_than_a_beat` | simulated device, against a running engine |
 | R66 | `bl-shell` `launchkeys::the_faders_and_the_fader_buttons_arm_and_select`, `a_controller_without_faders_ignores_them` | simulated device |
 | R67 | `bl-shell` `launchkeys::the_transport_and_workflow_buttons_run_their_commands`, `record_is_session_record_in_the_session_view_and_on_the_mk3`, `the_mk4s_record_switches_arrangement_recording_while_the_arrangement_shows`, `on_a_mini_play_starts_and_stops_and_shift_record_captures` | simulated device, against a running engine |
 | R68 | `bl-shell` `launchkeys::the_pots_follow_the_reported_mode_and_the_display_shows_what_they_reach`, `the_track_buttons_select_and_move_the_ring_past_its_edge`, `the_transport_encoders_reach_position_zoom_height_loop_locators_and_tempo`, `the_displays_hold_the_selected_track_and_the_device_in_focus` | simulated device |

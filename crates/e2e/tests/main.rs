@@ -3,5 +3,8 @@
 //! fails on a file in tests/ that isn't listed.
 
 mod commands;
+mod delay_compensation;
 mod devices;
+mod export_formats;
+mod live_offline;
 mod smoke;

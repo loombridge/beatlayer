@@ -102,6 +102,16 @@ impl<const N: usize> Rests<N> {
         }
     }
 
+    /// Takes the faders to be where the introduction's reply puts them, and
+    /// tells the shell again on the next tick, which may have run before the
+    /// reply arrived.
+    pub(super) fn replied(&mut self, values: &[u8]) {
+        for (index, value) in values.iter().enumerate() {
+            self.set(index, *value);
+        }
+        self.told = None;
+    }
+
     /// Tells the shell where each fader rests when the roles they reach or
     /// the places those roles take them to are not the ones it was last told.
     pub(super) fn tell(&mut self, roles: [Option<Role>; N], reach: Reach, cx: &mut Cx) {

@@ -358,6 +358,45 @@ fn the_introductions_reply_gives_takeover_mode_the_faders_positions() {
     }
 }
 
+// Spec: supported-controllers R35. The introduction's reply still gives
+// Takeover Mode the faders' positions when the surfaces tick between the
+// introduction and its reply, as they do with a real controller.
+#[test]
+fn a_reply_after_the_first_tick_still_gives_the_faders_positions() {
+    let test = TestBackend::new();
+    let (mut shell, control) = testing::rig();
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell.start_audio();
+    let apc = Apc::mini(&test).with_faders([127; 9]);
+    let mut rig = Rig {
+        shell,
+        control,
+        test,
+        apc,
+    };
+    rig.run("settings.set_takeover_mode", json!({ "mode": "pick_up" }));
+    let doc = rig.shell.editor().document();
+    let existing: Vec<TrackId> = doc.top_level().chain(doc.returns()).collect();
+    for track in existing {
+        rig.run("track.delete", json!({ "track": track }));
+    }
+    let track = rig.tracks(1)[0];
+    rig.apc.plug_in();
+    rig.shell.refresh_midi();
+    for _ in 0..4 {
+        rig.shell.poll();
+        rig.shell.midi().surfaces().settle();
+        rig.shell.midi().surfaces().tick();
+        rig.apc.pump();
+    }
+    rig.settle();
+    let volume = rig.mixer(track).volume;
+    rig.apc.fader_to(0, 20);
+    rig.settle();
+    let now = rig.mixer(track).volume;
+    assert!(now < volume, "{now} {volume}: picked up");
+}
+
 // Spec: supported-controllers R9, R37. Stopped clips show their colour at
 // half brightness and playing ones at full, queued clips blink their colour
 // at an eighth, recording ones pulse red at a quarter, and an empty slot of

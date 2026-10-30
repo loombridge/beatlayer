@@ -131,9 +131,7 @@ impl ApcMini {
     /// The introduction's reply gives the faders' positions (R35).
     fn sysex(&mut self, bytes: &[u8]) {
         if bytes.len() == 17 && bytes[..5] == [0xF0, 0x47, 0x7F, 0x4F, 0x61] {
-            for (index, value) in bytes[7..16].iter().enumerate() {
-                self.rests.set(index, *value);
-            }
+            self.rests.replied(&bytes[7..16]);
         }
     }
 

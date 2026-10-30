@@ -12,6 +12,7 @@ mod fades;
 mod grooves;
 mod http;
 mod kit_devices;
+mod link;
 mod linked_tracks;
 mod midi_clock;
 mod midi_effects;

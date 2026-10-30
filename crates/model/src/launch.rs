@@ -362,6 +362,24 @@ impl LaunchSettings {
         self.quantization.next_line(from, signatures)
     }
 
+    /// The grid's quantum at `from` and how far into it `from` is, in
+    /// ticks: what Link shares with its session (the Link spec, R5). The
+    /// quantum is one step of the grid at the signature `from` falls in, and
+    /// with quantisation off or None one quarter note, counted from 1.1.1.
+    #[must_use]
+    pub fn quantum_phase(self, from: Ticks, signatures: &TimeSignatureMap) -> (Ticks, Ticks) {
+        let from = from.max(Ticks::ZERO);
+        let step = self.enabled.then_some(self.quantization);
+        let unit = step
+            .and_then(|step| step.ticks(signatures.signature_at(from).bar_length()))
+            .unwrap_or(Ticks::QUARTER);
+        let line = match step {
+            Some(step) if step.bars().is_some() => step.line_at_or_before(from, signatures),
+            _ => from - from.rem_euclid(unit),
+        };
+        (unit, from - line)
+    }
+
     /// The span a held click in the scrub area loops: from the grid line at
     /// or before `point` to the next one, a step long. With quantisation off
     /// or None it is the bar the point is in (the time editing spec, R25;

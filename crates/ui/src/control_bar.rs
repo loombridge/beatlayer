@@ -168,6 +168,8 @@ pub fn automation_overridden(shell: &Shell) -> bool {
     // Spec: session-view R23. A launched scene's tempo or signature
     // overrides the set's, and lights it too (observed in Live 12.4.3).
     !shell.scene_override().is_none()
+        // Spec: link R4. A peer's tempo took the tempo envelope's place.
+        || shell.tempo_overridden()
         || shell
             .editor()
             .document()

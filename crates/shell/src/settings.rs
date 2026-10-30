@@ -206,6 +206,19 @@ pub struct Preferences {
     pub default_set: Option<PathBuf>,
     /// The MIDI ports' switches and the computer MIDI keyboard (WP-2.2).
     pub midi: MidiPrefs,
+    /// Link's switches (the Link spec, R1 and R8).
+    pub link: LinkPrefs,
+}
+
+/// What the app keeps of Link between starts (the Link spec, R1 and R8):
+/// both off in a new install.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LinkPrefs {
+    /// Whether Link is on: the app joins the Link session on its networks.
+    pub enabled: bool,
+    /// Whether starts and stops are shared with the peers that share them.
+    pub start_stop_sync: bool,
 }
 
 /// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3

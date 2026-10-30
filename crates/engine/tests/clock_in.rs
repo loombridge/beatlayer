@@ -21,10 +21,10 @@ use common::{RATE, Rig, device, track};
 use rtrb::{Producer, RingBuffer};
 
 /// The block sizes every test runs at.
-const BLOCKS: [usize; 4] = [1, 61, 512, 4096];
+pub(crate) const BLOCKS: [usize; 4] = [1, 61, 512, 4096];
 
 /// The seeds of the jitter each test runs under.
-const SEEDS: [u64; 6] = [
+pub(crate) const SEEDS: [u64; 6] = [
     0x9E37_79B9_7F4A_7C15,
     0x1234_5678_9ABC_DEF1,
     0xDEAD_BEEF_0BAD_F00D,
@@ -47,11 +47,11 @@ fn frames_ns(frames: u64) -> f64 {
 }
 
 /// A small seeded generator: the same jitter every run.
-struct Random(u64);
+pub(crate) struct Random(pub(crate) u64);
 
 impl Random {
     /// A number from -1 to 1.
-    fn next(&mut self) -> f64 {
+    pub(crate) fn next(&mut self) -> f64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
@@ -62,7 +62,7 @@ impl Random {
 /// The arrival time, in nanoseconds from the start, of every Timing Clock of
 /// `quarters` quarter notes, when the tempo is `bpm` at each quarter note
 /// of the song, the first at `first`.
-fn clock_times(first: f64, quarters: f64, bpm: impl Fn(f64) -> f64) -> Vec<f64> {
+pub(crate) fn clock_times(first: f64, quarters: f64, bpm: impl Fn(f64) -> f64) -> Vec<f64> {
     let mut times = Vec::new();
     let (mut t, mut q) = (first, 0.0);
     while q < quarters {
@@ -74,19 +74,19 @@ fn clock_times(first: f64, quarters: f64, bpm: impl Fn(f64) -> f64) -> Vec<f64> 
 }
 
 /// A rig whose input queue a test port fills, on a test clock.
-struct Host {
-    rig: Rig,
+pub(crate) struct Host {
+    pub(crate) rig: Rig,
     queue: Producer<MidiInputEvent>,
     start: Instant,
-    block: usize,
-    blocks: u64,
+    pub(crate) block: usize,
+    pub(crate) blocks: u64,
     /// What waits to arrive: time in nanoseconds from the start, message,
     /// and the port it comes from.
     waiting: Vec<(f64, MidiMessage, PortId)>,
 }
 
 impl Host {
-    fn new(block: usize, tempo: f64) -> Self {
+    pub(crate) fn new(block: usize, tempo: f64) -> Self {
         Self::with(block, tempo, |_| {})
     }
 
@@ -127,19 +127,19 @@ impl Host {
         self.waiting.sort_by(|a, b| a.0.total_cmp(&b.0));
     }
 
-    fn clocks(&mut self, times: &[f64]) {
+    pub(crate) fn clocks(&mut self, times: &[f64]) {
         for &t in times {
             self.at(t, MidiMessage::CLOCK);
         }
     }
 
     /// The start of block `n`, in nanoseconds from the start.
-    fn block_ns(&self, n: u64) -> f64 {
+    pub(crate) fn block_ns(&self, n: u64) -> f64 {
         frames_ns(n * self.block as u64)
     }
 
     /// Runs one block, handing over everything that arrived before it.
-    fn run(&mut self) {
+    pub(crate) fn run(&mut self) {
         let from = self.block_ns(self.blocks);
         while self.waiting.first().is_some_and(|w| w.0 < from) {
             let (ns, message, from_port) = self.waiting.remove(0);
@@ -161,7 +161,7 @@ impl Host {
     }
 
     /// Runs blocks until the one that starts at `ns` or after has run.
-    fn run_to(&mut self, ns: f64) {
+    pub(crate) fn run_to(&mut self, ns: f64) {
         while self.block_ns(self.blocks) <= ns {
             self.run();
         }
@@ -188,7 +188,7 @@ impl Host {
         self.rig.monitor.state().position_ticks.get() as f64
     }
 
-    fn send(&mut self, command: TransportCommand) {
+    pub(crate) fn send(&mut self, command: TransportCommand) {
         self.rig.sender.transport(command);
         assert!(self.rig.sender.flush());
     }

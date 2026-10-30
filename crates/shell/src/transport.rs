@@ -176,6 +176,11 @@ pub fn tempo(shell: &Shell) -> f64 {
     if let Some(followed) = shell.external_tempo() {
         return followed;
     }
+    // Spec: link R4. While a peer's change took the tempo envelope's place,
+    // the field shows the session's tempo.
+    if let Some(session) = shell.link_override_tempo() {
+        return session;
+    }
     shell
         .editor()
         .document()
@@ -555,6 +560,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         },
         waiting_start: engine.waiting_start,
         waiting_frame: engine.waiting_frame,
+        waiting_for_link: shell.link_waiting(&engine),
         tap_tempo,
         external_sync: shell.external_sync(),
     }

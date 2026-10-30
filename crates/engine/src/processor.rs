@@ -415,6 +415,12 @@ pub struct Processor {
     releasing: bool,
     /// EXT: whether the incoming MIDI clock leads the song (midi-clock R17).
     ext: bool,
+    /// Whether an outside change of the tempo has taken a tempo envelope's
+    /// place, until Re-Enable Automation (the Link spec, R4).
+    tempo_overridden: bool,
+    /// Whether the follower says no count-in plays (the metronome spec,
+    /// R10).
+    no_count_in: bool,
     /// The Phase Nudge buttons (R27).
     nudge: Nudge,
     /// Where the song exactly stood at the end of the last part.
@@ -506,6 +512,8 @@ impl Processor {
             release: None,
             releasing: false,
             nudge: Nudge::default(),
+            tempo_overridden: false,
+            no_count_in: false,
             exact: None,
             pending: Vec::with_capacity(config.max_pending_events),
             resolved: Vec::with_capacity(config.max_pending_events),
@@ -1045,6 +1053,9 @@ impl Processor {
     /// Re-Enable Automation and Back to Arrangement do after a scene
     /// launched its own.
     fn clear_scene_override(&mut self) {
+        // Spec: link R4. Re-Enable Automation also gives the tempo envelope
+        // back after a peer's change took its place.
+        self.tempo_overridden = false;
         if self.scene_override.is_none() {
             return;
         }
@@ -1230,6 +1241,10 @@ impl Processor {
             TransportCommand::PlayFromInsertMarker => self.play_from_marker(),
             // Spec: transport R3, R4
             TransportCommand::Stop => {
+                // Spec: transport R25. A stop of the follower's own cancels
+                // a start that waits too.
+                self.held.clear();
+                self.release = None;
                 // Spec: transport R22. A jump waiting for a line is
                 // abandoned when the transport stops.
                 self.pending_locate = None;
@@ -1429,8 +1444,13 @@ impl Processor {
             Some(p) => (&p.get().tempo, &p.get().time_signatures),
             None => (&self.fallback_tempo, &self.fallback_time_signatures),
         };
-        self.metronome
-            .start_count_in(self.config.sample_rate, tempo, sigs, start);
+        // Spec: metronome R10. No count-in plays while Link is on.
+        if self.no_count_in {
+            self.metronome.stop();
+        } else {
+            self.metronome
+                .start_count_in(self.config.sample_rate, tempo, sigs, start);
+        }
         self.position = self.frames_at(start);
         self.playing = true;
     }
@@ -2089,31 +2109,46 @@ impl Processor {
                 tempo.seconds_to_ticks_exact(self.position.get() as f64 / rate)
             }
         };
-        let ask = Ask {
+        let (tempo, varies, quantum, phase, start_phase) = self.quantum_view(ticks);
+        let mut ask = Ask {
             clock: self.clock,
             frames,
             playing: self.playing,
             position: ticks,
             rate,
+            tempo,
+            varies,
+            overridden: self.tempo_overridden,
+            leader: None,
+            quantum,
+            phase,
+            start_phase,
+            waiting: !self.held.is_empty(),
+            latency: self.output_latency,
         };
         self.follow.clear();
-        if let Some(follower) = self.follower.as_mut() {
-            follower.get_mut().block(&ask, &mut self.follow);
-        }
-        // Spec: midi-clock R14 to R24. An incoming clock is the follower
-        // when none is set; it counts what arrives for the lamp whether EXT
-        // is on or not.
-        let clock = self.follower.is_none();
+        // Spec: midi-clock R14 to R24. An incoming clock is a follower of
+        // its own; it counts what arrives for the lamp whether EXT is on or
+        // not. It answers first, so a Link session sees the tempo it leads
+        // with (link R10).
         let looped = self
             .loop_region
             .map(|region| (region.start.get() as f64, region.end.get() as f64));
         self.midi.follow_clock(
             &ask,
             self.output_latency,
-            self.ext && clock,
+            self.ext,
             looped,
             &mut self.follow,
         );
+        ask.leader = self.follow.followed();
+        if let Some(follower) = self.follower.as_mut() {
+            follower.get_mut().block(&ask, &mut self.follow);
+        }
+        self.no_count_in = self.follow.counts_in_off();
+        if self.follow.overrides_tempo() && !self.tempo_overridden {
+            self.tempo_overridden = true;
+        }
         self.followed = self.follow.followed();
         self.deciding = self.follow.deciding();
         if self.deciding && !self.held.is_empty() && self.follow.release().is_some() {
@@ -2126,6 +2161,51 @@ impl Processor {
         // A follower that stops deciding, or goes, lets what waited start.
         if !self.deciding && !self.held.is_empty() {
             self.release_held();
+        }
+    }
+
+    /// What a follower is told of the song's tempo and launch quantisation
+    /// at `ticks`: the map's tempo there, whether the map holds more than
+    /// one tempo, the quantum in quarter notes, how far into it `ticks` is,
+    /// and how far into it the position a start would play from is (the
+    /// Link spec, R5 and R7).
+    fn quantum_view(&self, ticks: f64) -> (f64, bool, f64, f64, f64) {
+        let (tempo, signatures) = match &self.program {
+            Some(program) => (&program.get().tempo, &program.get().time_signatures),
+            None => (&self.fallback_tempo, &self.fallback_time_signatures),
+        };
+        let settings = self.session.settings();
+        let at = Ticks(ticks.floor() as i64);
+        let (unit, into) = settings.quantum_phase(at, signatures);
+        let quarter = bl_core::time::TICKS_PER_QUARTER as f64;
+        let phase = into.as_quarters() + (ticks - ticks.floor()) / quarter;
+        let (_, start_into) = settings.quantum_phase(self.start_ticks(), signatures);
+        let mut segments = tempo.segments();
+        let varies = segments.len() > 1
+            || segments
+                .next()
+                .is_some_and(|segment| segment.start_bpm() != segment.end_bpm());
+        (
+            tempo.bpm_at(at).get(),
+            varies,
+            unit.as_quarters(),
+            phase,
+            start_into.as_quarters(),
+        )
+    }
+
+    /// Where a start that waits, or one a peer asks for, would play from:
+    /// the song start time or the insert marker, as the first start that
+    /// waits does, else the insert marker (the Link spec, R7 and R8).
+    fn start_ticks(&self) -> Ticks {
+        match self.held.first() {
+            Some(Held::Transport(TransportCommand::Play)) => {
+                self.song_start.unwrap_or(self.insert_marker)
+            }
+            Some(Held::Transport(TransportCommand::Continue)) => self
+                .tempo()
+                .frames_to_ticks(self.position, self.config.sample_rate),
+            _ => self.insert_marker,
         }
     }
 
@@ -2818,6 +2898,7 @@ impl Processor {
         state.waiting_start = !self.held.is_empty();
         state.waiting_frame = self.release.filter(|_| !self.held.is_empty());
         state.phase_nudge = self.nudge.active();
+        state.tempo_overridden = self.tempo_overridden;
         state.counters = self.counters;
         state.sync_out = self
             .sync_out

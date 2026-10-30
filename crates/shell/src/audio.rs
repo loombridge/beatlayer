@@ -406,6 +406,9 @@ pub struct EngineTransport {
     pub waiting_frame: Option<u64>,
     /// The Phase Nudge button held now (R27).
     pub phase_nudge: Option<bl_engine::NudgeDirection>,
+    /// Whether a peer's change of the tempo took the tempo envelope's place,
+    /// until Re-Enable Automation (the Link spec, R4).
+    pub tempo_overridden: bool,
 }
 
 /// The audio device the app plays through, the engine that plays the set
@@ -482,6 +485,10 @@ pub struct AudioHost {
     /// follower reads (midi-clock R14, R15).
     sync_inputs: Vec<bl_core::midi::SyncInput>,
     external_sync: bool,
+    /// The Link instance the engine follows a session of, and where it
+    /// leaves a peer's tempo (the Link spec, R12): each engine that starts
+    /// gets a session of its own over it.
+    link: Option<(bl_link::Handle, Arc<crate::link::PeerTempo>)>,
     /// The output latency and round trip, in frames, the engine was last
     /// told (WP-5.34).
     latency_sent: (u32, u32),
@@ -572,6 +579,7 @@ impl AudioHost {
             sync_outputs: Vec::new(),
             sync_inputs: Vec::new(),
             external_sync: false,
+            link: None,
             latency_sent: (0, 0),
             test_clock: None,
         }
@@ -632,6 +640,26 @@ impl AudioHost {
             engine.set_external_sync(on);
         }
         self.external_sync = on;
+    }
+
+    /// Has the engine follow a Link session over `link`, now and for every
+    /// engine that starts (the Link spec, R12). The follower reads whether
+    /// Link is on at each block, so switching it needs nothing more.
+    pub fn set_link(&mut self, link: Option<(bl_link::Handle, Arc<crate::link::PeerTempo>)>) {
+        self.link = link;
+        if let Some(engine) = &self.engine {
+            Self::follow_link(engine, self.link.as_ref());
+        }
+    }
+
+    /// Gives `engine` a follower over a new session of `link`, made here,
+    /// before the audio thread reads it.
+    fn follow_link(engine: &Engine, link: Option<&(bl_link::Handle, Arc<crate::link::PeerTempo>)>) {
+        let follower = link.map(|(handle, peer)| {
+            let session = crate::link::LinkSession::new(handle.audio(), Arc::clone(peer));
+            Box::new(bl_engine::LinkFollower::new(session)) as Box<dyn bl_engine::Follower>
+        });
+        engine.set_follower(follower);
     }
 
     /// What the engine reports of the MIDI clock it follows; all zeros while
@@ -1148,6 +1176,7 @@ impl AudioHost {
                 waiting_start: false,
                 waiting_frame: None,
                 phase_nudge: None,
+                tempo_overridden: false,
                 ..self.memory
             };
         };
@@ -1163,6 +1192,7 @@ impl AudioHost {
                 waiting_start: false,
                 waiting_frame: None,
                 phase_nudge: None,
+                tempo_overridden: false,
                 ..self.memory
             };
         }
@@ -1181,6 +1211,7 @@ impl AudioHost {
             waiting_start: state.waiting_start,
             waiting_frame: state.waiting_frame,
             phase_nudge: state.phase_nudge,
+            tempo_overridden: state.tempo_overridden,
         };
         self.memory
     }
@@ -1538,6 +1569,7 @@ impl AudioHost {
         engine.sync_outputs(&self.sync_outputs);
         engine.sync_inputs(&self.sync_inputs);
         engine.set_external_sync(self.external_sync);
+        Self::follow_link(&engine, self.link.as_ref());
         let _ = engine.flush(ENGINE_START_TIMEOUT);
         handoff
             .push(processor)

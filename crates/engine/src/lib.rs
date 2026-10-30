@@ -98,6 +98,7 @@ pub mod follower;
 mod gc;
 mod input;
 mod layers;
+pub mod link;
 mod message;
 mod metronome;
 mod midi;
@@ -154,6 +155,7 @@ pub use follower::{Ask, Follow, Follower};
 pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
+pub use link::{LinkFollower, Session};
 pub use message::{
     Action, LoopRegion, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,

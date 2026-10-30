@@ -63,14 +63,14 @@ Beatlayer builds the open-source Link library, version 4.1.1, from source, and t
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-7.14 | `bl-link` test (two instances on the loopback network); engine test with a stand-in session |
-| R3, R4 | to be written in WP-7.14 | engine test with a stand-in session; shell test |
-| R5, R6, R7 | to be written in WP-7.14 | engine test under the allocation trap (block sizes 1, 61, 512 and 4,096) |
-| R8, R9, R10 | to be written in WP-7.14 | engine test with a stand-in session; `bl-link` test |
-| R11 | to be written in WP-7.14 | engine test |
-| R12, R13 | to be written in WP-7.14 | real-time trap, RealtimeSanitizer |
-| R14 | to be written in WP-7.14 | shell test (an export ignores Link) |
-| R15, R16 | to be written in WP-7.14 | agent API, `cargo xtask commands` |
+| R1, R2 | `bl-link` `loopback::two_instances_find_each_other`, `enabling_with_no_session_changes_neither_tempo_nor_beat`, `joining_takes_the_sessions_tempo`; `bl-engine` `link::a_peer_joining_makes_no_jump_and_a_start_by_a_timed_command_waits_too`; `bl-shell` `link::link_and_start_stop_sync_are_off_at_first_and_kept_across_a_relaunch` (real preference files), `a_peers_tempo_becomes_the_sets_with_no_undo_step` (a new set keeps the session's tempo) | `bl-link` test (two instances on the loopback network); engine test with a stand-in session; shell test |
+| R3, R4 | `bl-link` `loopback::a_tempo_set_on_one_reaches_the_other`, `the_main_threads_snapshot_follows_the_session`; `bl-engine` `link::a_peers_tempo_change_is_played_from_the_next_block_and_the_phase_holds`, `the_envelope_is_sent_and_a_peers_change_overrides_it_until_it_is_re_enabled`; `bl-shell` `link::a_peers_tempo_becomes_the_sets_with_no_undo_step` | `bl-link` test; engine test with a stand-in session (blocks of 1, 61, 512 and 4,096); shell test |
+| R5, R6, R7 | `bl-engine` `link::with_peers_play_waits_for_the_phase_of_the_insert_marker` (quantisation 1 Bar, 1/4, 1/8T and None, five moments and insert markers), `stop_cancels_a_start_that_waits_and_alone_it_starts_at_once`, `drift_is_closed_without_a_jump_and_a_big_difference_jumps_once` | engine test under the allocation trap (block sizes 1, 61, 512 and 4,096) |
+| R8, R9, R10 | `bl-link` `loopback::start_and_stop_travel_with_start_stop_sync_on_both`, `start_and_stop_stay_home_when_one_has_start_stop_sync_off`; `bl-engine` `link::a_peers_start_and_stop_act_with_start_stop_sync_on`, `without_start_stop_sync_a_peers_start_is_not_acted_on_and_ours_is_not_sent`, `our_start_and_stop_go_to_the_session_when_it_is_time_and_turning_the_sync_on_does_not_start`, `a_peer_joining_makes_no_jump_and_a_start_by_a_timed_command_waits_too` (Tap Tempo's start is a command for a frame), `a_clock_that_leads_gives_the_session_its_tempo_and_the_phase_still_decides_our_starts`; `bl-agent` `link::link_set_start_stop_sync_is_set_by_id_and_read_back` | engine test with a stand-in session; `bl-link` test; agent API |
+| R11 | `bl-engine` `link::no_count_in_plays_while_link_is_on` | engine test |
+| R12, R13 | `bl-engine` `link::the_session_only_hears_a_block_that_changed_something`, `jitter_in_when_the_callback_runs_does_not_move_the_beat` (every block under the allocation trap); `rtsan/tests/link.rs` `link_capture_and_the_follower_pass_under_rtsan` (a real session with a peer), and `link_commit_under_rtsan`, ignored: RealtimeSanitizer reports `pthread_cond_signal` in Link's commit | real-time trap, RealtimeSanitizer |
+| R14 | `bl-shell` `link::an_export_ignores_link` | shell test (an export ignores Link) |
+| R15, R16 | `bl-agent` `link::link_set_enabled_is_refused_headless_without_autonomous_and_runs_with_it`, `link_set_start_stop_sync_is_set_by_id_and_read_back` (`link.state` and `transport.state` read back); every `bl-engine` `link` test runs the follower over `testing::link_session`, and `bl-link` `loopback` runs two real instances; `cargo xtask commands` | agent API, `cargo xtask commands` |
 | R17 to R22 | to be written in WP-7.15 | UI script, shell test |
 | R23 | to be written in WP-7.15 | UI script |
 | R24, R25 | to be written in WP-7.15 | agent API, UI script |

@@ -61,12 +61,18 @@ impl Buttons {
         // A control pressed while a modifier is held is a combination: the
         // modifier doesn't do its own action when it comes up (R25).
         self.use_modifiers(button);
+        // Pressed with a modifier held, it is part of that combination: it
+        // neither taps nor locks (R24, R25).
+        let combined = self
+            .down
+            .keys()
+            .any(|b| *b != button && MODIFIERS.contains(b));
         let unlocked = self.locked.remove(&button);
         self.down.insert(
             button,
             Down {
                 since: at,
-                used: false,
+                used: combined,
                 holding: false,
                 swallow: unlocked,
             },
@@ -236,6 +242,28 @@ mod tests {
         );
         assert!(buttons.release(cc::MUTE, start + ms(2050)).is_empty());
         assert!(!buttons.modifiers().has(cc::MUTE));
+    }
+
+    // Spec: push-2 R24, R25. Mute pressed while Shift is held is a
+    // combination: it neither locks nor taps.
+    #[test]
+    fn mute_pressed_with_shift_held_neither_locks_nor_taps() {
+        let clock = TestClock::new();
+        let mut buttons = Buttons::default();
+        let start = clock.now();
+        buttons.press(cc::SHIFT, start);
+        buttons.press(cc::MUTE, start);
+        assert!(buttons.tick(start + ms(1500)).is_empty());
+        buttons.release(cc::SHIFT, start + ms(1600));
+        assert_eq!(
+            buttons.release(cc::MUTE, start + ms(1700)),
+            [Event::Release {
+                button: cc::MUTE,
+                tap: false,
+                held: true,
+                used: true,
+            }]
+        );
     }
 
     // Spec: push-2 R24, R25. A button used with Mute held doesn't lock it.

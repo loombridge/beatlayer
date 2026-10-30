@@ -482,7 +482,13 @@ impl Push {
 
     fn button_down(&mut self, button: u8, at: Instant, cx: &mut Cx) {
         let others = self.buttons.modifiers();
-        let others_held = others.0.iter().any(|&m| m != button);
+        // A locked Mute, Solo or Stop Clip still modifies pads and the
+        // contents, but core buttons only combine with a modifier held
+        // down (R25), so Play, Undo and the modes work while one is locked.
+        let others_held = others
+            .0
+            .iter()
+            .any(|&m| m != button && self.buttons.is_down(m));
         let events = self.buttons.press(button, at);
         if self.user_mode && button != cc::USER {
             return;

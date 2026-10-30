@@ -249,6 +249,21 @@ fn a_core_button_with_a_modifier_held_does_not_do_its_own_action() {
     assert_eq!(rig.snapshot().menu, None);
 }
 
+// Spec: push-2 R24, R25. A locked Mute isn't held: Play/Stop still does its
+// own action while it is locked.
+#[test]
+fn play_works_while_mute_is_locked() {
+    let mut rig = started();
+    assert!(rig.sim.press("mute"));
+    rig.advance(1000);
+    assert!(rig.sim.let_go("mute"));
+    rig.advance(10);
+    assert_eq!(rig.snapshot().locked, ["mute"]);
+    rig.commands();
+    rig.tap("play");
+    assert_eq!(rig.commands(), ["transport.play_stop {}"]);
+}
+
 // Spec: push-2 R26. The lower display buttons stand for the ring's tracks: a
 // press selects the track with `session.select`, and each is labelled with the
 // track's name.

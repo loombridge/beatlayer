@@ -1618,3 +1618,51 @@ fn a_cv_instruments_section_routes_it_and_calibrate_runs() {
     let nodes = Harness::nodes(&h.settle());
     assert_eq!(Harness::node(&nodes, "Calibration").value, "Not calibrated");
 }
+
+// Spec: cv-tools R3, R24, R30 (WP-7.18); L-DEV-026. The CV effects and CV In
+// have a section of choosers for their ports and no Audio From or Hardware
+// Latency; CV Clock In's shows the tempo it measures and what leads.
+#[test]
+fn the_cv_effects_sections_list_their_ports_and_clock_in_shows_what_leads() {
+    let mut h = harness();
+    for (t, port, kind) in [
+        (bl_devices::cv_clock_out_type(), "CV Output Clock", "output"),
+        (bl_devices::cv_clock_in_type(), "CV Input Clock", "input"),
+        (bl_devices::cv_utility_type(), "CV Output CV", "output"),
+        (bl_devices::cv_in_type(), "CV Input CV", "input"),
+    ] {
+        let device = add(
+            &mut h,
+            json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+        );
+        let nodes = Harness::nodes(&h.settle());
+        let chooser = Harness::node(&nodes, port);
+        assert_eq!(
+            chooser.value,
+            if kind == "output" {
+                "No Output"
+            } else {
+                "No Input"
+            },
+            "{}",
+            t.name
+        );
+        assert!(
+            !nodes.iter().any(|n| n.label == "External Audio From"),
+            "{} brings no sound back",
+            t.name
+        );
+        if t.name == "CV Clock In" {
+            let readout = Harness::node(&nodes, "Clock");
+            assert!(
+                readout.value.contains("No tempo") && readout.value.contains("Leader: Nothing"),
+                "{}",
+                readout.value
+            );
+        }
+        h.shell
+            .run("device.remove", json!({ "device": device }))
+            .unwrap();
+        h.settle();
+    }
+}

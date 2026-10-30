@@ -624,6 +624,9 @@ pub struct Shell {
     /// the quarter notes of it that had arrived when the upper sync lamp
     /// last lit (midi-clock R16, R17).
     sync_in: bl_engine::SyncInState,
+    /// The CV Clock In leading the song's tempo as [`Shell::poll`] last
+    /// heard of it (cv-tools R25).
+    cv_leader: Option<bl_engine::cv_clock::Leader>,
     sync_in_seen: u64,
     sync_in_lit: Option<std::time::Instant>,
     /// The chord a Chord device's Learn is hearing.
@@ -1323,6 +1326,7 @@ impl Shell {
             sync_seen: 0,
             sync_lit: None,
             sync_in: bl_engine::SyncInState::default(),
+            cv_leader: None,
             sync_in_seen: 0,
             sync_in_lit: None,
             chord_learn: crate::chord_learn::ChordLearn::default(),

@@ -709,8 +709,21 @@ impl DeviceView {
             .filter(|v| {
                 v[bl_devices::cv_instrument::STATE_AT] == bl_devices::cv_instrument::RUNNING
             });
+        let clock_in = matches!(
+            &device.kind,
+            DeviceKind::Native { device_type } if device_type == bl_devices::CV_CLOCK_IN
+        );
+        // Spec: cv-tools R24. CV Clock In's panel shows the tempo it
+        // measures and what leads, from its display data.
+        let display = clock_in
+            .then(|| bl_devices::cv_clock_in::display(device.id, published.map(|v| &v[..])));
         let readout = match (calibrates, running, &external.cv_calibration) {
-            (false, ..) => String::new(),
+            (false, ..) => display.as_ref().map_or_else(String::new, |display| {
+                format!(
+                    "{}, {}\nLeader: {}",
+                    display.readings[0].text, display.readings[1].text, display.readings[4].text
+                )
+            }),
             (true, Some(values), _) => format!(
                 "Calibrating: step {} of {}",
                 values[bl_devices::cv_instrument::STEP_AT] as usize + 1,
@@ -740,6 +753,8 @@ impl DeviceView {
                 .chain(&external.cv_inputs)
                 .map(|port| port.name.clone())
                 .collect(),
+            returns: device.role == DeviceRole::Instrument,
+            lamp: display.map(|display| display.readings[3].value >= 0.5),
         }
     }
 

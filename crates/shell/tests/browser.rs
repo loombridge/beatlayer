@@ -228,9 +228,9 @@ fn the_sidebar_lists_live_s_labels_without_ableton_s_services() {
     assert!(sounds.note.unwrap().contains("M2"));
 }
 
-// Spec: modulation R12.
+// Spec: modulation R12; cv-tools R9.
 #[test]
-fn the_modulators_label_lists_the_six_modulators() {
+fn the_modulators_label_lists_the_seven_modulators() {
     let mut shell = Shell::headless();
     let state: BrowserState = run(
         &mut shell,
@@ -246,7 +246,8 @@ fn the_modulators_label_lists_the_six_modulators() {
             "Envelope Follower",
             "Envelope MIDI",
             "Shaper MIDI",
-            "Expression Control"
+            "Expression Control",
+            "CV In"
         ]
     );
     assert!(

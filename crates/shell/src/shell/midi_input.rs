@@ -76,8 +76,14 @@ impl Shell {
         let state = self.audio.sync_in_state();
         let shown =
             |s: &bl_engine::SyncInState| (s.following, s.tempo.map(|t| (t * 100.0).round()));
-        let moved = shown(&self.sync_in) != shown(&state);
+        let cv = self.audio.cv_leader();
+        let cv_shown = |l: Option<bl_engine::cv_clock::Leader>| {
+            l.map(|l| (l.device, (l.tempo * 100.0).round()))
+        };
+        let moved =
+            shown(&self.sync_in) != shown(&state) || cv_shown(self.cv_leader) != cv_shown(cv);
         self.sync_in = state;
+        self.cv_leader = cv;
         moved
     }
 
@@ -112,6 +118,15 @@ impl Shell {
             .following
             .then_some(self.sync_in.tempo)
             .flatten()
+            // Spec: cv-tools R24. A CV clock that leads sets it the same way.
+            .or(self.cv_leader.map(|leader| leader.tempo))
+    }
+
+    /// The CV Clock In that leads the song's tempo, if one does (the CV
+    /// tools spec, R25, R31).
+    #[must_use]
+    pub fn cv_clock_leader(&self) -> Option<bl_model::DeviceId> {
+        self.cv_leader.map(|leader| leader.device)
     }
 
     /// Whether the Control Bar shows the sync lamp pair: some input port has

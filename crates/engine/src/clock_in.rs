@@ -43,14 +43,14 @@ const PENDING: usize = 512;
 const CLOCK_TICKS: f64 = (TICKS_PER_QUARTER / 24) as f64;
 /// Ticks in a sixteenth note, the Song Position Pointer's unit and how far
 /// apart the positions may be before the song jumps (R19).
-const SIXTEENTH_TICKS: f64 = 6.0 * CLOCK_TICKS;
+pub(crate) const SIXTEENTH_TICKS: f64 = 6.0 * CLOCK_TICKS;
 /// A difference in position under this, in ticks, is left alone: rounding.
-const DEADBAND: f64 = CLOCK_TICKS / 40.0;
+pub(crate) const DEADBAND: f64 = CLOCK_TICKS / 40.0;
 /// The most the speed changes to close a difference in position (R19).
-const MAX_CORRECTION: f64 = 0.02;
+pub(crate) const MAX_CORRECTION: f64 = 0.02;
 /// The song position difference, in ticks, that would ask for the greatest
 /// correction: two quarter notes.
-const CORRECTION_SPAN: f64 = 2.0 * TICKS_PER_QUARTER as f64;
+pub(crate) const CORRECTION_SPAN: f64 = 2.0 * TICKS_PER_QUARTER as f64;
 /// How long without a usable clock before the clock counts as silent (R21).
 const SILENCE_NS: f64 = 500e6;
 /// How long without a quarter frame before the timecode counts as stopped
@@ -87,7 +87,10 @@ const BIAS_LIMIT: f64 = 3.0;
 /// for long enough, more than jitter would, mean the tempo is changing: the
 /// loop's memory is cut, and it grows again as the errors settle.
 #[derive(Clone, Copy, Debug)]
-struct Fit {
+pub(crate) struct Fit {
+    /// How many ticks of the clock make a quarter note: 24 for a MIDI
+    /// clock, a CV clock's Rate.
+    per_quarter: f64,
     /// How many clocks the estimate stands on.
     weight: u32,
     /// The filtered time of the last clock.
@@ -100,8 +103,14 @@ struct Fit {
 }
 
 impl Fit {
-    const fn new() -> Self {
+    pub(crate) const fn new() -> Self {
+        Self::per_quarter(24.0)
+    }
+
+    /// A fit of a clock of `per_quarter` ticks to the quarter note.
+    pub(crate) const fn per_quarter(per_quarter: f64) -> Self {
         Self {
+            per_quarter,
             weight: 0,
             t: 0.0,
             period: 0.0,
@@ -112,22 +121,60 @@ impl Fit {
 
     /// Begins at a clock at `time`, with the tempo of `period` standing for
     /// `weight` clocks.
-    fn lock(&mut self, time: f64, period: f64, weight: u32) {
+    pub(crate) fn lock(&mut self, time: f64, period: f64, weight: u32) {
         *self = Self {
             weight,
             t: time,
             period,
-            ..Self::new()
+            ..Self::per_quarter(self.per_quarter)
         };
     }
 
+    /// The fewest clocks the estimate stands on while it listens again: the
+    /// same stretch of the song for any rate (8 clocks of a MIDI clock, a
+    /// third of a quarter note), and never fewer than two.
+    fn listening(&self) -> u32 {
+        ((f64::from(LISTENING_WEIGHT) * self.per_quarter / 24.0).round() as u32).max(2)
+    }
+
+    /// How many clocks the prior tempo counts for when a clock begins again
+    /// after silence, by the same measure.
+    pub(crate) fn prior_weight(&self) -> u32 {
+        ((f64::from(PRIOR_WEIGHT) * self.per_quarter / 24.0).round() as u32).max(2)
+    }
+
+    /// The fit's own interval in nanoseconds.
+    pub(crate) fn period(&self) -> f64 {
+        self.period
+    }
+
+    /// The time of the last clock it took, in nanoseconds.
+    pub(crate) fn time(&self) -> f64 {
+        self.t
+    }
+
+    /// How many clocks the estimate stands on.
+    pub(crate) fn weight(&self) -> u32 {
+        self.weight
+    }
+
+    /// The slowest interval it takes, in nanoseconds: 20 BPM.
+    pub(crate) fn max_period(&self) -> f64 {
+        60e9 / (self.per_quarter * 20.0)
+    }
+
+    /// The fastest interval it takes, in nanoseconds: 999 BPM.
+    pub(crate) fn min_period(&self) -> f64 {
+        60e9 / (self.per_quarter * 999.0)
+    }
+
     /// Takes the next clock, at `time`.
-    fn push(&mut self, time: f64) {
-        let omega = core::f64::consts::TAU * BANDWIDTH / 24.0;
+    pub(crate) fn push(&mut self, time: f64) {
+        let omega = core::f64::consts::TAU * BANDWIDTH / self.per_quarter;
         let predicted = self.t + self.period;
         let error = time - predicted;
         let mut weight = self.weight + 1;
-        if self.weight > LISTENING_WEIGHT {
+        if self.weight > self.listening() {
             self.bias += (error - self.bias) * BIAS_RATE;
             // A jump the tempo makes isn't jitter: it widens the spread no
             // more than a few times jitter would.
@@ -135,7 +182,10 @@ impl Fit {
             self.spread += (squared - self.spread) * SPREAD_RATE;
             let deviation = (self.spread * BIAS_RATE / (2.0 - BIAS_RATE)).sqrt();
             if self.bias.abs() > BIAS_LIMIT * deviation {
-                weight = (self.weight / 4).max(LISTENING_WEIGHT);
+                // A quarter of the memory, counted in the song's time: a
+                // clock of fewer ticks to the quarter forgets more of them.
+                let kept = f64::from(self.weight) * self.per_quarter / 96.0;
+                weight = (kept as u32).max(self.listening());
                 self.bias = 0.0;
             }
         } else {
@@ -151,19 +201,20 @@ impl Fit {
             )
         };
         self.t = predicted + alpha.max(core::f64::consts::SQRT_2 * omega) * error;
-        self.period = (self.period + beta.max(omega * omega) * error).clamp(MIN_PERIOD, MAX_PERIOD);
+        self.period = (self.period + beta.max(omega * omega) * error)
+            .clamp(self.min_period(), self.max_period());
         self.weight = weight;
     }
 
     /// Steps over `clocks` clocks that never came, or came twice, on the
     /// loop's own tempo.
-    fn coast(&mut self, clocks: f64) {
+    pub(crate) fn coast(&mut self, clocks: f64) {
         self.t += clocks * self.period;
     }
 
     /// The tempo in BPM, once there is one.
-    fn bpm(&self) -> Option<f64> {
-        (self.weight >= 2).then(|| 60e9 / (24.0 * self.period))
+    pub(crate) fn bpm(&self) -> Option<f64> {
+        (self.weight >= 2).then(|| 60e9 / (self.per_quarter * self.period))
     }
 }
 

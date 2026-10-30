@@ -1049,6 +1049,7 @@ impl Shell {
                     self.prefs.settings_page = page;
                 }
                 self.settings_open = true;
+                self.templates_for_page();
                 self.focused_window = WindowKind::Settings;
                 self.effects.push(Effect::OpenSettings);
                 Ok(Value::Null)

@@ -143,6 +143,7 @@ pub mod scales;
 pub mod search;
 pub mod session_launch;
 pub mod session_record;
+pub mod session_strip;
 pub mod session_view;
 pub mod set_exchange;
 pub mod settings;
@@ -192,6 +193,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     session_view::register(registry)?;
     session_launch::register(registry)?;
     session_record::register(registry)?;
+    session_strip::register(registry)?;
     capture_midi::register(registry)?;
     plugins::register(registry)?;
     settings::register(registry)?;

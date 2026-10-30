@@ -7,7 +7,7 @@
 //! A click opens the list; choosing an entry runs its command. Entries
 //! another package brings are listed, disabled, and say which.
 
-use bl_model::{Monitor, TrackId};
+use bl_model::{Monitor, RemoteTarget, TrackId};
 use bl_shell::Invocation;
 use bl_shell::routing::{Chooser, Entry, InOut, MonitorSwitch, TuningBypass, TuningLayoutRow};
 use egui::accesskit::Role;
@@ -466,6 +466,17 @@ impl InOutParts<'_> {
             "Monitoring",
             monitor_label(switch.chosen),
             None,
+        );
+        // Spec: map-modes R3, R11. The map modes tint the Monitor switch,
+        // one radio button: In, Auto or Off.
+        crate::mapping::remote_overlay(
+            ui,
+            self.theme,
+            rect,
+            id,
+            RemoteTarget::Monitor { track: self.track },
+            false,
+            events,
         );
     }
 }

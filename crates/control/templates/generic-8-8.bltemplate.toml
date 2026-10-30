@@ -1,0 +1,495 @@
+# Generic 8 + 8: the template Beatlayer bundles, and an example of the format.
+#
+# A controller template is a text file in TOML. Save your own in the User
+# Library's "Controller Templates" folder (subfolders are read too) with a
+# name that ends in .bltemplate.toml; a template there with this name replaces
+# this one. Beatlayer reads the folder at start and whenever the Tempo & MIDI
+# page of the Settings opens, and lists each template in the Control Surface
+# chooser after the built-in surfaces. A file that breaks a rule isn't listed;
+# the control_surface.templates command names each mistake and its line.
+#
+# The file starts with `format`, the version of this format. Beatlayer reads
+# format 1 and refuses a file that asks for a later one.
+format = 1
+
+# [surface] describes the controller as a whole.
+[surface]
+# `name` is how the chooser lists the template. It is also what a row of the
+# Control Surfaces table remembers, so keep it when you edit the file.
+name = "Generic 8 + 8"
+# `ring_width` is how many tracks wide the session ring is: the block of the
+# Session View the controller's grid plays, and the tracks its faders and
+# track buttons reach. Zero for a controller with no ring.
+ring_width = 8
+# `ring_height` is how many scenes tall the ring is; zero for a controller
+# with no clip launching.
+ring_height = 2
+# `lock` says whether a device can be locked to the controller from its title
+# bar menu, and whether arming a MIDI track locks the controller to its
+# instrument.
+lock = true
+# `ports` is text the names of the controller's ports contain. Beatlayer then
+# reads "Matches Generic 8 + 8" beside those ports in the Settings and lists
+# the template first in the chooser. It never fills a row on its own.
+ports = []
+
+# Each [[control]] is one control of the controller. A control with no entry
+# here is not the template's, and its messages reach manual mappings and the
+# tracks as any message does.
+#
+# `id` is a name of your own for the control; it is only for you.
+# `message` is what the control sends: "note", "cc" (a controller), "cc14" (a
+# 14-bit pair: `number` and `number` + 32) or "pitch-bend".
+# `channel` is the MIDI channel, 1 to 16.
+# `number` is the note or controller number, 0 to 127 (0 to 31 for "cc14"); a
+# pitch bend has none.
+# `kind` is how its messages read:
+#   "button"    sends `press` when pressed and `release` when released (a
+#               note-on and a note-off for a note); they default to 127 and 0.
+#   "toggle"    sends a value that says whether it is on or off.
+#   "absolute"  sends its position, 0 to 127 (0 to 16,383 for "cc14" and
+#               pitch bend); Takeover Mode decides what happens when it first
+#               moves after a bank, device or ring change.
+#   "relative"  sends steps; it needs `encoding`, one of "signed-bit",
+#               "signed-bit-2", "bin-offset" or "twos-complement", and
+#               `accelerated`, true if the faster it turns the bigger the
+#               steps (false by default).
+# `press` and `release` are a button's values, as above.
+# `encoding` and `accelerated` are a relative control's, as above.
+# `role` is what the control does. Numbers after a role's word count from 1.
+#   slot C R            the clip slot at column C and row R of the ring
+#   scene R             the launch button of the scene at row R of the ring
+#   track-stop C        stops the clips of the ring's track at column C
+#   track-mute C        the activator of that track
+#   track-solo C        its Solo
+#   track-arm C         its Arm
+#   track-select C      selects it
+#   stop-all-clips      Stop All Clips
+#   volume C            its volume
+#   pan C               its pan
+#   send N C            its send to the Nth return track
+#   main-volume         the Main track's volume
+#   device N            the Nth parameter (1 to 8) of the device in focus's
+#                       bank
+#   next-bank, previous-bank
+#                       the device's next or previous bank of eight
+#   next-device, previous-device
+#                       selects the next or previous device in the chain
+#   ring-left, ring-right, ring-up, ring-down
+#                       moves the ring one track or scene
+#   page-left, page-right, page-up, page-down
+#                       moves the ring by its width or height
+#   play, stop, record, session-record, loop, metronome, tap-tempo
+#                       the transport (a button flips loop, metronome and
+#                       record; a toggle sets them)
+#   tempo               the song's tempo, 20 to 999 BPM, from an absolute
+#                       control
+#   undo, redo, back-to-arrangement
+#                       Undo, Redo and Back to Arrangement
+# `feedback` says what the controller shows. For a button or a toggle it is
+# a table of `off` and `on`, the values Beatlayer sends on the same note or
+# controller, and `flash`, an optional value for a clip that is queued; a
+# slot's button is `on` while its clip plays and `flash` (or `on`) while it is
+# queued. For an absolute volume, pan or main-volume control it is
+# `value = true`, which moves a motorised fader or a ring to the control's
+# value; `value` is that key.
+
+# Eight knobs on controllers 21 to 28, for the first eight parameters of the
+# device in focus's bank.
+[[control]]
+id = "knob 1"
+message = "cc"
+channel = 1
+number = 21
+kind = "absolute"
+role = "device 1"
+
+[[control]]
+id = "knob 2"
+message = "cc"
+channel = 1
+number = 22
+kind = "absolute"
+role = "device 2"
+
+[[control]]
+id = "knob 3"
+message = "cc"
+channel = 1
+number = 23
+kind = "absolute"
+role = "device 3"
+
+[[control]]
+id = "knob 4"
+message = "cc"
+channel = 1
+number = 24
+kind = "absolute"
+role = "device 4"
+
+[[control]]
+id = "knob 5"
+message = "cc"
+channel = 1
+number = 25
+kind = "absolute"
+role = "device 5"
+
+[[control]]
+id = "knob 6"
+message = "cc"
+channel = 1
+number = 26
+kind = "absolute"
+role = "device 6"
+
+[[control]]
+id = "knob 7"
+message = "cc"
+channel = 1
+number = 27
+kind = "absolute"
+role = "device 7"
+
+[[control]]
+id = "knob 8"
+message = "cc"
+channel = 1
+number = 28
+kind = "absolute"
+role = "device 8"
+
+# Eight faders on controllers 41 to 48, for the volumes of the ring's tracks.
+[[control]]
+id = "fader 1"
+message = "cc"
+channel = 1
+number = 41
+kind = "absolute"
+role = "volume 1"
+
+[[control]]
+id = "fader 2"
+message = "cc"
+channel = 1
+number = 42
+kind = "absolute"
+role = "volume 2"
+
+[[control]]
+id = "fader 3"
+message = "cc"
+channel = 1
+number = 43
+kind = "absolute"
+role = "volume 3"
+
+[[control]]
+id = "fader 4"
+message = "cc"
+channel = 1
+number = 44
+kind = "absolute"
+role = "volume 4"
+
+[[control]]
+id = "fader 5"
+message = "cc"
+channel = 1
+number = 45
+kind = "absolute"
+role = "volume 5"
+
+[[control]]
+id = "fader 6"
+message = "cc"
+channel = 1
+number = 46
+kind = "absolute"
+role = "volume 6"
+
+[[control]]
+id = "fader 7"
+message = "cc"
+channel = 1
+number = 47
+kind = "absolute"
+role = "volume 7"
+
+[[control]]
+id = "fader 8"
+message = "cc"
+channel = 1
+number = 48
+kind = "absolute"
+role = "volume 8"
+
+# Sixteen pads on notes 36 to 51, two rows of eight, for the ring's slots. A
+# pad is lit while its clip plays and flashes while it is queued.
+[[control]]
+id = "pad 1"
+message = "note"
+channel = 1
+number = 36
+kind = "button"
+role = "slot 1 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 2"
+message = "note"
+channel = 1
+number = 37
+kind = "button"
+role = "slot 2 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 3"
+message = "note"
+channel = 1
+number = 38
+kind = "button"
+role = "slot 3 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 4"
+message = "note"
+channel = 1
+number = 39
+kind = "button"
+role = "slot 4 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 5"
+message = "note"
+channel = 1
+number = 40
+kind = "button"
+role = "slot 5 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 6"
+message = "note"
+channel = 1
+number = 41
+kind = "button"
+role = "slot 6 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 7"
+message = "note"
+channel = 1
+number = 42
+kind = "button"
+role = "slot 7 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 8"
+message = "note"
+channel = 1
+number = 43
+kind = "button"
+role = "slot 8 1"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 9"
+message = "note"
+channel = 1
+number = 44
+kind = "button"
+role = "slot 1 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 10"
+message = "note"
+channel = 1
+number = 45
+kind = "button"
+role = "slot 2 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 11"
+message = "note"
+channel = 1
+number = 46
+kind = "button"
+role = "slot 3 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 12"
+message = "note"
+channel = 1
+number = 47
+kind = "button"
+role = "slot 4 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 13"
+message = "note"
+channel = 1
+number = 48
+kind = "button"
+role = "slot 5 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 14"
+message = "note"
+channel = 1
+number = 49
+kind = "button"
+role = "slot 6 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 15"
+message = "note"
+channel = 1
+number = 50
+kind = "button"
+role = "slot 7 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+[[control]]
+id = "pad 16"
+message = "note"
+channel = 1
+number = 51
+kind = "button"
+role = "slot 8 2"
+feedback = { off = 0, on = 127, flash = 64 }
+
+# Buttons on controllers 100 to 119 for the ring, the banks, the scenes and the
+# transport. Each sends 127 when pressed and 0 when released.
+[[control]]
+id = "ring left"
+message = "cc"
+channel = 1
+number = 100
+kind = "button"
+role = "ring-left"
+
+[[control]]
+id = "ring right"
+message = "cc"
+channel = 1
+number = 101
+kind = "button"
+role = "ring-right"
+
+[[control]]
+id = "ring up"
+message = "cc"
+channel = 1
+number = 102
+kind = "button"
+role = "ring-up"
+
+[[control]]
+id = "ring down"
+message = "cc"
+channel = 1
+number = 103
+kind = "button"
+role = "ring-down"
+
+[[control]]
+id = "previous bank"
+message = "cc"
+channel = 1
+number = 104
+kind = "button"
+role = "previous-bank"
+
+[[control]]
+id = "next bank"
+message = "cc"
+channel = 1
+number = 105
+kind = "button"
+role = "next-bank"
+
+[[control]]
+id = "stop all clips"
+message = "cc"
+channel = 1
+number = 106
+kind = "button"
+role = "stop-all-clips"
+
+[[control]]
+id = "scene 1"
+message = "cc"
+channel = 1
+number = 107
+kind = "button"
+role = "scene 1"
+
+[[control]]
+id = "scene 2"
+message = "cc"
+channel = 1
+number = 108
+kind = "button"
+role = "scene 2"
+
+[[control]]
+id = "play"
+message = "cc"
+channel = 1
+number = 115
+kind = "button"
+role = "play"
+
+[[control]]
+id = "stop"
+message = "cc"
+channel = 1
+number = 116
+kind = "button"
+role = "stop"
+
+[[control]]
+id = "record"
+message = "cc"
+channel = 1
+number = 117
+kind = "button"
+role = "record"
+
+[[control]]
+id = "loop"
+message = "cc"
+channel = 1
+number = 118
+kind = "button"
+role = "loop"
+
+[[control]]
+id = "metronome"
+message = "cc"
+channel = 1
+number = 119
+kind = "button"
+role = "metronome"
+
+# Messages sent to the controller, as hexadecimal bytes, each a whole
+# system-exclusive message (F0 to F7) or a channel message. [[setup]] is sent
+# when the surface starts, [[goodbye]] when it stops and [[dump]] when the
+# Dump button is pressed. `bytes` is the key that holds them. This controller
+# needs none, so they are commented out; for example:
+#
+# [[setup]]
+# bytes = "F0 7D 01 F7"

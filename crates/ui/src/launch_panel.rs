@@ -13,7 +13,9 @@
 //! the reference didn't measure the tab, so the sizes are the manual's
 //! reading, not pixel parity.
 
-use bl_model::{ClipData, ClipId, Document, LaunchMode, LaunchQuantization, SceneId, TrackId};
+use bl_model::{
+    ClipControl, ClipData, ClipId, Document, LaunchMode, LaunchQuantization, SceneId, TrackId,
+};
 use bl_shell::clip_properties_commands::Properties;
 use bl_shell::{Area, Invocation, Shell};
 use egui::accesskit::{self, Role};
@@ -143,6 +145,47 @@ fn nudge_button(
             json!({ "track": track, "scene": scene, "steps": steps }),
         )));
     }
+    // Spec: map-modes R11. The map modes tint the nudge buttons.
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        rect,
+        id,
+        if steps < 0 {
+            ClipControl::NudgeDown
+        } else {
+            ClipControl::NudgeUp
+        },
+        events,
+    );
+}
+
+/// The scrub control between the nudge buttons (L-CLIP-023, map modes R22),
+/// which shows in MIDI Map Mode only: a slider named Scrub with no value of
+/// its own, which a relative controller's increments nudge the playing clip
+/// by (launch quantisation R35, R36). A click on it only selects it.
+fn scrub_control(ui: &mut Ui, theme: &Theme, rect: Rect, events: &mut Vec<UiEvent>) {
+    let id = Id::new(("launch-nudge", "Scrub"));
+    let response = ui.interact(rect, id, Sense::hover());
+    let c = &theme.colors;
+    ui.painter()
+        .rect_filled(rect, theme.sizes.corner, c.control.0);
+    ui.painter().line_segment(
+        [
+            rect.left_center() + vec2(4.0, 0.0),
+            rect.right_center() - vec2(4.0, 0.0),
+        ],
+        egui::Stroke::new(1.0, c.text_dim.0),
+    );
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Slider, true, "Scrub"));
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Slider);
+        node.set_label("Scrub".to_owned());
+        node.set_description(
+            "Moves the playing clip by steps of the global launch quantization.".to_owned(),
+        );
+    });
+    crate::mapping::clip_overlay(ui, theme, rect, id, ClipControl::Scrub, events);
 }
 
 /// Draws the panel selector row of the left group in `rect` (L-CLIP-003):
@@ -303,6 +346,14 @@ pub fn show(
     ) {
         events.push(command("clip.set_launch_mode", "mode", json!(mode)));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, CONTROL),
+        Id::new(("chooser", "launch-mode")),
+        ClipControl::LaunchMode,
+        events,
+    );
 
     // Legato.
     let at = row("Legato");
@@ -322,10 +373,21 @@ pub fn show(
     ) {
         events.push(command("clip.set_legato", "legato", json!(legato)));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, vec2(54.0, CONTROL.y)),
+        Id::new(("switch", "launch-legato")),
+        ClipControl::Legato,
+        events,
+    );
 
-    // The nudge buttons.
+    // The nudge buttons, with the scrub control between them in MIDI Map
+    // Mode (launch quantisation R35, map modes R22).
     let at = row("Nudge");
     let slot = slot_of(document, clip);
+    let scrub = crate::mapping::remote_map(ui.ctx())
+        .is_some_and(|map| map.mode == bl_shell::remote_commands::MapMode::Midi);
     nudge_button(
         ui,
         theme,
@@ -334,10 +396,21 @@ pub fn show(
         slot,
         events,
     );
+    if scrub {
+        scrub_control(
+            ui,
+            theme,
+            Rect::from_min_size(at + vec2(28.0, 0.0), vec2(40.0, SMALL.y)),
+            events,
+        );
+    }
     nudge_button(
         ui,
         theme,
-        Rect::from_min_size(at + vec2(32.0, 0.0), vec2(26.0, SMALL.y)),
+        Rect::from_min_size(
+            at + vec2(if scrub { 70.0 } else { 32.0 }, 0.0),
+            vec2(26.0, SMALL.y),
+        ),
         ("Nudge Forward", "»", 1),
         slot,
         events,
@@ -378,6 +451,14 @@ pub fn show(
             json!(step),
         ));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, CONTROL),
+        Id::new(("chooser", "launch-quantize")),
+        ClipControl::LaunchQuantization,
+        events,
+    );
 
     // Velocity, in percent, a hundredth at a time.
     let at = row("Velocity");
@@ -400,4 +481,12 @@ pub fn show(
     ) {
         events.push(command("clip.set_velocity_amount", "amount", json!(amount)));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, SMALL),
+        Id::new(("number-box", "launch-velocity")),
+        ClipControl::Velocity,
+        events,
+    );
 }

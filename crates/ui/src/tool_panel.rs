@@ -15,7 +15,7 @@
 use bl_midi_tools::{
     DIVISION_NAMES, ParamKind, ParamSpec, ParamValue, ToolDescriptor, ToolKind, parse_key,
 };
-use bl_model::{ClipId, ParamDescriptor, ParamId, ParamUnit};
+use bl_model::{ClipId, ParamDescriptor, ParamId, ParamUnit, RemoteTarget, ToolControl, ToolId};
 use bl_shell::midi_tool_commands::Panel;
 use bl_shell::midi_tools::ToolView;
 use bl_shell::{Area, GesturePhase, Invocation, Shell};
@@ -397,6 +397,16 @@ fn tools(
             json!({ "clip": clip, "tool": descriptor.id, "auto": on }),
         )));
     }
+    mappable(
+        ui,
+        theme,
+        Rect::from_min_size(pos2(rect.left() + CONTROLS_AT, y), vec2(SWITCH, CONTROL.y)),
+        Id::new(("switch", auto.as_str())),
+        descriptor,
+        ToolControl::Auto,
+        false,
+        events,
+    );
     y += ROW + 2.0;
     // The apply button reads Transform or Generate; Reset beside it.
     let label = match kind {
@@ -417,6 +427,16 @@ fn tools(
             json!({ "clip": clip, "tool": descriptor.id }),
         )));
     }
+    mappable(
+        ui,
+        theme,
+        Rect::from_min_size(pos2(left, y), vec2(half, CONTROL.y + 2.0)),
+        Id::new(("tool-button", format!("apply-{}", descriptor.id))),
+        descriptor,
+        ToolControl::Apply,
+        false,
+        events,
+    );
     if button(
         ui,
         theme,
@@ -429,6 +449,42 @@ fn tools(
             bl_shell::midi_tool_commands::RESET,
             json!({ "clip": clip, "tool": descriptor.id }),
         )));
+    }
+    mappable(
+        ui,
+        theme,
+        Rect::from_min_size(pos2(left + half + 6.0, y), vec2(half, CONTROL.y + 2.0)),
+        Id::new(("tool-button", format!("reset-{}", descriptor.id))),
+        descriptor,
+        ToolControl::Reset,
+        false,
+        events,
+    );
+}
+
+/// The map modes' overlay on one of a MIDI Tool's controls (map modes R23): a
+/// mapping names the tool and the control, so it acts whichever clip shows.
+#[expect(clippy::too_many_arguments, reason = "an overlay's whole context")]
+fn mappable(
+    ui: &mut Ui,
+    theme: &Theme,
+    rect: Rect,
+    id: Id,
+    tool: &ToolDescriptor,
+    control: ToolControl,
+    continuous: bool,
+    events: &mut Vec<UiEvent>,
+) {
+    if let Some(tool) = ToolId::new(&tool.id) {
+        crate::mapping::remote_overlay(
+            ui,
+            theme,
+            rect,
+            id,
+            RemoteTarget::MidiTool { tool, control },
+            continuous,
+            events,
+        );
     }
 }
 
@@ -1123,6 +1179,30 @@ pub(crate) fn control(
             }
             None => display_data(ui, theme, spec, rect),
         },
+    }
+    // Spec: map-modes R23. The parameters that are numbers, choices or
+    // switches take a mapping, by their own kinds.
+    if let Some(param) = ToolId::new(&spec.id) {
+        let (id, continuous) = match &spec.kind {
+            ParamKind::Switch => (Some(Id::new(("switch", salt.as_str()))), false),
+            ParamKind::Choice { .. } => (Some(Id::new(("chooser", salt.as_str()))), false),
+            ParamKind::Number { .. } | ParamKind::Whole { .. } => {
+                (Some(Id::new(("tool-value", &tool.id, &spec.id))), true)
+            }
+            _ => (None, false),
+        };
+        if let Some(id) = id {
+            mappable(
+                ui,
+                theme,
+                rect,
+                id,
+                tool,
+                ToolControl::Param { param },
+                continuous,
+                events,
+            );
+        }
     }
     // The Info View shows the name and registered description of the control
     // under the pointer (R7).

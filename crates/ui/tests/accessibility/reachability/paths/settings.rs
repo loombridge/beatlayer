@@ -12,6 +12,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // (WP-7.3).
         ("remote.mappings", Exception(Query)),
         ("remote.state", Exception(Query)),
+        ("remote.targets", Exception(Query)),
         (
             "remote.select",
             Exception(Equivalent(
@@ -60,6 +61,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         // Down, and Dump is a button.
         ("control_surface.list", Exception(Query)),
         ("control_surface.surfaces", Exception(Query)),
+        ("control_surface.templates", Exception(Query)),
         (
             "control_surface.set",
             settings(

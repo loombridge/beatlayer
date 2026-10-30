@@ -15,8 +15,8 @@
 use std::cell::Cell;
 
 use bl_model::{
-    AudioData, ClipData, ClipId, DETUNE_MAX, DETUNE_MIN, Document, Preserve, TRANSPOSE_MAX,
-    TRANSPOSE_MIN, TransientLoopMode, WarpMode,
+    AudioData, ClipControl, ClipData, ClipId, DETUNE_MAX, DETUNE_MIN, Document, Preserve,
+    TRANSPOSE_MAX, TRANSPOSE_MIN, TransientLoopMode, WarpMode,
 };
 use bl_shell::{Area, Invocation, Shell};
 use egui::{Align2, Id, Pos2, Rect, Sense, Ui, Vec2, WidgetInfo, WidgetType, pos2, vec2};
@@ -267,31 +267,9 @@ fn disabled(
 /// The clips the panel acts on: the Arrangement's selected audio clips, or
 /// the Session clip the Clip View shows.
 #[must_use]
-pub fn targets(shell: &Shell, doc: &Document, shown: ClipId) -> Vec<ClipId> {
-    if shell
-        .clip_view()
-        .shown_session_clip(doc, shell.arrangement())
-        .is_some()
-    {
-        return vec![shown];
-    }
-    let selected: Vec<ClipId> = shell
-        .arrangement()
-        .selected_clips()
-        .iter()
-        .copied()
-        .filter(|id| {
-            matches!(
-                doc.clip(*id).map(|clip| &clip.data),
-                Some(ClipData::Audio(_))
-            )
-        })
-        .collect();
-    if selected.is_empty() {
-        vec![shown]
-    } else {
-        selected
-    }
+pub fn targets(shell: &Shell, _doc: &Document, shown: ClipId) -> Vec<ClipId> {
+    let clips = shell.audio_panel_clips();
+    if clips.is_empty() { vec![shown] } else { clips }
 }
 
 /// The tempo the BPM field shows for `audio`: the segment that starts at the
@@ -432,6 +410,14 @@ pub fn show(
     ) {
         each(events, "clip.set_warp", json!({ "warp": on }));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, vec2(SWITCH, CONTROL.y)),
+        Id::new(("switch", "audio-warp")),
+        ClipControl::Warp,
+        events,
+    );
 
     // Warp Mode, and the chosen mode's own controls. With Warp off they are
     // drawn disabled (R15).
@@ -479,6 +465,14 @@ pub fn show(
             json!({ "mode": mode_id(chosen) }),
         );
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        chooser,
+        Id::new(("chooser", "audio-warp-mode")),
+        ClipControl::WarpMode,
+        events,
+    );
     if let Shared::Range(_, _) = mode {
         mixed_text(ui, theme, chooser);
     }
@@ -644,6 +638,14 @@ pub fn show(
     ) {
         each(events, "clip.set_ram_mode", json!({ "ram": on }));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, vec2(SWITCH, CONTROL.y)),
+        Id::new(("switch", "audio-ram")),
+        ClipControl::Ram,
+        events,
+    );
     let hq = shared(&data.iter().map(|d| d.high_quality).collect::<Vec<_>>());
     let at = row(&painter, "HiQ");
     crate::focus::register(
@@ -667,6 +669,14 @@ pub fn show(
             json!({ "high_quality": on }),
         );
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, vec2(SWITCH, CONTROL.y)),
+        Id::new(("switch", "audio-hiq")),
+        ClipControl::HighQuality,
+        events,
+    );
 
     // Gain, in decibels, down to −∞ dB (rule G1).
     let gains: Vec<f64> = data.iter().map(|d| gain_db(d.gain)).collect();
@@ -700,6 +710,14 @@ pub fn show(
     ) {
         each(events, "clip.set_gain", json!({ "gain": gain_linear(db) }));
     }
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        Rect::from_min_size(at, CONTROL),
+        Id::new(("number-box", "audio-gain")),
+        ClipControl::Gain,
+        events,
+    );
 
     // Transpose, with Detune beside it (the warp modes spec, R2 and R25).
     let transposes: Vec<f64> = data.iter().map(|d| f64::from(d.transpose)).collect();
@@ -784,6 +802,24 @@ pub fn show(
             each(events, "clip.set_pitch", json!({ "detune": value }));
         }
     }
+    // Spec: map-modes R11, R17. Transpose and Detune are mappable even in
+    // Re-Pitch, where they are drawn off: the clips keep the values.
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        transpose_rect,
+        Id::new(("number-box", "audio-transpose")),
+        ClipControl::Transpose,
+        events,
+    );
+    crate::mapping::clip_overlay(
+        ui,
+        theme,
+        detune_rect,
+        Id::new(("number-box", "audio-detune")),
+        ClipControl::Detune,
+        events,
+    );
 }
 
 /// The mode's own controls, under the Warp Mode chooser (the warp modes

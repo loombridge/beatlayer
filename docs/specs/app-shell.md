@@ -1,9 +1,9 @@
 # The app shell: start-up, sets, the Settings window's Audio page, and the CPU meter
 
-- **Status:** partial (R1 to R23 each have a passing test; R24 comes with WP-6.27 to WP-6.30)
-- **Work packages:** WP-1.7, WP-1.7b (project folders), WP-6.27 to WP-6.30 (R24, what `view.state` and `settings.state` add for the detail views, the Undo History, the second window and the Theme & Colors page)
+- **Status:** partial (R1 to R23 each have a passing test; R24 comes with WP-6.27 to WP-6.30; R25 to R27 are Phase 10's)
+- **Work packages:** WP-1.7, WP-1.7b (project folders), WP-6.27 to WP-6.30 (R24, what `view.state` and `settings.state` add for the detail views, the Undo History, the second window and the Theme & Colors page); WP-10.16 and WP-10.17 (the Licenses & Updates page, R25, with [crash reports](crash-reports.md) and [updates](updates.md)); WP-10.35 (About Beatlayer's acknowledgements, R26 and R27)
 - **Parity-matrix row:** Views and workflow: Control Bar, Status Bar; Mixing and routing: CPU meter, disk overload indicator; Interface placement and key bindings
-- **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day
+- **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as published that day; for R25 to R27, the manual's chapter 2 section 2.3.10, the UI parity reference's L-SET-019 and M-APP-001, and [the architecture](../02-architecture.md)'s D3, read 30 October 2026
 
 ## The behaviour
 
@@ -26,6 +26,7 @@ This spec covers the shell's own behaviour. Where each pane and control sits is 
 | S9 | Observation | Live 12.4.3 on macOS, 10 October 2026, recorded in menus.md (M-FILE-004) and shortcuts.toml (S-FILE-009) | Close Window, Cmd-W, is in the File menu and disabled while only the main window is open |
 | S10 | Manual | Same manual, chapter 5 "Managing Files and Sets", sections 5.4.1 "Creating, Opening and Saving Sets", 5.5.1 "Projects and Live Sets", 5.10.1, 5.10.3, and 5.10.4 | Save As saves under a new name, in a new folder, or both. Saving a set makes a project folder named after it, "<name> Project", in the chosen folder, with the set inside, unless the set is saved into an existing project, where it joins the sets already there and shares their samples. In the manual's worked example, Save As of a changed version keeps the place Live suggests, the set's project folder, so the new version joins that project; a new set saved beside the project gets a project folder of its own. A set saved outside its project still uses the samples in the old project, and starts with no samples folder of its own. |
 | S11 | Decision | D13 and "Project files and interop" in [the architecture](../02-architecture.md#project-files-and-interop) | A Beatlayer project is a folder holding its sets, `Samples/Recorded/`, `Samples/Imported/`, and `Backup/`, which keeps the versions the last 10 saves replaced; media paths in a set are relative to its project folder |
+| S13 | Reference | Live 12 reference manual, chapter 2 "First Steps", section 2.3.10 "Licenses & Updates"; [layout.md](../ui-parity/layout.md) L-SET-019 (Licenses, then Maintenance: Get Automatic Updates and Send Usage Data) and the paragraph after L-SET-020 (rows tied to Ableton's services become Beatlayer's own or are left out, each with a design rule); [menus.md](../ui-parity/menus.md) M-APP-001 (About Beatlayer); the architecture's D3 (GPL-3.0-or-later) | The Licenses & Updates page's sections and rows; About Beatlayer; Beatlayer's licence |
 | S12 | Observation | Live 12.4.3 on macOS, 13 October 2026 | A new track is inserted directly after the selected track, or after the last of several selected tracks, and the new track is selected; Live always has a selected track |
 
 ## Rules
@@ -55,6 +56,10 @@ This spec covers the shell's own behaviour. Where each pane and control sits is 
 - **R23.** Two read-class queries, on no menu, read back what the set doesn't save. `settings.state` reports every preference the Settings window shows with a value, by page, in the form its own command takes it; tokens and API keys are never returned, only whether one is stored. `view.state` reports what the view commands switch (the main view, the browser, the Info View, full-screen mode, the zoom, the Clip View with Draw Mode, the lane and Fold, the assistant's panel, and whether plug-in windows show) without switching any of it.
 - **R24.** `view.state` also reports, beside what R23 lists: the detail area, under `detail` ([detail-views.md](detail-views.md) R17); whether the Undo History shows ([undo-history.md](undo-history.md) R10); the second window, under `second_window`, and which window has the focus ([second-window.md](second-window.md) R15). `settings.state` reports the Theme & Colors page's settings under `theme_colors` ([themes.md](themes.md) R12, R24, R30). Each still switches nothing. (S1, S2)
 
+- **R25.** Settings ▸ Licenses & Updates (L-SET-019) has no Licenses section, as Beatlayer has no licences to authorise. Its Maintenance section holds two rows, in this order: Get Automatic Updates, a switch ([updates](updates.md) R5), and Send Crash Reports, a chooser of Ask, Always and Never ([crash reports](crash-reports.md) R14), in the place of Live's Send Usage Data, since Beatlayer collects no usage data. `settings.state` reports both under `licenses_updates`. (WP-10.16, WP-10.17) (S8, S13)
+- **R26.** About Beatlayer (M-APP-001) shows Beatlayer's name, version and commit, its licence (GPL-3.0-or-later) with a link to its source for that version, and an Acknowledgements button, which opens the third-party notices bundled with the package (`THIRD-PARTY-NOTICES.txt`) in the system's viewer for text, through `app.open_acknowledgements` (`external`, with no readback: it opens a file outside Beatlayer). (WP-10.35) (S13)
+- **R27.** The bundled notices name every crate built into the shipped executables, the vendored Link sources and the bundled fonts, each with its licence's own text. (WP-10.35) (S13)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -83,3 +88,5 @@ This spec covers the shell's own behaviour. Where each pane and control sits is 
 | R22 | `crates/shell/tests/project_folders.rs`, `the_save_dialog_opens_in_the_sets_project_folder` | unit; the app passes the folder to the system dialog |
 | R23 | `crates/agent/tests/readback_runtime.rs`, `each_settings_command_reads_back_from_settings_state`, `settings_state_reports_secrets_only_as_stored_or_not`, `view_state_reads_back_the_view_toggles` | unit, through the agent API |
 | R24 | `crates/agent/tests/readback_runtime.rs`, `view_state_reads_back_the_detail_area` (`detail`, WP-6.27), `view_state_reads_back_the_second_window` (`second_window` and `focused_window`, WP-6.29); the other packages' fields come with their own | unit, through the agent API |
+| R25 | to be written in WP-10.16 and WP-10.17 | UI script; agent API |
+| R26, R27 | to be written in WP-10.35 (`cargo xtask notices` and its freshness check; the About dialog) | `xtask` test; UI script |

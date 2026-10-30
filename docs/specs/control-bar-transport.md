@@ -1,7 +1,7 @@
 # The Control Bar's transport: Play, Stop, and the position, loop, tempo, and time-signature fields
 
-- **Status:** implemented (R1 to R23 each have a passing test; the Link and EXT parts of R20 and R21 come with their own packages)
-- **Work packages:** WP-1.18; WP-7.31 (Tap Tempo and Start Transport With Tap Tempo, R18 to R23)
+- **Status:** partial (R1 to R23 each have a passing test; the Link and EXT parts of R20 and R21 come with their own packages; R24 to R26 are WP-9.13's)
+- **Work packages:** WP-1.18; WP-7.31 (Tap Tempo and Start Transport With Tap Tempo, R18 to R23); WP-9.13 (the Tempo Follower toggle, R24 to R26)
 - **Parity-matrix row:** Views and workflow: Control Bar, Status Bar; Interface placement and key bindings
 - **Checked against:** Live 12.4.3, through the UI parity reference recorded on 10 October 2026, and the Live 12 reference manual as that reference and [transport.md](transport.md) record it; for R18 to R23, the Live 12 reference manual (online edition), read 23 October 2026 (chapter 2, section 2.3.9; chapter 9, section 9.1.2; chapter 36, section 36.17; chapter 42, section 42.20).
 
@@ -31,6 +31,7 @@ This spec covers the section's controls, the Playback menu's transport items, an
 | S10 | Manual | Live 12 reference manual (online edition, read 23 October 2026), chapter 9, section 9.1.2 "Tapping the Tempo" | Clicking the Tap Tempo button once a beat makes the set's tempo follow the clicks; a key (Key Map Mode) or a MIDI note or controller such as a footswitch (MIDI Map Mode) can tap instead. The tempo responds at once, and grows more accurate the more taps there are. With Start Playback with Tap Tempo on in the Record, Warp & Launch settings, tapping also starts playback: in 4/4, four taps start the song at the tapped tempo. A start by tapping keeps apps connected through Link in phase |
 | S11 | Manual and observation | Same manual, chapter 2, section 2.3.9, and chapter 36, section 36.17 (Push 2's Tap Tempo button); [layout.md](../ui-parity/layout.md) L-CTRL-004 (the Tap Tempo button, x 54, 28 pt wide, always present) and L-SET-018 (Record, Warp & Launch's last section, Tap Tempo, holding Start Transport With Tap Tempo, On); [menus.md](../ui-parity/menus.md) M-PLAY-006c (Playback ▸ Options ▸ Start Transport With Tap Tempo, also in Settings) | Where the button and the setting are, the setting's name and its value on a new install; a controller's tap button counts in the same way |
 | S12 | Spec | [transport.md](transport.md) R1, R2, R21; [Link](link.md) R3, R7, R9; [MIDI clock](midi-clock.md) R17; [the shortcuts reference](../ui-parity/shortcuts.toml), which binds no key to Tap Tempo; [map modes](map-modes.md) R11 | Where Play starts and that a start lands on a frame of the engine clock; a tap's tempo going to a Link session and a tap start waiting for the session's phase; the Tempo field fixed while an incoming clock leads; no default key; the button mappable |
+| S13 | Manual | Live 12 reference manual, chapter 37, section 37.2.1; [layout.md](../ui-parity/layout.md) L-CTRL-002 to L-CTRL-004 | Show Tempo Follower Toggle adds a Follow toggle beside the other tempo controls; it's greyed out while the input can't be reached; the toggle sits after the Link toggle and before Tap |
 
 ## Rules
 
@@ -58,6 +59,10 @@ This spec covers the section's controls, the Playback menu's transport items, an
 - **R22.** `transport.tap_tempo` (`edit`, since it changes the set's tempo) takes an optional `at`, the tap's frame on the engine clock, and taps now without one; its result gives the run's taps, the tempo it set (none after the first tap) and the frame a start waits for, if one does. `transport.state` reports the same under `tap_tempo` (the run's taps, its tempo, and `start_at`) beside the tempo it shows (R12), and `settings.state` reports `start_transport_with_tap_tempo`; `settings.set_start_transport_with_tap_tempo` (`edit`, a kept preference, not an undo step) reads back there. A run ends for `transport.state` when a new one would start (R18). (S9)
 - **R23.** The Tap Tempo button is in the accessibility tree as a button named Tap Tempo, its description the run's tempo once it has one; Return presses it when it has the keyboard focus. It shows pressed while the mouse holds it. Live binds no key to it, and Beatlayer binds none (S12); it is key- and MIDI-mappable as a button ([map modes](map-modes.md) R11). (S10, S11, S12)
 
+- **R24.** The Tempo Follower toggle (L-CTRL-003) sits in the tempo group after the Link toggle and before Tap Tempo, and shows only while Settings' Show Tempo Follower Toggle is Show ([tempo follower](tempo-follower.md) R1, R2). It reads Follow, is lit while Tempo Follower is on, and a click runs `tempo_follower.set_enabled`. (S13)
+- **R25.** While Tempo Follower's input can't be reached, the toggle is greyed out and a click does nothing; its hover text and its description give the reason ([tempo follower](tempo-follower.md) R4). While it's on, the Tempo field shows the followed tempo and stays editable, a typed tempo being replaced by the next followed one. (S13; the Tempo field's behaviour is Beatlayer's own)
+- **R26.** In the accessibility tree the toggle is a switch named Tempo Follower, its value on or off, its description the followed tempo or the reason it's greyed out; Return switches it with focus. (S13; the name is Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -82,3 +87,4 @@ This spec covers the section's controls, the Playback menu's transport items, an
 | R21 | `crates/shell/tests/tap_tempo.rs`, `a_run_is_one_undo_step_and_an_edit_between_taps_starts_another`, `tap_tempo_is_refused_while_the_song_has_tempo_changes`; `crates/model/src/editor.rs`, `a_command_applied_into_the_newest_step_ends_that_step_with_its_result`; `crates/ui/tests/transport.rs`, `tap_tempo_is_disabled_with_a_reason_while_the_song_has_tempo_changes` | unit (undo), UI script (disabled with tempo changes) |
 | R22 | `crates/agent/tests/readback_runtime.rs`, `tap_tempo_and_its_setting_read_back`; `cargo xtask commands` | agent API, `cargo xtask commands` |
 | R23 | `crates/ui/tests/transport.rs`, `tap_tempo_taps_on_the_press_and_reaches_assistive_technology`, `tap_tempo_is_disabled_with_a_reason_while_the_song_has_tempo_changes` | UI script |
+| R24 to R26 | to be written in WP-9.13: `crates/ui/tests/tempo_follower.rs` | UI script |

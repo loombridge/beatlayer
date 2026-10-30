@@ -528,7 +528,9 @@ fn the_instant_test_surface_turns_messages_into_controls_in_order() {
         .iter()
         .map(|r| match &r.ask {
             Ask::Control(control) => (r.row, *control),
-            Ask::Command(_) | Ask::EndGesture(_) => panic!("a control, not a command"),
+            Ask::Command(_) | Ask::Rest(_) | Ask::EndGesture(_) => {
+                panic!("a control, not a command")
+            }
         })
         .collect();
     let value = |value| Hit::Value { value, full: 127 };

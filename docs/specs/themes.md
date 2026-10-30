@@ -1,7 +1,7 @@
 # Themes and colours: the Theme & Colors settings, theme files, and the colours of tracks, clips and scenes
 
-- **Status:** partial (R1 to R27 each have a passing test; R28 to R32 come with WP-6.50)
-- **Work packages:** WP-6.30 (the Theme and Customization sections and theme files: R1 to R13), WP-6.30b (the colours of tracks, clips and scenes, their palettes, and the Track and Clip Colors section: R14 to R27; R16's palettes in the Session clip's, the scene's and the Clip View title bar's context menus are WP-6.56's, [session-context-menus.md](session-context-menus.md)), WP-6.50 (a row of custom colours, and new tracks taking their group's colour, IMP-37: R28 to R32). The interface zoom on the Display & Input page is [interface-zoom.md](interface-zoom.md)'s; the colours of rack chains and macros are [racks.md](racks.md)'s and [macros.md](macros.md)'s, which take their swatches from R15
+- **Status:** partial (R1 to R27 each have a passing test; R28 to R32 come with WP-6.50; R33 to R35 with WP-10.25 and WP-10.27)
+- **Work packages:** WP-6.30 (the Theme and Customization sections and theme files: R1 to R13), WP-6.30b (the colours of tracks, clips and scenes, their palettes, and the Track and Clip Colors section: R14 to R27; R16's palettes in the Session clip's, the scene's and the Clip View title bar's context menus are WP-6.56's, [session-context-menus.md](session-context-menus.md)), WP-6.50 (a row of custom colours, and new tracks taking their group's colour, IMP-37: R28 to R32); WP-10.25 (the accessibility audit's contrast check: R33 to R35) and WP-10.27 (the theme colours it changes). The interface zoom on the Display & Input page is [interface-zoom.md](interface-zoom.md)'s; the colours of rack chains and macros are [racks.md](racks.md)'s and [macros.md](macros.md)'s, which take their swatches from R15; WP-9.2 names the four swatches the stem tracks take, one per part (Vocals, Drums, Bass, Others), matching the separation dialog's icons ([stem separation](stem-separation.md) R26)
 - **Parity-matrix row:** Views and workflow: Themes, light and dark, follow the OS, tone and contrast controls; [the improvements](../05-improvements.md), IMP-37 (a larger colour palette, and new tracks taking their group's colour)
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026; the Live 12 release notes, 12.0, 12.2 and 12.4.3; the UI parity reference's rows L-SET-002, L-SET-003, L-SET-011, C-TRACK-015 to C-TRACK-017, C-SCENE-014, C-CLIP-SES-018 and the Arrangement clip menu's colours, L-CLIP-002, L-MIX-009, recorded from Live 12.4.3 and 12.4.6 on macOS
 
@@ -88,6 +88,12 @@ This spec covers the Theme & Colors page, the theme files and how their colours 
 - **R31.** The sixth row and Custom Color… are reached from the keyboard and read by a screen reader as R22's palette is, as a seventh and eighth row of the grid. (S8, S9)
 - **R32.** A set saved before WP-6.50 loads unchanged, its colours all swatches; a saved colour that is neither a swatch from 0 to 69 nor a `#RRGGBB` colour doesn't load. (S9)
 
+**Contrast in every built-in theme (WP-10.25, WP-10.27)**
+
+- **R33.** Every built-in theme, light and dark, in each Tone, with High Contrast off and Customization at its defaults, meets WCAG 2.2's AA levels: text and dimmed text stand at a contrast ratio of at least 4.5:1 against every background token they are drawn on, and control outlines, the focus outline, separators that mark a control's edge, and what shows a control's state (a switch's on colour, a knob's or slider's value arc, a button's lit colour) at least 3:1 against what surrounds them. (S9)
+- **R34.** With High Contrast on, every built-in theme meets R5's levels in each Tone and appearance. (S9)
+- **R35.** The accessibility audit computes R33 and R34 from each built-in theme's tokens, over a table of the token pairs drawn together (each text token with the backgrounds it is drawn on, each control token with its surroundings), and fails on a pair below its level. A theme a person puts in the User Library isn't held to them; the audit reports its shortfalls. (S9)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -124,3 +130,4 @@ This spec covers the Theme & Colors page, the theme files and how their colours 
 | R30 | to be written in WP-6.50 | |
 | R31 | to be written in WP-6.50 | |
 | R32 | to be written in WP-6.50 | |
+| R33 to R35 | to be written in WP-10.25 (the computation on known colour pairs; every built-in theme's pairs); WP-10.27 changes the colours that fall short | unit; audit |

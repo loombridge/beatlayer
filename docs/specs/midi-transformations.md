@@ -1,7 +1,7 @@
 # MIDI Tools: the transformations
 
-- **Status:** partial (R1 to R22, and R43 for Chop's toggles, each have a passing test; R23 to R42, and R43 for the other tools' displays, are WP-6.13's and WP-6.13b's)
-- **Work packages:** WP-6.12 (what every transformation shares, Arpeggiate, Chop, Connect, Ornament and Quantize: R1 to R22); WP-6.13 (Recombine, Span, Strum, Time Warp and Velocity Shaper: R23 to R35); WP-6.13b (the MPE transformations, Glissando and LFO: R36 to R42); R43, the tools' displays, is built by each of the three packages for its own tools. The Transform panel, choosing a tool, what a tool acts on, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15)
+- **Status:** partial (R1 to R22, and R43 for Chop's toggles, each have a passing test; R23 to R42, and R43 for the other tools' displays, are WP-6.13's and WP-6.13b's; R44 to R53 are WP-9.39's)
+- **Work packages:** WP-6.12 (what every transformation shares, Arpeggiate, Chop, Connect, Ornament and Quantize: R1 to R22); WP-6.13 (Recombine, Span, Strum, Time Warp and Velocity Shaper: R23 to R35); WP-6.13b (the MPE transformations, Glissando and LFO: R36 to R42); R43, the tools' displays, is built by each of the three packages for its own tools. The Transform panel, choosing a tool, what a tool acts on, applying, undo, seeds and chains are [midi-tools.md](midi-tools.md)'s (WP-6.11, WP-6.15); WP-9.39 (the MIDI Tools Pack's transformations Retrigger and Slice Shuffler, as bundled extensions: R44 to R53)
 - **Parity-matrix row:** MIDI editing: "MIDI Tools, transformations (Arpeggiate, Chop, Connect, Glissando, LFO, Ornament, Quantize, Recombine, Span, Strum, Time Warp, Velocity Shaper)"
 - **Checked against:** the Live 12 reference manual (online edition), read 20 October 2026: chapter 11, sections 11.2.1 to 11.2.12, chapter 10, section 10.5.11, and chapter 8, section 8.6; the Live 12 release notes, 12.0.5 and 12.1; the UI parity reference's M-EDIT-035, M-EDIT-036, S-NOTE-011, S-NOTE-012 and S-SAMPLE-002
 
@@ -32,6 +32,7 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 | S15 | Reference | [menus.md](../ui-parity/menus.md) M-EDIT-035 (Quantize, ⌘U) and M-EDIT-036 (Quantize Settings..., ⇧⌘U); [shortcuts.toml](../ui-parity/shortcuts.toml) S-NOTE-011, S-NOTE-012 and S-SAMPLE-002 | Cmd+U quantises; Cmd+Shift+U opens the quantise settings, in the note editor and the Sample Editor |
 | S16 | Beatlayer | [midi-tools.md](midi-tools.md) R5, R8, R9, R13, R14, R16, R19 and R20; [arpeggiator.md](arpeggiator.md) R1 and its ranges; [midi-chord.md](midi-chord.md) (Strum's Tension law); [piano-roll.md](piano-roll.md) R3, R18 and R19; [warping.md](warping.md) R49 and R50; [scales.md](scales.md) R2; [midi-controller-data.md](midi-controller-data.md) R2 | The framework every tool here sits in; Arpeggiator's styles and ranges; the strum law Beatlayer already uses; the notes' order, quantise and its settings; audio quantise; how a key moves by degrees; a note's pressure points |
 | S17 | Beatlayer | [mpe.md](mpe.md) R1, R2, R4, R22 and R24 | A note's Pitch, Slide and Pressure envelopes, their ranges (Pitch ±48 semitones, Slide and Pressure 0 to 127) and breakpoints; how edits carry them; the MPE tab, where Pitch is drawn over the notes |
+| S18 | Product page | Ableton's MIDI Tools pack page (ableton.com/en/packs/midi-tools), read 30 October 2026 | Transformations: Retrigger repeats one, some or all of a clip's notes, with sliders shaping the repeats' velocity and timing, for fills and small changes; Slice Shuffler applies changes to separate parts of a clip, such as altering the timing of one quarter of the loop or adding randomness to it |
 
 ## Rules
 
@@ -228,6 +229,22 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 
 - **R43.** Besides its parameters' controls, a tool's panel draws Chop's Pattern and Emphasis toggles, Recombine's display of the chosen values as columns, Strum's Strum Position display, Time Warp's speed curve with its breakpoints, Velocity Shaper's envelope and LFO's curve, each from the tool's settings and each as the rules above say a gesture on it sets them (the look is Beatlayer's own). A display's gesture runs `midi_tool.set`, and an agent reads what a display shows in `midi_tool.state`. (S2, S8, S10, S11, S12, S5)
 
+**Retrigger (WP-9.39)**
+
+- **R44.** Retrigger is a transformation from a bundled extension ([MIDI Tools](midi-tools.md) R37) that splits each note it acts on into Count repeats (1 to 16) filling the note's length: one note, some (each note with a Chance from the seed, 0 to 100 %) or all of them, as the target says. (S18; the parameters are Beatlayer's own)
+- **R45.** Time Shape (−100 % to +100 %) bends the repeats' spacing: at 0 they're even, above 0 they speed up through the note, below 0 they slow down. (S18; the law is Beatlayer's own)
+- **R46.** Velocity Shape (−100 % to +100 %) ramps the repeats' velocities from the note's own: above 0 rising to it from a fraction, below 0 falling from it. (S18; the law is Beatlayer's own)
+- **R47.** Gate (10 % to 100 %) sets each repeat's length as a share of its space. (Beatlayer's own)
+- **R48.** Repeats keep the note's pitch, expressions (split at the repeats) and chance. (Beatlayer's own)
+
+**Slice Shuffler (WP-9.39)**
+
+- **R49.** Slice Shuffler is a transformation from a bundled extension that divides the range into Slices equal parts (2 to 16) and changes only the slices switched on in its display's toggles. (S18; the parameters are Beatlayer's own)
+- **R50.** For each switched-on slice, Shuffle (0 to 100 %) swaps its notes with another switched-on slice's, chosen from the seed, moving each note by the slices' distance. (S18; Beatlayer's own)
+- **R51.** Timing (−50 % to +50 % of a slice) shifts each switched-on slice's notes; Random Timing and Random Velocity add seeded changes up to their amounts. (S18)
+- **R52.** Reverse, a switch per slice, mirrors a slice's notes in time inside it. (Beatlayer's own)
+- **R53.** Notes pushed outside the range are dropped. (Beatlayer's own)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -275,3 +292,4 @@ Every tool here is applied as [midi-tools.md](midi-tools.md) says: to the select
 | R41 | `crates/midi-tools/tests/mpe_transformations.rs`, `r41_square_triangle_and_shape_follow_the_laws`, `r41_random_holds_a_value_a_cycle_then_slides_to_the_next`; `crates/shell/tests/midi_tools.rs`, `r41_lfo_random_draws_from_the_seed_and_reseed_runs_it_again` | unit |
 | R42 | `crates/midi-tools/tests/mpe_transformations.rs`, `r42_a_long_note_gets_at_most_512_breakpoints_from_its_start_to_its_end`, `r42_a_note_of_a_few_ticks_gets_only_its_two_ends_and_every_rate_is_a_period`, `r40_the_target_names_the_envelope_written_and_replaces_the_one_it_had` | unit |
 | R43 | Chop's toggles, WP-6.12's: `crates/ui/tests/midi_tools.rs`, `chops_pattern_and_emphasis_toggles_each_click_a_set_and_gaps_shows_a_dash`; `crates/shell/tests/midi_tools.rs`, `r8_r43_chops_gaps_write_its_pattern_and_a_toggle_click_is_a_set`. Recombine, Strum, Time Warp and Velocity Shaper, WP-6.13's: `crates/ui/tests/transformation_displays.rs`, `recombines_columns_rotate_by_dragging_and_the_step_buttons_by_one`, `strums_breakpoints_set_its_values_in_one_gesture_and_esc_puts_the_notes_back`, `dragging_strums_curve_sets_tension`, `time_warps_breakpoints_drag_to_set_time_and_speed_together`, `velocity_shapers_envelope_takes_clicks_to_add_and_drags_to_move`. LFO's curve, WP-6.13b's: `crates/ui/tests/midi_tools.rs`, `lfo_draws_its_curve_and_random_shows_a_reseed_button` | UI script, unit |
+| R44 to R53 | to be written in WP-9.39: tests under `extensions/midi-tools-pack/` on generated notes with fixed seeds | unit |

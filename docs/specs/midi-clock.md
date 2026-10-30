@@ -1,7 +1,7 @@
 # MIDI clock: sending and following MIDI clock, Song Position Pointer, sync delay, resync, and EXT
 
-- **Status:** partial (R1 to R27 each have a passing test; R28 waits for Tempo Follower)
-- **Work packages:** WP-7.11 (clock out, the output's sync options, resync and the sending lamp: R1 to R13); WP-7.12 (clock in, EXT, following an incoming clock's tempo and position, the receiving lamp: R14 to R28). The engine's way of playing at a followed tempo is [transport](transport.md) R24 to R26; a clip tempo leader under EXT is [warping](warping.md) R55; MIDI Timecode, the other kind of incoming sync, is [MIDI Timecode](midi-timecode.md); EXT with Link is [Link](link.md) R10
+- **Status:** partial (R1 to R27 each have a passing test; R28 is WP-9.13's)
+- **Work packages:** WP-7.11 (clock out, the output's sync options, resync and the sending lamp: R1 to R13); WP-7.12 (clock in, EXT, following an incoming clock's tempo and position, the receiving lamp: R14 to R28). The engine's way of playing at a followed tempo is [transport](transport.md) R24 to R26; a clip tempo leader under EXT is [warping](warping.md) R55; MIDI Timecode, the other kind of incoming sync, is [MIDI Timecode](midi-timecode.md); EXT with Link is [Link](link.md) R10; WP-9.13 (R28, with [Tempo Follower](tempo-follower.md) R5)
 - **Parity-matrix row:** Sync and control: MIDI Clock in and out with song position; sync delay per port
 - **Checked against:** the Live 12 reference manual (online edition), read 23 October 2026 (chapter 2 section 2.3.5, chapter 9 sections 9.1.1 and 9.1.4, chapter 17 sections 17.3.1.2 and 17.3.4, chapter 37 sections 37.2, 37.3, 37.3.1, 37.3.2 and 37.3.3, chapter 40); the MIDI 1.0 specification's System Real-Time messages and Song Position Pointer; the UI parity reference rows L-CTRL-002 to L-CTRL-007, L-CTRL-013, L-CTRL-026, L-SET-014 and M-OPT-007
 
@@ -85,7 +85,7 @@ This spec covers MIDI clock in both directions. The ports, their Track, Sync and
 - **R25.** Every action is a registered command with a schema, a description and a permission class, run by ID through the agent API: `transport.set_external_sync` (`edit`, as a kept preference), `transport.resync_external_hardware` (`read`, as the transport's commands are: it changes nothing in the set or on disk), `midi.set_show_resync_button` (`edit`, a preference), and `midi.set_port`'s sync options (`external`, as the switches are). `sync.state` (`read`) reports whether EXT is available and on, the leading input, whether usable clocks arrive, the followed tempo, whether clock is being sent, both lamps, and the counts (clocks received, set aside as glitches, sent, sent late); `transport.state` reports `external_sync`. Each command that isn't `read` names its readback. (S13)
 - **R26.** Estimating the tempo and following it run on the audio thread over a fixed number of past clocks held in storage made with the engine, without allocating, locking or blocking. (S13)
 - **R27.** In the accessibility tree the EXT switch is a switch named External Sync, its state on or off; the Resync External Hardware button a button of that name; the sync lamps two indicators named Sync Input and Sync Output, their value lit or dark. (Beatlayer's own names, but External Sync and Resync External Hardware, which are the manual's)
-- **R28.** Tempo Follower, when it comes, turns EXT off and disables it while it's on; clock out goes on. (S8)
+- **R28.** While Tempo Follower is on ([tempo follower](tempo-follower.md) R5), EXT is off and disabled, Options ▸ External Sync is disabled, and an incoming clock isn't followed, though its lamp still lights; clock out goes on, at the followed tempo (R9). Switching Tempo Follower off leaves EXT off. (S8)
 
 ## Tests
 
@@ -112,4 +112,4 @@ This spec covers MIDI clock in both directions. The ports, their Track, Sync and
 | R25 | `bl-agent` `midi_clock::the_sync_options_and_the_resync_button_are_set_by_id_and_read_back` (WP-7.11's commands), `midi_clock::ext_is_switched_by_id_and_the_clock_it_follows_is_read_back`, `ext_is_refused_while_no_input_has_sync_on` (WP-7.12's) | agent API, `cargo xtask commands` |
 | R26 | every `bl-engine` `clock_in` test runs its blocks under the allocation trap; `rtsan/tests/midi_clock.rs` `midi_clock_in_passes_under_rtsan` | real-time trap, RealtimeSanitizer |
 | R27 | `bl-ui` `midi_input::the_resync_button_shows_while_the_setting_is_on_and_leaves_room_in_the_tempo_group` (the Resync External Hardware button), `midi_input::the_ext_switch_shows_while_an_input_has_sync_on_and_switches_the_song_to_the_clock` (External Sync, Sync Input and Sync Output) | UI script |
-| R28 | to be written with Tempo Follower | |
+| R28 | to be written in WP-9.13: `crates/shell/tests/tempo_follower.rs`, EXT off and disabled while Follow is on and clock out going on | shell test, engine test |

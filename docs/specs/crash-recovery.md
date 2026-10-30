@@ -1,9 +1,9 @@
 # Crash recovery and Save Continuously
 
-- **Status:** implemented (every rule has a passing test)
-- **Work packages:** WP-1.11 (the journal, crash recovery, the Save Continuously option, and their commands: R1 to R11). The recovery prompt and the switch in the Settings window are the app shell's to draw (WP-1.7 and the Settings pages after it). WP-6.62 puts the service in the app: the shell journals every edit, the recovery prompt at launch, and the Save Continuously switch (R21 to R28). WP-6.39 builds the save history, which lists the save points and saved versions and restores them (R12 to R20).
+- **Status:** partial (R1 to R28 each have a passing test; R29 to R35 are Phase 10's)
+- **Work packages:** WP-1.11 (the journal, crash recovery, the Save Continuously option, and their commands: R1 to R11). The recovery prompt and the switch in the Settings window are the app shell's to draw (WP-1.7 and the Settings pages after it). WP-6.62 puts the service in the app: the shell journals every edit, the recovery prompt at launch, and the Save Continuously switch (R21 to R28). WP-6.39 builds the save history, which lists the save points and saved versions and restores them (R12 to R20). WP-10.16 puts the crash notice in the recovery dialog (R29, with [crash reports](crash-reports.md)); WP-10.14 writes down what survives a kill or a power cut at any moment and tests it with a soak (R30 to R35).
 - **Parity-matrix row:** Files and export: Crash recovery; (Beatlayer only) Save Continuously
-- **Checked against:** the Live 12 reference manual (online edition) and the Live 12 release notes, read on 10 October 2026; for R12 to R28, the manual's chapter 5 again and the Live 12 release notes, read 20 October 2026, and the UI parity reference's menus.md (M-FILE-008, M-VIEW-008) and layout.md (L-WIN-008, L-OTH-001) rows.
+- **Checked against:** the Live 12 reference manual (online edition) and the Live 12 release notes, read on 10 October 2026; for R12 to R28, the manual's chapter 5 again and the Live 12 release notes, read 20 October 2026, and the UI parity reference's menus.md (M-FILE-008, M-VIEW-008) and layout.md (L-WIN-008, L-OTH-001) rows; for R29 to R35, [crash reports](crash-reports.md), Apple's `fcntl` documentation (`F_FULLFSYNC`), the Linux manual pages for `fsync(2)` and `rename(2)`, and Microsoft's documentation of `FlushFileBuffers` and `MoveFileExW`, read 30 October 2026.
 
 ## The behaviour
 
@@ -26,6 +26,8 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | S7 | Beatlayer | [Improvements](../05-improvements.md), IMP-05; [the architecture](../02-architecture.md), "Project files and interop" | Save Continuously: every finished edit journalled to disk within a second, a history of save points, crash recovery always on whatever the setting, off by default as Live has no such mode. The journal sits beside the set, each entry naming the revision it follows; a normal save writes the next revision and retires the journal, so the set format stays as it is. A new setting goes where Live keeps related settings. |
 | S8 | Reference | [menus.md](../ui-parity/menus.md) M-FILE-008 (Open Live Set Backups) and M-VIEW-008 (Undo History); [layout.md](../ui-parity/layout.md) L-WIN-008 and L-OTH-001 (the Undo History opens in the right-hand area where the Learn View sits, newest action first, a click going back to it) | Where Live keeps a set's older versions and its history, and how its history lists them |
 | S9 | Beatlayer | [app-shell.md](app-shell.md) R3 and R19 (a save keeps the version it replaces in the project's `Backup` folder); [tracks-and-undo.md](tracks-and-undo.md); [accessibility.md](accessibility.md); [the architecture](../02-architecture.md), "Agent control" | A set's backups and where they are; every edit is one undo step; every control reaches assistive technology; every action is a registered command with a permission class and a readback |
+| S11 | Specification | Apple's `fcntl(2)` (`F_FULLFSYNC`: a flush through the drive's own cache, which `fsync` doesn't ask for on macOS); Linux's `fsync(2)` (a file's data and, for a folder, its entries reach the device) and `rename(2)`; Microsoft's `FlushFileBuffers` and `MoveFileExW` (`MOVEFILE_WRITE_THROUGH`) | What makes a write, and a rename, survive a power cut on each platform |
+| S12 | Spec | [Crash reports](crash-reports.md) R12 and R13 | The crash notice and what it offers |
 | S10 | Beatlayer | [app-shell.md](app-shell.md) R1, R4 and R23; [layout.md](../ui-parity/layout.md) L-SET-015 (File & Folder); [accessibility.md](accessibility.md); [the architecture](../02-architecture.md), "Processes and threads", "Agent control" and "Testing" | The set the app starts with; New, Open and Quit ask about unsaved changes and an agent's command never asks; `settings.state` reports the preferences; the File & Folder page's rows; every dialog reaches assistive technology and the keyboard; nothing slow runs on the UI or audio thread; every action is a registered command reachable through the agent API |
 
 ## Rules
@@ -65,6 +67,16 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 - **R27.** When the journal can't be written (the disk full, the folder gone), the Status Bar says once that edits aren't being kept for recovery, the app goes on working, and each later edit tries again; the message goes when a write succeeds. The wording is Beatlayer's own. (S7)
 - **R28.** A session killed at any moment while the app runs with a set open is offered at the next launch with every edit the app journalled before it was killed, recovered through the dialog to the same song as the library's recovery gives (R2, R3). (S6, S7)
 
+**The crash notice, and durability (Phase 10)**
+
+- **R29.** When reports from the last session wait for the person's answer ([crash reports](crash-reports.md) R12), the recovery dialog (R22) opens with the crash notice at its top, above the sets to recover; with no set to recover, a dialog of the same form holds the notice alone. Recover, Discard and Later act as R22 says whatever the notice's answer, and the notice's buttons act as crash reports R13 says whatever happens to the sets. Esc does what Later does for the sets and what Don't Send does for the notice. (WP-10.16) (S10, S12)
+- **R30.** An edit is on disk when the journal says it has flushed it: its frame written and flushed to the device (R32). A session killed at any moment, in the middle of a journal write included, is recovered with every edit on disk at the moment it was killed (R28). (WP-10.14) (S6, S7, S11)
+- **R31.** After a power cut, recovery gives the set as it was after the last edit on disk: a frame cut short or damaged at the journal's end is ignored, and every frame before it is recovered (as the journal's own choices below say). A set file being saved when the power went is either the old revision or the new one, whole, never a mixture, and the save it replaced is in the `Backup` folder. (WP-10.14) (S1, S7, S11)
+- **R32.** Each journal frame, each set file, each backup and each project file Beatlayer writes is flushed to the device before it counts as written: with a full flush through the drive's cache on macOS (`F_FULLFSYNC`), `fsync` on Linux, and `FlushFileBuffers` on Windows. (WP-10.14) (S11)
+- **R33.** A file written beside its place and renamed into it (a set's save, a recovery index) counts as written once the rename itself is on the device: on macOS and Linux the folder is flushed after the rename; on Windows the rename is made with `MOVEFILE_WRITE_THROUGH`. (WP-10.14) (S11)
+- **R34.** The query tool's `set` object reports `journal.durable_revision`, the newest edit the journal has on disk, so a test, or an agent, reads what a crash would keep. (WP-10.14) (S7)
+- **R35.** `bl-cli soak --minutes N --seed S` drives Beatlayer headless in a child process through the agent API with seeded edits, saves, undo and redo, and Save Continuously on and off; kills it at random moments, during writes too; cuts its power through a test-only file layer that drops what wasn't flushed and cuts the last write short; and checks after each relaunch that the recovered set is exactly the set at the last durable revision. A failing seed is printed and gives the same failure when run again. The nightly workflow runs it for an hour on each platform. (WP-10.14) (S7)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -96,6 +108,8 @@ This spec covers when edits reach the disk, when a set is offered, what recoveri
 | R26 | `crates/agent/tests/recovery.rs`, `an_agent_recovers_a_set_a_crash_left`; `crates/shell/tests/recovery.rs`, `discarding_a_recovery_leaves_nothing_to_offer` | integration |
 | R27 | `crates/shell/tests/recovery.rs`, `a_read_only_recovery_folder_says_so_once_and_the_set_still_edits` | integration |
 | R28 | `crates/shell/tests/recovery.rs`, `a_killed_session_is_offered_and_recovered` | integration |
+| R29 | to be written in WP-10.16 | UI script |
+| R30 to R35 | to be written in WP-10.14 (the soak for an hour with a fixed seed on each platform; a test hook that skips the folder flush is caught; a failing seed reruns to the same failure) | integration, soak |
 
 ## Beatlayer's own choices
 

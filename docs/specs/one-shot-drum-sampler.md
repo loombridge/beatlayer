@@ -1,7 +1,7 @@
 # The one-shot drum sampler
 
-- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; similar-sample swapping, Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet")
-- **Work packages:** WP-5.18; WP-6.9 (tuning systems: R25)
+- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet"; similar-sample swapping, R26 to R28, is WP-9.10's)
+- **Work packages:** WP-5.18; WP-6.9 (tuning systems: R25); WP-9.10 (similar sample swapping: R26 to R28, with [sound similarity](sound-similarity.md) R20 to R30)
 - **Parity-matrix row:** Instruments: Impulse, Drum Sampler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.4 "Drum Sampler" (31.4.1 to 31.4.5), read 17 October 2026
 
@@ -64,6 +64,10 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 - **R24.** Every parameter is automatable and modulatable (rule G2), and every change a control makes is one undo step named for the parameter (the device framework spec, R3 and R18), saved with the set. (S6, S7)
 - **R25.** On a track that plays the set's tuning ([tunings.md](tunings.md) R12, R14; a Drum Rack's track never does), a voice plays at the pitch R2 gives with its key's tuned pitch in place of the key, C3's twelve-step pitch still playing the sample at its own pitch, Transpose and Detune adding to it; the playback effects that follow the note's pitch (R12 to R15) and Envelope Follows Pitch follow the tuned pitch, and a per-note bend (R19) moves the note by steps of the tuning ([tunings.md](tunings.md) R13). (S11, S12)
 
+- **R26.** Drum Sampler's sample is swapped for the next or previous similar sample from its display's Previous Similar and Next Similar buttons and with Cmd-Right and Cmd-Left, keeping every parameter, as [sound similarity](sound-similarity.md) R21 and R22 say. (S1)
+- **R27.** The display's menu holds Show Similar Files, Save as Similarity Reference and Return to Reference, which run [sound similarity](sound-similarity.md) R12 with the device's reference, `device.set_similarity_reference` and `device.return_to_reference`. (S1)
+- **R28.** The reference saves with the set and with Drum Sampler's presets, and reads back in the query tool's `device`. (S1)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -93,10 +97,10 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 | R23 | `crates/shell/tests/drum_sampler.rs`, `swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step`, `a_strike_inside_a_rack_chain_swaps_in_place`; `crates/ui/tests/drum_sampler.rs`, `the_menu_ends_with_strikes_own_items_and_they_run_their_commands`; `crates/cli/tests/agent.rs`, `an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id` | unit, UI script, MCP script |
 | R24 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_is_modulatable_to_the_frame` | real-time trap |
 | R25 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_per_note_bend_moves_by_steps_of_the_tuning`; `crates/devices/tests/tuning_engine.rs`, `a_drum_racks_track_renders_as_without_a_tuning` | unit |
+| R26 to R28 | to be written in WP-9.10: `crates/shell/tests/sample_swap.rs` | shell test, UI script |
 
 ## Not built yet
 
-- Swapping to similar samples from the display (S1) needs the browser's similarity search, which is Phase 9 in the parity matrix. The display's Show Similar Files, Return to Reference and Save as Similarity Reference go with it.
 - The sample display (a waveform, Start and Length handles) and the effects' X-Y pad are not drawn: the generic layout has no X-Y pad (the reverb spec's note on its X-Y controller is the same), so FX1 and FX2 are knobs, and Drum Sampler's display cell is left black for them.
 - Save as Default Pad waits for the Drum Rack's pads (T145); its menu item is disabled and says so.
 - A double-click on a sample in the browser still adds it to the Arrangement (the browser spec, R14); loading the selected sample into a Drum Sampler with a key or double-click is not built, as for Simpler (the sampler spec, R11), because where Live puts that path is not recorded.

@@ -1,7 +1,7 @@
 # Link: tempo, phase, and start and stop shared with other apps on the network
 
 - **Status:** draft
-- **Work packages:** WP-7.14 (Link in the engine: R1 to R16); WP-7.15 (Link in the app: R17 to R25). Link Audio is [Link Audio](link-audio.md)'s; the engine's way of playing at a followed tempo is [transport](transport.md) R24 to R26; the count-in under Link is [metronome](metronome.md) R10
+- **Work packages:** WP-7.14 (Link in the engine: R1 to R16); WP-7.15 (Link in the app: R17 to R25). Link Audio is [Link Audio](link-audio.md)'s; the engine's way of playing at a followed tempo is [transport](transport.md) R24 to R26; the count-in under Link is [metronome](metronome.md) R10; WP-9.13 (Tempo Follower leading the session: R26)
 - **Parity-matrix row:** Sync and control: Ableton Link: tempo, phase, Start Stop Sync
 - **Checked against:** the Live 12 reference manual (online edition), read 23 October 2026 (chapter 2 section 2.3.4, chapter 9 sections 9.1.1 and 9.1.2, chapter 19 section 19.6, chapter 37 sections 37.1, 37.1.1 and 37.1.2); the Link 4.1.1 public repository's README and test plan; the UI parity reference rows L-CTRL-002, L-CTRL-005, L-CTRL-010, L-CTRL-013, L-SET-002, L-SET-013 and M-PLAY-006d
 
@@ -59,6 +59,10 @@ Beatlayer builds the open-source Link library, version 4.1.1, from source, and t
 - **R24.** Every control runs a registered command, so an agent reaches each through the agent API with the person's effect: `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle` (`edit`, a kept preference) and the Link Audio commands; `link.state` reads back each. (S8)
 - **R25.** The toggle, its menu and the progress bar redraw from what the engine and Link last published, without waiting on either. (S8)
 
+### Tempo Follower (WP-9.13)
+
+- **R26.** With Tempo Follower on ([tempo follower](tempo-follower.md) R6, R20), the followed tempo is Beatlayer's tempo for the session: each change it makes goes to the session as a change of Beatlayer's own (R3), and a peer's change is played until the next followed change replaces it. The session's phase still decides when a start of Beatlayer's own happens (R7). (S1)
+
 ## Tests
 
 | Rule | Test | Kind |
@@ -77,3 +81,4 @@ Beatlayer builds the open-source Link library, version 4.1.1, from source, and t
 | R22 | `bl-ui` `link::the_progress_bar_fills_with_the_phase_while_stopped_with_a_peer` | UI script |
 | R23 | `bl-ui` `link::a_click_switches_link_and_the_toggle_reads_the_peers_as_they_come_and_go` (the switch and its value), `the_menu_ticks_its_items_runs_their_commands_and_configures_link` (the menu button), `the_progress_bar_fills_with_the_phase_while_stopped_with_a_peer` (the progress indicator) | UI script |
 | R24, R25 | `bl-agent` `link::link_set_show_toggle_is_set_by_id_and_read_back`; `bl-ui` `accessibility::reachability::every_m1_command_is_reachable_from_the_keyboard`, `link::the_window_asks_for_a_frame_while_the_bar_shows`; `cargo xtask commands` | agent API, UI script |
+| R26 | to be written in WP-9.13: `crates/engine/tests/tempo_follower.rs` with a stand-in session | engine test |

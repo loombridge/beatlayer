@@ -1,0 +1,87 @@
+# Audio to MIDI: Convert Harmony, Melody and Drums to New MIDI Track
+
+- **Status:** draft
+- **Work packages:** WP-9.5 (pitch transcription for Melody and Harmony, the clean-up and the accuracy benchmark: R13 to R19, R23, R24); WP-9.6 (drum transcription: R20 to R22, and R23 and R24 for Drums); WP-9.7 (the commands, the menus, the new track, its instrument and its clip, transient markers as hints, progress, Cancel and undo: R1 to R12, R25 to R27). Slice to New MIDI Track, the fourth command in the group, is [slice to MIDI](slice-to-midi.md)'s; the packages a first conversion downloads are [stem separation](stem-separation.md) R15 to R21's; the clip's region and transient markers are [warping](warping.md)'s
+- **Parity-matrix row:** Audio clips and warping: Convert Drums, Melody, or Harmony to New MIDI Track
+- **Checked against:** the Live 12 reference manual (online edition), chapter 13, read 30 October 2026; the UI parity reference rows C-CLIP-ARR-027a to 027e, C-CLIP-SES-019 and M-CREATE-012 to 014
+
+## The behaviour
+
+Three commands turn the audio of one clip into notes on a new MIDI track. Convert Harmony finds the pitches of polyphonic audio, chords included, and the new track plays them with a piano sound. Convert Melody finds the pitches of monophonic audio, a voice, a whistle or a solo instrument, and the new track plays them with a synth sound whose Synth to Piano macro moves it towards an electric piano. Convert Drums finds the hits of unpitched, percussive audio, and classes each as a kick, a snare or a hi-hat, and the new track's Drum Rack plays them. The notes don't play the original audio; the person can swap the instrument for any other.
+
+The commands sit in an audio clip's menu in both views and in the Create menu. The new track goes after the clip's track, and its clip sits where the source clip is, in time with it through the source's warping. The clip's transient markers mark where notes divide, so moving, adding or deleting them before converting tunes the result. Conversion runs on this computer in the background with a progress bar and Cancel, and is one undo step.
+
+Beatlayer goes further than Live in how clean the result is (IMP-06): fragments of a note are merged, confident onsets are snapped to the grid, velocity follows the strength of each onset, and the accuracy of each kind is measured against generated material with known notes, with targets a release has to meet. Melody and Harmony run an open pitch-transcription network through ONNX Runtime, downloaded on first use; Drums runs Beatlayer's own small classifier, whose weights are made by a script in the repository.
+
+## Sources
+
+| ID | Kind | Source | What it shows |
+|---|---|---|---|
+| S1 | Manual | Live 12 reference manual, chapter 13 "Converting Audio to MIDI", introduction | With an audio clip selected, four conversion commands are in the Create menu and the clip's menu: Slice, and the three Convert commands |
+| S2 | Manual | The same chapter, section 13.2 "Convert Harmony to New MIDI Track" | Pitches are found in polyphonic audio and put in a clip on a new MIDI track, which comes with an Instrument Rack playing a piano sound; the clip doesn't play the original audio; recordings of guitar or piano and finished music both work |
+| S3 | Manual | The same chapter, section 13.3 "Convert Melody to New MIDI Track" | Pitches are found in monophonic audio and put in a clip on a new MIDI track, with an Instrument Rack playing a synth sound whose Synth to Piano macro moves between an analogue-style synth and an electric piano; singing, whistling and solo instruments work |
+| S4 | Manual | The same chapter, section 13.4 "Convert Drums to New MIDI Track" | Rhythms are taken from unpitched percussive audio, and kick, snare and hi-hat sounds are identified; the notes go in a clip on a new MIDI track, mapped to a preloaded Drum Rack; the clip's transient markers can be adjusted first to control where notes land; breakbeats, beatboxing and tapping work |
+| S5 | Manual | The same chapter, section 13.5 "Optimizing for Better Conversion Quality" | Transient markers set the divisions between notes, and adding, moving or deleting them tunes the result; clear attacks and isolated instruments convert best, Convert Drums best on drums alone; uncompressed files are preferred |
+| S6 | Observation | Live 12 on macOS, 18 October 2026, recorded in [menus.md](../ui-parity/menus.md) C-CLIP-ARR-027a to 027e and C-CLIP-ARR-028 | An Arrangement audio clip's menu: after a separator below Reverse Clip(s), Slice to New MIDI Track, Convert Harmony to New MIDI Track, Convert Melody to New MIDI Track, Convert Drums to New MIDI Track, Separate Stems to New Audio Tracks, then the clip colours |
+| S7 | Reference | [menus.md](../ui-parity/menus.md) C-CLIP-SES-019 and M-CREATE-012 to 014; [session context menus](session-context-menus.md) R2 | The Session clip menu's place for the commands, and the Create menu's items |
+| S8 | Paper | Bittner, Bosch, Rubinstein, Meseguer-Brocal and Ewert, "A Lightweight Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch Estimation", ICASSP 2022, with its published code and model (Apache-2.0) | A small network giving onset, note and pitch posteriorgrams at 22,050 Hz in frames of 256 samples over 88 piano keys, and a step that turns them into notes |
+| S9 | Paper | Raffel, McFee, Humphrey, Salamon, Nieto, Liang and Ellis, "mir_eval: A Transparent Implementation of Common MIR Metrics", ISMIR 2014 | Note-level transcription metrics: a note matches when its onset is within 50 ms and its pitch within 50 cents; precision, recall and F-measure over matched notes |
+| S10 | Paper | Wu, Dittmar, Southall, Vogl, Widmer, Hockman, Müller and Lerch, "A Review of Automatic Drum Transcription", IEEE/ACM Transactions on Audio, Speech and Language Processing, 2018; Böck and Widmer, "Maximum Filter Vibrato Suppression for Onset Detection", DAFx 2013 | Drum transcription as onset detection with classification into kick, snare and hi-hat, and its evaluation per class; an onset detector robust to vibrato |
+| S11 | Beatlayer | [05-improvements.md](../05-improvements.md) IMP-06; the architecture's "Media and warping" (the ML row) and "Agent control" (D17) | Clean-up and measured accuracy as Beatlayer's improvement; ONNX Runtime loaded at run time from packages downloaded on first use; every action a registered command with a readback |
+
+## Rules
+
+### The commands (WP-9.7)
+
+- **R1.** Convert Harmony to New MIDI Track, Convert Melody to New MIDI Track and Convert Drums to New MIDI Track are in an Arrangement audio clip's menu after Slice to New MIDI Track (C-CLIP-ARR-027a to 027c), in a Session audio clip's menu in the same order after Slice to New MIDI Track (C-CLIP-SES-019), and in the Create menu (M-CREATE-012 to 014). Each is enabled with exactly one audio clip selected, in either view, and disabled otherwise; a MIDI clip's menu doesn't show them. (S1, S6, S7)
+- **R2.** Each item runs `audio_to_midi.convert` (`edit`) with the clip and its `kind`: `harmony`, `melody` or `drums`. The first time Harmony or Melody runs without its packages (ONNX Runtime and the pitch model), the command opens the package page ([stem separation](stem-separation.md) R16) for them instead, and runs once they're installed. Drums needs no download. (S11; Beatlayer's own)
+- **R3.** A conversion runs in the background with a progress window over the main window: the command's name, a progress bar showing the share of the audio done, and Cancel. Cancel, or Esc, stops it within one analysis window and changes nothing in the set. Playback goes on while it runs. (S11; Beatlayer's own)
+- **R4.** The audio converted is the clip's file over the same region as stem separation's ([stem separation](stem-separation.md) R8): from the Start marker to the End marker, or with the loop on, from the earlier of the Start marker and the loop's start to the later of the End marker and the loop's end. (S1; Beatlayer's own)
+- **R5.** The new MIDI track goes directly after the clip's track, at the same level (inside the same group, if the clip's track is in one), and is selected. It's named after the source clip (or its file, if the clip has no name) followed by the kind: "Harmony", "Melody" or "Drums". (S2, S3, S4; the name and place are Beatlayer's own)
+- **R6.** In the Arrangement, the new MIDI clip starts where the source clip starts and is as long, with the source's loop on or off, its loop brace and its Start and End markers at the same song positions, its name and its colour. In the Session View it goes in the new track's slot in the source clip's scene, with the source's launch settings, name and colour. (S2, S3, S4; Beatlayer's own)
+- **R7.** A note found at time *t* in the clip's file starts at the beat the source clip plays *t*, through its warp markers ([warping](warping.md) R12 to R19); an unwarped clip maps file time to beats at the set's tempo from the clip's Start marker. A note's end maps the same way. Notes outside the region (R4) are dropped. Played together, the new clip's notes start on the frames on which the source clip plays their onsets, at any block size. (S2, S3, S4; Beatlayer's own)
+- **R8.** The clip's transient markers that the person placed, moved or kept by hand ([warping](warping.md) R20 to R28) are hints that win: an onset found within 30 ms of such a marker moves to it, and in Melody and Harmony a held note that crosses such a marker by more than 30 ms is split there. Transients Beatlayer found itself are used only as the analysis finds them. (S4, S5; the 30 ms and what wins are Beatlayer's own)
+- **R9.** The new track holds an instrument chosen by the kind, from Beatlayer's own presets of its own devices: for Harmony, an Instrument Rack named Harmony playing a keys sound; for Melody, an Instrument Rack named Melody whose first macro, Synth to Piano, moves its sound from a synth to an electric piano; for Drums, a Drum Rack named Drums with a kick on note 36 (C1), a snare on 38 (D1) and a closed hi-hat on 42 (F#1). Once Beatlayer's library is installed ([core library](core-library.md)), Harmony's rack plays the library's piano. (S2, S3, S4; the presets, their sounds and the pad notes are Beatlayer's own)
+- **R10.** The new track, its instrument, its clip and its notes are one undo step named after the command, such as "Convert Melody to New MIDI Track". The source clip is left as it is. (S2; Beatlayer's own)
+- **R11.** `audio_to_midi.convert`'s result names the new track and clip; `song` `tracks` and `clip` read them and the notes back. `audio_to_midi.status` (`read`) gives a running conversion's kind, clip and progress, or none; `audio_to_midi.cancel` (`read`) cancels it. Under `bl-cli mcp` a conversion lands as stem separation's does ([stem separation](stem-separation.md) R14). (S11)
+- **R12.** A conversion never runs on the audio thread or the main thread; the main window keeps drawing while it runs. (S11)
+
+### Pitch transcription (WP-9.5)
+
+- **R13.** Melody and Harmony resample the region to 22,050 Hz mono and run the pitch network over windows of two seconds overlapping by a quarter, its frames joined back with triangular weights, then turn its onset, note and pitch posteriorgrams into notes by the network's published note step: a note starts where onset and note activity pass their thresholds and ends where note activity falls below its own for longer than 11 frames, its pitch the key whose activity is highest. Pitches are within the network's range, A0 to C8. (S8)
+- **R14.** Harmony keeps every note the step finds, any number at once. Melody keeps one at a time: where two would sound together, the louder one at each frame wins, and a note ends when the next one starts. (S2, S3; the monophonic rule is Beatlayer's own)
+- **R15.** The clean-up runs on every kind's notes in this order: notes of one pitch separated by a gap shorter than 30 ms are merged into one; notes shorter than 40 ms are dropped; an onset whose confidence is at least 0.8 and which lies within 20 ms of a line of the clip's grid at a sixteenth note moves onto it; no two notes of one pitch overlap, the earlier ending where the later starts. (S11; the numbers are Beatlayer's own)
+- **R16.** Each note's velocity comes from its onset's strength: the peak onset activity at its start, mapped to 1 to 127 by a logarithmic law over the conversion's own range of strengths, so the strongest onset gets 127 and one a tenth as strong gets about 64. (S11; the law is Beatlayer's own)
+- **R17.** The same audio, kind, warp map and transient markers give the same notes on every run and computer: the network runs with fixed thread counts and its results are rounded to four decimal places before the note step. (S11; Beatlayer's own)
+- **R18.** The pitch network and ONNX Runtime are packages of the Packages manager ([stem separation](stem-separation.md) R15), in the roles `onnx-runtime` and `pitch-model`, shared with every feature that uses them. (S8, S11)
+- **R19.** A run that finds no notes makes the track and an empty clip, as one undo step, and says so in the result. (Beatlayer's own)
+
+### Drum transcription (WP-9.6)
+
+- **R20.** Drums finds onsets in the region with a spectral-flux onset detector with a maximum filter across frequency, at 100 frames a second, peaks at least 30 ms apart. Each onset is described by its energy in bands below 150 Hz, 150 Hz to 1 kHz, 1 to 5 kHz and above 5 kHz, its spectral centroid, flatness and decay over the first 80 ms, and classed as kick, snare and hi-hat, each with its own confidence, so one onset can be several at once. A class is kept at confidence 0.5 or more. (S4, S10; the features and threshold are Beatlayer's own)
+- **R21.** The classifier is Beatlayer's own: a small network or logistic model whose weights are a data file beside the script that trains them, `tools/drum-classifier/train.py`, from renders of Beatlayer's own drum devices playing generated sounds with varied tuning, decay, level, noise and room, from a fixed seed. Running the script gives the committed weights exactly. No third-party audio is used. (S11; Beatlayer's own)
+- **R22.** Each drum note is a sixteenth note long at the set's tempo, on its class's pad note (R9), with its velocity from its onset's strength (R16). The clean-up's merging and minimum length (R15) don't apply to drums; grid snapping does. (S4; Beatlayer's own)
+
+### Accuracy (WP-9.5, WP-9.6)
+
+- **R23.** `cargo xtask transcribe-bench` renders seeded phrases through Beatlayer's own instruments (Drift, Sampler playing generated waveforms, Drum Sampler and Impulse playing generated drum sounds), each with known notes, in three variants: clean, with a generated room, and with noise at 20 dB below the signal. It converts each and scores the notes by S9's definitions, onsets within 50 ms and pitches within 50 cents, offsets reported but not scored. The targets are: Melody on monophonic phrases, onset F-measure at least 0.90; Harmony on chords and piano-like voicings, at least 0.80; Drums on generated breaks, at least 0.90 for each of kick, snare and hi-hat, in each variant. The bench prints a table of precision, recall and F-measure per kind and variant, and fails when a target isn't met. (S9, S11; the material and targets are Beatlayer's own)
+- **R24.** The bench also reports, without a target, Drums on breaks mixed with a bass line and chords, and every kind on an open labelled set outside the repository when `BL_TRANSCRIBE_CORPUS` names its folder. (S5, S11)
+
+### Commands, readback and assistive technology (WP-9.7)
+
+- **R25.** Every item reaches assistive technology with its label and whether it's enabled; the progress window is a dialog named after the command, its bar a progress indicator with its share, and Cancel a button. (S11)
+- **R26.** `audio_to_midi.convert` is refused, with the reason, for a MIDI clip, a missing file, or while another conversion or a stem separation runs; a refusal changes nothing. (S11; Beatlayer's own)
+- **R27.** `cargo xtask commands` lists `audio_to_midi.convert`, `audio_to_midi.status` and `audio_to_midi.cancel`, each with its schema, description, permission class and readback. (S11)
+
+## Tests
+
+| Rule | Test | Kind |
+|---|---|---|
+| R1 | to be written in WP-9.7: `crates/shell-spec/src/context_menus.rs`, the Convert rows live in both menus; `crates/ui/tests/audio_to_midi.rs`, each menu row and Create item opens the conversion | unit, UI script |
+| R2, R3 | to be written in WP-9.7: `crates/shell/tests/audio_to_midi.rs`, the first run opens the package page; Cancel changes nothing | shell test |
+| R4 to R10 | to be written in WP-9.7: `crates/shell/tests/audio_to_midi.rs`, a stand-in transcription result for each kind in both views, warped and unwarped, at block sizes 1, 64 and 512; transient markers as hints; one undo step | shell test, engine render |
+| R11, R12 | to be written in WP-9.7: `crates/agent/tests/audio_to_midi.rs` | agent API |
+| R13 to R19 | to be written in WP-9.5: `crates/analysis/src/transcribe.rs`, each clean-up rule on hand-made posteriorgrams; a repeat run is identical | unit |
+| R20 to R22 | to be written in WP-9.6: `crates/analysis/src/drums.rs`; `tools/drum-classifier` reproduces its weights | unit |
+| R23, R24 | to be written in WP-9.5 and WP-9.6: `cargo xtask transcribe-bench` | benchmark |
+| R25 to R27 | to be written in WP-9.7; `cargo xtask commands` | UI script, agent API |

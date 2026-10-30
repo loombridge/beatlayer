@@ -867,6 +867,7 @@ dependencies = [
  "bl-agent",
  "bl-analysis",
  "bl-audio-io",
+ "bl-commands",
  "bl-core",
  "bl-devices",
  "bl-media",

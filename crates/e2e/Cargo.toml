@@ -16,6 +16,8 @@ bl-agent.workspace = true
 bl-shell.workspace = true
 # The null device paced by hand, and the cable that copies what it played.
 bl-audio-io.workspace = true
+# The command registry and its readback table, which the command sweep reads.
+bl-commands.workspace = true
 bl-core.workspace = true
 bl-model.workspace = true
 # The native devices' type IDs and parameters, which the fixture and the

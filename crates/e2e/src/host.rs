@@ -388,7 +388,10 @@ impl Host {
     /// ([`testing::settle`]), then runs a frame.
     pub fn settle(&mut self) {
         let app = self.client.transport();
-        testing::settle(&app.control, &mut app.shell);
+        // With the audio engine switched off there is no stream to settle.
+        if app.shell.audio().is_running() {
+            testing::settle(&app.control, &mut app.shell);
+        }
         self.pump();
     }
 

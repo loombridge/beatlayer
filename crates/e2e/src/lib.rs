@@ -15,6 +15,7 @@
 //! | [`audio`] | [`Audio`], and measurements of it: levels, loudness, alignment |
 //! | [`fixture`] | The rich set, built through the agent API, and the [`Ids`] it made |
 //! | [`known`] | The known-failures ratchet over `tests/known-failures.toml` |
+//! | [`schema`] | Arguments for any command, made from its JSON Schema and a set's objects |
 //!
 //! Both hosts implement [`Driver`], so a scenario written against it runs
 //! in either.
@@ -28,6 +29,7 @@ pub mod capture;
 pub mod fixture;
 pub mod host;
 pub mod known;
+pub mod schema;
 pub mod stdio_host;
 
 use std::path::{Path, PathBuf};
@@ -123,10 +125,51 @@ pub fn full_depth() -> bool {
     }
 }
 
-/// The repository's test fixtures folder, `tests/fixtures`.
+thread_local! {
+    /// The copy of the fixtures [`copy_fixtures`] made for this thread.
+    static FIXTURES: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The test fixtures folder: the repository's `tests/fixtures`, or the copy
+/// [`copy_fixtures`] made for this thread.
 #[must_use]
 pub fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+    FIXTURES
+        .with(|copy| copy.borrow().clone())
+        .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures"))
+}
+
+/// Copies the repository's fixture folders named in `folders` (such as
+/// `drums` and `media`) into `dir`, and makes [`fixtures`], and so
+/// [`fixture::media`] and [`fixture::drums`], name the copies on this
+/// thread from now on: for a test whose commands may write beside a file
+/// they are handed, or delete it, so the repository's own files stay as
+/// they are. Returns `dir`.
+///
+/// # Panics
+///
+/// If a folder doesn't copy.
+pub fn copy_fixtures(dir: &Path, folders: &[&str]) -> PathBuf {
+    fn copy(from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(to)?;
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let target = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                copy(&entry.path(), &target)?;
+            } else {
+                std::fs::copy(entry.path(), target)?;
+            }
+        }
+        Ok(())
+    }
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    for folder in folders {
+        copy(&repository.join(folder), &dir.join(folder))
+            .unwrap_or_else(|error| panic!("the {folder} fixtures didn't copy: {error}"));
+    }
+    FIXTURES.with(|copy| *copy.borrow_mut() = Some(dir.to_path_buf()));
+    dir.to_path_buf()
 }
 
 /// Where two documents differ, as JSON pointers into their serialised form

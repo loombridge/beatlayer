@@ -29,3 +29,33 @@ suite = "smoke"
 key = "export.audio in the app, allowed by the person"
 property = "the call answers with the export's result"
 description = "With the app's window open and the agent not autonomous, an agent's export.audio asks the person first; once allowed, the call fails with \"the call asked twice\" although the export starts, runs and writes its file. The agent never hears the result. Without a window (bl-cli mcp), or with autonomous mode on, the same call answers."
+
+[[failure]]
+suite = "commands"
+key = "device.set_param"
+property = "value clamped to the parameter's range"
+description = "device.set_param on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and stores 2e9, which the query reads back. The model checks only that the value is finite (crates/model/src/command.rs, Command::SetDeviceParam), never the device's parameter range."
+
+[[failure]]
+suite = "commands"
+key = "automation.set_breakpoint"
+property = "value clamped to the parameter's range"
+description = "automation.set_breakpoint on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and the envelope keeps the point at 2e9. Only clip settings are checked against their range; every other target only for being finite (crates/model/src/command.rs, set_automation_breakpoint)."
+
+[[failure]]
+suite = "commands"
+key = "mixer.set_volume"
+property = "value clamped to the parameter's range"
+description = "mixer.set_volume with a volume of 7.0 (about +16.9 dB) succeeds and stores 7.0, above the fader's top of +6 dB (gain 1.995). The model checks only that the volume is finite and at least 0 (crates/model/src/command.rs, Command::SetVolume)."
+
+[[failure]]
+suite = "commands"
+key = "track.set_bounced"
+property = "invariants hold"
+description = "track.set_bounced naming the Main track (with any bounced contents, such as just a name) succeeds and turns Main into an audio track, so the set no longer has exactly one Main track and fails Document::check_invariants. The apply (crates/model/src/command.rs, Command::BounceTrackInPlace and replace_with_bounced/fill_bounced) never checks the track's kind; a return or group track is replaced the same way."
+
+[[failure]]
+suite = "commands"
+key = "track.set_bounced"
+property = "no panic"
+description = "track.set_bounced naming a return track (the rich set's Verb, which the other tracks send to) succeeds and turns the return into an audio track while the sends to it stay. The engine's compiler then finds a loop in the routing graph and panics (debug assertion at crates/engine/src/compiler.rs:2645, \"the routing graph has no loop\"), so the engine never takes the set. The model's apply (Command::BounceTrackInPlace in crates/model/src/command.rs) never checks the track's kind."

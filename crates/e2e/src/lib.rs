@@ -123,10 +123,13 @@ pub fn full_depth() -> bool {
     }
 }
 
-/// The repository's test fixtures folder, `tests/fixtures`.
+/// The repository's test fixtures folder, `tests/fixtures`, as a plain
+/// absolute path: no `..` in it, so a set that uses a fixture records it in
+/// its media table as a person's file would be.
 #[must_use]
 pub fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures")
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    path.canonicalize().unwrap_or(path)
 }
 
 /// Where two documents differ, as JSON pointers into their serialised form

@@ -29,3 +29,39 @@ suite = "smoke"
 key = "export.audio in the app, allowed by the person"
 property = "the call answers with the export's result"
 description = "With the app's window open and the agent not autonomous, an agent's export.audio asks the person first; once allowed, the call fails with \"the call asked twice\" although the export starts, runs and writes its file. The agent never hears the result. Without a window (bl-cli mcp), or with autonomous mode on, the same call answers."
+
+[[failure]]
+suite = "background"
+key = "arrangement.consolidate"
+property = "finishes without a window"
+description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
+
+[[failure]]
+suite = "background"
+key = "arrangement.consolidate_to_scene"
+property = "finishes without a window"
+description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
+
+[[failure]]
+suite = "background"
+key = "clip.slice_to_midi_track of a warped clip"
+property = "finishes without a window"
+description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."
+
+[[failure]]
+suite = "background"
+key = "arrangement.consolidate"
+property = "finishes in the app"
+description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
+
+[[failure]]
+suite = "background"
+key = "arrangement.consolidate_to_scene"
+property = "finishes in the app"
+description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
+
+[[failure]]
+suite = "background"
+key = "clip.slice_to_midi_track of a warped clip"
+property = "finishes in the app"
+description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."

@@ -52,6 +52,12 @@ impl Shell {
         changed
     }
 
+    /// Whether `track` is armed by a surface's selection, not by hand (R3).
+    #[must_use]
+    pub fn armed_by_selection(&self, track: TrackId) -> bool {
+        self.surface.selection_armed.contains(&track)
+    }
+
     /// The first selected track, if it is a MIDI track.
     fn selected_midi_track(&self) -> Option<TrackId> {
         let doc = self.editor.document();

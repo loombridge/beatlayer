@@ -377,7 +377,9 @@ impl Note {
                 }
             }
             (55 | 54, Gesture::Press) => self.octave_shift = ctx.modifiers.shift(),
-            (55 | 54, Gesture::Tap) => self.octave(button == 55, ctx),
+            // Shift makes it a combination, which has no tap.
+            (55 | 54, Gesture::Tap) if !self.octave_shift => self.octave(button == 55, ctx),
+            (55 | 54, Gesture::Release) if self.octave_shift => self.octave(button == 55, ctx),
             (62 | 63, Gesture::Tap) => self.page_button(button == 63, false),
             (62 | 63, Gesture::Hold) => self.page_button(button == 63, true),
             (number, Gesture::Press) => {

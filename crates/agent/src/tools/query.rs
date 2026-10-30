@@ -263,6 +263,9 @@ impl View<'_> {
                 "mute": mixer.mute,
                 "solo": mixer.solo,
                 "arm": mixer.arm,
+                // Spec: push-2-notes R3. Armed by a control surface's
+                // selection rather than by hand.
+                "arm_by_selection": self.shell.armed_by_selection(track.id()),
             },
             "delay": track.delay(),
             "keep_monitoring_latency": track.keep_monitoring_latency(),

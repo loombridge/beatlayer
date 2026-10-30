@@ -701,7 +701,7 @@ impl Push {
                 } else if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
-                    Self::run(cx, "session.select", json!({ "track": track }));
+                    Self::select_track(cx, track);
                 }
             }
             number => {
@@ -709,7 +709,7 @@ impl Push {
                 if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
-                    Self::run(cx, "session.select", json!({ "track": track }));
+                    Self::select_track(cx, track);
                 }
             }
         }
@@ -730,6 +730,14 @@ impl Push {
         };
         let arm = !t.mixer().arm || model.selection_armed.contains(&track);
         Self::run(cx, "mixer.set_arm", json!({ "track": track, "arm": arm }));
+    }
+
+    /// Selects a track as a click on its title bar does, and as the
+    /// Arrangement's selection too, which the devices and the drum layout
+    /// follow (R26).
+    fn select_track(cx: &mut Cx, track: TrackId) {
+        Self::run(cx, "session.select", json!({ "track": track }));
+        Self::run(cx, "arrangement.select_tracks", json!({ "tracks": [track] }));
     }
 
     fn toggle_menu(&mut self, menu: Menu) {

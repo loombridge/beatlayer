@@ -14,7 +14,9 @@ use bl_push::screen::{Column, Dot, Graphic, Label, Screen};
 use crate::rig::Rig;
 
 fn golden_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(format!("{name}.png"))
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(format!("{name}.png"))
 }
 
 /// Compares `screen`'s image with the golden frame `name`: within a few
@@ -29,18 +31,26 @@ fn golden(name: &str, screen: &Screen) {
         std::fs::write(&path, paint::png(&rgb).unwrap()).unwrap();
         return;
     }
-    let file = std::fs::File::open(&path)
-        .unwrap_or_else(|_| panic!("no golden frame {path:?}: BL_UPDATE_GOLDEN=1 cargo test makes it"));
-    let mut reader = png::Decoder::new(std::io::BufReader::new(file)).read_info().unwrap();
+    let file = std::fs::File::open(&path).unwrap_or_else(|_| {
+        panic!("no golden frame {path:?}: BL_UPDATE_GOLDEN=1 cargo test makes it")
+    });
+    let mut reader = png::Decoder::new(std::io::BufReader::new(file))
+        .read_info()
+        .unwrap();
     let mut expected = vec![0; reader.output_buffer_size().unwrap()];
     let info = reader.next_frame(&mut expected).unwrap();
     assert_eq!((info.width as usize, info.height as usize), (WIDTH, HEIGHT));
     let differing = rgb
-        .chunks_exact(3)
-        .zip(expected.chunks_exact(3))
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .zip(expected.as_chunks::<3>().0)
         .filter(|(a, b)| a.iter().zip(*b).any(|(x, y)| x.abs_diff(*y) > 3))
         .count();
-    assert!(differing <= WIDTH * HEIGHT / 200, "{name}: {differing} pixels differ from {path:?}");
+    assert!(
+        differing <= WIDTH * HEIGHT / 200,
+        "{name}: {differing} pixels differ from {path:?}"
+    );
 }
 
 fn label(text: &str, colour: [u8; 3], selected: bool) -> Label {
@@ -64,13 +74,21 @@ const AMBER: [u8; 3] = [240, 180, 60];
 
 fn tracks() -> Screen {
     let mut screen = Screen::default();
-    for (n, (text, colour)) in [("Drums", RED), ("Bass", AMBER), ("Pad", GREEN), ("A very long track name", BLUE)]
-        .into_iter()
-        .enumerate()
+    for (n, (text, colour)) in [
+        ("Drums", RED),
+        ("Bass", AMBER),
+        ("Pad", GREEN),
+        ("A very long track name", BLUE),
+    ]
+    .into_iter()
+    .enumerate()
     {
         screen.lower[n] = label(text, colour, n == 1);
     }
-    for (n, text) in ["Volume", "Pan", "Send A", "Send B"].into_iter().enumerate() {
+    for (n, text) in ["Volume", "Pan", "Send A", "Send B"]
+        .into_iter()
+        .enumerate()
+    {
         screen.upper[n] = label(text, [200, 200, 200], n == 0);
     }
     screen
@@ -94,7 +112,12 @@ fn a_parameter_column_shows_its_value_and_each_dot() {
     screen.columns[0] = column("Cutoff", "1.20 kHz", Graphic::Arc(0.4), Dot::None);
     screen.columns[1] = column("Resonance", "34 %", Graphic::Arc(0.34), Dot::Automated);
     screen.columns[2] = column("Drive", "-6.0 dB", Graphic::Arc(0.9), Dot::Overridden);
-    screen.columns[3] = column("Filter Type", "Low-pass", Graphic::Choice("Low-pass".to_owned()), Dot::None);
+    screen.columns[3] = column(
+        "Filter Type",
+        "Low-pass",
+        Graphic::Choice("Low-pass".to_owned()),
+        Dot::None,
+    );
     screen.columns[4] = Column {
         touched: true,
         ..column("Attack", "10 ms", Graphic::Arc(0.1), Dot::None)
@@ -102,7 +125,10 @@ fn a_parameter_column_shows_its_value_and_each_dot() {
     screen.columns[5] = column("Release", "0.0 ms", Graphic::Arc(0.0), Dot::None);
     screen.columns[6] = column("Amount", "100 %", Graphic::Arc(1.0), Dot::None);
     golden("parameters", &screen);
-    assert!(screen.columns[7].is_empty(), "a column whose encoder controls nothing is empty");
+    assert!(
+        screen.columns[7].is_empty(),
+        "a column whose encoder controls nothing is empty"
+    );
 }
 
 // Spec: push-2 R19. A notification is a box in the middle of the content band.
@@ -131,7 +157,16 @@ fn the_count_in_is_a_bar_across_the_top() {
 #[test]
 fn progress_bars_sit_under_the_lower_labels() {
     let mut screen = tracks();
-    screen.progress = [Some(0.0), Some(0.5), Some(1.0), None, None, None, None, None];
+    screen.progress = [
+        Some(0.0),
+        Some(0.5),
+        Some(1.0),
+        None,
+        None,
+        None,
+        None,
+        None,
+    ];
     golden("progress", &screen);
 }
 
@@ -211,6 +246,11 @@ fn a_failed_claim_leaves_the_pads_and_leds_working() {
     assert_eq!(rig.commands(), ["edit.undo {}"], "the buttons work");
     assert!(rig.sim.press_pad(0, 0, 100));
     rig.advance(1);
-    assert!(rig.heard.all().contains(&"Note: pad 0,0 On(100)".to_owned()), "and the pads");
+    assert!(
+        rig.heard
+            .all()
+            .contains(&"Note: pad 0,0 On(100)".to_owned()),
+        "and the pads"
+    );
     assert_eq!(frames.count(), 0);
 }

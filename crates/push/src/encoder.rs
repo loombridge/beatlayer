@@ -47,7 +47,9 @@ impl Moving {
     /// The value after `steps`, from `current` (the parameter's position in
     /// 0 to 1 as the document has it), clamped to the range's ends (R9).
     pub fn turn(&mut self, now: Instant, current: f64, steps: i32, shift: bool) -> f64 {
-        let rested = self.last.is_none_or(|at| now.saturating_duration_since(at) >= REST);
+        let rested = self
+            .last
+            .is_none_or(|at| now.saturating_duration_since(at) >= REST);
         let base = match self.value {
             Some(value) if !rested => value,
             _ => current,
@@ -106,7 +108,10 @@ mod tests {
         let now = Instant::now();
         let mut moving = Moving::default();
         assert!((moving.turn(now, 0.5, 1, false) - 0.505).abs() < 1e-12);
-        assert!((moving.turn(now, 0.5, 4, false) - 0.525).abs() < 1e-12, "the document is behind");
+        assert!(
+            (moving.turn(now, 0.5, 4, false) - 0.525).abs() < 1e-12,
+            "the document is behind"
+        );
         let mut fine = Moving::default();
         assert!((fine.turn(now, 0.5, 10, true) - 0.505).abs() < 1e-12);
         let mut top = Moving::default();

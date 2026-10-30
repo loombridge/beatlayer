@@ -49,7 +49,13 @@ pub fn kind(shared: Arc<Shared>, claim: Claim, contents: MakeContents) -> Kind {
             scenes: 8,
         }),
         Vec::new(),
-        move || Box::new(Push::new(Arc::clone(&shared), Arc::clone(&claim), &contents)),
+        move || {
+            Box::new(Push::new(
+                Arc::clone(&shared),
+                Arc::clone(&claim),
+                &contents,
+            ))
+        },
     )
 }
 

@@ -213,7 +213,20 @@ pub fn parse(bytes: &[u8]) -> Reply {
     // F0 7E dev 06 02, Ableton's ID, family 0x1967 and member 2 (R1).
     if let [0xF0, 0x7E, _, 0x06, 0x02, rest @ ..] = bytes {
         return match rest {
-            [0x00, 0x21, 0x1D, 0x67, 0x32, 0x02, 0x00, major, minor, build_low, build_high, ..] => {
+            [
+                0x00,
+                0x21,
+                0x1D,
+                0x67,
+                0x32,
+                0x02,
+                0x00,
+                major,
+                minor,
+                build_low,
+                build_high,
+                ..,
+            ] => {
                 let build = u16::from(*build_low) | u16::from(*build_high) << 7;
                 Reply::Identity {
                     firmware: format!("{major}.{minor}.{build}"),
@@ -240,7 +253,9 @@ mod tests {
     fn commands_are_the_interface_manuals_examples() {
         assert_eq!(
             palette_entry(125, [0, 0, 255], 126),
-            [0xF0, 0, 0x21, 0x1D, 1, 1, 3, 0x7D, 0, 0, 0, 0, 0x7F, 1, 0x7E, 0, 0xF7]
+            [
+                0xF0, 0, 0x21, 0x1D, 1, 1, 3, 0x7D, 0, 0, 0, 0, 0x7F, 1, 0x7E, 0, 0xF7
+            ]
         );
         assert_eq!(
             led_brightness(0x40),
@@ -256,7 +271,9 @@ mod tests {
         );
         assert_eq!(
             pad_parameters(1220, 1570),
-            [0xF0, 0, 0x21, 0x1D, 1, 1, 0x1B, 0, 0, 0, 0, 0x44, 9, 0x22, 0x0C, 0xF7]
+            [
+                0xF0, 0, 0x21, 0x1D, 1, 1, 0x1B, 0, 0, 0, 0, 0x44, 9, 0x22, 0x0C, 0xF7
+            ]
         );
         let mut levels = [4u8; 31];
         for n in (0..31).step_by(4) {

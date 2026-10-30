@@ -7,9 +7,7 @@
 use skrifa::instance::{LocationRef, Size};
 use skrifa::outline::{DrawSettings, OutlinePen};
 use skrifa::{FontRef, MetadataProvider};
-use tiny_skia::{
-    FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform,
-};
+use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::frame::{HEIGHT, RGB_BYTES, WIDTH};
 use crate::screen::{Column, Dot, Graphic, Label, Screen};
@@ -33,7 +31,8 @@ const DIM: [u8; 3] = [140, 140, 140];
 /// Never in practice: the pixmap's size is a constant.
 #[must_use]
 pub fn render(screen: &Screen) -> Vec<u8> {
-    let mut pixmap = Pixmap::new(WIDTH as u32, HEIGHT as u32).expect("a pixmap of the display's size");
+    let mut pixmap =
+        Pixmap::new(WIDTH as u32, HEIGHT as u32).expect("a pixmap of the display's size");
     pixmap.fill(tiny_skia::Color::BLACK);
     let mut painter = Painter {
         pixmap: &mut pixmap,
@@ -115,13 +114,19 @@ impl OutlinePen for Pen {
 impl Painter<'_> {
     fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, colour: [u8; 3], alpha: u8) {
         if let Some(rect) = Rect::from_xywh(x, y, w, h) {
-            self.pixmap.fill_rect(rect, &paint(colour, alpha), Transform::identity(), None);
+            self.pixmap
+                .fill_rect(rect, &paint(colour, alpha), Transform::identity(), None);
         }
     }
 
     fn fill(&mut self, path: &Path, colour: [u8; 3]) {
-        self.pixmap
-            .fill_path(path, &paint(colour, 255), FillRule::Winding, Transform::identity(), None);
+        self.pixmap.fill_path(
+            path,
+            &paint(colour, 255),
+            FillRule::Winding,
+            Transform::identity(),
+            None,
+        );
     }
 
     fn stroke(&mut self, path: &Path, colour: [u8; 3], width: f32) {
@@ -130,8 +135,13 @@ impl Painter<'_> {
             line_cap: LineCap::Round,
             ..Stroke::default()
         };
-        self.pixmap
-            .stroke_path(path, &paint(colour, 255), &stroke, Transform::identity(), None);
+        self.pixmap.stroke_path(
+            path,
+            &paint(colour, 255),
+            &stroke,
+            Transform::identity(),
+            None,
+        );
     }
 
     /// The width of `text` at `size` pixels.
@@ -189,7 +199,15 @@ impl Painter<'_> {
     }
 
     /// Draws `text` centred on `centre`, cut to `max` pixels wide.
-    fn centred(&mut self, text: &str, centre: f32, baseline: f32, size: f32, max: f32, colour: [u8; 3]) {
+    fn centred(
+        &mut self,
+        text: &str,
+        centre: f32,
+        baseline: f32,
+        size: f32,
+        max: f32,
+        colour: [u8; 3],
+    ) {
         let text = self.fit(text, size, max);
         let width = self.width(&text, size);
         self.text(&text, centre - width / 2.0, baseline, size, colour);
@@ -211,7 +229,14 @@ impl Painter<'_> {
                 let colour = screen.lower[n].colour;
                 let x = n as f32 * COLUMN + 8.0;
                 self.rect(x, HEIGHT as f32 - 4.0, COLUMN - 16.0, 3.0, colour, 70);
-                self.rect(x, HEIGHT as f32 - 4.0, (COLUMN - 16.0) * progress.clamp(0.0, 1.0), 3.0, colour, 255);
+                self.rect(
+                    x,
+                    HEIGHT as f32 - 4.0,
+                    (COLUMN - 16.0) * progress.clamp(0.0, 1.0),
+                    3.0,
+                    colour,
+                    255,
+                );
             }
         }
         if let Some(curve) = &screen.curve {
@@ -239,10 +264,31 @@ impl Painter<'_> {
         let x = column as f32 * COLUMN;
         let centre = x + COLUMN / 2.0;
         if label.selected {
-            self.rect(x + 3.0, top + 2.0, COLUMN - 6.0, BAND - 4.0, label.colour, 255);
-            self.centred(&label.text, centre, top + 17.0, 14.0, COLUMN - 14.0, [0, 0, 0]);
+            self.rect(
+                x + 3.0,
+                top + 2.0,
+                COLUMN - 6.0,
+                BAND - 4.0,
+                label.colour,
+                255,
+            );
+            self.centred(
+                &label.text,
+                centre,
+                top + 17.0,
+                14.0,
+                COLUMN - 14.0,
+                [0, 0, 0],
+            );
         } else {
-            self.centred(&label.text, centre, top + 17.0, 14.0, COLUMN - 14.0, label.colour);
+            self.centred(
+                &label.text,
+                centre,
+                top + 17.0,
+                14.0,
+                COLUMN - 14.0,
+                label.colour,
+            );
         }
     }
 
@@ -254,7 +300,14 @@ impl Painter<'_> {
         let x = n as f32 * COLUMN;
         let centre = x + COLUMN / 2.0;
         if column.touched {
-            self.rect(x + 2.0, BAND + 2.0, COLUMN - 4.0, HEIGHT as f32 - 2.0 * BAND - 4.0, [50, 50, 50], 255);
+            self.rect(
+                x + 2.0,
+                BAND + 2.0,
+                COLUMN - 4.0,
+                HEIGHT as f32 - 2.0 * BAND - 4.0,
+                [50, 50, 50],
+                255,
+            );
         }
         match column.dot {
             Dot::None => {}
@@ -308,7 +361,8 @@ impl Painter<'_> {
     /// The velocity curve over columns 4 and 5: force across, velocity up
     /// (R31).
     fn curve(&mut self, curve: &[u8]) {
-        let (left, top, width, height) = (3.0 * COLUMN + 10.0, BAND + 10.0, 2.0 * COLUMN - 20.0, 90.0);
+        let (left, top, width, height) =
+            (3.0 * COLUMN + 10.0, BAND + 10.0, 2.0 * COLUMN - 20.0, 90.0);
         let mut frame = PathBuilder::new();
         frame.move_to(left, top);
         frame.line_to(left, top + height);

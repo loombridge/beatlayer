@@ -127,7 +127,12 @@ impl Screen {
             }
         };
         band("upper", &self.upper, &mut lines);
-        for (n, column) in self.columns.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
+        for (n, column) in self
+            .columns
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| !c.is_empty())
+        {
             let dot = match column.dot {
                 Dot::None => "",
                 Dot::Automated => " [white dot]",

@@ -185,11 +185,12 @@ impl Leds {
 
     /// The palette indices the LEDs show, for the allocator not to reuse.
     pub fn colours(&self) -> impl Iterator<Item = u8> + '_ {
-        Addr::every().flat_map(|addr| {
-            let led = self.wanted[addr.slot()];
-            [Some(led.colour), led.animation.map(|(to, _)| to)]
-        })
-        .flatten()
+        Addr::every()
+            .flat_map(|addr| {
+                let led = self.wanted[addr.slot()];
+                [Some(led.colour), led.animation.map(|(to, _)| to)]
+            })
+            .flatten()
     }
 
     /// The messages that bring Push 2 to what the LEDs should show: only
@@ -277,7 +278,8 @@ impl Palette {
             self.shown[usize::from(index)] = self.clock;
             return index;
         }
-        let free = (1..122u8).find(|&i| !Self::is_fixed(i) && self.entries[usize::from(i)].is_none());
+        let free =
+            (1..122u8).find(|&i| !Self::is_fixed(i) && self.entries[usize::from(i)].is_none());
         let index = free.unwrap_or_else(|| {
             let candidates = || (1..122u8).filter(|&i| !Self::is_fixed(i));
             let by_age = |&i: &u8| self.shown[usize::from(i)];
@@ -333,12 +335,19 @@ mod tests {
     fn only_changed_leds_are_sent_and_all_again_after_forgetting() {
         let mut leds = Leds::default();
         let first = leds.flush(false);
-        assert_eq!(first.len(), 64 + BUTTONS.len(), "every LED once at the start");
+        assert_eq!(
+            first.len(),
+            64 + BUTTONS.len(),
+            "every LED once at the start"
+        );
         assert!(leds.flush(false).is_empty());
 
         leds.set(Addr::Pad(36), Led::steady(fixed::RED));
         leds.set(Addr::Button(85), Led::steady(fixed::GREEN));
-        assert_eq!(leds.flush(false), [vec![0x90, 36, 127], vec![0xB0, 85, 126]]);
+        assert_eq!(
+            leds.flush(false),
+            [vec![0x90, 36, 127], vec![0xB0, 85, 126]]
+        );
         assert!(leds.flush(false).is_empty());
 
         leds.forget();
@@ -377,13 +386,23 @@ mod tests {
     fn the_allocator_keeps_the_fixed_entries_and_reuses_the_least_recently_shown() {
         let mut palette = Palette::default();
         let none = |_| false;
-        assert_eq!(palette.index([0, 255, 0], &none), fixed::GREEN, "a colour that has an index keeps it");
+        assert_eq!(
+            palette.index([0, 255, 0], &none),
+            fixed::GREEN,
+            "a colour that has an index keeps it"
+        );
         let mut given = Vec::new();
         for n in 0..120u8 {
             given.push(palette.index([n, 1, 2], &none));
         }
         assert!(given.iter().all(|&i| i != 0 && i != 16 && i < 122));
-        assert_eq!(given.iter().collect::<std::collections::BTreeSet<_>>().len(), 120);
+        assert_eq!(
+            given
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            120
+        );
         // Show the first again: the second is now the oldest.
         assert_eq!(palette.index([0, 1, 2], &none), given[0]);
         let reused = palette.index([200, 1, 2], &none);
@@ -409,6 +428,9 @@ mod tests {
         assert_eq!(writes[1], sysex::reapply_palette());
         assert!(palette.take_writes().is_empty());
         palette.index([255, 128, 0], &|_| false);
-        assert!(palette.take_writes().is_empty(), "a colour already held is not written again");
+        assert!(
+            palette.take_writes().is_empty(),
+            "a colour already held is not written again"
+        );
     }
 }

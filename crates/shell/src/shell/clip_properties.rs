@@ -235,7 +235,12 @@ impl Shell {
                 let clip = doc.slot(status.track, status.scene)?;
                 let since = self.clip_played(clip)?.since.get();
                 let length = clip.length.get();
-                (length > 0).then(|| (status.track, since.rem_euclid(length) as f32 / length as f32))
+                (length > 0).then(|| {
+                    (
+                        status.track,
+                        since.rem_euclid(length) as f32 / length as f32,
+                    )
+                })
             })
             .collect()
     }

@@ -47,6 +47,9 @@ pub(super) struct SurfaceHost {
     pub(super) refused: u64,
     /// The controller templates found when they were last read (R43).
     pub(super) templates: Vec<bl_control::template::Found>,
+    /// The revision of Push 2's shared Setup values and swing amount the
+    /// preferences last kept.
+    push_saved: u64,
 }
 
 fn info(report: RowReport, row: usize) -> ids::RowInfo {
@@ -270,6 +273,7 @@ impl Shell {
     /// (R6, R7). Returns whether the set changed.
     pub(super) fn poll_surfaces(&mut self) -> bool {
         let revision = self.document_revision;
+        let changed = self.poll_push();
         self.sync_instant();
         if self.midi.surfaces().running() {
             let model = self.surface_model();
@@ -287,7 +291,11 @@ impl Shell {
                 }
                 Ask::Control(control) => self.run_control(request.row, control),
                 Ask::EndGesture(control) => {
-                    if self.surface.gesture.is_some_and(|(row, held, _)| row == request.row && held == control) {
+                    if self
+                        .surface
+                        .gesture
+                        .is_some_and(|(row, held, _)| row == request.row && held == control)
+                    {
                         self.end_surface_gesture();
                     }
                 }
@@ -298,7 +306,31 @@ impl Shell {
         {
             self.end_surface_gesture();
         }
-        self.light_remote_indicators() | (revision != self.document_revision)
+        self.light_remote_indicators() | (revision != self.document_revision) | changed
+    }
+
+    /// Notes that the preferences now keep Push 2's Setup values and swing
+    /// amount as they are.
+    pub(super) fn surface_push_saved(&mut self) {
+        self.surface.push_saved = self.midi.push().revision();
+    }
+
+    /// Spec: push-2 R2, R10, R31. Says in the Status Bar why a Push 2 isn't
+    /// started, and keeps what the Setup menu and the swing encoder changed
+    /// in the preferences.
+    fn poll_push(&mut self) -> bool {
+        let mut changed = false;
+        if let Some(message) = self.midi.take_push_message() {
+            self.set_message(message, true);
+            changed = true;
+        }
+        let revision = self.midi.push().revision();
+        if revision != self.surface.push_saved {
+            self.surface.push_saved = revision;
+            self.prefs.midi = self.midi.prefs();
+            self.save_preferences();
+        }
+        changed
     }
 
     /// What the host gives each surface on its tick (R6).
@@ -478,10 +510,22 @@ impl Shell {
                 self.refresh_midi();
                 let now = self.midi.surfaces().rows()[row].clone();
                 let config = RowConfig {
-                    surface: args.surface.unwrap_or(now.surface),
-                    input: args.input.unwrap_or(now.input),
+                    surface: args.surface.unwrap_or_else(|| now.surface.clone()),
+                    input: args.input.unwrap_or_else(|| now.input.clone()),
                     output: args.output.unwrap_or(now.output),
                 };
+                // Spec: push-2 R2. A Push 2 whose row is set to None stays out
+                // of the table until the user chooses it again.
+                let push = Some(bl_push::SURFACE_ID);
+                if now.surface.as_deref() == push && config.surface.as_deref() != push {
+                    if let Some(port) = &now.input {
+                        self.midi.decline_push(port);
+                    }
+                } else if config.surface.as_deref() == push
+                    && let Some(port) = &config.input
+                {
+                    self.midi.accept_push(port);
+                }
                 self.midi.set_surface_row(row, config).map_err(failed)?;
                 self.sync_instant();
                 self.prefs.midi = self.midi.prefs();

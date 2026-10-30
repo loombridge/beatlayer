@@ -49,15 +49,25 @@ fn starting_sends_exactly_r4s_sequence_and_reads_the_replies() {
     let sysex = rig.sim.sysex();
     assert_eq!(sysex, start_sequence(&rig));
     // 14 colours were written, none of them over index 0, 16 or 122 to 127.
-    let entries: Vec<&Vec<u8>> = sysex.iter().filter(|m| m.get(6) == Some(&sysex::id::SET_PALETTE_ENTRY)).collect();
+    let entries: Vec<&Vec<u8>> = sysex
+        .iter()
+        .filter(|m| m.get(6) == Some(&sysex::id::SET_PALETTE_ENTRY))
+        .collect();
     assert_eq!(entries.len(), 14);
     for entry in entries {
-        assert!(entry[7] != 0 && entry[7] != 16 && entry[7] < 122, "index {}", entry[7]);
+        assert!(
+            entry[7] != 0 && entry[7] != 16 && entry[7] < 122,
+            "index {}",
+            entry[7]
+        );
     }
     // Every LED once, after the last sysex.
     let sent = rig.sim.sent();
     let last_sysex = sent.iter().rposition(|m| sysex::is_sysex(m)).unwrap();
-    assert_eq!(sent.len() - last_sysex - 1, 64 + bl_push::controls::BUTTONS.len());
+    assert_eq!(
+        sent.len() - last_sysex - 1,
+        64 + bl_push::controls::BUTTONS.len()
+    );
     // What the device was told took effect.
     assert_eq!(rig.sim.device.mode, MidiMode::Live);
     assert_eq!(rig.sim.device.curve, rig.shared.setup().curve());
@@ -81,13 +91,18 @@ fn stopping_puts_every_led_out_darkens_the_display_and_leaves_live_mode() {
     rig.tick();
     assert!(rig.sim.led("play").unwrap().colour != 0);
     rig.sim.forget_sent();
-    rig.surfaces.set_row(0, bl_control::RowConfig::default()).unwrap();
+    rig.surfaces
+        .set_row(0, bl_control::RowConfig::default())
+        .unwrap();
     rig.sync();
     assert_eq!(rig.run(), RunState::Empty);
     let sent = rig.sim.sent().to_vec();
     let leds = 64 + bl_push::controls::BUTTONS.len();
     assert_eq!(sent.len(), leds + 2);
-    assert!(sent[..leds].iter().all(|m| m[2] == 0 && m[0] & 0x0F == 0), "every LED, off, on channel 0");
+    assert!(
+        sent[..leds].iter().all(|m| m[2] == 0 && m[0] & 0x0F == 0),
+        "every LED, off, on channel 0"
+    );
     assert_eq!(sent[leds], sysex::display_brightness(0));
     assert_eq!(sent[leds + 1], sysex::midi_mode(MidiMode::Live));
     assert_eq!(rig.sim.device.display_brightness, 0);
@@ -111,7 +126,14 @@ fn unplugging_stops_and_plugging_in_again_starts_afresh() {
     rig.sync();
     assert_eq!(rig.run(), RunState::Running);
     let sent = rig.sim.sent();
-    assert_eq!(sent[0..3], [DEVICE_INQUIRY.to_vec(), sysex::midi_mode(MidiMode::Live), sysex::request_statistics()]);
+    assert_eq!(
+        sent[0..3],
+        [
+            DEVICE_INQUIRY.to_vec(),
+            sysex::midi_mode(MidiMode::Live),
+            sysex::request_statistics()
+        ]
+    );
     let leds = sent.iter().filter(|m| !sysex::is_sysex(m)).count();
     assert_eq!(leds, 64 + bl_push::controls::BUTTONS.len());
 }
@@ -127,17 +149,35 @@ fn a_reply_that_never_comes_is_waited_for_twice_and_then_given_up() {
     rig.advance(499);
     assert_eq!(rig.sim.sysex().len(), 1, "still waiting at 499 ms");
     rig.advance(1);
-    assert_eq!(rig.sim.sysex(), [DEVICE_INQUIRY.to_vec(), DEVICE_INQUIRY.to_vec()], "sent again at 500 ms");
+    assert_eq!(
+        rig.sim.sysex(),
+        [DEVICE_INQUIRY.to_vec(), DEVICE_INQUIRY.to_vec()],
+        "sent again at 500 ms"
+    );
     rig.advance(500);
     let sysex = rig.sim.sysex();
-    assert_eq!(sysex[2], sysex::midi_mode(MidiMode::Live), "carried on after the retry");
+    assert_eq!(
+        sysex[2],
+        sysex::midi_mode(MidiMode::Live),
+        "carried on after the retry"
+    );
     // Each of the three replies is given the same two waits.
     for _ in 0..4 {
         rig.advance(500);
     }
-    assert_eq!(rig.sim.sysex().iter().filter(|m| **m == sysex::request_statistics()).count(), 2);
+    assert_eq!(
+        rig.sim
+            .sysex()
+            .iter()
+            .filter(|m| **m == sysex::request_statistics())
+            .count(),
+        2
+    );
     rig.advance(500);
-    assert!(rig.sim.sysex().contains(&sysex::touch_strip_config(0x68)), "the sequence ran on");
+    assert!(
+        rig.sim.sysex().contains(&sysex::touch_strip_config(0x68)),
+        "the sequence ran on"
+    );
     assert_eq!(rig.snapshot().firmware, None);
 }
 
@@ -181,5 +221,8 @@ fn a_pads_note_never_reaches_a_track_through_the_ports_track_switch() {
     rig.advance(10);
     assert!(rig.reached_tracks().is_empty());
     let heard = rig.heard.all();
-    assert!(heard.contains(&"Note: pad 2,3 On(100)".to_owned()), "{heard:?}");
+    assert!(
+        heard.contains(&"Note: pad 2,3 On(100)".to_owned()),
+        "{heard:?}"
+    );
 }

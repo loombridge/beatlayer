@@ -8,9 +8,9 @@
 //! moves the touch strip, presses buttons and footswitches, and reads LEDs,
 //! sysex and frames, with no device and no window.
 
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use bl_core::clock::TestClock;
 use bl_midi_io::{Direction, TestBackend};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::controls;
 use crate::display::{Claim, Sink};
@@ -248,7 +248,11 @@ impl Simulated {
     /// The sysex messages the surface sent, in order.
     #[must_use]
     pub fn sysex(&self) -> Vec<Vec<u8>> {
-        self.sent.iter().filter(|m| sysex::is_sysex(m)).cloned().collect()
+        self.sent
+            .iter()
+            .filter(|m| sysex::is_sysex(m))
+            .cloned()
+            .collect()
     }
 
     /// Forgets what was sent so far, so a test reads what follows.
@@ -289,7 +293,8 @@ impl Simulated {
             self.receive(bytes);
         }
         // The clock and its Start and Stop are read with `stamped`.
-        self.sent.extend(new.iter().filter(|m| m[0] < 0xF8).cloned());
+        self.sent
+            .extend(new.iter().filter(|m| m[0] < 0xF8).cloned());
         new.len()
     }
 
@@ -364,29 +369,43 @@ impl Simulated {
                 let value = |n: usize| args[n] | args[n + 1] << 7;
                 device.palette[usize::from(args[0])] = ([value(1), value(3), value(5)], value(7));
             }
-            sysex::id::SET_LED_BRIGHTNESS => device.led_brightness = args.first().copied().unwrap_or(0),
+            sysex::id::SET_LED_BRIGHTNESS => {
+                device.led_brightness = args.first().copied().unwrap_or(0)
+            }
             sysex::id::SET_DISPLAY_BRIGHTNESS => {
-                device.display_brightness = args.first().copied().unwrap_or(0) | args.get(1).copied().unwrap_or(0) << 7;
+                device.display_brightness =
+                    args.first().copied().unwrap_or(0) | args.get(1).copied().unwrap_or(0) << 7;
             }
             sysex::id::SET_MIDI_MODE => {
                 let mode = args.first().copied().unwrap_or(0);
-                device.mode = if mode == 1 { MidiMode::User } else { MidiMode::Live };
+                device.mode = if mode == 1 {
+                    MidiMode::User
+                } else {
+                    MidiMode::Live
+                };
                 reply(&answer(sysex::id::SET_MIDI_MODE, &[mode]));
             }
-            sysex::id::SET_TOUCH_STRIP_CONFIG => device.strip_config = args.first().copied().unwrap_or(0),
+            sysex::id::SET_TOUCH_STRIP_CONFIG => {
+                device.strip_config = args.first().copied().unwrap_or(0)
+            }
             sysex::id::SET_TOUCH_STRIP_LEDS if args.len() == 16 => {
                 for n in 0..31 {
                     device.strip_leds[n] = args[n / 2] >> (3 * (n % 2)) & 7;
                 }
             }
             sysex::id::REQUEST_STATISTICS => {
-                reply(&answer(sysex::id::REQUEST_STATISTICS, &[1, 0, 0x3F, 7, 0, 0, 0]));
+                reply(&answer(
+                    sysex::id::REQUEST_STATISTICS,
+                    &[1, 0, 0x3F, 7, 0, 0, 0],
+                ));
             }
             sysex::id::SET_PAD_PARAMETERS if args.len() == 8 => {
                 let value = |n: usize| u16::from(args[n]) | u16::from(args[n + 1]) << 7;
                 device.thresholds = (value(4), value(6));
             }
-            sysex::id::SET_AFTERTOUCH_MODE => device.aftertouch = args.first().copied().unwrap_or(0),
+            sysex::id::SET_AFTERTOUCH_MODE => {
+                device.aftertouch = args.first().copied().unwrap_or(0)
+            }
             sysex::id::SET_VELOCITY_CURVE if args.len() == 17 => {
                 let start = usize::from(args[0]);
                 device.curve[start..start + 16].copy_from_slice(&args[1..]);
@@ -434,7 +453,10 @@ impl Simulated {
     /// Presses the pad in row `row` from the bottom and column `column`
     /// from the left.
     pub fn press_pad(&self, row: u8, column: u8, velocity: u8) -> bool {
-        self.send(self.port(), &[0x90, controls::pad_note(row, column), velocity])
+        self.send(
+            self.port(),
+            &[0x90, controls::pad_note(row, column), velocity],
+        )
     }
 
     /// Releases a pad.
@@ -455,18 +477,35 @@ impl Simulated {
     /// Turns encoder `index` (0 to 7, the master 8, tempo 9, swing 10) by
     /// `steps`, positive clockwise, as the relative value it sends.
     pub fn turn(&self, index: u8, steps: i32) -> bool {
-        let value = if steps >= 0 { steps.min(63) as u8 } else { (128 + steps.max(-64)) as u8 };
-        self.send(self.port(), &[0xB0, controls::ENCODERS[usize::from(index)].controller, value])
+        let value = if steps >= 0 {
+            steps.min(63) as u8
+        } else {
+            (128 + steps.max(-64)) as u8
+        };
+        self.send(
+            self.port(),
+            &[
+                0xB0,
+                controls::ENCODERS[usize::from(index)].controller,
+                value,
+            ],
+        )
     }
 
     /// A finger comes on encoder `index`.
     pub fn touch(&self, index: u8) -> bool {
-        self.send(self.port(), &[0x90, controls::ENCODERS[usize::from(index)].touch, 127])
+        self.send(
+            self.port(),
+            &[0x90, controls::ENCODERS[usize::from(index)].touch, 127],
+        )
     }
 
     /// The finger leaves encoder `index`.
     pub fn release(&self, index: u8) -> bool {
-        self.send(self.port(), &[0x90, controls::ENCODERS[usize::from(index)].touch, 0])
+        self.send(
+            self.port(),
+            &[0x90, controls::ENCODERS[usize::from(index)].touch, 0],
+        )
     }
 
     /// A finger comes on the touch strip.
@@ -486,7 +525,10 @@ impl Simulated {
         let position = position.clamp(0.0, 1.0);
         if self.device.strip_config & 0b100 == 0 {
             let value = ((position * 255.0).round() as u16) << 6;
-            self.send(self.port(), &[0xE0, (value & 0x7F) as u8, (value >> 7) as u8])
+            self.send(
+                self.port(),
+                &[0xE0, (value & 0x7F) as u8, (value >> 7) as u8],
+            )
         } else {
             self.send(self.port(), &[0xB0, 1, (position * 127.0).round() as u8])
         }
@@ -518,7 +560,11 @@ impl Simulated {
 
     /// Footswitch `number` (1 or 2) goes down or up.
     pub fn footswitch(&self, number: u8, down: bool) -> bool {
-        let controller = if number == 1 { controls::cc::FOOTSWITCH_1 } else { controls::cc::FOOTSWITCH_2 };
+        let controller = if number == 1 {
+            controls::cc::FOOTSWITCH_1
+        } else {
+            controls::cc::FOOTSWITCH_2
+        };
         self.send(self.port(), &[0xB0, controller, if down { 127 } else { 0 }])
     }
 }

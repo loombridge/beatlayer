@@ -58,7 +58,10 @@ impl Usb {
             .find(|d| d.vendor_id() == 0x2982 && d.product_id() == 0x1967)
             .ok_or("no Push 2 on USB")?;
         let device = info.open().wait().map_err(|e| e.to_string())?;
-        let interface = device.claim_interface(0).wait().map_err(|e| e.to_string())?;
+        let interface = device
+            .claim_interface(0)
+            .wait()
+            .map_err(|e| e.to_string())?;
         let endpoint = interface
             .endpoint(0x01)
             .map_err(|e| format!("Push 2's display endpoint: {e}"))?;
@@ -137,7 +140,10 @@ impl Renderer {
     /// (R17). Returns whether a frame went.
     pub fn step(&mut self, now: Instant, screen: &Screen) -> bool {
         if self.sink.is_none() {
-            if self.last_claim.is_some_and(|at| now.duration_since(at) < RETRY) {
+            if self
+                .last_claim
+                .is_some_and(|at| now.duration_since(at) < RETRY)
+            {
                 return false;
             }
             self.last_claim = Some(now);
@@ -315,7 +321,10 @@ mod tests {
             clock.advance(Duration::from_millis(1));
         }
         let busy = lock(&sent).len();
-        assert!((55..=60).contains(&busy), "{busy} frames in a second of changes");
+        assert!(
+            (55..=60).contains(&busy),
+            "{busy} frames in a second of changes"
+        );
         assert!(lock(&sent).iter().all(|&len| len == frame::FRAME_BYTES));
 
         // Three seconds with nothing new: one frame each second.

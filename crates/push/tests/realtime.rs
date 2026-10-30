@@ -10,9 +10,9 @@ use bl_core::time::SampleRate;
 use bl_engine::{Collector, Compiler, EngineConfig, NoInput, Registry, channel};
 use bl_midi_io::{MidiPorts, OutputBus, input_queue};
 use bl_model::{Command, Editor, TrackId, TrackKind};
+use bl_push::Shared;
 use bl_push::content::{Content, Contents, Ctx, MakeContents, Pad, PadEvent};
 use bl_push::sim::{LIVE, Simulated};
-use bl_push::Shared;
 use std::sync::Arc;
 
 const BLOCK: usize = 256;
@@ -28,7 +28,9 @@ impl Content for Plays {
     fn pad(&mut self, pad: Pad, event: PadEvent, ctx: &mut Ctx<'_>) {
         let note = bl_push::controls::pad_note(pad.row, pad.column);
         match event {
-            PadEvent::On(velocity) => ctx.cx.play(bl_core::midi::MidiMessage::note_on(0, note, velocity)),
+            PadEvent::On(velocity) => ctx
+                .cx
+                .play(bl_core::midi::MidiMessage::note_on(0, note, velocity)),
             PadEvent::Off => ctx.cx.play(bl_core::midi::MidiMessage::note_off(0, note)),
             _ => {}
         }
@@ -68,7 +70,8 @@ fn pads_notes_reach_the_engine_without_allocating_on_the_audio_thread() {
     let backend = bl_midi_io::TestBackend::new();
     let clock = TestClock::new();
     let bus = OutputBus::new();
-    let mut ports = MidiPorts::new(Box::new(backend.clone()), input.clone()).with_output(bus.clone());
+    let mut ports =
+        MidiPorts::new(Box::new(backend.clone()), input.clone()).with_output(bus.clone());
     let mut surfaces = Surfaces::new(input, bus);
     surfaces.set_clock(clock.clone());
     let mut sim = Simulated::new(&backend, &clock);
@@ -77,7 +80,11 @@ fn pads_notes_reach_the_engine_without_allocating_on_the_audio_thread() {
         contents.pads[0] = Box::new(Plays);
         contents
     });
-    surfaces.set_natives(vec![Arc::new(bl_push::kind(Arc::new(Shared::default()), sim.frames().claim(), make))]);
+    surfaces.set_natives(vec![Arc::new(bl_push::kind(
+        Arc::new(Shared::default()),
+        sim.frames().claim(),
+        make,
+    ))]);
     sim.plug_in();
     surfaces
         .set_row(
@@ -136,5 +143,8 @@ fn pads_notes_reach_the_engine_without_allocating_on_the_audio_thread() {
             .count();
     }
     assert!(played > 0, "the pads' notes reached the track");
-    assert!(surfaces.traffic().0 >= 5_000, "the host took every pad message");
+    assert!(
+        surfaces.traffic().0 >= 5_000,
+        "the host took every pad message"
+    );
 }

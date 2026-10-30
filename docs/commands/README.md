@@ -61,6 +61,7 @@ The commands, by the part of their ID before its first dot:
 - [`pad`](pad.md)
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
+- [`push`](push.md)
 - [`rack`](rack.md)
 - [`remote`](remote.md)
 - [`routing`](routing.md)
@@ -23938,6 +23939,753 @@ What `clip_view.show_properties` returns.
     "panel"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `PushDisplay`
+
+What the display shows (R17 to R20).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `text` | array of string | yes | The content as text, by band and column: the labels, the parameters' names and values with their dots, the notification, the count-in and the progress bars. |
+| `claimed` | boolean | yes | Whether the display interface is claimed. |
+| `error` | string or null | yes | Why it isn't. |
+| `frames` | integer, at least 0 | yes | Frames sent so far. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What the display shows (R17 to R20).",
+  "properties": {
+    "claimed": {
+      "description": "Whether the display interface is claimed.",
+      "type": "boolean"
+    },
+    "error": {
+      "description": "Why it isn't.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "frames": {
+      "description": "Frames sent so far.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "text": {
+      "description": "The content as text, by band and column: the labels, the parameters' names and values with their dots, the notification, the count-in and the progress bars.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "text",
+    "claimed",
+    "error",
+    "frames"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDisplayFrame`
+
+What `push.display_frame` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The row. |
+| `width` | integer, at least 0 | yes | The image's width in pixels. |
+| `height` | integer, at least 0 | yes | The image's height in pixels. |
+| `png` | string | yes | The frame as a PNG, base64. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.display_frame` returns.",
+  "properties": {
+    "height": {
+      "description": "The image's height in pixels.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "png": {
+      "description": "The frame as a PNG, base64.",
+      "type": "string"
+    },
+    "row": {
+      "description": "The row.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "width": {
+      "description": "The image's width in pixels.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "row",
+    "width",
+    "height",
+    "png"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDisplayMode`
+
+The display mode (R22).
+
+One of:
+
+- `"device"`: Device.
+- `"browse"`: Browse.
+- `"mix"`: Mix.
+- `"clip"`: Clip.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The display mode (R22).",
+  "oneOf": [
+    {
+      "const": "device",
+      "description": "Device.",
+      "type": "string"
+    },
+    {
+      "const": "browse",
+      "description": "Browse.",
+      "type": "string"
+    },
+    {
+      "const": "mix",
+      "description": "Mix.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "Clip.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushInfo`
+
+One connected Push 2.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `row` | integer from 0 to 255 | yes | The Control Surfaces table's row it runs in, from 1. |
+| `input` | string | yes | Its Live port. |
+| `output` | string | yes | The output it is sent to. |
+| `firmware` | string or null | yes | The firmware version its Device Inquiry reported. |
+| `external_power` | boolean or null | yes | Whether it has its own power supply, once Request Statistics was answered. |
+| `error` | string or null | yes | Why it isn't driven, if it isn't: not a Push 2. |
+| `midi_mode` | [`PushMidiMode`](#pushmidimode) | yes | The MIDI mode. |
+| `pad_mode` | [`PushPadMode`](#pushpadmode) | yes | The pad mode. |
+| `display_mode` | [`PushDisplayMode`](#pushdisplaymode) | yes | The display mode. |
+| `mix` | [`PushMixPage`](#pushmixpage) or null | yes | Mix's page, while Mix is the display mode. |
+| `menu` | [`PushMenu`](#pushmenu) or null | yes | The menu that is open. |
+| `held` | array of string | yes | The buttons held, by name. |
+| `locked` | array of string | yes | The buttons locked on (Mute, Solo, Stop Clip), by name. |
+| `colour_picker` | boolean | yes | Whether the colour picker is open. |
+| `leds` | object | yes | Every LED, by control name: a button by its name (`play`, `lower_1`), a pad as `pad_<row>_<column>`, row from the bottom and column from the left, both from 0. |
+| `touch_strip` | [`PushTouchStrip`](#pushtouchstrip) | yes | The touch strip. |
+| `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
+| `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One connected Push 2.",
+  "properties": {
+    "colour_picker": {
+      "description": "Whether the colour picker is open.",
+      "type": "boolean"
+    },
+    "display": {
+      "$ref": "#/$defs/PushDisplay",
+      "description": "The display."
+    },
+    "display_mode": {
+      "$ref": "#/$defs/PushDisplayMode",
+      "description": "The display mode."
+    },
+    "error": {
+      "description": "Why it isn't driven, if it isn't: not a Push 2.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "external_power": {
+      "description": "Whether it has its own power supply, once Request Statistics was answered.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "firmware": {
+      "description": "The firmware version its Device Inquiry reported.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "held": {
+      "description": "The buttons held, by name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "input": {
+      "description": "Its Live port.",
+      "type": "string"
+    },
+    "leds": {
+      "additionalProperties": {
+        "$ref": "#/$defs/PushLed"
+      },
+      "description": "Every LED, by control name: a button by its name (`play`, `lower_1`), a pad as `pad_<row>_<column>`, row from the bottom and column from the left, both from 0.",
+      "type": "object"
+    },
+    "locked": {
+      "description": "The buttons locked on (Mute, Solo, Stop Clip), by name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "menu": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushMenu"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The menu that is open."
+    },
+    "midi_mode": {
+      "$ref": "#/$defs/PushMidiMode",
+      "description": "The MIDI mode."
+    },
+    "mix": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushMixPage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Mix's page, while Mix is the display mode."
+    },
+    "output": {
+      "description": "The output it is sent to.",
+      "type": "string"
+    },
+    "pad_mode": {
+      "$ref": "#/$defs/PushPadMode",
+      "description": "The pad mode."
+    },
+    "row": {
+      "description": "The Control Surfaces table's row it runs in, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "setup": {
+      "$ref": "#/$defs/PushSetup",
+      "description": "The Setup menu's values."
+    },
+    "touch_strip": {
+      "$ref": "#/$defs/PushTouchStrip",
+      "description": "The touch strip."
+    }
+  },
+  "required": [
+    "row",
+    "input",
+    "output",
+    "firmware",
+    "external_power",
+    "error",
+    "midi_mode",
+    "pad_mode",
+    "display_mode",
+    "mix",
+    "menu",
+    "held",
+    "locked",
+    "colour_picker",
+    "leds",
+    "touch_strip",
+    "setup",
+    "display"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushLed`
+
+One LED (R13): the palette index it shows, which is a level of white for a white LED, and its animation.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `colour` | integer from 0 to 255 | yes | The colour index, 0 for off. |
+| `animation` | [`PushLedAnimation`](#pushledanimation) or null | yes | Its animation, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One LED (R13): the palette index it shows, which is a level of white for a white LED, and its animation.",
+  "properties": {
+    "animation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushLedAnimation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its animation, if it has one."
+    },
+    "colour": {
+      "description": "The colour index, 0 for off.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "colour",
+    "animation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushLedAnimation`
+
+What an LED does besides showing its colour (R13).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `colour` | integer from 0 to 255 | yes | The colour index it moves to. |
+| `channel` | integer from 0 to 255 | yes | The animation's channel, 1 to 15: one-shot on 1 to 5, pulsing on 6 to 10 and blinking on 11 to 15. |
+| `kind` | string | yes | `one_shot`, `pulsing` or `blinking`. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What an LED does besides showing its colour (R13).",
+  "properties": {
+    "channel": {
+      "description": "The animation's channel, 1 to 15: one-shot on 1 to 5, pulsing on 6 to 10 and blinking on 11 to 15.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "colour": {
+      "description": "The colour index it moves to.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "kind": {
+      "description": "`one_shot`, `pulsing` or `blinking`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "colour",
+    "channel",
+    "kind"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushMenu`
+
+A menu over the display mode (R23).
+
+One of:
+
+- `"setup"`: Setup.
+- `"scale"`: Scale.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A menu over the display mode (R23).",
+  "oneOf": [
+    {
+      "const": "setup",
+      "description": "Setup.",
+      "type": "string"
+    },
+    {
+      "const": "scale",
+      "description": "Scale.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushMidiMode`
+
+The MIDI mode (R4, R33).
+
+One of:
+
+- `"live"`: Live mode: the surface reads the controls.
+- `"user"`: User mode: the controls go to the User port.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The MIDI mode (R4, R33).",
+  "oneOf": [
+    {
+      "const": "live",
+      "description": "Live mode: the surface reads the controls.",
+      "type": "string"
+    },
+    {
+      "const": "user",
+      "description": "User mode: the controls go to the User port.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushMixPage`
+
+Mix's page (R22).
+
+One of:
+
+- `"track"`: Track Mix.
+- `"global"`: Global Mix.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Mix's page (R22).",
+  "oneOf": [
+    {
+      "const": "track",
+      "description": "Track Mix.",
+      "type": "string"
+    },
+    {
+      "const": "global",
+      "description": "Global Mix.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushPadMode`
+
+The pad mode (R21).
+
+One of:
+
+- `"note"`: Note Mode.
+- `"session"`: Session Mode.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The pad mode (R21).",
+  "oneOf": [
+    {
+      "const": "note",
+      "description": "Note Mode.",
+      "type": "string"
+    },
+    {
+      "const": "session",
+      "description": "Session Mode.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushSetModeResult`
+
+What `push.set_mode` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `rows` | array of integer from 0 to 255 | yes | The rows whose Push 2 was asked to switch, from 1. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.set_mode` returns.",
+  "properties": {
+    "rows": {
+      "description": "The rows whose Push 2 was asked to switch, from 1.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "rows"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSetup`
+
+The Setup menu's values (R31).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `pad_sensitivity` | integer from 0 to 255 | yes | Pad Sensitivity, 0 to 10. |
+| `pad_gain` | integer from 0 to 255 | yes | Pad Gain, 0 to 10. |
+| `pad_dynamics` | integer from 0 to 255 | yes | Pad Dynamics, 0 to 10. |
+| `display_light` | integer from 0 to 255 | yes | Display Light, 0 to 100 %. |
+| `led_brightness` | integer from 0 to 255 | yes | LED Brightness, 0 to 100 %. |
+| `workflow` | [`PushWorkflow`](#pushworkflow) | yes | Workflow. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Setup menu's values (R31).",
+  "properties": {
+    "display_light": {
+      "description": "Display Light, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "led_brightness": {
+      "description": "LED Brightness, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pad_dynamics": {
+      "description": "Pad Dynamics, 0 to 10.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pad_gain": {
+      "description": "Pad Gain, 0 to 10.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pad_sensitivity": {
+      "description": "Pad Sensitivity, 0 to 10.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "workflow": {
+      "$ref": "#/$defs/PushWorkflow",
+      "description": "Workflow."
+    }
+  },
+  "required": [
+    "pad_sensitivity",
+    "pad_gain",
+    "pad_dynamics",
+    "display_light",
+    "led_brightness",
+    "workflow"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushState`
+
+What `push.state` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `pushes` | array of [`PushInfo`](#pushinfo) | yes | Each Push 2 that runs, by row. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.state` returns.",
+  "properties": {
+    "pushes": {
+      "description": "Each Push 2 that runs, by row.",
+      "items": {
+        "$ref": "#/$defs/PushInfo"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "pushes"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushTouchStrip`
+
+How the touch strip is configured and lit (R11).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `configuration` | string | yes | `pitch_bend`, `modulation` or `range`. |
+| `flags` | integer from 0 to 255 | yes | The configuration flags Push 2 was given. |
+| `leds` | array of integer from 0 to 255 | yes | The 31 LEDs' levels, 0 to 7, the bottom one first; all 0 unless Beatlayer lights it (`range`). |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How the touch strip is configured and lit (R11).",
+  "properties": {
+    "configuration": {
+      "description": "`pitch_bend`, `modulation` or `range`.",
+      "type": "string"
+    },
+    "flags": {
+      "description": "The configuration flags Push 2 was given.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "leds": {
+      "description": "The 31 LEDs' levels, 0 to 7, the bottom one first; all 0 unless Beatlayer lights it (`range`).",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "configuration",
+    "flags",
+    "leds"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushWorkflow`
+
+Workflow (R31).
+
+One of:
+
+- `"scene"`: Scene, the default.
+- `"clip"`: Clip.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Workflow (R31).",
+  "oneOf": [
+    {
+      "const": "scene",
+      "description": "Scene, the default.",
+      "type": "string"
+    },
+    {
+      "const": "clip",
+      "description": "Clip.",
+      "type": "string"
+    }
+  ]
 }
 ```
 

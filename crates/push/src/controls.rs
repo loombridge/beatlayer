@@ -252,17 +252,61 @@ pub const SWING: u8 = 10;
 
 /// Every encoder, as R6 gives them.
 pub const ENCODERS: [Encoder; 11] = [
-    Encoder { index: 0, controller: 71, touch: 0 },
-    Encoder { index: 1, controller: 72, touch: 1 },
-    Encoder { index: 2, controller: 73, touch: 2 },
-    Encoder { index: 3, controller: 74, touch: 3 },
-    Encoder { index: 4, controller: 75, touch: 4 },
-    Encoder { index: 5, controller: 76, touch: 5 },
-    Encoder { index: 6, controller: 77, touch: 6 },
-    Encoder { index: 7, controller: 78, touch: 7 },
-    Encoder { index: MASTER, controller: 79, touch: 8 },
-    Encoder { index: TEMPO, controller: 14, touch: 10 },
-    Encoder { index: SWING, controller: 15, touch: 9 },
+    Encoder {
+        index: 0,
+        controller: 71,
+        touch: 0,
+    },
+    Encoder {
+        index: 1,
+        controller: 72,
+        touch: 1,
+    },
+    Encoder {
+        index: 2,
+        controller: 73,
+        touch: 2,
+    },
+    Encoder {
+        index: 3,
+        controller: 74,
+        touch: 3,
+    },
+    Encoder {
+        index: 4,
+        controller: 75,
+        touch: 4,
+    },
+    Encoder {
+        index: 5,
+        controller: 76,
+        touch: 5,
+    },
+    Encoder {
+        index: 6,
+        controller: 77,
+        touch: 6,
+    },
+    Encoder {
+        index: 7,
+        controller: 78,
+        touch: 7,
+    },
+    Encoder {
+        index: MASTER,
+        controller: 79,
+        touch: 8,
+    },
+    Encoder {
+        index: TEMPO,
+        controller: 14,
+        touch: 10,
+    },
+    Encoder {
+        index: SWING,
+        controller: 15,
+        touch: 9,
+    },
 ];
 
 /// The encoder that turns on controller `number`.

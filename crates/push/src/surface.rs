@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 
 use crate::buttons::{self, Buttons};
 use crate::content::{
-    Action, Contents, Content, Ctx, DisplayMode, Gesture, Lights, MakeContents, MixPage, Modifiers,
+    Action, Content, Contents, Ctx, DisplayMode, Gesture, Lights, MakeContents, MixPage, Modifiers,
     Pad, PadEvent, PadMode, Paint, StripEvent, StripUse, Target, Turn,
 };
 use crate::controls::{self, BUTTONS, LedKind, STRIP_TOUCH, cc};
@@ -296,7 +296,8 @@ impl Push {
                 waiting == Some(Expect::Identity)
             }
             (Reply::OtherDevice, Some(Expect::Identity)) => {
-                self.error = Some("the device that answered the Device Inquiry isn't a Push 2".to_owned());
+                self.error =
+                    Some("the device that answered the Device Inquiry isn't a Push 2".to_owned());
                 self.phase = Phase::Failed;
                 self.publish();
                 return;
@@ -360,7 +361,7 @@ impl Push {
 
     /// Runs `f` on the active pad mode's content and then the display
     /// mode's, with a context.
-    fn to_contents(&mut self, cx: &mut Cx, mut f: impl FnMut(&mut dyn Content, &mut Ctx<'_>)) {
+    fn with_contents(&mut self, cx: &mut Cx, mut f: impl FnMut(&mut dyn Content, &mut Ctx<'_>)) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
         let mut actions = std::mem::take(&mut self.actions);
@@ -385,7 +386,7 @@ impl Push {
         self.apply(cx.now());
     }
 
-    fn to_pad_content(&mut self, cx: &mut Cx, f: impl FnOnce(&mut dyn Content, &mut Ctx<'_>)) {
+    fn with_pad_content(&mut self, cx: &mut Cx, f: impl FnOnce(&mut dyn Content, &mut Ctx<'_>)) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
         let mut actions = std::mem::take(&mut self.actions);
@@ -407,7 +408,11 @@ impl Push {
         self.apply(cx.now());
     }
 
-    fn to_display_content(&mut self, cx: &mut Cx, f: impl FnOnce(&mut dyn Content, &mut Ctx<'_>)) {
+    fn with_display_content(
+        &mut self,
+        cx: &mut Cx,
+        f: impl FnOnce(&mut dyn Content, &mut Ctx<'_>),
+    ) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
         let mut actions = std::mem::take(&mut self.actions);
@@ -510,7 +515,9 @@ impl Push {
             return;
         }
         if matches!(events.first(), Some(buttons::Event::Unlock(_))) {
-            self.to_contents(cx, |content, ctx| content.button(button, Gesture::Unlock, ctx));
+            self.with_contents(cx, |content, ctx| {
+                content.button(button, Gesture::Unlock, ctx)
+            });
             return;
         }
         // Any button closes the colour picker, with no change (R27).
@@ -535,7 +542,9 @@ impl Push {
             }
             return;
         }
-        self.to_contents(cx, |content, ctx| content.button(button, Gesture::Press, ctx));
+        self.with_contents(cx, |content, ctx| {
+            content.button(button, Gesture::Press, ctx)
+        });
     }
 
     /// What a core button does with a modifier held: the combination the
@@ -577,7 +586,9 @@ impl Push {
             } => self.button_up(button, tap, held, used, cx),
             buttons::Event::Hold(button) => self.hold(button, cx),
             buttons::Event::Lock(button) => {
-                self.to_contents(cx, |content, ctx| content.button(button, Gesture::Lock, ctx));
+                self.with_contents(cx, |content, ctx| {
+                    content.button(button, Gesture::Lock, ctx)
+                });
             }
         }
     }
@@ -599,7 +610,9 @@ impl Push {
             }
         }
         if !self.is_core(button) {
-            self.to_contents(cx, |content, ctx| content.button(button, Gesture::Hold, ctx));
+            self.with_contents(cx, |content, ctx| {
+                content.button(button, Gesture::Hold, ctx)
+            });
         }
     }
 
@@ -626,9 +639,11 @@ impl Push {
             }
         }
         if !self.is_core(button) {
-            self.to_contents(cx, |content, ctx| content.button(button, Gesture::Release, ctx));
+            self.with_contents(cx, |content, ctx| {
+                content.button(button, Gesture::Release, ctx)
+            });
             if tap {
-                self.to_contents(cx, |content, ctx| content.button(button, Gesture::Tap, ctx));
+                self.with_contents(cx, |content, ctx| content.button(button, Gesture::Tap, ctx));
             }
             return;
         }
@@ -642,7 +657,11 @@ impl Push {
                     .model
                     .as_ref()
                     .is_some_and(|m| m.document.settings().metronome.enabled);
-                Self::run(cx, "transport.set_metronome_enabled", json!({ "enabled": !on }));
+                Self::run(
+                    cx,
+                    "transport.set_metronome_enabled",
+                    json!({ "enabled": !on }),
+                );
             }
             cc::UNDO => Self::run(cx, "edit.undo", json!({})),
             cc::DOUBLE_LOOP => Self::run(cx, "clip.duplicate_loop", json!({})),
@@ -682,7 +701,11 @@ impl Push {
     }
 
     fn toggle_menu(&mut self, menu: Menu) {
-        self.menu = if self.menu == Some(menu) { None } else { Some(menu) };
+        self.menu = if self.menu == Some(menu) {
+            None
+        } else {
+            Some(menu)
+        };
     }
 
     fn set_user_mode(&mut self, on: bool, cx: &mut Cx) {
@@ -696,7 +719,10 @@ impl Push {
             // Push 2 ignores the Live port's LEDs once it is in User mode,
             // except User's own.
             self.leds.clear();
-            self.leds.set(Addr::Button(cc::USER), Led::steady(crate::leds::white::FULL));
+            self.leds.set(
+                Addr::Button(cc::USER),
+                Led::steady(crate::leds::white::FULL),
+            );
             self.flush_leds(cx);
             Self::send(cx, sysex::midi_mode(MidiMode::User));
         } else {
@@ -717,7 +743,9 @@ impl Push {
         }
         self.last_pad = Pad { row, column };
         let pad = self.last_pad;
-        self.to_pad_content(cx, |content, ctx| content.pad(pad, PadEvent::On(velocity), ctx));
+        self.with_pad_content(cx, |content, ctx| {
+            content.pad(pad, PadEvent::On(velocity), ctx)
+        });
     }
 
     fn pad_event(&mut self, pad: Pad, event: PadEvent, cx: &mut Cx) {
@@ -728,14 +756,14 @@ impl Push {
         {
             return;
         }
-        self.to_pad_content(cx, |content, ctx| content.pad(pad, event, ctx));
+        self.with_pad_content(cx, |content, ctx| content.pad(pad, event, ctx));
     }
 
     fn strip_event(&mut self, event: StripEvent, cx: &mut Cx) {
         if matches!(event, StripEvent::Touch) {
             self.buttons.use_modifiers(0);
         }
-        self.to_pad_content(cx, |content, ctx| content.strip(event, ctx));
+        self.with_pad_content(cx, |content, ctx| content.strip(event, ctx));
     }
 
     fn touch(&mut self, index: u8, touched: bool, cx: &mut Cx) {
@@ -768,7 +796,7 @@ impl Push {
         }
         if index < 8 && self.menu != Some(Menu::Setup) {
             let turn = if touched { Turn::Touch } else { Turn::Release };
-            self.to_display_content(cx, |content, ctx| content.encoder(index, turn, ctx));
+            self.with_display_content(cx, |content, ctx| content.encoder(index, turn, ctx));
         }
     }
 
@@ -788,7 +816,8 @@ impl Push {
                 };
                 self.gestures[usize::from(index)] = true;
                 if shift {
-                    let now_value = bl_model::fader::fader_position(model.document.settings().cue_volume);
+                    let now_value =
+                        bl_model::fader::fader_position(model.document.settings().cue_volume);
                     let position = self.cue.turn(now, now_value, steps, true);
                     cx.run_held(
                         control,
@@ -816,7 +845,11 @@ impl Push {
                     return;
                 }
                 let base = match self.tempo {
-                    Some((bpm, at)) if now.saturating_duration_since(at) < Duration::from_millis(500) => bpm,
+                    Some((bpm, at))
+                        if now.saturating_duration_since(at) < Duration::from_millis(500) =>
+                    {
+                        bpm
+                    }
                     _ => model.tempo.get(),
                 };
                 let by = f64::from(steps) * if shift { 0.1 } else { 1.0 };
@@ -826,7 +859,8 @@ impl Push {
                 self.tempo = Some((bpm, now));
                 if let Ok(bpm) = bl_core::time::Bpm::new(bpm) {
                     self.gestures[usize::from(index)] = true;
-                    let tempo = serde_json::to_value(bl_core::time::TempoMap::constant(bpm)).unwrap_or(Value::Null);
+                    let tempo = serde_json::to_value(bl_core::time::TempoMap::constant(bpm))
+                        .unwrap_or(Value::Null);
                     cx.run_held(control, "song.set_tempo", json!({ "tempo": tempo }));
                 }
                 self.notify(now, format!("Tempo {bpm:.1} BPM"));
@@ -838,7 +872,9 @@ impl Push {
             }
             column if self.menu == Some(Menu::Setup) => self.setup_turn(column, steps, shift),
             column => {
-                self.to_display_content(cx, |content, ctx| content.encoder(column, Turn::Steps(steps), ctx));
+                self.with_display_content(cx, |content, ctx| {
+                    content.encoder(column, Turn::Steps(steps), ctx)
+                });
             }
         }
     }
@@ -878,7 +914,8 @@ impl Push {
     fn footswitch(&mut self, number: u8, value: u8, at: Instant, cx: &mut Cx) {
         let down = value >= 64;
         if number == cc::FOOTSWITCH_1 {
-            if let Some(message) = MidiMessage::from_bytes(&[0xB0, 64, if down { 127 } else { 0 }]) {
+            if let Some(message) = MidiMessage::from_bytes(&[0xB0, 64, if down { 127 } else { 0 }])
+            {
                 cx.play(message);
             }
         } else if down {
@@ -894,7 +931,7 @@ impl Push {
     /// A press and release of `button` that wasn't on Push 2 (R29).
     fn synthetic(&mut self, button: u8, cx: &mut Cx) {
         for gesture in [Gesture::Press, Gesture::Release, Gesture::Tap] {
-            self.to_contents(cx, |content, ctx| content.button(button, gesture, ctx));
+            self.with_contents(cx, |content, ctx| content.button(button, gesture, ctx));
         }
     }
 
@@ -922,7 +959,14 @@ impl Push {
                         self.touch(encoder.index, on, cx);
                     }
                 } else if a == STRIP_TOUCH && !self.user_mode {
-                    self.strip_event(if on { StripEvent::Touch } else { StripEvent::Release }, cx);
+                    self.strip_event(
+                        if on {
+                            StripEvent::Touch
+                        } else {
+                            StripEvent::Release
+                        },
+                        cx,
+                    );
                 }
             }
             0xB0 => {
@@ -1046,7 +1090,8 @@ impl Push {
                         swatch(t.colour()),
                         model.selection.tracks.contains(&track),
                     );
-                    if let Some((_, fraction)) = model.progress.iter().find(|(id, _)| *id == track) {
+                    if let Some((_, fraction)) = model.progress.iter().find(|(id, _)| *id == track)
+                    {
                         self.screen.progress[column] = Some(*fraction);
                     }
                 }
@@ -1059,7 +1104,10 @@ impl Push {
                 (PadMode::Note, mode) => (0, mode.index()),
                 (PadMode::Session, mode) => (1, mode.index()),
             };
-            for content in [self.contents.pads[pad].as_mut(), self.contents.display[display].as_mut()] {
+            for content in [
+                self.contents.pads[pad].as_mut(),
+                self.contents.display[display].as_mut(),
+            ] {
                 content.paint(&mut Paint {
                     screen: &mut self.screen,
                     lights: Lights {
@@ -1087,7 +1135,11 @@ impl Push {
                 if label.is_empty() || lights.leds.get(Addr::Button(button)) != Led::default() {
                     continue;
                 }
-                let rgb = if label.selected { label.colour } else { dim(label.colour) };
+                let rgb = if label.selected {
+                    label.colour
+                } else {
+                    dim(label.colour)
+                };
                 let index = lights.colour(rgb);
                 lights.button(button, Led::steady(index));
             }
@@ -1095,9 +1147,19 @@ impl Push {
 
         // The buttons the surface itself owns (R12, R13, R21, R22).
         let playing = model.transport.playing;
-        lights.button(cc::PLAY, Led::steady(if playing { fixed::GREEN } else { fixed::DARK_GREY }));
+        lights.button(
+            cc::PLAY,
+            Led::steady(if playing {
+                fixed::GREEN
+            } else {
+                fixed::DARK_GREY
+            }),
+        );
         lights.button(cc::TAP_TEMPO, Led::level(true, false));
-        lights.button(cc::METRONOME, Led::switch(model.document.settings().metronome.enabled));
+        lights.button(
+            cc::METRONOME,
+            Led::switch(model.document.settings().metronome.enabled),
+        );
         lights.button(cc::UNDO, Led::level(true, false));
         lights.button(cc::DOUBLE_LOOP, Led::level(true, false));
         lights.button(cc::SETUP, Led::level(true, self.menu == Some(Menu::Setup)));
@@ -1164,7 +1226,10 @@ impl Push {
                 ..Screen::default()
             };
             self.leds.clear();
-            self.leds.set(Addr::Button(cc::USER), Led::steady(crate::leds::white::FULL));
+            self.leds.set(
+                Addr::Button(cc::USER),
+                Led::steady(crate::leds::white::FULL),
+            );
         }
     }
 
@@ -1234,7 +1299,11 @@ impl Push {
         snapshot.firmware = self.firmware.clone();
         snapshot.external_power = self.external_power;
         snapshot.error = self.error.clone();
-        snapshot.midi_mode = if self.user_mode { MidiMode::User } else { MidiMode::Live };
+        snapshot.midi_mode = if self.user_mode {
+            MidiMode::User
+        } else {
+            MidiMode::Live
+        };
         snapshot.pad_mode = self.pad_mode;
         snapshot.display_mode = self.display_mode;
         snapshot.mix_page = self.mix_page;
@@ -1261,7 +1330,11 @@ impl Push {
         snapshot.strip_leds = *self.leds.strip();
         snapshot.setup = self.shared.setup();
         snapshot.screen = self.screen.clone();
-        snapshot.display = self.display.as_ref().map(Display::status).unwrap_or_default();
+        snapshot.display = self
+            .display
+            .as_ref()
+            .map(Display::status)
+            .unwrap_or_default();
         self.handle.publish(snapshot);
     }
 }
@@ -1340,11 +1413,18 @@ impl ControlSurface for Push {
 
     fn state(&self) -> SurfaceState {
         SurfaceState {
-            ring: Some(bl_control::Ring { tracks: 8, scenes: 8 }),
+            ring: Some(bl_control::Ring {
+                tracks: 8,
+                scenes: 8,
+            }),
             mode: Some(match (self.user_mode, self.display_mode, self.mix_page) {
                 (true, ..) => "User Mode".to_owned(),
-                (_, DisplayMode::Mix, MixPage::Global) => format!("{}, Global Mix", self.pad_mode.name()),
-                (_, DisplayMode::Mix, MixPage::Track) => format!("{}, Track Mix", self.pad_mode.name()),
+                (_, DisplayMode::Mix, MixPage::Global) => {
+                    format!("{}, Global Mix", self.pad_mode.name())
+                }
+                (_, DisplayMode::Mix, MixPage::Track) => {
+                    format!("{}, Track Mix", self.pad_mode.name())
+                }
                 (_, mode, _) => format!("{}, {}", self.pad_mode.name(), mode.name()),
             }),
         }

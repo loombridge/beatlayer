@@ -4,9 +4,7 @@
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use bl_control::{
-    CommandRequest, ReadModel, RingView, RowConfig, RowView, RunState, Surfaces,
-};
+use bl_control::{CommandRequest, ReadModel, RingView, RowConfig, RowView, RunState, Surfaces};
 use bl_core::clock::TestClock;
 use bl_core::midi::MidiInputEvent;
 use bl_midi_io::{MidiPorts, OutputBus, input_queue};
@@ -14,9 +12,9 @@ use bl_model::{Command, Editor, TrackId, TrackKind};
 use bl_push::content::{
     Content, Contents, Ctx, Gesture, MakeContents, Pad, PadEvent, Paint, StripEvent, Turn,
 };
+use bl_push::content::{StripUse, Target};
 use bl_push::leds::Led;
 use bl_push::sim::{LIVE, Simulated};
-use bl_push::content::{StripUse, Target};
 use bl_push::{Handle, Shared, Snapshot};
 use rtrb::Consumer;
 
@@ -99,7 +97,9 @@ impl Content for Recorder {
         if lock(&self.flags).play_pads {
             let note = bl_push::controls::pad_note(pad.row, pad.column);
             match event {
-                PadEvent::On(velocity) => ctx.cx.play(bl_core::midi::MidiMessage::note_on(0, note, velocity)),
+                PadEvent::On(velocity) => ctx
+                    .cx
+                    .play(bl_core::midi::MidiMessage::note_on(0, note, velocity)),
                 PadEvent::Off => ctx.cx.play(bl_core::midi::MidiMessage::note_off(0, note)),
                 _ => {}
             }
@@ -107,7 +107,10 @@ impl Content for Recorder {
     }
 
     fn encoder(&mut self, column: u8, turn: Turn, ctx: &mut Ctx<'_>) {
-        self.note(format!("encoder {column} {turn:?} shift={}", ctx.modifiers.shift()));
+        self.note(format!(
+            "encoder {column} {turn:?} shift={}",
+            ctx.modifiers.shift()
+        ));
     }
 
     fn strip(&mut self, event: StripEvent, _ctx: &mut Ctx<'_>) {
@@ -159,11 +162,21 @@ impl Rig {
     /// A rig with a set of eight MIDI tracks, a Push 2 not yet plugged in,
     /// and recording contents in every mode.
     pub fn new() -> Self {
+        Self::build(false)
+    }
+
+    /// A rig whose modes have no content of their own yet: the placeholders.
+    pub fn placeholders() -> Self {
+        Self::build(true)
+    }
+
+    fn build(placeholders: bool) -> Self {
         let backend = bl_midi_io::TestBackend::new();
         let clock = TestClock::new();
         let (sender, engine) = input_queue(16_384);
         let bus = OutputBus::new();
-        let ports = MidiPorts::new(Box::new(backend.clone()), sender.clone()).with_output(bus.clone());
+        let ports =
+            MidiPorts::new(Box::new(backend.clone()), sender.clone()).with_output(bus.clone());
         let mut surfaces = Surfaces::new(sender, bus);
         surfaces.set_clock(clock.clone());
         let sim = Simulated::new(&backend, &clock);
@@ -182,9 +195,19 @@ impl Rig {
                 };
                 Contents {
                     pads: [recorder("Note"), recorder("Session")],
-                    display: [recorder("Device"), recorder("Browse"), recorder("Mix"), recorder("Clip")],
+                    display: [
+                        recorder("Device"),
+                        recorder("Browse"),
+                        recorder("Mix"),
+                        recorder("Clip"),
+                    ],
                 }
             })
+        };
+        let make = if placeholders {
+            bl_push::placeholder_contents()
+        } else {
+            make
         };
         surfaces.set_natives(vec![Arc::new(bl_push::kind(
             Arc::clone(&shared),
@@ -211,7 +234,10 @@ impl Rig {
         let ring: Vec<TrackId> = tracks.iter().take(8).copied().collect();
         model.rows = vec![RowView {
             ring: Some(RingView {
-                size: bl_control::Ring { tracks: 8, scenes: 8 },
+                size: bl_control::Ring {
+                    tracks: 8,
+                    scenes: 8,
+                },
                 first_track: ring.first().copied(),
                 first_scene: None,
                 tracks: ring,

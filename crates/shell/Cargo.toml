@@ -19,6 +19,8 @@ bl-audio-io.workspace = true
 bl-commands.workspace = true
 # What a mapped MIDI message or key does to its control (WP-7.1).
 bl-control.workspace = true
+# Push 2 as a control surface, offered in the Control Surfaces table (WP-7.19).
+bl-push.workspace = true
 # IDs for objects a command will create, which the agent API hands out.
 bl-core.workspace = true
 # Beatlayer's native devices, for the engines it runs and the Device View

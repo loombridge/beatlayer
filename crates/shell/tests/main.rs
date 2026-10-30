@@ -101,6 +101,7 @@ mod plugins_lv2;
 mod preset_preview;
 mod processed_files;
 mod project_folders;
+mod push;
 mod rack_presets;
 mod racks;
 mod realtime;

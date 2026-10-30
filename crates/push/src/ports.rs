@@ -19,7 +19,9 @@ fn numbered(name: &str, prefix: &str) -> bool {
 pub fn is_live(name: &str) -> bool {
     name == "Ableton Push 2 Live Port"
         || numbered(name, PREFIX)
-        || name.strip_suffix(":0").is_some_and(|rest| numbered(rest, PREFIX))
+        || name
+            .strip_suffix(":0")
+            .is_some_and(|rest| numbered(rest, PREFIX))
 }
 
 /// Whether `name` is Push 2's User port: `Ableton Push 2 User Port`,
@@ -30,7 +32,9 @@ pub fn is_user(name: &str) -> bool {
     name == "Ableton Push 2 User Port"
         || numbered(name, "MIDIIN2 (Ableton Push 2)")
         || numbered(name, "MIDIOUT2 (Ableton Push 2)")
-        || name.strip_suffix(":1").is_some_and(|rest| numbered(rest, PREFIX))
+        || name
+            .strip_suffix(":1")
+            .is_some_and(|rest| numbered(rest, PREFIX))
 }
 
 /// The Live ports among `names`, once each, in the order given.
@@ -71,7 +75,12 @@ mod tests {
             assert!(is_user(user), "{user}");
             assert!(!is_live(user), "{user}");
         }
-        for other in ["IAC Driver Bus 1", "Ableton Push 3", "Ableton Push 2 Live Portx", "Ableton Push 2 x"] {
+        for other in [
+            "IAC Driver Bus 1",
+            "Ableton Push 3",
+            "Ableton Push 2 Live Portx",
+            "Ableton Push 2 x",
+        ] {
             assert!(!is_live(other) && !is_user(other), "{other}");
         }
     }

@@ -10,9 +10,7 @@ pub const LINE: usize = 2048;
 /// The bytes of a pixel line.
 const PIXELS: usize = WIDTH * 2;
 /// The frame header.
-pub const HEADER: [u8; 16] = [
-    0xFF, 0xCC, 0xAA, 0x88, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-];
+pub const HEADER: [u8; 16] = [0xFF, 0xCC, 0xAA, 0x88, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 /// A frame as sent: the header and 160 lines (327,696 bytes).
 pub const FRAME_BYTES: usize = HEADER.len() + HEIGHT * LINE;
 /// The bytes of an RGB image of the display.
@@ -31,10 +29,14 @@ pub fn encode(rgb: &[u8]) -> Vec<u8> {
     assert_eq!(rgb.len(), RGB_BYTES, "an image of the display's size");
     let mut out = Vec::with_capacity(FRAME_BYTES);
     out.extend_from_slice(&HEADER);
-    for line in rgb.chunks_exact(WIDTH * 3) {
+    for line in rgb.as_chunks::<{ WIDTH * 3 }>().0 {
         let start = out.len();
-        for pixel in line.chunks_exact(3) {
-            let (r, g, b) = (u16::from(pixel[0]), u16::from(pixel[1]), u16::from(pixel[2]));
+        for pixel in line.as_chunks::<3>().0 {
+            let (r, g, b) = (
+                u16::from(pixel[0]),
+                u16::from(pixel[1]),
+                u16::from(pixel[2]),
+            );
             let value = r >> 3 | (g >> 2) << 5 | (b >> 3) << 11;
             out.extend_from_slice(&value.to_le_bytes());
         }
@@ -54,7 +56,7 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<u8>> {
         return None;
     }
     let mut rgb = Vec::with_capacity(RGB_BYTES);
-    for line in bytes[16..].chunks_exact(LINE) {
+    for line in bytes[16..].as_chunks::<LINE>().0 {
         let line: Vec<u8> = line
             .iter()
             .zip(XOR.iter().cycle())
@@ -63,8 +65,8 @@ pub fn decode(bytes: &[u8]) -> Option<Vec<u8>> {
         if line[PIXELS..].iter().any(|&b| b != 0) {
             return None;
         }
-        for pixel in line[..PIXELS].chunks_exact(2) {
-            let value = u16::from_le_bytes([pixel[0], pixel[1]]);
+        for pixel in line[..PIXELS].as_chunks::<2>().0 {
+            let value = u16::from_le_bytes(*pixel);
             let (r, g, b) = (value & 31, value >> 5 & 63, value >> 11);
             rgb.extend_from_slice(&[
                 (r << 3 | r >> 2) as u8,
@@ -93,11 +95,27 @@ mod tests {
         assert_eq!(frame.len(), 327_696);
         assert_eq!(frame[..16], HEADER);
         let line = &frame[16..16 + LINE];
-        let plain: Vec<u8> = line.iter().zip(XOR.iter().cycle()).map(|(b, m)| b ^ m).collect();
-        assert_eq!(u16::from_le_bytes([plain[0], plain[1]]), 0b0000_0000_0001_1111);
-        assert_eq!(u16::from_le_bytes([plain[2], plain[3]]), 0b0000_0111_1110_0000);
-        assert_eq!(u16::from_le_bytes([plain[4], plain[5]]), 0b1111_1000_0000_0000);
-        assert!(plain[1920..].iter().all(|&b| b == 0), "the filler is zeros before the XOR");
+        let plain: Vec<u8> = line
+            .iter()
+            .zip(XOR.iter().cycle())
+            .map(|(b, m)| b ^ m)
+            .collect();
+        assert_eq!(
+            u16::from_le_bytes([plain[0], plain[1]]),
+            0b0000_0000_0001_1111
+        );
+        assert_eq!(
+            u16::from_le_bytes([plain[2], plain[3]]),
+            0b0000_0111_1110_0000
+        );
+        assert_eq!(
+            u16::from_le_bytes([plain[4], plain[5]]),
+            0b1111_1000_0000_0000
+        );
+        assert!(
+            plain[1920..].iter().all(|&b| b == 0),
+            "the filler is zeros before the XOR"
+        );
         // A black pixel is the XOR pattern itself.
         assert_eq!(line[6..10], [XOR[2], XOR[3], XOR[0], XOR[1]]);
     }

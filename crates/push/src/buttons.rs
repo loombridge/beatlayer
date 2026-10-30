@@ -196,14 +196,24 @@ mod tests {
         assert!(buttons.tick(start + ms(299)).is_empty());
         assert_eq!(
             buttons.release(cc::SESSION, start + ms(299)),
-            [Event::Release { button: cc::SESSION, tap: true, held: false, used: false }]
+            [Event::Release {
+                button: cc::SESSION,
+                tap: true,
+                held: false,
+                used: false
+            }]
         );
         buttons.press(cc::SESSION, start);
         assert_eq!(buttons.tick(start + ms(300)), [Event::Hold(cc::SESSION)]);
         assert!(buttons.tick(start + ms(400)).is_empty(), "once");
         assert_eq!(
             buttons.release(cc::SESSION, start + ms(500)),
-            [Event::Release { button: cc::SESSION, tap: false, held: true, used: false }]
+            [Event::Release {
+                button: cc::SESSION,
+                tap: false,
+                held: true,
+                used: false
+            }]
         );
     }
 
@@ -220,7 +230,10 @@ mod tests {
         assert_eq!(buttons.tick(start + ms(1000)), [Event::Lock(cc::MUTE)]);
         assert!(buttons.release(cc::MUTE, start + ms(1200)).is_empty());
         assert!(buttons.modifiers().has(cc::MUTE), "locked counts as held");
-        assert_eq!(buttons.press(cc::MUTE, start + ms(2000)), [Event::Unlock(cc::MUTE)]);
+        assert_eq!(
+            buttons.press(cc::MUTE, start + ms(2000)),
+            [Event::Unlock(cc::MUTE)]
+        );
         assert!(buttons.release(cc::MUTE, start + ms(2050)).is_empty());
         assert!(!buttons.modifiers().has(cc::MUTE));
     }
@@ -236,7 +249,12 @@ mod tests {
         assert!(buttons.tick(start + ms(1500)).is_empty());
         assert_eq!(
             buttons.release(cc::MUTE, start + ms(100)),
-            [Event::Release { button: cc::MUTE, tap: false, held: false, used: true }]
+            [Event::Release {
+                button: cc::MUTE,
+                tap: false,
+                held: false,
+                used: true
+            }]
         );
     }
 }

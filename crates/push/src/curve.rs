@@ -87,7 +87,11 @@ fn scale(percent: u8, full: u32) -> u8 {
 /// `s`, Pad Gain `g` and Pad Dynamics `d` (R30).
 #[must_use]
 pub fn curve(s: u8, g: u8, d: u8) -> [u8; 128] {
-    let (s, g, d) = (f64::from(s.min(10)), f64::from(g.min(10)), f64::from(d.min(10)));
+    let (s, g, d) = (
+        f64::from(s.min(10)),
+        f64::from(g.min(10)),
+        f64::from(d.min(10)),
+    );
     std::array::from_fn(|i| {
         let x = i as f64 / 127.0;
         let x1 = (x * ((s - 5.0) / 2.5).exp2()).min(1.0);
@@ -149,9 +153,18 @@ mod tests {
             led_brightness: led,
             ..Setup::default()
         };
-        assert_eq!((setup(100, 100).display_value(), setup(100, 100).led_value()), (255, 127));
-        assert_eq!((setup(0, 0).display_value(), setup(0, 0).led_value()), (0, 0));
-        assert_eq!((setup(50, 50).display_value(), setup(50, 50).led_value()), (128, 64));
+        assert_eq!(
+            (setup(100, 100).display_value(), setup(100, 100).led_value()),
+            (255, 127)
+        );
+        assert_eq!(
+            (setup(0, 0).display_value(), setup(0, 0).led_value()),
+            (0, 0)
+        );
+        assert_eq!(
+            (setup(50, 50).display_value(), setup(50, 50).led_value()),
+            (128, 64)
+        );
     }
 
     proptest! {

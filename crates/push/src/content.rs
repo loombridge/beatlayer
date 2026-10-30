@@ -236,7 +236,7 @@ impl Target {
         match self {
             Self::Track(track) => (
                 "track.set_colour".to_owned(),
-                json!({ "track": track, "colour": colour }),
+                json!({ "tracks": [track], "colour": colour }),
             ),
             Self::Command { command, args, .. } => {
                 let mut args = args.clone();
@@ -463,7 +463,8 @@ impl Contents {
                 Box::new(Named::pads(PadMode::Note.name())),
                 Box::new(Named::pads(PadMode::Session.name())),
             ],
-            display: DisplayMode::ALL.map(|mode| Box::new(Named::display(mode.name())) as Box<dyn Content>),
+            display: DisplayMode::ALL
+                .map(|mode| Box::new(Named::display(mode.name())) as Box<dyn Content>),
         }
     }
 }

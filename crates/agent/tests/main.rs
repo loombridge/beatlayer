@@ -23,6 +23,7 @@ mod plugin_midi_effect;
 mod plugin_mpe;
 mod plugin_vst3;
 mod polysynth;
+mod push;
 mod readback;
 mod readback_runtime;
 mod recording;

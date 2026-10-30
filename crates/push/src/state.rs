@@ -181,10 +181,12 @@ impl Snapshot {
         } else {
             Addr::Button(crate::controls::button_named(name)?.number)
         };
-        Some(self.leds[match addr {
-            Addr::Pad(note) => usize::from(note),
-            Addr::Button(number) => 128 + usize::from(number),
-        }])
+        Some(
+            self.leds[match addr {
+                Addr::Pad(note) => usize::from(note),
+                Addr::Button(number) => 128 + usize::from(number),
+            }],
+        )
     }
 }
 

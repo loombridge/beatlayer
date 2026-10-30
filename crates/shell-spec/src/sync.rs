@@ -73,6 +73,25 @@ pub struct SyncState {
     /// full.
     #[serde(default)]
     pub sync_dropped: u64,
+    /// The last whole time of an input set to MIDI Timecode, if one came
+    /// (the MIDI Timecode spec, R12).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timecode: Option<TimecodeReport>,
+}
+
+/// A timecode input's last whole time.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct TimecodeReport {
+    /// The time, as `hh:mm:ss:ff`.
+    pub time: String,
+    /// The rate it is counted at.
+    pub rate: crate::midi_io::TimecodeRateChoice,
+    /// Whether the timecode runs and the song follows it: whole times arrive
+    /// in order and the time has reached the offset.
+    pub running: bool,
+    /// The song position the time gives, in ticks: the time less the offset,
+    /// through the tempo map; 0 before the offset.
+    pub position_ticks: i64,
 }
 
 /// Adds the sync commands to a registry.
@@ -91,7 +110,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  Received: how many input ports have Sync on, whether EXT is available and on, \
                  the input that leads, whether usable clocks arrive, whether the upper sync \
                  lamp is lit, the smoothed incoming tempo, and how many Timing Clocks arrived \
-                 and were set aside as glitches. Changes nothing. Set a port's Sync switch and \
+                 and were set aside as glitches. For an input set to MIDI Timecode: the last whole \
+                 time with its rate, whether it runs, and the song position it gives. Changes \
+                 nothing. Set a port's Sync switch and \
                  its options with `midi.set_port`, and EXT with `transport.set_external_sync`.",
             )
             .permission(Permission::Read)

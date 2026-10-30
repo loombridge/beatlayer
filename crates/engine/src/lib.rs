@@ -125,6 +125,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 mod sync_out;
+mod timecode_in;
 pub mod transport;
 mod tuned;
 mod tuned_notes;
@@ -145,7 +146,7 @@ pub use clips::{
     Audition, ClipPlayer, MediaLibrary, MediaMap, MediaStreams, OpenedSource, SlotSample,
     SourceCues, media_edits,
 };
-pub use clock_in::{MAX_SYNC_INPUTS, SyncInState};
+pub use clock_in::{MAX_SYNC_INPUTS, SyncInState, TimecodeState};
 pub use compiler::{Compiler, Update};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use drum::ChainHits;

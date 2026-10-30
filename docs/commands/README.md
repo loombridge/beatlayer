@@ -23114,6 +23114,9 @@ One MIDI port as the Settings window's table shows it.
 | `sync_delay_ms` | integer from -32768 to 32767 | yes | MIDI Clock Sync Delay in milliseconds, from -100 to 100, added to the clock an output sends; kept while Sync is off. |
 | `clock_type` | [`ClockTypeChoice`](#clocktypechoice) | yes | An output's MIDI Clock Type: Song or Pattern. |
 | `hardware_resync` | [`HardwareResyncChoice`](#hardwareresyncchoice) | yes | An output's Hardware Resync: what Resync External Hardware sends it. |
+| `sync_type` | [`SyncTypeChoice`](#synctypechoice) | yes | An input's MIDI Sync Type: whether its Sync follows clock or timecode. An output's reads MIDI Clock. |
+| `timecode_rate` | [`TimecodeRateChoice`](#timecoderatechoice) | yes | An input's MIDI Timecode Frame Rate, kept while its type is clock. |
+| `timecode_offset` | string | yes | An input's MIDI Timecode Offset, as `hh:mm:ss:ff`: the time at which the Arrangement starts. Kept while its type is clock. |
 | `present` | boolean | yes | Whether the MIDI system offers the port now. |
 | `open` | boolean | yes | Whether it is open: any of its switches is on. |
 | `error` | string or null | no | Why it couldn't be opened, if it couldn't. |
@@ -23178,6 +23181,21 @@ One MIDI port as the Settings window's table shows it.
       "minimum": -32768,
       "type": "integer"
     },
+    "sync_type": {
+      "$ref": "#/$defs/SyncTypeChoice",
+      "default": "midi_clock",
+      "description": "An input's MIDI Sync Type: whether its Sync follows clock or timecode. An output's reads MIDI Clock."
+    },
+    "timecode_offset": {
+      "default": "00:00:00:00",
+      "description": "An input's MIDI Timecode Offset, as `hh:mm:ss:ff`: the time at which the Arrangement starts. Kept while its type is clock.",
+      "type": "string"
+    },
+    "timecode_rate": {
+      "$ref": "#/$defs/TimecodeRateChoice",
+      "default": "smpte_all",
+      "description": "An input's MIDI Timecode Frame Rate, kept while its type is clock."
+    },
     "track": {
       "description": "Track: an input's notes and controllers reach tracks; an output takes tracks' MIDI.",
       "type": "boolean"
@@ -23193,6 +23211,9 @@ One MIDI port as the Settings window's table shows it.
     "sync_delay_ms",
     "clock_type",
     "hardware_resync",
+    "sync_type",
+    "timecode_rate",
+    "timecode_offset",
     "present",
     "open"
   ],
@@ -30734,6 +30755,7 @@ What `sync.state` returns.
 | `clocks_received` | integer, at least 0 | yes | Timing Clocks that arrived from the leading input since the audio engine started. |
 | `clocks_set_aside` | integer, at least 0 | yes | Timing Clocks set aside as glitches: doubled or missing. |
 | `sync_dropped` | integer, at least 0 | yes | Incoming sync messages dropped because the audio thread's list was full. |
+| `timecode` | [`TimecodeReport`](#timecodereport) or null | no | The last whole time of an input set to MIDI Timecode, if one came (the MIDI Timecode spec, R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -30837,6 +30859,17 @@ What `sync.state` returns.
         "number",
         "null"
       ]
+    },
+    "timecode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TimecodeReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The last whole time of an input set to MIDI Timecode, if one came (the MIDI Timecode spec, R12)."
     }
   },
   "required": [
@@ -30858,6 +30891,37 @@ What `sync.state` returns.
     "sync_dropped"
   ],
   "type": "object"
+}
+```
+
+</details>
+
+### `SyncTypeChoice`
+
+An input's MIDI Sync Type: what its Sync follows (the MIDI Timecode spec, R1).
+
+One of:
+
+- `"midi_clock"`: Timing Clock, Start, Continue, Stop and Song Position Pointer.
+- `"midi_timecode"`: Quarter-frame and full-frame time code.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An input's MIDI Sync Type: what its Sync follows (the MIDI Timecode spec, R1).",
+  "oneOf": [
+    {
+      "const": "midi_clock",
+      "description": "Timing Clock, Start, Continue, Stop and Song Position Pointer.",
+      "type": "string"
+    },
+    {
+      "const": "midi_timecode",
+      "description": "Quarter-frame and full-frame time code.",
+      "type": "string"
+    }
+  ]
 }
 ```
 
@@ -32324,6 +32388,102 @@ Type: array of [`TimeSignatureChange`](#timesignaturechange), at least 1.
   },
   "minItems": 1,
   "type": "array"
+}
+```
+
+</details>
+
+### `TimecodeRateChoice`
+
+An input's MIDI Timecode Frame Rate (the MIDI Timecode spec, R1, R3).
+
+One of:
+
+- `"fps_24"`: 24 frames a second.
+- `"fps_25"`: 25 frames a second.
+- `"fps_29_97_drop"`: 29.97 frames a second, drop frame.
+- `"fps_30"`: 30 frames a second.
+- `"smpte_all"`: Each time at the rate its own message names.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "An input's MIDI Timecode Frame Rate (the MIDI Timecode spec, R1, R3).",
+  "oneOf": [
+    {
+      "const": "fps_24",
+      "description": "24 frames a second.",
+      "type": "string"
+    },
+    {
+      "const": "fps_25",
+      "description": "25 frames a second.",
+      "type": "string"
+    },
+    {
+      "const": "fps_29_97_drop",
+      "description": "29.97 frames a second, drop frame.",
+      "type": "string"
+    },
+    {
+      "const": "fps_30",
+      "description": "30 frames a second.",
+      "type": "string"
+    },
+    {
+      "const": "smpte_all",
+      "description": "Each time at the rate its own message names.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `TimecodeReport`
+
+A timecode input's last whole time.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | string | yes | The time, as `hh:mm:ss:ff`. |
+| `rate` | [`TimecodeRateChoice`](#timecoderatechoice) | yes | The rate it is counted at. |
+| `running` | boolean | yes | Whether the timecode runs and the song follows it: whole times arrive in order and the time has reached the offset. |
+| `position_ticks` | integer | yes | The song position the time gives, in ticks: the time less the offset, through the tempo map; 0 before the offset. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A timecode input's last whole time.",
+  "properties": {
+    "position_ticks": {
+      "description": "The song position the time gives, in ticks: the time less the offset, through the tempo map; 0 before the offset.",
+      "format": "int64",
+      "type": "integer"
+    },
+    "rate": {
+      "$ref": "#/$defs/TimecodeRateChoice",
+      "description": "The rate it is counted at."
+    },
+    "running": {
+      "description": "Whether the timecode runs and the song follows it: whole times arrive in order and the time has reached the offset.",
+      "type": "boolean"
+    },
+    "time": {
+      "description": "The time, as `hh:mm:ss:ff`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "time",
+    "rate",
+    "running",
+    "position_ticks"
+  ],
+  "type": "object"
 }
 ```
 

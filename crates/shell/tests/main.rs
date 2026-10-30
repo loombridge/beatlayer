@@ -78,6 +78,7 @@ mod menus;
 mod midi_controller_recording;
 mod midi_files;
 mod midi_io;
+mod midi_timecode;
 mod midi_tools;
 mod mixer_view;
 mod mpe_recording;

@@ -158,6 +158,14 @@ impl Shell {
             clocks_received: incoming.clocks,
             clocks_set_aside: incoming.glitches,
             sync_dropped: incoming.dropped,
+            timecode: incoming
+                .timecode
+                .map(|t| bl_shell_spec::sync::TimecodeReport {
+                    time: t.time.to_string(),
+                    rate: t.rate.into(),
+                    running: t.running,
+                    position_ticks: t.position.get(),
+                }),
         }))
     }
 

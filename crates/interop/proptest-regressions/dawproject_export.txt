@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 13baff91c32526786d84e7a186fe8e1570c2c2fa188727c7b679c43b4cd6a07d # shrinks to spec = Spec { bpm: (60, 60), signature: (1, 2), volume: 10, pan: 0, send: 5, bend: 0, fade: 0, crossfade: 20, gain: 10, transpose: 0, detune: -50, notes: [(0, 0, 1, 1, 1)], swatches: (0, 0, 0, 0), loop_beats: 2, label: "A" }

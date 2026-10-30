@@ -3,4 +3,5 @@
 //! fails on a file in tests/ that isn't listed.
 
 mod commands;
+mod devices;
 mod smoke;

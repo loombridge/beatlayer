@@ -13,6 +13,7 @@
 //! | [`stdio_host`] | [`StdioHost`]: the agent API exactly as `bl-cli mcp` serves it, over in-memory pipes |
 //! | [`capture`] | The cable that copies what the null device played |
 //! | [`audio`] | [`Audio`], and measurements of it: levels, loudness, alignment |
+//! | [`device_rig`] | Every native device type and rack on a track of its own, set and rendered through the agent API |
 //! | [`fixture`] | The rich set, built through the agent API, and the [`Ids`] it made |
 //! | [`known`] | The known-failures ratchet over `tests/known-failures.toml` |
 //! | [`schema`] | Arguments for any command, made from its JSON Schema and a set's objects |
@@ -26,6 +27,7 @@
 
 pub mod audio;
 pub mod capture;
+pub mod device_rig;
 pub mod fixture;
 pub mod host;
 pub mod known;

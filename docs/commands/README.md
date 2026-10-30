@@ -8357,6 +8357,8 @@ A CV device's part of its routing section (L-DEV-026): the choosers of its outpu
 | `calibrated` | boolean | yes | Whether the device holds a calibration, which Clear takes away. |
 | `readout` | string | yes | What the readout under the buttons says: `Not calibrated`, `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps, worst 0.6 cents`. Empty where the device doesn't calibrate. |
 | `ports` | array of string | yes | The ports' names, outputs then inputs, in the order their choosers are drawn. |
+| `returns` | boolean | yes | Whether the device brings the hardware's sound back, with an Audio From and a Hardware Latency under its ports (the instruments): the CV effects and CV In have none. |
+| `lamp` | boolean or null | yes | CV Clock In's pulse light, lit for a moment after each pulse; null for any other device (the CV tools spec, R24). |
 
 <details><summary>JSON Schema</summary>
 
@@ -8372,6 +8374,14 @@ A CV device's part of its routing section (L-DEV-026): the choosers of its outpu
       "description": "Whether the device calibrates, with Calibrate and Clear buttons under its choosers (CV Instrument).",
       "type": "boolean"
     },
+    "lamp": {
+      "default": null,
+      "description": "CV Clock In's pulse light, lit for a moment after each pulse; null for any other device (the CV tools spec, R24).",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "ports": {
       "description": "The ports' names, outputs then inputs, in the order their choosers are drawn.",
       "items": {
@@ -8382,13 +8392,20 @@ A CV device's part of its routing section (L-DEV-026): the choosers of its outpu
     "readout": {
       "description": "What the readout under the buttons says: `Not calibrated`, `Calibrating: step 3 of 8`, or the fit, such as `0.97 oct/V, 6 steps, worst 0.6 cents`. Empty where the device doesn't calibrate.",
       "type": "string"
+    },
+    "returns": {
+      "default": true,
+      "description": "Whether the device brings the hardware's sound back, with an Audio From and a Hardware Latency under its ports (the instruments): the CV effects and CV In have none.",
+      "type": "boolean"
     }
   },
   "required": [
     "calibrates",
     "calibrated",
     "readout",
-    "ports"
+    "ports",
+    "returns",
+    "lamp"
   ],
   "type": "object"
 }
@@ -35820,6 +35837,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `waiting_for_link` | boolean | yes | Whether a start waits for a Link session's phase (the Link spec, R7): `waiting_start`, with Link on and peers in the session. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 | `external_sync` | boolean | yes | Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on. |
+| `cv_clock_leader` | [`DeviceId`](#deviceid) or null | yes | The CV Clock In that leads the song's tempo, while one does and no MIDI clock leads (the CV tools spec, R24, R25, R31): then `tempo` is the tempo it measures. Null otherwise. |
 
 <details><summary>JSON Schema</summary>
 
@@ -35851,6 +35869,18 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "counting_in": {
       "description": "Whether the count-in is sounding, before playback and recording start.",
       "type": "boolean"
+    },
+    "cv_clock_leader": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DeviceId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "The CV Clock In that leads the song's tempo, while one does and no MIDI clock leads (the CV tools spec, R24, R25, R31): then `tempo` is the tempo it measures. Null otherwise."
     },
     "engine_running": {
       "description": "Whether the audio engine runs on a device, so the transport can play. While it doesn't, the transport's commands are refused.",
@@ -36029,7 +36059,8 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "waiting_frame",
     "waiting_for_link",
     "tap_tempo",
-    "external_sync"
+    "external_sync",
+    "cv_clock_leader"
   ],
   "type": "object"
 }

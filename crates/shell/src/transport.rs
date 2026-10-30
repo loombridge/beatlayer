@@ -563,6 +563,7 @@ pub fn state(shell: &Shell, engine: EngineTransport) -> TransportState {
         waiting_for_link: shell.link_waiting(&engine),
         tap_tempo,
         external_sync: shell.external_sync(),
+        cv_clock_leader: shell.cv_clock_leader(),
     }
 }
 

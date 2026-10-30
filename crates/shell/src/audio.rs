@@ -670,6 +670,14 @@ impl AudioHost {
             .map_or_else(Default::default, |engine| engine.state().sync_in)
     }
 
+    /// The CV Clock In that leads the song's tempo, with the tempo it
+    /// measures, while one does (the CV tools spec, R24, R25).
+    pub fn cv_leader(&mut self) -> Option<bl_engine::cv_clock::Leader> {
+        self.engine
+            .as_mut()
+            .and_then(|engine| engine.state().cv_leader)
+    }
+
     /// What the engine reports of the MIDI clock it sends; all zeros while
     /// none runs.
     pub fn sync_out_state(&mut self) -> bl_engine::SyncOutState {

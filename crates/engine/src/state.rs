@@ -251,6 +251,9 @@ pub struct EngineState {
     pub sync_out: crate::SyncOutState,
     /// The MIDI clock the engine follows (midi-clock R16, R17).
     pub sync_in: crate::SyncInState,
+    /// The CV Clock In that leads the song's tempo, and the tempo it
+    /// measures (cv-tools R24, R25).
+    pub cv_leader: Option<crate::cv_clock::Leader>,
 }
 
 impl EngineState {
@@ -300,6 +303,7 @@ impl EngineState {
             counters: EngineCounters::default(),
             sync_out: crate::SyncOutState::default(),
             sync_in: crate::SyncInState::default(),
+            cv_leader: None,
         }
     }
 
@@ -400,6 +404,7 @@ impl Clone for EngineState {
             counters: self.counters,
             sync_out: self.sync_out,
             sync_in: self.sync_in,
+            cv_leader: self.cv_leader,
         }
     }
 }

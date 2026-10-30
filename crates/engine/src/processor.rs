@@ -403,6 +403,8 @@ pub struct Processor {
     follow: Follow,
     /// The tempo this block plays at, if the follower gave one.
     followed: Option<f64>,
+    /// The CV Clock In leading the song's tempo this block (cv-tools R25).
+    cv_leader: Option<crate::cv_clock::Leader>,
     /// Whether the follower decides when a start happens (R25).
     deciding: bool,
     /// The clock frame of the block the follower was last asked about.
@@ -506,6 +508,7 @@ impl Processor {
             ext: false,
             follow: Follow::with_capacity(config.max_scheduled),
             followed: None,
+            cv_leader: None,
             deciding: false,
             asked: None,
             held: Vec::with_capacity(MAX_HELD),
@@ -696,6 +699,12 @@ impl Processor {
     ) -> Output<'_> {
         let began = Instant::now();
         let frames = frames.min(self.config.max_frames);
+        // Spec: cv-tools R24. A follower that arrives in the drain is asked at
+        // once, and a CV Clock In reads this block's input then: copy it
+        // before, and again after, for a program that arrives in the drain.
+        if let Some(program) = self.program.as_mut() {
+            program.get_mut().copy_device_input(input, frames);
+        }
         self.drain(frames);
         if let Some(program) = self.program.as_mut() {
             program.get_mut().copy_device_input(input, frames);
@@ -2153,6 +2162,19 @@ impl Processor {
             &mut self.follow,
         );
         ask.leader = self.follow.followed();
+        // Spec: cv-tools R24, R25. A CV Clock In leads when no MIDI clock
+        // does, and a Link session sees the tempo it leads with.
+        let others = if ask.leader.is_some() {
+            crate::cv_clock::Others::Midi
+        } else {
+            crate::cv_clock::Others::Nobody
+        };
+        self.cv_leader = self.program.as_mut().and_then(|program| {
+            program
+                .get_mut()
+                .follow_cv_clocks(&ask, looped, others, &mut self.follow)
+        });
+        ask.leader = self.follow.followed();
         if let Some(follower) = self.follower.as_mut() {
             follower.get_mut().block(&ask, &mut self.follow);
         }
@@ -2909,6 +2931,7 @@ impl Processor {
         state.cpu_load_max = self.cpu_load_max;
         state.following = self.followed;
         state.sync_in = self.midi.sync_in.state();
+        state.cv_leader = self.cv_leader;
         state.waiting_start = !self.held.is_empty();
         state.waiting_frame = self.release.filter(|_| !self.held.is_empty());
         state.phase_nudge = self.nudge.active();

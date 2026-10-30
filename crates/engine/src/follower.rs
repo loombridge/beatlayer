@@ -32,6 +32,30 @@ pub struct Ask {
     pub position: f64,
     /// The frame rate.
     pub rate: f64,
+    /// The tempo the tempo map plays at the position, in BPM: the tempo the
+    /// set asks for, the song's own (the Link spec, R3 and R4).
+    pub tempo: f64,
+    /// Whether the tempo map holds more than one tempo: a tempo envelope.
+    pub varies: bool,
+    /// Whether an outside change of the tempo has taken the envelope's
+    /// place, until Re-Enable Automation ([`Follow::override_tempo`]).
+    pub overridden: bool,
+    /// The tempo an incoming MIDI clock leads with this block, if one does
+    /// (the Link spec, R10).
+    pub leader: Option<f64>,
+    /// The length of the global launch quantisation at the position, in
+    /// quarter notes (the Link spec, R5).
+    pub quantum: f64,
+    /// How far into its quantum the position is, in quarter notes.
+    pub phase: f64,
+    /// How far into its quantum the position a start would play from is, in
+    /// quarter notes: the song start time or insert marker of a start that
+    /// waits, else the insert marker.
+    pub start_phase: f64,
+    /// Whether a start waits for the frame the follower gives (R25).
+    pub waiting: bool,
+    /// The audio interface's output latency, in frames.
+    pub latency: u32,
 }
 
 /// What a follower answers for a block. The processor clears it before each
@@ -42,6 +66,8 @@ pub struct Follow {
     decides_starts: bool,
     start_at: Option<u64>,
     commands: Vec<(u64, TransportCommand)>,
+    no_count_in: bool,
+    override_tempo: bool,
 }
 
 impl Follow {
@@ -51,6 +77,8 @@ impl Follow {
             decides_starts: false,
             start_at: None,
             commands: Vec::with_capacity(commands),
+            no_count_in: false,
+            override_tempo: false,
         }
     }
 
@@ -59,6 +87,8 @@ impl Follow {
         self.decides_starts = false;
         self.start_at = None;
         self.commands.clear();
+        self.no_count_in = false;
+        self.override_tempo = false;
     }
 
     /// Plays this block at `bpm`, limited to 20 to 999 BPM. While a follower
@@ -103,6 +133,19 @@ impl Follow {
         self.command(frame, TransportCommand::Locate(to))
     }
 
+    /// Says no count-in plays while this follower is on: playback and
+    /// recording start as with Count-In set to None (the metronome spec, R10).
+    pub fn no_count_in(&mut self) {
+        self.no_count_in = true;
+    }
+
+    /// Says an outside change of the tempo took a tempo envelope's place:
+    /// the envelope stops and Re-Enable Automation lights, until it is
+    /// pressed (the Link spec, R4).
+    pub fn override_tempo(&mut self) {
+        self.override_tempo = true;
+    }
+
     pub(crate) fn followed(&self) -> Option<f64> {
         self.tempo
     }
@@ -113,6 +156,14 @@ impl Follow {
 
     pub(crate) fn release(&self) -> Option<u64> {
         self.start_at
+    }
+
+    pub(crate) fn counts_in_off(&self) -> bool {
+        self.no_count_in
+    }
+
+    pub(crate) fn overrides_tempo(&self) -> bool {
+        self.override_tempo
     }
 
     pub(crate) fn commands(&self) -> &[(u64, TransportCommand)] {

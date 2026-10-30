@@ -96,6 +96,8 @@ impl Shell {
     /// set's plug-in devices load their plug-ins from their saved state.
     pub(super) fn set_replaced(&mut self) {
         self.editor_replaced();
+        // Spec: link R2. The new set takes the session's tempo.
+        self.keep_tempo = true;
         self.forget_remote_values();
         // Spec: control-surfaces R9, R30. Every ring starts again.
         self.instant_reset();

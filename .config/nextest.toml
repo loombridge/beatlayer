@@ -63,3 +63,13 @@ retries = 2
 # The report reads this: target/nextest/ci/junit.xml.
 [profile.ci.junit]
 path = "junit.xml"
+
+# Link instances find each other across processes, so the bl-link tests, which
+# count peers and set tempos, run one at a time: another test's instance in
+# the session would be a peer of theirs.
+[test-groups]
+link-sessions = { max-threads = 1 }
+
+[[profile.default.overrides]]
+filter = "package(bl-link) | (package(bl-shell) & test(/^link::/)) | (package(bl-agent) & test(/^link::/))"
+test-group = "link-sessions"

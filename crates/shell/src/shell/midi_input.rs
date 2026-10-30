@@ -33,6 +33,7 @@ impl Shell {
         self.midi_seen = seen;
         // The lamp follows the test clock when a test paces the engine by
         // hand.
+        changed |= self.track_link(self.midi.now());
         changed | self.track_sync_activity(self.midi.now())
     }
 

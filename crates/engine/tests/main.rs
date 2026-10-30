@@ -29,6 +29,7 @@ mod external_effect;
 mod follow;
 mod grooves;
 mod grooves_audio;
+mod link;
 mod live_complex;
 mod macros;
 mod metronome;

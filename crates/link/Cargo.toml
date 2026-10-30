@@ -10,5 +10,9 @@ publish.workspace = true
 [dependencies]
 bl-core.workspace = true
 
+[build-dependencies]
+# Compiles the vendored Link 4.1.1 (see build.rs).
+cc = "1"
+
 [lints]
 workspace = true

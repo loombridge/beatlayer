@@ -86,6 +86,7 @@ pub mod devices;
 pub mod export;
 pub mod export_dialog;
 pub mod files;
+pub mod link;
 pub mod midi;
 pub mod midi_files;
 pub mod midi_tools;

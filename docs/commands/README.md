@@ -50,6 +50,7 @@ The commands, by the part of their ID before its first dot:
 - [`focus`](focus.md)
 - [`groove`](groove.md)
 - [`keymap`](keymap.md)
+- [`link`](link.md)
 - [`locator`](locator.md)
 - [`midi`](midi.md)
 - [`midi_tool`](midi_tool.md)
@@ -17521,6 +17522,97 @@ Type: integer, at least 1.
 
 </details>
 
+### `LinkState`
+
+What `link.state` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Link is on: the app is in a Link session on its networks. |
+| `peers` | integer, at least 0 | yes | How many other peers are in the session; 0 while Link is off. |
+| `tempo` | number or null | yes | The session's tempo, in quarter notes per minute; null while Link has never been on. |
+| `quantum` | number | yes | The quantum, in quarter notes: the global launch quantisation's length at the play position, one quarter note with None. |
+| `phase` | number or null | yes | How far the session is through the quantum now, in quarter notes; null while Link has never been on. |
+| `session_playing` | boolean | yes | Whether the session's start and stop state is playing. |
+| `start_stop_sync` | boolean | yes | Whether starts and stops are shared with the peers that share them. |
+| `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
+| `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.state` returns.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Link is on: the app is in a Link session on its networks.",
+      "type": "boolean"
+    },
+    "peers": {
+      "description": "How many other peers are in the session; 0 while Link is off.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "phase": {
+      "description": "How far the session is through the quantum now, in quarter notes; null while Link has never been on.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "quantum": {
+      "description": "The quantum, in quarter notes: the global launch quantisation's length at the play position, one quarter note with None.",
+      "format": "double",
+      "type": "number"
+    },
+    "session_playing": {
+      "description": "Whether the session's start and stop state is playing.",
+      "type": "boolean"
+    },
+    "start_stop_sync": {
+      "description": "Whether starts and stops are shared with the peers that share them.",
+      "type": "boolean"
+    },
+    "starts_in": {
+      "description": "How many seconds until a waiting start begins, once it has been worked out; null otherwise.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "tempo": {
+      "description": "The session's tempo, in quarter notes per minute; null while Link has never been on.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "waiting_for_link": {
+      "description": "Whether a start waits for the session's phase.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled",
+    "peers",
+    "tempo",
+    "quantum",
+    "phase",
+    "session_playing",
+    "start_stop_sync",
+    "waiting_for_link",
+    "starts_in"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ListResult`
 
 What `control_surface.list` returns.
@@ -31320,6 +31412,34 @@ What a command that switches something returns: its new state.
 
 </details>
 
+### `Switched`
+
+What `link.set_enabled` and `link.set_start_stop_sync` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether it's on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_enabled` and `link.set_start_stop_sync` return.",
+  "properties": {
+    "on": {
+      "description": "Whether it's on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SyncState`
 
 What `sync.state` returns.
@@ -34541,6 +34661,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
 | `phase_nudge` | [`PhaseNudge`](#phasenudge) | yes | The Phase Nudge button held now, the one pressed last when both are: `none`, `down` or `up` (the transport spec, R27 and R28). |
 | `waiting_start` | boolean | yes | Whether a start waits for the frame an outside clock or Link session gives (the transport spec, R25). |
 | `waiting_frame` | integer or null | yes | The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise. |
+| `waiting_for_link` | boolean | yes | Whether a start waits for a Link session's phase (the Link spec, R7): `waiting_start`, with Link on and peers in the session. |
 | `tap_tempo` | [`TapTempo`](#taptempo) | yes | The run of taps Tap Tempo has now (the control bar transport spec, R22). |
 | `external_sync` | boolean | yes | Whether EXT is on: the song follows the incoming MIDI clock (the MIDI clock spec, R15, R17). Off while no input has Sync on. |
 
@@ -34697,6 +34818,11 @@ What `transport.state` returns: the transport and the Control Bar's transport se
       "description": "Whether the song has one time signature throughout, so the time-signature fields can set it.",
       "type": "boolean"
     },
+    "waiting_for_link": {
+      "default": false,
+      "description": "Whether a start waits for a Link session's phase (the Link spec, R7): `waiting_start`, with Link on and peers in the session.",
+      "type": "boolean"
+    },
     "waiting_frame": {
       "default": null,
       "description": "The frame of the engine's clock (frames processed since it started) that a waiting start begins on, once the follower has given it; null otherwise.",
@@ -34745,6 +34871,7 @@ What `transport.state` returns: the transport and the Control Bar's transport se
     "phase_nudge",
     "waiting_start",
     "waiting_frame",
+    "waiting_for_link",
     "tap_tempo",
     "external_sync"
   ],

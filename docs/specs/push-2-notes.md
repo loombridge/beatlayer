@@ -139,15 +139,15 @@ Every edit here runs the same registered command the app's own editors run, as o
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-7.21 | unit (simulated Push 2) |
-| R2 | to be written in WP-7.21 | unit, real-time trap |
-| R3 | to be written in WP-7.21 | unit, UI script |
-| R4 | to be written in WP-7.21 | unit |
-| R5 | to be written in WP-7.21 | unit |
+| R1 | WP-7.21: `bl-shell` `push_beats::a_drum_rack_track_shows_the_loop_selector_and_layout_steps_through_the_layouts`, `the_layout_follows_the_selected_tracks_instrument` | unit (simulated Push 2) |
+| R2 | WP-7.21: `bl-shell` `push_beats::the_pads_notes_reach_the_armed_track_and_its_recording` | unit (simulated Push 2) |
+| R3 | WP-7.21: `bl-shell` `push_beats::selecting_a_track_arms_it_by_selection_and_holding_a_lower_button_arms_by_hand`, `an_arm_by_selection_isnt_saved`; `bl-ui` `mixer::an_arm_by_selection_is_drawn_in_the_themes_pink` | unit (simulated Push 2), UI script |
+| R4 | WP-7.21: `bl-shell` `push_beats::selecting_a_track_arms_it_by_selection_and_holding_a_lower_button_arms_by_hand` | unit (simulated Push 2) |
+| R5 | WP-7.21: `bl-shell` `push_beats::each_track_keeps_its_layout_and_step_size` | unit (simulated Push 2) |
 | R6 | to be written in WP-7.22 | unit |
 | R7 | to be written in WP-7.22 | unit (simulated Push 2) |
-| R8 to R19 | to be written in WP-7.21 | unit (simulated Push 2), agent |
-| R20 to R31 | to be written in WP-7.21 | unit (simulated Push 2), agent |
+| R8 to R19 | WP-7.21: `bl-shell` `push_beats::a_drum_rack_track_shows_the_loop_selector_and_layout_steps_through_the_layouts`, `holding_layout_shows_another_view_and_shift_layout_keeps_it`, `a_velocity_pad_sets_the_velocity_new_steps_take`, `the_pads_colours_say_what_they_hold`, `octave_and_the_strip_move_the_bank_and_the_app_moves_the_pads`, `modifiers_and_a_pad_select_mute_solo_delete_and_duplicate`, `shift_and_a_pad_colours_the_pad`; `bl-model` `drum_racks::a_pads_push_colour_belongs_to_a_drum_chain`; `bl-shell` `rack_presets::a_pads_push_colour_survives_a_preset_and_a_saved_set`; `bl-agent` `push_beats::an_agent_reads_note_mode_and_reads_back_pad_copy_and_pad_colours`; R18 (a single pad in Device mode) is built with Device mode (WP-7.25) | unit (simulated Push 2), agent |
+| R20 to R31 | WP-7.21: `bl-shell` `push_beats::a_first_step_makes_a_clip_and_launches_it_and_tapping_again_deletes_the_note`, `steps_show_their_notes_and_triplet_sizes_darken_two_columns`, `delete_alone_deletes_the_clip`, `held_steps_are_exposed`, `loop_length_pads_set_the_loop`, `the_page_buttons_and_a_loop_pad_tap_stop_following`, `the_step_area_follows_the_page_that_plays`, `duplicate_and_delete_with_loop_length_pads_copy_and_clear_pages`, `the_loop_length_pads_have_reduced_sensitivity`; `bl-agent` `push_beats::an_agent_reads_note_mode_and_reads_back_pad_copy_and_pad_colours` | unit (simulated Push 2), agent |
 | R32 to R38 | to be written in WP-7.22 | unit (simulated Push 2), property, golden frame |
 | R39 to R44 | to be written in WP-7.22 | unit (simulated Push 2) |
 | R45 to R47 | to be written in WP-7.22 | unit |

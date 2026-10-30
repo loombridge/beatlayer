@@ -2,31 +2,26 @@
 //! surface runs, selecting a MIDI track arms it, and the track armed that
 //! way before is disarmed. It follows the selection and isn't an undo step.
 
-use std::collections::BTreeSet;
-
 use bl_model::{Editor, TrackId, TrackKind};
 use serde_json::Value;
 
 use super::{Shell, snapshot};
 
-/// The editor a save writes instead of `editor` (R3): the set without the
-/// arms a surface made by selection, which aren't saved. `None` where there
-/// are none.
-pub(super) fn without_selection_arms(
-    editor: &Editor,
-    by_selection: &BTreeSet<TrackId>,
-) -> Option<Editor> {
-    if by_selection.is_empty() {
-        return None;
-    }
-    let mut copy = snapshot(editor);
-    for track in by_selection {
-        copy.follow_arm(*track, false);
-    }
-    Some(copy)
-}
-
 impl Shell {
+    /// The editor a save writes instead of `self.editor` (R3): the set
+    /// without the arms a surface made by selection, which aren't saved.
+    /// `None` where there are none.
+    pub(super) fn without_selection_arms(&self) -> Option<Editor> {
+        if self.surface.selection_armed.is_empty() {
+            return None;
+        }
+        let mut copy = snapshot(&self.editor);
+        for track in &self.surface.selection_armed {
+            copy.follow_arm(*track, false);
+        }
+        Some(copy)
+    }
+
     /// Spec: push-2-notes R3. Arms the newly selected MIDI track while a Push
     /// 2 runs, disarms the one armed that way before, and lets go of every
     /// selection arm when the last Push 2 stops. Returns whether the set

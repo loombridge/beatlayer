@@ -1485,8 +1485,13 @@ fn the_apc40s_transport_buttons_run_and_light() {
             .iter()
             .all(|slot| slot.state != bl_engine::SlotState::Recording)
     });
-    // The recording ends on the next grid line, a bar away.
-    rig.pass(4000);
+    // The recording ends on the next grid line, a bar away, and Session
+    // Record stays lit until its clip is written, which happens off the main
+    // thread on the wall clock.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while rig.apc.single(0x66, 0).is_some() && std::time::Instant::now() < deadline {
+        rig.pass(100);
+    }
     assert_eq!(rig.apc.single(0x66, 0), None);
     rig.run("transport.stop", json!({}));
     rig.wait_transport(false);

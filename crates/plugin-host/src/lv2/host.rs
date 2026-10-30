@@ -995,9 +995,13 @@ fn borrow(
     entry.values = engine_values;
     let mut ends = ends;
     if let Ok((active, _)) = copy {
+        // A fresh instance reads 0 until it has run, so the node starts from
+        // the latency the running plug-in last reported, as the engine's
+        // factory does (delay-compensation R6).
+        let remembered = lock(&inner.latencies).get(&device.id).copied().unwrap_or(0);
         ends.status
             .latency
-            .store(active.instance.latency(), Relaxed);
+            .store(active.instance.latency().max(remembered), Relaxed);
         let _ = ends.to_node.push(active);
     }
     entry.lent = Some(Lent { ends, config });

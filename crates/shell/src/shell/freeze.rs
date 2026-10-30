@@ -6,10 +6,9 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
-use bl_core::time::Ticks;
+use bl_core::time::{TempoSegment, Ticks};
 use bl_model::{
     Clip, ClipData, ClipId, Command, ContentHash, Document, FrozenClip, FrozenTail, FrozenTrack,
     SceneId, TrackId, TrackKind,
@@ -172,6 +171,14 @@ impl Shell {
         if held.kind().holds_clips() && held.clips().len() == 0 && held.slots().len() == 0 {
             return Err(unavailable(id, "a track without clips can't be frozen"));
         }
+        // R14: a frozen group hides its tracks, and their sends to returns
+        // with them, which a freeze file can't carry yet.
+        if held.kind() == TrackKind::Group && inner_sends(&doc, held) {
+            return Err(unavailable(
+                id,
+                "a group whose tracks send to returns can't be frozen yet",
+            ));
+        }
         let label = crate::routing::track_label(&doc, track);
         let arrangement = arrangement_bounds(held);
         let mut frozen = FrozenTrack::default();
@@ -212,7 +219,7 @@ impl Shell {
                         rate,
                         &mut files,
                     )?;
-                    let tempo = doc.settings().tempo.bpm_at(start).get();
+                    let tempo = doc.tempo_map().bpm_at(start).get();
                     for (clip, _, from, to) in regions {
                         let held_clip = held.clips().find(|held| held.id == clip);
                         let length = held_clip.map_or(Ticks::ZERO, |held| held.length);
@@ -220,12 +227,16 @@ impl Shell {
                             || bl_model::ClipData::Midi(bl_model::MidiData::default()),
                             |held| held.data.clone(),
                         );
+                        let markers = held_clip.map_or_else(Vec::new, |held| {
+                            render_markers(&doc, start, held.start, held.end())
+                        });
                         frozen.clips.push(FrozenClip {
                             clip,
                             media,
                             start: from,
                             end: to,
                             tempo,
+                            markers,
                             length,
                             original,
                             scene: None,
@@ -253,6 +264,7 @@ impl Shell {
                             start: start_sec,
                             end: end_sec,
                             tempo: doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
+                            markers: Vec::new(),
                             length: clip.length,
                             original: clip.data.clone(),
                             scene: Some(scene),
@@ -264,8 +276,13 @@ impl Shell {
             TrackKind::Group | TrackKind::Return => {
                 let start = Ticks::ZERO;
                 let end = arrangement_end(&doc);
-                let (frames, rate) = self.render_frozen(id, track, start, end, false)?;
+                // R14, R15: the file runs to the last tail.
+                let (frames, rate) = self.render_frozen(id, track, start, end, true)?;
                 let channels = channels_of(&frames);
+                let total = frames.len() as f64 / 2.0 / f64::from(rate);
+                let sounding =
+                    quiet_end(&frames, 2, rate, seconds_between(&doc, start, end), total);
+                let length = end.max(frames_to_ticks(&doc, rate, sounding));
                 let media = self.write_frozen(
                     id,
                     Kind::Freeze,
@@ -278,9 +295,9 @@ impl Shell {
                 frozen.output = Some(bl_model::FrozenOutput {
                     id: self.editor.new_id(),
                     media,
-                    tempo: doc.settings().tempo.bpm_at(start).get(),
+                    tempo: doc.tempo_map().bpm_at(start).get(),
                     start,
-                    length: end,
+                    length,
                 });
             }
             TrackKind::Main => {}
@@ -448,6 +465,14 @@ fn arrangement_bounds(track: &bl_model::Track) -> Option<(Ticks, Ticks)> {
     Some((start, end))
 }
 
+/// Whether a track inside `group`, at any depth, sends to a return.
+fn inner_sends(doc: &Document, group: &bl_model::Track) -> bool {
+    group
+        .children()
+        .filter_map(|id| doc.track(id))
+        .any(|child| child.sends().any(|(_, level)| level > 0.0) || inner_sends(doc, child))
+}
+
 /// The end of the last clip in the set, for a return's render (R15).
 fn arrangement_end(doc: &Document) -> Ticks {
     let mut end = Ticks::ZERO;
@@ -486,7 +511,7 @@ pub(super) fn render_doc(
     tail: bool,
 ) -> Result<(Vec<f32>, u32), ShellError> {
     let rate = shell.engine_rate();
-    let media: Arc<dyn bl_engine::MediaLibrary> = shell.media.clone();
+    let media = shell.engine_media();
     // Spec: freeze-and-bounce R30. A render takes main lanes only, whether or
     // not a take lane is auditioned.
     let doc = &doc.without_auditions();
@@ -541,11 +566,12 @@ fn channels_of(frames: &[f32]) -> u16 {
     if equal { 1 } else { 2 }
 }
 
-/// The second `at` sits at, counting from `from` through the tempo map.
+/// The second `at` sits at, counting from `from` through the tempo map the
+/// set plays under, the leading clips' tempo included (R6).
 pub(super) fn seconds_between(doc: &Document, from: Ticks, at: Ticks) -> f64 {
     let rate = bl_core::time::SampleRate::new(48_000).expect("48 kHz is a rate");
-    let frames = doc.settings().tempo.ticks_to_frames(at, rate).get()
-        - doc.settings().tempo.ticks_to_frames(from, rate).get();
+    let tempo = doc.tempo_map();
+    let frames = tempo.ticks_to_frames(at, rate).get() - tempo.ticks_to_frames(from, rate).get();
     frames as f64 / f64::from(rate.hz())
 }
 
@@ -554,9 +580,45 @@ pub(super) fn seconds_between(doc: &Document, from: Ticks, at: Ticks) -> f64 {
 pub(super) fn frames_to_ticks(doc: &Document, rate: u32, seconds: f64) -> Ticks {
     let rate = bl_core::time::SampleRate::new(rate).expect("a known rate");
     let frames = (seconds * f64::from(rate.hz())).round() as i64;
-    doc.settings()
-        .tempo
+    doc.tempo_map()
         .frames_to_ticks(bl_core::time::Frames(frames), rate)
+}
+
+/// The warp markers between a clip's first and last, for the clip from
+/// `clip_start` to `clip_end` in a render that began at `from`: where the
+/// tempo map changes inside it, and on every beat from there on, so the
+/// file's frames stay on the beats they were rendered at (R6). Empty where
+/// the tempo is steady, since two markers then say all there is.
+///
+/// shortcut: a marker per beat approximates a ramp, which is off by far less
+/// than a frame between two beats; refine if a ramp is ever steeper than that.
+pub(super) fn render_markers(
+    doc: &Document,
+    from: Ticks,
+    clip_start: Ticks,
+    clip_end: Ticks,
+) -> Vec<bl_model::WarpMarker> {
+    let tempo = doc.tempo_map();
+    let changes: Vec<Ticks> = tempo
+        .segments()
+        .map(|segment| segment.start())
+        .filter(|&start| start > clip_start && start < clip_end)
+        .collect();
+    if changes.is_empty() && matches!(tempo.segment_at(clip_start), TempoSegment::Constant { .. }) {
+        return Vec::new();
+    }
+    let mut at: std::collections::BTreeSet<Ticks> = changes.into_iter().collect();
+    let mut beat = clip_start + Ticks::QUARTER;
+    while beat < clip_end {
+        at.insert(beat);
+        beat = beat + Ticks::QUARTER;
+    }
+    at.into_iter()
+        .map(|tick| bl_model::WarpMarker {
+            time: seconds_between(doc, from, tick),
+            beat: tick - clip_start,
+        })
+        .collect()
 }
 
 /// Where a tail falls silent: the last frame above [`FLOOR`] between `from`

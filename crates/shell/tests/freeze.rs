@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use bl_model::{ClipId, Track, TrackId, TrackKind};
+use bl_model::{ClipId, DeviceId, Track, TrackId, TrackKind};
 use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
@@ -482,5 +482,263 @@ fn a_frozen_track_s_clips_arent_reversed() {
     assert!(
         refused.is_err(),
         "a selection on a frozen track isn't reversed"
+    );
+}
+
+fn insert_device(shell: &mut Shell, track: TrackId, device_type: &str) -> DeviceId {
+    let device: DeviceId = shell.new_id();
+    shell
+        .run(
+            "device.insert",
+            json!({ "track": track, "index": 0, "device": {
+                "id": device, "name": device_type, "enabled": true, "params": [],
+                "kind": { "native": { "device_type": device_type } } } }),
+        )
+        .unwrap();
+    device
+}
+
+fn export(shell: &mut Shell, path: &Path) {
+    shell
+        .run(
+            "export.audio",
+            json!({ "path": path.display().to_string(), "bit_depth": 32,
+                    "sample_rate": 48_000 }),
+        )
+        .unwrap();
+}
+
+// Spec: freeze-and-bounce R6, delay-compensation R10. A track with a
+// look-ahead freezes where it was, beside a track that has none.
+#[test]
+fn a_frozen_track_lines_up_with_an_unfrozen_neighbour() {
+    let scratch = Scratch::new("neighbour");
+    let mut shell = new_shell(&scratch);
+    let a = audio_track(&shell);
+    let b: TrackId = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": b, "kind": "audio", "name": "B", "index": 1 }),
+        )
+        .unwrap();
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let clip = place(&mut shell, a, &file, 0);
+    place(&mut shell, b, &file, 0);
+    // The Limiter's default look-ahead is 3 ms.
+    insert_device(&mut shell, a, "beatlayer.brickwall");
+    let end = shell.editor().document().clip(clip).unwrap().end();
+    shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": 0, "end": end.get() }),
+        )
+        .unwrap();
+    let live = scratch.path("live.wav");
+    export(&mut shell, &live);
+    freeze(&mut shell, a);
+    let frozen = scratch.path("frozen.wav");
+    export(&mut shell, &frozen);
+    assert_eq!(
+        std::fs::read(&live).unwrap(),
+        std::fs::read(&frozen).unwrap(),
+        "a frozen track plays where it did, beside a track without a look-ahead"
+    );
+}
+
+// Spec: freeze-and-bounce R14. A group's tracks' sends to returns would
+// vanish with the tracks, so the freeze is refused.
+#[test]
+fn a_group_whose_tracks_send_to_returns_is_refused() {
+    let scratch = Scratch::new("group-sends");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    place(&mut shell, track, &file, 0);
+    let ret = shell.editor().document().returns().next().unwrap();
+    shell
+        .run(
+            "mixer.set_send",
+            json!({ "track": track, "to": ret, "level": 1.0 }),
+        )
+        .unwrap();
+    let grouped = shell
+        .run("track.group", json!({ "tracks": [track] }))
+        .unwrap();
+    let group: TrackId = serde_json::from_value(grouped["track"].clone()).unwrap();
+    assert!(
+        shell
+            .run(ids::FREEZE, json!({ "tracks": [group] }))
+            .is_err()
+    );
+    assert!(!shell.editor().document().track(group).unwrap().is_frozen());
+}
+
+// Spec: freeze-and-bounce R15. A frozen return's file runs to its tail.
+#[test]
+fn a_frozen_return_keeps_its_tail() {
+    let scratch = Scratch::new("return-tail");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 0.25, 2);
+    let clip = place(&mut shell, track, &file, 0);
+    let ret = shell.editor().document().returns().next().unwrap();
+    // Echoes 40 ms apart, so the render's 100 ms quiet rule doesn't end the
+    // tail between them.
+    let delay = insert_device(&mut shell, ret, "bl.device.reprise");
+    for (param, value) in [(0, 0.0), (12, 40.0), (13, 40.0), (6, 0.5), (9, 1.0)] {
+        shell
+            .run(
+                "device.set_param",
+                json!({ "device": delay, "param": param, "value": value }),
+            )
+            .unwrap();
+    }
+    shell
+        .run(
+            "mixer.set_send",
+            json!({ "track": track, "to": ret, "level": 1.0 }),
+        )
+        .unwrap();
+    let clip_end = shell.editor().document().clip(clip).unwrap().end();
+
+    let result = freeze(&mut shell, ret);
+    let output = shell
+        .editor()
+        .document()
+        .track(ret)
+        .unwrap()
+        .frozen()
+        .unwrap()
+        .output
+        .unwrap();
+    assert!(output.length > clip_end, "the output runs past the clip");
+    let decoded = bl_media::decode_file(Path::new(result["files"][0].as_str().unwrap())).unwrap();
+    let samples = decoded.channel(0).unwrap();
+    let clip_frames = 12_000;
+    assert!(samples.len() > clip_frames);
+    assert!(
+        samples[clip_frames..].iter().any(|s| s.abs() > 1e-4),
+        "the delay's echoes are in the file"
+    );
+}
+
+/// Sets the Song Tempo to a ramp from 100 to 140 BPM over four bars, then
+/// 140.
+fn ramp_tempo(shell: &mut Shell) {
+    shell
+        .run(
+            "song.set_tempo",
+            json!({ "tempo": [
+                { "kind": "ramp", "start": 0, "from": 100.0, "to": 140.0 },
+                { "kind": "constant", "start": 16 * 705_600, "bpm": 140.0 }
+            ] }),
+        )
+        .unwrap();
+}
+
+// Spec: freeze-and-bounce R6. Under a tempo ramp a frozen clip's markers keep
+// each beat on the second the render reached it.
+#[test]
+fn a_frozen_clip_keeps_its_beats_on_the_seconds_they_were_rendered_at() {
+    let scratch = Scratch::new("ramp");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 4.0, 2);
+    let clip = place(&mut shell, track, &file, 0);
+    ramp_tempo(&mut shell);
+    freeze(&mut shell, track);
+
+    let doc = shell.editor().document();
+    let held = doc.clip(clip).unwrap();
+    let region = doc.track(track).unwrap().frozen().unwrap().clips[0].clone();
+    assert!(!region.markers.is_empty(), "interior markers on a ramp");
+    let tempo = doc.tempo_map();
+    for marker in &region.markers {
+        let expected =
+            tempo.ticks_to_seconds(held.start + marker.beat) - tempo.ticks_to_seconds(held.start);
+        assert!(
+            (marker.time - expected).abs() < 1.0 / 48_000.0,
+            "{marker:?} is not on {expected}"
+        );
+    }
+}
+
+// Spec: freeze-and-bounce R6. A leading clip's tempo moves the clips after it.
+#[test]
+fn a_frozen_clips_span_follows_a_tempo_leader() {
+    let scratch = Scratch::new("leader");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    place(&mut shell, track, &file, 0);
+    let later = place(&mut shell, track, &file, 4 * 705_600);
+    // A leader over the first bar at 60 BPM: four beats take four seconds.
+    let leader_track: TrackId = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": leader_track, "kind": "audio", "name": "Lead", "index": 1 }),
+        )
+        .unwrap();
+    let leader: ClipId = shell.new_id();
+    let data = bl_model::AudioData {
+        end: Some((4 * 705_600) as f64),
+        tempo: Some(60.0),
+        warp: true,
+        warp_markers: vec![
+            bl_model::WarpMarker {
+                time: 0.0,
+                beat: bl_core::time::Ticks(0),
+            },
+            bl_model::WarpMarker {
+                time: 4.0,
+                beat: bl_core::time::Ticks(4 * 705_600),
+            },
+        ],
+        ..bl_model::AudioData::new(bl_model::ContentHash([3; 32]))
+    };
+    let clip = bl_model::Clip::new(
+        leader,
+        bl_core::time::Ticks(0),
+        bl_core::time::Ticks(4 * 705_600),
+        bl_model::ClipData::Audio(data),
+    );
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": leader_track, "clip": clip }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "clip.set_tempo_leader",
+            json!({ "clip": leader, "leader": true }),
+        )
+        .unwrap();
+    freeze(&mut shell, track);
+
+    let frozen = shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .frozen()
+        .unwrap()
+        .clone();
+    let region = frozen
+        .clips
+        .iter()
+        .find(|region| region.clip == later)
+        .unwrap();
+    assert!(
+        (region.start - 4.0).abs() < 1e-3,
+        "the later clip starts at {}, after four seconds of leader",
+        region.start
     );
 }

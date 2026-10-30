@@ -190,7 +190,12 @@ fn positions(shell: &mut Shell, scratch: &Scratch, track: TrackId) -> Vec<f64> {
             }),
         )
         .unwrap();
-    let file = bl_media::decode_file(&path).unwrap();
+    file_positions(&path)
+}
+
+/// The file frame each frame of the WAV at `path` plays, from its left channel.
+fn file_positions(path: &Path) -> Vec<f64> {
+    let file = bl_media::decode_file(path).unwrap();
     let left = file.channel(0).unwrap();
     // The track's gain and pan law, from a frame inside bar 1's own audio.
     let probe = 20_000_usize;
@@ -222,6 +227,24 @@ fn a_beats_clip_slowed_down_cuts_at_its_file_s_transients() {
     assert!(
         back < 1.5 * CLICK_EVERY * RATE,
         "the clip read back {back:.0} frames ({:.3} s): it cut at its warp markers alone",
+        back / RATE
+    );
+}
+
+// Spec: freeze-and-bounce R6, warp-modes R14. Freezing renders what plays: a
+// slowed-down Beats clip cuts at its file's transients in the frozen file too.
+#[test]
+fn a_frozen_beats_clip_cuts_at_its_file_s_transients() {
+    let scratch = Scratch::new("freeze");
+    let (mut shell, track, _) = beats_clip(&scratch);
+    let frozen = shell
+        .run("track.freeze", json!({ "tracks": [track] }))
+        .unwrap();
+    let path = PathBuf::from(frozen["files"][0].as_str().unwrap());
+    let back = furthest_read_back(&file_positions(&path));
+    assert!(
+        back < 0.5 * CLICK_EVERY * RATE,
+        "the freeze read back {back:.0} frames ({:.3} s): it cut at its warp markers alone",
         back / RATE
     );
 }

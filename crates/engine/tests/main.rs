@@ -18,6 +18,7 @@ mod clock_in;
 mod common;
 mod crossfades;
 mod cue;
+mod cv_tools;
 mod deactivated;
 mod device_chains;
 mod device_input;

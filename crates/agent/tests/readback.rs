@@ -476,6 +476,10 @@ fn fixture() -> Project {
         audio_from: Channel::Mono(3),
         audio_to: None,
         hardware_latency: HardwareLatency::Samples { value: 96 },
+        // A CV device's ports and calibration (the CV tools spec, R4, R20).
+        cv_outputs: vec![bl_model::CvPort::new("Pitch")],
+        cv_calibration: bl_model::CvCalibration::fit(&[(0.0, 130.0), (1.0, 260.0)]),
+        ..External::default()
     });
     device.sidechain = Some(Sidechain {
         enabled: true,

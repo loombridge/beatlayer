@@ -10,8 +10,8 @@
 //! MIDI input ports the computer offers (WP-2.2).
 
 use bl_model::{
-    Chain, Channel, Device, DeviceId, DeviceOutput, DeviceRole, Document, Input, MidiTo, Monitor,
-    Output, RackKind, Tap, TrackId, TrackKind,
+    Chain, Channel, CvPort, Device, DeviceId, DeviceOutput, DeviceRole, Document, External, Input,
+    MidiTo, Monitor, Output, RackKind, Tap, TrackId, TrackKind,
 };
 use bl_shell_spec::commands::APP_SETTINGS;
 use bl_shell_spec::plugins::SHOW_MPE_SETTINGS;
@@ -1150,6 +1150,60 @@ pub struct ExternalChoosers {
     /// `None` for a device without an Audio To, such as an external
     /// instrument.
     pub audio_to: Option<Chooser>,
+    /// A CV device's output choosers (the CV tools spec, R3), each with the
+    /// output's name in the device, in its order: No Output, the interface's
+    /// output channels one by one, and Configure… at the end. Empty for a
+    /// device without CV outputs.
+    pub cv_outputs: Vec<(String, Chooser)>,
+    /// A CV device's input choosers, as `cv_outputs`, with No Input.
+    pub cv_inputs: Vec<(String, Chooser)>,
+}
+
+/// The choosers of a CV device's ports (the CV tools spec, R3): No Output
+/// (or No Input), the interface's `channels` one by one, and Configure….
+/// A channel the interface lacks stays chosen, dimmed, as a missing MIDI
+/// port does.
+fn cv_choosers(
+    device: DeviceId,
+    ports: &[CvPort],
+    channels: u16,
+    (field, name, none): (&'static str, &'static str, &str),
+) -> Vec<(String, Chooser)> {
+    let set = |port: &CvPort, channel: Option<u16>| {
+        let mut chosen = json!({ "name": port.name });
+        if let Some(channel) = channel {
+            chosen["channel"] = json!(channel);
+        }
+        set_external(device, json!({ field: [chosen] }))
+    };
+    ports
+        .iter()
+        .map(|port| {
+            let mut entries = vec![Entry::choice(none, set(port, None), port.channel.is_none())];
+            for channel in 1..=channels {
+                entries.push(Entry::choice(
+                    channel.to_string(),
+                    set(port, Some(channel)),
+                    port.channel == Some(channel),
+                ));
+            }
+            if let Some(kept) = port.channel.filter(|&c| c > channels) {
+                entries.push(Entry::Choice {
+                    label: kept.to_string(),
+                    run: None,
+                    chosen: true,
+                    pending: None,
+                });
+            }
+            entries.push(Entry::Separator);
+            entries.push(configure("audio"));
+            let mut chooser = chooser(name, entries);
+            if chooser.text.is_empty() {
+                none.clone_into(&mut chooser.text);
+            }
+            (port.name.clone(), chooser)
+        })
+        .collect()
 }
 
 fn set_external(device: DeviceId, change: Value) -> Invocation {
@@ -1202,11 +1256,31 @@ pub fn external_choosers(
     let mut audio_from = interface_channels(interface.inputs, external.audio_from, |channel| {
         set_external(device, json!({ "audio_from": channel_value(channel) }))
     });
+    // Spec: cv-tools R10. A CV device's Audio From can be No Input.
+    let cv = external.is_cv();
+    if cv {
+        audio_from.insert(
+            0,
+            Entry::choice(
+                "No Input",
+                set_external(
+                    device,
+                    json!({ "audio_from": channel_value(External::NO_INPUT) }),
+                ),
+                external.audio_from == External::NO_INPUT,
+            ),
+        );
+    }
     audio_from.push(Entry::Separator);
     audio_from.push(configure("audio"));
     let mut audio = chooser("External Audio From", audio_from);
     if audio.text.is_empty() {
-        external.audio_from.label().clone_into(&mut audio.text);
+        let none = cv && external.audio_from == External::NO_INPUT;
+        if none {
+            "No Input".clone_into(&mut audio.text);
+        } else {
+            external.audio_from.label().clone_into(&mut audio.text);
+        }
     }
     // Spec: external-devices R17. An external effect sends its signal to
     // the interface's outputs, which it chooses as it chooses its inputs.
@@ -1251,6 +1325,18 @@ pub fn external_choosers(
         },
         audio_from: audio,
         audio_to,
+        cv_outputs: cv_choosers(
+            device,
+            &external.cv_outputs,
+            interface.outputs,
+            ("cv_outputs", "CV Output", "No Output"),
+        ),
+        cv_inputs: cv_choosers(
+            device,
+            &external.cv_inputs,
+            interface.inputs,
+            ("cv_inputs", "CV Input", "No Input"),
+        ),
     })
 }
 

@@ -2,9 +2,11 @@
 //! (T199): advance the set by milliseconds or blocks, and poll the engine
 //! while doing it, so a test never waits on the wall clock for a result.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
+use bl_audio_io::{BackendKind, Cable, NullBackend, NullControl, NullOptions, Pacing};
 
 use crate::Shell;
 use crate::audio::{AudioHost, AudioSettings};
@@ -33,6 +35,21 @@ pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
         },
         &[("null", "Null device")],
     );
+    rig_on_with(backend, control, settings)
+}
+
+/// As [`rig`], on `backend` and the `control` it came with: a test gives the
+/// null device more channels or a cable (WP-7.17).
+#[must_use]
+pub fn rig_on(backend: NullBackend, control: NullControl) -> (Shell, NullControl) {
+    rig_on_with(backend, control, AudioSettings::default())
+}
+
+fn rig_on_with(
+    backend: NullBackend,
+    control: NullControl,
+    settings: AudioSettings,
+) -> (Shell, NullControl) {
     let audio = AudioHost::with_backends(
         vec![BackendKind::Null],
         Box::new(move |_| Ok(Box::new(backend.clone()))),
@@ -50,6 +67,39 @@ pub fn rig_with(settings: AudioSettings) -> (Shell, NullControl) {
     ));
     shell.use_test_clock(control.clock().expect("manual pacing"));
     (shell, control)
+}
+
+/// An oscillator patched to the null device's cable (WP-7.17): it follows the
+/// voltage output channel 3 played the block before, at 0.97 octaves a volt
+/// from 164 Hz at −0.13 V with a slight bow, and sounds a sine on input
+/// channel 4. `heard` collects what it sounded while `record` is set, and
+/// `silent` takes the sound away. A test gives the device 4 channels.
+#[must_use]
+pub fn oscillator(
+    heard: &Arc<Mutex<Vec<f32>>>,
+    record: &Arc<AtomicBool>,
+    silent: &Arc<AtomicBool>,
+) -> Cable {
+    let (heard, record, silent) = (heard.clone(), record.clone(), silent.clone());
+    let mut phase = 0.0f64;
+    Cable::new(move |played, next| {
+        let volts = f64::from(played[2].last().copied().unwrap_or(0.0)) * 10.0;
+        let hz = 164.0 * (0.97 * (volts + 0.13) + 0.00005 * (volts * volts - 3.0 * volts)).exp2();
+        let silent = silent.load(Ordering::Relaxed);
+        for (c, channel) in next.iter_mut().enumerate() {
+            for sample in channel.iter_mut() {
+                *sample = if c == 3 && !silent {
+                    phase = (phase + hz / 48_000.0).fract();
+                    (phase * std::f64::consts::TAU).sin() as f32 * 0.5
+                } else {
+                    0.0
+                };
+            }
+        }
+        if record.load(Ordering::Relaxed) {
+            heard.lock().unwrap().extend_from_slice(&next[3]);
+        }
+    })
 }
 
 /// Runs `blocks` blocks on the null stream and lets the shell read what the

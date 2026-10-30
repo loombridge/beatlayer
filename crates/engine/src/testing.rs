@@ -17,6 +17,7 @@
 //! | [`KEY`] | multiplies its input by what its detector hears, while its sidechain is on (WP-2.19b) | none |
 //! | [`DELAY`] | delays every sample by its frames, and reports that latency (WP-2.11) | the frames |
 //! | [`EXTERNAL`] | replaces its input with what an external device brings back from the interface (WP-5.34) | none |
+//! | [`CV_PROBE`] | writes 0.25 on its first CV output, an impulse of 1.0 at song frame [`CV_IMPULSE_AT`] on its second, and its CV input on its third (WP-7.17) | none |
 //! | [`HEAR`] | writes the last key its block's notes played, over 127, from the frame it played on (WP-5.27) | none |
 //! | [`SPIN`] | passes its input through after busy-waiting, and notes which thread ran it (WP-5.37) | the microseconds to wait |
 //!
@@ -73,6 +74,11 @@ pub const NOTE_PULSE: &str = "test.note_pulse";
 pub const DELAY: &str = "test.delay";
 /// The external instrument stand-in's device type (WP-5.34).
 pub const EXTERNAL: &str = "test.external";
+/// The CV probe's device type (WP-7.17): an audio effect with three CV outputs
+/// and one CV input.
+pub const CV_PROBE: &str = "test.cv_probe";
+/// The song frame the CV probe's impulse falls on.
+pub const CV_IMPULSE_AT: i64 = 1_000;
 /// The transposing MIDI effect's device type (WP-5.1).
 pub const TRANSPOSE: &str = "test.transpose";
 /// The busy-waiting node's device type (WP-5.37).
@@ -146,6 +152,14 @@ pub fn key_type() -> DeviceType {
 #[must_use]
 pub fn external_type() -> DeviceType {
     DeviceType::native(EXTERNAL, "Test External", DeviceRole::Instrument).with_external()
+}
+
+/// The CV probe as a device type: an audio effect named "Test CV" with the
+/// CV outputs Constant, Impulse and Through and the CV input In.
+#[must_use]
+pub fn cv_probe_type() -> DeviceType {
+    DeviceType::native(CV_PROBE, "Test CV", DeviceRole::AudioEffect)
+        .with_cv(&["Constant", "Impulse", "Through"], &["In"])
 }
 
 /// The MIDI sidechain probe as a device type: an audio effect named "Test
@@ -311,6 +325,12 @@ pub fn registry(probe: &Arc<Probe>) -> Registry {
     let p = Arc::clone(probe);
     registry.add_native(TRANSPOSE, move |device, _| {
         Box::new(Transpose::new(device, &p))
+    });
+    let p = Arc::clone(probe);
+    registry.add_native(CV_PROBE, move |_, _| {
+        Box::new(CvProbe {
+            _tracked: Tracked::new(&p),
+        })
     });
     let p = Arc::clone(probe);
     registry.add_native(SPIN, move |device, _| Box::new(Spin::new(device, &p)));
@@ -654,6 +674,34 @@ impl Node for External {
             match block.external(c) {
                 Some(returned) => block.channel_mut(c).copy_from_slice(returned),
                 None => block.channel_mut(c).fill(0.0),
+            }
+        }
+    }
+}
+
+/// Writes its CV outputs: 0.25, an impulse on a song frame, and what its CV
+/// input reads.
+#[derive(Debug)]
+struct CvProbe {
+    _tracked: Tracked,
+}
+
+impl Node for CvProbe {
+    fn process(&mut self, block: &mut Block<'_>) {
+        let position = block.transport().position.get();
+        if let Some(out) = block.cv_out_mut(0) {
+            out.fill(0.25);
+        }
+        if let Some(out) = block.cv_out_mut(1) {
+            for (frame, sample) in out.iter_mut().enumerate() {
+                *sample = f32::from(position + frame as i64 == CV_IMPULSE_AT);
+            }
+        }
+        let through = block.cv_in(0);
+        if let Some(out) = block.cv_out_mut(2) {
+            match through {
+                Some(heard) => out.copy_from_slice(heard),
+                None => out.fill(0.0),
             }
         }
     }

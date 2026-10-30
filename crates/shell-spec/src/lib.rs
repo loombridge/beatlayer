@@ -116,6 +116,7 @@ pub mod commands;
 pub mod comping;
 pub mod context_menus;
 pub mod control_surface;
+pub mod cv;
 pub mod dawproject;
 pub mod devices;
 pub mod editing;
@@ -193,6 +194,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     devices::register(registry)?;
     multisampler::register(registry)?;
     autosampler::register(registry)?;
+    cv::register(registry)?;
     tracks::register(registry)?;
     session_view::register(registry)?;
     session_launch::register(registry)?;

@@ -254,3 +254,46 @@ fn a_failed_claim_leaves_the_pads_and_leds_working() {
     );
     assert_eq!(frames.count(), 0);
 }
+
+// Spec: push-2-tracks R6, R11. Browse Mode draws the browser's lists in
+// columns, the column in use on a white band, and Up, Down, Preview and Load
+// on the buttons' labels.
+#[test]
+fn browse_mode_draws_its_columns_and_buttons() {
+    use bl_push::screen::List;
+    let rows = |names: &[(&str, bool)]| {
+        names
+            .iter()
+            .map(|(name, folder)| ((*name).to_owned(), *folder))
+            .collect()
+    };
+    let mut screen = Screen::default();
+    screen.lists[0] = Some(List {
+        rows: rows(&[
+            ("Sounds", true),
+            ("Drums", true),
+            ("Instruments", true),
+            ("Audio Effects", true),
+            ("MIDI Effects", true),
+            ("Plug-Ins", true),
+        ]),
+        selected: Some(2),
+        in_use: false,
+    });
+    let devices: Vec<(String, bool)> = (1..=12)
+        .map(|n| (format!("Instrument {n:02}"), false))
+        .collect();
+    screen.lists[1] = Some(List {
+        rows: devices,
+        selected: Some(9),
+        in_use: true,
+    });
+    let white = [230, 230, 230];
+    screen.upper[6] = label("Up", white, false);
+    screen.upper[7] = label("Down", white, false);
+    screen.lower[6] = label("Preview", white, true);
+    screen.lower[7] = label("Load", white, false);
+    golden("browse", &screen);
+    let text = screen.text().join("\n");
+    assert!(text.contains("list 2 (in use):"), "{text}");
+}

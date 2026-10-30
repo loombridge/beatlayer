@@ -254,7 +254,7 @@ impl MidiHost {
         let kind = bl_push::kind(
             Arc::clone(&self.push),
             Arc::clone(&self.push_claim),
-            bl_push::placeholder_contents(),
+            bl_push::contents(),
         );
         self.surfaces.set_natives(vec![Arc::new(kind)]);
     }

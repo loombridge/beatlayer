@@ -73,7 +73,7 @@ Result: [`PushSetup`](README.md#pushsetup).
 
 **Push 2 State**. Permission: `read`. Contexts: `global`.
 
-Reads each Push 2 that runs in the Control Surfaces table: its ports, firmware version and power supply; its MIDI mode; the pad mode, the display mode (with Track Mix or Global Mix), any open menu and the buttons held or locked; each LED's colour index and animation by control name; the touch strip's configuration and LEDs; the Setup menu's values; and the display's content as text, by band and column: labels, parameter names and values, dots, notifications. Changes nothing.
+Reads each Push 2 that runs in the Control Surfaces table: its ports, firmware version and power supply; its MIDI mode; the pad mode, the display mode (with Track Mix or Global Mix), any open menu and the buttons held or locked; each LED's colour index and animation by control name; the touch strip's configuration and LEDs; the Setup menu's values; and the display's content as text, by band and column: labels, parameter names and values, dots, notifications; and, in Browse Mode, what Load does, its columns with their entries and selection and the column in use. Changes nothing.
 
 Default keys: none.
 

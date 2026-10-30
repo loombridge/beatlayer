@@ -84,6 +84,18 @@ impl Column {
     }
 }
 
+/// A list in a column of the content band: a browser column (push-2-tracks
+/// R6).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct List {
+    /// The entries: each one's name, and whether it can hold entries.
+    pub rows: Vec<(String, bool)>,
+    /// The selected row.
+    pub selected: Option<usize>,
+    /// Whether it is the column in use.
+    pub in_use: bool,
+}
+
 /// A box of text over the content band, which a notification or a mode's
 /// name uses (R19).
 pub type Message = String;
@@ -97,6 +109,8 @@ pub struct Screen {
     pub lower: [Label; 8],
     /// The content band's columns.
     pub columns: [Column; 8],
+    /// Lists drawn in place of a column's parameter, as Browse Mode does.
+    pub lists: [Option<List>; 8],
     /// A short message over the content band for 1.5 s (R19).
     pub notification: Option<Message>,
     /// While a count-in runs, whether its bar is lit on this beat (R19).
@@ -145,6 +159,22 @@ impl Screen {
                 column.name,
                 column.value
             ));
+        }
+        for (n, list) in self.lists.iter().enumerate() {
+            let Some(list) = list else {
+                continue;
+            };
+            let rows: Vec<String> = list
+                .rows
+                .iter()
+                .enumerate()
+                .map(|(row, (name, folder))| {
+                    let mark = if list.selected == Some(row) { "*" } else { "" };
+                    format!("{mark}{name}{}", if *folder { "/" } else { "" })
+                })
+                .collect();
+            let in_use = if list.in_use { " (in use)" } else { "" };
+            lines.push(format!("list {}{in_use}: {}", n + 1, rows.join(", ")));
         }
         band("lower", &self.lower, &mut lines);
         for (n, progress) in self.progress.iter().enumerate() {

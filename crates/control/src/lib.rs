@@ -22,6 +22,7 @@ use bl_model::{
     ControlKind, RelativeEncoding, RemoteMapping, RemoteMode, RemoteSource, TakeoverMode,
 };
 
+pub mod browse;
 pub mod grid;
 mod host;
 pub mod launchkey;

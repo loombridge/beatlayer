@@ -477,6 +477,9 @@ fn a_warp_mode_set_while_stopped_starts_clean() {
     clear(&mut host);
     let (_, clip) = loop_track(&mut host, "Loop", 0, None);
     host.run_ok("clip.set_warp", json!({ "clip": clip, "warp": true }));
+    // The engine takes the clip in its first mode before the change, so the
+    // change is one the engine sees, not one folded into its first program.
+    host.settle();
     host.run_ok(
         "clip.set_warp_mode",
         json!({ "clip": clip, "mode": "complex_pro" }),

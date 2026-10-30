@@ -10,6 +10,5 @@ mod export_formats;
 mod live_offline;
 mod long_runs;
 mod round_trips;
-mod smoke;
-
 mod scenarios;
+mod smoke;

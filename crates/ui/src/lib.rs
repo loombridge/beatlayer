@@ -75,6 +75,7 @@ pub mod layout;
 pub mod main_panel;
 pub mod main_window;
 pub mod mapping;
+pub mod mapping_browser;
 pub mod menus;
 pub mod meters;
 pub mod middle;

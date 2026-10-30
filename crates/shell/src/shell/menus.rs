@@ -186,6 +186,11 @@ impl Shell {
                 self.editor.document().settings().record_quantization
                     == serde_json::from_value(args["quantization"].clone()).ok()?,
             ),
+            // Spec: map-modes R1. Edit MIDI Map and Edit Key Map are ticked
+            // while their mode is on.
+            bl_shell_spec::remote::MAP_MODE => {
+                Some(self.remote.map.mode == serde_json::from_value(args["mode"].clone()).ok()?)
+            }
             ids::VIEW_NOTE_SPELLING => Some(
                 self.clip_view.note_spelling()
                     == serde_json::from_value(args["spelling"].clone()).ok()?,

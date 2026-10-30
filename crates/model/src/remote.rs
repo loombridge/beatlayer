@@ -120,6 +120,51 @@ impl RemoteSource {
         }
     }
 
+    /// The source as the map modes write it (map modes R3, R8): a MIDI
+    /// source's channel then its note, note range or controller, and a
+    /// key's name.
+    #[must_use]
+    pub fn label(&self) -> String {
+        use crate::rack::note_name;
+        match self {
+            Self::Note { channel, key } => format!("{channel} · {}", note_name(*key)),
+            Self::NoteRange {
+                channel, low, high, ..
+            } => format!("{channel} · {}–{}", note_name(*low), note_name(*high)),
+            Self::Cc {
+                channel,
+                controller,
+            } => format!("{channel} · CC {controller}"),
+            Self::Cc14 {
+                channel,
+                controller,
+            } => format!("{channel} · CC {controller} (14-bit)"),
+            Self::PitchBend { channel } => format!("{channel} · Pitch Bend"),
+            Self::Key { key } => key.clone(),
+        }
+    }
+
+    /// Where the source sorts in the Mapping Browser (map modes R8): MIDI
+    /// by channel, then notes, controllers and pitch bend, then the number;
+    /// keys by name.
+    #[must_use]
+    pub fn sort_key(&self) -> (u8, u8, u8, &str) {
+        match self {
+            Self::Note { channel, key } => (*channel, 0, *key, ""),
+            Self::NoteRange { channel, low, .. } => (*channel, 0, *low, ""),
+            Self::Cc {
+                channel,
+                controller,
+            }
+            | Self::Cc14 {
+                channel,
+                controller,
+            } => (*channel, 1, *controller, ""),
+            Self::PitchBend { channel } => (*channel, 2, 0, ""),
+            Self::Key { key } => (0, 0, 0, key),
+        }
+    }
+
     fn check(&self) -> Result<(), ModelError> {
         let channel = |c: u8| {
             if (1..=16).contains(&c) {
@@ -239,6 +284,67 @@ pub enum RemoteMode {
         /// Whether a larger value moves further; otherwise it is linear.
         accelerated: bool,
     },
+}
+
+impl RelativeEncoding {
+    /// The four encodings, in the order the Status Bar's chooser lists them.
+    pub const ALL: [Self; 4] = [
+        Self::SignedBit,
+        Self::SignedBit2,
+        Self::BinOffset,
+        Self::TwosComplement,
+    ];
+
+    /// The encoding's name.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::SignedBit => "Signed Bit",
+            Self::SignedBit2 => "Signed Bit 2",
+            Self::BinOffset => "Bin Offset",
+            Self::TwosComplement => "Twos Complement",
+        }
+    }
+}
+
+impl RemoteMode {
+    /// The modes a controller source reads, in the order the Status Bar's
+    /// chooser lists them (map modes R10): a 14-bit pair reads Absolute
+    /// (14-bit); a controller Absolute, then each relative encoding
+    /// accelerated and linear.
+    #[must_use]
+    pub fn choices(source: &RemoteSource) -> Vec<Self> {
+        match source {
+            RemoteSource::Cc14 { .. } => vec![Self::Absolute14],
+            RemoteSource::Cc { .. } => std::iter::once(Self::Absolute)
+                .chain(RelativeEncoding::ALL.into_iter().flat_map(|encoding| {
+                    [true, false].map(|accelerated| Self::Relative {
+                        encoding,
+                        accelerated,
+                    })
+                }))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The mode's name in the chooser: Linear marks the relative modes that
+    /// aren't accelerated.
+    #[must_use]
+    pub fn label(self) -> String {
+        match self {
+            Self::Absolute => "Absolute".to_owned(),
+            Self::Absolute14 => "Absolute (14-bit)".to_owned(),
+            Self::Relative {
+                encoding,
+                accelerated: true,
+            } => encoding.label().to_owned(),
+            Self::Relative {
+                encoding,
+                accelerated: false,
+            } => format!("{} Linear", encoding.label()),
+        }
+    }
 }
 
 /// What an absolute controller does when it and its control disagree (R28):

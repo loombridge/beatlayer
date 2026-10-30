@@ -10,6 +10,7 @@ use std::time::Duration;
 use bl_model::{CountIn, MetronomeRhythm, MetronomeSound};
 use bl_shell::clip_drag::{ClipDragEvent, DragSource, DropSpot};
 use bl_shell::midi_io_commands as midi_ids;
+use bl_shell::remote_commands::{self as remote_ids, MapMode};
 use bl_shell::settings::AutomationRecordMode;
 use bl_shell::{
     Area, Effect, GesturePhase, Invocation, MainView, Shell, WindowKind, commands as ids,
@@ -524,6 +525,8 @@ impl MainWindowUi {
         // Spec: macros R3. A rack's Map mode tints the parameters it can
         // map.
         crate::mapping::set_macro_map(ctx, macro_map(shell));
+        // Spec: map-modes R3. A map mode tints the controls it can map.
+        crate::mapping::set_remote_map(ctx, remote_map_state(shell));
         // Spec: macros R11. A parameter a macro holds is drawn disabled, and
         // the Status Bar names the macro under the pointer.
         crate::mapping::set_held(ctx, held_params(shell));
@@ -611,7 +614,11 @@ impl MainWindowUi {
             if let Some(browser) = layout.browser {
                 // Spec: macros R3. A rack's Map mode puts the mappings list
                 // in the browser's place.
-                if shell.devices().map_mode().is_some() {
+                // Spec: map-modes R8. A map mode puts the Mapping Browser in
+                // the browser's place.
+                if shell.map_mode() != MapMode::Off {
+                    crate::mapping_browser::show(ui, shell, theme, browser, &mut events);
+                } else if shell.devices().map_mode().is_some() {
                     crate::rack_view::mappings_list(ui, shell, theme, browser, &mut events);
                 } else {
                     // Spec: device-chains R19. Hot-swapping's bar tops the
@@ -1574,6 +1581,44 @@ impl MainWindowUi {
                 .accessibility_parent(id),
             |ui| self.strip(ui, shell, theme, layout, Strip::StatusBar, events),
         );
+        // Spec: map-modes R10 (L-STAT-009). While the selected control has a
+        // controller mapping, the mode chooser sits at the right of the
+        // message area.
+        let message = layout
+            .elements
+            .iter()
+            .find(|(element, _)| *element == Element::Message)
+            .map(|(_, rect)| *rect);
+        if let (Some(mapping), Some(message)) = (shell.map_controller_mapping(), message) {
+            let choices: Vec<crate::widgets::Choice<bl_model::RemoteMode>> =
+                bl_model::RemoteMode::choices(&mapping.source)
+                    .into_iter()
+                    .map(|mode| crate::widgets::Choice {
+                        label: mode.label(),
+                        value: mode,
+                        leds: crate::widgets::NO_LEDS,
+                    })
+                    .collect();
+            let rect = Rect::from_min_size(
+                pos2(message.right() - 152.0, message.top() + 2.0),
+                egui::vec2(148.0, message.height() - 4.0),
+            );
+            if let Some(mode) = crate::widgets::chooser(
+                ui,
+                theme,
+                "mapping-mode",
+                "Mapping Mode",
+                rect,
+                &choices,
+                Some(&mapping.mode),
+                true,
+            ) {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    remote_ids::SET_MODE,
+                    json!({ "source": mapping.source, "mode": mode }),
+                )));
+            }
+        }
         // Spec: macros R11. The macro that holds the parameter under the
         // pointer is named here.
         let hint = crate::mapping::hover_hold(ui.ctx())
@@ -1771,6 +1816,29 @@ fn macro_map(shell: &Shell) -> Option<crate::mapping::MacroMap> {
     let device = doc.device(rack)?;
     let devices = device.walk().map(|d| d.id).collect();
     Some(crate::mapping::MacroMap { rack, devices })
+}
+
+/// The map mode that is on, with the source of each mapped control.
+fn remote_map_state(shell: &Shell) -> Option<crate::mapping::RemoteMap> {
+    let mode = shell.map_mode();
+    if mode == MapMode::Off {
+        return None;
+    }
+    let keys = mode == MapMode::Key;
+    let labels = shell
+        .editor()
+        .document()
+        .settings()
+        .remote
+        .iter()
+        .filter(|m| m.source.is_key() == keys)
+        .map(|m| (m.target, m.source.label()))
+        .collect();
+    Some(crate::mapping::RemoteMap {
+        mode,
+        selected: shell.map_selection(),
+        labels,
+    })
 }
 
 /// Every parameter a rack's macro holds, with the macro's name (macros spec,
@@ -2109,8 +2177,21 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 ..Look::default()
             }
         }
-        Element::KeyMap => text("KEY"),
-        Element::MidiMap => text("MIDI"),
+        // Spec: map-modes R1. The switches are lit while their mode is on.
+        Element::KeyMap | Element::MidiMap => {
+            let mode = if element == Element::KeyMap {
+                MapMode::Key
+            } else {
+                MapMode::Midi
+            };
+            let on = shell.map_mode() == mode;
+            Look {
+                text: Some(if mode == MapMode::Key { "KEY" } else { "MIDI" }.to_owned()),
+                on,
+                value: Some(if on { "on" } else { "off" }.to_owned()),
+                ..Look::default()
+            }
+        }
         Element::SampleRate => {
             let rate = shell.audio().status().sample_rate;
             let shown = rate.map_or_else(|| "—".to_owned(), sample_rate_text);
@@ -2217,6 +2298,12 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 text: Some(hint.to_owned()),
                 ..Look::default()
             },
+            // Spec: map-modes R5, R10. A selected control with nowhere for a
+            // message to come from, and a mode that is only a guess.
+            (None, None) if map_message(shell).is_some() => Look {
+                text: map_message(shell),
+                ..Look::default()
+            },
             // Spec: file-management R12. The Status Bar says how many of
             // the set's files are missing, until none is.
             (None, None) if shell.note_group_status().is_some() => Look {
@@ -2243,6 +2330,21 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
     }
 }
 
+/// What the Status Bar says in MIDI Map Mode: that no input has its Remote
+/// switch on, while a control waits for a message, and that a controller's
+/// mode is a guess (map modes R5, R10).
+fn map_message(shell: &Shell) -> Option<String> {
+    if shell.map_mode() != MapMode::Midi || shell.map_selection().is_none() {
+        return None;
+    }
+    if !shell.remote_input_on() {
+        return Some("No MIDI input has its Remote switch on".to_owned());
+    }
+    shell
+        .map_guess()
+        .map(|mode| format!("Mapping mode guessed from the controller: {}", mode.label()))
+}
+
 /// A sample rate as the Control Bar shows it: `48 kHz`, `44.1 kHz`.
 #[must_use]
 pub fn sample_rate_text(rate: u32) -> String {
@@ -2265,6 +2367,7 @@ fn command_of(element: Element) -> Option<&'static str> {
         Element::DeviceViewToggle => Some(ids::VIEW_TOGGLE_DEVICE_VIEW),
         Element::DrawMode => Some(ids::VIEW_DRAW_MODE),
         Element::ComputerKeyboard => Some(midi_ids::TOGGLE_COMPUTER_KEYBOARD),
+        Element::KeyMap | Element::MidiMap => Some(remote_ids::MAP_MODE),
         Element::ResyncExternalHardware => Some("transport.resync_external_hardware"),
         Element::SessionView | Element::ArrangementView => {
             Some(ids::VIEW_TOGGLE_SESSION_ARRANGEMENT)
@@ -2353,6 +2456,14 @@ fn click(element: Element, shell: &Shell, window: WindowKind) -> Option<Invocati
         Element::ComputerKeyboard => Some(Invocation::new(
             midi_ids::TOGGLE_COMPUTER_KEYBOARD,
             json!({}),
+        )),
+        Element::KeyMap => Some(Invocation::new(
+            remote_ids::MAP_MODE,
+            json!({ "mode": "key", "toggle": true }),
+        )),
+        Element::MidiMap => Some(Invocation::new(
+            remote_ids::MAP_MODE,
+            json!({ "mode": "midi", "toggle": true }),
         )),
         Element::ResyncExternalHardware => Some(Invocation::new(
             "transport.resync_external_hardware",

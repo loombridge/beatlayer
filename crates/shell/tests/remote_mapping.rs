@@ -302,7 +302,7 @@ fn a_mapped_key_toggles_a_switch_and_no_mapping_acts_in_a_map_mode() {
     rig.run("remote.input", json!({ "key": "S", "pressed": false }));
     assert!(!solo(&rig));
 
-    rig.shell.set_map_mode(true);
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
     assert!(!rig.shell.key_is_mapped("S"));
     let result = rig.run("remote.input", json!({ "key": "S" }));
     assert_eq!(result["taken"], false);
@@ -310,9 +310,13 @@ fn a_mapped_key_toggles_a_switch_and_no_mapping_acts_in_a_map_mode() {
 
     rig.remote_port("Pads", true);
     rig.map(note(40), json!({ "type": "arm", "track": track }));
+    let applied = rig.shell.remote_counts().0;
     rig.send("Pads", &[0x90, 40, 100]);
-    let learned = rig.shell.take_learned_messages();
-    assert_eq!(learned.len(), 1, "the message crossed for learning");
+    assert_eq!(
+        rig.shell.remote_counts().0,
+        applied,
+        "the mapping didn't act"
+    );
     assert!(
         !rig.shell
             .editor()
@@ -607,6 +611,74 @@ fn a_mapped_note_launches_at_its_velocity_and_session_launch_checks_it() {
     );
 }
 
+// Spec: remote-mapping R33 to R37. A slot mapped to C2 to C4 with root C3
+// launches on E3 four semitones up at E3's velocity and the root as it is; a
+// Gate clip stops on the release of the latest key, a release of an earlier
+// key does nothing, and the clip in the set doesn't change.
+#[test]
+fn a_chromatic_slot_launches_transposed_and_only_the_latest_keys_release_stops_it() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", false);
+    let track = rig.track("midi");
+    let scene = rig.scene();
+    rig.run(
+        "session.insert_empty_midi_clip",
+        json!({ "track": track, "scene": scene }),
+    );
+    let clip = rig.shell.editor().document().slot(track, scene).unwrap().id;
+    rig.run(
+        "clip.set_launch_mode",
+        json!({ "clip": clip, "mode": LaunchMode::Gate }),
+    );
+    // Live names middle C C3: C2 is 48, C3 60 and C4 72.
+    rig.map(
+        json!({ "type": "note_range", "channel": 1, "low": 48, "high": 72, "root": 60 }),
+        json!({ "type": "slot", "track": track, "scene": scene }),
+    );
+    let before = rig.shell.editor().document().clone();
+    let slot = |shell: &Shell| {
+        shell
+            .session_states()
+            .iter()
+            .find(|s| s.track == track && s.state == bl_engine::SlotState::Playing)
+            .map(|s| (s.velocity, s.transpose))
+    };
+    let launched = |rig: &mut Rig, what: &str, want| {
+        testing::wait_for(&rig.control, &mut rig.shell, what, |shell| {
+            slot(shell) == Some(want)
+        });
+    };
+
+    rig.send("Pads", &[0x90, 64, 90]);
+    launched(&mut rig, "E3 to launch four up at 90", (90, 4));
+    rig.send("Pads", &[0x90, 67, 100]);
+    launched(&mut rig, "G3 to relaunch seven up at 100", (100, 7));
+    // E3 is released after G3 was pressed: nothing happens.
+    rig.send("Pads", &[0x80, 64, 0]);
+    testing::advance(&rig.control, &mut rig.shell, 100);
+    assert_eq!(slot(&rig.shell), Some((100, 7)));
+    rig.send("Pads", &[0x80, 67, 0]);
+    testing::wait_for(
+        &rig.control,
+        &mut rig.shell,
+        "G3's release to stop it",
+        |shell| slot(shell).is_none(),
+    );
+    // The root plays the clip as it is.
+    rig.send("Pads", &[0x90, 60, 127]);
+    launched(&mut rig, "C3 to launch untransposed", (127, 0));
+    assert_eq!(
+        rig.shell.remote_counts(),
+        (4, 0),
+        "E3's release isn't a message to act on"
+    );
+    assert_eq!(
+        rig.shell.editor().document(),
+        &before,
+        "nothing in the set changed"
+    );
+}
+
 // Spec: remote-mapping R29. A mapping that is changed forgets where its
 // controller was.
 #[test]
@@ -627,4 +699,271 @@ fn changing_a_mapping_starts_takeover_afresh() {
     rig.hand(track, 0.9);
     rig.send("Pads", &[0xB0, 20, 100]);
     near(rig.position(track), 0.9);
+}
+
+fn state(rig: &mut Rig) -> Value {
+    rig.run("remote.state", json!({}))
+}
+
+fn select(rig: &mut Rig, target: Value) {
+    rig.run("remote.select", json!({ "target": target }));
+}
+
+fn mode_of(rig: &mut Rig, source: &Value) -> Value {
+    rig.mappings()
+        .iter()
+        .find(|m| &m["source"] == source)
+        .map_or(Value::Null, |m| m["mode"].clone())
+}
+
+// Spec: map-modes R2, R4. A map mode is view state: no undo step, one at a
+// time, and a control is selected by its ID while one is on.
+#[test]
+fn a_map_mode_is_view_state_one_at_a_time_and_selects_by_id() {
+    let mut rig = Rig::new();
+    let track = rig.track("audio");
+    let steps = rig.steps();
+    assert_eq!(state(&mut rig)["mode"], "off");
+    assert!(
+        rig.shell
+            .run("remote.select", json!({ "target": volume_of(track) }))
+            .is_err()
+    );
+
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    assert_eq!(state(&mut rig)["mode"], "midi");
+    rig.run("remote.map_mode", json!({ "mode": "midi", "toggle": true }));
+    assert_eq!(state(&mut rig)["mode"], "off");
+    rig.run("remote.map_mode", json!({ "mode": "midi", "toggle": true }));
+    rig.run("remote.map_mode", json!({ "mode": "key", "toggle": true }));
+    assert_eq!(
+        state(&mut rig)["mode"],
+        "key",
+        "turning one on turns the other off"
+    );
+
+    select(&mut rig, json!({ "type": "solo", "track": track }));
+    assert_eq!(state(&mut rig)["selected"]["type"], "solo");
+    assert!(
+        rig.shell
+            .run("remote.select", json!({ "target": volume_of(track) }))
+            .is_err(),
+        "Key Map Mode takes no continuous control"
+    );
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    assert!(
+        state(&mut rig)["selected"].is_null(),
+        "a new mode starts with no selection"
+    );
+    select(&mut rig, volume_of(track));
+    rig.run("remote.select", json!({}));
+    assert!(state(&mut rig)["selected"].is_null());
+    assert_eq!(rig.steps(), steps, "view state is no undo step");
+}
+
+// Spec: map-modes R4. While a map mode is on no mapping acts, and leaving it
+// lets them act.
+#[test]
+fn no_mapping_acts_in_a_map_mode_and_leaving_it_lets_them() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", false);
+    let track = rig.track("audio");
+    rig.map(cc(20), volume_of(track));
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    let before = rig.volume(track);
+    rig.send("Pads", &[0xB0, 20, 127]);
+    assert_eq!(rig.volume(track), before);
+    rig.run("remote.map_mode", json!({ "mode": "off" }));
+    rig.send("Pads", &[0xB0, 20, 127]);
+    assert_ne!(rig.volume(track), before);
+}
+
+// Spec: map-modes R5, R10. The next controller maps the selected control and
+// stays selected; its mode is guessed from the messages after it, and the
+// whole learn is one undo step.
+#[test]
+fn a_controller_maps_the_selected_control_and_each_message_refines_the_guess() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", true);
+    let track = rig.track("audio");
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    select(&mut rig, volume_of(track));
+    let (steps, before) = (rig.steps(), rig.volume(track));
+
+    rig.send("Pads", &[0xB0, 30, 127]);
+    let listed = rig.mappings();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0]["source"], cc(30));
+    assert_eq!(listed[0]["target"], volume_of(track));
+    assert_eq!(listed[0]["mode"]["type"], "absolute");
+    assert_eq!(rig.volume(track), before, "the message moved nothing");
+    let learned = state(&mut rig);
+    assert_eq!(learned["rows"][0]["name"], "Volume");
+    assert_eq!(learned["guess"]["type"], "absolute");
+    assert_eq!(learned["selected"]["type"], "mixer", "it stays selected");
+
+    rig.send("Pads", &[0xB0, 30, 127]);
+    let mode = mode_of(&mut rig, &cc(30));
+    assert_eq!(mode["type"], "relative");
+    assert_eq!(mode["encoding"], "twos_complement");
+    assert_eq!(mode["accelerated"], false);
+    assert_eq!(state(&mut rig)["guess"]["encoding"], "twos_complement");
+
+    rig.pass(1_000);
+    rig.shell.poll();
+    assert_eq!(
+        rig.steps(),
+        steps + 1,
+        "learning one control is one undo step"
+    );
+    rig.run("edit.undo", json!({}));
+    assert!(rig.mappings().is_empty());
+}
+
+// Spec: map-modes R5, remote-mapping R27. A controller followed by its
+// partner is a 14-bit pair, and a controller from another source maps that
+// source instead.
+#[test]
+fn a_14_bit_pair_is_learned_and_another_source_replaces_the_mapping() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", true);
+    let track = rig.track("audio");
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    select(&mut rig, volume_of(track));
+
+    rig.send("Pads", &[0xB0, 1, 64]);
+    rig.send("Pads", &[0xB0, 33, 0]);
+    let listed = rig.mappings();
+    assert_eq!(
+        listed[0]["source"],
+        json!({ "type": "cc14", "channel": 1, "controller": 1 })
+    );
+    assert_eq!(listed[0]["mode"]["type"], "absolute14");
+
+    rig.send("Pads", &[0xB0, 31, 10]);
+    let listed = rig.mappings();
+    assert_eq!(listed.len(), 1, "a control has one MIDI mapping");
+    assert_eq!(listed[0]["source"], cc(31));
+    assert_eq!(listed[0]["mode"]["type"], "absolute");
+}
+
+// Spec: map-modes R10. A mode chosen by hand stays while the controller keeps
+// sending.
+#[test]
+fn a_mode_chosen_by_hand_is_not_guessed_over() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", true);
+    let track = rig.track("audio");
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    select(&mut rig, volume_of(track));
+    rig.send("Pads", &[0xB0, 30, 64]);
+    let relative = json!({ "type": "relative", "encoding": "bin_offset", "accelerated": true });
+    rig.run(
+        "remote.set_mode",
+        json!({ "source": cc(30), "mode": relative }),
+    );
+    rig.send("Pads", &[0xB0, 30, 65]);
+    rig.send("Pads", &[0xB0, 30, 65]);
+    assert_eq!(mode_of(&mut rig, &cc(30)), relative);
+    assert!(state(&mut rig)["guess"].is_null());
+}
+
+// Spec: map-modes R5. Note-offs map nothing; a note held while a second goes
+// down maps the range between them on a continuous control, and a single
+// note on a switch.
+#[test]
+fn notes_map_a_note_a_range_or_nothing() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", true);
+    let track = rig.track("audio");
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    select(&mut rig, volume_of(track));
+
+    rig.send("Pads", &[0x80, 60, 0]);
+    assert!(rig.mappings().is_empty(), "a note-off maps nothing");
+    rig.send("Pads", &[0x90, 60, 100]);
+    assert_eq!(rig.mappings()[0]["source"], note(60));
+    rig.send("Pads", &[0x90, 64, 100]);
+    assert_eq!(
+        rig.mappings()[0]["source"],
+        json!({ "type": "note_range", "channel": 1, "low": 60, "high": 64 })
+    );
+    rig.send("Pads", &[0x80, 60, 0]);
+    rig.send("Pads", &[0x80, 64, 0]);
+
+    select(&mut rig, json!({ "type": "solo", "track": track }));
+    rig.send("Pads", &[0x90, 50, 100]);
+    rig.send("Pads", &[0x90, 52, 100]);
+    let listed = rig.mappings();
+    let solo = listed
+        .iter()
+        .find(|m| m["target"]["type"] == "solo")
+        .unwrap();
+    assert_eq!(solo["source"], note(52), "a switch takes the last key");
+}
+
+// Spec: map-modes R6. On a slot the first key is the root; a key below and a
+// key above it, held, make the range; a root released first maps the note.
+#[test]
+fn a_slot_learns_a_root_and_then_a_range_around_it() {
+    let mut rig = Rig::new();
+    rig.remote_port("Pads", true);
+    let track = rig.track("midi");
+    let scene = rig.scene();
+    let slot = json!({ "type": "slot", "track": track, "scene": scene });
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    select(&mut rig, slot.clone());
+
+    rig.send("Pads", &[0x90, 60, 100]);
+    assert_eq!(rig.mappings()[0]["source"], note(60));
+    rig.send("Pads", &[0x90, 59, 100]);
+    assert_eq!(
+        rig.mappings()[0]["source"],
+        note(60),
+        "one side isn't a range yet"
+    );
+    rig.send("Pads", &[0x90, 62, 100]);
+    assert_eq!(
+        rig.mappings()[0]["source"],
+        json!({ "type": "note_range", "channel": 1, "low": 59, "high": 62, "root": 60 })
+    );
+    for key in [60, 59, 62] {
+        rig.send("Pads", &[0x80, key, 0]);
+    }
+    rig.send("Pads", &[0x90, 70, 100]);
+    rig.send("Pads", &[0x80, 70, 0]);
+    rig.send("Pads", &[0x90, 65, 100]);
+    assert_eq!(
+        rig.mappings()[0]["source"],
+        note(65),
+        "a released root maps only its note"
+    );
+}
+
+// Spec: map-modes R8. The Mapping Browser's rows are the mode's mappings in
+// order of their source: MIDI by channel, then note or controller; keys by
+// name.
+#[test]
+fn the_mapping_rows_are_the_modes_in_order_of_their_source() {
+    let mut rig = Rig::new();
+    let track = rig.track("audio");
+    rig.map(cc(20), volume_of(track));
+    rig.map(note(60), json!({ "type": "solo", "track": track }));
+    rig.map(
+        json!({ "type": "key", "key": "S" }),
+        json!({ "type": "arm", "track": track }),
+    );
+    rig.run("remote.map_mode", json!({ "mode": "midi" }));
+    let rows = state(&mut rig)["rows"].clone();
+    let sources: Vec<&Value> = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| &r["source"])
+        .collect();
+    assert_eq!(sources, [&note(60), &cc(20)]);
+    rig.run("remote.map_mode", json!({ "mode": "key" }));
+    assert_eq!(state(&mut rig)["rows"][0]["source"]["type"], "key");
+    rig.run("remote.map_mode", json!({ "mode": "off" }));
+    assert!(state(&mut rig)["rows"].as_array().unwrap().is_empty());
 }

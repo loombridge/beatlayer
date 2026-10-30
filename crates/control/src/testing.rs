@@ -325,7 +325,11 @@ impl ControlSurface for TestSurface {
                 inner.stamp,
             )
         };
-        assert!(!panic, "the test surface was told to panic");
+        if panic {
+            // Unwinds without the panic hook, whose backtrace can take the
+            // call past the watchdog on a loaded machine.
+            std::panic::resume_unwind(Box::new("the test surface was told to panic"));
+        }
         if !sleep.is_zero() {
             std::thread::sleep(sleep);
         }

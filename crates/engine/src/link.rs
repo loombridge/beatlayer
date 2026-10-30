@@ -167,10 +167,21 @@ impl<S: Session> LinkFollower<S> {
         self.peer_next = (self.peer_next + 1) % PEER_TEMPOS;
     }
 
-    fn told(&self, bpm: f64) -> bool {
-        self.peer_tempos
-            .iter()
-            .any(|&told| (told - bpm).abs() < TEMPO_EPS)
+    /// Whether `bpm` is a tempo told to the main thread coming back as the
+    /// set's. It and every tempo told before it are forgotten then, so a
+    /// later change to the same tempo by hand is Beatlayer's own.
+    fn told(&mut self, bpm: f64) -> bool {
+        let back = (1..=PEER_TEMPOS).find(|back| {
+            let told = self.peer_tempos[(self.peer_next + PEER_TEMPOS - back) % PEER_TEMPOS];
+            (told - bpm).abs() < TEMPO_EPS
+        });
+        let Some(back) = back else {
+            return false;
+        };
+        for older in back..=PEER_TEMPOS {
+            self.peer_tempos[(self.peer_next + PEER_TEMPOS - older) % PEER_TEMPOS] = 0.0;
+        }
+        true
     }
 
     /// Takes the state a block starts from when Link comes on.
@@ -222,7 +233,8 @@ impl<S: Session> Follower for LinkFollower<S> {
             }
         } else if (own - self.own).abs() > TEMPO_EPS {
             self.own = own;
-            if !overridden && ((own - self.tempo).abs() > TEMPO_EPS && !self.told(own)) {
+            let told = self.told(own);
+            if !overridden && (own - self.tempo).abs() > TEMPO_EPS && !told {
                 self.session.set_tempo(own, heard);
                 self.tempo = own;
                 dirty = true;

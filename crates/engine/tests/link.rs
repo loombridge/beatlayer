@@ -534,6 +534,37 @@ fn the_envelope_is_sent_and_a_peers_change_overrides_it_until_it_is_re_enabled()
 }
 
 #[test]
+fn a_tempo_set_by_hand_goes_to_the_session_though_a_peer_set_it_before() {
+    // Spec: link R3. A peer sets 133 and then 120, and the set follows
+    // both; setting 133 by hand afterwards is Beatlayer's own change.
+    for block in BLOCKS {
+        let mut host = Host::new(block, 120.0);
+        let set_tempo = |host: &mut Host, bpm: f64| {
+            host.rig
+                .editor
+                .apply(Command::SetTempo {
+                    tempo: TempoMap::constant(Bpm::new(bpm).unwrap()),
+                })
+                .unwrap();
+            host.rig.sync();
+            host.run(2 * block as u64);
+        };
+        for bpm in [133.0, 120.0] {
+            host.peer_tempo(bpm);
+            host.run(2 * block as u64);
+            set_tempo(&mut host, bpm);
+        }
+        assert_eq!(host.peers.told(), vec![133.0, 120.0]);
+        set_tempo(&mut host, 133.0);
+        assert!(
+            (host.peers.tempo() - 133.0).abs() < 1e-9,
+            "block {block}: the session has {}",
+            host.peers.tempo()
+        );
+    }
+}
+
+#[test]
 fn the_session_only_hears_a_block_that_changed_something() {
     // Spec: link R12. A song that plays in phase at a steady tempo writes
     // nothing to the session.

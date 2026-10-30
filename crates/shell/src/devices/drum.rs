@@ -229,6 +229,30 @@ impl DeviceView {
         }
     }
 
+    /// The drum rack a grid controller follows on `track`: its first
+    /// instrument, if that is a drum rack, with what its pad view shows
+    /// (supported controllers R15, R16).
+    #[must_use]
+    pub fn drum_view(&self, doc: &Document, track: TrackId) -> Option<bl_control::DrumView> {
+        let rack = doc
+            .track(track)?
+            .devices()
+            .find(|d| d.role == bl_model::DeviceRole::Instrument)?;
+        (rack.rack_kind() == Some(RackKind::Drum)).then(|| bl_control::DrumView {
+            rack: rack.id,
+            first: self.views_of(rack.id).first_pad,
+            selected: self.pads_selected.get(&rack.id).copied(),
+            filled: rack
+                .chains
+                .iter()
+                .filter(|c| !c.is_return)
+                .fold(0u128, |bits, c| match c.receive {
+                    Receive::Note(note) if note < 128 => bits | 1 << note,
+                    _ => bits,
+                }),
+        })
+    }
+
     /// `rack.move_pads`: moves the notes the pad view shows.
     pub(super) fn move_pads(
         &mut self,

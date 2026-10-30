@@ -813,7 +813,9 @@ dependencies = [
  "bl-rt",
  "proptest",
  "rtrb",
+ "serde",
  "serde_json",
+ "toml",
 ]
 
 [[package]]

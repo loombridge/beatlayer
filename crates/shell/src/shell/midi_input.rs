@@ -204,6 +204,8 @@ impl Shell {
         let output = self.midi.output().clone();
         let clock = self.midi.test_clock();
         self.midi = MidiHost::new(backend, sender, output, &self.prefs.midi);
+        self.midi
+            .set_surface_templates(bl_control::template::kinds(&self.surface.templates));
         if let Some(clock) = clock {
             self.midi.set_test_clock(clock);
         }

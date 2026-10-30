@@ -16,8 +16,8 @@ use bl_core::midi::{MidiMessage, PortId};
 use bl_engine::SlotState;
 use bl_model::modulation::Travel;
 use bl_model::{
-    Command, ControlKind, CrossfadeAssign, MixerParam, ParamDescriptor, ParamKind, RemoteMapping,
-    RemoteMode, RemoteSource, RemoteTarget,
+    BarControl, ClipControl, Command, ControlKind, CrossfadeAssign, CrossfaderField, MixerParam,
+    ParamDescriptor, ParamKind, RemoteMapping, RemoteMode, RemoteSource, RemoteTarget,
 };
 use bl_shell_spec::midi_io::PortDirection;
 use bl_shell_spec::remote as ids;
@@ -55,6 +55,12 @@ pub(super) struct RemoteState {
     pub(super) applying: bool,
     /// The map mode, what it has selected and what it has learned so far.
     pub(super) map: MapState,
+    /// The crossfader's mapping fields held down, in the order they went
+    /// down (map modes R19).
+    pub(super) fields_held: Vec<CrossfaderField>,
+    /// What the Scrub control's absolute controller sent last (map modes
+    /// R22).
+    pub(super) scrub_last: Option<f64>,
     applied: u64,
     pub(super) refused: u64,
     /// What each mapping last told the outputs with Remote on (R39).
@@ -72,23 +78,34 @@ pub(super) struct Run {
     pub(super) id: &'static str,
     pub(super) args: Value,
     /// The undo step's name, for a command that moves a continuous control.
-    pub(super) gesture: Option<&'static str>,
+    pub(super) gesture: Option<String>,
+    /// The same command for the other clips a Clip View control acts on
+    /// (map modes R17).
+    pub(super) more: Vec<Value>,
 }
 
-fn cmd(id: &'static str, args: Value) -> Option<Run> {
+pub(super) fn cmd(id: &'static str, args: Value) -> Option<Run> {
     Some(Run {
         id,
         args,
         gesture: None,
+        more: Vec::new(),
     })
 }
 
-fn drag(id: &'static str, args: Value, name: &'static str) -> Option<Run> {
+pub(super) fn drag(id: &'static str, args: Value, name: impl Into<String>) -> Option<Run> {
     Some(Run {
         id,
         args,
-        gesture: Some(name),
+        gesture: Some(name.into()),
+        more: Vec::new(),
     })
+}
+
+/// A message that has nothing to do, as a switch that is in the state it is
+/// asked for: it is neither run nor refused.
+pub(super) fn nothing() -> Option<Run> {
+    cmd("", Value::Null)
 }
 
 impl Shell {
@@ -145,6 +162,7 @@ impl Shell {
     pub(super) fn forget_remote_values(&mut self) {
         self.remote.memory.clear();
         self.remote.run = None;
+        self.remote.fields_held.clear();
         // Spec: remote-mapping R39. A set that loads sends every value.
         self.remote.fed.clear();
         // Spec: map-modes R2. A map mode is off when a set opens.
@@ -406,19 +424,48 @@ impl Shell {
         let Some(action) = bl_control::act(&law, hit, key, at, memory) else {
             return;
         };
+        if let RemoteTarget::CrossfaderField { field } = mapping.target {
+            self.hold_field(field, action);
+        }
         // A button's release has nothing to do, and isn't a refusal; nor is
-        // the release of an empty slot's press.
+        // the release of an empty slot's press. A crossfader field's and a
+        // Phase Nudge button's release does something.
         let empty_slot = matches!(mapping.target, RemoteTarget::Slot { track, scene }
             if self.editor.document().slot(track, scene).is_none());
-        if action == Action::Release && (mapping.kind == ControlKind::Button || empty_slot) {
+        let held = matches!(
+            mapping.target,
+            RemoteTarget::CrossfaderField { .. }
+                | RemoteTarget::Bar {
+                    control: BarControl::PhaseNudgeDown | BarControl::PhaseNudgeUp
+                }
+        );
+        if action == Action::Release
+            && ((mapping.kind == ControlKind::Button && !held) || empty_slot)
+        {
+            return;
+        }
+        if mapping.target
+            == (RemoteTarget::Clip {
+                control: ClipControl::Scrub,
+            })
+        {
+            if self.nudge_by_scrub(mapping, action) {
+                self.remote.applied += 1;
+            }
             return;
         }
         let Some(run) = self.command_for(mapping, action) else {
             self.remote.refused += 1;
             return;
         };
+        if run.id.is_empty() {
+            return;
+        }
         let now = self.midi.now();
-        match run.gesture {
+        // Spec: map-modes R17. A Clip View control that acts on several
+        // clips changes them in one undo step.
+        let several = run.gesture.is_none() && !run.more.is_empty();
+        match &run.gesture {
             Some(name) => {
                 let key = RunKey::Source(mapping.source.clone());
                 if self.remote.run.as_ref().map(|(key, _)| key) != Some(&key) {
@@ -427,11 +474,23 @@ impl Shell {
                 }
                 self.remote.run = Some((key, now));
             }
-            None => self.end_remote_run(),
+            None => {
+                self.end_remote_run();
+                if several {
+                    self.begin_gesture("Change clips");
+                }
+            }
         }
         self.remote.applying = true;
-        let result = self.run(run.id, run.args);
+        let mut result = self.run(run.id, run.args);
+        for args in run.more {
+            let more = self.run(run.id, args);
+            result = result.and(more);
+        }
         self.remote.applying = false;
+        if several {
+            self.end_gesture();
+        }
         if result.is_ok() {
             self.remote.applied += 1;
             // Spec: remote-mapping R39. What the mapping's own message did
@@ -458,7 +517,7 @@ impl Shell {
         let value = self.current(&mapping.target)?;
         match mapping.kind {
             ControlKind::Continuous => Some(self.position_of(&mapping.target, value)),
-            ControlKind::Radio { .. } => Some(value),
+            ControlKind::Radio { .. } => Some(self.option_of(&mapping.target, value)),
             _ => None,
         }
     }
@@ -466,6 +525,9 @@ impl Shell {
     /// One step of a stepped control as a share of its travel (R26); `None`
     /// for a control with no steps of its own.
     pub(super) fn step_of(&self, target: &RemoteTarget) -> Option<f64> {
+        if let Some(step) = self.step_of_other(target) {
+            return Some(step);
+        }
         let descriptor = self.descriptor(target)?;
         let span = descriptor.max() - descriptor.min();
         (descriptor.is_stepped() && span > 0.0).then(|| 1.0 / span)
@@ -493,6 +555,15 @@ impl Shell {
         )
     }
 
+    /// The values at the ends of a control with no travel of its own, which
+    /// runs straight between them.
+    fn straight_range(&self, target: &RemoteTarget) -> (f64, f64) {
+        target
+            .natural_range()
+            .or_else(|| self.param_control(target).and_then(|(_, range)| range))
+            .unwrap_or((0.0, 1.0))
+    }
+
     /// The control's travel; `None` for the crossfader, which is straight.
     fn travel(&self, target: &RemoteTarget) -> Option<Travel<'_>> {
         match *target {
@@ -509,14 +580,24 @@ impl Shell {
         }
     }
 
-    fn position_of(&self, target: &RemoteTarget, value: f64) -> f64 {
-        self.travel(target)
-            .map_or(value.clamp(0.0, 1.0), |t| t.position(value))
+    pub(super) fn position_of(&self, target: &RemoteTarget, value: f64) -> f64 {
+        self.travel(target).map_or_else(
+            || {
+                let (low, high) = self.straight_range(target);
+                ((value - low) / (high - low)).clamp(0.0, 1.0)
+            },
+            |t| t.position(value),
+        )
     }
 
-    fn value_at(&self, target: &RemoteTarget, position: f64) -> f64 {
-        self.travel(target)
-            .map_or(position.clamp(0.0, 1.0), |t| t.value(position))
+    pub(super) fn value_at(&self, target: &RemoteTarget, position: f64) -> f64 {
+        self.travel(target).map_or_else(
+            || {
+                let (low, high) = self.straight_range(target);
+                low + position.clamp(0.0, 1.0) * (high - low)
+            },
+            |t| t.value(position),
+        )
     }
 
     /// The control's value now, for the actions that turn it over.
@@ -546,10 +627,13 @@ impl Shell {
             },
             RemoteTarget::Crossfader => doc.settings().crossfader,
             RemoteTarget::DeviceOn { device } => flag(doc.device(device)?.enabled),
-            RemoteTarget::Device { device, param } => {
-                doc.device(device)?.params.get(&param).copied()?
-            }
-            _ => return None,
+            RemoteTarget::Device { device, param } => doc
+                .device(device)?
+                .params
+                .get(&param)
+                .copied()
+                .or_else(|| self.descriptor(target).map(|d| d.default))?,
+            _ => return self.current_other(target),
         })
     }
 
@@ -557,6 +641,9 @@ impl Shell {
     /// set no longer has the control or the action means nothing to it
     /// (R11).
     pub(super) fn command_for(&self, mapping: &RemoteMapping, action: Action) -> Option<Run> {
+        if let Some(run) = self.command_other(mapping, action) {
+            return run;
+        }
         let target = mapping.target;
         let current = self.current(&target);
         let on = |current: Option<f64>| match action {
@@ -656,13 +743,19 @@ impl Shell {
                 self.drag_to(&target, if (at - max).abs() < 1e-9 { min } else { max })
             }
             (RemoteTarget::Device { device, param }, _) => {
+                let option = |option: u32| match self.macro_steps(&target) {
+                    // A radio-button macro's buttons are positions on its
+                    // travel (macros R22, R34).
+                    Some(steps) => f64::from(option) / f64::from(steps.saturating_sub(1).max(1)),
+                    None => f64::from(option),
+                };
                 let value = match action {
-                    Action::Option(option) => f64::from(option),
+                    Action::Option(chosen) => option(chosen),
                     Action::Next => {
                         let ControlKind::Radio { options } = mapping.kind else {
                             return None;
                         };
-                        f64::from((current? as u32 + 1) % options)
+                        option((self.option_of(&target, current?) as u32 + 1) % options)
                     }
                     _ => f64::from(u8::from(on(current)?)),
                 };
@@ -736,7 +829,7 @@ impl Shell {
     }
 
     /// The path to a control and its name, for `remote.mappings` (R14).
-    fn describe(&self, target: &RemoteTarget) -> (String, String) {
+    pub(super) fn describe(&self, target: &RemoteTarget) -> (String, String) {
         let doc = self.editor.document();
         let track = |id| {
             doc.track(id)
@@ -788,17 +881,22 @@ impl Shell {
                     .map_or_else(String::new, |c| c.name.clone()),
                 mixer(param).to_owned(),
             ),
+            _ => self.describe_other(target),
         }
     }
 
     /// The values Min and Max may take, in the control's own units (map
     /// modes R9).
     fn units_of(&self, mapping: &RemoteMapping) -> (f64, f64) {
-        match mapping.kind {
-            ControlKind::Continuous => mapping
-                .target
+        self.units_for(&mapping.target, mapping.kind)
+    }
+
+    /// The same for a control of `kind`, mapped or not.
+    pub(super) fn units_for(&self, target: &RemoteTarget, kind: ControlKind) -> (f64, f64) {
+        match kind {
+            ControlKind::Continuous => target
                 .natural_range()
-                .or_else(|| self.param_control(&mapping.target).and_then(|(_, r)| r))
+                .or_else(|| self.param_control(target).and_then(|(_, r)| r))
                 .unwrap_or((0.0, 1.0)),
             ControlKind::Radio { options } => (0.0, f64::from(options.saturating_sub(1))),
             ControlKind::RangedSwitch => (0.0, 127.0),
@@ -827,6 +925,9 @@ impl Shell {
         &self,
         target: &RemoteTarget,
     ) -> Option<(ControlKind, Option<(f64, f64)>)> {
+        if let RemoteTarget::MidiTool { .. } = target {
+            return self.tool_param_control(target);
+        }
         let RemoteTarget::Device { device, param } = *target else {
             return None;
         };
@@ -835,6 +936,11 @@ impl Shell {
             .devices
             .description(&doc.device(device)?.kind)?
             .param(param)?;
+        // Spec: macros R34. A radio-button macro is a radio button; a knob
+        // or a stepped macro is a continuous control.
+        if let Some(options) = self.macro_steps(target) {
+            return Some((ControlKind::Radio { options }, None));
+        }
         Some(match &descriptor.kind {
             ParamKind::Toggle => (ControlKind::RangedSwitch, None),
             ParamKind::Choice { choices } => (
@@ -952,6 +1058,15 @@ impl Shell {
             }
             ids::MAP => {
                 let args = Self::args::<ids::MapArgs>(id, args)?;
+                // Spec: macros R35. A parameter a macro holds takes no
+                // mapping, and the message says which macro holds it.
+                if let RemoteTarget::Device { device, param } = args.target
+                    && let Some(held) =
+                        self.devices
+                            .macro_holding(self.editor.document(), device, param)
+                {
+                    return Err(failed(format!("{held} holds that parameter")));
+                }
                 let (kind, range) = match args.kind.or(args.target.natural_kind()) {
                     Some(kind) => (kind, args.target.natural_range()),
                     None => self
@@ -1047,6 +1162,10 @@ impl Shell {
                 Ok(to_value(&ids::InputResult { taken }))
             }
             ids::MAP_MODE | ids::SELECT | ids::STATE => self.run_map_mode(id, args),
+            ids::TARGETS => {
+                let args = Self::args::<ids::TargetsArgs>(id, args)?;
+                Ok(to_value(&self.remote_targets(args.mode)))
+            }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
     }

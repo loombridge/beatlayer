@@ -2008,6 +2008,7 @@ fn tempo_midi_page(
     }
     rows.heading(ui, "MIDI Ports");
     let ports = shell.midi().ports();
+    let matches = shell.template_matches();
     if ports.is_empty() {
         rows.note(ui, "The computer offers no MIDI ports.");
     }
@@ -2056,6 +2057,11 @@ fn tempo_midi_page(
                 sync_options(ui, theme, rows, events, &port);
             }
         }
+        // Spec: control-surfaces R45. A template that names the port is
+        // noted under it.
+        for (_, template) in matches.iter().filter(|(name, _)| *name == port.name) {
+            rows.read_note(ui, &format!("Matches {template}"));
+        }
         if let Some(error) = &port.error {
             rows.note(ui, &format!("{label} couldn't be opened: {error}"));
         }
@@ -2074,7 +2080,7 @@ fn control_surfaces_table(
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
 ) {
-    let kinds = Shell::control_surface_choices();
+    let kinds = shell.control_surface_choices();
     let ports = shell.midi().ports();
     let offered = |direction| {
         ports
@@ -3063,5 +3069,26 @@ impl<'a> Rows<'a> {
             self.theme.colors.text_dim.0,
         );
         self.y += height + 10.0;
+    }
+
+    /// A note that assistive technology can read, as a value row is: the
+    /// text, labelled by itself.
+    fn read_note(&mut self, ui: &Ui, text: &str) {
+        let top = self.y + 4.0;
+        self.note(ui, text);
+        let rect = Rect::from_min_max(
+            pos2(self.layout.label_x, top),
+            pos2(self.right(), self.y - 6.0),
+        );
+        let response = ui.interact(
+            rect,
+            Id::new(("settings-note", text, top as i32)),
+            Sense::hover(),
+        );
+        response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(Role::Label);
+            node.set_label(text.to_owned());
+        });
     }
 }

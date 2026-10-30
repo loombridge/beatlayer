@@ -2119,6 +2119,26 @@ impl DeviceViewUi {
                 ui, theme, frame, item, &name, &text, value, colour, stepped, events,
             )
         };
+        // Spec: map-modes R3, R11; macros R34. The map modes tint a macro: a
+        // knob or a stepped one is a continuous control, mapped to MIDI
+        // only, and a radio-button one a radio button.
+        let radios = style == bl_model::MacroStyle::RadioButtons;
+        crate::mapping::remote_overlay(
+            ui,
+            theme,
+            item.knob,
+            if radios {
+                Id::new(("macro-radios", frame.id, item.number))
+            } else {
+                response.id
+            },
+            bl_model::RemoteTarget::Device {
+                device: frame.id,
+                param: bl_model::macro_param(item.number),
+            },
+            !radios,
+            events,
+        );
         crate::info_text::describe(
             ui.ctx(),
             &response,

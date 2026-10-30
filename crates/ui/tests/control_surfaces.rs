@@ -150,3 +150,135 @@ fn a_missing_port_shows_by_name() {
     let nodes = Harness::nodes(&h.settle());
     assert_eq!(Harness::node(&nodes, "Input 2").value, "Gone");
 }
+
+// Spec: supported-controllers R1. The Control Surface chooser lists None,
+// then the supported controllers by their product names in alphabetical
+// order (the Launchpads so far), and choosing one runs `control_surface.set`
+// with its ID.
+#[test]
+fn the_chooser_lists_the_launchpads_by_their_product_names() {
+    let (mut h, _) = open();
+    h.accesskit(Id::new(("chooser", "Control Surface 1")), Action::Click);
+    let nodes = Harness::nodes(&h.settle());
+    let top = |label: &str| {
+        nodes
+            .iter()
+            .find(|n| n.label == label && n.role == Role::Button)
+            .unwrap_or_else(|| panic!("the chooser offers no {label:?}"))
+            .bounds
+            .unwrap()
+            .y0
+    };
+    let order = [
+        "None",
+        "Launchpad Mini MK3",
+        "Launchpad Pro MK3",
+        "Launchpad X",
+    ]
+    .map(top);
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{order:?}");
+    let id = nodes
+        .iter()
+        .find(|n| n.label == "Launchpad X" && n.role == Role::Button)
+        .unwrap()
+        .id;
+    h.frame(vec![egui::Event::AccessKitActionRequest(ActionRequest {
+        action: Action::Click,
+        target_tree: TreeId::ROOT,
+        target_node: id,
+        data: None,
+    })]);
+    h.settle();
+    assert_eq!(
+        h.shell.control_surface_rows()[0]
+            .surface
+            .as_ref()
+            .unwrap()
+            .id,
+        "launchpad-x"
+    );
+}
+
+/// A User Library with two templates, `Zed Pads` naming the port `Pads` and
+/// `Beta` naming none, and the Settings opened on Tempo & MIDI.
+fn open_with_templates() -> Harness {
+    let library = std::env::temp_dir().join(format!("bl-ui-templates-{}", std::process::id()));
+    let folder = library.join("Controller Templates");
+    std::fs::create_dir_all(&folder).unwrap();
+    let write = |file: &str, text: &str| std::fs::write(folder.join(file), text).unwrap();
+    write(
+        "zed.bltemplate.toml",
+        "format = 1\n[surface]\nname = \"Zed Pads\"\nports = [\"Pads\"]\n",
+    );
+    write(
+        "beta.bltemplate.toml",
+        "format = 1\n[surface]\nname = \"Beta\"\n",
+    );
+    let mut h = Harness::new(Window::Settings);
+    h.shell.set_user_library(Some(library.clone()));
+    let test = TestBackend::new();
+    for (direction, name) in [
+        (Direction::Input, "Pads"),
+        (Direction::Output, "Pads Out"),
+        (Direction::Input, "Other"),
+    ] {
+        test.add_port(direction, name);
+    }
+    h.shell.use_midi_backend(Box::new(test));
+    h.shell
+        .run("app.settings", json!({ "page": SettingsPage::TempoMidi }))
+        .unwrap();
+    h.settle();
+    std::fs::remove_dir_all(&library).unwrap();
+    h
+}
+
+// Spec: control-surfaces R1, R43, R45. The Control Surface chooser lists None,
+// the native surfaces, then the templates by name with the one that names the
+// ports present first; the ports it names carry a "Matches" note.
+#[test]
+fn the_chooser_lists_templates_after_the_native_surfaces_and_notes_a_match() {
+    let mut h = open_with_templates();
+    h.accesskit(Id::new(("chooser", "Control Surface 1")), Action::Click);
+    let nodes = Harness::nodes(&h.settle());
+    let mut offered: Vec<_> = nodes
+        .iter()
+        .filter(|n| {
+            n.role == Role::Button
+                && [
+                    "None",
+                    "Test Surface",
+                    "Test Instant Surface",
+                    "Zed Pads",
+                    "Beta",
+                    "Generic 8 + 8",
+                ]
+                .contains(&n.label.as_str())
+        })
+        .filter_map(|n| Some((n.bounds?.y0, n.label.clone())))
+        .collect();
+    offered.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let labels: Vec<_> = offered.into_iter().map(|(_, label)| label).collect();
+    assert_eq!(
+        labels,
+        [
+            "None",
+            "Test Surface",
+            "Test Instant Surface",
+            "Zed Pads",
+            "Beta",
+            "Generic 8 + 8"
+        ]
+    );
+
+    // The note sits under each port the template names, and no other.
+    let notes: Vec<_> = nodes
+        .iter()
+        .filter(|n| n.label == "Matches Zed Pads")
+        .collect();
+    assert_eq!(notes.len(), 2, "the input Pads and the output Pads Out");
+    let y = |label: &str| Harness::node(&nodes, label).bounds.unwrap().y0;
+    let (pads, other) = (y("In: Pads Track"), y("In: Other Track"));
+    assert!(notes.iter().all(|n| n.bounds.unwrap().y0 != other));
+    assert!(notes.iter().any(|n| n.bounds.unwrap().y0 > pads));
+}

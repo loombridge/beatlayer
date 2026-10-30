@@ -24,6 +24,8 @@ pub const SET: &str = "control_surface.set";
 pub const DUMP: &str = "control_surface.dump";
 /// `control_surface.surfaces`: the surfaces the table's chooser offers.
 pub const SURFACES: &str = "control_surface.surfaces";
+/// `control_surface.templates`: every controller template file found.
+pub const TEMPLATES: &str = "control_surface.templates";
 
 /// `control_surface.lock`: lock a device to a row's surface.
 pub const LOCK: &str = "control_surface.lock";
@@ -40,7 +42,7 @@ pub const SET_BANK: &str = "control_surface.set_bank";
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
 pub const IDS: &[&str] = &[
-    LIST, SET, DUMP, SURFACES, LOCK, UNLOCK, MOVE_RING, BANKS, SET_BANK,
+    LIST, SET, DUMP, SURFACES, TEMPLATES, LOCK, UNLOCK, MOVE_RING, BANKS, SET_BANK,
 ];
 
 /// Whether `id` is one of the control surface commands.
@@ -274,6 +276,44 @@ pub struct SurfacesResult {
     pub surfaces: Vec<SurfaceInfo>,
 }
 
+/// One thing wrong in a controller template file.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TemplateErrorInfo {
+    /// The line, from 1.
+    pub line: u32,
+    /// What is wrong.
+    pub message: String,
+}
+
+/// One controller template file, bundled or in the User Library.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TemplateInfo {
+    /// The template's name; left out for a file that doesn't parse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// The file's path; left out for the bundled template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Whether it is the template bundled with Beatlayer.
+    pub bundled: bool,
+    /// Whether the chooser lists it: not a broken file, not a bundled
+    /// template a User Library one of the same name replaces, and not a
+    /// second file of one name.
+    pub listed: bool,
+    /// Each mistake in the file, with its line; empty for a whole file.
+    pub errors: Vec<TemplateErrorInfo>,
+    /// The ports present that the template names and no row uses, which the
+    /// Settings mark "Matches" (R45).
+    pub matches: Vec<String>,
+}
+
+/// What `control_surface.templates` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TemplatesResult {
+    /// Every template file found, the bundled one first.
+    pub templates: Vec<TemplateInfo>,
+}
+
 /// Arguments of `control_surface.set`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -475,6 +515,23 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SurfacesResult>(),
+    )?;
+    registry.register(
+        CommandSpec::new(TEMPLATES, "Controller Templates")
+            .description(
+                "Reads the controller templates again, the one bundled with Beatlayer and the \
+                 `.bltemplate.toml` files in the User Library's `Controller Templates` folder \
+                 and its subfolders, and lists every file found with its name, its path (none \
+                 for the bundled one), whether the chooser lists it and, for a broken file, \
+                 each mistake with its line. A template that doesn't parse or breaks a rule \
+                 isn't listed; a User Library template with the bundled one's name replaces \
+                 it. A listed template is chosen with `control_surface.set` by the ID \
+                 `template:<name>`. Changes nothing in the set.",
+            )
+            .permission(Permission::Read)
+            .context(Global)
+            .args::<NoArgs>()
+            .result::<TemplatesResult>(),
     )?;
     registry.register(
         CommandSpec::new(LOCK, "Lock Device to Control Surface")

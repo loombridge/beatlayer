@@ -1678,6 +1678,61 @@ fn toolbar(
             args,
         )));
     }
+    // Spec: map-modes R21, step-recording R12. In the map modes the note
+    // editor shows Step Back and Step Forward just before the grid chooser.
+    if !audio && shown == ClipTab::Notes {
+        step_buttons(ui, theme, view, events);
+    }
+}
+
+/// How wide a step button is.
+const STEP_WIDTH: f32 = 22.0;
+
+/// Step Back and Step Forward, which show while a map mode is on, just
+/// before the grid chooser (L-CLIP-022): they step as Left and Right do
+/// while step recording, and are there to be mapped, so a click on one only
+/// selects it. They aren't drawn where they would cover the tabs.
+fn step_buttons(ui: &mut Ui, theme: &Theme, view: Rect, events: &mut Vec<UiEvent>) {
+    if crate::mapping::remote_map(ui.ctx()).is_none() {
+        return;
+    }
+    let grid = grid_chooser_rect(view);
+    let forward = Rect::from_min_size(
+        pos2(grid.left() - 2.0 - STEP_WIDTH, grid.top()),
+        vec2(STEP_WIDTH, grid.height()),
+    );
+    let back = forward.translate(vec2(-(STEP_WIDTH + 2.0), 0.0));
+    if back.left() < tab_rect(view, TABS.len() - 1).right() + 2.0 {
+        return;
+    }
+    let colours = &theme.colors;
+    for (rect, name, target, forwards) in [
+        (back, "Step Back", bl_model::RemoteTarget::StepBack, false),
+        (
+            forward,
+            "Step Forward",
+            bl_model::RemoteTarget::StepForward,
+            true,
+        ),
+    ] {
+        let id = Id::new(("clip-view-step", name));
+        let response = ui.interact(rect, id, Sense::hover());
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, name));
+        ui.painter()
+            .rect_filled(rect, theme.sizes.corner, colours.control.0);
+        let c = rect.center();
+        let sign = if forwards { 1.0 } else { -1.0 };
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                pos2(c.x - 3.0 * sign, c.y - 4.0),
+                pos2(c.x - 3.0 * sign, c.y + 4.0),
+                pos2(c.x + 4.0 * sign, c.y),
+            ],
+            colours.text.0,
+            Stroke::NONE,
+        ));
+        crate::mapping::remote_overlay(ui, theme, rect, id, target, false, events);
+    }
 }
 
 mod multi;

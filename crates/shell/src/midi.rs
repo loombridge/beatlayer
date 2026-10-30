@@ -165,6 +165,17 @@ impl MidiHost {
         self.surfaces.reconcile(&mut self.ports);
     }
 
+    /// Lets the surfaces follow the rows and the ports again without listing
+    /// the ports, so a controller's answer to the device inquiry fills its
+    /// row at once (supported controllers R2). Returns whether a row was
+    /// filled since the last call.
+    pub fn follow_surfaces(&mut self) -> bool {
+        if self.surfaces.probing() {
+            self.surfaces.reconcile(&mut self.ports);
+        }
+        self.surfaces.filled()
+    }
+
     /// What the preferences keep.
     #[must_use]
     pub fn prefs(&self) -> MidiPrefs {
@@ -215,6 +226,13 @@ impl MidiHost {
     #[must_use]
     pub const fn surfaces(&self) -> &Surfaces {
         &self.surfaces
+    }
+
+    /// Sets the controller templates the chooser offers (control surfaces
+    /// R43).
+    pub fn set_surface_templates(&mut self, templates: Vec<std::sync::Arc<bl_control::Kind>>) {
+        self.surfaces.set_templates(templates);
+        self.refresh();
     }
 
     /// The six rows as the Control Surfaces table shows them.

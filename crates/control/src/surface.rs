@@ -89,6 +89,11 @@ pub struct ReadModel {
     /// The drum rack on the selected track, if its first instrument at the
     /// top level is one (supported controllers R15, R16).
     pub drum: Option<DrumView>,
+    /// The browser's lists, for a surface that browses (push-2-tracks R13).
+    pub browse: Option<crate::browse::Browse>,
+    /// The device selected in the Device View, if it is on a selected track
+    /// (push-2-tracks R5).
+    pub selected_device: Option<DeviceId>,
     /// Whether the Session View is the main view, not the Arrangement.
     pub session_view: bool,
 }
@@ -120,6 +125,8 @@ impl ReadModel {
             session_record: false,
             metronome: false,
             drum: None,
+            browse: None,
+            selected_device: None,
             session_view: false,
         }
     }

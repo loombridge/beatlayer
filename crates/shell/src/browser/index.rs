@@ -233,6 +233,16 @@ impl Snapshot {
             .collect()
     }
 
+    /// The items directly in `folder`, in name order.
+    #[must_use]
+    pub fn in_folder(&self, folder: &Path) -> Vec<u32> {
+        self.order
+            .iter()
+            .copied()
+            .filter(|&index| self.folders[self.entry(index).folder as usize] == folder)
+            .collect()
+    }
+
     /// Where `path` is among `hits`, if it's there.
     #[must_use]
     pub fn position_of(&self, hits: &[u32], path: &Path) -> Option<usize> {

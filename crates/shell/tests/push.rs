@@ -501,3 +501,249 @@ fn the_buttons_run_the_apps_commands_and_the_picker_colours_a_track() {
     assert_eq!(rig.steps(), steps + 1);
     assert_eq!(rig.state()["colour_picker"], false);
 }
+
+impl Rig {
+    /// A Push 2 running, with a new MIDI track selected.
+    fn browsing() -> Self {
+        let mut rig = Self::new();
+        rig.shell
+            .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+            .unwrap();
+        rig.sim.plug_in();
+        rig.refresh();
+        rig.step();
+        rig
+    }
+
+    /// The columns of Browse Mode, as `push.state` reads them.
+    fn columns(&mut self) -> Vec<Value> {
+        self.state()["browse"]["columns"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    fn selected_in(&mut self, column: usize) -> Value {
+        self.columns()[column]["entries"]
+            [self.columns()[column]["selected"].as_u64().unwrap() as usize]
+            .clone()
+    }
+
+    /// The devices on `track`, by name.
+    fn devices(&self, track: bl_model::TrackId) -> Vec<String> {
+        let doc = self.shell.editor().document();
+        doc.track(track)
+            .unwrap()
+            .devices()
+            .map(|d| d.title().to_owned())
+            .collect()
+    }
+
+    /// Moves the column in use, which is `column`, to `label` and opens it.
+    fn open_label(&mut self, column: usize, label: &str) {
+        for _ in 0..13 {
+            if self.selected_in(column) == label {
+                break;
+            }
+            self.tap("down");
+        }
+        assert_eq!(self.selected_in(column), label);
+        self.tap("upper_8");
+    }
+}
+
+// Spec: push-2-tracks R5, R9, R11, R14, R2. Browse on an empty MIDI track
+// lists everything a MIDI track takes and changes nothing; Load adds the
+// chosen device as one undo step, and a second Load replaces what the first
+// added, each one undo step, with Push 2 staying in Browse Mode.
+#[test]
+fn load_adds_to_an_empty_midi_track_and_the_next_load_replaces() {
+    let mut rig = Rig::browsing();
+    let track = rig.shell.arrangement().selected_tracks()[0];
+    let steps = rig.steps();
+    rig.tap("browse");
+    let browse = rig.state()["browse"].clone();
+    assert_eq!(browse["load"], "add");
+    let labels: Vec<_> = browse["columns"][0]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        &labels[..6],
+        [
+            "Sounds",
+            "Drums",
+            "Instruments",
+            "Audio Effects",
+            "MIDI Effects",
+            "Plug-Ins"
+        ]
+    );
+    assert_eq!(labels[6], "Favorites", "the collections follow");
+    assert_eq!(rig.steps(), steps, "Browse Mode adds no undo step");
+
+    rig.open_label(0, "Instruments");
+    let first = rig.selected_in(1);
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.steps(), steps + 1);
+    assert_eq!(rig.devices(track).len(), 1);
+    assert_eq!(
+        rig.state()["browse"]["load"],
+        "replace",
+        "the loaded device is next"
+    );
+    assert_eq!(rig.state()["display_mode"], "browse");
+
+    // The next entry replaces it: still one device, one more undo step.
+    rig.tap("down");
+    let second = rig.selected_in(1);
+    assert_ne!(first, second);
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.steps(), steps + 2);
+    assert_eq!(rig.devices(track).len(), 1);
+    rig.run("edit.undo", json!({}));
+    assert_eq!(rig.devices(track).len(), 1, "undo brings the first back");
+    rig.run("edit.undo", json!({}));
+    assert!(rig.devices(track).is_empty());
+}
+
+// Spec: push-2-tracks R5. An audio track lists audio effects, and a Load
+// with one selected replaces it.
+#[test]
+fn an_audio_track_takes_audio_effects_and_load_replaces_the_selected_one() {
+    let mut rig = Rig::browsing();
+    rig.shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    let track = rig.shell.arrangement().selected_tracks()[0];
+    rig.step();
+    rig.tap("browse");
+    assert_eq!(rig.columns()[0]["entries"][0], "Audio Effects");
+    assert_eq!(rig.columns()[0]["entries"][1], "Plug-Ins");
+    rig.open_label(0, "Audio Effects");
+    rig.tap("upper_8");
+    let steps = rig.steps();
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.devices(track).len(), 1);
+    assert_eq!(rig.steps(), steps + 1);
+    rig.tap("down");
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.devices(track).len(), 1, "replaced, not added");
+    assert_eq!(rig.steps(), steps + 2);
+}
+
+// Spec: push-2-tracks R12, R1. Add Track inserts a MIDI track with an
+// instrument after the selected track, as one undo step; selected in a group
+// it goes inside the group.
+#[test]
+fn add_track_inserts_a_track_with_a_device_after_the_selected_one_in_its_group() {
+    let mut rig = Rig::browsing();
+    let keys = rig.shell.arrangement().selected_tracks()[0];
+    let before = rig.shell.editor().document().top_level().len();
+    let steps = rig.steps();
+    rig.tap("add_track");
+    assert_eq!(rig.state()["browse"]["load"], "add_track");
+    assert_eq!(
+        rig.columns()[0]["entries"],
+        json!(["MIDI", "Audio", "Return"])
+    );
+    rig.tap("upper_8");
+    rig.open_label(1, "Instruments");
+    rig.tap("lower_8");
+    rig.step();
+    let doc = rig.shell.editor().document();
+    let top: Vec<_> = doc.top_level().collect();
+    assert_eq!(top.len(), before + 1);
+    let new = top[top.iter().position(|t| *t == keys).unwrap() + 1];
+    assert_eq!(doc.track(new).unwrap().kind(), bl_model::TrackKind::Midi);
+    assert_eq!(rig.shell.arrangement().selected_tracks(), [new]);
+    assert_eq!(rig.devices(new).len(), 1);
+    assert_eq!(
+        rig.steps(),
+        steps + 1,
+        "the track and its device are one step"
+    );
+    assert_eq!(rig.state()["browse"]["load"], "replace");
+    rig.run("edit.undo", json!({}));
+    assert_eq!(rig.shell.editor().document().top_level().len(), before);
+
+    // In a group: the new track goes inside it, after the selected one.
+    rig.run("arrangement.select_tracks", json!({ "tracks": [keys] }));
+    rig.run("track.group", json!({}));
+    let group = rig.shell.editor().document().parent(keys).expect("grouped");
+    rig.run("arrangement.select_tracks", json!({ "tracks": [keys] }));
+    rig.step();
+    rig.tap("add_track");
+    rig.tap("lower_8");
+    rig.step();
+    let doc = rig.shell.editor().document();
+    let children: Vec<_> = doc.track(group).unwrap().children().collect();
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0], keys);
+    assert_eq!(doc.parent(children[1]), Some(group));
+    assert_eq!(rig.shell.arrangement().selected_tracks(), [children[1]]);
+}
+
+// Spec: push-2-tracks R10. The Preview button switches the browser's own
+// Preview switch, which the window reads too, and Shift with the Master
+// encoder sets the preview volume `browser.state` reads.
+#[test]
+fn preview_is_the_browsers_switch_and_shift_master_sets_its_volume() {
+    let mut rig = Rig::browsing();
+    rig.tap("browse");
+    let preview = |rig: &mut Rig| rig.run("browser.state", json!({}))["preview"].clone();
+    let was = preview(&mut rig)["on"].as_bool().unwrap();
+    rig.tap("lower_7");
+    assert_eq!(preview(&mut rig)["on"].as_bool().unwrap(), !was);
+    let lit = rig.state()["display"]["text"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|l| l.as_str().unwrap().starts_with("lower 7: Preview"));
+    assert!(lit);
+    let volume = preview(&mut rig)["volume"].as_f64().unwrap();
+    assert!(rig.sim.press("shift"));
+    rig.pass(10);
+    assert!(rig.sim.touch(controls::MASTER));
+    assert!(rig.sim.turn(controls::MASTER, -30));
+    assert!(rig.sim.release(controls::MASTER));
+    rig.pass(10);
+    assert!(rig.sim.let_go("shift"));
+    rig.pass(10);
+    assert!(preview(&mut rig)["volume"].as_f64().unwrap() < volume);
+}
+
+// Spec: push-2-tracks R13. The columns read what the browser has indexed and
+// fill in as indexing goes on, never waiting for it.
+#[test]
+fn the_columns_fill_in_as_the_index_does() {
+    let mut rig = Rig::browsing();
+    let library = std::env::temp_dir().join(format!("bl-push-browse-{}", std::process::id()));
+    let folder = library.join("Presets/Audio Effects/Reverb");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("Big Hall.blpreset"), "{}").unwrap();
+    rig.shell.set_user_library(Some(library.clone()));
+    rig.shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    rig.step();
+    rig.tap("browse");
+    rig.open_label(0, "Audio Effects");
+    assert!(rig.shell.wait_for_browser_index(Duration::from_secs(20)));
+    rig.step();
+    rig.step();
+    let names: Vec<_> = rig.columns()[1]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names[0], "Reverb", "the indexed preset folder, first");
+    std::fs::remove_dir_all(&library).ok();
+}

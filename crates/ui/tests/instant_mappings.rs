@@ -248,7 +248,7 @@ fn a_locked_device_shows_the_hand_icon_in_its_title_bar_and_folded() {
 fn stroked(output: &egui::FullOutput) -> Vec<(Rect, egui::Stroke)> {
     fn walk(shape: &egui::Shape, out: &mut Vec<(Rect, egui::Stroke)>) {
         match shape {
-            egui::Shape::Rect(r) if r.stroke.width > 0.0 => out.push((r.rect, r.stroke.into())),
+            egui::Shape::Rect(r) if r.stroke.width > 0.0 => out.push((r.rect, r.stroke)),
             egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| walk(s, out)),
             _ => {}
         }

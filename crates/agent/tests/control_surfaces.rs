@@ -40,11 +40,13 @@ fn an_agent_sets_lists_dumps_and_reads_the_surfaces_back() {
     client.initialize("test-agent").unwrap();
 
     let surfaces = run(&mut client, "control_surface.surfaces", json!({}));
-    assert_eq!(surfaces["surfaces"][0]["id"], "test");
-    assert_eq!(
-        surfaces["surfaces"][0]["ring"],
-        json!({ "tracks": 8, "scenes": 2 })
-    );
+    let offered = surfaces["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["id"] == "test")
+        .expect("the test surface is offered");
+    assert_eq!(offered["ring"], json!({ "tracks": 8, "scenes": 2 }));
 
     let listed = run(&mut client, "control_surface.list", json!({}));
     assert_eq!(listed["rows"].as_array().unwrap().len(), 6);
@@ -273,6 +275,60 @@ fn an_agents_call_waits_while_a_surface_gesture_lasts() {
         host.shell.editor().document().track(track).unwrap().name(),
         "Keys"
     );
+}
+
+// Spec: supported-controllers R1, R2, R4. An agent finds the Launchpads in
+// the chooser's list, and reads each plugged-in controller's own mode by
+// name from the Control Surfaces table.
+#[test]
+fn an_agent_reads_each_launchpads_mode() {
+    use bl_control::grid::sim::Launchpad;
+    for (make, id, mode) in [
+        (
+            Launchpad::x as fn(&TestBackend) -> Launchpad,
+            "launchpad-x",
+            "Session",
+        ),
+        (Launchpad::mini, "launchpad-mini-mk3", "Session"),
+        (
+            Launchpad::pro,
+            "launchpad-pro-mk3",
+            "Session; track buttons: Select",
+        ),
+    ] {
+        let test = TestBackend::new();
+        let mut pad = make(&test);
+        pad.plug_in();
+        let mut shell = Shell::headless();
+        shell.use_midi_backend(Box::new(test.clone()));
+        pad.pump();
+        let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+        client.initialize("test-agent").unwrap();
+
+        let surfaces = run(&mut client, "control_surface.surfaces", json!({}));
+        let names: Vec<(&str, &str)> = surfaces["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .take(3)
+            .map(|s| (s["id"].as_str().unwrap(), s["name"].as_str().unwrap()))
+            .collect();
+        assert_eq!(
+            names,
+            [
+                ("launchpad-mini-mk3", "Launchpad Mini MK3"),
+                ("launchpad-pro-mk3", "Launchpad Pro MK3"),
+                ("launchpad-x", "Launchpad X"),
+            ]
+        );
+
+        let listed = run(&mut client, "control_surface.list", json!({}));
+        let row = &listed["rows"][0];
+        assert_eq!(row["surface"]["id"], id);
+        assert_eq!(row["state"], "running");
+        assert_eq!(row["surface_state"]["mode"], mode);
+        assert_eq!(row["surface_state"]["ring"]["tracks"], 8, "an 8 x 8 ring");
+    }
 }
 
 // Spec: control-surfaces R43, R44, R47. An agent lists the controller

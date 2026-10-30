@@ -1167,7 +1167,7 @@ fn the_x_capture_button_records_on_a_tap_and_captures_on_a_hold() {
     rig.run("transport.play", json!({}));
     rig.settle();
     assert!(is_static(rig.pad.button(98), 1), "dim white");
-    let now = std::time::Instant::now();
+    let now = rig.control.clock().expect("manual pacing").now();
     // A tap of 100 ms: Session Record.
     rig.pad.button_down_at(98, now);
     rig.pad

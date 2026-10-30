@@ -665,10 +665,11 @@ impl Shell {
                     });
                 }
             }
-            role => match self.target_of(row, role) {
-                Some(target) => self.drive(row, role, target, control),
-                None => {}
-            },
+            role => {
+                if let Some(target) = self.target_of(row, role) {
+                    self.drive(row, role, target, control);
+                }
+            }
         }
     }
 

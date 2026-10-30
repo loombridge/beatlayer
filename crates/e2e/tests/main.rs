@@ -3,3 +3,5 @@
 //! fails on a file in tests/ that isn't listed.
 
 mod smoke;
+
+mod scenarios;

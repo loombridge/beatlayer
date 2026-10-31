@@ -15,7 +15,7 @@ use crate::clips::{ClipList, ClipPlayer, SlotSample};
 use crate::disjoint::Shared;
 use crate::display::Displays;
 use crate::drum::{self, ChainHits, DrumNotes};
-use crate::gc::{GcHandle, Program};
+use crate::gc::{GcHandle, Owned, Program};
 use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
@@ -32,7 +32,7 @@ use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
 use crate::sched::Sched;
 use crate::session::FollowTable;
-use crate::session::{Button, LoopLength, SceneMaps, SceneOverride, SlotRow};
+use crate::session::{Button, LoopLength, SceneMaps, SceneOverride, SceneTables, SlotRow};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
 use crate::state::{MeterOwner, MeterSite};
@@ -60,6 +60,10 @@ pub struct Update {
     /// each audio track whose clips changed, for its clip player
     /// ([`NodeKey::Player`]), placed under the program's tempo map.
     pub data: Vec<(NodeKey, NodeData)>,
+    /// The Session View's slot rows and follow table, when an edit changed
+    /// their values but not which slots hold a clip, so no program was made.
+    /// The running program swaps them in.
+    pub(crate) scene_tables: Option<Owned<SceneTables>>,
     /// Devices in the new program that no factory makes a node for, so their
     /// tracks' audio passes through where they'd be.
     pub unhosted: Vec<DeviceId>,
@@ -79,6 +83,7 @@ impl Update {
             && self.transport.is_empty()
             && self.params.is_empty()
             && self.data.is_empty()
+            && self.scene_tables.is_none()
     }
 }
 
@@ -280,6 +285,14 @@ fn scene_slots(document: &Document) -> Vec<SlotRow> {
     slots
 }
 
+/// The slot rows and follow table of `document`.
+fn scene_tables(document: &Document) -> SceneTables {
+    SceneTables {
+        slots: scene_slots(document),
+        follow: FollowTable::of(document),
+    }
+}
+
 /// How long one pass of the clip's loop is while its Loop switch is on: what
 /// a nudge back before the clip's start goes round by (the launch
 /// quantisation spec, R32). `shortcut:` an audio clip with no loop end uses
@@ -468,6 +481,7 @@ impl Compiler {
         // Spec: modulation R28. A mapping of a modulator driven by audio,
         // notes or MIDI changes which track waits for which, and which rows
         // its target reads.
+        let (old_tables, tables) = (scene_tables(&old), scene_tables(document));
         let recompile = needs_program(&changes, &old, document, &mut params, &|kind, param| {
             if matches!(kind, bl_model::DeviceKind::Rack { .. }) {
                 bl_model::rack_description().param(param).cloned()
@@ -476,7 +490,8 @@ impl Compiler {
                     .device_type(kind)
                     .and_then(|device_type| device_type.description.param(param).cloned())
             }
-        }) || signal_mappings(&old) != signal_mappings(document);
+        }) || !old_tables.same_shape(&tables)
+            || signal_mappings(&old) != signal_mappings(document);
         route_events(&changes, &old, document, &mut params);
         // Tracks that held or hold a clip that changed: their players get
         // their clips again, and their nodes their envelopes again, since a
@@ -531,6 +546,11 @@ impl Compiler {
         } else {
             self.synced = Some(document.clone());
             let mut update = Update::default();
+            // A slot's launch settings, loop or follow actions change what
+            // the program reads, not its shape.
+            if old_tables != tables {
+                update.scene_tables = Some(self.gc.wrap(tables));
+            }
             if old.settings().arrangement_loop != document.settings().arrangement_loop {
                 update
                     .transport
@@ -1417,6 +1437,7 @@ impl Compiler {
                 .collect(),
             waits: waits.iter().copied().collect(),
         };
+        let tables = scene_tables(document);
         let mut program = EngineProgram {
             generation,
             main_latency: self.main_latency,
@@ -1472,8 +1493,8 @@ impl Compiler {
             override_tempo,
             override_signatures,
             sample_rate: self.config.sample_rate,
-            scene_slots: scene_slots(document),
-            follow: FollowTable::of(document),
+            scene_slots: tables.slots,
+            follow: tables.follow,
             session_tracks: document
                 .track_order()
                 .into_iter()
@@ -3345,10 +3366,9 @@ fn needs_program(
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
     // player its clips as node data (the audio clips spec, R12). The Session
     // View's slots are the exception: which slots hold a clip travels in the
-    // program's scene table, which a scene launch reads (WP-3.2).
+    // program's scene table, which a scene launch reads (WP-3.2); the rows'
+    // values travel as a swap of the table (`Update::scene_tables`).
     recompile
-        || scene_slots(old) != scene_slots(new)
-        || FollowTable::of(old) != FollowTable::of(new)
 }
 
 /// Every modulator driven by audio, notes or MIDI with its mappings: what

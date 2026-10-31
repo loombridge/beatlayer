@@ -886,6 +886,15 @@ impl Processor {
                 Message::Program(program) => self.swap(program),
                 Message::Param(event) => self.queue_param(event),
                 Message::Data { key, data } => self.deliver(key, data),
+                // Swapped, not assigned: the tables the program held go to
+                // the drop thread with the message.
+                Message::SceneTables(mut tables) => {
+                    if let Some(program) = self.program.as_mut() {
+                        let (program, tables) = (program.get_mut(), tables.get_mut());
+                        std::mem::swap(&mut program.scene_slots, &mut tables.slots);
+                        std::mem::swap(&mut program.follow, &mut tables.follow);
+                    }
+                }
                 Message::Transport(command, When::Now) => {
                     // Spec: control-bar-transport R20. A Stop abandons a
                     // start that waits for its frame.

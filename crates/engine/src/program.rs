@@ -646,8 +646,8 @@ pub(crate) fn delay_storage(lengths: &[u32], channels: usize) -> (Shared<DelayLi
     (Shared::new(lines), Shared::new(vec![0.0; total]))
 }
 
-/// How many table entries and steps the swaps of the tests looked at in
-/// [`EngineProgram::release_departed`].
+// How many table entries and steps the swaps of the tests looked at in
+// `EngineProgram::release_departed`.
 #[cfg(test)]
 thread_local!(static DEPARTED_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
 

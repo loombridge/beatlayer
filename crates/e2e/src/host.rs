@@ -429,6 +429,22 @@ impl Host {
         .unwrap_or_else(|error| panic!("locate: {error}"));
     }
 
+    /// Waits, in real time, until the engine's request thread has taken
+    /// what was sent so far, a transport command included. The test clock
+    /// runs blocks without waiting for that thread, so a wait counted in
+    /// pumps would give up on a busy machine before the command arrived.
+    ///
+    /// # Panics
+    ///
+    /// If the engine doesn't take it within ten seconds.
+    fn delivered(&mut self) {
+        let app = self.client.transport();
+        assert!(
+            app.shell.audio().flush(std::time::Duration::from_secs(10)),
+            "the engine never took what was sent"
+        );
+    }
+
     /// Starts the transport through the `transport` tool.
     ///
     /// # Panics
@@ -437,6 +453,7 @@ impl Host {
     pub fn play(&mut self) {
         self.tool("transport", json!({ "action": "play" }))
             .unwrap_or_else(|error| panic!("play: {error}"));
+        self.delivered();
         self.wait_until("the transport to play", Self::is_playing);
     }
 
@@ -449,6 +466,7 @@ impl Host {
     pub fn stop(&mut self) {
         self.tool("transport", json!({ "action": "stop" }))
             .unwrap_or_else(|error| panic!("stop: {error}"));
+        self.delivered();
         self.wait_until("the transport to stop", |host| !host.is_playing());
     }
 
@@ -473,6 +491,7 @@ impl Host {
         self.recorder.start();
         self.tool("transport", json!({ "action": "play" }))
             .unwrap_or_else(|error| panic!("play: {error}"));
+        self.delivered();
         self.advance_ms(millis);
         let capture = self.recorder.stop();
         self.stop();
@@ -503,6 +522,7 @@ impl Host {
         self.recorder.start();
         self.tool("transport", json!({ "action": "play" }))
             .unwrap_or_else(|error| panic!("play: {error}"));
+        self.delivered();
         self.wait_until("the transport to play", Self::is_playing);
         let state = self.shell_mut().audio_mut().transport_state();
         let rate = bl_core::time::SampleRate::new(self.shell().engine_rate())

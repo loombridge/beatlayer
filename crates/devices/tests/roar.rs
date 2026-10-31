@@ -1076,7 +1076,7 @@ fn renders_are_bit_identical_at_four_block_sizes_and_run_after_run() {
             (DRY_WET, 85.0),
         ],
     );
-    for mode in 0..MODES.len() {
+    for (mode, name) in MODES.iter().enumerate() {
         let params = with(base.clone(), &[(ROUTING_MODE, mode as f64)]);
         let tempo = TempoMap::constant(Bpm::DEFAULT);
         let render = |block: usize| {
@@ -1090,18 +1090,14 @@ fn renders_are_bit_identical_at_four_block_sizes_and_run_after_run() {
             )
         };
         let reference = render(4_096);
-        assert!(render(4_096) == reference, "{}: run after run", MODES[mode]);
+        assert!(render(4_096) == reference, "{}: run after run", name);
         for block in [1, 64, 512] {
-            assert!(
-                render(block) == reference,
-                "{} at block size {block}",
-                MODES[mode]
-            );
+            assert!(render(block) == reference, "{} at block size {block}", name);
         }
         assert!(
             reference[0].iter().any(|s| *s != 0.0),
             "{} makes sound",
-            MODES[mode]
+            name
         );
     }
 }

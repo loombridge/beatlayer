@@ -18,6 +18,12 @@ pub const MAX_SAMPLE_RATE: u32 = 768_000;
 /// 24 hours at 48 kHz.
 pub const MAX_FRAMES: u64 = 1 << 32;
 
+/// The most frames one decoded packet may span: more than any codec's frame
+/// (AAC 1,024 or 2,048, MP3 1,152, Vorbis 8,192, ALAC 4,096 by default, FLAC
+/// 65,535). A damaged packet's silence is cut to it, as its duration comes
+/// from the container unchecked.
+pub const MAX_PACKET_FRAMES: u64 = 1 << 16;
+
 /// The most samples, over every channel, that a [`ProgressiveSample`]
 /// makes ahead for one file: 1 GiB, about 46 minutes of stereo at 48 kHz.
 /// Its whole length is allocated from what the header declares, before a

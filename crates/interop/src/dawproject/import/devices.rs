@@ -660,17 +660,31 @@ impl Importer<'_, '_> {
         let input = input_gain.as_ref().and_then(db_of);
         let ceiling = threshold.as_ref().and_then(db_of);
         let offset = output.unwrap_or(0.0);
+        // Infinite values of opposite sign add up to NaN, which the model
+        // refuses along with the whole device; only that value is left out (R8).
         if let Some(ceiling) = ceiling.or(output.map(|_| 0.0)) {
-            let range = set.range(limiter::CEILING);
-            set.params
-                .insert(limiter::CEILING, (ceiling + offset).clamp(range.0, range.1));
+            let db = ceiling + offset;
+            if db.is_nan() {
+                self.report
+                    .add("a limiter's ceiling", &set.place, "left at its default");
+            } else {
+                let range = set.range(limiter::CEILING);
+                set.params
+                    .insert(limiter::CEILING, db.clamp(range.0, range.1));
+            }
         }
         if input.is_some() || output.is_some() {
-            let range = set.range(limiter::GAIN);
-            set.params.insert(
-                limiter::GAIN,
-                bl_model::param::db_to_gain(input.unwrap_or(0.0) + offset).clamp(range.0, range.1),
-            );
+            let db = input.unwrap_or(0.0) + offset;
+            if db.is_nan() {
+                self.report
+                    .add("a limiter's gain", &set.place, "left at its default");
+            } else {
+                let range = set.range(limiter::GAIN);
+                set.params.insert(
+                    limiter::GAIN,
+                    bl_model::param::db_to_gain(db).clamp(range.0, range.1),
+                );
+            }
         }
         // The automation of the threshold and the input gain moves the same
         // parameters, offset by the output gain; the output gain itself
@@ -820,6 +834,8 @@ fn db_of(parameter: &RealParameter) -> Option<f64> {
         model::Unit::Linear => Some(bl_model::param::gain_to_db(value)),
         _ => None,
     }
+    // A negative linear gain has no level (R8).
+    .filter(|db| !db.is_nan())
 }
 
 /// A ratio's value as a percent.
@@ -891,6 +907,9 @@ pub(super) fn native_value(
         model::Unit::Linear => bl_model::param::gain_to_db(value),
         _ => return None,
     } + offset_db;
+    if db.is_nan() {
+        return None;
+    }
     let converted = match quantity {
         Quantity::Gain => bl_model::param::db_to_gain(db),
         _ => db,

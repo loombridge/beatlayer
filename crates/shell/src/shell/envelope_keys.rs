@@ -10,7 +10,10 @@
 //! breakpoint commands, run as they are for the pointer.
 
 use bl_core::time::Ticks;
-use bl_model::{AutomationTarget, Breakpoint, ClipId, Document, ParamDescriptor, TrackId};
+use bl_model::{
+    AutomationTarget, Breakpoint, ClipId, ClipParam, Document, ParamDescriptor, ParamId, ParamKind,
+    ParamUnit, TrackId,
+};
 use bl_shell_spec::envelope_keys::{
     self as ids, ArrowKey, EnvelopeKeyState, EnvelopeKeys, MarkerStep, MoveMarkerArgs,
     MoveSelectedArgs, SelectAdjacentArgs, SelectBreakpointArgs, SelectEnvelopeBreakpointArgs,
@@ -61,6 +64,11 @@ enum Units {
     Steps(u8),
     /// A parameter with a descriptor: a device's, or a clip setting's.
     Param(Box<ParamDescriptor>),
+    /// A clip envelope's offset to a clip setting, over the descriptor's
+    /// span either way, shown with its sign.
+    Offset(Box<ParamDescriptor>),
+    /// A clip's Gain envelope, a share from 0 to 100 %.
+    ClipShare,
     /// A clip envelope's modulation, a share of the parameter's travel.
     Share,
     /// A MIDI controller, in its own numbers.
@@ -88,15 +96,42 @@ impl Units {
                     .map_or(Self::Share, |descriptor| {
                         Self::Param(Box::new(descriptor.clone()))
                     }),
+                // A clip setting's lane holds the setting's own values.
+                AutomationTarget::Clip { param } => Self::Param(Box::new(param.descriptor())),
                 _ => Self::Share,
             },
         }
     }
 
-    /// The units of a clip envelope's values.
+    /// The units of a clip envelope's values (the warp modes spec, R29).
     fn of_clip(target: AutomationTarget) -> Self {
         match target {
-            AutomationTarget::Clip { param } => Self::Param(Box::new(param.descriptor())),
+            AutomationTarget::Clip {
+                param: ClipParam::Gain,
+            } => Self::ClipShare,
+            AutomationTarget::Clip {
+                param: param @ (ClipParam::Transpose | ClipParam::Detune | ClipParam::SampleOffset),
+            } => Self::Param(Box::new(param.descriptor())),
+            AutomationTarget::Clip { param } => {
+                // The offset reads in the setting's unit, over its envelope range.
+                let (id, name) = (ParamId(param as u32), "Offset");
+                let (low, high) = param.envelope_range();
+                Self::Offset(Box::new(match param.descriptor().kind {
+                    ParamKind::Continuous { unit, .. } => {
+                        ParamDescriptor::continuous(id, name, (low, high), 0.0, unit)
+                    }
+                    ParamKind::Integer { unit, .. } => {
+                        ParamDescriptor::integer(id, name, (low as i64, high as i64), 0, unit)
+                    }
+                    _ => ParamDescriptor::integer(
+                        id,
+                        name,
+                        (low as i64, high as i64),
+                        0,
+                        ParamUnit::None,
+                    ),
+                }))
+            }
             _ if target.is_midi() => Self::Midi,
             _ => Self::Share,
         }
@@ -109,6 +144,15 @@ impl Units {
             Self::Switch => (if value >= 0.5 { "off" } else { "on" }).to_owned(),
             Self::Steps(_) | Self::Share => format!("{:.0}%", value * 100.0),
             Self::Param(descriptor) => descriptor.format(value),
+            Self::Offset(descriptor) => {
+                let text = descriptor.format(value);
+                if value > 0.0 {
+                    format!("+{text}")
+                } else {
+                    text
+                }
+            }
+            Self::ClipShare => format!("{value:.0}%"),
             Self::Midi => format!("{value:.0}"),
         }
     }
@@ -148,7 +192,8 @@ impl Units {
                 _ => return None,
             },
             Self::Steps(_) | Self::Share => number(text.trim_end_matches('%'))? / 100.0,
-            Self::Param(descriptor) => descriptor.parse(text)?,
+            Self::ClipShare => number(text.trim_end_matches('%'))?,
+            Self::Param(descriptor) | Self::Offset(descriptor) => descriptor.parse(text)?,
             Self::Midi => number(text)?,
         };
         Some(scale.value(scale.position(value)))
@@ -175,7 +220,18 @@ impl Units {
                     descriptor.denormalize(descriptor.normalize(value) + by * 0.01)
                 }
             }
-            Self::Share | Self::Midi => scale.value(scale.position(value) + by * 0.01),
+            Self::Offset(descriptor) => {
+                // 1% of the setting's travel, which is half the offset's span.
+                let by = if descriptor.is_stepped() {
+                    by
+                } else {
+                    by * 0.005 * (descriptor.max() - descriptor.min())
+                };
+                descriptor.clamp(value + by)
+            }
+            Self::Share | Self::ClipShare | Self::Midi => {
+                scale.value(scale.position(value) + by * 0.01)
+            }
         }
     }
 }

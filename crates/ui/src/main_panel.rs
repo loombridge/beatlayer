@@ -750,6 +750,12 @@ pub fn show(
         }
         let id = Id::new(("number-box", label));
         let rect = Rect::from_min_size(at, FIELD);
+        // Spec: clip-properties R3, R7: a drag of the field is one undo step.
+        let gesture = match marker {
+            Marker::Start | Marker::End => "Set Clip Region",
+            Marker::LoopPosition | Marker::LoopLength => "Set Clip Loop",
+        };
+        crate::widgets::number_box_gesture(ui, label, gesture, events);
         if let (Some(entry), _) = field(
             ui,
             theme,

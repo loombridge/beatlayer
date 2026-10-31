@@ -113,8 +113,9 @@ impl IdAllocator {
     /// Instead of handing out `u64::MAX`, after 2⁶⁴ − 2 IDs. At a million IDs
     /// a second that takes over half a million years.
     pub fn allocate(&mut self) -> Id {
+        assert!(self.next.get() != u64::MAX, "object IDs exhausted");
         let id = Id(self.next);
-        self.next = self.next.checked_add(1).expect("object IDs exhausted");
+        self.next = self.next.checked_add(1).unwrap();
         id
     }
 

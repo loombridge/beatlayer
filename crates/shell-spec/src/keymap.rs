@@ -1071,12 +1071,8 @@ impl UserKeymap {
             out.push_str("\n[[bind]]\n");
             out.push_str(&format!("command = {}\n", quote(&bind.command)));
             if !bind.args.is_empty() {
-                let args: Vec<String> = bind
-                    .args
-                    .iter()
-                    .map(|(name, value)| format!("{name} = {}", literal(value)))
-                    .collect();
-                out.push_str(&format!("args = {{ {} }}\n", args.join(", ")));
+                let args = literal(&Value::Object(bind.args.clone()));
+                out.push_str(&format!("args = {args}\n"));
             }
             if !bind.mac.is_empty() {
                 out.push_str(&format!("mac = {}\n", list(&bind.mac)));
@@ -1186,6 +1182,10 @@ fn quote(text: &str) -> String {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            // TOML basic strings take no other control character raw.
+            c if c.is_control() => out.push_str(&format!("\\u{:04X}", u32::from(c))),
             c => out.push(c),
         }
     }
@@ -1205,7 +1205,19 @@ fn literal(value: &Value) -> String {
         Value::String(text) => quote(text),
         Value::Bool(on) => on.to_string(),
         Value::Number(number) => number.to_string(),
-        other => quote(&other.to_string()),
+        Value::Array(items) => {
+            let items: Vec<String> = items.iter().map(literal).collect();
+            format!("[{}]", items.join(", "))
+        }
+        Value::Object(fields) => {
+            let fields: Vec<String> = fields
+                .iter()
+                .map(|(name, value)| format!("{} = {}", quote(name), literal(value)))
+                .collect();
+            format!("{{ {} }}", fields.join(", "))
+        }
+        // TOML has no null, and `keymap.bind` refuses one.
+        Value::Null => quote(""),
     }
 }
 
@@ -1405,8 +1417,8 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
         CommandSpec::new(UNBIND, "Unbind Keys")
             .description(
                 "Takes a shortcut's keys away: the default shortcut by its ID, such as \
-                 `S-EDIT-004`, or a command with the keys themselves. The keys go on one \
-                 platform, or on both without a platform. The file is written at once; nothing \
+                 `S-EDIT-004`, or a command with the keys themselves. Only the keys named \
+                 go, on one platform, or on both without a platform. The file is written at once; nothing \
                  is part of the set and nothing is an undo step.",
             )
             .permission(Permission::Edit)
@@ -1474,6 +1486,35 @@ mod tests {
         assert_eq!(own.commands[0].id, "edit.undo");
         assert_eq!(own.context, "global");
         assert_eq!(own.mac, ["Cmd+Option+Z"]);
+    }
+
+    #[test]
+    fn to_file_round_trips_any_args() {
+        // Spec: custom-shortcuts R11.
+        let mut a = Map::new();
+        a.insert("tracks".into(), serde_json::json!([3]));
+        a.insert("pick".into(), serde_json::json!({ "x y": [true, 1.5] }));
+        let mut b = Map::new();
+        b.insert("a b".into(), serde_json::json!(1));
+        b.insert("name".into(), serde_json::json!("x\ry\t\u{1}\u{7f}"));
+        let bind = |command: &str, args: &Map<String, Value>, key: &str| Bind {
+            command: command.into(),
+            args: args.clone(),
+            mac: vec![key.into()],
+            win: vec![],
+            context: Some("global".into()),
+            skipped: None,
+        };
+        let keymap = UserKeymap {
+            binds: vec![
+                bind("arrangement.select_tracks", &a, "F9"),
+                bind("x", &b, "F8"),
+            ],
+            unbinds: vec![],
+        };
+        let back = UserKeymap::parse(&keymap.to_file()).expect("to_file writes valid TOML");
+        assert_eq!(back.binds[0].args, a);
+        assert_eq!(back.binds[1].args, b);
     }
 
     #[test]

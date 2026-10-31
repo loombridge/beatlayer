@@ -304,6 +304,7 @@ impl Split {
 /// whose ring-down time constant is `decay` seconds (its Q is π·f·decay, so
 /// its poles' radius gives the time constant).
 fn resonator_coeffs(hz: f64, decay_seconds: f64, rate: f64) -> Coeffs {
+    crate::sections::count_design();
     let w = TAU * (hz / rate).clamp(1.0e-6, 0.49);
     let q = std::f64::consts::PI * hz * decay_seconds.max(1.0e-5);
     let (sin, cos) = w.sin_cos();
@@ -337,6 +338,10 @@ pub struct Buss {
     transient_slow: [EnvelopeFollower; 2],
     /// The low-end enhancer's resonators.
     resonators: [Biquad; 2],
+    /// The Damp corner and the resonator's (Hz, seconds) the sections were
+    /// last designed for; a refresh that finds them unchanged keeps them.
+    last_corner: Option<f64>,
+    last_resonator: Option<(f64, f64)>,
     /// Frames processed so far, which the coefficient refresh counts.
     ticks: u64,
     /// The low-end enhancer's loudest sample since the display last
@@ -352,6 +357,15 @@ impl Buss {
             follower.set(attack, release, false);
             follower
         };
+        let shelf = coeffs(Type::LowShelf, HARD_SHELF_HZ, HARD_SHELF_DB, LR4_Q, rate);
+        let mut hard_shelf = [Biquad::default(); 2];
+        let mut crunch_split = [Split::default(); 2];
+        let mut transient_split = [Split::default(); 2];
+        for channel in 0..2 {
+            hard_shelf[channel].c = shelf;
+            crunch_split[channel].set(CRUNCH_HZ, rate);
+            transient_split[channel].set(TRANSIENT_HZ, rate);
+        }
         Self {
             rate,
             comp_slope: 1.0 - 1.0 / COMP_RATIO,
@@ -360,9 +374,9 @@ impl Buss {
             comp_release: step_of(COMP_RELEASE_MS, rate),
             comp_gain: 1.0,
             damp: [Biquad::default(); 2],
-            hard_shelf: [Biquad::default(); 2],
-            crunch_split: [Split::default(); 2],
-            transient_split: [Split::default(); 2],
+            hard_shelf,
+            crunch_split,
+            transient_split,
             transient_fast: [
                 follower(TRANSIENT_FAST_ATTACK, TRANSIENT_FAST_RELEASE),
                 follower(TRANSIENT_FAST_ATTACK, TRANSIENT_FAST_RELEASE),
@@ -372,6 +386,8 @@ impl Buss {
                 follower(TRANSIENT_SLOW_ATTACK, TRANSIENT_SLOW_RELEASE),
             ],
             resonators: [Biquad::default(); 2],
+            last_corner: None,
+            last_resonator: None,
             ticks: 0,
             meter: 0.0,
         }
@@ -414,18 +430,18 @@ impl NativeDevice for Buss {
                 };
                 let seconds = f64::from(decay[i]) * 0.001;
                 let corner = damp_corner(f64::from(damp[i]));
+                let corner_changed = self.last_corner != Some(corner);
+                let resonator_changed = self.last_resonator != Some((hz, seconds));
+                self.last_corner = Some(corner);
+                self.last_resonator = Some((hz, seconds));
                 for channel in 0..channels {
-                    self.damp[channel].c = coeffs(Type::HighCut12, corner, 0.0, LR4_Q, self.rate);
-                    self.hard_shelf[channel].c = coeffs(
-                        Type::LowShelf,
-                        HARD_SHELF_HZ,
-                        HARD_SHELF_DB,
-                        LR4_Q,
-                        self.rate,
-                    );
-                    self.crunch_split[channel].set(CRUNCH_HZ, self.rate);
-                    self.transient_split[channel].set(TRANSIENT_HZ, self.rate);
-                    self.resonators[channel].c = resonator_coeffs(hz, seconds, self.rate);
+                    if corner_changed {
+                        self.damp[channel].c =
+                            coeffs(Type::HighCut12, corner, 0.0, LR4_Q, self.rate);
+                    }
+                    if resonator_changed {
+                        self.resonators[channel].c = resonator_coeffs(hz, seconds, self.rate);
+                    }
                 }
             }
 
@@ -560,7 +576,10 @@ pub fn display(
 
 #[cfg(test)]
 mod tests {
+    use bl_engine::{NodeEvent, ParamValue};
+
     use super::*;
+    use crate::sections::{designs_in_block, test_node};
 
     // Spec: drum-bus R10
     #[test]
@@ -569,5 +588,24 @@ mod tests {
         assert!((nearest_note_hz(110.0) - 110.0).abs() < 1e-9);
         // 200 Hz is nearer G3 (196 Hz) than G#3 (207.7 Hz).
         assert!((nearest_note_hz(200.0) - 196.0).abs() < 0.1);
+    }
+
+    // Spec: drum-bus R15
+    #[test]
+    fn a_refresh_with_nothing_moved_designs_nothing() {
+        let mut node = test_node(register, &drum_buss_type(), &[]);
+        designs_in_block(node.as_mut(), &[]);
+        for _ in 0..16 {
+            assert_eq!(designs_in_block(node.as_mut(), &[]), 0, "static parameters");
+        }
+        let moved = NodeEvent {
+            offset: 0,
+            param: FREQ,
+            value: ParamValue::Set(90.0),
+        };
+        assert!(
+            designs_in_block(node.as_mut(), &[moved]) > 0,
+            "a moved Freq"
+        );
     }
 }

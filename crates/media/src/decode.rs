@@ -328,6 +328,10 @@ impl<T: Read + Seek + Send> ReadSeek for T {}
 /// the `fLaC` marker and the STREAMINFO block's own four-byte header.
 const FLAC_MIN_BLOCK_OFFSET: u64 = 8;
 
+/// How far past the stream an iTunSMPB tag's priming and valid frames may
+/// reach before the tag is distrusted: one packet's worth.
+const TRIM_SLACK: u64 = 2048;
+
 /// The block size of a FLAC stream whose frames all have one fixed block
 /// size but whose stream header gives a smaller minimum, or `None` for any
 /// other file. Some encoders (flacenc's whole-stream encoder among them)
@@ -570,8 +574,20 @@ impl SymphoniaStream {
             Some(trim) if codec == Codec::Aac && container == Container::Mp4 => {
                 let trim = trim.at_rate(sample_rate);
                 let end = trim.valid.map(|v| trim.priming.checked_add(v));
-                // A tag whose fields overflow is garbage: decode untrimmed.
-                if end == Some(None) {
+                // A tag whose fields overflow, or that trims more than the
+                // stream holds, is garbage: decode untrimmed. Real AAC
+                // priming is 1,024 to 2,112 frames.
+                let garbage = end == Some(None)
+                    || match frames {
+                        Some(n) => {
+                            trim.priming >= n
+                                || end
+                                    .flatten()
+                                    .is_some_and(|e| e > n.saturating_add(TRIM_SLACK))
+                        }
+                        None => trim.priming > u64::from(sample_rate),
+                    };
+                if garbage {
                     (0, None)
                 } else {
                     frames = trim
@@ -764,7 +780,9 @@ impl SymphoniaStream {
             Err(SymphoniaError::DecodeError(_)) => {
                 // Keep time: a damaged packet becomes silence.
                 self.damaged += 1;
-                let frames = self.dur_to_frames(packet.dur.get()) as usize;
+                let frames = self
+                    .dur_to_frames(packet.dur.get())
+                    .min(limits::MAX_PACKET_FRAMES) as usize;
                 for plane in &mut self.pending {
                     plane.clear();
                     plane.resize(frames, 0.0);

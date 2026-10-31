@@ -341,6 +341,8 @@ pub fn start(
             launches,
             events: Vec::new(),
             take: None,
+            so_far: None,
+            rate,
             engines_closed: 0,
             stale: None,
             fresh: false,
@@ -378,6 +380,12 @@ pub struct Recording {
     launches: Consumer<SessionEvent>,
     events: Vec<SessionEvent>,
     take: Option<TakeBounds>,
+    /// The bounds the engine published for the take that was running, kept
+    /// for an engine that closes before it publishes the take.
+    so_far: Option<TakeBounds>,
+    /// The sample rate the take is recorded at: the device may change
+    /// before the clips are made.
+    rate: SampleRate,
     /// The audio host's [`engines_closed`](crate::audio::AudioHost::engines_closed)
     /// when the recording began: another count means the engine that took
     /// it was closed, and no take will ever be published.
@@ -439,6 +447,9 @@ pub struct Outcome {
     /// The take the engine published, if it saw one: the song frames the
     /// clips are placed from. `None` when nothing was played.
     pub take: Option<TakeBounds>,
+    /// The sample rate the take was recorded at, which its song frames are
+    /// at whatever the device is now.
+    pub rate: SampleRate,
     /// Frames the audio was moved earlier: its clips start and end that much
     /// earlier than the take, and its files leave out the take's first
     /// frames up to the delay.
@@ -512,9 +523,13 @@ impl Recording {
     /// Notes the take the engine published, from its state: `take` is the
     /// take that last ended and `running` whether one runs now. The take
     /// that ended before this recording began is not this recording's, and
-    /// is still published until the engine has the new plan.
-    pub fn follow(&mut self, take: Option<TakeBounds>, running: bool) {
+    /// is still published until the engine has the new plan. `so_far` is
+    /// the bounds of the take running now, if one does.
+    pub fn follow(&mut self, take: Option<TakeBounds>, so_far: Option<TakeBounds>, running: bool) {
         self.fresh |= take.is_none() || running;
+        if self.fresh && so_far.is_some() {
+            self.so_far = so_far;
+        }
         if let Some(take) = take
             && (self.fresh || self.stale != Some(take))
         {
@@ -566,6 +581,25 @@ impl Recording {
             // went in, so it can arrive a frame after the writer's report.
             return None;
         }
+        if self.take.is_none()
+            && !running
+            && let Some(so_far) = self.so_far
+        {
+            // Spec: recording R2. The engine closed mid-take and never
+            // published it: the clips cover the take as far as it got, and
+            // the whole of the longest file.
+            let frames = match &self.files {
+                Some(Ok(files)) => files.iter().map(|file| file.frames).max().unwrap_or(0),
+                _ => 0,
+            }
+            .max(so_far.frames);
+            self.take = Some(TakeBounds {
+                end: so_far.start + Frames(i64::try_from(frames).unwrap_or(i64::MAX)),
+                wrap: None,
+                frames,
+                ..so_far
+            });
+        }
         let dropped = self.dropped();
         let midi = self
             .midi
@@ -579,6 +613,7 @@ impl Recording {
             .collect();
         Some(Outcome {
             take: self.take,
+            rate: self.rate,
             delay: self.delay,
             files: self.files.take().expect("set above"),
             midi,
@@ -611,15 +646,25 @@ struct Writing {
 /// engine drops the plan (the take is over), then finishes the files and
 /// reports them. Real-time safety binds the audio thread only; here a file
 /// write may block as long as it likes.
-fn write(
+fn write(tracks: Vec<Writing>, rate: SampleRate, done: Sender<Result<Vec<RecordedFile>, String>>) {
+    write_with_hook(tracks, rate, done, |_| {});
+}
+
+/// [`write`], calling `between` with whether the pass was idle after each
+/// drain and before the check for the engine having let go, so a test can
+/// land the engine's last samples in that gap.
+fn write_with_hook(
     mut tracks: Vec<Writing>,
     rate: SampleRate,
     done: Sender<Result<Vec<RecordedFile>, String>>,
+    mut between: impl FnMut(bool),
 ) {
     let mut writers: Vec<Option<AudioWriter>> = (0..tracks.len()).map(|_| None).collect();
     let mut buffers: Vec<Vec<f32>> = tracks.iter().map(|_| Vec::with_capacity(CHUNK)).collect();
     let mut error: Option<String> = None;
     loop {
+        // A ring abandoned before the drain has nothing more to come.
+        let abandoned = tracks.iter().all(|track| track.consumer.is_abandoned());
         let mut idle = true;
         for (index, track) in tracks.iter_mut().enumerate() {
             let channels = track.channels;
@@ -653,7 +698,8 @@ fn write(
                 }
             }
         }
-        if tracks.iter().all(|track| track.consumer.is_abandoned()) && idle {
+        between(idle);
+        if abandoned && idle {
             break;
         }
         thread::sleep(POLL);
@@ -1243,6 +1289,52 @@ mod tests {
         );
     }
 
+    // Spec: recording R4. The engine's last samples can land after the writer
+    // has found its rings empty and before it checks that the engine let go:
+    // they are written, not left in the ring.
+    #[test]
+    fn writer_drains_samples_pushed_just_before_the_plan_drops() {
+        let dir = std::env::temp_dir().join(format!(
+            "bl-shell-recording-writer-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("take.wav");
+        let (producer, consumer) = RingBuffer::<f32>::new(RING_FRAMES);
+        let producer = Arc::new(std::sync::Mutex::new(Some(producer)));
+        let track = TrackId(bl_core::id::Id::new(1).unwrap());
+        let writing = Writing {
+            consumer,
+            path: path.clone(),
+            track,
+            channels: 1,
+        };
+        let (done, finished) = mpsc::channel();
+        let held = Arc::clone(&producer);
+        let thread = thread::spawn(move || {
+            write_with_hook(vec![writing], SampleRate::HZ_48000, done, |idle| {
+                // The first idle pass: the engine pushes its last block and
+                // the plan goes, after the drain and before the check.
+                if idle && let Some(mut producer) = held.lock().unwrap().take() {
+                    for i in 0..64 {
+                        producer.push(i as f32 / 64.0).unwrap();
+                    }
+                }
+            });
+        });
+        let files = finished.recv().unwrap().unwrap();
+        thread.join().unwrap();
+        assert_eq!(files.len(), 1, "{files:?}");
+        assert_eq!(files[0].frames, 64);
+        let data = bl_media::decode_file(&path).unwrap();
+        assert_eq!(data.channel(0).unwrap().len(), 64);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // Spec: app-shell R13; WP-2.13. A recording that ends with frames the
     // engine dropped reports them, and a take that never started makes no
     // file.
@@ -1459,17 +1551,17 @@ mod tests {
         };
         let (_plan, mut recording) = start(None, RATE, &[], &[], Vec::new()).unwrap();
         recording.stale = Some(take(0, 100));
-        recording.follow(Some(take(0, 100)), false);
+        recording.follow(Some(take(0, 100)), None, false);
         assert_eq!(recording.take, None, "the previous take is not this one's");
-        recording.follow(None, false);
-        recording.follow(Some(take(50, 80)), false);
+        recording.follow(None, None, false);
+        recording.follow(Some(take(50, 80)), None, false);
         assert_eq!(recording.take, Some(take(50, 80)));
         // A new take that happens to cover the same frames is followed once
         // the engine has been seen to clear the old one.
         let (_plan, mut again) = start(None, RATE, &[], &[], Vec::new()).unwrap();
         again.stale = Some(take(0, 100));
-        again.follow(None, true);
-        again.follow(Some(take(0, 100)), false);
+        again.follow(None, None, true);
+        again.follow(Some(take(0, 100)), None, false);
         assert_eq!(again.take, Some(take(0, 100)));
     }
 

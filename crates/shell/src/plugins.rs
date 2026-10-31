@@ -260,7 +260,7 @@ pub fn capture_states(
 ) {
     // Spec: ara-hosting R10. The ARA plug-ins' document archives go in the
     // set too.
-    let archives = vst3.ara_archives(&editor.document().settings().ara_archives);
+    let archives = vst3.ara_archives(&editor.document().settings().ara_archives[..]);
     editor.amend_ara_archives(archives);
     for device in clap_devices(editor.document()) {
         if let Ok(state) = plugins.save_state(device) {

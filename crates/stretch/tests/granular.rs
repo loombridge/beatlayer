@@ -70,3 +70,43 @@ fn a_pitch_change_resamples_the_next_grain() {
     let detected2 = detect_period(&out2[1000..3000], sample_rate);
     assert_eq!(detected2, Some(expected_octave_period));
 }
+
+#[test]
+fn tones_starts_afresh_when_another_clip_takes_it_over_at_a_continuous_frame() {
+    let mut tones = Tones::new(1, 48_000.0);
+    let render = |tones: &mut Tones, level: f32, file_first: i64, first: i64, clip: u64| {
+        let data = vec![level; 8192];
+        let window = Window {
+            data: &data,
+            stride: 8192,
+            channels: 1,
+            frames: 8192,
+            first: file_first,
+        };
+        let start = file_first as f64 + 4096.0;
+        let positions: Vec<f64> = (0..2048).map(|i| start + i as f64).collect();
+        let request = Request {
+            positions: &positions,
+            first,
+            speed: 1.0,
+            neutral: false,
+            high_quality: false,
+            beats: &Plan::EMPTY,
+            transient_envelope: 100.0,
+            pitch: 1.0,
+            clip,
+            step: 1.0,
+            song: f64::NAN,
+        };
+        let mut out = vec![0.0f32; 2048];
+        tones.render(&request, &window, &mut out, 2048);
+        out
+    };
+
+    // Clip 1 plays far into its file; clip 2 then starts where its run ended.
+    render(&mut tones, 1.0, 480_000, 0, 1);
+    let out = render(&mut tones, 0.5, 0, 2048, 2);
+    for (i, &s) in out.iter().enumerate().take(1441).skip(1) {
+        assert!((s - 0.5).abs() < 1e-3, "frame {i} is {s}");
+    }
+}

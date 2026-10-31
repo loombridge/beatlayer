@@ -361,16 +361,21 @@ impl Complex {
         if (start - self.fed).abs() > MARGIN as i64 {
             self.fed = start;
         }
-        // Feed up to the position one frame past the run: the input a run takes
-        // is then exactly its own span, whatever the block size (R6).
-        let until = (request.positions[0] + rate * n as f64).round() as i64 + lead;
-        let (inputs, need) = self.inputs(window, until);
-        let columns = out
-            .chunks_mut(stride)
-            .take(self.channels)
-            .map(|channel| &mut channel[..n]);
-        self.stretcher.process(inputs, need, columns, n);
-        self.fed = until;
+        // One output frame a call, fed up to the position one frame past it:
+        // the library places each spectral block by where inside a call it
+        // starts, so a call spanning many frames makes the input a block sees
+        // depend on where the block size cut the run (R6). A frame's own
+        // rounded position doesn't.
+        for i in 0..n {
+            let until = (request.positions[i] + rate).round() as i64 + lead;
+            let (inputs, need) = self.inputs(window, until);
+            let columns = out
+                .chunks_mut(stride)
+                .take(self.channels)
+                .map(|channel| &mut channel[i..=i]);
+            self.stretcher.process(inputs, need, columns, 1);
+            self.fed = until;
+        }
         let Some(corrector) = &mut self.corrector else {
             return;
         };
@@ -568,5 +573,41 @@ mod tests {
         complex.tune(ratio);
         assert!(complex.correction.is_none(), "Complex");
         assert!(complex.corrector.is_none(), "Complex makes no corrector");
+    }
+
+    // Spec: warp-modes R6. A speed that isn't a whole number of file frames
+    // a block (a file at 110 BPM in a 120 BPM set) renders the same to the
+    // bit at any block size: the input a call takes was cut at the block's
+    // own rounded span, so the spectral blocks fell differently in each.
+    #[test]
+    fn a_fractional_speed_renders_the_same_at_any_block_size() {
+        let file: Vec<f32> = (0..96_000)
+            .map(|i| {
+                (i as f32 * 0.03).sin() + 0.3 * (i as f32 * 0.31).sin() * (i as f32 * 0.002).cos()
+            })
+            .collect();
+        let speed = 120.0 / 110.0;
+        let total = 4_096;
+        for pro in [false, true] {
+            let render = |block: usize| {
+                let mut mode = Complex::new(1, 48_000.0, pro);
+                let mut out = Vec::new();
+                let mut done = 0;
+                while done < total {
+                    let n = block.min(total - done);
+                    let at = 20_000.0 + done as f64 * speed;
+                    out.extend(run_at(&mut mode, &file, at, speed, done as i64, n, 1));
+                    done += n;
+                }
+                out
+            };
+            let base = render(256);
+            for block in [61, 512, 1_024] {
+                assert!(
+                    render(block) == base,
+                    "pro {pro}: blocks of {block} differ from blocks of 256"
+                );
+            }
+        }
     }
 }

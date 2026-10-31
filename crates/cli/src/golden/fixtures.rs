@@ -65,6 +65,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: cv_utility_track,
     },
     Fixture {
+        name: "cv-modulators",
+        about: "The device channels after Main's two, of CV LFO (a triangle at 2 Hz with Jitter, \
+                from -3 V to 4 V), CV Shaper (the staircase preset at 1 Hz, 0 to 5 V) and CV \
+                Envelope Follower (following a 3 Hz tone through its sidechain, 0 to 5 V): \
+                the voltages as sample values, worked out on every frame.",
+        build: cv_modulators,
+    },
+    Fixture {
         name: "summed-tracks",
         about: "Four tracks summed into Main through their faders, at three volumes, one muted.",
         build: summed_tracks,
@@ -1079,6 +1087,99 @@ fn cv_utility_track() -> Scene {
         enabled: true,
     });
     song.device_channels = 1;
+    song.finish(2.0)
+}
+
+/// CV LFO, CV Shaper and CV Envelope Follower, each captured on a device
+/// channel after Main's two (WP-7.18b; the CV tools spec, R32 to R36).
+fn cv_modulators() -> Scene {
+    use bl_devices::cv_modulators::{MAX, MIN, cv_curve_type, cv_level_type, cv_wave_type};
+    use bl_devices::level_mod::{FALL, RISE};
+    use bl_devices::modulator::{JITTER, RATE_HZ, WAVE};
+    use bl_model::modulator::shape_preset;
+    use bl_model::{Input, Tap};
+
+    let mut song = Song::new();
+    let put =
+        |song: &mut Song, track, mut device: Device, channel: u16, params: &[(ParamId, f64)]| {
+            for &(param, value) in params {
+                device.params.insert(param, value);
+            }
+            device.external.as_mut().expect("it has routing").cv_outputs[0].channel = Some(channel);
+            let index = song
+                .editor
+                .document()
+                .track(track)
+                .expect("the track exists")
+                .devices()
+                .len();
+            song.apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            });
+        };
+    let wave = song.track(TrackKind::Audio, "Wave", None);
+    let id = song.editor.new_id();
+    put(
+        &mut song,
+        wave,
+        cv_wave_type().device(id),
+        1,
+        &[
+            (WAVE, 3.0),
+            (RATE_HZ, 2.0),
+            (JITTER, 20.0),
+            (MIN, -3.0),
+            (MAX, 4.0),
+        ],
+    );
+    let shape = song.track(TrackKind::Audio, "Shape", None);
+    let id = song.editor.new_id();
+    put(
+        &mut song,
+        shape,
+        cv_curve_type().device(id),
+        2,
+        &[(RATE_HZ, 1.0)],
+    );
+    song.apply(Command::SetShape {
+        device: id,
+        points: shape_preset(5).expect("preset 5 is a shape"),
+    });
+    // Heard only through the sidechain.
+    let slow = song.track(TrackKind::Audio, "Slow", None);
+    song.tone(slow, 3.0, -6.0);
+    song.volume(slow, 0.0);
+    let level = song.track(TrackKind::Audio, "Level", None);
+    song.tone(level, 220.0, -12.0);
+    let id = song.editor.new_id();
+    put(
+        &mut song,
+        level,
+        cv_level_type().device(id),
+        3,
+        &[(RISE, 0.0), (FALL, 50.0)],
+    );
+    song.apply(Command::SetSidechainInput {
+        device: id,
+        input: Input::Track {
+            track: slow,
+            tap: Tap::PostFx,
+            chain: None,
+            output: None,
+        },
+    });
+    song.apply(Command::SetSidechainEnabled {
+        device: id,
+        enabled: true,
+    });
+    // All of the sidechain's signal, none of the track's own.
+    song.apply(Command::SetSidechainMix {
+        device: id,
+        mix: 1.0,
+    });
+    song.device_channels = 3;
     song.finish(2.0)
 }
 

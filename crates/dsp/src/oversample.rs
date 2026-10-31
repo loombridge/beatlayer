@@ -7,8 +7,10 @@
 //! taps, Kaiser window, cutoff at 0.21 of the doubled rate, so the original
 //! band is flat to about 0.34 of the original rate, 16 kHz at 48 kHz, and
 //! the band that would fold back is about 80 dB down). Going up, a stage
-//! puts a zero between samples and filters; coming down, it filters and
-//! keeps every other sample. Each stage delays the signal by 32 samples of
+//! puts a zero between samples and filters, which it does as two shorter
+//! filters (the even and the odd taps) over the samples themselves, so no
+//! multiply is by an inserted zero; coming down, it filters and keeps every
+//! other sample. Each stage delays the signal by 32 samples of
 //! its own rate each way, so the whole trip's latency is a whole number of
 //! frames at the original rate ([`Oversampler::latency`]), which a device
 //! reports for delay compensation.
@@ -37,45 +39,59 @@ struct Stage {
     down: History,
 }
 
-/// A filter's recent inputs, stored twice over so the newest `TAPS` are
+/// A filter's recent inputs, stored twice over so the newest `len` are
 /// always one unbroken slice.
 #[derive(Clone, Debug)]
 struct History {
     samples: Vec<f32>,
     at: usize,
+    len: usize,
 }
 
 impl History {
-    fn new() -> Self {
+    fn new(len: usize) -> Self {
         Self {
-            samples: vec![0.0; 2 * TAPS],
+            samples: vec![0.0; 2 * len],
             at: 0,
+            len,
         }
     }
 
     #[inline]
     fn push(&mut self, sample: f32) {
         self.samples[self.at] = sample;
-        self.samples[self.at + TAPS] = sample;
-        self.at = (self.at + 1) % TAPS;
+        self.samples[self.at + self.len] = sample;
+        self.at = (self.at + 1) % self.len;
     }
 
-    /// The filter's output for the newest input.
+    /// The filter's output for the newest input: the newest `taps.len()`
+    /// inputs against `taps`.
     #[inline]
     fn filter(&self, taps: &[f32]) -> f32 {
-        // samples[at..at + TAPS] runs oldest to newest; the taps are
-        // symmetric, so their order doesn't matter.
-        self.samples[self.at..self.at + TAPS]
-            .iter()
-            .zip(taps)
-            .map(|(s, t)| s * t)
-            .sum()
+        // samples[at..at + len] runs oldest to newest.
+        let end = self.at + self.len;
+        dot(&self.samples[end - taps.len()..end], taps)
     }
 
     fn clear(&mut self) {
         self.samples.fill(0.0);
         self.at = 0;
     }
+}
+
+/// The dot product in eight independent lanes, which the compiler can turn
+/// into vector multiply-adds; one running sum is a serial chain it can't.
+#[inline]
+fn dot(a: &[f32], b: &[f32]) -> f32 {
+    let ((a, a_tail), (b, b_tail)) = (a.as_chunks::<8>(), b.as_chunks::<8>());
+    let tail: f32 = a_tail.iter().zip(b_tail).map(|(x, y)| x * y).sum();
+    let mut lanes = [0.0f32; 8];
+    for (x, y) in a.iter().zip(b) {
+        for ((lane, x), y) in lanes.iter_mut().zip(x).zip(y) {
+            *lane += x * y;
+        }
+    }
+    lanes.iter().sum::<f32>() + tail
 }
 
 /// Runs a process at a multiple of the sample rate, channel by channel.
@@ -85,11 +101,18 @@ pub struct Oversampler {
     channels: usize,
     max_frames: usize,
     taps: Vec<f32>,
+    /// The way up's two filters: the even taps and the odd taps, each
+    /// doubled to make up for the zeros the polyphase form never inserts.
+    even: Vec<f32>,
+    odd: Vec<f32>,
     /// Per channel, per stage.
     state: Vec<Vec<Stage>>,
     /// Per stage, the audio at that stage's rate: `max_frames << (s + 1)`
     /// samples.
     work: Vec<Vec<f32>>,
+    /// Multiplies the way up has made.
+    #[cfg(test)]
+    up_macs: u64,
 }
 
 impl Oversampler {
@@ -105,17 +128,27 @@ impl Oversampler {
     pub fn new(stages: u32, channels: usize, max_frames: usize) -> Self {
         assert!(stages <= MAX_STAGES, "at most {MAX_STAGES} stages");
         assert!(max_frames > 0, "max_frames must be above 0");
+        let taps = design();
+        let phase = |first| {
+            taps.iter()
+                .skip(first)
+                .step_by(2)
+                .map(|t| 2.0 * t)
+                .collect()
+        };
         Self {
             stages,
             channels,
             max_frames,
-            taps: design(),
+            even: phase(0),
+            odd: phase(1),
+            taps,
             state: (0..channels)
                 .map(|_| {
                     (0..stages)
                         .map(|_| Stage {
-                            up: History::new(),
-                            down: History::new(),
+                            up: History::new(TAPS.div_ceil(2)),
+                            down: History::new(TAPS),
                         })
                         .collect()
                 })
@@ -123,6 +156,8 @@ impl Oversampler {
             work: (0..stages)
                 .map(|s| vec![0.0; max_frames << (s + 1)])
                 .collect(),
+            #[cfg(test)]
+            up_macs: 0,
         }
     }
 
@@ -167,11 +202,31 @@ impl Oversampler {
         }
     }
 
-    fn piece(&mut self, channel: usize, samples: &mut [f32], f: &mut impl FnMut(&mut [f32])) {
+    /// Runs `f` over channel `channel`'s `samples` at the higher rate, going
+    /// up only: no way down, for a caller that only reads the high-rate
+    /// audio, such as a peak detector. Longer runs than `max_frames` go in
+    /// pieces, and `f` runs on each. With no stages, `f` runs on `samples`
+    /// themselves.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than the channels it was made for.
+    pub fn upsample(&mut self, channel: usize, samples: &[f32], mut f: impl FnMut(&[f32])) {
+        assert!(channel < self.channels, "channel {channel} out of range");
+        if self.stages == 0 {
+            f(samples);
+            return;
+        }
+        for piece in samples.chunks(self.max_frames) {
+            self.up(channel, piece);
+            f(&self.work[self.stages as usize - 1][..piece.len() << self.stages]);
+        }
+    }
+
+    /// Fills the top stage's `work` with `samples` at the higher rate.
+    fn up(&mut self, channel: usize, samples: &[f32]) {
         let n = samples.len();
-        let taps = &self.taps;
         let state = &mut self.state[channel];
-        // Up, stage by stage.
         for s in 0..self.stages as usize {
             let (before, after) = self.work.split_at_mut(s);
             let input: &[f32] = if s == 0 {
@@ -182,14 +237,26 @@ impl Oversampler {
             let output = &mut after[0][..n << (s + 1)];
             let history = &mut state[s].up;
             for (i, sample) in input.iter().enumerate() {
-                // A zero between samples halves the level; twice the input
-                // makes it up.
-                history.push(2.0 * sample);
-                output[2 * i] = history.filter(taps);
-                history.push(0.0);
-                output[2 * i + 1] = history.filter(taps);
+                // The taps are symmetric, so the newest 33 inputs against
+                // the even taps are the stuffed filter's output for the
+                // sample itself, and the newest 32 against the odd taps its
+                // output for the zero after it.
+                history.push(*sample);
+                output[2 * i] = history.filter(&self.even);
+                output[2 * i + 1] = history.filter(&self.odd);
+            }
+            #[cfg(test)]
+            {
+                self.up_macs += (input.len() * (self.even.len() + self.odd.len())) as u64;
             }
         }
+    }
+
+    fn piece(&mut self, channel: usize, samples: &mut [f32], f: &mut impl FnMut(&mut [f32])) {
+        let n = samples.len();
+        self.up(channel, samples);
+        let taps = &self.taps;
+        let state = &mut self.state[channel];
         let top = self.stages as usize - 1;
         f(&mut self.work[top][..n << self.stages]);
         // Down, stage by stage.
@@ -318,5 +385,128 @@ mod tests {
             let kept = amplitude(&audio[4800..], 15_000.0);
             assert!((kept - 0.75).abs() < 0.05, "{stages} stages: {kept}");
         }
+    }
+
+    /// The full-length filter of `x`, for the references below.
+    fn convolve(x: &[f32], taps: &[f32]) -> Vec<f32> {
+        (0..x.len())
+            .map(|n| {
+                (0..taps.len().min(n + 1))
+                    .map(|k| f64::from(taps[k]) * f64::from(x[n - k]))
+                    .sum::<f64>() as f32
+            })
+            .collect()
+    }
+
+    /// The way up with a zero between samples and the full filter, which
+    /// the polyphase form replaces.
+    fn reference_up(x: &[f32], taps: &[f32]) -> Vec<f32> {
+        let stuffed: Vec<f32> = x.iter().flat_map(|s| [2.0 * s, 0.0]).collect();
+        convolve(&stuffed, taps)
+    }
+
+    /// The whole trip, up, a per-sample `f` and down, over the whole signal
+    /// at once: `f` acts on one sample at a time, so the pieces the real
+    /// one runs in can't change the result.
+    fn reference_process(input: &[f32], stages: u32, f: impl Fn(f32) -> f32) -> Vec<f32> {
+        let taps = design();
+        let mut audio = input.to_vec();
+        for _ in 0..stages {
+            audio = reference_up(&audio, &taps);
+        }
+        audio.iter_mut().for_each(|s| *s = f(*s));
+        for _ in 0..stages {
+            audio = convolve(&audio, &taps).into_iter().step_by(2).collect();
+        }
+        audio
+    }
+
+    /// Seeded white noise from a linear congruential generator.
+    fn noise(frames: usize, seed: u32) -> Vec<f32> {
+        let mut state = seed;
+        (0..frames)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (state >> 8) as f32 / (1 << 23) as f32 - 1.0
+            })
+            .collect()
+    }
+
+    // Spec: device-framework R8
+    #[test]
+    fn the_polyphase_trip_matches_the_zero_stuffed_filter() {
+        for stages in 1..=MAX_STAGES {
+            let max_frames = 100;
+            let sizes = [1, 7, 64, max_frames + 3];
+            let tanh = |s: f32| (3.0 * s).tanh();
+            let identity = |s: f32| s;
+            let closures: [(&str, &dyn Fn(f32) -> f32); 2] =
+                [("identity", &identity), ("tanh", &tanh)];
+            for (name, f) in closures {
+                let mut os = Oversampler::new(stages, 2, max_frames);
+                assert_eq!(os.latency(), [0, 32, 48, 56][stages as usize]);
+                for channel in 0..2 {
+                    os.reset();
+                    let input = noise(4096, 7 + channel as u32);
+                    let want = reference_process(&input, stages, f);
+                    let mut audio = input.clone();
+                    let (mut at, mut i) = (0, 0);
+                    while at < audio.len() {
+                        let size = sizes[i % sizes.len()].min(audio.len() - at);
+                        os.process(channel, &mut audio[at..at + size], |high| {
+                            high.iter_mut().for_each(|s| *s = f(*s));
+                        });
+                        at += size;
+                        i += 1;
+                    }
+                    for (n, (got, want)) in audio.iter().zip(&want).enumerate() {
+                        assert!(
+                            (got - want).abs() < 1e-6,
+                            "{stages} stages, {name}, channel {channel}, frame {n}: {got} against {want}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Spec: device-framework R8
+    #[test]
+    fn upsample_matches_process_closure_input() {
+        for stages in 1..=MAX_STAGES {
+            let input: Vec<f32> = (0..1000)
+                .map(|i| (TAU * (100.0 + 20.0 * i as f64) * i as f64 / RATE / 2.0).sin() as f32)
+                .collect();
+            let mut with_process = Oversampler::new(stages, 1, 256);
+            let mut with_upsample = Oversampler::new(stages, 1, 256);
+            let (mut from_process, mut from_upsample) = (Vec::new(), Vec::new());
+            let mut at = 0;
+            for size in [7, 256, 300, 437] {
+                let end = at + size;
+                let mut copy = input[at..end].to_vec();
+                with_process.process(0, &mut copy, |high| from_process.extend_from_slice(high));
+                with_upsample.upsample(0, &input[at..end], |high| {
+                    from_upsample.extend_from_slice(high)
+                });
+                at = end;
+            }
+            assert_eq!(from_process.len(), 1000 * (1 << stages));
+            assert_eq!(from_process.len(), from_upsample.len());
+            for (n, (a, b)) in from_process.iter().zip(&from_upsample).enumerate() {
+                assert!(
+                    (a - b).abs() < 1e-6,
+                    "{stages} stages, sample {n}: {a} against {b}"
+                );
+            }
+        }
+    }
+
+    // Spec: device-framework R8
+    #[test]
+    fn the_way_up_makes_at_most_half_the_stuffed_filters_multiplies() {
+        let mut os = Oversampler::new(MAX_STAGES, 1, 256);
+        os.process(0, &mut [0.0; 100], |_| {});
+        // 65 multiplies for each pair of outputs: 1 + 2 + 4 pairs per input.
+        assert!(os.up_macs <= 100 * 455, "{}", os.up_macs);
     }
 }

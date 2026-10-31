@@ -522,7 +522,7 @@ fn a_loop_recorded_at_120_plays_at_140_over_120_with_follow() {
     // playing at 480 BPM it then plays twice as fast.
     let mut rig = Rig::new(
         &[
-            (TRANSPORT, RECORD),
+            (TRANSPORT, STOP),
             (QUANTIZATION, Q_OFF),
             (RECORD_LENGTH, 1.0),
             (INPUT_OUTPUT, IO_NEVER),
@@ -531,7 +531,9 @@ fn a_loop_recorded_at_120_plays_at_140_over_120_with_follow() {
         false,
         (BAR / 2) as usize,
     );
-    let _ = rig.block(0.0, &[]);
+    // A set never reopens recording (R3): Record is chosen after it opens.
+    let record = rig.set(TRANSPORT, RECORD);
+    let _ = rig.block(0.0, &[record]);
     let event = rig.set(TRANSPORT, STOP);
     let _ = rig.block(0.0, &[event]);
     assert_eq!(rig.values()[16], (BAR / 2) as f32, "half a bar recorded");
@@ -573,7 +575,7 @@ fn set_and_follow_asks_for_the_tempo_a_fixed_recording_gives() {
     // recorded exactly one bar, so half a bar of frames is 240 BPM.
     let mut rig = Rig::new(
         &[
-            (TRANSPORT, RECORD),
+            (TRANSPORT, STOP),
             (QUANTIZATION, Q_BAR),
             (RECORD_LENGTH, 1.0),
             (INPUT_OUTPUT, IO_NEVER),
@@ -582,7 +584,9 @@ fn set_and_follow_asks_for_the_tempo_a_fixed_recording_gives() {
         false,
         (BAR / 2) as usize,
     );
-    let _ = rig.block(LAYER / 2.0, &[]);
+    // A set never reopens recording (R3): Record is chosen after it opens.
+    let record = rig.set(TRANSPORT, RECORD);
+    let _ = rig.block(LAYER / 2.0, &[record]);
     let event = rig.set(TRANSPORT, STOP);
     let _ = rig.block(0.0, &[event]);
     let values = rig.values();
@@ -674,4 +678,128 @@ fn renders_are_bit_identical_at_any_block_size() {
     for block in [1, 64, 512, 4096] {
         assert_eq!(run(block), reference, "at a block size of {block}");
     }
+}
+
+/// The request kind Looper publishes to have Transport written back.
+const REQUEST_TRANSPORT: f32 = 4.0;
+
+// Spec: looper R6, R20
+#[test]
+fn fixed_length_past_30_s_while_playing_keeps_the_song_tempo() {
+    // 16 bars at 120 BPM are 32 s, past the 30 s buffer.
+    let mut rig = Rig::new(
+        &[
+            (TRANSPORT, STOP),
+            (QUANTIZATION, Q_OFF),
+            (RECORD_LENGTH, 5.0),
+            (INPUT_OUTPUT, IO_NEVER),
+            (TEMPO_CONTROL, 1.0),
+        ],
+        true,
+        STEP,
+    );
+    let record = rig.set(TRANSPORT, RECORD);
+    let _ = rig.block(LAYER, &[record]);
+    // 480 blocks of a 1/32 are 30 s: the take is still running at their end.
+    rig.run(479, LAYER, &[]);
+    assert_eq!(f64::from(rig.values()[0]), RECORD, "recording until 30 s");
+    let _ = rig.block(LAYER, &[]);
+    let values = rig.values();
+    assert_eq!(f64::from(values[0]), PLAY, "the buffer's end ends the take");
+    assert_eq!(f64::from(values[16]), 30.0 * 48_000.0, "30 s were kept");
+    rig.run(48, LAYER, &[]);
+    let values = rig.values();
+    assert!(
+        (f64::from(values[10]) - 120.0).abs() < 0.01,
+        "the song's tempo, not the buffer's: {}",
+        values[10]
+    );
+    assert_eq!(f64::from(values[16]), 30.0 * 48_000.0);
+}
+
+// Spec: looper R20
+#[test]
+fn open_ended_recording_while_playing_takes_the_song_tempo() {
+    let mut rig = Rig::new(
+        &[
+            (TRANSPORT, STOP),
+            (QUANTIZATION, Q_OFF),
+            (RECORD_LENGTH, 0.0),
+            (INPUT_OUTPUT, IO_NEVER),
+            (TEMPO_CONTROL, 1.0),
+        ],
+        true,
+        STEP,
+    );
+    let record = rig.set(TRANSPORT, RECORD);
+    let _ = rig.block(LAYER, &[record]);
+    // 74 blocks are a little over 2.3 bars, which a frame-based guess rounds
+    // to 2.
+    rig.run(73, LAYER, &[]);
+    let play = rig.set(TRANSPORT, PLAY);
+    let _ = rig.block(LAYER, &[play]);
+    let values = rig.values();
+    assert_eq!(f64::from(values[0]), PLAY);
+    assert!(
+        (f64::from(values[10]) - 120.0).abs() < 0.01,
+        "the song's tempo, not a guess from the frames: {}",
+        values[10]
+    );
+}
+
+// Spec: looper R3
+#[test]
+fn reopened_record_starts_stopped_with_an_empty_buffer() {
+    let mut rig = Rig::new(
+        &[(TRANSPORT, RECORD), (INPUT_OUTPUT, IO_NEVER)],
+        false,
+        STEP,
+    );
+    rig.run(5, LAYER, &[]);
+    let v = rig.values();
+    assert_eq!(f64::from(v[0]), STOP);
+    assert_eq!(v[1], 1.0, "the buffer is empty");
+    assert_eq!(v[16], 0.0, "and has no length");
+    assert_eq!(v[11], REQUEST_TRANSPORT, "the document is asked to follow");
+    assert_eq!(f64::from(v[13]), STOP);
+    for _ in 0..480 {
+        let out = rig.block(LAYER, &[]);
+        assert!(out[0].iter().all(|s| *s == 0.0), "nothing was recorded");
+    }
+    assert_eq!(rig.values()[16], 0.0);
+}
+
+// Spec: looper R6, R24
+#[test]
+fn record_can_be_chosen_again_after_a_fixed_length_take() {
+    let mut rig = Rig::new(
+        &[
+            (TRANSPORT, STOP),
+            (QUANTIZATION, Q_BAR),
+            (RECORD_LENGTH, 1.0),
+            (AFTER_RECORD, 0.0),
+            (INPUT_OUTPUT, IO_NEVER),
+        ],
+        true,
+        STEP,
+    );
+    let event = rig.set(TRANSPORT, RECORD);
+    let mut events = vec![vec![event]];
+    events.extend((1..65).map(|_| Vec::new()));
+    rig.run(65, 1.0, &events);
+    let v = rig.values();
+    assert_eq!(f64::from(v[0]), PLAY, "the take ended on its own");
+    // The node can't change the document: it asks, and the shell writes the
+    // state back, as this does.
+    assert_eq!(v[11], REQUEST_TRANSPORT);
+    assert_eq!(f64::from(v[13]), PLAY);
+    let play = rig.set(TRANSPORT, PLAY);
+    let _ = rig.block(1.0, &[play]);
+    let record = rig.set(TRANSPORT, RECORD);
+    let _ = rig.block(1.0, &[record]);
+    // Block 96 is the first after the next bar line, where it takes effect.
+    rig.run(30, 1.0, &[]);
+    let v = rig.values();
+    assert_eq!(f64::from(v[0]), RECORD, "Record chosen again records");
+    assert_eq!(v[16], 0.0, "from an empty buffer");
 }

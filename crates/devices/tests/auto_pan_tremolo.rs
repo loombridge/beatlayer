@@ -355,6 +355,71 @@ fn phase_offsets_channels_and_spin_detunes() {
     assert_ne!(out[0], out[1]);
 }
 
+// Spec: auto-pan-tremolo R5
+#[test]
+fn tremolo_phase_offsets_channels_and_spin_detunes() {
+    let input = vec![1.0f32; 48_000];
+    let base = |extra: &[(ParamId, f64)]| {
+        let mut params = vec![
+            (MODE, 1.0), // Tremolo
+            (WAVE, 0.0),
+            (TIME_MODE, 0.0),
+            (RATE_HZ, 1.0),
+            (AMOUNT, 100.0),
+        ];
+        params.extend_from_slice(extra);
+        params
+    };
+
+    // Phase 180° puts the channels in antiphase: right at its peak where left is silent.
+    let mut dev = auto_pan(&base(&[(STEREO_MODE, 0.0), (PHASE, 180.0)]), 48_000);
+    let out = run(dev.as_mut(), &input, &[]);
+    let (low, _) =
+        out[0].iter().enumerate().fold(
+            (0, f32::MAX),
+            |best, (i, &v)| if v < best.1 { (i, v) } else { best },
+        );
+    assert!(out[0][low] < 1e-3 && out[1][low] > 0.99);
+    let mean = |v: &[f32]| v.iter().map(|&x| f64::from(x)).sum::<f64>() / v.len() as f64;
+    let (ml, mr) = (mean(&out[0]), mean(&out[1]));
+    let (mut cov, mut vl, mut vr) = (0.0, 0.0, 0.0);
+    for (&l, &r) in out[0].iter().zip(&out[1]) {
+        let (dl, dr) = (f64::from(l) - ml, f64::from(r) - mr);
+        cov += dl * dr;
+        vl += dl * dl;
+        vr += dr * dr;
+    }
+    assert!(cov / (vl * vr).sqrt() < -0.9);
+
+    // Phase 0° keeps them together.
+    let mut dev = auto_pan(&base(&[(STEREO_MODE, 0.0), (PHASE, 0.0)]), 48_000);
+    let out = run(dev.as_mut(), &input, &[]);
+    assert_eq!(out[0], out[1]);
+
+    // Spin detunes the right channel's rate.
+    let mut dev = auto_pan(&base(&[(STEREO_MODE, 1.0), (SPIN, 50.0)]), 48_000);
+    let out = run(dev.as_mut(), &input, &[]);
+    assert_ne!(out[0], out[1]);
+
+    // Harmonic: the two channels' band envelopes differ at Phase 180°.
+    let sine = common::sine(100.0, 1.0, 48_000);
+    let mut dev = auto_pan(
+        &base(&[(STEREO_MODE, 0.0), (PHASE, 180.0), (HARMONIC, 1.0)]),
+        48_000,
+    );
+    let out = run(dev.as_mut(), &sine, &[]);
+    let rms = |slice: &[f32]| {
+        (slice
+            .iter()
+            .map(|&x| f64::from(x) * f64::from(x))
+            .sum::<f64>()
+            / slice.len() as f64)
+            .sqrt()
+    };
+    let (l, r) = (rms(&out[0][11_500..12_500]), rms(&out[1][11_500..12_500]));
+    assert!((l - r).abs() > 0.3, "left {l} and right {r} differ");
+}
+
 // Spec: auto-pan-tremolo R6
 #[test]
 fn phase_offset_acts_as_width_on_random_shapes() {

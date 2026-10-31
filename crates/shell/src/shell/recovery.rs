@@ -1,7 +1,7 @@
 //! Crash recovery: the journal of the set's edits and the recovery commands.
 
 use super::{Shell, ShellError, to_value};
-use crate::files::new_set_from;
+use crate::files::{after_load, new_set_from};
 use bl_project::autosave::Autosave;
 use bl_project::autosave::Recoverable;
 use bl_project::autosave::Recovered;
@@ -50,7 +50,15 @@ impl Shell {
     /// spec, R3): as it was after its last journalled edit, unsaved, with
     /// an empty undo history.
     fn open_recovered(&mut self, recovered: Recovered) {
-        let Recovered { set, project, .. } = recovered;
+        let Recovered {
+            set,
+            mut project,
+            info,
+            ..
+        } = recovered;
+        // The journal holds the song in the form it was written in, as a set
+        // file does: finish its migrations as `set.open` does.
+        let notice = after_load(&mut project, &info);
         self.set_replaced();
         self.editor = project.editor();
         self.set_path = set.as_ref().map(|set| set.path().to_owned());
@@ -63,22 +71,14 @@ impl Shell {
         )
         .0;
         self.dirty = true;
-        self.store.adopt(set, project);
-        self.apply_window_views(self.store.window_views());
+        // A set never saved lists its files from the journal's folder.
+        match (set, self.autosave.as_ref().map(Autosave::dir)) {
+            (None, Some(root)) => self.store.adopt_untitled(root, project),
+            (set, _) => self.store.adopt(set, project),
+        }
         // The views saved beside the song, and its files, as `set.open`
         // takes them.
-        self.devices.set_windows(self.store.windows());
-        self.devices.set_rack_views(self.store.rack_views());
-        self.devices
-            .set_multisampler_views(self.store.multisampler_views());
-        self.clip_view.set_folds(self.store.folds());
-        self.clip_view.set_scale_folds(self.store.scale_folds());
-        self.clip_view.restore_mpe(self.store.mpe_view());
-        self.clip_view.restore_midi_tools(&self.store.midi_tools());
-        for (hash, path, size) in self.store.media_files() {
-            self.media
-                .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
-        }
+        self.restore_store_views();
         self.arrangement.reset();
         self.arrangement.restore_lanes(self.store.lane_views());
         self.clip_view.forget_selection();
@@ -88,6 +88,9 @@ impl Shell {
         self.new_set_transport();
         self.document_changed();
         self.set_file_changed();
+        if let Some(notice) = notice {
+            self.set_message(notice, false);
+        }
         self.touch();
     }
 
@@ -179,7 +182,11 @@ impl Shell {
             .or_else(|| self.editor.undo_history().next().map(str::to_owned))
             .unwrap_or_else(|| self.journal_label.clone());
         self.journal_label = label.clone();
-        let project = self.store.project(&self.editor);
+        let root = self
+            .autosave
+            .as_ref()
+            .map(|autosave| autosave.dir().to_path_buf());
+        let project = self.store.project(&self.editor, root.as_deref());
         if let Some(autosave) = self.autosave.as_mut() {
             autosave.edited(&project, label);
         }
@@ -227,13 +234,14 @@ impl Shell {
     /// error, or the reason the session couldn't start.
     fn recovery_problem(&mut self) -> Option<String> {
         let autosave = self.autosave.as_mut()?;
+        let set = self.store.set_file();
         if let Some(error) = autosave.status().error {
             return Some(error);
         }
         if autosave.status().session.is_none() {
             // The session never started: try again, so a folder that is
             // writable now is used (the crash-recovery spec, R27).
-            if let Err(error) = autosave.retry() {
+            if let Err(error) = autosave.retry(set) {
                 return Some(error.to_string());
             }
         }

@@ -35,7 +35,9 @@ use std::time::{Duration, Instant};
 
 use bl_core::time::{SampleRate, Ticks, TimeSignatureMap};
 use bl_engine::{EngineConfig, MediaLibrary, Offline, Output, Registry, TransportCommand, When};
-use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, RateConverter};
+use bl_media::{
+    AudioWriter, BitDepth, Dither, EncodeSpec, FLAC_MAX_RATE, FileType, MP3_RATES, RateConverter,
+};
 use bl_model::{ContentHash, DeviceId, Document, TrackId};
 pub use bl_plugin_host::Hosts;
 use bl_shell_spec::editing::Position;
@@ -449,6 +451,14 @@ fn check(job: &Job) -> Result<(), ExportError> {
             "a sample rate of {} Hz; MP3 holds {} Hz",
             job.sample_rate,
             rates.join(", ")
+        ));
+    }
+    // The FLAC encoder stops at 96,000 Hz; a higher rate is refused before the
+    // render rather than after it.
+    if job.file_type == FileType::Flac && job.sample_rate > FLAC_MAX_RATE {
+        return invalid(format!(
+            "a sample rate of {} Hz; FLAC is written up to {FLAC_MAX_RATE} Hz",
+            job.sample_rate
         ));
     }
     if job.path.file_name().is_none() || job.path.is_dir() {
@@ -1530,6 +1540,21 @@ pub fn run_command(
             offline.push((document, job));
         }
     }
+    // Spec: external-devices R24. A real-time render captures each output
+    // as it plays, with no tail past the range and no returns: it refuses
+    // the switches that need them rather than write a different file.
+    if live.iter().any(|(_, _, job)| job.render_as_loop) {
+        return Err(invalid(
+            "Render as Loop is unavailable for an export rendered in real time through external hardware"
+                .to_owned(),
+        ));
+    }
+    if args.include_return_and_main_effects && live.iter().any(|(track, _, _)| track.is_some()) {
+        return Err(invalid(
+            "Include Return and Main Effects is unavailable for an export rendered in real time through external hardware"
+                .to_owned(),
+        ));
+    }
     let failed = |error: ExportError| match error {
         ExportError::Invalid(message) => invalid(message),
         ExportError::Exists(_) => ShellError::Unavailable {
@@ -1686,7 +1711,7 @@ pub fn run_command(
     })
 }
 
-/// Converts a render down to the file's rate as it arrives, a chunk at a
+/// Converts a render to the file's rate as it arrives, a chunk at a
 /// time, exactly as [`RateConverter::convert`] converts it whole: the
 /// converter's delay dropped, and `ceil(frames × to ÷ from)` frames out.
 pub(crate) struct Downsampler {

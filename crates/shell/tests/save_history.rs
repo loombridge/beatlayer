@@ -480,3 +480,31 @@ fn the_panel_toggles_as_view_state_and_shares_the_place_with_the_undo_history() 
     let hidden = shell.run("view.toggle_save_history", json!({})).unwrap();
     assert_eq!(hidden["open"], false);
 }
+
+// Spec: crash-recovery R15. The panel re-lists when a save writes a backup,
+// not by reading the Backup folder on every poll.
+#[test]
+fn the_panel_lists_the_backup_folder_after_a_save_and_not_on_every_poll() {
+    let scratch = Scratch::new("polls");
+    let (mut shell, set) = open(&scratch, false);
+    shell.run("view.toggle_save_history", json!({})).unwrap();
+    shell.poll();
+    let n = shell.save_history_rows().len();
+
+    // A backup made behind the shell's back stays unlisted while polling.
+    let backups = set.parent().unwrap().join("Backup");
+    std::fs::copy(&set, backups.join("Song [2026-10-30 120000].blset")).unwrap();
+    for _ in 0..100 {
+        shell.poll();
+    }
+    assert_eq!(shell.save_history_rows().len(), n, "no re-list per poll");
+
+    // A save lists the folder again, the new backup among its rows.
+    shell.run("set.save", json!({})).unwrap();
+    shell.poll();
+    assert_eq!(
+        shell.save_history_rows().len(),
+        n + 2,
+        "the save's backup and the one made outside list"
+    );
+}

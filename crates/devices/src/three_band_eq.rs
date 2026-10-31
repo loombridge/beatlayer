@@ -236,6 +236,8 @@ pub struct Triad {
     rate: f64,
     chains: [Chain; 2],
     steep: bool,
+    /// The crossover frequencies the chains were designed for.
+    last: Option<(f64, f64)>,
     tick: usize,
     /// Each channel's band levels, as peak followers, and their decay per
     /// sample.
@@ -252,6 +254,7 @@ impl Triad {
             rate,
             chains: [Chain::default(); 2],
             steep: false,
+            last: None,
             tick: 0,
             levels: [[0.0; 3]; 2],
             decay: (-1.0 / (LIGHT_RELEASE_SECONDS * rate)).exp() as f32,
@@ -276,6 +279,7 @@ impl NativeDevice for Triad {
         if steep != self.steep {
             self.steep = steep;
             self.chains = [Chain::default(); 2];
+            self.last = None;
             self.tick = 0;
         }
         let gains = [GAIN_LOW, GAIN_MID, GAIN_HIGH].map(|id| params.ramp(at(id)));
@@ -287,12 +291,15 @@ impl NativeDevice for Triad {
                 // The upper crossover never sits below the lower one.
                 let lower_hz = f64::from(low_hz[i]);
                 let upper_hz = f64::from(high_hz[i]).max(lower_hz);
-                let lower = Crossover::new(lower_hz, steep, self.rate);
-                let upper = Crossover::new(upper_hz, steep, self.rate);
-                for chain in &mut self.chains {
-                    chain.lower.set(&lower);
-                    chain.upper.set(&upper);
-                    chain.align.set(&upper);
+                if self.last != Some((lower_hz, upper_hz)) {
+                    self.last = Some((lower_hz, upper_hz));
+                    let lower = Crossover::new(lower_hz, steep, self.rate);
+                    let upper = Crossover::new(upper_hz, steep, self.rate);
+                    for chain in &mut self.chains {
+                        chain.lower.set(&lower);
+                        chain.upper.set(&upper);
+                        chain.align.set(&upper);
+                    }
                 }
             }
             let n = (REFRESH_FRAMES - self.tick % REFRESH_FRAMES).min(frames - i);

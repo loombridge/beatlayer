@@ -1120,6 +1120,48 @@ fn a_scheduled_paste_is_judged_again_when_it_fires_and_not_run_if_it_would_repla
     );
 }
 
+#[test]
+fn binding_keys_to_a_destructive_command_asks_first() {
+    // Spec: agent-permissions R18.
+    let mut c = app();
+    let bind = json!({ "commands": [{ "command": "keymap.bind", "args": {
+        "command": "set.discard_changes", "keys": ["Space"], "platform": "mac",
+        "context": "global", "replace": true } }] });
+    let mut dry = bind.clone();
+    dry["dry_run"] = json!(true);
+    let dry = call(&mut c, "run", dry);
+    assert_eq!(dry["permission"], "destructive", "{dry}");
+    assert_eq!(dry["would"], "ask the person first", "{dry}");
+    // The person declines, so no key is taken.
+    let result = c.call("run", bind).unwrap();
+    assert!(
+        result.is_error && result.text.contains("declined"),
+        "{result:?}"
+    );
+    assert!(c.transport().shell.user_keymap().binds.is_empty());
+}
+
+#[test]
+fn an_agent_cannot_bind_keys_to_the_agent_servers_commands() {
+    // Spec: agent-permissions R18.
+    let mut c = app();
+    let result = c
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "keymap.bind", "args": {
+                "command": "agent.set_autonomous", "args": { "client": "editor", "on": true },
+                "keys": ["A"], "platform": "mac", "context": "settings" } }] }),
+        )
+        .unwrap();
+    assert!(
+        result.is_error
+            && result.text.contains("agent.set_autonomous")
+            && result.text.contains("Settings window"),
+        "{result:?}"
+    );
+    assert!(c.transport().shell.user_keymap().binds.is_empty());
+}
+
 /// The dry run of one command.
 fn dry_run(client: &mut Client<InProcess>, command: &str, args: &Value) -> Value {
     call(

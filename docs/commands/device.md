@@ -1341,7 +1341,7 @@ Result: [`MultisamplerState`](README.md#multisamplerstate).
 
 **Set Device Parameter**. Permission: `edit`. Contexts: `device-view`.
 
-Sets one of a device's parameters to a value in the parameter's own units. The value must be finite. Parameters that haven't been set keep their defaults.
+Sets one of a device's parameters to a value in the parameter's own units. The value must be finite. A value outside the parameter's range is stored as the nearest end of it, and `device.parameters` reads back what is stored. Parameters that haven't been set keep their defaults.
 
 Default keys: none.
 

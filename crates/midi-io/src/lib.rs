@@ -77,7 +77,7 @@ pub mod test_backend;
 mod timed;
 
 pub use backend::{
-    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection,
+    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection, PortKey,
 };
 pub use keyboard::{ComputerKeyboard, KeyboardKey, MAX_OCTAVE, MIN_OCTAVE, VELOCITIES, note_name};
 pub use midir_backend::MidirBackend;

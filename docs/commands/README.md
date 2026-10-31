@@ -2077,6 +2077,7 @@ What `audio.status` returns.
 | `dropouts` | integer, at least 0 | yes | Dropouts since the stream opened. |
 | `test_tone` | boolean | yes | Whether the test tone plays. |
 | `tone` | [`ToneSettings`](#tonesettings) | yes | The test tone's level and frequency. |
+| `interrupted` | boolean | yes | Whether the stream stopped because its device changed (unplugged, a new rate, stalled) and the host is opening it again; `error` says why. |
 | `error` | string or null | yes | The last error from the device, if the stream couldn't open or failed. |
 
 <details><summary>JSON Schema</summary>
@@ -2160,6 +2161,10 @@ What `audio.status` returns.
         "number",
         "null"
       ]
+    },
+    "interrupted": {
+      "description": "Whether the stream stopped because its device changed (unplugged, a new rate, stalled) and the host is opening it again; `error` says why.",
+      "type": "boolean"
     },
     "output_channels": {
       "description": "Output channels open.",
@@ -2246,6 +2251,7 @@ What `audio.status` returns.
     "dropouts",
     "test_tone",
     "tone",
+    "interrupted",
     "error"
   ],
   "type": "object"

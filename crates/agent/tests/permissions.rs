@@ -1120,6 +1120,48 @@ fn a_scheduled_paste_is_judged_again_when_it_fires_and_not_run_if_it_would_repla
     );
 }
 
+#[test]
+fn binding_keys_to_a_destructive_command_asks_first() {
+    // Spec: agent-permissions R18.
+    let mut c = app();
+    let bind = json!({ "commands": [{ "command": "keymap.bind", "args": {
+        "command": "set.discard_changes", "keys": ["Space"], "platform": "mac",
+        "context": "global", "replace": true } }] });
+    let mut dry = bind.clone();
+    dry["dry_run"] = json!(true);
+    let dry = call(&mut c, "run", dry);
+    assert_eq!(dry["permission"], "destructive", "{dry}");
+    assert_eq!(dry["would"], "ask the person first", "{dry}");
+    // The person declines, so no key is taken.
+    let result = c.call("run", bind).unwrap();
+    assert!(
+        result.is_error && result.text.contains("declined"),
+        "{result:?}"
+    );
+    assert!(c.transport().shell.user_keymap().binds.is_empty());
+}
+
+#[test]
+fn an_agent_cannot_bind_keys_to_the_agent_servers_commands() {
+    // Spec: agent-permissions R18.
+    let mut c = app();
+    let result = c
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "keymap.bind", "args": {
+                "command": "agent.set_autonomous", "args": { "client": "editor", "on": true },
+                "keys": ["A"], "platform": "mac", "context": "settings" } }] }),
+        )
+        .unwrap();
+    assert!(
+        result.is_error
+            && result.text.contains("agent.set_autonomous")
+            && result.text.contains("Settings window"),
+        "{result:?}"
+    );
+    assert!(c.transport().shell.user_keymap().binds.is_empty());
+}
+
 /// The dry run of one command.
 fn dry_run(client: &mut Client<InProcess>, command: &str, args: &Value) -> Value {
     call(
@@ -1490,4 +1532,39 @@ fn a_scheduled_drop_that_would_replace_clips_when_it_fires_is_not_run_though_its
             .is_some_and(|error| error.starts_with("not run")),
         "{entry}"
     );
+}
+
+#[test]
+fn headless_the_file_managers_read_commands_do_not_list_files() {
+    // Spec: agent-permissions R2. `view.toggle_file_manager` and
+    // `file_manager.set_search_folder` are `read`, so they must not hand back
+    // the listing `file_manager.state` keeps behind `external`.
+    let folder = std::env::temp_dir().join(format!("bl-agent-file-manager-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("a.wav"), b"RIFF").unwrap();
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("script").unwrap();
+    for (command, args) in [
+        (
+            "view.toggle_file_manager",
+            json!({ "view": "project", "project": folder.to_string_lossy(), "open": true }),
+        ),
+        ("file_manager.set_search_folder", json!({})),
+    ] {
+        let result = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap();
+        assert!(!result.text.contains("a.wav"), "{command}: {}", result.text);
+    }
+    let state = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "file_manager.state", "args": {} }] }),
+        )
+        .unwrap();
+    assert!(state.is_error, "{}", state.text);
+    let _ = std::fs::remove_dir_all(&folder);
 }

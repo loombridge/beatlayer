@@ -239,14 +239,16 @@ impl Importer<'_, '_> {
         if !value.is_finite() {
             return Ticks::ZERO;
         }
-        match unit {
+        let ticks = match unit {
             TimeUnit::Beats => beats_to_ticks(value),
             TimeUnit::Seconds => {
                 let from = from.max(Ticks::ZERO);
                 let seconds = (self.seconds_at(from) + value).max(0.0);
                 self.tempo.seconds_to_ticks(seconds) - from
             }
-        }
+        };
+        // Kept well inside a tick count, so later sums can't overflow (R4).
+        Ticks(ticks.get().clamp(-TICK_LIMIT, TICK_LIMIT))
     }
 
     /// A marker of an unwarped clip as seconds in its file (R29): a time in
@@ -280,11 +282,12 @@ impl Importer<'_, '_> {
                         let duration = note.duration?;
                         (duration > 0.0 && time >= 0.0).then(|| {
                             let start = self.span(unit, time, Ticks::ZERO);
-                            start + self.span(unit, duration, start)
+                            start.saturating_add(self.span(unit, duration, start))
                         })
                     })
                     .max()
-                    .unwrap_or(Ticks::ZERO);
+                    .unwrap_or(Ticks::ZERO)
+                    .min(Ticks(TICK_LIMIT));
                 let (bar, into) = self.signatures.bar_at(end);
                 if into == Ticks::ZERO {
                     end
@@ -331,7 +334,12 @@ impl Importer<'_, '_> {
                 .add("a clip without its time", &lane.place, "left out");
             return Vec::new();
         };
-        let start = origin + self.span(unit, time, origin);
+        let start = Ticks(
+            origin
+                .get()
+                .saturating_add(self.span(unit, time, origin).get())
+                .clamp(-TICK_LIMIT, TICK_LIMIT),
+        );
         let place = self.clip_place(source, start, lane);
         if depth > MAX_DEPTH {
             self.report
@@ -357,6 +365,11 @@ impl Importer<'_, '_> {
             self.report.add("a clip with no length", &place, "left out");
             return Vec::new();
         };
+        if length.get() > TICK_LIMIT || start.saturating_add(length).get() > TICK_LIMIT {
+            self.report
+                .add("a clip past the end of the timeline", &place, "left out");
+            return Vec::new();
+        }
         let frame = Frame {
             unit: content_unit,
             start,
@@ -407,7 +420,7 @@ impl Importer<'_, '_> {
                     .iter()
                     .filter_map(|note| {
                         let at = self.span(unit, note.time?, start);
-                        Some(at + self.span(unit, note.duration?, at))
+                        Some(at.saturating_add(self.span(unit, note.duration?, at)))
                     })
                     .max()?
             }
@@ -507,7 +520,7 @@ impl Importer<'_, '_> {
         if self.scene.is_some() {
             self.session_automation(&driving, &mut made[0].clip, frame.unit, lane, place);
         } else {
-            let span = Some((frame.start, frame.start + frame.length));
+            let span = Some((frame.start, frame.start.saturating_add(frame.length)));
             for set in &driving {
                 if let Some(parameter) = &set.target.parameter {
                     self.add_envelope(parameter, set, frame.unit, frame.zero, span, place);
@@ -565,9 +578,15 @@ impl Importer<'_, '_> {
                 continue;
             }
             let at = self.span(notes_unit, time, frame.zero);
-            let long = self
-                .span(notes_unit, duration, frame.zero + at)
-                .max(Ticks(1));
+            let Some(placed) = frame
+                .zero
+                .checked_add(at)
+                .filter(|placed| placed.get() <= TICK_LIMIT)
+            else {
+                left_out += 1;
+                continue;
+            };
+            let long = self.span(notes_unit, duration, placed).max(Ticks(1));
             let velocity = note
                 .vel
                 .map_or(100, |vel| (vel * 127.0).round().clamp(1.0, 127.0) as u8);
@@ -700,7 +719,7 @@ impl Importer<'_, '_> {
         lane: &Lane,
     ) {
         let unit = source.fade_time_unit.unwrap_or(frame.unit);
-        let end = frame.start + frame.length;
+        let end = frame.start.saturating_add(frame.length);
         if let Some(value) = source.fade_in
             && value < 0.0
         {
@@ -986,14 +1005,21 @@ impl Importer<'_, '_> {
         }
         let tempo = self.tempo.clone();
         let mut made = Vec::new();
-        for (from, to, shift) in passes {
+        'passes: for (from, to, shift) in passes {
             for piece in &inner {
-                let mut moved = piece.clone();
-                moved.clip.start += shift;
-                let (a, b) = (moved.clip.start.max(from), moved.clip.end().min(to));
+                let start = piece.clip.start.saturating_add(shift);
+                let stop = piece.clip.end().saturating_add(shift);
+                let (a, b) = (start.max(from), stop.min(to));
                 if a >= b {
                     continue;
                 }
+                if self.unrolled_left == 0 {
+                    self.report_cut(place);
+                    break 'passes;
+                }
+                self.unrolled_left -= 1;
+                let mut moved = piece.clone();
+                moved.clip.start = start;
                 let mut part = moved.clip.part(a, b, &tempo);
                 part.id = self.editor.new_id();
                 made.push(Piece {
@@ -1017,10 +1043,13 @@ impl Importer<'_, '_> {
         place: &str,
     ) -> Vec<Piece> {
         let mut notes = Vec::new();
-        for piece in inner {
+        'pieces: for piece in inner {
             let ClipData::Midi(data) = &piece.clip.data else {
                 continue;
             };
+            // In order of start, so each pass finds its notes by search.
+            let mut sorted: Vec<&Note> = data.notes.iter().collect();
+            sorted.sort_by_key(|note| note.start);
             // Each note as the inner clip plays it, cut to its region.
             let region = piece.clip.length;
             let mut at = Ticks::ZERO;
@@ -1031,14 +1060,25 @@ impl Importer<'_, '_> {
                 if take <= Ticks::ZERO {
                     break;
                 }
-                for note in data.notes.iter() {
-                    if note.start < from || note.start >= from + take {
-                        continue;
-                    }
-                    let mut note = note.clone();
-                    note.length = note.length.min(from + take - note.start);
-                    note.start = piece.clip.start - frame.zero + at + (note.start - from);
+                let until = from.saturating_add(take);
+                let first = sorted.partition_point(|note| note.start < from);
+                let last = sorted.partition_point(|note| note.start < until);
+                let room = (last - first).min(self.unrolled_left);
+                self.unrolled_left -= room;
+                for note in &sorted[first..first + room] {
+                    let mut note = (*note).clone();
+                    note.length = note.length.min(until - note.start);
+                    note.start = piece
+                        .clip
+                        .start
+                        .saturating_sub(frame.zero)
+                        .saturating_add(at)
+                        .saturating_add(note.start - from);
                     notes.push(note);
+                }
+                if room < last - first {
+                    self.report_cut(place);
+                    break 'pieces;
                 }
                 at += take;
                 if !data.looping || at >= region {
@@ -1057,6 +1097,15 @@ impl Importer<'_, '_> {
             clip,
             place: place.to_owned(),
         }]
+    }
+
+    /// Lists a nested loop that ran out of the import's budget (R34).
+    fn report_cut(&mut self, place: &str) {
+        self.report.add(
+            &format!("a nested loop that makes more than {UNROLL_BUDGET} notes or clips"),
+            place,
+            "cut where the limit was reached",
+        );
     }
 
     /// Places a track's clips in order of their start, then the file's

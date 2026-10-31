@@ -13,19 +13,23 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 use bl_commands::Registry as Commands;
-use bl_core::time::Ticks;
+use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{DELAY, DELAY_FRAMES, INSTRUMENT, KEY, MULTI, THROUGH, VALUE};
 use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
-    DeviceRole, Editor, MidiData, Note, RackKind, TrackDelay, TrackId, TrackKind, registry,
+    AudioData, AutomationTarget, CHAIN_SELECTOR, Chain, ChainId, Clip, ClipData, Command,
+    ContentHash, Device, DeviceId, DeviceKind, DeviceRole, Editor, MidiData, Note, RackKind,
+    TrackDelay, TrackId, TrackKind, Zone, ZoneKind, registry,
 };
 use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
 
 /// The latency the test device adds.
 const LATENCY: usize = 500;
+
+/// A beat in frames, at 120 beats a minute and 48 kHz.
+const BEAT: usize = 24_000;
 
 /// Runs a document command by ID, as an agent does.
 fn run(editor: &mut Editor, id: &str, args: Value) {
@@ -233,6 +237,65 @@ fn automation_lands_on_the_compensated_sample() {
     assert!(out[..onset].iter().all(|&s| s == 0.0), "silent before");
     let settled = onset + 960;
     assert!(out[settled + 64..].iter().all(|&s| s == 1.0), "up after");
+}
+
+// A rack's Chain Selector automation is held back with the audio it gates.
+#[test]
+fn chain_selector_automation_lands_on_the_compensated_sample() {
+    // Spec: delay-compensation R5; racks R33.
+    let mut rig = Rig::new(64);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    delay_device(ed, a);
+    // The rack's input is 1, from the first frame, whatever the latency.
+    common::dc(ed, a, 1.0);
+    let (rack_id, chains) = rack(ed, a, RackKind::AudioEffect, 2);
+    for (chain, (volume, low, high)) in chains.iter().zip([(0.25, 0, 63), (0.75, 64, 127)]) {
+        ed.apply(Command::SetChainVolume {
+            chain: *chain,
+            volume,
+        })
+        .unwrap();
+        ed.apply(Command::SetChainZone {
+            chain: *chain,
+            kind: ZoneKind::Select,
+            zone: Zone::new(low, high),
+        })
+        .unwrap();
+    }
+    let target = AutomationTarget::Device {
+        device: rack_id,
+        param: CHAIN_SELECTOR,
+    };
+    // The selector holds 0, then steps to 127 at the first beat.
+    let step = Ticks(TICKS_PER_QUARTER);
+    for (at, value) in [(Ticks::ZERO, 0.0), (step, 0.0), (step + Ticks(1), 127.0)] {
+        ed.apply(Command::SetAutomationBreakpoint {
+            track: a,
+            target,
+            at,
+            value,
+        })
+        .unwrap();
+    }
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(BEAT + LATENCY + 4_096, 64);
+    let onset = BEAT + LATENCY;
+    assert!(
+        out[onset - 1] == out[onset - 100],
+        "chain A holds until the step reaches the rack's input"
+    );
+    assert!(
+        (out[onset - 1] - 0.25).abs() < 1e-4,
+        "A's level: {}",
+        out[onset - 1]
+    );
+    assert!(
+        (out[onset + 4_000] - 0.75).abs() < 1e-4,
+        "B's level: {}",
+        out[onset + 4_000]
+    );
 }
 
 // A sidechain's source lines up with the device's own input.
@@ -1210,17 +1273,44 @@ fn the_delay_compensation_switch_holds_nothing_back_and_disables_track_delay() {
     );
 }
 
+/// Three audio tracks: A and C each playing an impulse at frame 0 (A's 1, C's
+/// -1), C heard only through B, and B, which has the latency device, taking C
+/// as its input. The caller sets B's monitoring and syncs.
+fn monitored_through_a_latency_device() -> (Rig, TrackId, TrackId, TrackId) {
+    let mut media = MediaMap::new();
+    media.insert(hash(1), impulse(1.0));
+    media.insert(hash(2), impulse(-1.0));
+    let mut rig = playing(media);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    let b = track(ed, TrackKind::Audio, None);
+    let c = track(ed, TrackKind::Audio, None);
+    clip(ed, a, hash(1));
+    clip(ed, c, hash(2));
+    delay_device(ed, b);
+    run(
+        ed,
+        "routing.set_output",
+        json!({ "track": c, "output": { "type": "sends_only" } }),
+    );
+    run(
+        ed,
+        "routing.set_input",
+        json!({ "track": b, "input": { "type": "track", "track": c, "tap": "post_fx" } }),
+    );
+    (rig, a, b, c)
+}
+
 // Reduced Latency When Monitoring, with Keep Monitoring Latency off: the
 // monitored track is given the lowest latency.
 #[test]
 fn reduced_latency_monitoring_gives_a_monitored_track_no_compensation() {
     // Spec: delay-compensation R8, R9.
-    let (mut rig, _a, b) = two_tracks(1.0, -1.0);
-    delay_device(&mut rig.editor, b);
+    let (mut rig, _a, b, _c) = monitored_through_a_latency_device();
     run(
         &mut rig.editor,
-        "mixer.set_arm",
-        json!({ "track": b, "arm": true }),
+        "routing.set_monitor",
+        json!({ "track": b, "monitor": "in" }),
     );
     rig.apply(Command::SetReducedLatencyMonitoring { enabled: true });
     rig.apply(Command::SetKeepMonitoringLatency {
@@ -1231,7 +1321,6 @@ fn reduced_latency_monitoring_gives_a_monitored_track_no_compensation() {
     let bt = doc.track(b).unwrap();
     assert!(doc.settings().reduced_latency_monitoring);
     assert!(!bt.keep_monitoring_latency());
-    assert!(bt.mixer().arm, "B is armed");
     assert!(bt.routing().monitoring(bt.mixer().arm), "B is monitored");
     let out = rig.render(2 * LATENCY + 512, 64);
     let peak = out.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
@@ -1239,6 +1328,76 @@ fn reduced_latency_monitoring_gives_a_monitored_track_no_compensation() {
         peak > 0.5,
         "the monitored track isn't held with the rest: peak {peak}"
     );
+}
+
+// Spec: delay-compensation R8; routing R11. An armed track on Monitor Auto
+// hears its input only while no clip plays, so while its clip plays it is held
+// back with the rest, though armed.
+#[test]
+fn an_armed_auto_track_playing_its_clip_keeps_its_compensation_under_reduced_latency() {
+    let (mut rig, a, b) = two_tracks(1.0, -1.0);
+    delay_device(&mut rig.editor, b);
+    run(
+        &mut rig.editor,
+        "mixer.set_arm",
+        json!({ "track": a, "arm": true }),
+    );
+    rig.apply(Command::SetReducedLatencyMonitoring { enabled: true });
+    rig.apply(Command::SetKeepMonitoringLatency {
+        track: a,
+        enabled: false,
+    });
+    let doc = rig.editor.document();
+    assert!(doc.track(a).unwrap().routing().monitoring(true)); // Auto, armed
+    let out = rig.render(2 * LATENCY + 512, 64);
+    assert_null(
+        &out,
+        "A plays its clip, so it isn't monitored and stays held back with B",
+    );
+}
+
+// Spec: delay-compensation R8; routing R11. The same track, with no clip
+// playing, hears its input, which reaches Main without the compensation.
+#[test]
+fn an_armed_auto_track_hearing_its_input_reaches_main_unheld_under_reduced_latency() {
+    let mut media = MediaMap::new();
+    media.insert(hash(1), impulse(1.0));
+    media.insert(hash(2), impulse(-1.0));
+    let mut rig = playing(media);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    let b = track(ed, TrackKind::Audio, None);
+    let c = track(ed, TrackKind::Audio, None);
+    // B carries the latency the rest of the set is held back to; A hears C.
+    clip(ed, b, hash(1));
+    clip(ed, c, hash(2));
+    delay_device(ed, b);
+    run(
+        ed,
+        "routing.set_output",
+        json!({ "track": c, "output": { "type": "sends_only" } }),
+    );
+    run(
+        ed,
+        "routing.set_input",
+        json!({ "track": a, "input": { "type": "track", "track": c, "tap": "post_fx" } }),
+    );
+    run(ed, "mixer.set_arm", json!({ "track": a, "arm": true }));
+    rig.apply(Command::SetReducedLatencyMonitoring { enabled: true });
+    rig.apply(Command::SetKeepMonitoringLatency {
+        track: a,
+        enabled: false,
+    });
+    // The first pass lets A's input open; the second is the one measured.
+    rig.render(2 * LATENCY + 512, 64);
+    replay(&mut rig);
+    let out = rig.render(2 * LATENCY + 512, 64);
+    assert!(
+        near(out[0], -1.0),
+        "C's impulse passes A at once: {}",
+        out[0]
+    );
+    assert!(near(out[LATENCY], 1.0), "B's arrives with its latency");
 }
 
 // Keep Monitoring Latency gives the compensation back.

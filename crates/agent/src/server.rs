@@ -783,8 +783,10 @@ impl Agent {
         self.server.handle(shell, session, message)
     }
 
-    /// Answers a question: `allow` is the person's answer. Returns the reply
-    /// to the request that asked, or `None` if no question has that ID.
+    /// Answers a question: `allow` is the person's answer. Returns what the
+    /// request that asked came to, or `None` if no question has that ID: a
+    /// reply, or [`Outcome::Wait`] for an allowed call that waits for the
+    /// host (an export).
     ///
     /// Allowing an agent to connect allows it for good
     /// (`agent.approve_client`, run as the person), making it its own token,
@@ -792,7 +794,7 @@ impl Agent {
     /// already allowed, the session is allowed for itself only, with none
     /// of that agent's rights, since anyone can give a name. Allowing a call
     /// runs it.
-    pub fn resolve(&mut self, shell: &mut Shell, question: u64, allow: bool) -> Option<Value> {
+    pub fn resolve(&mut self, shell: &mut Shell, question: u64, allow: bool) -> Option<Outcome> {
         self.server.resolve(shell, question, allow)
     }
 }

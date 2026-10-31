@@ -2077,6 +2077,7 @@ What `audio.status` returns.
 | `dropouts` | integer, at least 0 | yes | Dropouts since the stream opened. |
 | `test_tone` | boolean | yes | Whether the test tone plays. |
 | `tone` | [`ToneSettings`](#tonesettings) | yes | The test tone's level and frequency. |
+| `interrupted` | boolean | yes | Whether the stream stopped because its device changed (unplugged, a new rate, stalled) and the host is opening it again; `error` says why. |
 | `error` | string or null | yes | The last error from the device, if the stream couldn't open or failed. |
 
 <details><summary>JSON Schema</summary>
@@ -2160,6 +2161,10 @@ What `audio.status` returns.
         "number",
         "null"
       ]
+    },
+    "interrupted": {
+      "description": "Whether the stream stopped because its device changed (unplugged, a new rate, stalled) and the host is opening it again; `error` says why.",
+      "type": "boolean"
     },
     "output_channels": {
       "description": "Output channels open.",
@@ -2246,6 +2251,7 @@ What `audio.status` returns.
     "dropouts",
     "test_tone",
     "tone",
+    "interrupted",
     "error"
   ],
   "type": "object"
@@ -12894,6 +12900,48 @@ What the File Manager shows (R10 to R17).
     "unused",
     "search",
     "packing"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `FileManagerView`
+
+What `view.toggle_file_manager` returns: whether the File Manager shows and what it is set to list. The listing itself is `file_manager.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the File Manager shows. |
+| `scope` | [`Scope`](#scope) | yes | Which files it shows. |
+| `project` | string or null | no | The project folder it works on, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_file_manager` returns: whether the File Manager shows and what it is set to list. The listing itself is `file_manager.state`.",
+  "properties": {
+    "open": {
+      "description": "Whether the File Manager shows.",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "The project folder it works on, when it has one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope",
+      "description": "Which files it shows."
+    }
+  },
+  "required": [
+    "open",
+    "scope"
   ],
   "type": "object"
 }
@@ -24689,6 +24737,7 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 
 <details><summary>JSON Schema</summary>
 
@@ -24791,6 +24840,17 @@ One connected Push 2.
       ],
       "description": "Mix's page, while Mix is the display mode."
     },
+    "mix_mode": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushMix"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Mix Mode shows, while it is the display mode."
+    },
     "output": {
       "description": "The output it is sent to.",
       "type": "string"
@@ -24834,7 +24894,8 @@ One connected Push 2.
     "touch_strip",
     "setup",
     "display",
-    "browse"
+    "browse",
+    "mix_mode"
   ],
   "type": "object"
 }
@@ -24994,6 +25055,141 @@ One of:
 
 </details>
 
+### `PushMix`
+
+What Mix Mode shows (push-2-tracks R42).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `view` | string | yes | Track Mix's chosen view: `mix` or `in_out`. |
+| `global` | string | yes | What Global Mix sets: `volumes`, `pans` or `send_a`, `send_b` and on. |
+| `sends_shift` | integer, at least 0 | yes | How many places the sends are shifted on the page shown. |
+| `places` | array of [`PushMixPlace`](#pushmixplace) | yes | The eight places, left to right. |
+| `encoders` | array of [`PushMixControl`](#pushmixcontrol) or null | yes | What each of the eight encoders sets, left to right; none where it sets nothing. |
+| `unfolded_groups` | array of [`TrackId`](#trackid) | yes | The group tracks that are unfolded. |
+| `unfolded_racks` | array of [`DeviceId`](#deviceid) | yes | The racks whose chains are unfolded. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Mix Mode shows (push-2-tracks R42).",
+  "properties": {
+    "encoders": {
+      "description": "What each of the eight encoders sets, left to right; none where it sets nothing.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PushMixControl"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "global": {
+      "description": "What Global Mix sets: `volumes`, `pans` or `send_a`, `send_b` and on.",
+      "type": "string"
+    },
+    "places": {
+      "description": "The eight places, left to right.",
+      "items": {
+        "$ref": "#/$defs/PushMixPlace"
+      },
+      "type": "array"
+    },
+    "sends_shift": {
+      "description": "How many places the sends are shifted on the page shown.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "unfolded_groups": {
+      "description": "The group tracks that are unfolded.",
+      "items": {
+        "$ref": "#/$defs/TrackId"
+      },
+      "type": "array"
+    },
+    "unfolded_racks": {
+      "description": "The racks whose chains are unfolded.",
+      "items": {
+        "$ref": "#/$defs/DeviceId"
+      },
+      "type": "array"
+    },
+    "view": {
+      "description": "Track Mix's chosen view: `mix` or `in_out`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "view",
+    "global",
+    "sends_shift",
+    "places",
+    "encoders",
+    "unfolded_groups",
+    "unfolded_racks"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushMixControl`
+
+What one encoder sets in Mix Mode (push-2-tracks R42).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it sets: `Volume`, `Pan`, `Pan L`, `Pan R`, `Send A`, an In/Out chooser's name. |
+| `value` | string | yes | Its value as the display shows it. |
+| `position` | number or null | yes | Where a continuous control sits, from 0 to 1; none for a list. |
+| `inert` | boolean | yes | Whether turning it does nothing: a split-pan track's pan in Global Mix. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What one encoder sets in Mix Mode (push-2-tracks R42).",
+  "properties": {
+    "inert": {
+      "description": "Whether turning it does nothing: a split-pan track's pan in Global Mix.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "What it sets: `Volume`, `Pan`, `Pan L`, `Pan R`, `Send A`, an In/Out chooser's name.",
+      "type": "string"
+    },
+    "position": {
+      "description": "Where a continuous control sits, from 0 to 1; none for a list.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "value": {
+      "description": "Its value as the display shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "position",
+    "inert"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushMixPage`
 
 Mix's page (R22).
@@ -25020,6 +25216,59 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushMixPlace`
+
+One of the eight places Mix Mode shows: a track, or a chain of an unfolded rack (push-2-tracks R42).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name, as the lower display button shows it. |
+| `track` | [`TrackId`](#trackid) | yes | The track, or for a chain the track its rack is on. |
+| `chain` | [`ChainId`](#chainid) or null | yes | The chain, if the place is one. |
+| `selected` | boolean | yes | Whether it is the selected place. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of the eight places Mix Mode shows: a track, or a chain of an unfolded rack (push-2-tracks R42).",
+  "properties": {
+    "chain": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ChainId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The chain, if the place is one."
+    },
+    "name": {
+      "description": "Its name, as the lower display button shows it.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the selected place.",
+      "type": "boolean"
+    },
+    "track": {
+      "$ref": "#/$defs/TrackId",
+      "description": "The track, or for a chain the track its rack is on."
+    }
+  },
+  "required": [
+    "name",
+    "track",
+    "chain",
+    "selected"
+  ],
+  "type": "object"
 }
 ```
 

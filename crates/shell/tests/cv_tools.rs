@@ -622,6 +622,27 @@ fn the_browser_lists_cv_in_under_modulators_and_the_other_three_under_audio_effe
     }
 }
 
+// Spec: cv-tools R9, R32 (WP-7.18b)
+#[test]
+fn the_browser_lists_the_three_cv_modulators_under_audio_effects_not_modulators() {
+    use bl_shell::browser_commands::{self as ids, BrowserState};
+    let mut shell = Shell::headless();
+    let mut names = |label: &str| -> Vec<String> {
+        let state: BrowserState = serde_json::from_value(
+            shell
+                .run(ids::OPEN_PLACE, json!({ "label": label }))
+                .unwrap(),
+        )
+        .unwrap();
+        state.rows.into_iter().map(|row| row.name).collect()
+    };
+    let (effects, modulators) = (names("audio_effects"), names("modulators"));
+    for listed in ["CV Envelope Follower", "CV LFO", "CV Shaper"] {
+        assert!(effects.contains(&listed.to_owned()), "{listed}");
+        assert!(!modulators.contains(&listed.to_owned()), "{listed}");
+    }
+}
+
 /// The preview's render of the whole range with the tone at a quarter note:
 /// the samples of the left channel.
 fn render_offline(shell: &Shell, to: bl_core::time::Ticks) -> Vec<f32> {

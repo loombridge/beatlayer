@@ -7,14 +7,15 @@ use std::path::PathBuf;
 use std::thread;
 
 use bl_audio_io::{BackendKind, NullBackend, NullControl, NullOptions, Pacing};
+use bl_core::time::Ticks;
 use bl_devices::hardware_effect_type;
 use bl_model::{Channel, DeviceId, TrackId};
-use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::export_commands::{self as export_ids, ExportResult};
 use bl_shell::files::ProjectFiles;
 use bl_shell::realtime::Phase;
 use bl_shell::settings::Preferences;
+use bl_shell::{Shell, ShellError};
 use serde_json::{Value, json};
 
 /// A folder for the test's files.
@@ -214,8 +215,6 @@ fn an_export_with_external_hardware_renders_in_real_time() {
         24_000,
         "the file holds exactly the range's frames"
     );
-    // The song is stopped where the range ended.
-    assert!(!shell.audio_mut().transport_state().playing);
     // Spec: external-devices R29. The render's blocks touch no heap: the
     // audio thread copies into rings the export made before it started.
     let stats = shell.audio().stats().expect("a stream is open");
@@ -245,16 +244,31 @@ fn the_song_plays_again_after_a_render() {
     assert!(result.real_time, "the export rendered in real time");
     let control = driver.join().unwrap();
 
+    // Spec: external-devices R24. The song is stopped where the range ended: the
+    // render's end isn't followed by a second Stop, which would send the
+    // playhead to the start. The commands reach the audio thread at a later
+    // block, so the test waits for the marker.
+    bl_shell::testing::wait_for(
+        &control,
+        &mut shell,
+        "the insert marker at the range's end",
+        |shell| shell.audio_mut().transport_state().insert_marker == Ticks::QUARTER,
+    );
+    let state = shell.audio_mut().transport_state();
+    assert!(!state.playing);
+    assert_eq!(
+        state.position,
+        Ticks::QUARTER,
+        "the song stays at the range's end"
+    );
+
     // The song plays on from the range's end: the render's plan is gone, so
     // nothing stops it at the range's first frame.
-    let before = shell.audio_mut().transport_state().position;
+    let before = state.position;
     shell.run("transport.play", json!({})).unwrap();
-    bl_shell::testing::run_blocks(&control, &mut shell, 4);
-    let after = shell.audio_mut().transport_state().position;
-    assert!(
-        after > before,
-        "the song plays again: {before:?} to {after:?}"
-    );
+    bl_shell::testing::wait_for(&control, &mut shell, "the song to play again", |shell| {
+        shell.audio_mut().transport_state().position > before
+    });
 }
 
 // Spec: external-devices R26. A real-time render at a rate below the
@@ -283,6 +297,119 @@ fn a_realtime_render_converts_the_rate_and_normalises() {
         frames.abs_diff(expected) <= 1,
         "the file holds the range at the file's rate: {frames} frames"
     );
+}
+
+// Spec: external-devices R24. The render turns the Arrangement loop off to
+// play the range, and puts the set's loop back when it ends.
+#[test]
+fn the_arrangement_loop_returns_after_a_render() {
+    let folder = TestDir::new("loop");
+    let (mut shell, control) = shell_on_manual_loopback(None);
+    set_with_effect(&mut shell, &folder);
+    // A loop over the first bar, which the one-beat range lies inside.
+    let bar = Ticks::QUARTER.get() * 4;
+    shell
+        .run("transport.set_loop", json!({ "start": 0, "length": bar }))
+        .unwrap();
+    shell
+        .run("transport.set_loop_enabled", json!({ "enabled": true }))
+        .unwrap();
+    let session = shell.realtime_session();
+    let driver = drive(control, session);
+
+    let out = folder.path("Loop.wav");
+    let result: Value = shell
+        .run(
+            export_ids::AUDIO,
+            json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                    "sample_rate": 48000, "wait_seconds": 0 }),
+        )
+        .unwrap();
+    let result: ExportResult = serde_json::from_value(result).unwrap();
+    assert!(result.real_time, "the export rendered in real time");
+    let control = driver.join().unwrap();
+
+    // Play from the start for more than the loop's bar: the playhead wraps.
+    shell.run("transport.stop", json!({})).unwrap();
+    shell.run("transport.stop", json!({})).unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    bl_shell::testing::run_blocks(&control, &mut shell, 2_000);
+    let position = shell.audio_mut().transport_state().position;
+    assert!(
+        position < Ticks(bar),
+        "the loop plays again after the render: {position:?}"
+    );
+}
+
+// Spec: external-devices R26. A real-time render at a rate above the
+// device's is converted up, and the file's header and length agree.
+#[test]
+fn a_realtime_render_converts_the_rate_up() {
+    let folder = TestDir::new("convert-up");
+    let mut shell = shell_on_loopback();
+    set_with_effect(&mut shell, &folder);
+
+    let out = folder.path("Higher.wav");
+    let result: Value = shell
+        .run(
+            export_ids::AUDIO,
+            json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                    "sample_rate": 96000, "wait_seconds": 0 }),
+        )
+        .unwrap();
+    let result: ExportResult = serde_json::from_value(result).unwrap();
+    assert!(result.real_time, "the export rendered in real time");
+    let frames = frames_of(&out);
+    assert!(
+        frames.abs_diff(24_000 * 96_000 / 48_000) <= 2,
+        "the file holds the range at the file's rate: {frames} frames"
+    );
+    let header = std::fs::read(&out).unwrap();
+    assert_eq!(
+        u32::from_le_bytes(header[24..28].try_into().unwrap()),
+        96_000,
+        "the header's rate"
+    );
+    assert!(
+        (result.seconds - 0.5).abs() < 1e-3,
+        "the length is the range's: {}",
+        result.seconds
+    );
+}
+
+// Spec: external-devices R24. A render in real time has no tail and no
+// returns, so an export that asks for either is refused, and writes nothing.
+#[test]
+fn render_as_loop_and_returns_are_refused_in_real_time() {
+    let folder = TestDir::new("refused");
+    let mut shell = shell_on_loopback();
+    set_with_effect(&mut shell, &folder);
+    for (switch, name) in [
+        ("render_as_loop", "Render as Loop"),
+        (
+            "include_return_and_main_effects",
+            "Include Return and Main Effects",
+        ),
+    ] {
+        let out = folder.path("Refused.wav");
+        let mut args = json!({ "path": out.to_string_lossy(), "bit_depth": 24,
+                "sample_rate": 48000, "wait_seconds": 0,
+                "rendered_track": "all_tracks" });
+        args[switch] = json!(true);
+        match shell.run(export_ids::AUDIO, args) {
+            Err(ShellError::InvalidArgs { message, .. }) => {
+                assert!(message.contains(name), "{message}");
+            }
+            other => panic!("{name} is refused, got {other:?}"),
+        }
+        assert!(
+            std::fs::read_dir(&folder.0).unwrap().all(|entry| {
+                let name = entry.unwrap().file_name();
+                name.to_string_lossy().starts_with("Tone")
+            }),
+            "nothing was written"
+        );
+    }
 }
 
 // Spec: external-devices R22. The outputs whose path runs through the

@@ -226,6 +226,12 @@ impl<T: Send + 'static> Owned<T> {
     }
 }
 
+impl<T: Send + 'static> std::fmt::Debug for Owned<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Owned").finish_non_exhaustive()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::AtomicUsize;

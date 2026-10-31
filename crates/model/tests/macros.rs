@@ -413,3 +413,36 @@ fn a_set_saved_before_macros_loads_with_none() {
     assert_eq!(back.macros, bl_model::RackMacros::default());
     assert!(back.macros.mappings.is_empty());
 }
+
+// Spec: racks R5
+#[test]
+fn a_mapped_value_outside_a_chains_range_is_refused() {
+    let mut song = Song::new();
+    let rack = song.rack(RackKind::AudioEffect, 1);
+    let chain = rack.chains[0].id;
+    song.insert(rack);
+    for (param, value) in [(MixerParam::Pan, 3.0), (MixerParam::Volume, -1.0)] {
+        let command = Command::SetMappedValue {
+            target: MacroTarget::Chain { chain, param },
+            value,
+        };
+        assert!(matches!(
+            rejected(&mut song.editor, command),
+            bl_model::ModelError::InvalidValue { .. }
+        ));
+        song.editor.document().check_invariants().unwrap();
+    }
+    for (param, value) in [
+        (MixerParam::Pan, 1.0),
+        (MixerParam::Pan, -1.0),
+        (MixerParam::Volume, 0.0),
+    ] {
+        song.editor
+            .apply(Command::SetMappedValue {
+                target: MacroTarget::Chain { chain, param },
+                value,
+            })
+            .unwrap();
+    }
+    song.editor.document().check_invariants().unwrap();
+}

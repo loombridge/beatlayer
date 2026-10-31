@@ -432,3 +432,190 @@ fn a_read_only_recovery_folder_says_so_once_and_the_set_still_edits() {
     permissions.set_mode(0o700);
     std::fs::set_permissions(&recovery, permissions).unwrap();
 }
+
+/// Writes a short 16-bit mono WAV file at 48 kHz.
+fn wav(path: &Path) {
+    let data = 480u32 * 2;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data.to_le_bytes());
+    for i in 0..480u32 {
+        let phase = f64::from(i) * 440.0 / 48_000.0 * std::f64::consts::TAU;
+        bytes.extend_from_slice(&((phase.sin() * 32.0) as i16).to_le_bytes());
+    }
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn an_untitled_sets_imported_audio_survives_a_crash() {
+    // Spec: crash-recovery R3, R21. The journal of a set never saved lists
+    // the files its clips play, so the recovered set finds them.
+    let scratch = Scratch::new("untitled-media");
+    let recovery = scratch.path("Recovery");
+    let file = scratch.path("Music/Kick.wav");
+    wav(&file);
+    // A session that stopped without closing its untitled set.
+    {
+        let mut shell = shell(&recovery);
+        let track = shell
+            .editor()
+            .document()
+            .tracks()
+            .find(|track| track.kind() == bl_model::TrackKind::Audio)
+            .unwrap()
+            .id();
+        shell
+            .run(
+                "browser.add_to_arrangement",
+                json!({ "paths": [file.to_string_lossy()], "track": track, "at": 0 }),
+            )
+            .unwrap();
+        shell.flush_recovery().unwrap();
+    }
+    let mut shell = shell(&recovery);
+    let offers = shell.recovery_offers();
+    assert_eq!(offers.len(), 1, "the set is offered");
+    shell
+        .run("set.recover", json!({ "id": offers[0].id }))
+        .unwrap();
+    assert_eq!(shell.missing_files(), 0);
+    std::fs::rename(&file, scratch.path("Moved.wav")).unwrap();
+    assert_eq!(
+        shell.missing_files(),
+        1,
+        "the recovered set knows the file, so it reports it missing"
+    );
+    std::fs::rename(scratch.path("Moved.wav"), &file).unwrap();
+
+    // Saving the recovered set lists the file from the set's own folder.
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Saved/Song.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    let song = PathBuf::from(saved["path"].as_str().unwrap());
+    let (_, project) = bl_project::SetFile::open(&song).unwrap();
+    let listed: Vec<PathBuf> = project
+        .media
+        .iter()
+        .filter_map(|media| media.path.resolve(song.parent().unwrap()))
+        .collect();
+    assert_eq!(listed.len(), 1, "the saved set lists the file");
+    assert_eq!(
+        listed[0].canonicalize().unwrap(),
+        file.canonicalize().unwrap()
+    );
+}
+
+// Windows has no read-only folder to make: its read-only attribute doesn't
+// stop files being made in one.
+#[cfg(unix)]
+#[test]
+fn save_continuously_in_a_read_only_project_still_has_unsaved_changes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Spec: crash-recovery R8, R25. The folder can't hold save points, so
+    // the edits are only recovery points, and quitting asks.
+    let scratch = Scratch::new("ro-project");
+    let recovery = scratch.path("Recovery");
+    let set = saved_set(&scratch.path(""));
+    let folder = set.parent().unwrap();
+    let writable = std::fs::metadata(folder).unwrap().permissions();
+    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(folder.join(".probe")).is_ok() {
+        // Running as a user who ignores permissions: nothing to test.
+        let _ = std::fs::remove_file(folder.join(".probe"));
+        return;
+    }
+    let mut app = shell(&recovery);
+    app.run("settings.set_continuous_save", json!({ "on": true }))
+        .unwrap();
+    app.run("set.open", json!({ "path": set.to_string_lossy() }))
+        .unwrap();
+    app.invoke("track.create", json!({ "kind": "midi", "name": "A" }))
+        .unwrap();
+    app.invoke("track.create", json!({ "kind": "midi", "name": "B" }))
+        .unwrap();
+    app.flush_recovery().unwrap();
+    let unsaved = app.unsaved_changes();
+    app.invoke("app.quit", json!({})).unwrap();
+    let asked = app
+        .take_effects()
+        .iter()
+        .any(|effect| matches!(effect, bl_shell::Effect::ConfirmDiscard { .. }));
+    std::fs::set_permissions(folder, writable).unwrap();
+    assert!(unsaved, "edits in a read-only project aren't committed");
+    assert!(asked, "quitting asks");
+}
+
+/// Crashes a session that edited the set `fixture` (a set's JSON) is saved
+/// as, with its journal holding the fixture as an older build wrote it, and
+/// relaunches: the shell with the offer.
+fn crashed_with_an_older_song(scratch: &Scratch, fixture: &str) -> Shell {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../project/tests/fixtures");
+    let json = std::fs::read(fixtures.join(fixture)).unwrap();
+    let recovery = scratch.path("Recovery");
+    let path = scratch.path("Old.blset");
+    std::fs::write(&path, bl_project::format::compress(&json)).unwrap();
+    let mut crashed = shell(&recovery);
+    crashed
+        .run("set.open", json!({ "path": path.to_string_lossy() }))
+        .unwrap();
+    crashed
+        .invoke("track.create", json!({ "kind": "midi", "name": "A" }))
+        .unwrap();
+    crashed.flush_recovery().unwrap();
+    drop(crashed);
+    // The journal's one entry is the older song, as an older build wrote it.
+    let journals = bl_project::journal::journals_beside(&path).unwrap();
+    let name = journals[0]
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let session = name
+        .strip_prefix(".Old.blset.")
+        .and_then(|name| name.strip_suffix(".bljournal"))
+        .unwrap();
+    let entry = json!({
+        "format": "beatlayer-journal",
+        "version": 1,
+        "session": session,
+        "seq": 1,
+        "follows": null,
+        "time": 0,
+        "label": "Create Track",
+        "committed": false,
+        "change": { "snapshot": serde_json::from_slice::<serde_json::Value>(&json).unwrap() },
+    });
+    std::fs::write(
+        &journals[0],
+        bl_project::format::compress(&serde_json::to_vec(&entry).unwrap()),
+    )
+    .unwrap();
+    shell(&recovery)
+}
+
+#[test]
+fn recovering_a_song_from_before_the_region_names_the_simplers_whose_start_was_driven() {
+    // Spec: sampler R24, crash-recovery R3. As `set.open` of the same song.
+    let scratch = Scratch::new("recover-simplers");
+    let mut app = crashed_with_an_older_song(&scratch, "simplers-driven-schema-11.json");
+    assert_eq!(app.recovery_offers().len(), 1);
+    app.run("set.recover", json!({})).unwrap();
+    let text = app.message().map(|message| message.text.clone());
+    let text = text.expect("a message in the Status Bar");
+    assert!(text.starts_with("Simpler One-Shot: "), "{text}");
+}

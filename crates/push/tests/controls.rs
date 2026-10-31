@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::rig::Rig;
 
 /// The buttons the surface runs itself: the rest reach the modes' content.
-const CORE: [&str; 15] = [
+const CORE: [&str; 16] = [
     "tap_tempo",
     "metronome",
     "play",
@@ -27,6 +27,7 @@ const CORE: [&str; 15] = [
     "mix",
     "clip",
     "shift",
+    "master",
 ];
 
 fn is_core(name: &str) -> bool {
@@ -464,6 +465,32 @@ fn footswitch_1_reaches_a_track_as_controller_64() {
             .iter()
             .all(|e| e.source == MidiSource::Port(bl_core::midi::PortId::from_name(LIVE)))
     );
+}
+
+// Spec: push-2 R28. A sustain pedal still down when the surface stops or Push 2
+// enters User mode is let go, since its release can no longer arrive.
+#[test]
+fn a_sustain_pedal_still_down_is_let_go_by_stopping_and_by_user_mode() {
+    let last = |rig: &mut Rig| {
+        rig.settle();
+        rig.reached_tracks()
+            .last()
+            .map(|e| e.message.bytes().to_vec())
+    };
+    let mut rig = Rig::new();
+    rig.start();
+    assert!(rig.sim.footswitch(1, true));
+    rig.surfaces
+        .set_row(0, bl_control::RowConfig::default())
+        .unwrap();
+    rig.sync();
+    assert_eq!(last(&mut rig), Some(vec![0xB0, 64, 0]));
+
+    let mut rig = Rig::new();
+    rig.start();
+    assert!(rig.sim.footswitch(1, true));
+    rig.tap("user");
+    assert_eq!(last(&mut rig), Some(vec![0xB0, 64, 0]));
 }
 
 // Spec: push-2 R29. A tap of footswitch 2 acts as Record after 300 ms; two

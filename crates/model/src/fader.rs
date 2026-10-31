@@ -154,3 +154,32 @@ pub fn send_level(position: f64) -> f64 {
     }
     db_gain((SEND_LOWEST_DB * (1.0 - position.min(1.0)) * 100.0).round() / 100.0)
 }
+
+/// How many pan steps there are to each side: pan reads 1L to 50L and 1R to
+/// 50R.
+pub const PAN_STEPS: f64 = 50.0;
+
+/// Volume as the mixer shows it, in dB to one decimal: `0.0`, `-6.0`,
+/// `-inf`.
+#[must_use]
+pub fn volume_text(gain: f64) -> String {
+    if gain <= 0.0 {
+        "-inf".to_owned()
+    } else {
+        let db = gain_db(gain);
+        // -0.0 reads 0.0.
+        let shown = (db * 10.0).round() / 10.0;
+        format!("{:.1}", if shown == 0.0 { 0.0 } else { shown })
+    }
+}
+
+/// Pan as the mixer shows it: `C`, or a number from 1 to 50 and `L` or `R`.
+#[must_use]
+pub fn pan_text(pan: f64) -> String {
+    let amount = (pan.abs() * PAN_STEPS).round() as i64;
+    match amount {
+        0 => "C".to_owned(),
+        _ if pan < 0.0 => format!("{amount}L"),
+        _ => format!("{amount}R"),
+    }
+}

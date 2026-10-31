@@ -315,6 +315,7 @@ impl Shell {
 
     pub fn prepare_edit(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         self.check_warp_files(id, &args)?;
+        let args = self.clamp_to_range(id, args);
         let args = self.prepare_device_role(id, args)?;
         let args = self.prepare_scale_clips(id, args)?;
         let args = self.prepare_groove_clips(id, args)?;
@@ -322,6 +323,36 @@ impl Shell {
         // follows Retune Set On Loading Tuning Systems.
         let args = self.with_retune(id, args);
         self.prepare_warping(id, args)
+    }
+
+    /// A device parameter's value, set directly or at an automation
+    /// breakpoint, is cut to the parameter's range: the document doesn't
+    /// hold the descriptors, so this is done here, as the app knows them.
+    fn clamp_to_range(&self, id: &str, mut args: Value) -> Value {
+        use bl_model::Command;
+        let (device, param, value) = match model::command_from_args(id, args.clone()) {
+            Ok(Command::SetDeviceParam {
+                device,
+                param,
+                value,
+            })
+            | Ok(Command::SetAutomationBreakpoint {
+                target: AutomationTarget::Device { device, param },
+                value,
+                ..
+            }) => (device, param, value),
+            _ => return args,
+        };
+        let descriptor = self
+            .editor
+            .document()
+            .device(device)
+            .and_then(|device| self.devices.description(&device.kind))
+            .and_then(|description| description.param(param));
+        if let Some(descriptor) = descriptor.filter(|_| value.is_finite()) {
+            args["value"] = json!(value.clamp(descriptor.min(), descriptor.max()));
+        }
+        args
     }
 
     /// Spec: scales R5. `clip.set_scale` names the clips it sets; left out,

@@ -965,7 +965,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.16 | todo |  |  |
 | 7.17 | done | 30 October 2026 | [#506](https://github.com/loombridge/beatlayer/pull/506): CV in the engine as DC samples on the interface's channels with output and input choosers, timed against Main and exported in real time; CV Instrument (pitch under the set's tuning, gate with Retrigger, two Mod outputs, calibration against the returning oscillator kept as one undo step) and CV Triggers; `cv.calibrate`, `cv.clear_calibration` and `cv.set_calibration` |
 | 7.18 | done | 30 October 2026 | [#556](https://github.com/loombridge/beatlayer/pull/556): CV Clock Out (pulses on the tempo map's frames through ramps and loop jumps), CV Clock In (a modular clock leads the tempo through MIDI clock's follower and holds the last tempo when it stops), CV In (a modulator worked out before any track runs) and CV Utility (adds and multiplies two signals), matching at any block size |
-| 7.18b | todo |  |  |
+| 7.18b | done | 31 October 2026 | [#632](https://github.com/loombridge/beatlayer/pull/632): CV Envelope Follower, CV LFO and CV Shaper share the modulators' laws, worked out every frame and equal to the modulators on their 32-frame grid points, with Min, Max and Depth in volts |
 | 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
 | 7.21 | todo |  |  |
@@ -973,7 +973,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
 | 7.25 | todo |  |  |
-| 7.26 | todo |  |  |
+| 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
 | 7.27 | todo |  |  |
 | 7.28 | todo |  |  |
 | 7.29 | done | 29 October 2026 | [#507](https://github.com/loombridge/beatlayer/pull/507): Legato, a clip's own launch quantisation with Repeat's restarts, and `session.nudge` with the Launch Properties panel's nudge buttons run in the engine, with the clip time in `session.state`; the scrub control and the mapping targets come with WP-7.3 and 7.3b |

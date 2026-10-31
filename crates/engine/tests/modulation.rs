@@ -6,10 +6,11 @@
 use crate::common;
 use bl_core::time::Ticks;
 use bl_engine::TransportCommand;
-use bl_engine::mixer::pan_gains;
+use bl_engine::mixer::{pan_gains, split_pan_gains};
 use bl_model::fader::{fader_gain, fader_position};
 use bl_model::{
-    AutomationTarget, Clip, ClipData, ClipId, Command, MidiData, MixerParam, TrackId, TrackKind,
+    AutomationTarget, Clip, ClipData, ClipId, Command, MidiData, MixerParam, PanMode, TrackId,
+    TrackKind,
 };
 use common::{Rig, dc, track};
 
@@ -279,5 +280,87 @@ fn the_engine_publishes_what_a_modulated_parameter_played() {
             .played(bl_engine::NodeKey::Mixer(a), bl_engine::mixer::track::PAN)
             .is_none(),
         "the pan isn't"
+    );
+}
+
+/// The left output of a track of DC 1.0 in Split Stereo Pan mode, with its
+/// split-left pan at centre and its split-right at hard right, when Split
+/// Left plays at `pan`.
+fn split_left_output(pan: f64) -> f64 {
+    let [[a, b], _] = split_pan_gains(pan, 1.0);
+    a + b
+}
+
+// Spec: modulation R4. A split pan travels like a pan, not like a switch.
+#[test]
+fn a_clip_modulation_moves_a_split_pan_along_its_pan_travel() {
+    let (mut rig, a, clip) = rig_with_clip(64);
+    rig.apply(Command::SetPanMode {
+        track: a,
+        mode: PanMode::Split,
+    });
+    rig.apply(Command::SetSplitPanLeft { track: a, pan: 0.0 });
+    rig.apply(Command::SetSplitPanRight { track: a, pan: 1.0 });
+    envelope(
+        &mut rig,
+        clip,
+        mixer(MixerParam::SplitLeft),
+        &[(Ticks::ZERO, -0.5)],
+    );
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(2_048, 64);
+    let want = split_left_output(-0.5);
+    assert!((want - split_left_output(0.0)).abs() > 1e-3, "{want}");
+    assert!(
+        out[1_024..]
+            .iter()
+            .all(|&s| (f64::from(s) - want).abs() < 1e-6),
+        "{} isn't {want}",
+        out[2_000]
+    );
+}
+
+// Spec: modulation R14. A hold on a split pan sits at its place on the pan
+// travel.
+#[test]
+fn a_remote_control_hold_places_a_split_pan_on_its_pan_travel() {
+    use bl_model::modulator::{self, MODE, ModTarget};
+    let mut rig = Rig::with_registry(64, bl_devices::register);
+    let a = track(&mut rig.editor, TrackKind::Midi, None);
+    dc(&mut rig.editor, a, 1.0);
+    rig.apply(Command::SetPanMode {
+        track: a,
+        mode: PanMode::Split,
+    });
+    rig.apply(Command::SetSplitPanRight { track: a, pan: 1.0 });
+    let source = track(&mut rig.editor, TrackKind::Audio, None);
+    let wave = common::device(
+        &mut rig.editor,
+        source,
+        modulator::WAVE_MOD,
+        &[
+            (MODE, 1.0),
+            (modulator::amount(0), 100.0),
+            (modulator::min(0), 25.0),
+            (modulator::max(0), 25.0),
+        ],
+    );
+    rig.apply(Command::MapModulator {
+        device: wave,
+        slot: 0,
+        target: ModTarget::Mixer {
+            track: a,
+            param: MixerParam::SplitLeft,
+        },
+    });
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(2_048, 64);
+    let want = split_left_output(-0.5);
+    assert!(
+        out[1_024..]
+            .iter()
+            .all(|&s| (f64::from(s) - want).abs() < 1e-6),
+        "{} isn't {want}",
+        out[2_000]
     );
 }

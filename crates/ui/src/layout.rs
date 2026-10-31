@@ -1633,6 +1633,8 @@ pub struct ArrangementLayout {
     pub optimize_width: Rect,
     /// The Arrangement's mixer, while it shows (L-ARR-018, WP-1.9).
     pub mixer: Option<Rect>,
+    /// The bottom the parts fit above: the view's, or the mixer's top.
+    fit_bottom: f32,
 }
 
 impl ArrangementLayout {
@@ -1724,6 +1726,7 @@ impl ArrangementLayout {
                 pos2(header_x(1404.0), bottom(761.0)),
             ),
             mixer: None,
+            fit_bottom: view.bottom(),
         }
         .fitted()
     }
@@ -1733,7 +1736,7 @@ impl ArrangementLayout {
     /// would otherwise put them over the mixer and the Control Bar, where
     /// they'd still take the clicks.
     fn fitted(mut self) -> Self {
-        let (top, bottom) = (self.view.top(), self.view.bottom());
+        let (top, bottom) = (self.view.top(), self.fit_bottom);
         for rect in [
             &mut self.beat_ruler,
             &mut self.scrub,
@@ -1755,9 +1758,11 @@ impl ArrangementLayout {
         ]
         .into_iter()
         .chain(self.overview.as_mut())
+        .chain(self.signature_lane.as_mut())
         {
             rect.min.y = rect.min.y.clamp(top, bottom);
             rect.max.y = rect.max.y.clamp(top, bottom);
+            rect.min.y = rect.min.y.min(rect.max.y);
         }
         self
     }
@@ -1776,7 +1781,7 @@ impl ArrangementLayout {
         self.scrub = self.scrub.translate(vec2(0.0, SIGNATURE_LANE));
         self.lanes.min.y += SIGNATURE_LANE;
         self.headers.min.y += SIGNATURE_LANE;
-        self
+        self.fitted()
     }
 
     /// The same view with its mixer showing (L-ARR-018; the mixer view

@@ -32,7 +32,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 ## Rules
 
-- **R1.** On start-up and after New Set, the set is the saved default set when one has been saved and can be read, otherwise the factory default set. (S1, S5)
+- **R1.** On start-up and after New Set, the set is the saved default set when one has been saved and can be read, otherwise the factory default set. A new set from a saved default set has its media table, launch quantisation and saved views too, so its clips play, and a save lists its files. (S1, S5)
 - **R2.** `set.save_as_default` saves the open set as the default set, which R1 then uses. It is saved as a copy, so the open set keeps its own file, its name, and its undo history, and stays open. `path` names the default set's file (`.blset` is added if it's missing); left out, it goes in the User Library's `Templates` folder, or beside the application's preferences when there is no User Library. The choice is kept for the next start. (S1)
 - **R3.** `set.save_as_template` saves the open set as a template in the User Library's `Templates` folder, making that folder the first time. `name` names the template, without the `.blset` extension; left out it takes the open set's name. As in R2 the open set is unchanged. A template is an ordinary set file: it can be opened, or set as the default set with R2. (S1)
 - **R4.** `set.collect_all_and_save` copies every media file the set uses that lives outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, so the set no longer depends on files elsewhere. A name already taken in `Samples/Imported` gets ` 2`, ` 3`, and so on before its extension, so nothing is overwritten. It fails if the set has never been saved, so it has no project folder to collect into. The result's `files` is how many files were copied. (S2)
@@ -51,7 +51,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 - **R14.** The Automatic Search section has Search Folder, with Set Folder… to choose the folder, Search Project and Search Library switches, and Go. Go searches the switched-on places, each with its subfolders, by content as R6 does: a missing file with one candidate is relinked to it; one with several keeps its row, which offers Hot-Swap, arming the browser with the candidates listed, so Enter or a double-click relinks to the one chosen while the music plays; one with none says so on its row. This replaces R6's first match: whenever a file has several candidates, the person chooses, and opening a set relinks only files with one. (S3, S11)
 - **R15.** The External Files section lists the files used from outside the project (in Manage Set, the set's project; in Manage User Library, the User Library), grouped by where they are: other projects, the User Library and elsewhere. Each group shows how many files it has and their size, a Show button that lists them in the browser as search results are listed, and a Collect Into Project switch, on for other projects and elsewhere and off for the User Library (Beatlayer's own defaults). Collect and Save copies the switched-on groups' files into the project's `Samples/Imported` folder, as R4 copies, re-points every set that uses them, and saves. File ▸ Collect All and Save first asks the same question, with the same groups and switches; R4's `set.collect_all_and_save` takes the groups, all of them when none are given. (S2, S12)
 - **R16.** Manage Project shows the Missing Files, Automatic Search and External Files sections for every set in the project folder, then Unused Files (R17) and Packing ([set exchange](set-exchange.md) R16). Manage User Library shows the same for the clip files, presets and sets in the User Library, without Packing. A Collect and Save or a relink there rewrites each set or clip file it changes, a set keeping the version it replaces in its project's `Backup` folder as a save does ([the app shell](app-shell.md) R19); the open set changes as an edit, one undo step. (S10)
-- **R17.** The Unused Files section lists the audio files in the project folder (or the User Library) that no set, clip file or preset there uses, grouped by kind: Recorded, Imported, Processed (by its kind) and Other (Beatlayer's own groups, after its folders). Each group shows its count and size and a Show button. Selecting a file previews it, as the browser does (browser R11). Delete, by the Delete key or the file's context menu, asks first, warning that another project may use the files, then moves the selected files to the system's trash (Beatlayer's own: nothing is erased outright). (S13)
+- **R17.** The Unused Files section lists the audio files in the project folder (or the User Library) that no set, clip file or preset there uses, grouped by kind: Recorded, Imported, Processed (by its kind) and Other (Beatlayer's own groups, after its folders). Each group shows its count and size and a Show button. Selecting a file previews it, as the browser does (browser R11). Delete, by the Delete key or the file's context menu, asks first, warning that another project may use the files, then moves the selected files to the system's trash (Beatlayer's own: nothing is erased outright). The command refuses a path the section doesn't list, and moves nothing then (Beatlayer's own). (S13)
 
 **Backups and copies (WP-6.63)**
 
@@ -68,12 +68,12 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/shell/tests/file_management.rs`, `a_new_set_opens_from_the_saved_default` | unit, through `Shell::run` on real folders |
+| R1 | `crates/shell/tests/file_management.rs`, `a_new_set_opens_from_the_saved_default`; `crates/shell/tests/file_manager.rs`, `a_new_set_from_a_default_set_keeps_its_files_and_launch_quantisation` | unit, through `Shell::run` on real folders |
 | R2 | `crates/shell/tests/file_management.rs`, `a_new_set_opens_from_the_saved_default`, `the_file_commands_are_registered_and_reach_the_agent_api` | unit |
 | R3 | `crates/shell/tests/file_management.rs`, `templates_are_saved_into_the_user_library_and_listed` | unit, through `Shell::run` on real folders |
 | R4 | `crates/shell/tests/file_management.rs`, `collect_all_and_save_copies_external_files_into_the_project` | unit, through `Shell::run` on real folders |
 | R5 | `crates/shell/tests/file_management.rs`, `templates_are_saved_into_the_user_library_and_listed` | unit |
-| R6 | `crates/shell/tests/file_management.rs`, `a_moved_file_is_found_by_the_automatic_search` | unit, through `Shell::run` on real folders |
+| R6 | `crates/shell/tests/file_management.rs`, `a_moved_file_is_found_by_the_automatic_search`; `crates/media/tests/store.rs`, `a_changed_file_is_not_hashed_again_until_it_changes_again` | unit, through `Shell::run` on real folders; unit, on a file made unreadable after its first check |
 | R7 | `crates/shell/tests/clip_files.rs`, `collect_files_on_export_copies_refers_or_asks`; `crates/ui/tests/clip_files.rs`, `the_library_page_has_collect_files_on_export_and_the_user_library` | unit, UI script |
 | R8 | `crates/shell/tests/clip_files.rs`, `collect_files_on_export_copies_refers_or_asks`; `crates/ui/tests/clip_files.rs`, `ask_shows_copy_dont_copy_and_cancel` | unit, UI script |
 | R9 | `crates/shell/tests/clip_files.rs`, `copies_go_into_the_project_the_file_lands_in`, `collect_files_on_export_copies_refers_or_asks` | unit, through `Shell::run` on real folders |
@@ -83,8 +83,8 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 | R13 | `crates/shell/tests/file_manager.rs`, `a_missing_file_is_relinked_to_other_content_in_one_step` | unit, through `Shell::run` on real folders |
 | R14 | `crates/shell/tests/file_manager.rs`, `a_search_with_two_candidates_relinks_nothing_until_one_is_chosen` | unit, through `Shell::run` on real folders |
 | R15 | `crates/shell/tests/file_manager.rs`, `the_files_list_where_they_are`, `collect_and_save_copies_the_groups_that_are_switched_on` | unit, through `Shell::run` on real folders |
-| R16 | `crates/shell/tests/file_manager.rs`, `a_projects_collect_and_save_rewrites_its_sets_with_a_backup` | unit, through `Shell::run` on real folders |
-| R17 | `crates/shell/tests/file_manager.rs`, `an_unused_recording_is_listed_and_deleted_to_the_trash` | unit, through `Shell::run` on real folders |
+| R16 | `crates/shell/tests/file_manager.rs`, `a_projects_collect_and_save_rewrites_its_sets_with_a_backup`, `collecting_the_open_sets_project_survives_the_next_save` and `a_projects_collect_and_save_refuses_while_the_open_set_has_unsaved_changes` | unit, through `Shell::run` on real folders |
+| R17 | `crates/shell/tests/file_manager.rs`, `an_unused_recording_is_listed_and_deleted_to_the_trash` and `delete_unused_refuses_a_file_the_section_does_not_list`; `crates/agent/tests/permissions.rs`, `headless_the_file_managers_read_commands_do_not_list_files` | unit, through `Shell::run` on real folders; headless through the agent API |
 | R18 | `crates/shell/tests/file_manager.rs`, `three_saves_give_three_backups_and_opening_one_makes_it_the_set` | unit, through `Shell::run` on real folders |
 | R19 | `crates/shell/tests/file_manager.rs`, `save_a_copy_leaves_the_open_set_alone` | unit, through `Shell::run` on real folders |
 | R20 | `crates/shell/tests/file_manager.rs`, `the_file_manager_commands_are_registered_and_reach_the_agent_api` | unit |
@@ -93,7 +93,6 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 ## Not built yet
 
-- A default set that uses samples: R1 opens the saved default set's document, but its media table isn't loaded into the media store yet, so such a set's clips play silence until relinked.
 - The External Files section's Show button, and the Unused Files section's Show button and preview (R15, R17): the files a group holds aren't listed in the browser yet.
 - The User Library's clip files and presets in Manage User Library (R16): only its sets are listed.
 - The query tool's report of a clip or a device whose file is missing (R12): nothing says so yet.

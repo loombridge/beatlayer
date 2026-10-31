@@ -716,3 +716,56 @@ fn manual_slice_gestures_add_move_and_delete() {
         "warp survives serialize/deserialize"
     );
 }
+
+// Spec: slice-to-midi R15, R16 (C-DEVICE-015). The display's menu has
+// Slice to Drum Rack and Slice to New MIDI Track, enabled only in Slice mode
+// with a slice, and Slice to New MIDI Track leaves the Simpler where it is.
+#[test]
+fn the_displays_menu_offers_the_slicing_commands_in_slice_mode_only() {
+    let (mut h, device) = window(&sampler::sampler_type());
+    let all = nodes(&mut h);
+    let display = bounds(&all, "Sample Display");
+    let at = pos2(
+        display.x0 as f32 + (display.x1 - display.x0) as f32 * 0.4,
+        ((display.y0 + display.y1) / 2.0) as f32,
+    );
+    let menu = |h: &mut Harness| {
+        h.frame(vec![Event::PointerMoved(at)]);
+        for pressed in [true, false] {
+            h.frame(vec![Event::PointerButton {
+                pos: at,
+                button: PointerButton::Secondary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            }]);
+        }
+        nodes(h)
+    };
+    let find = |menu: &[Node], label: &str| {
+        menu.iter()
+            .find(|n| n.label == label)
+            .unwrap_or_else(|| panic!("no menu item {label:?}"))
+            .clone()
+    };
+    let shown = menu(&mut h);
+    assert!(find(&shown, "Slice to Drum Rack").disabled);
+    assert!(find(&shown, "Slice to New MIDI Track").disabled);
+    h.key(egui::Key::Escape, Modifiers::NONE);
+
+    set_param(&mut h, device, MODE, 2.0);
+    set_param(&mut h, device, SLICE_BY, 2.0);
+    set_param(&mut h, device, SLICE_REGIONS, 4.0);
+    h.settle();
+    let shown = menu(&mut h);
+    assert!(!find(&shown, "Slice to Drum Rack").disabled);
+    let item = find(&shown, "Slice to New MIDI Track");
+    assert!(!item.disabled);
+    let tracks = h.shell.editor().document().tracks().count();
+    h.click(centre(item.bounds.unwrap()));
+    h.settle();
+    assert_eq!(h.shell.editor().document().tracks().count(), tracks + 1);
+    assert!(
+        h.shell.editor().document().device(device).is_some(),
+        "the Simpler stays"
+    );
+}

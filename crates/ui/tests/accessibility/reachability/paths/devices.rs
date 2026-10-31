@@ -608,6 +608,20 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         (
+            "device.slice_to_drum_rack",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (slice-to-midi R15)",
+            )),
+        ),
+        (
+            "device.slice_to_midi_track",
+            Exception(Gap(
+                "the device's title bar menu, which the keyboard doesn't open yet \
+                 (slice-to-midi R16)",
+            )),
+        ),
+        (
             "device.add_sample_edit",
             Exception(Equivalent(
                 "`device.edit_sample`, which checks the selection against the sample",

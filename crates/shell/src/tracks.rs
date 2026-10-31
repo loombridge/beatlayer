@@ -11,7 +11,7 @@ use std::collections::BTreeSet;
 use bl_model::{
     Automation, AutomationTarget, ChainId, Clip, ClipId, Command, Device, DeviceId, Document,
     EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, NewTakeLane, Output, Routing, Scale,
-    SceneId, TakeLane, Track, TrackDelay, TrackId, TrackKind,
+    SceneId, TakeLane, Track, TrackDelay, TrackId, TrackKind, TuningLayout,
 };
 
 use crate::routing::{return_letter, track_label};
@@ -82,6 +82,8 @@ pub struct TrackData {
     pub removed_stop_buttons: Vec<usize>,
     /// Its take lanes.
     pub take_lanes: Vec<TakeLane>,
+    /// The take lane it auditions, counted from 0 among its take lanes.
+    pub audition: Option<usize>,
     /// Its automation: the parameter each envelope drives, and the envelope.
     pub automation: Vec<(AutomationTarget, Automation)>,
     /// Its delay.
@@ -90,6 +92,10 @@ pub struct TrackData {
     pub keep_monitoring_latency: bool,
     /// Whether it bypasses the set's tuning (WP-6.9).
     pub tuning_bypass: bool,
+    /// Its MIDI Controller Layout.
+    pub tuning_layout: TuningLayout,
+    /// Its info text.
+    pub info_text: String,
     /// Its frozen audio, if it is frozen.
     pub frozen: Option<FrozenTrack>,
     /// The tracks inside it, if it is a group.
@@ -188,6 +194,9 @@ pub fn snapshot(doc: &Document, id: TrackId) -> Option<TrackData> {
             .filter_map(|scene| doc.scene_position(scene))
             .collect(),
         take_lanes: track.take_lanes().cloned().collect(),
+        audition: track
+            .audition()
+            .and_then(|lane| track.take_lanes().position(|l| l.id == lane)),
         automation: track
             .automation()
             .map(|(target, automation)| (*target, automation.clone()))
@@ -195,6 +204,8 @@ pub fn snapshot(doc: &Document, id: TrackId) -> Option<TrackData> {
         delay: track.delay(),
         keep_monitoring_latency: track.keep_monitoring_latency(),
         tuning_bypass: track.tuning_bypass(),
+        tuning_layout: track.tuning_layout().clone(),
+        info_text: track.info_text().to_owned(),
         frozen: track.frozen().cloned(),
         children: track.children().filter_map(|c| snapshot(doc, c)).collect(),
     })
@@ -486,8 +497,10 @@ fn create(
         keep_scale(editor, made, scale)?;
     }
     // Spec: comping R9. The lanes and their clips come under new IDs.
+    let mut lane_ids = Vec::with_capacity(data.take_lanes.len());
     for lane in &data.take_lanes {
         let lane_id = editor.new_id();
+        lane_ids.push(lane_id);
         editor.apply(Command::AddTakeLane {
             track: id,
             lane: NewTakeLane {
@@ -511,6 +524,12 @@ fn create(
             })?;
             keep_scale(editor, made, scale)?;
         }
+    }
+    if let Some(lane) = data.audition.and_then(|n| lane_ids.get(n)) {
+        editor.apply(Command::SetAudition {
+            lane: *lane,
+            on: true,
+        })?;
     }
     for (index, child) in data.children.iter().enumerate() {
         create(editor, child, Some(id), index, copies)?;
@@ -539,6 +558,59 @@ fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
             true
         })
     });
+}
+
+/// Gives the track `id` the settings of a copy's source beyond its volume,
+/// pan, mute, solo and arm: crossfade assign, pan mode, split pans, keeping
+/// the monitoring latency, bypassing the tuning and the delay.
+fn copy_settings(
+    editor: &mut Editor,
+    id: TrackId,
+    mixer: &Mixer,
+    keep_monitoring_latency: bool,
+    tuning_bypass: bool,
+    delay: TrackDelay,
+) -> Result<(), EditError> {
+    if !mixer.crossfade.is_none() {
+        editor.apply(Command::SetCrossfadeAssign {
+            track: id,
+            assign: mixer.crossfade,
+        })?;
+    }
+    if !mixer.pan_mode.is_stereo() {
+        editor.apply(Command::SetPanMode {
+            track: id,
+            mode: mixer.pan_mode,
+        })?;
+    }
+    if mixer.split_left != 0.0 {
+        editor.apply(Command::SetSplitPanLeft {
+            track: id,
+            pan: mixer.split_left,
+        })?;
+    }
+    if mixer.split_right != 0.0 {
+        editor.apply(Command::SetSplitPanRight {
+            track: id,
+            pan: mixer.split_right,
+        })?;
+    }
+    if !keep_monitoring_latency {
+        editor.apply(Command::SetKeepMonitoringLatency {
+            track: id,
+            enabled: false,
+        })?;
+    }
+    if tuning_bypass {
+        editor.apply(Command::SetTuningBypass {
+            track: id,
+            bypass: true,
+        })?;
+    }
+    if !delay.is_default() {
+        editor.apply(Command::SetTrackDelay { track: id, delay })?;
+    }
+    Ok(())
 }
 
 /// Gives a copy everything that names other objects: its mixer, its sends,
@@ -578,46 +650,25 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
             tap: mixer.tap,
         })?;
     }
-    if !mixer.crossfade.is_none() {
-        editor.apply(Command::SetCrossfadeAssign {
+    copy_settings(
+        editor,
+        id,
+        &mixer,
+        data.keep_monitoring_latency,
+        data.tuning_bypass,
+        data.delay,
+    )?;
+    if !data.info_text.is_empty() {
+        editor.apply(Command::SetTrackInfoText {
             track: id,
-            assign: mixer.crossfade,
+            info_text: data.info_text.clone(),
         })?;
     }
-    if !mixer.pan_mode.is_stereo() {
-        editor.apply(Command::SetPanMode {
+    if !data.tuning_layout.is_default() {
+        editor.apply(Command::SetTuningLayout {
             track: id,
-            mode: mixer.pan_mode,
-        })?;
-    }
-    if mixer.split_left != 0.0 {
-        editor.apply(Command::SetSplitPanLeft {
-            track: id,
-            pan: mixer.split_left,
-        })?;
-    }
-    if mixer.split_right != 0.0 {
-        editor.apply(Command::SetSplitPanRight {
-            track: id,
-            pan: mixer.split_right,
-        })?;
-    }
-    if !data.keep_monitoring_latency {
-        editor.apply(Command::SetKeepMonitoringLatency {
-            track: id,
-            enabled: false,
-        })?;
-    }
-    if data.tuning_bypass {
-        editor.apply(Command::SetTuningBypass {
-            track: id,
-            bypass: true,
-        })?;
-    }
-    if !data.delay.is_default() {
-        editor.apply(Command::SetTrackDelay {
-            track: id,
-            delay: data.delay,
+            layout: Some(data.tuning_layout.layout),
+            keys: (!data.tuning_layout.keys.is_empty()).then(|| data.tuning_layout.keys.clone()),
         })?;
     }
     for send in &data.sends {
@@ -711,6 +762,14 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
                 })?;
             }
         }
+        // A control moved by hand has turned its envelope off.
+        if !automation.enabled {
+            editor.apply(Command::SetAutomationEnabled {
+                track: id,
+                target,
+                enabled: false,
+            })?;
+        }
     }
     if let Some(frozen) = &data.frozen {
         let mut frozen = frozen.clone();
@@ -725,10 +784,10 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
             }
             tail.id = editor.new_id();
         }
-        if let Some(output) = frozen.output.as_mut()
-            && let Some(copy) = copies.clip(output.id)
-        {
-            output.id = copy;
+        // A group's or return's output is no clip of the tracks, so it takes
+        // a new ID as the tails do.
+        if let Some(output) = frozen.output.as_mut() {
+            output.id = editor.new_id();
         }
         editor.apply(Command::FreezeTracks {
             frozen: vec![(id, frozen)],
@@ -1028,6 +1087,14 @@ fn copy_track(
             tap: mixer.tap,
         })?;
     }
+    copy_settings(
+        editor,
+        id,
+        &mixer,
+        source.keep_monitoring_latency(),
+        source.tuning_bypass(),
+        source.delay(),
+    )?;
     for (to, level) in source.sends() {
         editor.apply(Command::SetSend {
             track: id,
@@ -1802,6 +1869,27 @@ mod tests {
             3,
             "each track is saved as text once, however many files the set holds"
         );
+    }
+
+    // Spec: track-context-menu R13
+    #[test]
+    fn a_duplicate_keeps_its_midi_controller_layout() {
+        let mut editor = Editor::new();
+        let one = add(&mut editor, TrackKind::Midi, "1 MIDI", None);
+        editor
+            .apply(Command::SetTuningLayout {
+                track: one,
+                layout: Some(bl_model::LayoutKind::BlackKeysOnly),
+                keys: None,
+            })
+            .unwrap();
+        let copy = duplicate_tracks(&mut editor, &[one], "Duplicate").unwrap()[0];
+        let doc = editor.document();
+        assert_eq!(
+            doc.track(copy).unwrap().tuning_layout(),
+            doc.track(one).unwrap().tuning_layout()
+        );
+        assert!(!doc.track(copy).unwrap().tuning_layout().is_default());
     }
 
     // Spec: track-context-menu R12 (a group, a return track)

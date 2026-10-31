@@ -205,10 +205,13 @@ impl Shell {
             slots: Vec::new(),
             removed_stop_buttons: Vec::new(),
             take_lanes: Vec::new(),
+            audition: None,
             automation: Vec::new(),
             delay: from.delay(),
             keep_monitoring_latency: from.keep_monitoring_latency(),
             tuning_bypass: false,
+            tuning_layout: bl_model::TuningLayout::default(),
+            info_text: String::new(),
             frozen: None,
             children: Vec::new(),
         }];

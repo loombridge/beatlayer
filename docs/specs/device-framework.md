@@ -96,6 +96,7 @@ Many of Live's instruments hold more controls than a device's body can show at o
 - **R47.** A device type may declare impulse-response slots, each named, beside its sample slots (R40): `device.load_sample` with `slot` fills one and `device.set_sample` clears it, as [impulse responses](impulse-responses.md) R1 to R15 say. A slot is media, not a parameter: it has no automation lane and isn't in the device's banks. An audio file dropped on a display cell of a device with such a slot loads into the slot the cell names, or the device's only slot. (Beatlayer's own)
 - **R48.** A device from an extension ([extensions](extensions.md) R24) declares its parameters as this framework's descriptors and is held to G1 and G2 as a native device is; it gets the generic layout unless it draws display cells of its own (R49). (Beatlayer's own)
 - **R49.** An extension device's display cell is drawn from the drawing list its extension gives ([extensions](extensions.md) R32), in Beatlayer's typeface and theme colours; a floating window's extra width and height go to its display cells as to a native device's (IMP-14), and its regions reach assistive technology with the names its extension gives them. (Beatlayer's own)
+- **R50.** A device type may declare that two parameters share one control, which a switch turns between: while the switch is on the control is the second parameter's, and while it is off the first's (Limiter's Maximize, which turns Ceiling into Threshold). The layout places the first parameter's control only; the second is placed through it, so R10's check counts it placed. The control's label, value, range, automation lane and accessibility name follow the parameter it shows. Both parameters keep their values, lanes, banks and clip-envelope targets whichever is shown, and both play exactly as R45 says of a hidden page's; `device.parameters` marks each parameter with whether it is shown. A description that pairs a parameter twice, pairs one with itself, or names a switch that isn't a switch of the device is refused when the type registers. (S2)
 
 ## Tests
 
@@ -147,6 +148,7 @@ Many of Live's instruments hold more controls than a device's body can show at o
 | R46 | to be written in WP-8.28 | unit (the grid's size from the description); agent API (`device.display`); UI script |
 | R47 | to be written in WP-8.30 | shell test with the convolution test device; agent API; UI script (a drop on the display cell) |
 | R48, R49 | to be written in WP-9.32 and WP-9.33 | shell test with a test extension device; offscreen render; accessibility tree |
+| R50 | `crates/devices/tests/limiter.rs`, `maximize_turns_a_control_between_two_parameters_that_keep_their_values`; `crates/ui/tests/delay_limiter.rs`, `maximize_relabels_ceiling_and_gain_in_the_body_the_tree_and_the_parameters` | unit, UI script, accessibility tree |
 
 
 ## Details

@@ -7,6 +7,7 @@
 
 use bl_model::{DeviceDisplay, DeviceId, DisplaySeries};
 use bl_shell::Invocation;
+use bl_shell::device_commands::DevicePanel;
 use egui::accesskit::Role;
 use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use serde_json::json;
@@ -86,9 +87,10 @@ pub fn draw(
     id: Id,
     enabled: bool,
     display: &DeviceDisplay,
-    views: &[String],
+    panel: &DevicePanel,
     events: &mut Vec<UiEvent>,
 ) {
+    let views = &panel.description.views;
     let c = &theme.colors;
     let painter = ui.painter_at(cell);
     // Switched off, the curves turn grey (observed).
@@ -109,6 +111,7 @@ pub fn draw(
         activity(ui, &painter, area, id, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
+        crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
     }
     if let Some(reading) = meter {
         let strip = Rect::from_min_max(
@@ -177,7 +180,7 @@ fn modulator_readings(
 /// responses faint, and dots where markers sit.
 fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &DeviceDisplay) {
     let c = &theme.colors;
-    for series in &display.series {
+    for series in display.series.iter().filter(|s| !s.values.is_empty()) {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
         if series.name == SPECTRUM {
             let wide = area.width() / series.values.len().max(1) as f32;
@@ -204,7 +207,12 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             .collect();
         painter.add(Shape::line(line, Stroke::new(1.5, colour)));
     }
-    for marker in &display.markers {
+    // The particles of a particle field are the handles it draws itself.
+    for marker in display
+        .markers
+        .iter()
+        .filter(|m| m.series != crate::particles::PARTICLES)
+    {
         let Some(series) = display.series(&marker.series) else {
             continue;
         };

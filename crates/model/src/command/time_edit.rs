@@ -83,6 +83,7 @@ impl Document {
                 "the time to open must be longer than 0",
             ));
         }
+        let opened_end = at.checked_add(length).ok_or(ModelError::PositionOverflow)?;
         if ids.len() != self.clips_split_by_insert(at).len() {
             return Err(ModelError::InvalidInput(
                 "`clips` needs one new ID for each clip the time opens inside, in track order",
@@ -101,7 +102,7 @@ impl Document {
         for ((place, clip), id) in split.into_iter().zip(ids) {
             let right = Clip {
                 id: *id,
-                start: at + length,
+                start: opened_end,
                 ..clip.part(at, clip.end(), &tempo)
             };
             self.clip_mut(clip.id)?.length = at - clip.start;
@@ -110,25 +111,32 @@ impl Document {
         self.each_envelope(|envelope| envelope.insert_time(at, length))?;
 
         let mut points = tempo_breakpoints(&tempo);
-        insert_tempo_time(&mut points, at, length);
+        insert_tempo_time(&mut points, at, length)?;
         self.set_tempo_points(points);
 
         let changes = self
             .settings
             .time_signatures
             .changes()
-            .map(|change| TimeSignatureChange {
-                at: if change.at >= at && change.at > Ticks::ZERO {
-                    change.at + length
+            .map(|change| {
+                let moved = if change.at >= at && change.at > Ticks::ZERO {
+                    change
+                        .at
+                        .checked_add(length)
+                        .ok_or(ModelError::PositionOverflow)?
                 } else {
                     change.at
-                },
-                ..change
-            });
-        self.settings.time_signatures = time_signature_map(changes.collect());
+                };
+                Ok(TimeSignatureChange { at: moved, ..change })
+            })
+            .collect::<Result<_, ModelError>>()?;
+        self.settings.time_signatures = time_signature_map(changes);
         for locator in &mut self.settings.locators {
             if locator.position >= at {
-                locator.position += length;
+                locator.position = locator
+                    .position
+                    .checked_add(length)
+                    .ok_or(ModelError::PositionOverflow)?;
             }
         }
         Ok(())
@@ -196,7 +204,10 @@ impl Document {
             self.add_arrangement_clip(place, &right)?;
         }
         self.move_clips(&earlier, -length)?;
-        self.each_envelope(|envelope| envelope.delete_time(start, end))?;
+        self.each_envelope(|envelope| {
+            envelope.delete_time(start, end);
+            Ok(())
+        })?;
 
         let mut points = tempo_breakpoints(&tempo);
         delete_tempo_time(&mut points, start, end);
@@ -266,7 +277,7 @@ impl Document {
     /// returns' included.
     fn each_envelope(
         &mut self,
-        edit: impl Fn(&mut crate::automation::Envelope),
+        edit: impl Fn(&mut crate::automation::Envelope) -> Result<(), ModelError>,
     ) -> Result<(), ModelError> {
         let holders: Vec<TrackId> = self
             .tracks()
@@ -278,7 +289,7 @@ impl Document {
             let targets: Vec<_> = track.automation.keys().copied().collect();
             for target in targets {
                 if let Some(automation) = track.automation.get_mut(&target) {
-                    edit(&mut automation.envelope);
+                    edit(&mut automation.envelope)?;
                 }
             }
         }
@@ -327,14 +338,21 @@ fn along(from: (Ticks, Bpm), to: (Ticks, Bpm), at: Ticks) -> Bpm {
 
 /// Opens `length` at `at` in a tempo's breakpoints: those from `at` on move
 /// later, and the tempo arriving at `at` holds across the new time.
-fn insert_tempo_time(points: &mut Vec<(Ticks, Bpm)>, at: Ticks, length: Ticks) {
+fn insert_tempo_time(
+    points: &mut Vec<(Ticks, Bpm)>,
+    at: Ticks,
+    length: Ticks,
+) -> Result<(), ModelError> {
     let before = points.partition_point(|&(position, _)| position < at);
     if before == points.len() {
-        return;
+        return Ok(());
     }
     let held = (before > 0).then(|| tempo_arriving(points, at));
     for point in &mut points[before..] {
-        point.0 += length;
+        point.0 = point
+            .0
+            .checked_add(length)
+            .ok_or(ModelError::PositionOverflow)?;
     }
     if let Some(bpm) = held {
         let mut hold = vec![(at, bpm)];
@@ -343,6 +361,7 @@ fn insert_tempo_time(points: &mut Vec<(Ticks, Bpm)>, at: Ticks, length: Ticks) {
         }
         points.splice(before..before, hold);
     }
+    Ok(())
 }
 
 /// Closes `start..end` in a tempo's breakpoints: those inside go, those
@@ -501,14 +520,14 @@ mod tests {
     #[test]
     fn inserting_time_in_an_envelope_holds_the_value_it_had_there() {
         let mut ramp = envelope(&[(0, 0.0), (4, 1.0)]);
-        ramp.insert_time(bar(2), bar(1));
+        ramp.insert_time(bar(2), bar(1)).unwrap();
         assert_eq!(
             shape(&ramp),
             [(bar(0), 0.0), (bar(2), 0.5), (bar(3), 0.5), (bar(5), 1.0)]
         );
         // At a breakpoint, it moves later and the value before it holds.
         let mut stepped = envelope(&[(0, 0.0), (2, 1.0)]);
-        stepped.insert_time(bar(2), bar(1));
+        stepped.insert_time(bar(2), bar(1)).unwrap();
         assert_eq!(
             shape(&stepped),
             [(bar(0), 0.0), (bar(2), 1.0), (bar(3), 1.0)]
@@ -516,8 +535,8 @@ mod tests {
         // Before the first breakpoint and after the last, the envelope is
         // flat already.
         let mut ends = envelope(&[(1, 0.2), (2, 0.8)]);
-        ends.insert_time(bar(0), bar(1));
-        ends.insert_time(bar(9), bar(1));
+        ends.insert_time(bar(0), bar(1)).unwrap();
+        ends.insert_time(bar(9), bar(1)).unwrap();
         assert_eq!(shape(&ends), [(bar(2), 0.2), (bar(3), 0.8)]);
     }
 
@@ -547,7 +566,7 @@ mod tests {
     #[test]
     fn inserting_time_in_the_tempo_holds_the_tempo_arriving_there() {
         let mut points = tempo(&[(0, 100.0), (4, 140.0)]);
-        insert_tempo_time(&mut points, bar(2), bar(1));
+        insert_tempo_time(&mut points, bar(2), bar(1)).unwrap();
         assert_eq!(
             points,
             tempo(&[(0, 100.0), (2, 120.0), (3, 120.0), (5, 140.0)])
@@ -848,5 +867,40 @@ mod tests {
         })
         .unwrap();
         assert_eq!(song.spans(audio), [(0, 2), (3, 5)]);
+    }
+
+    #[test]
+    fn a_time_too_long_to_place_is_refused_and_changes_nothing() {
+        let huge = Ticks(i64::MAX - bar(8).0);
+        // A tempo breakpoint after the insert and no clip: the shifted
+        // breakpoint would wrap.
+        let mut song = Song::new();
+        song.apply(Command::SetTempoBreakpoint {
+            at: bar(9),
+            bpm: Bpm::new(140.0).unwrap(),
+        })
+        .unwrap();
+        song.locator(10);
+        let before = song.doc.clone();
+        let insert = Command::InsertTime {
+            at: bar(5),
+            length: huge,
+            clips: Vec::new(),
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            song.doc.apply(&insert)
+        }));
+        assert!(matches!(result, Ok(Err(ModelError::PositionOverflow))));
+        assert_eq!(song.doc, before);
+
+        // A locator alone would wrap to a negative position.
+        let mut song = Song::new();
+        song.locator(10);
+        let before = song.doc.clone();
+        assert!(matches!(
+            song.doc.apply(&insert),
+            Err(ModelError::PositionOverflow)
+        ));
+        assert_eq!(song.doc, before);
     }
 }

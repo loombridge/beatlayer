@@ -4,7 +4,7 @@ use bl_core::time::Ticks;
 use bl_model::{
     AutomationTarget, Chain, ChainId, ChainZones, Command, ContentHash, Device, DeviceId,
     DeviceKind, DeviceRole, Editor, FadeMode, Layer, LayerId, MixerParam, ModelError, ParamId,
-    RackKind, TrackId, TrackKind, Zone, ZoneKind,
+    RackKind, RemoteMapping, RemoteSource, RemoteTarget, TrackId, TrackKind, Zone, ZoneKind,
 };
 
 fn rejected(editor: &mut Editor, command: Command) -> ModelError {
@@ -946,4 +946,67 @@ fn a_racks_fades_and_a_multisamplers_give_the_same_share_at_every_value() {
             }
         }
     }
+}
+
+// Spec: modulation R19, remote-mapping R6. Taking a rack apart takes the
+// mappings to the rack and its chain with it, in the same undo step.
+#[test]
+fn ungrouping_a_rack_takes_the_mappings_to_it_and_its_chain() {
+    let mut song = Song::new();
+    let rack = song.rack(RackKind::AudioEffect, 1);
+    let (rack_id, chain) = (rack.id, rack.chains[0].id);
+    song.insert(song.midi, 0, rack).unwrap();
+    let fx = song.device(DeviceRole::AudioEffect);
+    song.insert_in(chain, 0, fx).unwrap();
+    let lfo: DeviceId = song.editor.new_id();
+    song.insert(
+        song.midi,
+        1,
+        Device::new(
+            lfo,
+            "Shaper",
+            DeviceKind::Native {
+                device_type: "beatlayer.curve_mod".to_owned(),
+            },
+        ),
+    )
+    .unwrap();
+    song.editor
+        .apply(Command::MapModulator {
+            device: lfo,
+            slot: 0,
+            target: bl_model::modulator::ModTarget::Device {
+                device: rack_id,
+                param: ParamId(1),
+            },
+        })
+        .unwrap();
+    let target = RemoteTarget::DeviceOn { device: rack_id };
+    let kind = target.natural_kind().unwrap();
+    song.editor
+        .apply(Command::SetRemoteMappings {
+            mappings: vec![
+                RemoteMapping::new(
+                    RemoteSource::Note { channel: 1, key: 36 },
+                    target,
+                    kind,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ],
+        })
+        .unwrap();
+    let before = song.doc().clone();
+
+    song.editor
+        .apply(Command::UngroupDevice { device: rack_id })
+        .unwrap();
+    assert!(song.doc().device(lfo).unwrap().mappings.is_empty());
+    assert!(song.doc().settings().remote.is_empty());
+
+    song.editor.undo().unwrap();
+    assert_eq!(song.doc(), &before);
+    assert_eq!(song.doc().device(lfo).unwrap().mappings.len(), 1);
+    assert_eq!(song.doc().settings().remote.len(), 1);
 }

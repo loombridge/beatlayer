@@ -296,3 +296,99 @@ fn an_agent_reads_the_filters_curves_from_its_parameters_and_the_newest_data() {
     let curve = high.series("Filter Curve").unwrap();
     assert!(curve.values[0] < -24.0 && curve.values[95].abs() < 0.5);
 }
+
+// Spec: device-framework R4. A value outside a parameter's range, set by
+// `device.set_param` or at an automation breakpoint, is stored at the
+// nearest end of it, and a volume above the fader's top at the top.
+#[test]
+fn a_value_outside_a_parameters_range_is_stored_at_its_nearest_end() {
+    let scratch = Scratch::new("range");
+    let mut shell = Shell::new(
+        Preferences::default(),
+        Some(scratch.0.join("config")),
+        AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    );
+    let audio = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|track| track.kind() == TrackKind::Audio)
+        .map(bl_model::Track::id)
+        .expect("the default set has an audio track");
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [audio] }))
+        .unwrap();
+    let added: DeviceAdded = serde_json::from_value(
+        shell
+            .run(
+                "device.add",
+                json!({
+                    "device": {
+                        "kind": DeviceKind::Native { device_type: AUTO_FILTER.to_owned() },
+                        "name": "Auto Filter",
+                        "role": DeviceRole::AudioEffect,
+                    }
+                }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let device = added.device;
+    let description = auto_filter_type().description;
+    let freq = description.param(FREQ).unwrap();
+    let (min, max) = (freq.min(), freq.max());
+
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": FREQ, "value": 1e9 }),
+        )
+        .unwrap();
+    let stored = |shell: &mut Shell| {
+        parameters(shell, device)
+            .params
+            .iter()
+            .find(|p| p.descriptor.id == FREQ)
+            .unwrap()
+            .value
+    };
+    assert_eq!(stored(&mut shell), max);
+
+    for (at, value) in [(0, 0.4), (1, 1e9)] {
+        shell
+            .run(
+                "automation.set_breakpoint",
+                json!({
+                    "track": audio,
+                    "target": { "type": "device", "device": device, "param": FREQ },
+                    "at": at,
+                    "value": value,
+                }),
+            )
+            .unwrap();
+    }
+    let envelope = shell
+        .editor()
+        .document()
+        .track(audio)
+        .unwrap()
+        .automation_for(&bl_model::AutomationTarget::Device {
+            device,
+            param: FREQ,
+        })
+        .unwrap()
+        .envelope
+        .points()
+        .map(|point| point.value)
+        .collect::<Vec<_>>();
+    assert_eq!(envelope, [min, max]);
+
+    shell
+        .run("mixer.set_volume", json!({ "track": audio, "volume": 7.0 }))
+        .unwrap();
+    assert_eq!(
+        shell.editor().document().track(audio).unwrap().mixer().volume,
+        bl_model::MAX_CUE_VOLUME
+    );
+}

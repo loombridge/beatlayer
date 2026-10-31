@@ -581,9 +581,9 @@ impl Envelope {
     /// where no breakpoint comes before `at` or none from `at` on: the
     /// envelope already runs flat there.
     // shortcut: the two halves of a bent segment the insert splits both keep its bend, which only approximates the curve; upgrade if a golden render ever needs it exact.
-    pub(crate) fn insert_time(&mut self, at: Ticks, length: Ticks) {
+    pub(crate) fn insert_time(&mut self, at: Ticks, length: Ticks) -> Result<(), ModelError> {
         let Some(value) = self.value_at(at).filter(|_| length > Ticks::ZERO) else {
-            return;
+            return Ok(());
         };
         let before = self.points.partition_point(|point| point.at < at);
         let anchored = before > 0 && before < self.points.len();
@@ -591,10 +591,13 @@ impl Envelope {
             .checked_sub(1)
             .map_or(0.0, |last| self.points[last].bend);
         for point in &mut self.points[before..] {
-            point.at += length;
+            point.at = point
+                .at
+                .checked_add(length)
+                .ok_or(ModelError::PositionOverflow)?;
         }
         if !anchored {
-            return;
+            return Ok(());
         }
         let held = [
             Breakpoint {
@@ -616,6 +619,7 @@ impl Envelope {
             &held[..]
         };
         self.points.splice(before..before, kept.iter().copied());
+        Ok(())
     }
 
     /// Removes the time from `start` to `end`: the breakpoints inside it go

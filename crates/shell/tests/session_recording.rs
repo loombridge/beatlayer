@@ -463,7 +463,13 @@ fn an_overdub_into_a_nudged_clip_records_at_its_clip_time() {
             json!({ "track": nudged, "scene": scene, "steps": 8 }),
         )
         .unwrap();
-    pass_time(&control, &mut shell, 10);
+    // The engine shows the nudge once the block that took it has run.
+    poll_until(&control, &mut shell, "the nudge to show", |shell| {
+        shell
+            .session_states()
+            .iter()
+            .any(|s| s.track == nudged && s.scene == scene && s.offset.ticks == Ticks::QUARTER)
+    });
     // How far ahead the nudged clip's own time is of the other's, at any
     // one moment: the nudge, less the later launch of one of them.
     let tempo = shell.editor().document().settings().tempo.clone();

@@ -157,6 +157,9 @@ struct ManualState {
     active: bool,
     /// Whether that stream is stopping, so a waiter gives up.
     stopping: bool,
+    /// Whether that stream ended because its device went away or changed
+    /// rate, so blocks asked for never run.
+    ended: bool,
 }
 
 #[derive(Debug, Default)]
@@ -175,6 +178,7 @@ impl ManualPacer {
         assert!(!state.active, "two manual streams share one null backend");
         state.active = true;
         state.stopping = false;
+        state.ended = false;
         state.requested = state.completed;
     }
 
@@ -205,6 +209,13 @@ impl ManualPacer {
         !state.stopping && !stop.load(Ordering::Acquire)
     }
 
+    /// Says the stream ended on its own, as its device went away or changed
+    /// rate, waking anyone waiting for its blocks.
+    fn ended(&self) {
+        self.lock().ended = true;
+        self.done.notify_all();
+    }
+
     /// Counts a block the stream ran and wakes the test waiting for it.
     fn finished_block(&self) {
         self.lock().completed += 1;
@@ -212,7 +223,7 @@ impl ManualPacer {
     }
 
     /// Runs exactly `blocks` blocks on the stream's thread, and returns once
-    /// they have run.
+    /// they have run, or once the stream has ended on its own.
     fn run(&self, blocks: u64) {
         let mut state = self.lock();
         assert!(state.active, "start the null stream before running blocks");
@@ -222,7 +233,7 @@ impl ManualPacer {
         state.requested = state.requested.saturating_add(blocks);
         let target = state.requested;
         self.ready.notify_all();
-        while state.completed < target {
+        while state.completed < target && !state.ended {
             assert!(
                 !state.stopping,
                 "the null stream stopped before the blocks finished"
@@ -790,7 +801,8 @@ impl NullControl {
     }
 
     /// Runs exactly `blocks` blocks on the stream's own thread, and returns
-    /// once they have run (T199). The stream must be started first, and the
+    /// once they have run (T199), or at once if the stream has ended because
+    /// its device went away or changed rate. The stream must be started first, and the
     /// backend paced [`Manually`](Pacing::Manual); the test clock moves on by
     /// each block's length as they run.
     ///
@@ -910,7 +922,12 @@ impl NullEngine {
                     thread::sleep(IDLE_PERIOD);
                     continue;
                 }
-                Health::End => break,
+                Health::End => {
+                    if let Some(pacer) = &self.pacer {
+                        pacer.ended();
+                    }
+                    break;
+                }
             }
             if idle {
                 // Calling back again after a pause: start the clock afresh
@@ -1368,6 +1385,32 @@ mod tests {
         assert_eq!(stream.stats().heap_operations, 0);
         stream.stop().unwrap();
         assert!(control.clock().is_some());
+    }
+
+    #[test]
+    fn blocks_asked_of_a_stream_whose_device_went_away_return() {
+        let options = NullOptions {
+            pacing: Pacing::Manual,
+            frame_limit: None,
+            channels: 2,
+            dropout_after: None,
+        };
+        let (backend, control) = NullBackend::with_devices(options, &[(LOCAL, NAME)]);
+        let blocks = Arc::new(AtomicU64::new(0));
+        let mut stream = backend
+            .open_stream(&duplex(256), Box::new(Count(Arc::clone(&blocks))))
+            .unwrap();
+        stream.start().unwrap();
+        control.run_blocks(1);
+
+        // The thread may notice before or after the next block is asked for:
+        // either way, asking returns rather than waiting for good.
+        control.unplug(LOCAL);
+        control.run_blocks(1);
+        control.run_blocks(1);
+        assert!(stream.stats().device_lost);
+        assert!(blocks.load(Ordering::Relaxed) <= 2);
+        stream.stop().unwrap();
     }
 
     #[test]

@@ -8,7 +8,7 @@ use bl_devices::articulation_map::{
     ARTICULATION, ARTICULATION_MAP, PASS_TRIGGERS, articulation_map_type,
 };
 use bl_engine::{NoteEvent, NoteKind};
-use bl_model::{Articulation, ArticulationOutput, ArticulationTrigger, Command};
+use bl_model::{Articulation, ArticulationList, ArticulationOutput, ArticulationTrigger, Command};
 use common::chain::{BEAT_FRAMES, Chain, note};
 use common::{device, node, notes_through_events, registry, set};
 
@@ -519,4 +519,48 @@ fn the_device_sends_on_its_frame_at_any_block_size() {
             "the trigger is swallowed at size {size}: {first:?}"
         );
     }
+}
+
+/// The notes `block` holds, as `(kind, key, channel)`.
+fn kinds(sent: &[NoteEvent]) -> Vec<(NoteKind, u8, u8)> {
+    sent.iter().map(|n| (n.kind, n.key, n.channel)).collect()
+}
+
+// Spec: articulation-map R8, device-framework R31. Turning Pass Triggers off
+// while a trigger key is held doesn't swallow the note-off of the note-on that
+// passed.
+#[test]
+fn turning_pass_triggers_off_while_a_trigger_is_held_still_ends_it() {
+    let mut device = map(vec![articulation()]);
+    device.params.insert(PASS_TRIGGERS, 1.0);
+    let mut node = node(&registry(), &device, FRAMES);
+    let first = notes_through_events(node.as_mut(), &[on(0, 36, 0)], &[], FRAMES);
+    assert!(kinds(&first).contains(&(NoteKind::On, 36, 0)), "{first:?}");
+    let second = notes_through_events(
+        node.as_mut(),
+        &[off(10, 36, 0)],
+        &[set(0, PASS_TRIGGERS, 0.0)],
+        FRAMES,
+    );
+    assert_eq!(kinds(&second), [(NoteKind::Off, 36, 0)]);
+}
+
+// Spec: articulation-map R10, R15, device-framework R31. A held key that
+// becomes a trigger, as Learn makes it, still ends on the channel it went out
+// on.
+#[test]
+fn a_held_key_that_becomes_a_trigger_still_ends_on_its_channel() {
+    let mut node = node(&registry(), &map(vec![articulation()]), FRAMES);
+    let first = notes_through_events(node.as_mut(), &[on(0, 60, 0)], &[], FRAMES);
+    assert_eq!(kinds(&first), [(NoteKind::On, 60, 4)]);
+    let mut learned = articulation();
+    learned.trigger = ArticulationTrigger::Key { key: 60 };
+    let collector = bl_engine::Collector::new();
+    node.receive_data(
+        collector
+            .handle()
+            .data(bl_engine::Articulations(ArticulationList::of(&[learned]))),
+    );
+    let second = notes_through_events(node.as_mut(), &[off(10, 60, 0)], &[], FRAMES);
+    assert_eq!(kinds(&second), [(NoteKind::Off, 60, 4)]);
 }

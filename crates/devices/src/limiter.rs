@@ -47,6 +47,13 @@ pub const ROUTING: ParamId = ParamId(6);
 /// Link: how much of the gain reduction both channels share, per cent.
 pub const LINK: ParamId = ParamId(7);
 
+/// Maximize: Threshold takes Ceiling's control and Output Gain's.
+pub const MAXIMIZE: ParamId = ParamId(8);
+/// Threshold: with Maximize on, the level the input is lifted from, in dB.
+pub const THRESHOLD: ParamId = ParamId(9);
+/// Output: with Maximize on, the level the output is limited at.
+pub const OUTPUT: ParamId = ParamId(10);
+
 /// The parameters', descriptors', and bank's order.
 const CEILING_INDEX: usize = 0;
 const GAIN_INDEX: usize = 1;
@@ -56,6 +63,9 @@ const LOOKAHEAD_INDEX: usize = 4;
 const MODE_INDEX: usize = 5;
 const ROUTING_INDEX: usize = 6;
 const LINK_INDEX: usize = 7;
+const MAXIMIZE_INDEX: usize = 8;
+const THRESHOLD_INDEX: usize = 9;
+const OUTPUT_INDEX: usize = 10;
 
 /// The look-ahead times the chooser offers, in seconds.
 const LOOKAHEAD_SECONDS: [f64; 3] = [0.0015, 0.003, 0.006];
@@ -116,6 +126,20 @@ pub fn limiter_type() -> DeviceType {
             .describe("Whether the channels are left/right or mid/side."),
         ParamDescriptor::continuous(LINK, "Link", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("How much of the gain reduction both channels share."),
+        ParamDescriptor::toggle(MAXIMIZE, "Maximize", false).describe(
+            "Turns Ceiling into Threshold and Gain into Output: the level the signal is \
+             lifted from, and the level it is limited at.",
+        ),
+        ParamDescriptor::continuous(
+            THRESHOLD,
+            "Threshold",
+            (-24.0, 0.0),
+            0.0,
+            ParamUnit::Decibels,
+        )
+        .describe("With Maximize on, the level the signal is lifted from: lower is louder."),
+        ParamDescriptor::gain(OUTPUT, "Output", 0.0, -0.3)
+            .describe("With Maximize on, the level the output is limited at."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &[(GAIN, Widget::Knob)])),
@@ -129,6 +153,7 @@ pub fn limiter_type() -> DeviceType {
                 (RELEASE, Widget::Knob),
                 (LINK, Widget::Knob),
                 (AUTO, Widget::Toggle),
+                (MAXIMIZE, Widget::Toggle),
                 (LOOKAHEAD, Widget::Chooser),
                 (CEILING_MODE, Widget::Chooser),
                 (ROUTING, Widget::Chooser),
@@ -138,19 +163,24 @@ pub fn limiter_type() -> DeviceType {
     DeviceType::native(LIMITER, "Limiter", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
-            .with_banks(&[(
-                "Limiter",
-                &[
-                    "Ceiling",
-                    "Gain",
-                    "Release",
-                    "Auto",
-                    "Lookahead",
-                    "Ceiling Mode",
-                    "Routing Mode",
-                    "Link",
-                ],
-            )]),
+            .with_alternate(MAXIMIZE, CEILING, THRESHOLD)
+            .with_alternate(MAXIMIZE, GAIN, OUTPUT)
+            .with_banks(&[
+                (
+                    "Limiter",
+                    &[
+                        "Ceiling",
+                        "Gain",
+                        "Release",
+                        "Auto",
+                        "Lookahead",
+                        "Ceiling Mode",
+                        "Routing Mode",
+                        "Link",
+                    ],
+                ),
+                ("Maximize", &["Maximize", "Threshold", "Output"]),
+            ]),
     )
 }
 
@@ -323,7 +353,23 @@ impl NativeDevice for Brickwall {
             return;
         }
 
-        let ceiling = db_to_gain(params.value(CEILING_INDEX)).max(1e-6) as f32;
+        // Maximize (Spec: limiter R11): the limit is Output, and the input is
+        // lifted by Output minus Threshold in dB.
+        let maximize = params.value(MAXIMIZE_INDEX) >= 0.5;
+        let ceiling = if maximize {
+            params.value(OUTPUT_INDEX)
+        } else {
+            db_to_gain(params.value(CEILING_INDEX))
+        }
+        .max(1e-6) as f32;
+        let (input, lift) = if maximize {
+            (
+                params.ramp(OUTPUT_INDEX),
+                (1.0 / db_to_gain(params.value(THRESHOLD_INDEX))) as f32,
+            )
+        } else {
+            (params.ramp(GAIN_INDEX), 1.0)
+        };
         let mode = (params.value(MODE_INDEX) as usize).min(MODE_TRUE_PEAK);
         // True Peak leaves a little headroom for the reconstruction filters.
         let limit = if mode == MODE_TRUE_PEAK {
@@ -338,12 +384,11 @@ impl NativeDevice for Brickwall {
         self.lookahead = lookahead as u32;
 
         // 1. The input gain, into the working buffers.
-        let gain = params.ramp(GAIN_INDEX);
         for channel in 0..channels {
             let src = audio.channel_mut(channel);
             let work = &mut self.work[channel][..frames];
-            for ((sample, out), g) in src.iter().zip(work.iter_mut()).zip(gain) {
-                *out = *sample * *g;
+            for ((sample, out), g) in src.iter().zip(work.iter_mut()).zip(input) {
+                *out = *sample * *g * lift;
             }
         }
 

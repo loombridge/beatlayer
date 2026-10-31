@@ -10,6 +10,18 @@ publish.workspace = true
 [dependencies]
 # Parameter smoothing (`smooth`), re-exported from the plug-in kit.
 lspk-params.workspace = true
+# The SIMD lanes the physical models run their voices in (physical-models R12, R18).
+lspk-dsp.workspace = true
+
+[dev-dependencies]
+# Every block in the physical models' tests runs as a real-time section under
+# the allocation trap.
+lspk-rt.workspace = true
+
+# The physical models against the device budget, run by hand: `cargo bench -p bl-dsp --bench physical`.
+[[bench]]
+name = "physical"
+harness = false
 
 [lints]
 workspace = true

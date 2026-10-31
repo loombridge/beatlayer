@@ -65,6 +65,7 @@ mod play_mod;
 mod polysynth;
 mod remap;
 mod reverb;
+mod roar;
 mod rules;
 mod sampler;
 mod saturator;

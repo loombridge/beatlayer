@@ -46,7 +46,7 @@ fn view_label(view: &str) -> &str {
         "Transfer Curve" => "Curve",
         ACTIVITY => "Act",
         COLLAPSED => "Min",
-        other => other,
+        other => other.strip_prefix("Stage ").unwrap_or(other),
     }
 }
 

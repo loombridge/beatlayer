@@ -149,7 +149,7 @@ pub fn place_with_pages(
         placed
             .controls
             .iter()
-            .map(|c| (c.param, c.widget, at(c.rect)))
+            .map(|c| (panel.drawn(c.param), c.widget, at(c.rect)))
             .collect(),
         placed
             .cells
@@ -442,6 +442,9 @@ pub fn show(
             _ => None,
         };
         if let Some(display) = shown {
+            // The drag goes under the display, so its view buttons stay on
+            // top and take their clicks.
+            display_drag(ui, frame, panel, display, rect, id, events);
             crate::device_display::draw(ui, theme, rect, id, frame.enabled, display, panel, events);
         }
         // Spec: articulation-map R15. The Articulation Map's list shows
@@ -595,6 +598,47 @@ pub fn show(
                 });
         }
     }
+}
+
+/// Spec: roar R12. A vertical drag on a display that names parameters to drag
+/// (the description's `display_drag`, one for each view) changes the shown
+/// view's, as a drag on its knob does: one undo step named for the parameter.
+fn display_drag(
+    ui: &mut Ui,
+    frame: &DeviceFrame,
+    panel: &DevicePanel,
+    display: &DeviceDisplay,
+    rect: Rect,
+    id: Id,
+    events: &mut Vec<UiEvent>,
+) {
+    let description = &panel.description;
+    let view = description
+        .views
+        .iter()
+        .position(|v| Some(v.as_str()) == display.view.as_deref())
+        .unwrap_or(0);
+    let Some(param) = description.display_drag.get(view) else {
+        return;
+    };
+    let Some(index) = description.params.iter().position(|p| p.id == *param) else {
+        return;
+    };
+    let control = Control {
+        device: frame.id,
+        enabled: frame.enabled,
+        descriptor: &description.params[index],
+        value: panel.value(index),
+        modulated: None,
+        rect,
+        stops: &[],
+        knob: None,
+        configured: &[],
+        text: None,
+        automation: None,
+    };
+    let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
+    control.value_input(ui, &response, events);
 }
 
 /// What a control's name above it reads: a sample slot's parameter drops the

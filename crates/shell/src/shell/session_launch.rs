@@ -410,6 +410,7 @@ impl Shell {
         // state; its edits run the set's scene and slot commands as one
         // undo step.
         let columns = crate::mixer_view::columns(self.editor.document(), &self.arrangement);
+        let doc_tracks = crate::arrangement::editing::lanes(self.editor.document());
         let scenes: Vec<bl_model::SceneId> = self
             .editor
             .document()
@@ -441,6 +442,7 @@ impl Shell {
                     editor: &mut self.editor,
                     media: &self.media,
                     columns: &columns,
+                    doc_tracks: &doc_tracks,
                     scenes: &scenes,
                     edge_fades,
                     warping: auto_warp::Warping {

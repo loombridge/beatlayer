@@ -1,5 +1,7 @@
 //! The clip the Clip View shows and the scale that follows it.
 
+use std::collections::HashMap;
+
 use super::Shell;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::scales as scales_ids;
@@ -55,19 +57,32 @@ impl Shell {
     /// The clips in the selected Session slots, in track then scene order.
     pub(super) fn selected_slot_clips(&self) -> Vec<bl_model::ClipId> {
         let doc = self.editor.document();
-        let order = doc.track_order();
-        let mut slots = self.session.selected_slots().to_vec();
+        let track_at: HashMap<_, _> = doc
+            .track_order()
+            .into_iter()
+            .enumerate()
+            .map(|(at, track)| (track, at))
+            .collect();
+        let scene_at: HashMap<_, _> = doc
+            .scenes()
+            .enumerate()
+            .map(|(at, scene)| (scene.id, at))
+            .collect();
         // Spec: multi-clip-editing R2. By track, then scene.
-        slots.sort_by_key(|slot| {
-            (
-                order.iter().position(|track| *track == slot.track),
-                doc.scene_position(slot.scene),
-            )
-        });
-        slots
+        let mut keyed: Vec<_> = self
+            .session
+            .selected_slots()
             .iter()
-            .filter_map(|slot| doc.slot(slot.track, slot.scene).map(|clip| clip.id))
-            .collect()
+            .filter_map(|slot| {
+                let clip = doc.slot(slot.track, slot.scene)?;
+                Some((
+                    (track_at.get(&slot.track), scene_at.get(&slot.scene)),
+                    clip.id,
+                ))
+            })
+            .collect();
+        keyed.sort_unstable_by_key(|(key, _)| *key);
+        keyed.into_iter().map(|(_, clip)| clip).collect()
     }
 
     /// The clips the Control Bar's scale controls change (the scales spec,

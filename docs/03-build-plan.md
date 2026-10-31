@@ -1014,7 +1014,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
 | 8.32 | todo |  |  |
-| 8.33 | todo |  |  |
+| 8.33 | done | 31 October 2026 | [#650](https://github.com/loombridge/beatlayer/pull/650): Delay has 12.4's LFO with six rate modes, seven waves and Morph in its expanded part, and Limiter has Maximize with Threshold and Output; saving Delay's expanded part with the set (R13) is a follow-up |
 | 8.34 | todo |  |  |
 | 8.35 | todo |  |  |
 | 8.36 | todo |  |  |

@@ -133,7 +133,6 @@ impl Snapshot {
                     .into_owned(),
                 size: entry.size,
                 modified: entry.modified,
-                hash: None,
             })
             .collect()
     }
@@ -662,7 +661,6 @@ mod tests {
                     place: "/lib".to_owned(),
                     size: 100,
                     modified: 0,
-                    hash: None,
                 }
             })
             .collect();

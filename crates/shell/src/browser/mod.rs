@@ -679,16 +679,14 @@ impl BrowserView {
         self.collections.load(loaded.item_collections);
         // The files that carried a tag keep their hash, so a file moved
         // outside Beatlayer finds them again (spec: browser-tags R5).
-        for row in &loaded.files {
-            if let Some(hash) = &row.hash {
-                self.tagged_files.insert(
-                    row.path.clone(),
-                    TaggedFile {
-                        size: row.size,
-                        hash: hash.clone(),
-                    },
-                );
-            }
+        for row in &loaded.tagged_files {
+            self.tagged_files.insert(
+                row.path.clone(),
+                TaggedFile {
+                    size: row.size,
+                    hash: row.hash.clone(),
+                },
+            );
         }
         self.saved_files = loaded
             .files
@@ -730,6 +728,12 @@ impl BrowserView {
             .get(key)
             .map(|tagged| tagged.hash.as_str())
             .filter(|hash| !hash.is_empty())
+    }
+
+    /// Whether files are still being hashed for the tags, for tests.
+    #[must_use]
+    pub fn hashing(&self) -> bool {
+        !self.pending_hashes.is_empty()
     }
 
     /// The message the Status Bar shows, if the browser has one (spec:
@@ -3466,6 +3470,7 @@ impl BrowserView {
                     ops.extend(self.tags.set_item_tags(&key, carried));
                 }
                 self.save_tags(ops);
+                self.forget_untagged(&items);
                 self.hash_tagged_files(&items);
                 outcome.value = to_value(&self.tags_state(&items));
                 self.rebuild();
@@ -3843,6 +3848,7 @@ impl BrowserView {
             if let Some(db) = &self.db {
                 db.save_files(vec![FileOp::Hash {
                     path: path.clone(),
+                    size: tagged.size,
                     hash: hash.clone(),
                 }]);
             }
@@ -3850,14 +3856,36 @@ impl BrowserView {
         self.rehome(&path, &hash);
     }
 
+    /// A file that no longer carries a tag or a collection keeps no hash.
+    fn forget_untagged(&mut self, items: &[String]) {
+        for item in items {
+            let key = self.tag_key(item);
+            if self.tags.item_tags_ref(&key).is_none()
+                && self.collections.of(&key).is_empty()
+                && self.tagged_files.remove(&key).is_some()
+                && let Some(db) = &self.db
+            {
+                db.save_files(vec![FileOp::Untag(key)]);
+            }
+        }
+    }
+
+    /// Whether a tagged file has left its path: it isn't in the index and
+    /// isn't on disk either, which a project switch alone doesn't change
+    /// (spec: browser-tags R5).
+    fn is_gone(&self, path: &str) -> bool {
+        !self.saved_files.contains_key(path) && !Path::new(path).exists()
+    }
+
     /// The tags of a file that moved outside Beatlayer pass to the file
-    /// with the same content (spec: browser-tags R5).
+    /// with the same content, and join the ones it has (spec: browser-tags
+    /// R5).
     fn rehome(&mut self, path: &str, hash: &str) {
         let orphans: Vec<String> = self
             .tagged_files
             .iter()
             .filter(|(old, tagged)| {
-                tagged.hash == hash && *old != path && !self.saved_files.contains_key(*old)
+                tagged.hash == hash && *old != path && self.is_gone(old)
             })
             .map(|(old, _)| old.clone())
             .collect();
@@ -3867,8 +3895,21 @@ impl BrowserView {
             if tags.is_empty() && collected.is_empty() {
                 continue;
             }
+            // The hash moves first, so clearing the old tags below doesn't
+            // forget it.
+            if let Some(tagged) = self.tagged_files.remove(&old) {
+                self.tagged_files.insert(path.to_owned(), tagged);
+                if let Some(db) = &self.db {
+                    db.save_files(vec![FileOp::Rehome {
+                        old: old.clone(),
+                        new: path.to_owned(),
+                    }]);
+                }
+            }
             if !tags.is_empty() {
-                let mut ops = self.tags.set_item_tags(path, tags);
+                let mut merged: BTreeSet<i64> = self.tags.item_tags(path).into_iter().collect();
+                merged.extend(tags);
+                let mut ops = self.tags.set_item_tags(path, merged);
                 ops.extend(self.tags.set_item_tags(&old, Vec::new()));
                 self.save_tags(ops);
             }
@@ -3881,9 +3922,6 @@ impl BrowserView {
                     self.collections.set(&old, BTreeSet::new()),
                 ];
                 self.save_collections(ops.into_iter().flatten().collect());
-            }
-            if let Some(tagged) = self.tagged_files.remove(&old) {
-                self.tagged_files.insert(path.to_owned(), tagged);
             }
         }
     }
@@ -3922,7 +3960,7 @@ impl BrowserView {
         let orphans: Vec<(String, u64)> = self
             .tagged_files
             .iter()
-            .filter(|(old, tagged)| !tagged.hash.is_empty() && !self.saved_files.contains_key(*old))
+            .filter(|(old, tagged)| !tagged.hash.is_empty() && self.is_gone(old))
             .map(|(old, tagged)| (old.clone(), tagged.size))
             .collect();
         for (_, size) in orphans {

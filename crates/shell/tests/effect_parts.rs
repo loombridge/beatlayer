@@ -3,7 +3,7 @@
 //! menu, and the expand toggle's command. The device is the framework's
 //! test effects device.
 
-use bl_devices::testing::{self, EFFECTS_INVERT};
+use bl_devices::testing::{self, EFFECTS_INVERT, INSTRUMENT_HI_QUALITY};
 use bl_model::TrackId;
 use bl_shell::device_commands::{
     DeviceAdded, DeviceParameters, DeviceViewState, frame_width, window_min_size,
@@ -153,4 +153,40 @@ fn the_expand_toggle_widens_the_device_like_fold_and_changes_only_the_view() {
             .is_err()
     );
     assert!(!state(&shell).devices[1].expanded);
+}
+
+// Spec: instrument voices R19
+#[test]
+fn an_instruments_hi_quality_is_a_menu_option_that_one_undo_step_switches_and_agents_read_back() {
+    let mut shell = shell();
+    let instrument = add(&mut shell, &testing::instrument_type());
+    let hi_quality = |shell: &mut Shell| -> (bool, bool, f64) {
+        let reply: Value = shell
+            .run("device.parameters", json!({ "device": instrument.device }))
+            .unwrap();
+        let parameters: DeviceParameters = serde_json::from_value(reply).unwrap();
+        let param = parameters
+            .params
+            .iter()
+            .find(|p| p.descriptor.id == INSTRUMENT_HI_QUALITY)
+            .unwrap();
+        (param.menu_option, param.descriptor.automatable, param.value)
+    };
+    // Off in a new device, a menu option, automatable like any parameter.
+    assert_eq!(hi_quality(&mut shell), (true, true, 0.0));
+    assert_eq!(options(&shell, 0), [("Hi-Quality".to_owned(), false)]);
+
+    let steps = shell.editor().undo_history().len();
+    shell
+        .invoke(
+            "device.set_param",
+            json!({ "device": instrument.device, "param": INSTRUMENT_HI_QUALITY, "value": 1.0 }),
+        )
+        .unwrap();
+    assert_eq!(shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(hi_quality(&mut shell).2, 1.0);
+    assert_eq!(options(&shell, 0), [("Hi-Quality".to_owned(), true)]);
+
+    shell.invoke("edit.undo", json!({})).unwrap();
+    assert_eq!(hi_quality(&mut shell).2, 0.0);
 }

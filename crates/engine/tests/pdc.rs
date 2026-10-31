@@ -18,8 +18,9 @@ use bl_engine::testing::{DELAY, DELAY_FRAMES, INSTRUMENT, KEY, MULTI, THROUGH, V
 use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, AutomationTarget, CHAIN_SELECTOR, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
-    DeviceRole, Editor, MidiData, Note, RackKind, TrackDelay, TrackId, TrackKind, Zone, ZoneKind, registry,
+    AudioData, AutomationTarget, CHAIN_SELECTOR, Chain, ChainId, Clip, ClipData, Command,
+    ContentHash, Device, DeviceId, DeviceKind, DeviceRole, Editor, MidiData, Note, RackKind,
+    TrackDelay, TrackId, TrackKind, Zone, ZoneKind, registry,
 };
 use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
@@ -1349,7 +1350,10 @@ fn an_armed_auto_track_playing_its_clip_keeps_its_compensation_under_reduced_lat
     let doc = rig.editor.document();
     assert!(doc.track(a).unwrap().routing().monitoring(true)); // Auto, armed
     let out = rig.render(2 * LATENCY + 512, 64);
-    assert_null(&out, "A plays its clip, so it isn't monitored and stays held back with B");
+    assert_null(
+        &out,
+        "A plays its clip, so it isn't monitored and stays held back with B",
+    );
 }
 
 // Spec: delay-compensation R8; routing R11. The same track, with no clip
@@ -1388,7 +1392,11 @@ fn an_armed_auto_track_hearing_its_input_reaches_main_unheld_under_reduced_laten
     rig.render(2 * LATENCY + 512, 64);
     replay(&mut rig);
     let out = rig.render(2 * LATENCY + 512, 64);
-    assert!(near(out[0], -1.0), "C's impulse passes A at once: {}", out[0]);
+    assert!(
+        near(out[0], -1.0),
+        "C's impulse passes A at once: {}",
+        out[0]
+    );
     assert!(near(out[LATENCY], 1.0), "B's arrives with its latency");
 }
 

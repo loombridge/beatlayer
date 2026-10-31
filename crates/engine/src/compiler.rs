@@ -1417,13 +1417,16 @@ impl Compiler {
                 .collect(),
             waits: waits.iter().copied().collect(),
         };
-        let program = EngineProgram {
+        let mut program = EngineProgram {
             generation,
             main_latency: self.main_latency,
             base,
             index: build.layout.iter().map(|(&key, p)| (key, p.slot)).collect(),
             slots: Shared::new(build.slots),
             migrations: build.migrations,
+            slot_task: Vec::new(),
+            migrated_to: Vec::new(),
+            migrated_from: Vec::new(),
             order,
             task_dependents: dependents.iter().flatten().copied().collect(),
             sched: Sched::new(tasks, build.racks.len(), build.rack_chains.len()),
@@ -1496,6 +1499,7 @@ impl Compiler {
             ]),
             signals: build.signals,
         };
+        program.index_swap();
         self.modulator_rows = mod_rows;
         self.generation = generation;
         self.layout = build.layout;

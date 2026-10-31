@@ -3527,7 +3527,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Moves a chain to `index` in a rack's list of chains, within its rack or into another rack, on the same track or another, keeping its devices' settings and running state. The index counts positions after the chain is taken out of its current place. The chain must fit the other rack's kind, and a chain can't go into a rack it holds.",
+        description: "Moves a chain to `index` in a rack's list of chains, within its rack or into another rack, on the same track or another, keeping its devices' settings and running state. The index counts positions after the chain is taken out of its current place. The chain's devices must fit the other rack's kind, and the chain loses the zones and the Volume and Pan that kind lacks, with their envelopes. A chain can't go into a rack it holds.",
     },
     Entry {
         id: "chain.rename",

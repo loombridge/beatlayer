@@ -437,11 +437,6 @@ fn warped_case(ratchet: &mut Ratchet, material: &str, mode: &str, bpm: f64) {
             place(host, track, &path, 0)
         };
         warp(host, clip, mode, bpm);
-        // A warp mode set while the song is stopped crossfades in from the
-        // old mode at the next start, live only: a bug of its own, pinned
-        // by `a_warp_mode_set_while_stopped_starts_clean`. A first start
-        // takes that crossfade, so the comparison sees the mode alone.
-        host.play_from(0, 50);
     });
 }
 

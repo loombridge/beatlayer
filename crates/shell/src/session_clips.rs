@@ -298,7 +298,7 @@ pub fn material_of_clipboard(material: &Material) -> SlotMaterial {
 /// the track can't take are left behind (an Arrangement clip's only modulate,
 /// and a parameter of another track isn't this track's), and a groove the pool
 /// no longer holds.
-fn carried(doc: &Document, track: TrackId, clip: &Clip, in_slot: bool) -> Clip {
+pub(crate) fn carried(doc: &Document, track: TrackId, clip: &Clip, in_slot: bool) -> Clip {
     let mut carried = clip.clone();
     carried.envelopes.retain(|envelope| {
         (in_slot || envelope.kind != EnvelopeKind::Automation)

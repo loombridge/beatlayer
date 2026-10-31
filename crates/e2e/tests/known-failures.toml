@@ -128,12 +128,6 @@ description = "Complex Pro on the melody at a speed whose input per block isn't 
 
 [[failure]]
 suite = "live_offline"
-key = "warp mode set while stopped/complex_pro"
-property = "live matches offline"
-description = "A warp mode changed while the song is stopped crossfades in from the old mode over 20 ms at the next start, live only: the clip list built while stopped still names the old mode as playing, so the first frames differ from the export (residual -41 dB from frame 1). Warp-modes R8 crossfades only a change to a playing clip."
-
-[[failure]]
-suite = "live_offline"
 key = "tempo-synced delay under a tempo ramp"
 property = "live matches offline"
 description = "Reprise, the tempo-synced delay, works out its delay time once per block from the tempo at the block's first frame, so under a tempo ramp its repeats move in block-sized steps and the live device's 256-frame blocks render differently from an export's (device-framework S9, export R14): the drum loop sent to it while the tempo rises from 120 to 128 BPM over four bars parts from frame 23,905, at a residual of -103 dB."

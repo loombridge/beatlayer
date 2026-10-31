@@ -1748,3 +1748,46 @@ fn the_cv_effects_sections_list_their_ports_and_clock_in_shows_what_leads() {
         h.settle();
     }
 }
+
+// Spec: cv-tools R9, R32 (WP-7.18b). CV Envelope Follower, CV LFO and CV
+// Shaper have a section with their CV output's chooser, controls for Depth,
+// Min and Max, and no Map button or Mod switch.
+#[test]
+fn the_cv_modulators_panels_have_a_cv_output_and_min_max_depth_and_no_mapping() {
+    let mut h = harness();
+    for t in [
+        bl_devices::cv_level_type(),
+        bl_devices::cv_wave_type(),
+        bl_devices::cv_curve_type(),
+    ] {
+        let device = add(
+            &mut h,
+            json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+        );
+        let nodes = Harness::nodes(&h.settle());
+        assert_eq!(
+            Harness::node(&nodes, "CV Output CV").value,
+            "No Output",
+            "{}",
+            t.name
+        );
+        for control in ["Depth", "Min", "Max"] {
+            assert!(
+                nodes.iter().any(|n| n.label == control),
+                "{} has {control}",
+                t.name
+            );
+        }
+        for absent in ["Map 1", "Mod", "Polarity"] {
+            assert!(
+                !nodes.iter().any(|n| n.label == absent),
+                "{} has no {absent}",
+                t.name
+            );
+        }
+        h.shell
+            .run("device.remove", json!({ "device": device }))
+            .unwrap();
+        h.settle();
+    }
+}

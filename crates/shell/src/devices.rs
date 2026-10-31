@@ -872,7 +872,9 @@ impl DeviceView {
     /// What a modulator's panel shows beside its parameters.
     fn modulator_frame(&self, doc: &Document, d: &Device) -> Option<ModulatorFrame> {
         use bl_model::modulator::{default_shape_of, has_shape_kind, is_modulator_kind};
-        if !is_modulator_kind(&d.kind) {
+        // CV Shaper isn't a modulator but draws and edits a shape as the
+        // Shaper does, with no mappings (cv-tools R35).
+        if !is_modulator_kind(&d.kind) && !has_shape_kind(&d.kind) {
             return None;
         }
         Some(ModulatorFrame {

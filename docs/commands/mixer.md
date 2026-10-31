@@ -367,7 +367,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Set Track Volume**. Permission: `edit`. Contexts: `session`, `arrangement`.
 
-Sets a track's volume as a linear gain: 1 is unity (0 dB), 0.5 is about -6 dB (10^(dB/20) converts decibels), 2 is about +6 dB, and 0 is silence (-inf dB). Use it to balance tracks; the Main track's volume sets the song's output level. The engine glides to the new level over 20 ms, so a change never clicks. The value must be finite and at least 0.
+Sets a track's volume as a linear gain: 1 is unity (0 dB), 0.5 is about -6 dB (10^(dB/20) converts decibels), 2 is about +6 dB, and 0 is silence (-inf dB). Use it to balance tracks; the Main track's volume sets the song's output level. The engine glides to the new level over 20 ms, so a change never clicks. The value must be finite and at least 0; a value above the fader's top, 1.995 (+6 dB), is stored as 1.995, and `query` reads back what is stored.
 
 Default keys: none.
 

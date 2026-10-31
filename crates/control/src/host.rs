@@ -926,6 +926,10 @@ impl Surfaces {
             if self.started[row].is_some() && self.error_of(row).is_some() {
                 self.started[row] = None;
                 self.halted[row] = true;
+                // The input's messages go the way its switches say, as after stop().
+                if let Some(live) = &self.held[row].live {
+                    live.hold(None);
+                }
             }
         }
         for row in 0..ROWS {

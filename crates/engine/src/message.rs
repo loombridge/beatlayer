@@ -296,4 +296,7 @@ pub(crate) enum Message {
     },
     /// Whether the song follows the incoming clock: EXT (midi-clock R15).
     ExternalSync(bool),
+    /// The output port opened, or its Track switch went on: the MPE routes to
+    /// it send their configuration again (mpe R17).
+    MidiOutputOpened(bl_core::midi::PortId),
 }

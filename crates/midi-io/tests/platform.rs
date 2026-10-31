@@ -25,7 +25,11 @@ fn the_platforms_ports_are_listed() {
                 if ports.is_empty() {
                     "none".to_owned()
                 } else {
-                    ports.join(", ")
+                    ports
+                        .iter()
+                        .map(|(name, _)| name.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 }
             ),
             // Core MIDI and Windows MIDI are always there; the ALSA
@@ -66,7 +70,8 @@ fn a_virtual_port_carries_messages_into_an_input_with_little_jitter() {
     while !backend
         .ports(Direction::Input)
         .unwrap_or_default()
-        .contains(&name)
+        .iter()
+        .any(|(port, _)| *port == name)
     {
         assert!(
             began.elapsed() < Duration::from_secs(5),

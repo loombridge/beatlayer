@@ -1,7 +1,7 @@
 //! The null backend: a MIDI system with no ports, for headless runs and CI.
 
 use crate::backend::{
-    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection,
+    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection, PortKey,
 };
 
 /// A MIDI system with no ports. Opening anything fails with
@@ -14,7 +14,7 @@ impl MidiBackend for NullBackend {
         "None"
     }
 
-    fn ports(&mut self, _direction: Direction) -> Result<Vec<String>, MidiError> {
+    fn ports(&mut self, _direction: Direction) -> Result<Vec<(String, PortKey)>, MidiError> {
         Ok(Vec::new())
     }
 

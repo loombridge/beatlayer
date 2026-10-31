@@ -22,6 +22,8 @@ pub struct Report {
     pub application: Option<String>,
     /// Each thing left out or changed, in the file's order.
     pub entries: Vec<Entry>,
+    /// Where each entry sits, so a repeat is found without a scan.
+    positions: std::collections::HashMap<(String, String, String), usize>,
 }
 
 impl Report {
@@ -33,14 +35,12 @@ impl Report {
     /// Records `count` of one thing left out or changed. The same thing in
     /// the same place is counted again rather than listed twice.
     pub fn add_count(&mut self, what: &str, place: &str, did: &str, count: usize) {
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|entry| entry.what == what && entry.place == place && entry.did == did)
-        {
-            entry.count += count;
+        let key = (what.to_owned(), place.to_owned(), did.to_owned());
+        if let Some(&at) = self.positions.get(&key) {
+            self.entries[at].count += count;
             return;
         }
+        self.positions.insert(key, self.entries.len());
         self.entries.push(Entry {
             what: what.to_owned(),
             place: place.to_owned(),

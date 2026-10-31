@@ -768,7 +768,11 @@ fn a_mode_change_crossfades_over_20_ms() {
 fn a_mode_change_that_the_song_didnt_play_through_crossfades_nothing() {
     let length = Ticks::WHOLE * 4;
     let (tempo, block, frames) = (60.0, 256_usize, 24_000_u64);
-    let want = play(&song(tempo, length, beats(), WarpMode::Beats), frames, block);
+    let want = play(
+        &song(tempo, length, beats(), WarpMode::Beats),
+        frames,
+        block,
+    );
     let start = |stop_inside_the_fade: bool| {
         let mut editor = song(tempo, length, beats(), WarpMode::RePitch);
         let clip = editor

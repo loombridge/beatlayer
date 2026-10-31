@@ -42,6 +42,8 @@ serde_json = "1"
 toml = { version = "1", default-features = false, features = ["std", "parse", "serde"] }
 
 [dev-dependencies]
+# The wrench's test reads the status counter.
+bl-plugin-host = { workspace = true, features = ["test-hooks"] }
 # The test plug-in, built from source, for the plug-in device panel's tests
 # (WP-2.10).
 bl-test-clap = { path = "../test-clap" }

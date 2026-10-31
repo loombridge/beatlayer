@@ -964,9 +964,7 @@ impl DeviceViewUi {
         rect: Rect,
         events: &mut Vec<UiEvent>,
     ) {
-        let info = shell.plugin_info(frame.id);
-        let has_window = info.as_ref().is_some_and(|i| i.has_window);
-        let open = info.as_ref().is_some_and(|i| i.window_open);
+        let (has_window, open) = shell.plugin_window_state(frame.id).unwrap_or_default();
         let id = control_id(frame.id, "plugin_window");
         let sense = if has_window {
             Sense::click()

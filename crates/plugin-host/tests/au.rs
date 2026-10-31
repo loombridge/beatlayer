@@ -182,10 +182,11 @@ fn an_audio_unit_loads_by_description_with_its_parameters() {
 
 // Spec: au-hosting R2, R3
 #[test]
-fn a_parameter_change_lands_on_its_frame() {
-    // Fully dry, a 1 ms delay, no feedback: the block's impulse sounds at
-    // its own frame, and a change to fully wet at frame 244 is heard from
-    // that exact frame (the wet path's echo lands about 48 frames later).
+fn a_parameter_change_reaches_the_unit_at_the_start_of_its_block() {
+    // Fully dry, a 1 ms delay, no feedback: a change to fully wet at frame
+    // 244 reaches the unit at the block's first frame, as Live gives a unit
+    // its changes, so the whole block is wet (the wet path's echo lands about
+    // 48 frames after each impulse).
     let (host, mut node) = running(&[
         (MIX, 0.0),
         (DELAY_TIME, 0.001),
@@ -203,13 +204,13 @@ fn a_parameter_change_lands_on_its_frame() {
             &channel[240..243]
         );
         assert!(
-            (channel[243] - 1.0).abs() < 0.05,
-            "the impulse at 243 is still dry: {}",
+            channel[243].abs() < 0.05,
+            "the change reached the unit at frame 0, so no dry impulse at 243: {}",
             channel[243]
         );
         assert!(
             channel[244].abs() < 0.05,
-            "the change landed at 244, so no dry impulse there: {}",
+            "and none at 244: {}",
             channel[244]
         );
         assert!(
@@ -225,6 +226,66 @@ fn a_parameter_change_lands_on_its_frame() {
         .expect("a status");
     assert!(status.active);
     assert_eq!(status.failure, None);
+}
+
+// Spec: au-hosting R3, R6, R17. A playing ramp reaches the unit through its
+// scheduling block as one change, the last value in the block, for the
+// block's first frame: one render call, and the unit hears it from frame 0,
+// so the impulse at frame 10 is wet too.
+#[test]
+fn an_automated_parameter_is_scheduled_on_the_unit_not_set() {
+    use bl_core::time::Ticks;
+    let (host, mut node) = running(&[
+        (MIX, 0.0),
+        (DELAY_TIME, 0.001),
+        (FEEDBACK, 0.0),
+        (CUTOFF, 22050.0),
+    ]);
+    let id = device(1, "aufx/dely/appl", &[]).id;
+    node.receive_data(crate::common::modulation_for(
+        device(1, "aufx/dely/appl", &[]),
+        MIX,
+        &[
+            (Ticks::ZERO, 0.0),
+            (Ticks(Ticks::WHOLE.0 * 256 / crate::common::BAR), 1.0),
+        ],
+    ));
+    let mut input = vec![0.0; FRAMES];
+    input[10] = 1.0;
+    input[400] = 1.0;
+    let transport = TransportInfo {
+        playing: true,
+        ..TransportInfo::default()
+    };
+    let mut data: Vec<f32> = (0..CHANNELS).flat_map(|_| input.iter().copied()).collect();
+    let mut out = NoteBuffer::with_capacity(64);
+    {
+        let mut block = Block::new(&mut data, CHANNELS, FRAMES, FRAMES, &[], transport, RATE)
+            .with_notes(&[], &mut out);
+        bl_rt::rt_test!({ node.process(&mut block) });
+    }
+    // The ramp has a value at each multiple of 32 frames up to its end at 256;
+    // the block gets the last, in one render call. Nothing is set on the
+    // unit's parameter from the render thread.
+    assert_eq!(host.render_counts(id), Some((1, 1)));
+    // The unit's own value stays where it was (Apple's AUDelay leaves it
+    // alone for a scheduled change, which a setValue would have moved); the
+    // host reports the value it scheduled.
+    let status = host.status(id).expect("a status");
+    assert_eq!(status.values[MIX as usize], (ParamId(MIX), 100.0));
+    let channel = &data[..FRAMES];
+    assert!(
+        channel[10].abs() < 0.05,
+        "the impulse is wet: {}",
+        channel[10]
+    );
+    assert!(
+        channel[400].abs() < 0.05,
+        "the impulse is wet: {}",
+        channel[400]
+    );
+    let echo: f32 = channel[440..480].iter().map(|s| s.abs()).sum();
+    assert!(echo > 0.5, "the wet delay sounds: {echo}");
 }
 
 // Spec: au-hosting R2
@@ -284,6 +345,8 @@ fn a_note_reaches_the_unit_on_its_frame() {
     );
     let energy: f32 = channel[100..].iter().map(|s| s.abs()).sum();
     assert!(energy > 0.1, "the note sounds: {energy}");
+    // Notes are scheduled on their frames, so the block is one render call.
+    assert_eq!(host.render_counts(device.id), Some((1, 0)));
 }
 
 // Spec: au-hosting R18. A control change reaches the unit with its notes: the
@@ -503,4 +566,31 @@ fn an_aumi_unit_passes_its_notes_on() {
         played.contains(&(400, NoteKind::Off, 60)),
         "the unit's notes go on: {played:?}"
     );
+}
+
+// Spec: au-hosting R13. The editor query says what `status` says of the
+// editor, without reading a single parameter.
+#[test]
+fn the_editor_query_reads_no_parameters() {
+    use std::sync::atomic::Ordering::Relaxed;
+    let host = AuHost::new();
+    host.load("aumu", "dls ", "appl").expect("the DLS synth");
+    let device = device(1, "aumu/dls /appl", &[]);
+    let _node = host
+        .factory()
+        .create(&device, &config())
+        .expect("a node for an instrument");
+
+    bl_plugin_host::STATUS_VALUE_READS.store(0, Relaxed);
+    for _ in 0..100 {
+        assert!(host.editor_state(device.id).is_some());
+    }
+    assert_eq!(bl_plugin_host::STATUS_VALUE_READS.load(Relaxed), 0);
+
+    let status = host.status(device.id).expect("a status");
+    assert_eq!(
+        host.editor_state(device.id),
+        Some((status.has_editor, status.editor_open, status.editor_hidden))
+    );
+    assert!(bl_plugin_host::STATUS_VALUE_READS.load(Relaxed) > 0);
 }

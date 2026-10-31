@@ -286,8 +286,7 @@ impl Shell {
     /// a track's input, a peer coming or going. Returns whether a peer's
     /// state or the plan changed.
     fn track_link_audio(&mut self) -> bool {
-        let before = self.link.audio.peers();
-        self.link.audio.poll();
+        let mut changed = self.link.audio.poll();
         let rate = if self.audio.engine_running() {
             self.audio.sample_rate().unwrap_or(0)
         } else {
@@ -295,7 +294,6 @@ impl Shell {
         };
         let on = self.link_enabled() && self.link.audio_enabled();
         let document = self.editor.document();
-        let mut changed = false;
         if self.link.audio.stale(document, on, rate) {
             let print = fingerprint(document, on, rate);
             let wanted = Wanted::of(document, on, rate);
@@ -304,7 +302,7 @@ impl Shell {
             }
             changed = true;
         }
-        changed | (self.link.audio.peers() != before)
+        changed
     }
 
     /// Writes a peer's tempo into the set when the set has one constant

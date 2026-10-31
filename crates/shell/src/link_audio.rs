@@ -452,13 +452,18 @@ impl LinkAudioHost {
     }
 
     /// Looks at what the rings have kept since the last look, for each peer's
-    /// state. Called once a poll.
-    pub fn poll(&mut self) {
+    /// state, and returns whether any ring started or stopped receiving.
+    /// Called once a poll.
+    pub fn poll(&mut self) -> bool {
+        let mut flipped = false;
         for taken in &mut self.taken {
             let kept = taken.ring.received();
-            taken.receiving = kept != taken.seen;
+            let receiving = kept != taken.seen;
+            flipped |= receiving != taken.receiving;
+            taken.receiving = receiving;
             taken.seen = kept;
         }
+        flipped
     }
 
     /// The peers with Link Audio on that offer a channel, in the order Link

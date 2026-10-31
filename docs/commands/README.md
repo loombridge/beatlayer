@@ -1921,6 +1921,63 @@ What `audio.devices` returns.
 
 </details>
 
+### `AudioLatency`
+
+What `link.set_audio_latency` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `ms` | number | yes | The latency in effect now, in milliseconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_audio_latency` returns.",
+  "properties": {
+    "ms": {
+      "description": "The latency in effect now, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "ms"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AudioName`
+
+What `link.set_audio_name` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The name in effect now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `link.set_audio_name` returns.",
+  "properties": {
+    "name": {
+      "description": "The name in effect now.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AudioPageSettings`
 
 The Audio page's settings: the device choices as `audio.configure` takes them, and the test tone's level and frequency.
@@ -15177,7 +15234,7 @@ The index of the places' files, built in the background.
 
 ### `Input`
 
-Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
+Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), `link_audio` (a Link Audio peer's channel, by the names `peer` and `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.
 
 One of:
 
@@ -15186,6 +15243,7 @@ One of:
 - an object with `type` = `"all_ins"`: All Ins: every MIDI input port whose Track switch is on, and the computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"computer_keyboard"`: The computer MIDI keyboard. MIDI tracks only.
 - an object with `type` = `"port"`, `name` (string): One MIDI input port, by the name the MIDI system gives it. MIDI tracks only. The track keeps the name while the port is away and receives again when a port of that name returns.
+- an object with `type` = `"link_audio"`, `peer` (string), `channel` (string): A channel another app in the Link session offers (Link Audio), by the names of the peer and the channel. Audio tracks only. The track keeps the names while the peer is away, silent, and hears them again when a peer and channel of those names return (the Link Audio spec, R10).
 - an object with `type` = `"resampling"`: Resampling: the Main output. Audio tracks only.
 - an object with `type` = `"track"`, `track` ([`TrackId`](#trackid)), `chain` ([`ChainId`](#chainid) or null), `output` ([`DeviceOutput`](#deviceoutput) or null), `tap` ([`Tap`](#tap)): Another track's signal.
 
@@ -15193,7 +15251,7 @@ One of:
 
 ```json
 {
-  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
+  "description": "Where a track takes its input from. Audio tracks: `external` (Ext. In, the audio interface's inputs, with its `channel`; a new audio track's), `resampling` (the Main output), `track` (another audio track, a MIDI track with an instrument, a return, or Main, tapped at `tap`; with a `chain` of an instrument or audio effect rack on that track, that chain's signal at `tap`; or with an `output`, one of an instrument's extra outputs on that track), `link_audio` (a Link Audio peer's channel, by the names `peer` and `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, by its name as the MIDI settings list it), `track` (another MIDI track), or `none`.",
   "oneOf": [
     {
       "description": "No Input.",
@@ -15266,6 +15324,29 @@ One of:
       "required": [
         "type",
         "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A channel another app in the Link session offers (Link Audio), by the names of the peer and the channel. Audio tracks only. The track keeps the names while the peer is away, silent, and hears them again when a peer and channel of those names return (the Link Audio spec, R10).",
+      "properties": {
+        "channel": {
+          "description": "The channel's name, as the peer shows it.",
+          "type": "string"
+        },
+        "peer": {
+          "description": "The peer's name, as the Link page lists it.",
+          "type": "string"
+        },
+        "type": {
+          "const": "link_audio",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "peer",
+        "channel"
       ],
       "type": "object"
     },
@@ -17855,6 +17936,112 @@ The Library page's settings (L-SET-016).
 
 </details>
 
+### `LinkAudioPeer`
+
+A peer in the session that has Link Audio on (`link.state`).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The peer's name. |
+| `state` | [`PeerState`](#peerstate) | yes | Whether audio is arriving from it. |
+| `buffered_ms` | number | yes | The audio buffered from it, in milliseconds. |
+| `channels` | array of string | yes | The channels it offers, in its order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A peer in the session that has Link Audio on (`link.state`).",
+  "properties": {
+    "buffered_ms": {
+      "description": "The audio buffered from it, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "channels": {
+      "description": "The channels it offers, in its order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "name": {
+      "description": "The peer's name.",
+      "type": "string"
+    },
+    "state": {
+      "$ref": "#/$defs/PeerState",
+      "description": "Whether audio is arriving from it."
+    }
+  },
+  "required": [
+    "name",
+    "state",
+    "buffered_ms",
+    "channels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LinkAudioState`
+
+Link Audio's part of `link.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `enabled` | boolean | yes | Whether Link Audio is switched on (it streams only while Link is on too). |
+| `name` | string | yes | The name other peers see this app by. |
+| `latency_ms` | number | yes | The input latency of incoming audio, in milliseconds. |
+| `sync_to_incoming_audio` | boolean | yes | Whether Beatlayer delays its own playback by the latency. |
+| `peers` | array of [`LinkAudioPeer`](#linkaudiopeer) | yes | The peers with Link Audio on, as the Link page lists them. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Link Audio's part of `link.state`.",
+  "properties": {
+    "enabled": {
+      "description": "Whether Link Audio is switched on (it streams only while Link is on too).",
+      "type": "boolean"
+    },
+    "latency_ms": {
+      "description": "The input latency of incoming audio, in milliseconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "name": {
+      "description": "The name other peers see this app by.",
+      "type": "string"
+    },
+    "peers": {
+      "description": "The peers with Link Audio on, as the Link page lists them.",
+      "items": {
+        "$ref": "#/$defs/LinkAudioPeer"
+      },
+      "type": "array"
+    },
+    "sync_to_incoming_audio": {
+      "description": "Whether Beatlayer delays its own playback by the latency.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "enabled",
+    "name",
+    "latency_ms",
+    "sync_to_incoming_audio",
+    "peers"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `LinkGroupId`
 
 The ID of a link group: a positive integer, unique within the project and never reused.
@@ -17890,6 +18077,7 @@ What `link.state` returns.
 | `show_toggle` | boolean | yes | Whether the Control Bar shows the Link toggle and its menu. |
 | `waiting_for_link` | boolean | yes | Whether a start waits for the session's phase. |
 | `starts_in` | number or null | yes | How many seconds until a waiting start begins, once it has been worked out; null otherwise. |
+| `audio` | [`LinkAudioState`](#linkaudiostate) | yes | Link Audio: its switch, name, latency, Sync to Incoming Audio and the peers. |
 
 <details><summary>JSON Schema</summary>
 
@@ -17897,6 +18085,10 @@ What `link.state` returns.
 {
   "description": "What `link.state` returns.",
   "properties": {
+    "audio": {
+      "$ref": "#/$defs/LinkAudioState",
+      "description": "Link Audio: its switch, name, latency, Sync to Incoming Audio and the peers."
+    },
     "enabled": {
       "description": "Whether Link is on: the app is in a Link session on its networks.",
       "type": "boolean"
@@ -17963,7 +18155,8 @@ What `link.state` returns.
     "start_stop_sync",
     "show_toggle",
     "waiting_for_link",
-    "starts_in"
+    "starts_in",
+    "audio"
   ],
   "type": "object"
 }
@@ -23150,6 +23343,37 @@ One of:
     {
       "const": "groove_pool",
       "description": "The Groove Pool under the list (the grooves spec R24): its keys are its own, so no browser key applies.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PeerState`
+
+Whether audio is arriving from a Link Audio peer (`link.state`).
+
+One of:
+
+- `"receiving"`: A track takes one of the peer's channels and audio is arriving.
+- `"connected"`: The peer is in the session with Link Audio on, and nothing arrives.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Whether audio is arriving from a Link Audio peer (`link.state`).",
+  "oneOf": [
+    {
+      "const": "receiving",
+      "description": "A track takes one of the peer's channels and audio is arriving.",
+      "type": "string"
+    },
+    {
+      "const": "connected",
+      "description": "The peer is in the session with Link Audio on, and nothing arrives.",
       "type": "string"
     }
   ]
@@ -32632,7 +32856,7 @@ What a command that switches something returns: its new state.
 
 ### `Switched`
 
-What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.
+What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`, `link.set_audio` and `link.set_sync_to_incoming_audio` return.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -32642,7 +32866,7 @@ What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` r
 
 ```json
 {
-  "description": "What `link.set_enabled`, `link.set_start_stop_sync` and `link.set_show_toggle` return.",
+  "description": "What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`, `link.set_audio` and `link.set_sync_to_incoming_audio` return.",
   "properties": {
     "on": {
       "description": "Whether it's on now.",

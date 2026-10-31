@@ -71,9 +71,12 @@ pub(crate) fn capture(
     frames: usize,
     channels: usize,
 ) -> bool {
-    // The part covers the song's frames from `position` on.
-    let from = position.max(plan.start);
-    let to = (position + Frames(frames as i64)).min(plan.end());
+    // The part covers the song's frames from `position` on, and Main plays
+    // each of them `lag` frames after song time, so the range is `lag` later
+    // in the output (the delay compensation spec, R10).
+    let lag = Frames(i64::from(program.main_latency));
+    let from = position.max(plan.start + lag);
+    let to = (position + Frames(frames as i64)).min(plan.end() + lag);
     if to <= from {
         return true;
     }

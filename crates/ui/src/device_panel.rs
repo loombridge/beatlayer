@@ -131,7 +131,7 @@ pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlR
         placed
             .controls
             .iter()
-            .map(|c| (c.param, c.widget, at(c.rect)))
+            .map(|c| (panel.drawn(c.param), c.widget, at(c.rect)))
             .collect(),
         placed
             .cells

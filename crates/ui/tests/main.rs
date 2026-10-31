@@ -27,6 +27,7 @@ mod clips_between_views;
 mod common;
 mod control_surfaces;
 mod dawproject_window;
+mod delay_limiter;
 mod detail_views;
 mod device_panel;
 mod device_view;

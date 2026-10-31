@@ -543,6 +543,25 @@ impl DevicePanel {
         self.description.layout.shown(expanded)
     }
 
+    /// The parameter whose control sits where `param`'s does, as the
+    /// panel's values stand: the alternate while its switch is on.
+    #[must_use]
+    pub fn drawn(&self, param: ParamId) -> ParamId {
+        self.description
+            .alternates
+            .iter()
+            .find(|a| {
+                a.off == param
+                    && self
+                        .description
+                        .params
+                        .iter()
+                        .position(|p| p.id == a.switch)
+                        .is_some_and(|i| self.value(i) >= 0.5)
+            })
+            .map_or(param, |a| a.on)
+    }
+
     /// The value of the parameter at `index` in the description.
     #[must_use]
     pub fn value(&self, index: usize) -> f64 {
@@ -619,10 +638,20 @@ pub struct ParameterState {
     /// a device that isn't a plug-in, since its panel shows them all.
     #[serde(default)]
     pub configured: bool,
+    /// Whether its control is shown: false for the parameter a switch has put
+    /// away, such as Limiter's Ceiling while Maximize is on (the control then
+    /// is Threshold's). A parameter that isn't shown keeps its value, its
+    /// lane and its place in its banks, and still plays.
+    #[serde(default = "shown_by_default")]
+    pub shown: bool,
     /// Its value in the A and B state that isn't active (device compare
     /// R11); left out for a device without two states.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub other: Option<f64>,
+}
+
+fn shown_by_default() -> bool {
+    true
 }
 
 /// What `device.parameters` returns.

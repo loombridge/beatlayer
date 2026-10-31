@@ -60,8 +60,44 @@ pub const LFO_DELAY: ParamId = ParamId(19);
 /// How much the LFO moves the filter's frequency.
 pub const LFO_FILTER: ParamId = ParamId(20);
 
+/// Which of [`RATE_MODES`] the LFO's rate is in: Rate, Time, Synced, Triplet, Dotted or
+/// Sixteenth (Spec: delay R10).
+pub const LFO_RATE_MODE: ParamId = ParamId(21);
+/// The LFO's cycle in Time mode, in seconds.
+pub const LFO_TIME: ParamId = ParamId(22);
+/// The LFO's cycle in Synced mode, one of [`DIVISIONS`].
+pub const LFO_SYNCED: ParamId = ParamId(23);
+/// The LFO's cycle in Triplet mode, one of [`DIVISIONS`], two thirds as long.
+pub const LFO_TRIPLET: ParamId = ParamId(24);
+/// The LFO's cycle in Dotted mode, one of [`DIVISIONS`], one and a half times as long.
+pub const LFO_DOTTED: ParamId = ParamId(25);
+/// The LFO's cycle in Sixteenth mode, in sixteenth notes.
+pub const LFO_SIXTEENTH: ParamId = ParamId(26);
+
 /// How many parameters the delay has.
-const PARAMS: usize = 21;
+const PARAMS: usize = 27;
+
+/// The LFO's rate modes, in the Rate chooser's order.
+pub const RATE_MODES: [&str; 6] = ["Rate", "Time", "Synced", "Triplet", "Dotted", "Sixteenth"];
+
+/// The synced divisions: their names and their lengths in quarter notes.
+pub const DIVISIONS: [(&str, f64); 10] = [
+    ("1/64", 0.0625),
+    ("1/32", 0.125),
+    ("1/16", 0.25),
+    ("1/8", 0.5),
+    ("1/4", 1.0),
+    ("1/2", 2.0),
+    ("1 bar", 4.0),
+    ("2 bars", 8.0),
+    ("4 bars", 16.0),
+    ("8 bars", 32.0),
+];
+
+/// The division a new device's Synced mode starts on: 1/4.
+const DEFAULT_SYNCED: usize = 4;
+/// The division a new device's Triplet and Dotted modes start on: 1/8.
+const DEFAULT_TRIPLET_DOTTED: usize = 3;
 
 /// The longest free delay the manual records, in seconds.
 pub(crate) const MAX_DELAY_SECONDS: f64 = 5.0;
@@ -74,6 +110,11 @@ const MODULATION_SECONDS: f64 = 0.02;
 pub(crate) const TRANSITION_SECONDS: f64 = 0.02;
 /// The LFO's highest filter movement, in octaves.
 const FILTER_MOD_OCTAVES: f64 = 2.0;
+
+/// The divisions' names, for the choosers.
+fn division_names() -> Vec<&'static str> {
+    DIVISIONS.iter().map(|d| d.0).collect()
+}
 
 /// The delay's type: Beatlayer's own look, Live's parameters
 /// (the delay spec, "What Live does").
@@ -151,6 +192,37 @@ pub fn delay_type() -> DeviceType {
             .describe("How much the LFO moves the delay time."),
         ParamDescriptor::continuous(LFO_FILTER, "Filter", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much the LFO moves the filter's frequency."),
+        ParamDescriptor::choice(LFO_RATE_MODE, "Rate Mode", &RATE_MODES, 0).describe(
+            "Whether the LFO's rate is in Hz, a time per cycle, or a division of the beat: \
+             straight, triplet, dotted, or in sixteenth notes.",
+        ),
+        ParamDescriptor::continuous(
+            LFO_TIME,
+            "LFO Time",
+            (0.025, 100.0),
+            1.0,
+            ParamUnit::Seconds,
+        )
+        .logarithmic()
+        .describe("How long one cycle of the LFO takes in Time mode."),
+        ParamDescriptor::choice(LFO_SYNCED, "LFO Synced", &division_names(), DEFAULT_SYNCED)
+            .describe("The LFO's cycle as a division of the beat in Synced mode."),
+        ParamDescriptor::choice(
+            LFO_TRIPLET,
+            "LFO Triplet",
+            &division_names(),
+            DEFAULT_TRIPLET_DOTTED,
+        )
+        .describe("The LFO's cycle as a triplet of a division of the beat in Triplet mode."),
+        ParamDescriptor::choice(
+            LFO_DOTTED,
+            "LFO Dotted",
+            &division_names(),
+            DEFAULT_TRIPLET_DOTTED,
+        )
+        .describe("The LFO's cycle as a dotted division of the beat in Dotted mode."),
+        ParamDescriptor::integer(LFO_SIXTEENTH, "LFO Sixteenth", (1, 16), 4, ParamUnit::None)
+            .describe("The LFO's cycle in sixteenth notes in Sixteenth mode."),
     ];
     DeviceType::native(DELAY, "Delay", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
@@ -162,22 +234,43 @@ pub fn delay_type() -> DeviceType {
                         "Sync",
                         "Link",
                         "Freeze",
-                        "Time Mode",
                         "Ping Pong",
                         "Feedback",
                         "Dry/Wet",
+                        "L Sync",
+                        "R Sync",
                     ],
                 ),
                 (
                     "Time",
-                    &[
-                        "L Sync", "R Sync", "L Time", "R Time", "L Offset", "R Offset",
-                    ],
+                    &["L Time", "R Time", "L Offset", "R Offset", "Time Mode"],
                 ),
                 // Two parameters are named Filter: the switch and the
                 // LFO's amount.
-                ("Filter", &["#3", "Freq", "Width", "#20"]),
-                ("Modulation", &["Rate", "Wave", "Morph", "Delay"]),
+                (
+                    "Filter and LFO",
+                    &[
+                        "#3",
+                        "Freq",
+                        "Width",
+                        "#20",
+                        "Delay",
+                        "Rate Mode",
+                        "Wave",
+                        "Morph",
+                    ],
+                ),
+                (
+                    "LFO Rate",
+                    &[
+                        "Rate",
+                        "LFO Time",
+                        "LFO Synced",
+                        "LFO Triplet",
+                        "LFO Dotted",
+                        "LFO Sixteenth",
+                    ],
+                ),
             ]),
     )
 }
@@ -214,25 +307,36 @@ fn layout() -> DeviceLayout {
             (R_OFFSET, Widget::Knob),
         ],
     );
+    // The two amounts stay in the body; the rest of the LFO is the expanded
+    // part the LFO Controls toggle shows (Spec: delay R13).
+    let amounts = ControlBand::stacked(
+        BODY_HEIGHT,
+        &[(LFO_DELAY, Widget::Knob), (LFO_FILTER, Widget::Knob)],
+    );
     let lfo = ControlBand::stacked(
         BODY_HEIGHT,
         &[
+            (LFO_RATE_MODE, Widget::Chooser),
             (LFO_RATE, Widget::Knob),
+            (LFO_TIME, Widget::Knob),
+            (LFO_SYNCED, Widget::Chooser),
+            (LFO_TRIPLET, Widget::Chooser),
+            (LFO_DOTTED, Widget::Chooser),
+            (LFO_SIXTEENTH, Widget::Number),
+            (LFO_WAVE, Widget::Chooser),
             (LFO_MORPH, Widget::Knob),
-            (LFO_DELAY, Widget::Knob),
-            (LFO_FILTER, Widget::Knob),
         ],
     );
     let display = DisplayCell::new("Delay", 160.0, BODY_HEIGHT, 1.0)
-        .with_top(ControlBand::stacked(40.0, &[(TIME_MODE, Widget::Chooser)]))
-        .with_bottom(ControlBand::stacked(40.0, &[(LFO_WAVE, Widget::Chooser)]));
+        .with_top(ControlBand::stacked(40.0, &[(TIME_MODE, Widget::Chooser)]));
     DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(toggles),
         LayoutNode::Band(main),
         LayoutNode::Cell(display),
         LayoutNode::Band(times),
-        LayoutNode::Band(lfo),
+        LayoutNode::Band(amounts),
     ]))
+    .with_expanded(LayoutNode::Band(lfo))
 }
 
 /// Adds the delay to `registry`.
@@ -258,8 +362,7 @@ impl Mode {
     }
 }
 
-/// The LFO's waveforms, in the order of the Wave chooser. A waveform's
-/// morph blends toward the next one, except for the random ones.
+/// The LFO's waveforms, in the order of the Wave chooser.
 const WAVES: [Wave; 7] = [
     Wave::Sine,
     Wave::Triangle,
@@ -270,17 +373,14 @@ const WAVES: [Wave; 7] = [
     Wave::Wander,
 ];
 
-/// The LFO's shape for the Wave chooser's `index`: its waveform, morphed
-/// toward the next one by `morph` (0 to 1) except for the random waveforms.
+/// The LFO's shape for the Wave chooser's `index`, with Morph (0 to 1) as
+/// the duty cycle that moves the wave's turning point to the front of the
+/// cycle. The random waves ignore it (Spec: delay R11).
 fn lfo_shape(index: usize, morph: f64) -> Shape {
-    let index = index.min(WAVES.len() - 1);
     Shape {
-        wave: WAVES[index],
-        morph: WAVES
-            .get(index + 1)
-            .filter(|_| index < 5)
-            .map(|to| (*to, morph)),
-        duty: 0.0,
+        wave: WAVES[index.min(WAVES.len() - 1)],
+        morph: None,
+        duty: morph,
     }
 }
 
@@ -317,12 +417,8 @@ impl NativeDevice for Delay {
             return;
         }
         let settings = Settings::new(params, self.sample_rate, self.glide, self.mod_depth);
-        self.lfo.set(
-            audio,
-            Rate::Hertz(settings.lfo_rate),
-            Stereo::Phase(0.0),
-            0.0,
-        );
+        self.lfo
+            .set(audio, settings.lfo_rate, Stereo::Phase(0.0), 0.0);
         let tempo = audio.tempo();
         if settings.sync {
             for (frame, sixteenth) in self.sixteenths[..audio.frames()].iter_mut().enumerate() {
@@ -439,7 +535,7 @@ struct Settings {
     rate: f64,
     glide: f64,
     mod_depth: f64,
-    lfo_rate: f64,
+    lfo_rate: Rate,
     index: [usize; PARAMS],
 }
 
@@ -461,7 +557,7 @@ impl Settings {
             rate,
             glide,
             mod_depth,
-            lfo_rate: params.target(index[LFO_RATE.0 as usize]),
+            lfo_rate: lfo_rate(params, &index),
             index,
         }
     }
@@ -512,6 +608,22 @@ impl Settings {
         let frequency = f64::from(self.ramp(params, FREQ)[frame]);
         let amount = f64::from(self.ramp(params, LFO_FILTER)[frame]) / 100.0;
         (frequency * (lfo * amount * FILTER_MOD_OCTAVES).exp2()).clamp(20.0, self.rate * 0.45)
+    }
+}
+
+/// The LFO's rate in the mode the chooser is on (Spec: delay R10): the mode's own
+/// parameter, and for the beat modes a count of quarter notes.
+fn lfo_rate(params: &ParamBank, index: &[usize; PARAMS]) -> Rate {
+    let at = |id: ParamId| index[id.0 as usize];
+    let division =
+        |id: ParamId| DIVISIONS[(params.value(at(id)) as usize).min(DIVISIONS.len() - 1)].1;
+    match params.value(at(LFO_RATE_MODE)) as usize {
+        0 => Rate::Hertz(params.target(at(LFO_RATE))),
+        1 => Rate::Seconds(params.target(at(LFO_TIME))),
+        2 => Rate::Beats(division(LFO_SYNCED)),
+        3 => Rate::Beats(division(LFO_TRIPLET) * 2.0 / 3.0),
+        4 => Rate::Beats(division(LFO_DOTTED) * 1.5),
+        _ => Rate::Beats(0.25 * params.target(at(LFO_SIXTEENTH)).round()),
     }
 }
 
@@ -683,7 +795,7 @@ mod tests {
         assert!((line.read(5_000.000_000_000_001) - 1.0).abs() < 1e-6);
     }
 
-    // Spec: delay R8
+    // Spec: delay R8, R11
     #[test]
     fn every_lfo_wave_stays_between_minus_one_and_one() {
         let tempo = TempoMap::constant(Bpm::DEFAULT);
@@ -698,13 +810,48 @@ mod tests {
                 }
             }
         }
-        // Morphing half-way between the ramp up and the ramp down is flat.
-        let mut lfo = Lfo::new(sample_rate, 3);
-        let shape = lfo_shape(2, 0.5);
-        assert_eq!(shape.morph, Some((Wave::SawDown, 0.5)));
-        assert!(lfo.step(&tempo, 0, shape)[0].abs() < 1e-9, "morphed");
-        // The random waves ignore the morph.
-        assert_eq!(lfo_shape(5, 0.5).morph, None);
-        assert_eq!(lfo_shape(6, 0.5).morph, None);
+    }
+
+    // Spec: delay R11
+    #[test]
+    fn morph_squeezes_each_periodic_wave_toward_the_front_and_the_random_waves_ignore_it() {
+        let tempo = TempoMap::constant(Bpm::DEFAULT);
+        let rate = bl_core::time::SampleRate::HZ_48000;
+        let cycle = |wave: usize, morph: f64| {
+            let mut lfo = Lfo::new(rate, 3);
+            // One cycle: the LFO starts at 1 Hz.
+            (0..48_000)
+                .map(|f| lfo.step(&tempo, f, lfo_shape(wave, morph))[0])
+                .collect::<Vec<_>>()
+        };
+        // Sine, Triangle, Ramp Up, Ramp Down and Square.
+        for wave in 0..5 {
+            let plain = cycle(wave, 0.0);
+            // At 0 % it is the shape the delay has always played.
+            assert_eq!(plain, {
+                let mut lfo = Lfo::new(rate, 3);
+                (0..48_000)
+                    .map(|f| lfo.step(&tempo, f, Shape::of(WAVES[wave]))[0])
+                    .collect::<Vec<_>>()
+            });
+            // At 50 % the wave's turning point is at 55 % of the cycle and at
+            // 100 % at 10 %; after it the wave holds its end value.
+            for (morph, kept) in [(0.5, 0.55), (1.0, 0.1)] {
+                let morphed = cycle(wave, morph);
+                let held = (kept * 48_000.0) as usize + 2;
+                assert!(
+                    morphed[held..]
+                        .windows(2)
+                        .all(|w| (w[0] - w[1]).abs() < 1e-9),
+                    "wave {wave} at {morph}: not held after {held}"
+                );
+                assert_ne!(morphed, plain);
+            }
+        }
+        // S&H and Wander are the same at every Morph.
+        for wave in [5, 6] {
+            assert_eq!(cycle(wave, 0.0), cycle(wave, 1.0));
+            assert_eq!(cycle(wave, 0.0), cycle(wave, 0.5));
+        }
     }
 }

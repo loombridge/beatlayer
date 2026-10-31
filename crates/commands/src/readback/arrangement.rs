@@ -56,6 +56,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("automation.move_breakpoint", query(Track, "automation")),
     ("automation.re_enable", query(Track, "automation")),
     ("automation.re_enable_for", query(Track, "automation")),
+    ("automation.set_enabled", query(Track, "automation")),
     ("automation.set_breakpoint", query(Track, "automation")),
     ("automation.set_curve", query(Track, "automation")),
     ("automation.set_envelope", query(Track, "automation")),

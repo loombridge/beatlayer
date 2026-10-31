@@ -169,6 +169,9 @@ impl Default for ScheduledEcho {
 #[derive(Clone, Copy, Debug)]
 struct ActiveNote {
     source: Key,
+    /// Whether the input note's note-on went out, which its note-off follows
+    /// whatever Input says by then (R7).
+    dry_sent: bool,
     start_frame: i64,
     echoes: [ScheduledEcho; MAX_REPEATS],
     num_echoes: usize,
@@ -237,8 +240,9 @@ impl NativeDevice for NoteEcho {
                     let src_key = Key::of(&note);
                     let mut echoes = [ScheduledEcho::default(); MAX_REPEATS];
                     let mut num_echoes = 0;
+                    let dry_sent = !mute_input;
 
-                    if !mute_input {
+                    if dry_sent {
                         // The input note passes through unchanged (R2); it
                         // takes no table room, and an input note without an
                         // ID, as monitored input has, still ends with its
@@ -246,12 +250,20 @@ impl NativeDevice for NoteEcho {
                         audio.send(note);
                     }
 
+                    // A note with no room in `active` makes no echoes: they
+                    // would never get their note-offs.
+                    let has_room = self.active.len() < MAX_ACTIVE;
+                    if !has_room {
+                        self.router.note_dropped();
+                    }
+
                     // Compute and schedule echoes
                     let mut k = 1;
                     let mut current_vel = note.velocity * vel_decay;
                     let mut current_fb = 1.0f32;
 
-                    while k <= MAX_REPEATS
+                    while has_room
+                        && k <= MAX_REPEATS
                         && current_vel >= (1.0 / 127.0)
                         && (k == 1 || current_fb > 0.001)
                     {
@@ -290,9 +302,10 @@ impl NativeDevice for NoteEcho {
                         k += 1;
                     }
 
-                    if self.active.len() < MAX_ACTIVE {
+                    if has_room {
                         self.active.push(ActiveNote {
                             source: src_key,
+                            dry_sent,
                             start_frame: note_frame,
                             echoes,
                             num_echoes,
@@ -301,6 +314,13 @@ impl NativeDevice for NoteEcho {
                 }
                 NoteKind::Off | NoteKind::Choke => {
                     let active_idx = self.active.iter().position(|a| a.source.names(&note));
+
+                    // The note-off follows what happened to the note-on; an
+                    // untracked note, from a full table, passes on.
+                    let pass = match active_idx {
+                        Some(idx) => self.active[idx].dry_sent,
+                        None => !mute_input || self.active.len() >= MAX_ACTIVE,
+                    };
 
                     if let Some(idx) = active_idx {
                         let active = self.active.remove(idx);
@@ -321,7 +341,7 @@ impl NativeDevice for NoteEcho {
                         }
                     }
 
-                    if !mute_input {
+                    if pass {
                         audio.send(note);
                     }
                 }
@@ -329,13 +349,12 @@ impl NativeDevice for NoteEcho {
                     expression,
                     value: expr_val,
                 } => {
-                    if !mute_input {
+                    let active = self.active.iter().find(|a| a.source.names(&note));
+                    if active.map_or(!mute_input, |a| a.dry_sent) {
                         audio.send(note);
                     }
 
-                    if mpe_enabled
-                        && let Some(active) = self.active.iter().find(|a| a.source.names(&note))
-                    {
+                    if mpe_enabled && let Some(active) = active {
                         let time_offset = note_frame - active.start_frame;
                         let fb_rate = match expression {
                             NoteExpression::Pressure => press_fb,

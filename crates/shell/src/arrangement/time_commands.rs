@@ -18,9 +18,9 @@ use bl_shell_spec::editing::{
 use serde_json::Value;
 
 use super::editing::{
-    Clipboard, EditFailure, EnvelopeMaterial, Material, apply, envelopes_over, invalid, paste_plan,
-    place, place_on_lane, place_on_main, refused, result, settled, to_value, unavailable,
-    write_envelopes,
+    Clipboard, EditFailure, EnvelopeMaterial, Material, apply, envelopes_over, fits, invalid,
+    paste_plan, place, place_on_lane, place_on_main, refused, result, settled, to_value,
+    unavailable, write_envelopes,
 };
 use super::placing::piece;
 use super::{ArrangementView, parse};
@@ -31,10 +31,13 @@ use super::{ArrangementView, parse};
 pub struct TrackTime {
     /// The track it came from.
     pub track: TrackId,
+    /// Its place in the set's track order, counted from 0.
+    pub place: usize,
     /// The clips of its main lane, or parts of them.
     pub clips: Vec<Clip>,
-    /// The clips of each of its take lanes, or parts of them.
-    pub lanes: Vec<(TakeLaneId, Vec<Clip>)>,
+    /// The clips of each of its take lanes, or parts of them, with the lane
+    /// and its place among the track's take lanes, counted from 0.
+    pub lanes: Vec<(TakeLaneId, usize, Vec<Clip>)>,
     /// Each parameter's shape over the span.
     pub envelopes: Vec<(AutomationTarget, Vec<Breakpoint>)>,
 }
@@ -44,6 +47,9 @@ pub struct TrackTime {
 /// R18).
 #[derive(Clone, Debug, PartialEq)]
 pub struct TimeMaterial {
+    /// Whether it was copied in another set, so its tracks and take lanes are
+    /// found by their places, not their IDs (the set exchange spec, R6).
+    pub foreign: bool,
     /// How long the span is.
     pub length: Ticks,
     /// The tracks that held anything over it.
@@ -57,6 +63,31 @@ pub struct TimeMaterial {
 }
 
 impl TimeMaterial {
+    /// Every clip it holds.
+    pub(super) fn clips(&self) -> impl Iterator<Item = &Clip> {
+        self.tracks.iter().flat_map(|track| {
+            track
+                .clips
+                .iter()
+                .chain(track.lanes.iter().flat_map(|(_, _, clips)| clips))
+        })
+    }
+
+    /// Makes it a paste into another set (`Clipboard::leave_set`).
+    pub(super) fn leave_set(&mut self) {
+        self.foreign = true;
+        for track in &mut self.tracks {
+            track
+                .clips
+                .iter_mut()
+                .chain(track.lanes.iter_mut().flat_map(|(_, _, clips)| clips))
+                .for_each(super::editing::leave_set_clip);
+            track
+                .envelopes
+                .retain(|(target, _)| !super::editing::names_an_object_of_its_set(target));
+        }
+    }
+
     /// What it holds, as `arrangement.copy_time` reports it.
     #[must_use]
     pub fn state(&self) -> TimeClipboardState {
@@ -65,7 +96,11 @@ impl TimeMaterial {
                 .tracks
                 .iter()
                 .map(|t| {
-                    t.clips.len() + t.lanes.iter().map(|(_, clips)| clips.len()).sum::<usize>()
+                    t.clips.len()
+                        + t.lanes
+                            .iter()
+                            .map(|(_, _, clips)| clips.len())
+                            .sum::<usize>()
                 })
                 .sum(),
             tracks: self.tracks.len(),
@@ -95,15 +130,18 @@ fn time_material(doc: &Document, start: Ticks, end: Ticks) -> TimeMaterial {
         parts.sort_by_key(|c| (c.start, c.id));
         parts
     };
+    let order = doc.track_order();
     let tracks = doc
         .tracks()
         .map(|track| TrackTime {
             track: track.id(),
+            place: order.iter().position(|&t| t == track.id()).unwrap_or(0),
             clips: parts(&mut track.clips()),
             lanes: track
                 .take_lanes()
-                .map(|lane| (lane.id, parts(&mut lane.clips.iter())))
-                .filter(|(_, clips)| !clips.is_empty())
+                .enumerate()
+                .map(|(place, lane)| (lane.id, place, parts(&mut lane.clips.iter())))
+                .filter(|(_, _, clips)| !clips.is_empty())
                 .collect(),
             envelopes: envelopes_over(doc, track.id(), start, end),
         })
@@ -111,6 +149,7 @@ fn time_material(doc: &Document, start: Ticks, end: Ticks) -> TimeMaterial {
         .collect();
     let settings = doc.settings();
     TimeMaterial {
+        foreign: false,
         length: end - start,
         tracks,
         tempo: bl_model::tempo_shape(&settings.tempo, start, end),
@@ -154,12 +193,23 @@ fn paste_material(
     let mut landed = BTreeMap::new();
     for held in &material.tracks {
         let doc = editor.document();
-        let Some(track) = doc.track(held.track) else {
+        // Material from another set finds its tracks and take lanes by place.
+        let destination = if material.foreign {
+            doc.track_order().get(held.place).copied()
+        } else {
+            Some(held.track)
+        };
+        let Some(destination) = destination else {
             continue;
         };
+        let Some(track) = doc.track(destination) else {
+            continue;
+        };
+        // Clips that don't fit the track now there are left out.
         let shift = |clips: &[Clip]| -> Vec<Clip> {
             clips
                 .iter()
+                .filter(|c| fits(doc, destination, &c.data))
                 .map(|c| Clip {
                     start: c.start + at,
                     ..c.clone()
@@ -169,26 +219,32 @@ fn paste_material(
         let lanes: Vec<(TakeLaneId, Vec<Clip>)> = held
             .lanes
             .iter()
-            .filter(|(lane, _)| track.take_lane(*lane).is_some())
-            .map(|(lane, clips)| (*lane, shift(clips)))
+            .filter_map(|(lane, place, clips)| {
+                let lane = if material.foreign {
+                    track.take_lanes().nth(*place)?.id
+                } else {
+                    track.take_lane(*lane)?.id
+                };
+                Some((lane, shift(clips)))
+            })
             .collect();
         // A parameter whose device is gone since the copy gets nothing.
         let shapes = held
             .envelopes
             .iter()
-            .filter(|(target, _)| doc.check_automation_target(held.track, *target).is_ok())
+            .filter(|(target, _)| doc.check_automation_target(destination, *target).is_ok())
             .cloned()
             .collect();
         let main = shift(&held.clips);
         if !main.is_empty() {
-            place_on_main(editor, vec![(held.track, main)])?;
+            place_on_main(editor, vec![(destination, main)])?;
         }
         for (lane, clips) in lanes {
-            place_on_lane(editor, held.track, lane, clips)?;
+            place_on_lane(editor, destination, lane, clips)?;
         }
-        landed.insert(envelopes.len(), held.track);
+        landed.insert(envelopes.len(), destination);
         envelopes.push(EnvelopeMaterial {
-            source: held.track,
+            source: destination,
             distance: envelopes.len(),
             start: Ticks::ZERO,
             length: material.length,

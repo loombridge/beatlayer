@@ -509,27 +509,21 @@ impl Map {
                     if !pass {
                         return;
                     }
-                    audio.send(note);
+                    self.router.track(&note, Some(Key::of(&note)));
+                    self.router.send_now(audio, note, Key::of(&note));
                     return;
                 }
+                // The device ends every note it passes, on the channel it
+                // went out on, whatever the list or Pass Triggers say by
+                // then (device-framework R31).
                 let out = self.on_channel(note);
-                if out.channel == note.channel {
-                    // The note keeps its channel: it isn't the device's,
-                    // and its own note-off ends it.
-                    audio.send(out);
-                } else {
-                    // The device starts the note on the articulation's
-                    // channel, and ends it there (device-framework R31).
-                    self.router.track(&note, Some(Key::of(&out)));
-                    self.router.send_now(audio, out, Key::of(&note));
-                }
+                self.router.track(&note, Some(Key::of(&out)));
+                self.router.send_now(audio, out, Key::of(&note));
             }
             NoteKind::Off | NoteKind::Choke => {
-                if self.trigger_of_key(note.key).is_some() {
-                    if !pass {
-                        return;
-                    }
-                    audio.send(note);
+                // A trigger's note-off is held back only when its note-on
+                // was (R8); a note the device passed ends as it went out.
+                if !pass && !self.router.knows(&note) && self.trigger_of_key(note.key).is_some() {
                     return;
                 }
                 // Spec: articulation-map R10. The note-off keeps the

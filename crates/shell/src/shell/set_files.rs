@@ -132,6 +132,14 @@ impl Shell {
         self.kit.clear();
     }
 
+    /// A number that changes whenever the set is replaced (a new or opened
+    /// one, or a recovered one), so what the agent API keeps about the old
+    /// set, such as scheduled commands, names no objects of the new one.
+    #[must_use]
+    pub fn set_generation(&self) -> u64 {
+        self.editor_generation
+    }
+
     /// Notes that the editor was replaced, so the journal doesn't hold the
     /// new set as an edit of the old one (the crash-recovery spec, R2).
     pub(super) fn editor_replaced(&mut self) {

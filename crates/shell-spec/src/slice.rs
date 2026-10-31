@@ -10,10 +10,10 @@
 //! Preserve warped timing, and its OK runs [`SLICE`]. An agent calls
 //! [`SLICE`] directly with the arguments the dialog would gather.
 
-use bl_commands::Context::{Arrangement, ClipView, Global, Session};
+use bl_commands::Context::{Arrangement, ClipView, DeviceView, Global, Session};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_core::time::{Ticks, TimeSignature};
-use bl_model::{ClipId, TrackId};
+use bl_model::{ChainId, ClipId, DeviceId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -27,8 +27,17 @@ pub const OPEN: &str = "clip.open_slice_dialog";
 /// `clip.close_slice_dialog`: close the slicing dialog.
 pub const CLOSE: &str = "clip.close_slice_dialog";
 
+/// `device.slice_to_drum_rack`: replace a Simpler in Slice mode with a Drum
+/// Rack of its slices (R15).
+pub const SLICE_TO_DRUM_RACK: &str = "device.slice_to_drum_rack";
+/// `device.slice_to_midi_track`: play a Simpler's slices from a new MIDI
+/// track, leaving it as it is (R16).
+pub const SLICE_TO_MIDI_TRACK: &str = "device.slice_to_midi_track";
+
 /// The undo step's name.
 pub const STEP: &str = "Slice to New MIDI Track";
+/// The undo step's name for `device.slice_to_drum_rack`.
+pub const DRUM_RACK_STEP: &str = "Slice to Drum Rack";
 
 /// The factory preset that makes a Drum Rack with one sampler per slice
 /// (R7, R9): the default.
@@ -41,7 +50,7 @@ pub const FACTORY_PRESETS: [&str; 2] = [DRUM_RACK_PRESET, ONE_SAMPLER_PRESET];
 
 /// Every command [`register`] adds, so a host knows which IDs to send to
 /// `bl-shell`'s `Shell::run`.
-pub const IDS: &[&str] = &[SLICE, OPEN, CLOSE];
+pub const IDS: &[&str] = &[SLICE, OPEN, CLOSE, SLICE_TO_DRUM_RACK, SLICE_TO_MIDI_TRACK];
 
 /// Whether `id` is one of the slice-to-midi commands.
 #[must_use]
@@ -196,6 +205,26 @@ pub struct SliceResult {
     pub slices: usize,
 }
 
+/// Arguments of `device.slice_to_drum_rack` and `device.slice_to_midi_track`
+/// (R15, R16).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SimplerArgs {
+    /// The Simpler, in Slice mode with at least one slice. Left out, the
+    /// selected device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+}
+
+/// What `device.slice_to_drum_rack` made (R17).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DrumRackSliced {
+    /// The new Drum Rack, in the Simpler's place.
+    pub device: DeviceId,
+    /// Its chains, one per slice, in order.
+    pub chains: Vec<ChainId>,
+}
+
 /// Arguments of `clip.open_slice_dialog` (R1).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -276,5 +305,45 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<NoArgs>()
             .result::<SliceDialogStatus>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SLICE_TO_DRUM_RACK, DRUM_RACK_STEP)
+            .description(
+                "Replaces a Simpler that is in Slice mode and has at least one slice (`device`, \
+                 or the selected device) with a Drum Rack, in its place in its chain and with \
+                 its name. The rack has one chain per slice, in order; each chain receives the \
+                 note its slice played in Simpler (C3 for the first, rising by semitones), \
+                 plays C3, and holds a copy of Simpler (its sample and edits, warp settings and \
+                 every parameter) in One-Shot mode whose Start and End flags sit on its slice, \
+                 or, with Playback set to Thru, on the slice's start and the region's End flag. \
+                 With Playback Mono or Thru every chain is in choke group 1, so one slice \
+                 sounds at a time as it did; with Poly, none is. The Simpler's own automation \
+                 and mappings go with it. One undo step. The result gives the rack and its \
+                 chains. Refused unless the device is a Simpler in Slice mode with a slice.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SimplerArgs>()
+            .result::<DrumRackSliced>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SLICE_TO_MIDI_TRACK, STEP)
+            .description(
+                "Plays a Simpler's slices from a new MIDI track, leaving the Simpler as it is. \
+                 The Simpler (`device`, or the selected device) must be in Slice mode and have \
+                 at least one slice. The new track goes directly after the Simpler's track, \
+                 takes the Simpler's name and is selected; it holds a Drum Rack made as \
+                 `device.slice_to_drum_rack` makes one, and a looping MIDI clip as long as the \
+                 Simpler's region with one note per slice on its chain's note, at the time its \
+                 slice starts at the sample's tempo (its warp tempo with Warp on, otherwise the \
+                 set's tempo), lasting to the next note, the last to the region's end, at \
+                 velocity 127. The clip goes in the new track's slot of the selected scene \
+                 while the Session View shows, otherwise at the Arrangement's insert marker. \
+                 One undo step. The result gives the track, the clip and the number of slices.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SimplerArgs>()
+            .result::<SliceResult>(),
     )
 }

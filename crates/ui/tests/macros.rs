@@ -320,6 +320,53 @@ fn variation_rows_take_the_edit_keys() {
     assert!(h.main.is_typing(), "Rename types the variation's name");
 }
 
+// Spec: macros R14 (a rename never leaves the keys with a field that is gone)
+#[test]
+fn a_macro_rename_ends_when_its_rack_goes() {
+    use egui::{Event, PointerButton};
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.settle();
+    let (rack, _) = set(&mut h);
+    h.shell
+        .invoke(
+            "rack.rename_macro",
+            json!({ "rack": rack, "macro_number": 1, "name": "Brightness" }),
+        )
+        .unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    let b = Harness::node(&nodes, "Brightness").bounds.unwrap();
+    let at = pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+    h.frame(vec![Event::PointerMoved(at)]);
+    for pressed in [true, false] {
+        h.frame(vec![Event::PointerButton {
+            pos: at,
+            button: PointerButton::Secondary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+    }
+    let nodes = Harness::nodes(&h.settle());
+    let item = nodes
+        .iter()
+        .find(|n| n.label == "Rename")
+        .expect("the macro's menu lists Rename");
+    h.frame(vec![Event::AccessKitActionRequest(
+        egui::accesskit::ActionRequest {
+            action: egui::accesskit::Action::Click,
+            target_tree: egui::accesskit::TreeId::ROOT,
+            target_node: item.id,
+            data: None,
+        },
+    )]);
+    h.settle();
+    assert!(h.main.is_typing(), "the slot's name is a text field");
+    h.shell
+        .run("device.remove", json!({ "device": rack }))
+        .unwrap();
+    h.settle();
+    assert!(!h.main.is_typing(), "the keys are back");
+}
+
 // Spec: info-view R10, R11 (the macros spec, R14). A macro's menu opens the
 // Info View's field for it; assistive technology reads the text as the
 // macro's description.

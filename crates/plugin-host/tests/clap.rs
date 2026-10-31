@@ -695,6 +695,58 @@ fn other_parameters_take_the_played_value() {
     }
 }
 
+// Spec: clap-hosting R6. A plug-in that changes its values in bulk, as by
+// loading a preset in its own editor, and asks the host to read them again
+// has each changed value come into the set.
+#[test]
+fn a_values_rescan_brings_the_changed_values_into_the_set() {
+    let (host, _node) = running(&[(GAIN, 0.5)]);
+    let id = device(1, &[]).id;
+    host.idle();
+    assert!(host.take_param_changes().is_empty());
+    host.load_state(id, &bl_test_clap::quiet_gain_state(0.9))
+        .unwrap();
+    host.idle();
+    assert_eq!(
+        host.take_param_changes(),
+        [ParamChange {
+            device: id,
+            param: ParamId(GAIN),
+            value: 0.9
+        }]
+    );
+    host.idle();
+    assert!(host.take_param_changes().is_empty(), "once");
+}
+
+// Spec: clap-hosting R10. A plug-in let go of while its processor is still
+// in its node's queue is deactivated and destroyed once the node is gone.
+#[test]
+fn a_plugin_let_go_of_while_its_processor_is_queued_is_still_released() {
+    let host = ClapHost::new();
+    host.load(bundle()).unwrap();
+    // Made off the main thread, as the compiler thread makes it; no block
+    // runs, so the processor stays in its queue.
+    let factory = host.factory();
+    let node = std::thread::scope(|s| {
+        s.spawn(|| factory.create(&device(1, &[(GAIN, 0.25)]), &config()))
+            .join()
+            .unwrap()
+    })
+    .expect("a node");
+    assert!(host.idle());
+    host.clear();
+    drop(node);
+    for _ in 0..3 {
+        host.idle();
+    }
+    assert_eq!(
+        host.closing(),
+        0,
+        "the plug-in let go of is still waiting for its processor"
+    );
+}
+
 // Spec: modulation R10
 #[test]
 fn a_value_the_plugin_reports_back_because_the_engine_sent_it_is_not_a_change() {

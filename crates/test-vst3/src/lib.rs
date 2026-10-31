@@ -82,6 +82,14 @@ pub const LATENCY: u32 = 1;
 /// was told, 0 to 127, stepped. The controller sets it itself, in a
 /// gesture, as its editor would.
 pub const LAST_NOTE: u32 = 2;
+/// The mode parameter's ID: a switch of four positions (step count 3),
+/// declared as the VST3 SDK's own stepped parameters are, so its plain range
+/// is its normalized one, 0 to 1, whatever its step count.
+pub const MODE: u32 = 3;
+/// The trigger parameter's ID: when the controller is told a value above 0,
+/// it asks the host to read its values and titles again (a restart with only
+/// information flags), and changes no latency.
+pub const TRIGGER: u32 = 4;
 /// The gain's plain range: 0 to this, 1 by default.
 pub const GAIN_MAX: f64 = 2.0;
 /// The most frames the plug-in's latency can be, and the length of its
@@ -97,6 +105,13 @@ pub const CONTROLLER_MAGIC: &[u8; 4] = b"BLTU";
 pub const FAIL_PROCESS: &[u8] = b"FAIL:PROCESS";
 /// A component state that makes the next activation fail.
 pub const FAIL_ACTIVATE: &[u8] = b"FAIL:ACTIVATE";
+/// What a controller state that makes the controller set its gain, with no
+/// gesture, and ask the host to read its values again starts with: the gain
+/// as `f64` bytes follows.
+pub const QUIET_GAIN: &[u8] = b"QUIETGAIN";
+/// What a controller state that makes the controller perform one gesture
+/// on [`MODE`] starts with: the step it ends on follows, as one byte.
+pub const MODE_GESTURE: &[u8] = b"MODEGESTURE";
 /// What a controller state that makes the controller perform one gesture
 /// on [`LAST_NOTE`] starts with: its two performed values follow.
 pub const GESTURE: &[u8] = b"GESTURE";
@@ -220,6 +235,25 @@ pub fn gesture_state(first: u8, second: u8) -> Vec<u8> {
     bytes
 }
 
+/// A controller state that performs one gesture on [`MODE`] that ends on
+/// `step` of its four positions, as its editor's switch would.
+#[must_use]
+pub fn mode_gesture_state(step: u8) -> Vec<u8> {
+    let mut bytes = MODE_GESTURE.to_vec();
+    bytes.push(step);
+    bytes
+}
+
+/// A controller state that sets the gain without a gesture and asks the host
+/// to read the values again, as a plug-in does that loads a preset in its
+/// own window.
+#[must_use]
+pub fn quiet_gain_state(gain: f64) -> Vec<u8> {
+    let mut bytes = QUIET_GAIN.to_vec();
+    bytes.extend_from_slice(&gain.to_le_bytes());
+    bytes
+}
+
 fn copy_cstring(src: &str, dst: &mut [c_char]) {
     let c_string = CString::new(src).unwrap_or_default();
     let bytes = c_string.as_bytes_with_nul();
@@ -274,6 +308,7 @@ fn plain_range(id: u32) -> Option<(f64, f64)> {
         GAIN => Some((0.0, GAIN_MAX)),
         LATENCY => Some((0.0, MAX_LATENCY as f64)),
         LAST_NOTE => Some((0.0, 127.0)),
+        MODE | TRIGGER => Some((0.0, 1.0)),
         _ => None,
     }
 }
@@ -644,7 +679,8 @@ impl IComponentTrait for Processor {
         kResultOk
     }
 
-    unsafe fn setActive(&self, _state: TBool) -> tresult {
+    unsafe fn setActive(&self, state: TBool) -> tresult {
+        log_call("set-active", 0, f64::from(state));
         kResultOk
     }
 
@@ -1070,6 +1106,8 @@ struct Controller<const EXPRESSIONS: bool> {
     gain: Cell<f64>,
     latency: Cell<f64>,
     last_note: Cell<f64>,
+    mode: Cell<f64>,
+    trigger: Cell<f64>,
     /// The host's component handler, which it set and keeps alive for as
     /// long as this controller lives.
     handler: Cell<*mut IComponentHandler>,
@@ -1083,6 +1121,8 @@ impl<const EXPRESSIONS: bool> Controller<EXPRESSIONS> {
             gain: Cell::new(1.0),
             latency: Cell::new(0.0),
             last_note: Cell::new(0.0),
+            mode: Cell::new(0.0),
+            trigger: Cell::new(0.0),
             handler: Cell::new(ptr::null_mut()),
         }
     }
@@ -1092,6 +1132,8 @@ impl<const EXPRESSIONS: bool> Controller<EXPRESSIONS> {
             GAIN => Some(self.gain.get()),
             LATENCY => Some(self.latency.get()),
             LAST_NOTE => Some(self.last_note.get()),
+            MODE => Some(self.mode.get()),
+            TRIGGER => Some(self.trigger.get()),
             _ => None,
         }
     }
@@ -1101,6 +1143,8 @@ impl<const EXPRESSIONS: bool> Controller<EXPRESSIONS> {
             GAIN => self.gain.set(plain.clamp(0.0, GAIN_MAX)),
             LATENCY => self.latency.set(plain.clamp(0.0, MAX_LATENCY as f64)),
             LAST_NOTE => self.last_note.set(plain.clamp(0.0, 127.0)),
+            MODE => self.mode.set(plain.clamp(0.0, 1.0)),
+            TRIGGER => self.trigger.set(plain.clamp(0.0, 1.0)),
             _ => {}
         }
     }
@@ -1347,6 +1391,20 @@ impl<const EXPRESSIONS: bool> IEditControllerTrait for Controller<EXPRESSIONS> {
             self.gesture(LAST_NOTE, &[first, second]);
             return kResultOk;
         }
+        if bytes.len() == MODE_GESTURE.len() + 1 && bytes.starts_with(MODE_GESTURE) {
+            self.gesture(MODE, &[f64::from(bytes[MODE_GESTURE.len()]) / 3.0]);
+            return kResultOk;
+        }
+        if bytes.len() == QUIET_GAIN.len() + 8
+            && bytes.starts_with(QUIET_GAIN)
+            && let Some(gain) = f64_at(&bytes, QUIET_GAIN.len()..QUIET_GAIN.len() + 8)
+        {
+            self.gain.set(gain.clamp(0.0, GAIN_MAX));
+            self.ask_restart(
+                (RestartFlags_::kParamValuesChanged | RestartFlags_::kParamTitlesChanged) as int32,
+            );
+            return kResultOk;
+        }
         if bytes.is_empty() {
             return kResultOk;
         }
@@ -1382,7 +1440,7 @@ impl<const EXPRESSIONS: bool> IEditControllerTrait for Controller<EXPRESSIONS> {
     }
 
     unsafe fn getParameterCount(&self) -> i32 {
-        3
+        5
     }
 
     unsafe fn getParameterInfo(&self, param_index: i32, info: *mut ParameterInfo) -> tresult {
@@ -1390,6 +1448,8 @@ impl<const EXPRESSIONS: bool> IEditControllerTrait for Controller<EXPRESSIONS> {
             0 => (GAIN, "Gain", 0, 1.0),
             1 => (LATENCY, "Latency", 4096, 0.0),
             2 => (LAST_NOTE, "Last Note", 127, 0.0),
+            3 => (MODE, "Mode", 3, 0.0),
+            4 => (TRIGGER, "Trigger", 0, 0.0),
             _ => return kInvalidArgument,
         };
         // SAFETY: the host passes a valid pointer for the call.
@@ -1480,6 +1540,13 @@ impl<const EXPRESSIONS: bool> IEditControllerTrait for Controller<EXPRESSIONS> {
             // As its editor would: the latency changed, so ask the host to
             // deactivate and activate the plug-in again.
             self.ask_restart(RestartFlags_::kLatencyChanged as int32);
+        }
+        if id == TRIGGER && plain > 0.0 && before == 0.0 {
+            // As a JUCE plug-in does from `updateHostDisplay`: its values
+            // and titles changed, and nothing that needs a restart.
+            self.ask_restart(
+                (RestartFlags_::kParamValuesChanged | RestartFlags_::kParamTitlesChanged) as int32,
+            );
         }
         kResultOk
     }

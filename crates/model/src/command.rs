@@ -16,8 +16,8 @@ use crate::automation::{
     override_device,
 };
 use crate::clip::{
-    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MidiData, NewTakeLane, TakeLane,
-    clip_entry, crossfades,
+    AudioData, Clip, ClipData, ClipEnvelope, EnvelopeKind, MIN_MIDI_BRACE, MidiData, NewTakeLane,
+    TakeLane, clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
 use crate::device::{Device, DeviceKind, DeviceRole};
@@ -4550,13 +4550,11 @@ impl Document {
                 })
             }
             Command::WarpAsLoop { clip, analysis } => {
-                let seconds =
-                    analysis
-                        .as_ref()
-                        .map(|file| file.seconds)
-                        .ok_or(ModelError::InvalidInput(
-                            "give the file's length in `analysis`",
-                        ))?;
+                let file = analysis.as_ref().ok_or(ModelError::InvalidInput(
+                    "give the file's length in `analysis`",
+                ))?;
+                file.check()?;
+                let seconds = file.seconds;
                 let set_bpm = self.set_bpm_at(*clip, None)?;
                 self.edit_markers_with(*clip, |audio| {
                     audio.require_warp()?;
@@ -9041,6 +9039,13 @@ pub(crate) fn check_midi(midi: &MidiData) -> Result<(), ModelError> {
     if let Some(end) = midi.loop_end.filter(|&end| end <= midi.loop_start) {
         return Err(ModelError::EmptyLength(end));
     }
+    if let Some(end) = midi.loop_end {
+        check_value(
+            "loop end (at least a 2048th note after the loop start)",
+            end.get() as f64,
+            end - midi.loop_start >= MIN_MIDI_BRACE,
+        )?;
+    }
     if !midi.groups_hold() {
         return Err(ModelError::BrokenGroups);
     }
@@ -9175,6 +9180,7 @@ pub(crate) fn check_clip(clip: &Clip) -> Result<(), ModelError> {
         return Err(ModelError::AudioClipOffset(clip.offset));
     }
     check_velocity_amount(clip.launch.velocity_amount)?;
+    clip.launch.follow.check()?;
     check_clip_data(&clip.data)
 }
 
@@ -14170,6 +14176,33 @@ mod tests {
             (2.0, quarter * 4),
             "the map moved back by the region's start and holds the file's end"
         );
+    }
+
+    // Spec: audio-clip-editing R23. A brace of a few ticks would repeat a
+    // clip into millions of stretches.
+    #[test]
+    fn a_midi_loop_brace_is_at_least_a_2048th_note() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Midi, None);
+        let clip = song.clip(track, 16);
+        song.apply(Command::SetClipData {
+            clip,
+            data: ClipData::Midi(MidiData::new([])),
+        })
+        .unwrap();
+        for end in [Ticks(1), MIN_MIDI_BRACE - Ticks(1)] {
+            song.reject(Command::SetMidiClipLoop {
+                clip,
+                start: Ticks::ZERO,
+                end: Some(end),
+            });
+        }
+        song.apply(Command::SetMidiClipLoop {
+            clip,
+            start: Ticks::QUARTER,
+            end: Some(Ticks::QUARTER + MIN_MIDI_BRACE),
+        })
+        .unwrap();
     }
 
     // Spec: audio-clip-editing R23.

@@ -65,7 +65,9 @@ fn a_plugin_loads_by_path_with_its_parameters() {
         [
             (ParamId(bl_test_vst3::GAIN), "Gain"),
             (ParamId(bl_test_vst3::LATENCY), "Latency"),
-            (ParamId(bl_test_vst3::LAST_NOTE), "Last Note")
+            (ParamId(bl_test_vst3::LAST_NOTE), "Last Note"),
+            (ParamId(bl_test_vst3::MODE), "Mode"),
+            (ParamId(bl_test_vst3::TRIGGER), "Trigger")
         ]
     );
     assert!(params.iter().all(|p| p.automatable));
@@ -344,6 +346,22 @@ fn state_saves_and_loads_into_a_new_instance() {
     assert_eq!(reopened.save_state(restored.id).unwrap(), saved);
 }
 
+// Spec: vst3-hosting R9. A state whose controller part the plug-in refuses
+// changes nothing, though its component took its own part.
+#[test]
+fn a_state_whose_controller_part_is_refused_changes_nothing() {
+    let (host, _node) = running(&[]);
+    let id = vst3_device(1, &[]).id;
+    let before = host.save_state(id).unwrap();
+    let mut component = bl_test_vst3::COMPONENT_MAGIC.to_vec();
+    component.extend_from_slice(&0.5f64.to_le_bytes());
+    component.extend_from_slice(&0u32.to_le_bytes());
+    let bad = plugin_state(&component, b"junk controller");
+    let refused = host.load_state(id, &bad);
+    assert!(matches!(refused, Err(Vst3Error::Refused(_))), "{refused:?}");
+    assert_eq!(host.save_state(id).unwrap(), before);
+}
+
 // Spec: vst3-hosting R10 (as clap-hosting's R10). A plug-in that asks for a
 // restart is deactivated and activated again by the main thread, and its
 // new latency is reported; the node passes its input through for the blocks
@@ -424,6 +442,108 @@ fn a_gesture_from_the_controllers_editor_makes_one_change() {
             .contains(&(ParamId(bl_test_vst3::LAST_NOTE), 64.0)),
         "{:?}",
         status.values
+    );
+}
+
+// Spec: vst3-hosting R6. A plug-in that changes its values itself and asks
+// the host to read them again, as one that loads a preset in its own
+// window, has each changed value come into the set once.
+#[test]
+fn a_values_restart_brings_the_changed_values_into_the_set() {
+    let (host, _node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let id = vst3_device(1, &[]).id;
+    host.idle();
+    assert!(host.take_param_changes().is_empty());
+    host.load_state(id, &plugin_state(&[], &bl_test_vst3::quiet_gain_state(1.5)))
+        .unwrap();
+    host.idle();
+    assert_eq!(
+        host.take_param_changes(),
+        [ParamChange {
+            device: id,
+            param: ParamId(bl_test_vst3::GAIN),
+            value: 1.5
+        }]
+    );
+    host.idle();
+    assert!(host.take_param_changes().is_empty(), "once");
+}
+
+// Spec: vst3-hosting R10. A restart that asks only for the values and
+// titles to be read again keeps the plug-in running: no block passes its
+// input through.
+#[test]
+fn a_param_values_restart_ask_keeps_the_plugin_running() {
+    let (host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let id = vst3_device(1, &[]).id;
+    let input = [1.0; FRAMES];
+    let reference = run(node.as_mut(), &input, &[], &[]).channels;
+    assert!(reference[0].iter().all(|s| *s == 0.5));
+    let mut blocks = vec![
+        run(
+            node.as_mut(),
+            &input,
+            &[set(0, bl_test_vst3::TRIGGER, 1.0)],
+            &[],
+        )
+        .channels,
+    ];
+    for _ in 0..4 {
+        host.idle();
+        assert!(host.status(id).unwrap().active);
+        blocks.push(run(node.as_mut(), &input, &[], &[]).channels);
+    }
+    for block in blocks {
+        assert_eq!(block, reference);
+    }
+}
+
+// Spec: vst3-hosting R5, R6. A stepped parameter whose plain range is its
+// normalized one is its step index: every step can be set, and the editor's
+// gesture comes back as a step.
+#[test]
+fn an_sdk_stepped_parameter_with_a_unit_range_is_a_step_index() {
+    let host = Vst3Host::new();
+    let types = host.load(vst3_bundle()).unwrap();
+    let mode = types[0]
+        .device_type
+        .description
+        .params
+        .iter()
+        .find(|p| p.id == ParamId(bl_test_vst3::MODE))
+        .expect("the mode parameter");
+    assert_eq!(
+        mode.kind,
+        ParamKind::Integer {
+            min: 0,
+            max: 3,
+            unit: bl_model::ParamUnit::None
+        }
+    );
+    let id = vst3_device(1, &[]).id;
+    let mut node = host
+        .factory()
+        .create(&vst3_device(1, &[(bl_test_vst3::MODE, 2.0)]), &config())
+        .unwrap();
+    let _ = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    host.idle();
+    let values = host.status(id).unwrap().values;
+    assert!(
+        values.contains(&(ParamId(bl_test_vst3::MODE), 2.0)),
+        "{values:?}"
+    );
+
+    // The editor's switch moves to step 1.
+    host.load_state(id, &plugin_state(&[], &bl_test_vst3::mode_gesture_state(1)))
+        .unwrap();
+    host.idle();
+    assert_eq!(
+        host.take_param_changes(),
+        [ParamChange {
+            device: id,
+            param: ParamId(bl_test_vst3::MODE),
+            value: 1.0
+        }]
     );
 }
 
@@ -632,6 +752,48 @@ fn a_component_a_dropped_node_never_took_is_activated_for_the_next_node() {
     host.retain(&Default::default());
     host.idle();
     assert!(host.status(device.id).is_none());
+}
+
+// Spec: vst3-hosting R2. A plug-in whose node is gone isn't activated again,
+// and it is deactivated before it is terminated.
+#[test]
+fn a_plugin_whose_node_is_dropped_is_not_activated_again() {
+    let log = plugin_log("dropped-node");
+    let (host, mut node) = running(&[(bl_test_vst3::GAIN, 0.5)]);
+    let _ = run(node.as_mut(), &[1.0; FRAMES], &[], &[]);
+    let activations = |lines: &[String]| {
+        lines
+            .iter()
+            .filter(|l| l.starts_with("call=set-active ") && l.ends_with("value=1"))
+            .count()
+    };
+    let before = activations(&logged(&log));
+    assert!(before >= 1);
+    // As the drop thread does when the device is deleted.
+    drop(node);
+    for _ in 0..10 {
+        host.idle();
+    }
+    let lines = logged(&log);
+    assert_eq!(
+        activations(&lines),
+        before,
+        "activated again for a node that is gone"
+    );
+    assert!(
+        lines
+            .iter()
+            .rfind(|l| l.starts_with("call=set-active "))
+            .is_some_and(|l| l.ends_with("value=0")),
+        "{lines:?}"
+    );
+    host.clear();
+    assert!(
+        logged(&log)
+            .iter()
+            .rfind(|l| l.starts_with("call=set-active "))
+            .is_some_and(|l| l.ends_with("value=0"))
+    );
 }
 
 // Spec: vst3-hosting R3

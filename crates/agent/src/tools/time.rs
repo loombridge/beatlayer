@@ -613,7 +613,7 @@ fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
                     shell,
                     entry.agent.as_deref(),
                     *class,
-                    &[&entry.command],
+                    &super::judged_ids(&entry.command, &entry.args),
                 ) != Decision::Run
         })
     {
@@ -847,20 +847,20 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             };
             let classes = call.classes();
             let shell = &*ctx.shell;
-            step!(ctx.permit(&classes, &[command.as_str()], || format!(
+            let judged = super::judged_ids(&command, &args);
+            step!(ctx.permit(&classes, &judged, || format!(
                 "At {position}: {}",
                 question_line(shell, &command, &label, &call, &args)
             )));
             // What the person just said yes to is cleared, and so is what the
             // agent needs no answer for.
-            let by_autonomy =
-                ctx.decide(Permission::Destructive, &[command.as_str()]) == Decision::Run;
+            let by_autonomy = ctx.decide(Permission::Destructive, &judged) == Decision::Run;
             let cleared: Vec<Permission> = Permission::ALL
                 .into_iter()
                 .filter(|class| {
                     !class.asks_first()
                         || classes.contains(class)
-                        || ctx.decide(*class, &[command.as_str()]) == Decision::Run
+                        || ctx.decide(*class, &judged) == Decision::Run
                 })
                 .collect();
             ctx.session.refs = names;

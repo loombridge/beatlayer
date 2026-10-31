@@ -195,18 +195,18 @@ impl TemplateSurface {
                     }
                 }
             }
-            Act::Record if pressed => {
+            Act::Record if pressed || toggle => {
                 if let Some(on) = flip(seen.map(|s| s.transport.recording)) {
                     cx.run("transport.set_recording", json!({ "recording": on }));
                 }
             }
-            Act::Loop if pressed => {
+            Act::Loop if pressed || toggle => {
                 let now = seen.map(|s| s.document.settings().arrangement_loop.enabled);
                 if let Some(on) = flip(now) {
                     cx.run("transport.set_loop_enabled", json!({ "enabled": on }));
                 }
             }
-            Act::Metronome if pressed => {
+            Act::Metronome if pressed || toggle => {
                 let now = seen.map(|s| s.document.settings().metronome.enabled);
                 if let Some(on) = flip(now) {
                     cx.run("transport.set_metronome_enabled", json!({ "enabled": on }));
@@ -418,7 +418,11 @@ impl ControlSurface for TemplateSurface {
                 controller: message.data1(),
             },
             0xE0 => Source::PitchBend { channel },
-            _ => return,
+            // Aftertouch, pressure and program change are never a control's.
+            _ => {
+                cx.hand_back(at, message);
+                return;
+            }
         };
         // A message that isn't one of the template's controls reaches the
         // tracks as it would without a surface.
@@ -465,5 +469,98 @@ impl ControlSurface for TemplateSurface {
             mode: None,
             watch: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bl_model::Editor;
+
+    use bl_core::clock::TestClock;
+
+    use super::*;
+    use crate::surface::Ask;
+    use crate::template::{BUNDLED, parse};
+
+    fn surface(controls: &str) -> TemplateSurface {
+        let text = format!(
+            "format = 1\n\n[surface]\nname = \"T\"\n\n[[control]]\nid = \"c\"\nchannel = 1\n{controls}\n"
+        );
+        let mut surface = TemplateSurface::new(Arc::new(parse(&text).unwrap()));
+        let model = ReadModel::at_rest(Arc::new(Editor::new().document().clone()));
+        surface.tick(&model, &mut Cx::new(0, TestClock::new().now()));
+        surface
+    }
+
+    /// The commands `bytes` asks for, as (ID, arguments).
+    fn asked(surface: &mut TemplateSurface, bytes: &[u8]) -> Vec<(String, Value)> {
+        let mut cx = Cx::new(0, TestClock::new().now());
+        surface.message(TestClock::new().now(), bytes, &mut cx);
+        cx.requests
+            .into_iter()
+            .filter_map(|ask| match ask {
+                Ask::Command(request) => Some((request.id, request.args)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // Spec: control-surfaces R40. A toggle's every message says whether it is
+    // on, so its off message switches record, loop and the metronome off.
+    #[test]
+    fn a_toggle_switches_record_loop_and_the_metronome_off_as_well_as_on() {
+        for (role, id, field) in [
+            ("metronome", "transport.set_metronome_enabled", "enabled"),
+            ("loop", "transport.set_loop_enabled", "enabled"),
+            ("record", "transport.set_recording", "recording"),
+        ] {
+            let mut cc = surface(&format!(
+                "message = \"cc\"\nnumber = 20\nkind = \"toggle\"\nrole = \"{role}\""
+            ));
+            assert_eq!(
+                asked(&mut cc, &[0xB0, 20, 0x7F]),
+                [(id.to_owned(), json!({ field: true }))]
+            );
+            assert_eq!(
+                asked(&mut cc, &[0xB0, 20, 0x00]),
+                [(id.to_owned(), json!({ field: false }))]
+            );
+            let mut note = surface(&format!(
+                "message = \"note\"\nnumber = 60\nkind = \"toggle\"\nrole = \"{role}\""
+            ));
+            assert_eq!(
+                asked(&mut note, &[0x90, 60, 100]),
+                [(id.to_owned(), json!({ field: true }))]
+            );
+            assert_eq!(
+                asked(&mut note, &[0x80, 60, 0]),
+                [(id.to_owned(), json!({ field: false }))]
+            );
+        }
+    }
+
+    // Spec: control-surfaces R40. A toggle's off message is no press: it
+    // doesn't start the transport a second time.
+    #[test]
+    fn a_toggles_off_message_does_not_press_a_one_shot() {
+        let mut play = surface("message = \"cc\"\nnumber = 20\nkind = \"toggle\"\nrole = \"play\"");
+        assert_eq!(asked(&mut play, &[0xB0, 20, 0x7F]).len(), 1);
+        assert!(asked(&mut play, &[0xB0, 20, 0x00]).is_empty());
+    }
+
+    // Spec: control-surfaces R40. Aftertouch, channel pressure and program
+    // change are no control's: they reach the tracks as without a surface.
+    #[test]
+    fn aftertouch_pressure_and_program_change_are_handed_back() {
+        let mut surface = TemplateSurface::new(Arc::new(parse(BUNDLED).unwrap()));
+        let mut cx = Cx::new(0, TestClock::new().now());
+        for bytes in [&[0xD0, 0x40][..], &[0xA0, 60, 50], &[0xC0, 5]] {
+            surface.message(TestClock::new().now(), bytes, &mut cx);
+        }
+        let handed: Vec<Vec<u8>> = cx.handed.iter().map(|(_, m)| m.bytes().to_vec()).collect();
+        assert_eq!(
+            handed,
+            [vec![0xD0, 0x40], vec![0xA0, 60, 50], vec![0xC0, 5]]
+        );
     }
 }

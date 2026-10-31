@@ -932,6 +932,11 @@ impl Processor {
                     input,
                 } => self.midi.sync_in.set_input(index, count, input),
                 Message::ExternalSync(on) => self.ext = on,
+                Message::MidiOutputOpened(port) => {
+                    if let Some(program) = self.program.as_mut() {
+                        program.get_mut().midi.reopen_port(port);
+                    }
+                }
             }
         }
     }

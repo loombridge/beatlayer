@@ -1546,9 +1546,12 @@ fn slot_at(
         return None;
     }
     let (scene, _) = scenes.get(row as usize)?;
+    // A chain's strip has no slots (racks R27): its column's index is its
+    // track's, which a drop there must not reach.
     layout
         .columns
         .iter()
+        .filter(|column| !matches!(column.kind, ColumnKind::Chain(_)))
         .find(|column| pos.x >= column.rect.left() && pos.x < column.rect.right())
         .map(|column| (columns[column.index], *scene))
 }

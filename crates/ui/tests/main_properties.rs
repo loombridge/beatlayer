@@ -12,7 +12,7 @@ use bl_core::time::{Ticks, TimeSignature};
 use bl_model::{Clip, ClipData, ClipId, MidiData};
 use bl_shell::clip_properties_commands::Properties;
 use common::{Harness, Node, Window};
-use egui::{Key, Modifiers, Pos2, Rect};
+use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect};
 use serde_json::json;
 
 fn nodes(h: &mut Harness) -> Vec<Node> {
@@ -561,4 +561,89 @@ fn the_scale_controls_run_clip_set_scale_and_show_a_mixed_selection() {
         all.iter().any(|n| n.label == "B♭"),
         "A# reads B♭ with Flats"
     );
+}
+
+fn press(at: Pos2, pressed: bool) -> Event {
+    Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    }
+}
+
+/// A press at `from`, `frames` moves of `dy` points each, and the release.
+fn drag_by(h: &mut Harness, from: Pos2, dy: f32, frames: u32) {
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true)]);
+    let mut at = from;
+    for _ in 0..frames {
+        at += egui::vec2(0.0, dy);
+        h.frame(vec![Event::PointerMoved(at)]);
+    }
+    h.frame(vec![press(at, false)]);
+    h.settle();
+}
+
+// Spec: clip-properties R3, R7. Dragging a marker field is one undo step, not
+// one for each step of the drag.
+#[test]
+fn dragging_start_and_position_is_one_undo_step() {
+    let (mut h, clip) = session_clip();
+    h.shell
+        .run(
+            "clip.set_midi_loop",
+            json!({ "clip": clip, "start": 0, "end": Ticks::WHOLE.get() }),
+        )
+        .unwrap();
+    for (name, read) in [
+        ("Start", (|m: &MidiData| m.start) as fn(&MidiData) -> Ticks),
+        ("Position", |m| m.loop_start),
+    ] {
+        let all = nodes(&mut h);
+        let at = centre(Harness::node(&all, name));
+        let before = steps(&h);
+        let first = read(&midi(&h, clip));
+        drag_by(&mut h, at, -5.0, 6);
+        assert_ne!(read(&midi(&h, clip)), first, "{name} moved");
+        assert_eq!(steps(&h), before + 1, "{name}: one undo step");
+        h.shell.run("edit.undo", json!({})).unwrap();
+        assert_eq!(read(&midi(&h, clip)), first, "{name}: undone");
+    }
+}
+
+// Spec: clip-properties R3. A drag whose field stops being drawn before the
+// release still ends its gesture, so later edits aren't folded into it.
+#[test]
+fn a_drag_hidden_before_the_release_ends_its_gesture() {
+    let (mut h, clip) = session_clip();
+    let all = nodes(&mut h);
+    let at = centre(Harness::node(&all, "Start"));
+    let before = steps(&h);
+    let first = midi(&h, clip).start;
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![press(at, true)]);
+    for i in 1..=4 {
+        h.frame(vec![Event::PointerMoved(
+            at - egui::vec2(0.0, 5.0 * i as f32),
+        )]);
+    }
+    assert!(h.shell.gesture_under_way(), "the drag holds a gesture");
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.frame(vec![Event::PointerMoved(at - egui::vec2(0.0, 25.0))]);
+    h.frame(vec![press(at - egui::vec2(0.0, 25.0), false)]);
+    h.settle();
+    assert!(
+        !h.shell.gesture_under_way(),
+        "the release ended the gesture"
+    );
+    assert_ne!(midi(&h, clip).start, first, "the drag moved Start");
+    assert_eq!(steps(&h), before + 1, "one undo step for the drag");
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.settle();
+    assert!(
+        !h.shell.gesture_under_way(),
+        "showing the field again opens nothing"
+    );
+    assert_eq!(steps(&h), before + 1, "and adds no step");
 }

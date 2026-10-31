@@ -414,6 +414,7 @@ fn place_in_session(
             let mut clip = carried(editor.document(), *track, &slot.clip, true);
             clip.id = editor.new_id();
             clip.start = Ticks::ZERO;
+            let (made, scale) = (clip.id, clip.scale);
             apply(
                 editor,
                 Command::CreateSlotClip {
@@ -422,6 +423,7 @@ fn place_in_session(
                     clip,
                 },
             )?;
+            crate::tracks::keep_scale(editor, made, scale)?;
             slots.push(SlotRef {
                 track: *track,
                 scene,
@@ -639,6 +641,7 @@ fn paste_scenes(
                 let mut clip = carried(doc, *track, clip, true);
                 clip.id = editor.new_id();
                 clip.start = Ticks::ZERO;
+                let (made, scale) = (clip.id, clip.scale);
                 apply(
                     editor,
                     Command::CreateSlotClip {
@@ -647,6 +650,7 @@ fn paste_scenes(
                         clip,
                     },
                 )?;
+                crate::tracks::keep_scale(editor, made, scale)?;
             }
             made.push(id);
         }

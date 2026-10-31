@@ -275,6 +275,73 @@ fn a_copy_keeps_its_source_s_scale() {
     assert_eq!(scale_of(&shell, pasted), wanted, "a paste");
 }
 
+// Spec: scales R7. A clip with Scale Mode off is still the same as one made
+// from nothing, so a copy has to be given its scale back.
+#[test]
+fn a_copy_of_a_clip_with_scale_mode_off_keeps_it() {
+    let (mut shell, track, clip) = shell_with_a_clip();
+    shell
+        .run(
+            "song.set_scale",
+            json!({ "enabled": true, "root": 2, "name": "minor" }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [clip], "enabled": false, "root": 0, "name": "major" }),
+        )
+        .unwrap();
+    assert_eq!(scale_of(&shell, clip), Scale::default());
+
+    // A track duplicate.
+    shell
+        .run("track.duplicate", json!({ "tracks": [track] }))
+        .unwrap();
+    let doc = shell.editor().document();
+    let copy = doc
+        .top_level()
+        .find(|&other| other != track && doc.track(other).unwrap().clips().count() == 1)
+        .expect("the copy of the track");
+    let copied = doc.track(copy).unwrap().clips().next().unwrap().id;
+    assert_eq!(
+        scale_of(&shell, copied),
+        Scale::default(),
+        "a duplicated track's clip keeps Scale Mode off"
+    );
+
+    // A Session duplicate.
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let slot = shell.editor().document().slot(track, scene).unwrap().id;
+    shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [slot], "enabled": false, "root": 0, "name": "major" }),
+        )
+        .unwrap();
+    shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    shell.run("session.duplicate", json!({})).unwrap();
+    let doc = shell.editor().document();
+    let slots: Vec<&Clip> = doc
+        .track(track)
+        .unwrap()
+        .slots()
+        .map(|(_, clip)| clip)
+        .collect();
+    assert_eq!(slots.len(), 2, "the slot clip was duplicated");
+    for clip in slots {
+        assert_eq!(clip.scale, Scale::default(), "a duplicated slot clip");
+    }
+}
+
 // Spec: scales R11.
 #[test]
 fn a_launched_clip_makes_its_scale_the_current_scale() {

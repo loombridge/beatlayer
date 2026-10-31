@@ -453,9 +453,7 @@ fn place_clip(
             None => Command::CreateClip { track, clip },
         },
     )?;
-    if scale != editor.document().settings().scale {
-        apply(editor, scale.command(vec![id]))?;
-    }
+    crate::tracks::keep_scale(editor, id, scale)?;
     Ok(id)
 }
 

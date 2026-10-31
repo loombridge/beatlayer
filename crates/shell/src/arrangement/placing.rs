@@ -52,9 +52,7 @@ pub fn split_off(editor: &mut Editor, clip: ClipId, at: Ticks) -> Result<ClipId,
         Some(lane) => Command::CreateTakeClip { lane, clip: right },
         None => Command::CreateClip { track, clip: right },
     })?;
-    if scale != editor.document().settings().scale {
-        editor.apply(scale.command(vec![id]))?;
-    }
+    crate::tracks::keep_scale(editor, id, scale)?;
     Ok(id)
 }
 

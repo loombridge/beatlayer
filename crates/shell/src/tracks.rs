@@ -10,8 +10,8 @@ use std::collections::BTreeSet;
 
 use bl_model::{
     Automation, AutomationTarget, ChainId, Clip, ClipId, Command, Device, DeviceId, Document,
-    EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, NewTakeLane, Output, Routing, SceneId,
-    TakeLane, Track, TrackDelay, TrackId, TrackKind,
+    EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, NewTakeLane, Output, Routing, Scale,
+    SceneId, TakeLane, Track, TrackDelay, TrackId, TrackKind,
 };
 
 use crate::routing::{return_letter, track_label};
@@ -394,6 +394,16 @@ fn scene_at(editor: &mut Editor, position: usize) -> Result<SceneId, EditError> 
         .id)
 }
 
+/// Gives the new clip `id` its source's `scale`: a clip made with the default
+/// scale takes the set's when it is made, so a copy of one with Scale Mode
+/// off would otherwise come out with the set's scale on (the scales spec, R7).
+pub(crate) fn keep_scale(editor: &mut Editor, id: ClipId, scale: Scale) -> Result<(), EditError> {
+    if scale != editor.document().settings().scale {
+        editor.apply(scale.command(vec![id]))?;
+    }
+    Ok(())
+}
+
 /// Creates a copy of `data` in the editor, at `index` in `parent`'s list
 /// (or among the returns), with its devices and its clips under new IDs.
 fn create(
@@ -454,7 +464,10 @@ fn create(
         clip.id = editor.new_id();
         copies.clips.push((original, clip.id));
         remap_clip(&mut clip, copies, editor.document());
+        let scale = clip.scale;
+        let made = clip.id;
         editor.apply(Command::CreateClip { track: id, clip })?;
+        keep_scale(editor, made, scale)?;
     }
     for (position, clip) in &data.slots {
         let scene = scene_at(editor, *position)?;
@@ -463,11 +476,14 @@ fn create(
         clip.id = editor.new_id();
         copies.clips.push((original, clip.id));
         remap_clip(&mut clip, copies, editor.document());
+        let scale = clip.scale;
+        let made = clip.id;
         editor.apply(Command::CreateSlotClip {
             track: id,
             scene,
             clip,
         })?;
+        keep_scale(editor, made, scale)?;
     }
     // Spec: comping R9. The lanes and their clips come under new IDs.
     for lane in &data.take_lanes {
@@ -487,10 +503,13 @@ fn create(
             clip.id = editor.new_id();
             copies.clips.push((original, clip.id));
             remap_clip(&mut clip, copies, editor.document());
+            let scale = clip.scale;
+            let made = clip.id;
             editor.apply(Command::CreateTakeClip {
                 lane: lane_id,
                 clip,
             })?;
+            keep_scale(editor, made, scale)?;
         }
     }
     for (index, child) in data.children.iter().enumerate() {

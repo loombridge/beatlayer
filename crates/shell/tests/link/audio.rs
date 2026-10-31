@@ -418,7 +418,11 @@ fn onsets(samples: &[f32]) -> Vec<usize> {
 // again when A returns.
 #[test]
 fn a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other() {
-    const LATENCY_MS: f64 = 20.0;
+    // Well over the default 20 ms: Link's network threads run at normal
+    // priority, and a busy machine (Windows schedules such threads in 15 ms
+    // quanta) delivers buffers late enough that the start of a beat would be
+    // dropped as late and its onset found where the kept audio begins.
+    const LATENCY_MS: f64 = 100.0;
     let (dir_a, dir_b) = (TestDir::new("a"), TestDir::new("b"));
     let mut a = in_session(dir_a.path(), "alpha");
     // The session's tempo is whatever its first peer set.

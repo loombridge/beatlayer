@@ -453,6 +453,7 @@ impl Recipe {
             },
             lane_views: bl_model::LaneViews::new(),
             column_widths: bl_model::ColumnWidths::new(),
+            pages: bl_model::DevicePages::new(),
             // WP-3.2: the global launch quantisation and its switch save
             // beside the song.
             launch: bl_model::LaunchSettings {

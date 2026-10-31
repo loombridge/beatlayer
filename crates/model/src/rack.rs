@@ -1075,7 +1075,9 @@ impl Chain {
 
     /// Makes the chain fit `rack` after it moved there: a drum rack keeps
     /// the sends to its own return chains, any other rack's chain loses
-    /// every setting only a drum rack's chains have.
+    /// every setting only a drum rack's chains have, and every rack resets
+    /// the zones and the Volume and Pan its kind of chain lacks (racks spec,
+    /// R5 and R30).
     pub fn fit_to(&mut self, rack: &Device) {
         if rack.rack_kind() == Some(RackKind::Drum) {
             self.sends
@@ -1092,6 +1094,19 @@ impl Chain {
         }
         if !self.is_return {
             self.audio_to = None;
+        }
+        if let Some(kind) = rack.rack_kind() {
+            for zone_kind in [ZoneKind::Key, ZoneKind::Velocity, ZoneKind::Select] {
+                if !kind.zone_kinds().contains(&zone_kind) {
+                    self.zones = self
+                        .zones
+                        .with(zone_kind, ChainZones::default().get(zone_kind));
+                }
+            }
+            if !kind.chains_have_volume_and_pan() {
+                self.mixer.volume = ChainMixer::default().volume;
+                self.mixer.pan = ChainMixer::default().pan;
+            }
         }
     }
 }

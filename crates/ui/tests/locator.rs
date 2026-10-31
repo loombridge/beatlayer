@@ -305,6 +305,47 @@ fn escaping_a_locator_drag_leaves_it_where_it_was() {
 }
 
 #[test]
+fn a_locator_dragged_into_the_track_headers_commits_on_release() {
+    // Spec: time-editing R7, R13.
+    let mut h = Harness::with_title_bar(Window::Main);
+    h.shell.run(ids::ADD, json!({ "at": 5 * BAR })).unwrap();
+    h.settle();
+    let l = layout(&h);
+    let x = locator_x(&h, &l, 5);
+    let y = l.scrub.center().y;
+    let before = steps(&h);
+    h.frame(vec![
+        Event::PointerMoved(pos2(x, y)),
+        Event::PointerButton {
+            pos: pos2(x, y),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    let end = l.scrub.right() + 120.0;
+    for step in 1..=10 {
+        let at = x + (end - x) * step as f32 / 10.0;
+        h.frame(vec![Event::PointerMoved(pos2(at, y))]);
+    }
+    // The locator is now drawn more than 40 points out.
+    for _ in 0..2 {
+        h.frame(vec![Event::PointerMoved(pos2(end, y))]);
+    }
+    h.frame(vec![Event::PointerButton {
+        pos: pos2(end, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    assert!(!h.shell.gesture_open(), "the release ended the gesture");
+    assert!(!h.shell.gesture_under_way());
+    assert_eq!(steps(&h), before + 1);
+    assert!(locators(&h)[0].1 > Ticks(5 * BAR));
+}
+
+#[test]
 fn double_clicking_a_locator_selects_it_and_asks_to_play_from_it() {
     // Spec: time-editing R5.
     let mut h = Harness::with_title_bar(Window::Main);

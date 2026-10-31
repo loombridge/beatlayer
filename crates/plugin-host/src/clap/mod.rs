@@ -813,7 +813,7 @@ impl ClapHost {
         let instance = main.instances.get_mut(&device)?;
         let mut plugin = instance.instance.plugin_handle();
         let has_editor = has_editor(&mut plugin);
-        let values = plugin
+        let values: Vec<(ParamId, f64)> = plugin
             .get_extension::<PluginParams>()
             .map(|params| {
                 describe::params(&mut plugin)
@@ -825,6 +825,8 @@ impl ClapHost {
                     .collect()
             })
             .unwrap_or_default();
+        #[cfg(feature = "test-hooks")]
+        crate::count_value_reads(values.len());
         let editor_scale = instance.editor.as_ref().map(|editor| editor.scale);
         let editor_size = instance.editor.as_ref().map(|editor| editor.window.size());
         Some(PluginStatus {
@@ -844,6 +846,22 @@ impl ClapHost {
             editor_size,
             values,
         })
+    }
+
+    /// Whether the device's plug-in has an editor, whether it's open, and
+    /// whether it's hidden, or `None` if the device has no CLAP plug-in:
+    /// what [`ClapHost::status`] says of the editor, without reading the
+    /// parameters.
+    #[must_use]
+    pub fn editor_state(&self, device: DeviceId) -> Option<(bool, bool, bool)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        if main.missing.contains_key(&device) {
+            return Some((false, false, false));
+        }
+        let instance = main.instances.get_mut(&device)?;
+        let has_editor = has_editor(&mut instance.instance.plugin_handle());
+        Some((has_editor, instance.editor_open, instance.editor_hidden))
     }
 
     /// Lets go of every plug-in whose device isn't in `keep`, as when a set

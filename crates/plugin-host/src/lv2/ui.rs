@@ -530,6 +530,11 @@ pub(super) fn open_with(
 /// Shows or hides the device's editor window, without closing it.
 pub(super) fn set_visible(main: &mut Main, device: DeviceId, shown: bool) {
     if let Some(editor) = main.editors.0.get_mut(&device) {
+        // The shell asks every frame: only a change touches the window, so
+        // a window the person minimised stays minimised.
+        if editor.hidden == !shown {
+            return;
+        }
         editor.hidden = !shown;
         #[cfg(all(unix, not(target_os = "macos")))]
         if let Some(window) = &editor.window {

@@ -15,9 +15,9 @@ use std::path::{Component, Path, PathBuf};
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, ColumnWidths, ContentHash, DEFAULT_SCENE_COUNT, DeviceWindows, Document, Editor,
-    LaneViews, LaunchSettings, MpeView, MultisamplerViews, RackViewMap, SceneId, TrackId,
-    TrackKind, WindowViews, registry,
+    ClipFolds, ColumnWidths, ContentHash, DEFAULT_SCENE_COUNT, DevicePages, DeviceWindows,
+    Document, Editor, LaneViews, LaunchSettings, MpeView, MultisamplerViews, RackViewMap, SceneId,
+    TrackId, TrackKind, WindowViews, registry,
 };
 use bl_project::midi_tools::MidiToolSettings;
 use bl_project::{
@@ -189,6 +189,18 @@ pub trait SetStore {
     /// Which views each of the open set's racks shows, as it was saved.
     fn rack_views(&self) -> RackViewMap {
         RackViewMap::new()
+    }
+
+    /// Gives the store the page each device's pages nodes show (WP-8.1), for
+    /// the next save to write beside the document. A store that keeps none
+    /// ignores them.
+    fn set_pages(&mut self, pages: DevicePages) {
+        let _ = pages;
+    }
+
+    /// The open set's pages, as it was saved.
+    fn pages(&self) -> DevicePages {
+        DevicePages::new()
     }
 
     /// Gives the store what each multisampler's views show (WP-5.13), for
@@ -388,6 +400,9 @@ pub struct ProjectFiles {
     /// The views racks show (WP-5.2): the open set's, then the shell's for
     /// the next save.
     rack_views: RackViewMap,
+    /// The pages devices show (WP-8.1): the open set's, then the shell's for
+    /// the next save.
+    pages: DevicePages,
     /// Folded MIDI Note Editors (WP-2.3): the open set's, then the shell's
     /// for the next save.
     folds: ClipFolds,
@@ -432,6 +447,7 @@ impl SetStore for ProjectFiles {
         self.media = project.media;
         self.windows = project.windows;
         self.rack_views = project.rack_views;
+        self.pages = project.pages;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
         self.scale_folds = project.scale_folds;
@@ -507,6 +523,7 @@ impl SetStore for ProjectFiles {
         self.media = Media::new();
         self.windows = DeviceWindows::new();
         self.rack_views = RackViewMap::new();
+        self.pages = DevicePages::new();
         self.multisamplers = MultisamplerViews::new();
         self.folds = ClipFolds::new();
         self.scale_folds = ClipFolds::new();
@@ -537,6 +554,7 @@ impl SetStore for ProjectFiles {
         Project::from_editor(editor, media)
             .with_windows(&self.windows)
             .with_rack_views(&self.rack_views)
+            .with_pages(&self.pages)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
             .with_scale_folds(&self.scale_folds)
@@ -553,6 +571,7 @@ impl SetStore for ProjectFiles {
         self.media = project.media;
         self.windows = project.windows;
         self.rack_views = project.rack_views;
+        self.pages = project.pages;
         self.multisamplers = project.multisamplers;
         self.folds = project.folds;
         self.scale_folds = project.scale_folds;
@@ -607,6 +626,14 @@ impl SetStore for ProjectFiles {
 
     fn rack_views(&self) -> RackViewMap {
         self.rack_views.clone()
+    }
+
+    fn set_pages(&mut self, pages: DevicePages) {
+        self.pages = pages;
+    }
+
+    fn pages(&self) -> DevicePages {
+        self.pages.clone()
     }
 
     fn set_folds(&mut self, folds: ClipFolds) {
@@ -741,6 +768,7 @@ impl SetStore for ProjectFiles {
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
             .with_rack_views(&self.rack_views)
+            .with_pages(&self.pages)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
             .with_scale_folds(&self.scale_folds)
@@ -944,6 +972,7 @@ impl ProjectFiles {
         let project = Project::from_editor(editor, media)
             .with_windows(&self.windows)
             .with_rack_views(&self.rack_views)
+            .with_pages(&self.pages)
             .with_multisamplers(&self.multisamplers)
             .with_folds(&self.folds)
             .with_scale_folds(&self.scale_folds)

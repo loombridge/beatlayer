@@ -18,10 +18,9 @@
 
 use bl_commands::Context::DeviceView;
 use bl_commands::{CommandSpec, Permission, RegisterError, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode};
 use bl_model::{
-    ContentHash, DeviceId, DeviceLayout, EditorSize, LayerId, LayerSettings, MultisamplerView,
-    SampleEdit, SampleEditKind, SampleRange, SamplerTab, TrackId, ZoneKind,
+    ContentHash, DeviceId, EditorSize, LayerId, LayerSettings, MultisamplerView, SampleEdit,
+    SampleEditKind, SampleRange, SamplerTab, TrackId, ZoneKind,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -92,39 +91,6 @@ pub const IDS: &[&str] = &[
     AUDITION_SAMPLE,
     SET_SAMPLE_REGION,
 ];
-
-/// The multisampler's layout as `tab` shows it (R1): its layout holds one
-/// group of nodes for each tab after Zone, in the tabs' order, and the tab
-/// shows its own, padded with an empty band to the width of the widest tab,
-/// so the device is as wide whichever tab shows. Any other layout is
-/// returned as it is.
-#[must_use]
-pub fn tab_layout(layout: &DeviceLayout, tab: SamplerTab) -> DeviceLayout {
-    let LayoutNode::Row(groups) = &layout.root else {
-        return layout.clone();
-    };
-    let index = match tab {
-        SamplerTab::Sample => 0,
-        SamplerTab::PitchOsc => 1,
-        SamplerTab::FilterGlobal => 2,
-        SamplerTab::Modulation => 3,
-        SamplerTab::Midi => 4,
-    };
-    let Some(group) = groups.get(index) else {
-        return layout.clone();
-    };
-    let width = |node: &LayoutNode| DeviceLayout::new(node.clone()).docked_size().width;
-    let widest = groups.iter().map(width).fold(0.0, f32::max);
-    DeviceLayout::new(LayoutNode::Row(vec![
-        group.clone(),
-        LayoutNode::Band(ControlBand {
-            width: (widest - width(group)).max(0.0),
-            height: BODY_HEIGHT,
-            controls: Vec::new(),
-            slots: None,
-        }),
-    ]))
-}
 
 /// Whether `id` is one of these commands.
 #[must_use]

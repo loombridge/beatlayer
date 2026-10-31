@@ -86,3 +86,20 @@ fn a_description_without_banks_has_the_generic_ones_named_by_position() {
         .collect();
     assert_eq!(names, [("1–8", 8), ("9–10", 2), ("Options", 1)]);
 }
+
+// Spec: device-framework R45
+#[test]
+fn the_banks_hold_the_parameters_on_hidden_pages() {
+    let description = bl_devices::testing::pages_type().description;
+    description.check().unwrap();
+    let banked: Vec<ParamId> = description
+        .banks()
+        .iter()
+        .flat_map(|b| b.params.iter().copied())
+        .collect();
+    // The layout places P3 on a tab and P8 on a shell page that show only
+    // while chosen, yet every parameter is in a bank, in descriptor order.
+    let all: Vec<ParamId> = description.params.iter().map(|p| p.id).collect();
+    assert_eq!(banked, all);
+    assert!(banked.contains(&ParamId(3)) && banked.contains(&ParamId(8)));
+}

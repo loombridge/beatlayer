@@ -485,9 +485,18 @@ impl MultisamplerUi {
             if pressed {
                 let args = match tab {
                     None => json!({ "device": frame.id, "zone_editor": !state.view.zone_editor }),
-                    Some(tab) => json!({ "device": frame.id, "tab": tab }),
+                    Some(tab) => json!({
+                        "device": frame.id,
+                        "node": SamplerTab::PAGES,
+                        "page": tab.page_name(),
+                    }),
                 };
-                invoke(events, bl_shell::multisampler_commands::SET_VIEW, args);
+                // Spec: multisampler R75. The five tabs are pages.
+                let id = match tab {
+                    None => bl_shell::multisampler_commands::SET_VIEW,
+                    Some(_) => bl_shell::device_commands::SET_PAGE,
+                };
+                invoke(events, id, args);
             }
         }
     }

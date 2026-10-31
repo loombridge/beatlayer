@@ -1,7 +1,7 @@
 //! The ports in use: their switches, opening and closing them, and where an
 //! input's messages go (`docs/specs/midi-io.md`, R1 to R5).
 
-use std::sync::atomic::{AtomicU8, Ordering::Relaxed};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Instant;
 
@@ -11,7 +11,7 @@ use bl_core::midi::{
 };
 use bl_core::timecode::{Timecode, TimecodeRate};
 
-use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError};
+use crate::backend::{Direction, InputConnection, InputHandler, MidiBackend, MidiError, PortKey};
 use crate::output::{OutputBus, OutputStats};
 use crate::queue::InputSender;
 
@@ -110,12 +110,16 @@ impl PortSwitches {
 pub type SurfaceSink = Box<dyn Fn(Instant, &[u8]) + Send + Sync>;
 
 /// What an input's handler and the main thread share: the switches the
-/// handler reads, so a switch takes effect without reopening, and the
-/// control surface that holds the input, if one does.
+/// handler reads, so a switch takes effect without reopening, the control
+/// surface that holds the input, if one does, and the notes whose note-on
+/// reached the tracks.
 #[derive(Default)]
 pub struct InputLive {
     switches: AtomicU8,
     surface: Mutex<Option<SurfaceSink>>,
+    /// One bit for each channel and key whose note-on went to the tracks:
+    /// two words a channel.
+    to_tracks: [AtomicU64; 32],
 }
 
 impl InputLive {
@@ -130,6 +134,36 @@ impl InputLive {
     /// with `None`.
     pub fn hold(&self, sink: Option<SurfaceSink>) {
         *self.surface.lock().unwrap_or_else(PoisonError::into_inner) = sink;
+    }
+
+    /// Sets or clears the bit of a note message's channel and key; whether
+    /// it was set.
+    fn mark(&self, message: &MidiMessage, set: bool) -> bool {
+        let channel = usize::from(message.channel().unwrap_or(0));
+        let key = usize::from(message.data1() & 127);
+        let (word, bit) = (&self.to_tracks[channel * 2 + key / 64], 1 << (key % 64));
+        let before = if set {
+            word.fetch_or(bit, Relaxed)
+        } else {
+            word.fetch_and(!bit, Relaxed)
+        };
+        before & bit != 0
+    }
+
+    /// Ends every note that reached the tracks, for an input that closes.
+    fn end_notes(&self, source: MidiSource, sender: &InputSender) {
+        for (index, word) in self.to_tracks.iter().enumerate() {
+            let mut bits = word.swap(0, Relaxed);
+            while bits != 0 {
+                let key = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                sender.send(MidiInputEvent {
+                    source,
+                    time: Instant::now(),
+                    message: MidiMessage::note_off((index / 2) as u8, (index % 2 * 64 + key) as u8),
+                });
+            }
+        }
     }
 
     /// Hands a message to the surface that holds the input; whether one
@@ -177,6 +211,8 @@ struct Entry {
     /// Whether the output is open; its connection is in the output
     /// thread's table.
     output: bool,
+    /// The system's identity for the port when it was last listed.
+    key: Option<PortKey>,
 }
 
 impl Entry {
@@ -193,6 +229,7 @@ impl Entry {
             live: Arc::new(live),
             claimed: false,
             output: false,
+            key: None,
         }
     }
 
@@ -318,19 +355,33 @@ impl MidiPorts {
     pub fn refresh(&mut self) -> Result<(), MidiError> {
         let inputs = self.backend.ports(Direction::Input)?;
         let outputs = self.backend.ports(Direction::Output)?;
-        for entry in &mut self.ports {
+        for index in 0..self.ports.len() {
+            let entry = &mut self.ports[index];
             let listed = match entry.direction {
                 Direction::Input => &inputs,
                 Direction::Output => &outputs,
             };
-            entry.present = listed.contains(&entry.name);
+            let key = listed
+                .iter()
+                .find(|(name, _)| *name == entry.name)
+                .map(|(_, key)| key);
+            entry.present = key.is_some();
+            let Some(key) = key else { continue };
+            // Spec: midi-io R3. A port unplugged and plugged in again
+            // between two listings has a new identity: its connection is
+            // dead, so it opens again.
+            if entry.key.as_ref().is_some_and(|old| old != key) {
+                self.close(index);
+            }
+            self.ports[index].key = Some(key.clone());
         }
         for (direction, listed) in [(Direction::Input, inputs), (Direction::Output, outputs)] {
-            for name in listed {
+            for (name, key) in listed {
                 if self.entry_mut(direction, &name).is_none() {
                     let switches = PortSwitches::first_seen(direction);
-                    self.ports
-                        .push(Entry::new(direction, &name, switches, true));
+                    let mut entry = Entry::new(direction, &name, switches, true);
+                    entry.key = Some(key);
+                    self.ports.push(entry);
                 }
             }
         }
@@ -340,6 +391,20 @@ impl MidiPorts {
         Ok(())
     }
 
+    /// Closes a port, and ends the notes an input's tracks still hold from
+    /// it (Spec: midi-io R26).
+    fn close(&mut self, index: usize) {
+        let entry = &mut self.ports[index];
+        let port = PortId::from_name(&entry.name);
+        entry.input = None;
+        entry
+            .live
+            .end_notes(source(port, entry.switches.mpe), &self.sender);
+        if std::mem::take(&mut entry.output) {
+            self.output.remove(self.owner, port);
+        }
+    }
+
     /// Opens or closes a port as its switches say, and tells an open
     /// input's handler the switches.
     fn apply(&mut self, index: usize) {
@@ -347,10 +412,8 @@ impl MidiPorts {
         let wanted = entry.present && (entry.switches.any() || entry.claimed);
         let port = PortId::from_name(&entry.name);
         if !wanted {
-            entry.input = None;
-            if std::mem::take(&mut entry.output) {
-                self.output.remove(self.owner, port);
-            }
+            self.close(index);
+            let entry = &mut self.ports[index];
             if !entry.present {
                 entry.error = None;
             }
@@ -566,17 +629,22 @@ fn full_frame(bytes: &[u8]) -> Option<MidiMessage> {
     MidiMessage::full_frame(hours, minutes, seconds, frames)
 }
 
+/// What an input's messages are stamped as.
+const fn source(port: PortId, mpe: bool) -> MidiSource {
+    if mpe {
+        MidiSource::MpePort(port)
+    } else {
+        MidiSource::Port(port)
+    }
+}
+
 /// The handler for an open input: it routes each message by the port's
 /// switches, on the MIDI system's thread.
 fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandler {
     let port = PortId::from_name(name);
     Box::new(move |time, bytes| {
         let on = live.switches();
-        let source = if on.mpe {
-            MidiSource::MpePort(port)
-        } else {
-            MidiSource::Port(port)
-        };
+        let source = source(port, on.mpe);
         let stats = sender.stats();
         let timecode = on.sync && on.sync_type == SyncType::Timecode;
         let Some(message) = MidiMessage::from_bytes(bytes) else {
@@ -628,6 +696,13 @@ fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandle
             time,
             message,
         };
+        // Spec: midi-io R26, remote-mapping R8. A note-off whose note-on
+        // reached a track reaches it too, whatever the table, a surface or
+        // the Track switch say now; it then goes the way they say as well.
+        let ended = message.is_note_off() && live.mark(&message, false);
+        if ended {
+            sender.send(event);
+        }
         // Spec: remote-mapping R7 to R10. A message a mapping takes goes to
         // remote control and never to a track; while a map mode is on every
         // message from a Remote input also crosses, for learning.
@@ -648,12 +723,14 @@ fn handler(name: &str, live: Arc<InputLive>, sender: InputSender) -> InputHandle
             return;
         }
         if on.track {
-            sender.send(event);
+            if !ended && sender.send(event) && message.is_note_on() {
+                live.mark(&message, true);
+            }
         } else if on.remote {
-            if !remote.learning() {
+            if !remote.learning() && !ended {
                 stats.remote_unmapped.fetch_add(1, Relaxed);
             }
-        } else {
+        } else if !ended {
             stats.ignored.fetch_add(1, Relaxed);
         }
     })
@@ -991,5 +1068,132 @@ mod tests {
         assert_eq!(counts.remote_taken + counts.remote_dropped, 1101);
         assert!(counts.remote_dropped > 0);
         assert_eq!(took(&ports).len() as u64, counts.remote_taken - 1);
+    }
+
+    // Spec: midi-io R26, remote-mapping R8. A note that reached a track gets
+    // its note-off there, whatever the table says by then.
+    #[test]
+    fn a_note_that_reached_a_track_gets_its_note_off_after_it_is_mapped() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Keys");
+        let (mut ports, mut engine) = ports(&test);
+        ports
+            .set_switches(Direction::Input, "Keys", remote(true))
+            .unwrap();
+        ports.sender().remote().set_learning(true);
+        let now = Instant::now();
+        assert!(test.send("Keys", now, &[0x90, 60, 100]));
+        assert_eq!(engine.pop().unwrap().message.bytes(), &[0x90, 60, 100]);
+        let mut bits = crate::RemoteBits::default();
+        bits.note(0, 60);
+        ports.sender().remote().publish(&bits);
+        assert!(test.send("Keys", now, &[0x80, 60, 0]));
+        assert_eq!(
+            engine
+                .pop()
+                .expect("the note-off reaches the track")
+                .message
+                .bytes(),
+            &[0x80, 60, 0]
+        );
+        assert!(engine.pop().is_err(), "once");
+        assert_eq!(took(&ports).len(), 2, "remote control gets it too");
+
+        // A note whose note-on a mapping took never reaches a track, and
+        // neither does its note-off.
+        assert!(test.send("Keys", now, &[0x90, 60, 100]));
+        assert!(test.send("Keys", now, &[0x90, 60, 0]));
+        assert!(engine.pop().is_err());
+    }
+
+    // Spec: midi-io R26, R5. Switching Track off, or a surface taking the
+    // input, mid-note doesn't hold the note-off back from the track.
+    #[test]
+    fn a_note_off_reaches_the_track_after_track_is_switched_off_or_a_surface_holds_the_input() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Keys");
+        let (mut ports, mut engine) = ports(&test);
+        ports
+            .set_switches(Direction::Input, "Keys", remote(true))
+            .unwrap();
+        let now = Instant::now();
+        assert!(test.send("Keys", now, &[0x90, 60, 100]));
+        assert!(test.send("Keys", now, &[0x91, 61, 100]));
+        assert!(engine.pop().is_ok() && engine.pop().is_ok());
+
+        ports
+            .set_switches(Direction::Input, "Keys", remote(false))
+            .unwrap();
+        assert!(test.send("Keys", now, &[0x80, 60, 0]));
+        assert_eq!(engine.pop().unwrap().message.bytes(), &[0x80, 60, 0]);
+        assert!(test.send("Keys", now, &[0x90, 62, 100]));
+        assert!(engine.pop().is_err(), "a new note stays back");
+
+        let seen = Arc::new(AtomicU8::new(0));
+        let counter = Arc::clone(&seen);
+        ports
+            .claim(Direction::Input, "Keys")
+            .hold(Some(Box::new(move |_, _| {
+                counter.fetch_add(1, Relaxed);
+            })));
+        assert!(test.send("Keys", now, &[0x81, 61, 0]));
+        assert_eq!(engine.pop().unwrap().message.bytes(), &[0x81, 61, 0]);
+        assert_eq!(seen.load(Relaxed), 1, "the surface gets it as well");
+    }
+
+    // Spec: midi-io R26. An input that closes ends the notes it started.
+    #[test]
+    fn closing_an_input_ends_the_notes_it_started() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Keys");
+        let (mut ports, mut engine) = ports(&test);
+        let now = Instant::now();
+        assert!(test.send("Keys", now, &[0x92, 100, 100]));
+        assert!(test.send("Keys", now, &[0x92, 5, 100]));
+        assert!(engine.pop().is_ok() && engine.pop().is_ok());
+        test.remove_port(Direction::Input, "Keys");
+        ports.refresh().unwrap();
+        let mut ended = Vec::new();
+        while let Ok(event) = engine.pop() {
+            assert_eq!(event.source, MidiSource::Port(PortId::from_name("Keys")));
+            ended.push((event.message.status(), event.message.data1()));
+        }
+        ended.sort_unstable();
+        assert_eq!(ended, [(0x82, 5), (0x82, 100)]);
+    }
+
+    // Spec: midi-io R3
+    #[test]
+    fn a_port_replugged_between_refreshes_opens_again() {
+        let test = TestBackend::new();
+        test.add_port(Direction::Input, "Keys");
+        test.add_port(Direction::Output, "Synth");
+        let (mut ports, mut engine) = ports(&test);
+        ports
+            .set_switches(
+                Direction::Output,
+                "Synth",
+                PortSwitches {
+                    track: true,
+                    ..PortSwitches::OFF
+                },
+            )
+            .unwrap();
+        assert!(test.is_open(Direction::Input, "Keys"));
+        assert!(test.is_open(Direction::Output, "Synth"));
+        for (direction, name) in [(Direction::Input, "Keys"), (Direction::Output, "Synth")] {
+            test.remove_port(direction, name);
+            test.add_port(direction, name); // no refresh in between
+        }
+        ports.refresh().unwrap();
+        assert!(test.is_open(Direction::Input, "Keys"), "the input is open");
+        assert!(
+            test.is_open(Direction::Output, "Synth"),
+            "the output is open"
+        );
+        assert!(test.send("Keys", Instant::now(), &[0x90, 60, 100]));
+        assert!(engine.pop().is_ok(), "the note reaches the engine");
+        let listed = ports.ports();
+        assert!(listed.iter().all(|p| p.open && p.error.is_none()));
     }
 }

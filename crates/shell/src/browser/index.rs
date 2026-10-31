@@ -721,7 +721,10 @@ mod tests {
         }
         let compares = COMPARES.with(std::cell::Cell::get);
         let bound = 2.0 * N as f64 * (N as f64).log2();
-        assert!((compares as f64) < bound, "{compares} comparisons, over {bound}");
+        assert!(
+            (compares as f64) < bound,
+            "{compares} comparisons, over {bound}"
+        );
 
         let last = &snapshots[3];
         let sorted: Vec<&str> = last.order.iter().map(|&i| &*last.entry(i).name).collect();

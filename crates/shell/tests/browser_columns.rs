@@ -112,7 +112,12 @@ fn sorting_by_length_probes_files_in_the_background() {
         if names == expected {
             break;
         }
-        assert!(Instant::now() < deadline, "the rows never reached length order: {:?} total {}", &names[..5.min(names.len())], state.total_rows);
+        assert!(
+            Instant::now() < deadline,
+            "the rows never reached length order: {:?} total {}",
+            &names[..5.min(names.len())],
+            state.total_rows
+        );
         std::thread::sleep(Duration::from_millis(5));
     }
 }
@@ -120,8 +125,14 @@ fn sorting_by_length_probes_files_in_the_background() {
 // Spec: browser-tags R28. Sorting names allocates nothing.
 #[test]
 fn natural_cmp_allocates_nothing() {
-    assert_eq!(natural_cmp("sample 00001.wav", "sample 00002.wav"), std::cmp::Ordering::Less);
-    assert_eq!(natural_cmp("kick 808 10", "kick 808 9"), std::cmp::Ordering::Greater);
+    assert_eq!(
+        natural_cmp("sample 00001.wav", "sample 00002.wav"),
+        std::cmp::Ordering::Less
+    );
+    assert_eq!(
+        natural_cmp("kick 808 10", "kick 808 9"),
+        std::cmp::Ordering::Greater
+    );
     assert_eq!(natural_cmp("Kick 2", "kick 10"), std::cmp::Ordering::Less);
     bl_rt::rt_test!({
         for _ in 0..1_000 {

@@ -3892,9 +3892,7 @@ impl BrowserView {
         let orphans: Vec<String> = self
             .tagged_files
             .iter()
-            .filter(|(old, tagged)| {
-                tagged.hash == hash && *old != path && self.is_gone(old)
-            })
+            .filter(|(old, tagged)| tagged.hash == hash && *old != path && self.is_gone(old))
             .map(|(old, _)| old.clone())
             .collect();
         for old in orphans {

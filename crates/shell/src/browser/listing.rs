@@ -116,10 +116,7 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
                 let (x, y) = (digits(&a[i..]), digits(&b[j..]));
                 let run = (&a[i..i + x], &b[j..j + y]);
                 (i, j) = (i + x, j + y);
-                let (x, y) = (
-                    run.0.trim_start_matches('0'),
-                    run.1.trim_start_matches('0'),
-                );
+                let (x, y) = (run.0.trim_start_matches('0'), run.1.trim_start_matches('0'));
                 let order = x.len().cmp(&y.len()).then_with(|| x.cmp(y));
                 if order != Ordering::Equal {
                     return order;

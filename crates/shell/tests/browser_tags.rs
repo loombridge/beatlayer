@@ -444,7 +444,11 @@ fn a_project_switch_keeps_tags_on_files_still_on_disk() {
     wav(&project_kick, 100);
     let mut shell = shell_on(&config);
     shell.set_user_library(Some(library));
-    run::<Value>(&mut shell, ids::ADD_FOLDER, json!({ "path": text(&project) }));
+    run::<Value>(
+        &mut shell,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&project) }),
+    );
     wait_for_index(&mut shell);
     tag_file(&mut shell, &library_kick, &["Lo-fi"]);
     tag_file(&mut shell, &project_kick, &["Punchy"]);
@@ -455,7 +459,11 @@ fn a_project_switch_keeps_tags_on_files_still_on_disk() {
 
     // With the library's copy untagged, the project's tags stay where they
     // are, and are there when the place comes back.
-    run::<Value>(&mut shell, ids::ADD_FOLDER, json!({ "path": text(&project) }));
+    run::<Value>(
+        &mut shell,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&project) }),
+    );
     wait_for_index(&mut shell);
     run::<TagsState>(
         &mut shell,
@@ -464,7 +472,11 @@ fn a_project_switch_keeps_tags_on_files_still_on_disk() {
     );
     remove_place(&mut shell, &project);
     assert_eq!(tags_of(&mut shell, &project_kick), ["Mine|Punchy"]);
-    run::<Value>(&mut shell, ids::ADD_FOLDER, json!({ "path": text(&project) }));
+    run::<Value>(
+        &mut shell,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&project) }),
+    );
     wait_for_index(&mut shell);
     assert_eq!(tags_of(&mut shell, &project_kick), ["Mine|Punchy"]);
     assert!(tags_of(&mut shell, &library_kick).is_empty());
@@ -502,7 +514,11 @@ fn a_tagged_files_hash_survives_a_restart_after_it_leaves_the_index() {
     let mut third = shell_on(&config);
     third.set_user_library(Some(library));
     wait_for_index(&mut third);
-    run::<Value>(&mut third, ids::ADD_FOLDER, json!({ "path": text(&elsewhere) }));
+    run::<Value>(
+        &mut third,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&elsewhere) }),
+    );
     wait_for_index(&mut third);
     wait_until(&mut third, "the tags to follow the file", |shell| {
         tags_of(shell, &moved) == ["Mine|Favourite"]

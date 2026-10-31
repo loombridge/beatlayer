@@ -98,6 +98,12 @@ impl Shell {
     /// makes its clips. Called with every engine poll, so the clips appear
     /// a frame or two after the take ends.
     pub(super) fn poll_recording(&mut self, engine: &EngineTransport) {
+        // A take that ended inside a drag lands once the drag has ended.
+        if !self.landings_wait()
+            && let Some(outcome) = self.pending_recording.take()
+        {
+            self.finish_recording(outcome);
+        }
         let Some(recording) = self.recording.as_mut() else {
             return;
         };
@@ -109,7 +115,11 @@ impl Shell {
         let running = engine.running && !recording.engine_closed(&self.audio);
         if let Some(outcome) = recording.poll(running) {
             self.recording = None;
-            self.finish_recording(outcome);
+            if self.landings_wait() {
+                self.pending_recording = Some(outcome);
+            } else {
+                self.finish_recording(outcome);
+            }
         } else {
             self.grow_session_clips(engine);
         }
@@ -119,6 +129,10 @@ impl Shell {
     /// when the transport stops recording (automation R17).
     pub(super) fn poll_automation_record(&mut self, engine: &EngineTransport) {
         let recording = engine.recording && engine.playing;
+        // A take that stops inside a drag is written once the drag has ended.
+        if !recording && self.automation_recording && self.landings_wait() {
+            return;
+        }
         let was = std::mem::replace(&mut self.automation_recording, recording);
         if recording {
             if !was {

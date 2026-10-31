@@ -1448,6 +1448,85 @@ fn a_fader_drag_ends_when_its_column_scrolls_away_before_the_release() {
     assert!(!h.shell.gesture_under_way(), "the release ends the gesture");
 }
 
+/// Presses on `at`, drags by `by`, scrolls the mixer until `column` is out of
+/// view, then releases: the control never sees its own release.
+fn drag_then_scroll_away(h: &mut Harness, at: Pos2, by: Vec2, column: &str) {
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.frame(vec![Event::PointerMoved(at + by)]);
+    assert!(h.shell.gesture_under_way(), "the drag holds a gesture");
+    for _ in 0..10 {
+        h.frame(vec![Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -40.0),
+            modifiers: Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+        }]);
+    }
+    assert!(
+        inside(&tree(h), "Session Mixer", column).is_none(),
+        "the dragged column is out of view"
+    );
+    h.frame(vec![Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    assert!(!h.shell.gesture_under_way(), "the release ends the gesture");
+}
+
+// Spec: mixer-view R6, R28.
+#[test]
+fn a_track_delay_drag_ends_when_its_column_scrolls_away_before_the_release() {
+    let mut h = session();
+    many_tracks(&mut h, 20);
+    h.shell.run(ids::TRACK_OPTIONS, json!({})).unwrap();
+    let field = control(&mut h, "3 Audio", "Track Delay");
+    drag_then_scroll_away(&mut h, field.center(), vec2(0.0, -10.0), "3 Audio");
+}
+
+// Spec: mixer-view R3, R29.
+#[test]
+fn a_split_pan_drag_ends_when_its_column_scrolls_away_before_the_release() {
+    let mut h = session();
+    many_tracks(&mut h, 20);
+    let track = tracks(&h.shell)[2];
+    h.shell
+        .run(
+            "mixer.set_pan_mode",
+            json!({ "track": track, "mode": "split" }),
+        )
+        .unwrap();
+    let half = control(&mut h, "3 Audio", "Split Pan Left");
+    drag_then_scroll_away(&mut h, half.center(), vec2(0.0, -10.0), "3 Audio");
+}
+
+// Spec: racks R27.
+#[test]
+fn a_chain_strip_drag_ends_when_its_column_scrolls_away_before_the_release() {
+    let mut h = session();
+    let _ = folded_rack(&mut h);
+    many_tracks(&mut h, 20);
+    let slider = control(
+        &mut h,
+        "Chain Strip Keys of Instrument Rack",
+        "Chain Volume of Keys",
+    );
+    drag_then_scroll_away(
+        &mut h,
+        slider.center(),
+        vec2(-10.0, 0.0),
+        "Chain Strip Keys of Instrument Rack",
+    );
+}
+
 // Spec: view-options R1, mixer-view R23.
 #[test]
 fn the_middle_button_pans_the_mixer() {

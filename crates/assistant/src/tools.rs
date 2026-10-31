@@ -1,121 +1,130 @@
-//! The registry's commands as the model's tools.
+//! The model's tools: a small fixed set that serves the whole command
+//! registry, the same shape the agent API gives agent clients (the
+//! architecture's "Agent control").
 //!
-//! A feature that exists for a person exists for an agent (the
-//! architecture's "Agent control"), so the assistant doesn't get a tool set
-//! of its own: every command's ID, description, and argument schema is a
-//! tool the model may call. A call comes back as a [`ToolCall`], and
-//! [`ToolCall::command`] resolves it to the registry command it names,
-//! which the agent loop then runs.
-//!
-//! Every provider's naming rules are narrower than a command's ID
-//! (`clip.create`): a dot isn't allowed. The tool's name is the command's ID
-//! with dots as underscores, and a command whose ID would give the same
-//! tool name as another is a registry error.
+//! One tool per command would give the model about a thousand tools, more
+//! than a provider accepts (OpenAI answers a request with more than 128
+//! functions with a 400) and a very large prompt on every request. The
+//! model gets four: [`LIST_COMMANDS`] and [`DESCRIBE_COMMAND`] to find a
+//! command and read its argument schema, [`RUN`] to run one by its ID, and
+//! [`QUERY`] to read the project. A `run` call comes back as a [`Command`]
+//! ([`ToolCall::command`]), which the agent loop runs through the same
+//! permission classes as the agent API; the others it answers from the
+//! host ([`Commands::read`](crate::agent::Commands::read)).
 
-use std::collections::BTreeMap;
-
-use bl_commands::{CommandSpec, Permission};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::provider::Error;
 
-/// One command, in the shape every provider's tool format is made from.
+/// Lists the registry's areas, or the commands of one.
+pub const LIST_COMMANDS: &str = "list_commands";
+/// Describes one command: its description, permission class and argument
+/// schema.
+pub const DESCRIBE_COMMAND: &str = "describe_command";
+/// Runs one command by its ID.
+pub const RUN: &str = "run";
+/// Reads the project by ID or readable path.
+pub const QUERY: &str = "query";
+
+/// What a tool call carries when its arguments were not JSON: the text the
+/// model sent.
+const UNPARSED: &str = "__unparsed_arguments";
+/// Why the arguments did not parse, beside [`UNPARSED`].
+const UNPARSED_ERROR: &str = "__error";
+
+/// One tool, in the shape every provider's tool format is made from.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ToolSpec {
-    /// The tool's name: the command's ID with dots as underscores, which
-    /// every provider's naming rules allow.
+    /// The tool's name, which every provider's naming rules allow.
     pub name: String,
-    /// The command's ID, such as `clip.create`.
-    pub command: String,
-    /// What the command does, when to use it, and what it changes: the
-    /// registry's description, written for a model.
+    /// What the tool does and when to use it, written for a model.
     pub description: String,
-    /// The command's registered permission class, which the agent loop
-    /// passes to its [`Commands`](crate::agent::Commands) when it asks
-    /// whether the call may run. A command that names none is external,
-    /// the most a command can need, as the agent API reads it.
-    pub permission: Permission,
-    /// The JSON Schema of the command's arguments.
+    /// The JSON Schema of the tool's arguments.
     pub input: Value,
 }
 
 impl ToolSpec {
-    /// The tool for one command.
-    #[must_use]
-    pub fn new(spec: &CommandSpec) -> Self {
+    fn new(name: &str, description: &str, input: Value) -> Self {
         Self {
-            name: tool_name(&spec.id),
-            command: spec.id.to_string(),
-            description: spec.description.to_string(),
-            permission: spec.permission.unwrap_or(Permission::External),
-            input: spec
-                .args
-                .as_ref()
-                .and_then(|args| serde_json::to_value(args).ok())
-                .unwrap_or_else(|| json!({ "type": "object" })),
+            name: name.to_owned(),
+            description: description.to_owned(),
+            input,
         }
     }
 }
 
-/// The tool name for a command's ID.
+/// The tools the model is offered, in the order they are listed.
 #[must_use]
-pub fn tool_name(id: &str) -> String {
-    id.replace('.', "_")
-}
-
-/// The model's tools for a set of commands, and the command each tool name
-/// runs.
-#[derive(Clone, Debug, Default)]
-pub struct ToolSet {
-    tools: Vec<ToolSpec>,
-    by_name: BTreeMap<String, usize>,
-}
-
-impl ToolSet {
-    /// The tools for `commands`: one tool each, in the order given.
-    ///
-    /// # Panics
-    ///
-    /// If two commands share a tool name: their IDs differ only in a dot
-    /// where the other has an underscore, which the command registry's own
-    /// rules make a mistake to fix, not something to carry on with.
-    #[must_use]
-    pub fn new<'a>(commands: impl IntoIterator<Item = &'a CommandSpec>) -> Self {
-        let mut tools = Vec::new();
-        let mut by_name = BTreeMap::new();
-        for spec in commands {
-            let tool = ToolSpec::new(spec);
-            if let Some(seen) = by_name.get(&tool.name) {
-                let other: &ToolSpec = &tools[*seen];
-                panic!(
-                    "the commands `{}` and `{}` share the tool name `{}`",
-                    other.command, tool.command, tool.name
-                );
-            }
-            by_name.insert(tool.name.clone(), tools.len());
-            tools.push(tool);
-        }
-        Self { tools, by_name }
-    }
-
-    /// The tools, in the order their commands came.
-    #[must_use]
-    pub fn tools(&self) -> &[ToolSpec] {
-        &self.tools
-    }
-
-    /// The tool a name refers to, if one does.
-    #[must_use]
-    pub fn get(&self, name: &str) -> Option<&ToolSpec> {
-        self.by_name.get(name).map(|index| &self.tools[*index])
-    }
-
-    /// Whether there are no tools.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.tools.is_empty()
-    }
+pub fn tools() -> Vec<ToolSpec> {
+    vec![
+        ToolSpec::new(
+            LIST_COMMANDS,
+            "Lists Beatlayer's commands: every action a person can take in the app, which you \
+             run with `run`. With no arguments it lists the areas (such as `track`, `clip`, \
+             `mixer`, `song`, `set`) and how many commands each holds. With `area` or `search` \
+             it lists the matching commands: each one's ID, the label a person sees, its \
+             permission class (read, edit, destructive, external) and the first sentence of its \
+             description. Use `describe_command` for a command's full description and argument \
+             schema before running it.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "area": {
+                        "type": "string",
+                        "description": "Only commands in this area: the part of a command's ID before the dot, such as `track` or `clip`."
+                    },
+                    "search": {
+                        "type": "string",
+                        "description": "Only commands whose ID, label or description holds every one of these words."
+                    }
+                }
+            }),
+        ),
+        ToolSpec::new(
+            DESCRIBE_COMMAND,
+            "Describes one command: what it does and when to use it, its permission class, and \
+             the JSON Schema of its arguments. Read it before running a command for the first \
+             time.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "The command's ID, such as `clip.create`." }
+                },
+                "required": ["command"]
+            }),
+        ),
+        ToolSpec::new(
+            RUN,
+            "Runs one command by its ID, with the arguments its schema describes (see \
+             `describe_command`). Everything you run in one turn is one undo step. A destructive \
+             or external command asks the person first.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "The command's ID, such as `clip.create`." },
+                    "args": { "type": "object", "description": "The command's arguments. Leave it out for a command that takes none." }
+                },
+                "required": ["command"]
+            }),
+        ),
+        ToolSpec::new(
+            QUERY,
+            "Reads the person's project by ID or by a readable path such as `tracks`, `tempo`, \
+             `track \"Bass\"`, `track \"Bass\" / clip #1` or `device \"EQ\" / param 0`. With no \
+             arguments it gives an overview of the whole song. Long lists come in pages.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "What to read, as a readable path." },
+                    "id": { "type": "integer", "description": "What to read, by its ID: any track, clip, device or rack chain." },
+                    "detail": { "type": "string", "enum": ["summary", "full"], "description": "How much to return. `summary` is the default." },
+                    "offset": { "type": "integer", "description": "Where a long list starts, counting from 0." },
+                    "limit": { "type": "integer", "description": "The most entries a list returns, from 1 to 500; 50 unless given." }
+                }
+            }),
+        ),
+    ]
 }
 
 /// A tool call the model made: a whole one, with its arguments parsed.
@@ -124,35 +133,66 @@ pub struct ToolCall {
     /// The call's ID, which its result names. Gemini's API gives its calls
     /// no ID, so the crate makes one.
     pub id: String,
-    /// The tool's name ([`ToolSpec::name`]).
+    /// The tool's name: one of the four above.
     pub name: String,
     /// The arguments, as the model sent them.
     pub arguments: Value,
 }
 
 impl ToolCall {
-    /// The registry command this call names, with the arguments it sent.
+    /// A call whose arguments weren't JSON. The call is kept rather than
+    /// failing the stream, so the loop can tell the model what was wrong
+    /// and run the reply's other calls.
+    #[must_use]
+    pub fn unparsed(id: String, name: String, raw: &str, error: &str) -> Self {
+        Self {
+            id,
+            name,
+            arguments: json!({ UNPARSED: raw, UNPARSED_ERROR: error }),
+        }
+    }
+
+    /// Why the call's arguments weren't JSON, if they weren't.
+    #[must_use]
+    pub fn unparsed_because(&self) -> Option<&str> {
+        self.arguments.get(UNPARSED)?;
+        self.arguments.get(UNPARSED_ERROR)?.as_str()
+    }
+
+    /// The registry command a `run` call names, with the arguments it sent.
     ///
     /// # Errors
     ///
-    /// If the tool set has no tool called [`ToolCall::name`]: the model
-    /// named something it wasn't offered, which the loop reports back to it
-    /// rather than running.
-    pub fn command(&self, tools: &ToolSet) -> Result<Command, Error> {
-        let tool = tools.get(&self.name).ok_or_else(|| {
-            Error::Protocol(format!(
-                "the model called a tool called `{}`, which it wasn't offered",
+    /// If this isn't a `run` call, or it names no command: the loop reports
+    /// it back to the model rather than running it.
+    pub fn command(&self) -> Result<Command, Error> {
+        if self.name != RUN {
+            return Err(Error::Protocol(format!(
+                "`{}` doesn't run a command; only `{RUN}` does",
                 self.name
-            ))
-        })?;
+            )));
+        }
+        let command = self
+            .arguments
+            .get("command")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                Error::Protocol(format!(
+                    "`{RUN}` needs a `command`: the ID of the command to run"
+                ))
+            })?;
         Ok(Command {
-            command: tool.command.clone(),
-            args: self.arguments.clone(),
+            command: command.to_owned(),
+            args: self
+                .arguments
+                .get("args")
+                .cloned()
+                .unwrap_or_else(|| json!({})),
         })
     }
 }
 
-/// A registry command named by a tool call, with its arguments: what the
+/// A registry command named by a `run` call, with its arguments: what the
 /// agent loop runs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Command {
@@ -165,65 +205,66 @@ pub struct Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bl_commands::{NoArgs, Registry};
 
-    fn set() -> ToolSet {
-        let mut registry = Registry::new();
-        registry
-            .register(
-                CommandSpec::new("clip.create", "Create Clip")
-                    .description("Adds a clip. Undo removes it.")
-                    .args::<NoArgs>(),
-            )
-            .unwrap();
-        ToolSet::new(registry.iter())
+    #[test]
+    fn a_fixed_few_tools_serve_every_command() {
+        let names: Vec<_> = tools().into_iter().map(|tool| tool.name).collect();
+        assert_eq!(names, [LIST_COMMANDS, DESCRIBE_COMMAND, RUN, QUERY]);
     }
 
     #[test]
-    fn a_command_becomes_a_tool() {
-        let set = set();
-        let tool = &set.tools()[0];
-        assert_eq!(tool.name, "clip_create");
-        assert_eq!(tool.command, "clip.create");
-        assert_eq!(tool.description, "Adds a clip. Undo removes it.");
-        assert_eq!(tool.input["type"], "object");
-    }
-
-    #[test]
-    fn a_call_resolves_to_its_command() {
-        let set = set();
+    fn a_run_call_resolves_to_its_command() {
         let call = ToolCall {
             id: "call_1".into(),
-            name: "clip_create".into(),
-            arguments: json!({ "track": 1 }),
+            name: RUN.into(),
+            arguments: json!({ "command": "clip.create", "args": { "track": 1 } }),
         };
-        let command = call.command(&set).unwrap();
+        let command = call.command().unwrap();
         assert_eq!(command.command, "clip.create");
         assert_eq!(command.args, json!({ "track": 1 }));
     }
 
     #[test]
-    fn a_call_to_an_offered_tool_only() {
-        let set = set();
+    fn a_run_call_without_args_runs_with_none() {
         let call = ToolCall {
             id: "call_1".into(),
-            name: "clip_duplicate".into(),
-            arguments: json!({}),
+            name: RUN.into(),
+            arguments: json!({ "command": "transport.play" }),
         };
-        let error = call.command(&set).unwrap_err().to_string();
-        assert!(error.contains("clip_duplicate"), "{error}");
+        assert_eq!(call.command().unwrap().args, json!({}));
     }
 
     #[test]
-    #[should_panic(expected = "share the tool name")]
-    fn two_commands_with_one_tool_name_are_a_registry_error() {
-        let mut registry = Registry::new();
-        registry
-            .register(CommandSpec::new("clip.create", "Create Clip").args::<NoArgs>())
-            .unwrap();
-        registry
-            .register(CommandSpec::new("clip_create", "Trap").args::<NoArgs>())
-            .unwrap();
-        let _ = ToolSet::new(registry.iter());
+    fn only_a_run_call_naming_a_command_is_a_command() {
+        let no_command = ToolCall {
+            id: "call_1".into(),
+            name: RUN.into(),
+            arguments: json!({}),
+        };
+        assert!(
+            no_command
+                .command()
+                .unwrap_err()
+                .to_string()
+                .contains("command")
+        );
+        let other = ToolCall {
+            id: "call_2".into(),
+            name: QUERY.into(),
+            arguments: json!({}),
+        };
+        assert!(other.command().unwrap_err().to_string().contains("query"));
+    }
+
+    #[test]
+    fn an_unparsed_call_says_why() {
+        let call = ToolCall::unparsed("c".into(), RUN.into(), "{,}", "expected value");
+        assert_eq!(call.unparsed_because(), Some("expected value"));
+        let whole = ToolCall {
+            id: "c".into(),
+            name: RUN.into(),
+            arguments: json!({ "command": "a.b" }),
+        };
+        assert_eq!(whole.unparsed_because(), None);
     }
 }

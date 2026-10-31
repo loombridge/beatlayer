@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use bl_core::time::Ticks;
 use bl_model::{
-    AudioData, AutomationTarget, BouncedAutomation, BouncedTrack, Clip, ClipData, ClipId, Command,
+    AutomationTarget, BouncedAutomation, BouncedTrack, Clip, ClipData, ClipId, Command,
     ContentHash, Document, Editor, FrozenClip, FrozenTrack, MidiData, NewTakeLane, SceneId,
     TakeLaneId, Track, TrackId, TrackKind,
 };
@@ -20,7 +20,7 @@ use bl_shell_spec::bounce::{
 use bl_shell_spec::editing::TargetArgs;
 use serde_json::Value;
 
-use super::freeze::{frames_to_ticks, prepared_track, render_doc, seconds_between};
+use super::freeze::{frames_to_ticks, prepared_track, render_doc, render_markers, seconds_between};
 use super::*;
 use crate::arrangement::editing::{self, Clipboard, Target};
 use crate::arrangement::placing;
@@ -224,6 +224,7 @@ impl Shell {
                 start: start_sec,
                 end: end_sec,
                 tempo: doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
+                markers: Vec::new(),
                 length: clip.length,
                 original: ClipData::Midi(MidiData::default()),
                 scene: Some(scene),
@@ -296,6 +297,7 @@ impl Shell {
                 start: from,
                 end,
                 tempo,
+                markers: render_markers(&doc, start, clip.start, clip.start + length),
                 length,
                 original: ClipData::Midi(MidiData::default()),
                 scene: None,
@@ -338,7 +340,7 @@ impl Shell {
             return Err(unavailable(id, "the group holds no clips"));
         }
         let prepared = prepared_group(&doc, group).map_err(|why| failed(id, why))?;
-        let (frames, rate) = render_doc(self, id, &prepared, start, end, false)?;
+        let (frames, rate) = render_doc(self, id, &prepared, start, end - start, false)?;
         let total = frames.len() as f64 / f64::from(RENDER_CHANNELS) / f64::from(rate);
         let label = crate::routing::track_label(&doc, group);
         let media = self.write_bounce(
@@ -349,19 +351,29 @@ impl Shell {
             channels,
             files,
         )?;
-        let tempo = doc.settings().tempo.bpm_at(start).get();
-        let mut audio = AudioData::new(media);
-        audio.end = Some(total);
-        audio.tempo = Some(tempo);
+        let clip_id = self.editor.new_id();
+        // R19, R23: the clip plays warped, as a frozen clip does.
+        let region = FrozenClip {
+            clip: clip_id,
+            media,
+            start: 0.0,
+            end: total,
+            tempo: doc.tempo_map().bpm_at(start).get(),
+            markers: render_markers(&doc, start, start, end),
+            length: end - start,
+            original: ClipData::Midi(MidiData::default()),
+            scene: None,
+            cycle: None,
+        };
         let name = doc.track(group).map_or("", |track| track.name());
         let clip = Clip {
-            id: self.editor.new_id(),
+            id: clip_id,
             name: bounced_name(name),
             start,
             length: end - start,
             offset: Ticks::ZERO,
             mute: false,
-            data: ClipData::Audio(audio),
+            data: FrozenTrack::default().audio_for(&region),
             envelopes: Vec::new(),
             launch: Default::default(),
             // Spec: scales R7. A clip made from nothing takes the set's
@@ -677,6 +689,7 @@ impl Shell {
                     start: start_sec,
                     end: end_sec,
                     tempo: doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
+                    markers: Vec::new(),
                     length: clip.length,
                     original: ClipData::Midi(MidiData::default()),
                     scene: Some(scene),
@@ -778,6 +791,7 @@ impl Shell {
                 start: 0.0,
                 end: *seconds,
                 tempo,
+                markers: Vec::new(),
                 length,
                 original: ClipData::Midi(MidiData::default()),
                 scene: None,

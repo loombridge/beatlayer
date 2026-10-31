@@ -12,7 +12,9 @@ use bl_core::midi::{MidiInputEvent, MidiMessage, MidiSource};
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{self, RecordedNote};
 use bl_engine::{NoInput, NoteExpression, NoteKind, TransportCommand};
-use bl_model::{Clip, ClipData, Command, Input, MidiData, Monitor, Note, TrackId, TrackKind};
+use bl_model::{
+    Clip, ClipData, Command, CountIn, Input, MidiData, Monitor, Note, TrackId, TrackKind,
+};
 use common::{Rig, device, track};
 use rtrb::{Producer, RingBuffer};
 
@@ -426,4 +428,32 @@ fn an_edit_that_keeps_the_input_keeps_the_held_notes_sounding() {
         play.heard(),
         [(8192, NoteKind::On, 60), (10_240, NoteKind::Off, 60)]
     );
+}
+
+// Spec: metronome R5
+#[test]
+fn a_monitored_tracks_input_plays_through_a_count_in() {
+    for size in SIZES {
+        let mut p = Play::new(size);
+        p.instrument();
+        p.rig.apply(Command::SetMetronomeEnabled { enabled: true });
+        p.rig.apply(Command::SetMetronomeCountIn {
+            count_in: CountIn::Bars1,
+        });
+        p.send(KEYBOARD, 4096, on(60));
+        p.run_to(4096 + 2 * size as u64);
+        // One 4/4 bar at 120 BPM is 96,000 frames.
+        p.rig.sender.transport(TransportCommand::Play);
+        p.send(KEYBOARD, 20_000, off(60));
+        p.send(KEYBOARD, 30_000, on(64));
+        p.run_to(4096 + 96_000 + 8192);
+
+        // The song waits at frame 0 through the count-in, so a note's song
+        // frame is only its offset in the part.
+        let heard = p.heard();
+        let at = |kind, key| heard.iter().position(|&(_, k, n)| k == kind && n == key);
+        let released = at(NoteKind::Off, 60).expect("the release during the count-in arrives");
+        let along = at(NoteKind::On, 64).expect("the note played along is heard");
+        assert!(released < along, "block size {size}: {heard:?}");
+    }
 }

@@ -42,6 +42,18 @@ impl Shell {
         }
     }
 
+    /// The provider the settings name, reading its key from the keychain
+    /// when a request is made.
+    #[must_use]
+    pub fn assistant_provider(&self) -> Box<dyn bl_assistant::provider::Provider> {
+        let settings = &self.prefs.assistant;
+        crate::assistant::provider(
+            settings.provider,
+            &settings.base_url,
+            Arc::clone(&self.keychain),
+        )
+    }
+
     /// Every command the assistant ran this session, in order (WP-2.23,
     /// part 4).
     #[must_use]
@@ -191,6 +203,15 @@ impl Shell {
         )
     }
 
+    /// Gives the assistant's `query` tool the way to read the project.
+    pub fn set_assistant_query(&mut self, query: crate::assistant::QueryFn) {
+        self.assistant_query = Some(query);
+    }
+
+    pub(crate) fn assistant_query(&self) -> Option<crate::assistant::QueryFn> {
+        self.assistant_query
+    }
+
     /// Tells the window the panel changed.
     pub(crate) fn assistant_touch(&mut self) {
         self.touch();
@@ -211,10 +232,16 @@ impl Shell {
 
     /// Closes the turn's undo step, keeping whatever ran.
     pub(crate) fn end_assistant_turn(&mut self) {
-        if self.editor.commit().unwrap_or(false) {
+        let committed = self.editor.commit().unwrap_or(false);
+        if committed {
             self.dirty = true;
         }
         self.document_changed();
+        if committed {
+            // Spec: crash-recovery R1, R21. The turn's transaction is
+            // journalled as the one edit it was.
+            self.journal_edit(None);
+        }
         self.touch();
     }
 

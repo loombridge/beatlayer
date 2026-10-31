@@ -206,6 +206,8 @@ pub struct Compiler {
     displays: Displays,
     /// The counters of the notes that reach drum chains.
     hits: ChainHits,
+    /// How far behind song time Main's output is in the last program.
+    main_latency: u32,
 }
 
 /// The tuning a plug-in device plays through per-note pitch bend (the
@@ -324,6 +326,7 @@ impl Compiler {
             modulator_rows: crate::modbus::ModRows::default(),
             displays: Displays::default(),
             hits: ChainHits::default(),
+            main_latency: 0,
         }
     }
 
@@ -723,6 +726,12 @@ impl Compiler {
             tracks: BTreeSet::new(),
         };
         self.compile_with(document, &resend)
+    }
+
+    /// How far Main's output lags song time in the last program, in frames.
+    #[must_use]
+    pub fn main_latency(&self) -> u32 {
+        self.main_latency
     }
 
     /// Reports `device`'s node's latency now, as a plug-in that restarted
@@ -1274,7 +1283,7 @@ impl Compiler {
             build.tasks[to as usize].dependencies += 1;
         }
         let (order, dependents) = run_order(&build, &wait_tasks);
-        compensate(&mut build, &order, document, self.config.sample_rate.hz());
+        self.main_latency = compensate(&mut build, &order, document, self.config.sample_rate.hz());
         // Spec: external-devices R4. A track's MIDI to a port waits as long
         // as its audio would be held back on the way into Main.
         for track in document.tracks() {
@@ -1408,6 +1417,7 @@ impl Compiler {
         };
         let program = EngineProgram {
             generation,
+            main_latency: self.main_latency,
             base,
             index: build.layout.iter().map(|(&key, p)| (key, p.slot)).collect(),
             slots: Shared::new(build.slots),
@@ -2681,14 +2691,22 @@ fn input_latency(arrival: &[u32], chain: &[u32], rack_chains: &[(u32, u32)], inp
 /// clips and each route are held back so every path into a track lines up,
 /// each sidechain's source lines up with its device's own input, and each
 /// node's parameter changes are held back with the audio they act on.
-fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) {
+///
+/// Returns how far Main's output lags song time, in frames: what an offline
+/// render discards from its start (delay-compensation R10).
+fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) -> u32 {
     let tasks = build.tasks.len();
+    let main_task = build
+        .tasks
+        .iter()
+        .position(|task| task.track == document.main_id());
     // Spec: delay-compensation R7. While delay compensation is off, nothing
     // is held back and no node's latency counts, so every delay line stays as
     // a new build left it (all [`NO_DELAY`]) and a track's own delay has no
     // effect.
     if !document.settings().delay_compensation {
-        return;
+        // Main's devices still hold its output back by what they report.
+        return main_task.map_or(0, |t| flow_latency(build, build.tasks[t].chain));
     }
     // Spec: mixer R28. Each track's own delay, in frames: positive delays the
     // track, negative plays it early. It joins the compensation here by
@@ -2893,6 +2911,7 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
         }
         build.slots[task.mixer as usize].delay = a as u32 + chain[t];
     }
+    main_task.map_or(0, |t| build.slots[build.tasks[t].mixer as usize].delay)
 }
 
 /// The frames `track`'s audio is held back on its way into Main: the delay

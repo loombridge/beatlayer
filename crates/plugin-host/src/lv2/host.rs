@@ -433,7 +433,7 @@ impl Lv2Host {
             });
         }
         let entry = main.entries.get(&device)?;
-        let values = entry
+        let values: Vec<(ParamId, f64)> = entry
             .params
             .iter()
             .map(|param| {
@@ -445,6 +445,8 @@ impl Lv2Host {
                 (ParamId(port), value)
             })
             .collect();
+        #[cfg(feature = "test-hooks")]
+        crate::count_value_reads(values.len());
         let (editor_open, editor_hidden) = editor_state(main, device);
         let entry = main.entries.get(&device)?;
         Some(PluginStatus {
@@ -524,6 +526,22 @@ impl Lv2Host {
     pub(super) fn open_editor_headless(&self, device: DeviceId) -> Result<(), Lv2Error> {
         let mut guard = lock(&self.inner.main);
         super::ui::open_with(guard.get()?, device, None)
+    }
+
+    /// Whether the device's plug-in has an editor, whether it's open, and
+    /// whether it's hidden, or `None` if the device has no LV2 plug-in:
+    /// what [`Lv2Host::status`] says of the editor, without reading the
+    /// parameters.
+    #[must_use]
+    pub fn editor_state(&self, device: DeviceId) -> Option<(bool, bool, bool)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        if main.missing.contains_key(&device) {
+            return Some((false, false, false));
+        }
+        let has_editor = has_editor(&main.entries.get(&device)?.info);
+        let (open, hidden) = editor_state(main, device);
+        Some((has_editor, open, hidden))
     }
 
     /// Lets go of every plug-in whose device isn't in `keep`, as when a set
@@ -995,9 +1013,13 @@ fn borrow(
     entry.values = engine_values;
     let mut ends = ends;
     if let Ok((active, _)) = copy {
+        // A fresh instance reads 0 until it has run, so the node starts from
+        // the latency the running plug-in last reported, as the engine's
+        // factory does (delay-compensation R6).
+        let remembered = lock(&inner.latencies).get(&device.id).copied().unwrap_or(0);
         ends.status
             .latency
-            .store(active.instance.latency(), Relaxed);
+            .store(active.instance.latency().max(remembered), Relaxed);
         let _ = ends.to_node.push(active);
     }
     entry.lent = Some(Lent { ends, config });

@@ -131,10 +131,13 @@ impl SignatureLane {
         }
         for change in signatures.changes() {
             let x = lane.left() + horizontal.x(change.at) as f32;
-            if x < lane.left() - MARKER_WIDTH || x > lane.right() {
+            let at = change.at;
+            // The marker being dragged keeps its widget, which alone sees
+            // the release.
+            let dragging = self.drag.is_some() && view.selected_signature() == Some(at);
+            if !dragging && (x < lane.left() - MARKER_WIDTH || x > lane.right()) {
                 continue;
             }
-            let at = change.at;
             let rect = Rect::from_min_max(
                 pos2(x - 2.0, lane.top()),
                 pos2(x + MARKER_WIDTH, lane.bottom()),
@@ -239,6 +242,15 @@ impl SignatureLane {
                     invocation: None,
                 });
             }
+        }
+        // A drag whose marker is gone never sees its release: end it once
+        // the pointer is up.
+        if self.drag.is_some() && ui.input(|i| !i.pointer.any_down()) {
+            self.drag = None;
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Commit,
+                invocation: None,
+            });
         }
     }
 }

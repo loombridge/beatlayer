@@ -61,6 +61,21 @@ impl Provider for Script {
 /// headless agent API refuses, and `run` runs the command on the editor.
 struct DocumentCommands {
     editor: Editor,
+    registry: Registry,
+    /// The commands `run` ran, in order.
+    ran: Vec<String>,
+}
+
+impl DocumentCommands {
+    fn new() -> Self {
+        let mut registry = Registry::new();
+        bl_model::registry::register(&mut registry).expect("the document's commands");
+        Self {
+            editor: Editor::new(),
+            registry,
+            ran: Vec::new(),
+        }
+    }
 }
 
 impl Commands for DocumentCommands {
@@ -72,7 +87,13 @@ impl Commands for DocumentCommands {
         self.editor.commit().expect("the loop opened a turn");
     }
 
-    fn permit(&mut self, command: &str, _args: &Value, class: Permission) -> Result<(), String> {
+    fn permit(&mut self, command: &str, _args: &Value) -> Result<(), String> {
+        let class = self
+            .registry
+            .get(command)
+            .ok_or_else(|| format!("there is no command `{command}`"))?
+            .permission
+            .unwrap_or(Permission::External);
         if class.asks_first() {
             Err(format!(
                 "`{command}` is {class}, and there is no one to ask."
@@ -83,25 +104,23 @@ impl Commands for DocumentCommands {
     }
 
     fn run(&mut self, command: &str, args: Value) -> Result<Value, String> {
+        self.ran.push(command.to_owned());
         bl_model::registry::run(&mut self.editor, command, args)
             .map(|changes| json!({ "changed": !changes.is_empty() }))
             .map_err(|error| error.to_string())
     }
+
+    fn read(&mut self, tool: &str, _args: Value) -> Result<Value, String> {
+        Ok(json!({ "read": tool }))
+    }
 }
 
-/// The loop offering every document command.
-fn agent() -> Agent {
-    let mut registry = Registry::new();
-    bl_model::registry::register(&mut registry).expect("the document's commands");
-    Agent::new(registry.iter())
-}
-
-/// A tool call.
-fn call(id: &str, tool: &str, args: Value) -> ToolCall {
+/// A `run` call of the command `command`.
+fn call(id: &str, command: &str, args: Value) -> ToolCall {
     ToolCall {
         id: id.to_owned(),
-        name: tool.to_owned(),
-        arguments: args,
+        name: "run".to_owned(),
+        arguments: json!({ "command": command, "args": args }),
     }
 }
 
@@ -137,21 +156,19 @@ fn main_id(editor: &Editor) -> u64 {
 
 #[test]
 fn a_three_call_turn_runs_every_command_and_undoes_as_one_step() {
-    let agent = agent().with_label("Trim the Main track");
-    let mut commands = DocumentCommands {
-        editor: Editor::new(),
-    };
+    let agent = Agent::new().with_label("Trim the Main track");
+    let mut commands = DocumentCommands::new();
     let main = main_id(&commands.editor);
     let before = commands.editor.document().clone();
     let script = Script::new(vec![
         calls(vec![
             call(
                 "c1",
-                "mixer_set_volume",
+                "mixer.set_volume",
                 json!({"track": main, "volume": 0.5}),
             ),
-            call("c2", "mixer_set_pan", json!({"track": main, "pan": 0.25})),
-            call("c3", "transport_set_loop_enabled", json!({"enabled": true})),
+            call("c2", "mixer.set_pan", json!({"track": main, "pan": 0.25})),
+            call("c3", "transport.set_loop_enabled", json!({"enabled": true})),
         ]),
         answer("Trimmed the Main track."),
     ]);
@@ -201,14 +218,12 @@ fn a_three_call_turn_runs_every_command_and_undoes_as_one_step() {
 
 #[test]
 fn a_forbidden_command_is_refused_and_the_refusal_goes_back_to_the_model() {
-    let agent = agent();
-    let mut commands = DocumentCommands {
-        editor: Editor::new(),
-    };
+    let agent = Agent::new();
+    let mut commands = DocumentCommands::new();
     let main = main_id(&commands.editor);
     let before = commands.editor.document().clone();
     let script = Script::new(vec![
-        calls(vec![call("c1", "track_delete", json!({"track": main}))]),
+        calls(vec![call("c1", "track.delete", json!({"track": main}))]),
         answer("I couldn't delete it."),
     ]);
     let mut request = request("Delete the Main track.");
@@ -243,20 +258,18 @@ fn a_forbidden_command_is_refused_and_the_refusal_goes_back_to_the_model() {
 
 #[test]
 fn cancel_stops_the_turn_between_calls_and_keeps_what_ran() {
-    let agent = agent();
-    let mut commands = DocumentCommands {
-        editor: Editor::new(),
-    };
+    let agent = Agent::new();
+    let mut commands = DocumentCommands::new();
     let main = main_id(&commands.editor);
     let before = commands.editor.document().clone();
     let script = Script::new(vec![calls(vec![
         call(
             "c1",
-            "mixer_set_volume",
+            "mixer.set_volume",
             json!({"track": main, "volume": 0.5}),
         ),
-        call("c2", "mixer_set_pan", json!({"track": main, "pan": 0.25})),
-        call("c3", "transport_set_loop_enabled", json!({"enabled": true})),
+        call("c2", "mixer.set_pan", json!({"track": main, "pan": 0.25})),
+        call("c3", "transport.set_loop_enabled", json!({"enabled": true})),
     ])]);
     let mut request = request("Trim the Main track.");
 
@@ -285,10 +298,8 @@ fn cancel_stops_the_turn_between_calls_and_keeps_what_ran() {
 
 #[test]
 fn the_cap_ends_a_runaway_loop() {
-    let agent = agent().with_max_calls(2);
-    let mut commands = DocumentCommands {
-        editor: Editor::new(),
-    };
+    let agent = Agent::new().with_max_calls(2);
+    let mut commands = DocumentCommands::new();
     let main = main_id(&commands.editor);
     // A model that keeps calling: ten turns of one call each, more than the
     // cap, so the loop has to stop it.
@@ -297,7 +308,7 @@ fn the_cap_ends_a_runaway_loop() {
             .map(|index| {
                 calls(vec![call(
                     &format!("c{index}"),
-                    "mixer_set_volume",
+                    "mixer.set_volume",
                     json!({"track": main, "volume": 0.5}),
                 )])
             })

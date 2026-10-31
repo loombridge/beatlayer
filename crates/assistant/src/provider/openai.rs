@@ -115,7 +115,23 @@ impl Provider for OpenAi {
                 .into_iter()
                 .flatten()
             {
-                let index = call["index"].as_u64().unwrap_or(0) as usize;
+                // A server that sends no index: a piece with an ID already
+                // seen continues that call, a piece with a new ID or a name
+                // starts the next one, and any other continues the last.
+                let index = call["index"].as_u64().map_or_else(
+                    || {
+                        let id = call["id"].as_str();
+                        if let Some(seen) = id.and_then(|id| calls.iter().position(|c| c.id == id))
+                        {
+                            seen
+                        } else if id.is_some() || call["function"]["name"].is_string() {
+                            calls.len()
+                        } else {
+                            calls.len().saturating_sub(1)
+                        }
+                    },
+                    |index| index as usize,
+                );
                 if index >= calls.len() {
                     calls.resize_with(index + 1, Partial::default);
                 }
@@ -135,7 +151,7 @@ impl Provider for OpenAi {
             }
         }
         for partial in calls {
-            let call = partial.finish(reply.tool_calls.len())?;
+            let call = partial.finish(reply.tool_calls.len());
             on_event(Event::ToolCall(call.clone()));
             reply.tool_calls.push(call);
         }
@@ -155,26 +171,27 @@ struct Partial {
 impl Partial {
     /// The finished call. `count` is how many calls already finished, for a
     /// server that gives a call no ID of its own.
-    fn finish(self, count: usize) -> Result<ToolCall, Error> {
-        let arguments = if self.arguments.trim().is_empty() {
-            json!({})
+    fn finish(self, count: usize) -> ToolCall {
+        let id = if self.id.is_empty() {
+            format!("call_{}", count + 1)
         } else {
-            serde_json::from_str(&self.arguments).map_err(|error| {
-                Error::Protocol(format!(
-                    "the arguments of `{}` aren't JSON: {error}",
-                    self.name
-                ))
-            })?
+            self.id
         };
-        Ok(ToolCall {
-            id: if self.id.is_empty() {
-                format!("call_{}", count + 1)
-            } else {
-                self.id
+        if self.arguments.trim().is_empty() {
+            return ToolCall {
+                id,
+                name: self.name,
+                arguments: json!({}),
+            };
+        }
+        match serde_json::from_str(&self.arguments) {
+            Ok(arguments) => ToolCall {
+                id,
+                name: self.name,
+                arguments,
             },
-            name: self.name,
-            arguments,
-        })
+            Err(error) => ToolCall::unparsed(id, self.name, &self.arguments, &error.to_string()),
+        }
     }
 }
 

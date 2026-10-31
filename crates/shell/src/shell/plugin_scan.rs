@@ -144,6 +144,14 @@ impl Shell {
         crate::plugins::info(&self.plugins, &self.au, &self.vst3, &self.lv2, device)
     }
 
+    /// Whether a plug-in device has an editor and whether its window is
+    /// open: the two things the Device View's window button reads each
+    /// frame, from [`Shell::plugin_info`] without its parameter values.
+    #[must_use]
+    pub fn plugin_window_state(&self, device: bl_model::DeviceId) -> Option<(bool, bool)> {
+        crate::plugins::window_state(&self.plugins, &self.au, &self.vst3, &self.lv2, device)
+    }
+
     /// How the Browser shows plug-ins, and the Plug-In Sources switches:
     /// what `plugin.settings` returns.
     #[must_use]

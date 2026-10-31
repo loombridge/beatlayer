@@ -30,12 +30,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use bl_assistant::keychain::{Keychain, MemoryKeychain};
 use bl_assistant::message::{Event, Part, Reply, Request, Stop};
 use bl_assistant::provider::{Error, OpenAi, Provider};
-use bl_assistant::tools::{ToolCall, ToolSet};
-use bl_cli::assistant::{Recording, Replay, Transcript, provider, run_headless};
+use bl_assistant::tools::ToolCall;
+use bl_cli::assistant::{Recording, Replay, Transcript, run_headless};
 use bl_devices::polysynth::POLYSYNTH;
 use bl_devices::sampler::SAMPLER;
 use bl_model::{Document, TrackKind};
 use bl_shell::Shell;
+use bl_shell::assistant::provider;
 use serde_json::{Value, json};
 
 /// A quarter note, a bar of 4/4 and the track's length, in ticks.
@@ -246,16 +247,18 @@ fn replay_and_check(path: &Path) {
     let mut shell = Shell::headless();
     let factory = serialized(&shell);
 
-    // Every command the model called is registered.
-    let tools = ToolSet::new(shell.registry().iter());
+    // Every command the model ran is registered.
     let missing: Vec<&str> = transcript
         .exchanges
         .iter()
         .flat_map(|exchange| &exchange.response.tool_calls)
-        .map(|call| call.name.as_str())
-        .filter(|tool| tools.get(tool).is_none())
+        .filter_map(|call| call.arguments["command"].as_str())
+        .filter(|command| shell.registry().get(command).is_none())
         .collect();
-    assert!(missing.is_empty(), "{name}: unregistered tools {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "{name}: unregistered commands {missing:?}"
+    );
 
     let replay = Replay::new(transcript.clone());
     let turn = run_headless(&mut shell, &replay, &transcript.model, false, &prompt())
@@ -382,11 +385,12 @@ impl Provider for Script {
     }
 }
 
-fn call(id: &str, tool: &str, arguments: Value) -> ToolCall {
+/// A `run` call of the command `command`.
+fn call(id: &str, command: &str, args: Value) -> ToolCall {
     ToolCall {
         id: id.to_owned(),
-        name: tool.to_owned(),
-        arguments,
+        name: "run".to_owned(),
+        arguments: json!({ "command": command, "args": args }),
     }
 }
 
@@ -422,7 +426,7 @@ fn last_results(script: &Script) -> Vec<String> {
 
 #[test]
 fn a_destructive_call_is_refused_without_autonomous_and_the_model_is_told() {
-    let delete = |id: &str| calls(vec![call(id, "track_delete", json!({ "track": 2 }))]);
+    let delete = |id: &str| calls(vec![call(id, "track.delete", json!({ "track": 2 }))]);
     for autonomous in [false, true] {
         let mut shell = Shell::headless();
         let tracks = shell.editor().document().tracks().count();
@@ -444,6 +448,25 @@ fn a_destructive_call_is_refused_without_autonomous_and_the_model_is_told() {
 
 // The key comes from the keychain alone.
 
+/// Reads one request from `stream`: its headers, lowercased, and its body.
+fn read_request(stream: &mut std::net::TcpStream) -> (String, Vec<u8>) {
+    let mut reader = BufReader::new(stream.try_clone().unwrap());
+    let (mut headers, mut length) = (String::new(), 0);
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+            break;
+        }
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            length = value.trim().parse().unwrap_or(0);
+        }
+        headers.push_str(&line.to_ascii_lowercase());
+    }
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).unwrap();
+    (headers, body)
+}
+
 /// A server that answers each request with the next of `bodies` as an SSE
 /// stream, and hands back every request's headers.
 struct Mock {
@@ -462,20 +485,7 @@ impl Mock {
                 let Ok((mut stream, _)) = listener.accept() else {
                     return;
                 };
-                let mut reader = BufReader::new(stream.try_clone().unwrap());
-                let (mut headers, mut length) = (String::new(), 0);
-                loop {
-                    let mut line = String::new();
-                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                        break;
-                    }
-                    if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                        length = value.trim().parse().unwrap_or(0);
-                    }
-                    headers.push_str(&line.to_ascii_lowercase());
-                }
-                let mut sent = vec![0; length];
-                reader.read_exact(&mut sent).unwrap();
+                let (headers, _) = read_request(&mut stream);
                 log.lock().unwrap().push(headers);
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
@@ -556,6 +566,51 @@ fn the_key_is_read_from_the_keychain_and_sent_as_the_providers_header() {
     );
 }
 
+/// OpenAI's own limit on the tools in one request.
+const OPEN_AI_TOOL_LIMIT: usize = 128;
+
+#[test]
+fn the_app_s_turn_fits_openai_s_limit_on_tools() {
+    // A server that answers as api.openai.com does: a 400 for a request
+    // with more than 128 tools, a plain completion otherwise.
+    let listener = TcpListener::bind("127.0.0.1:0").expect("a free port");
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("a request");
+        let (_, body) = read_request(&mut socket);
+        let body: Value = serde_json::from_slice(&body).expect("a JSON body");
+        let tools = body["tools"].as_array().map_or(0, Vec::len);
+        let response = if tools > OPEN_AI_TOOL_LIMIT {
+            let error = json!({ "error": { "message": format!(
+                "Invalid 'tools': array too long. Expected an array with maximum length {OPEN_AI_TOOL_LIMIT}"
+            ) } });
+            format!(
+                "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{error}"
+            )
+        } else {
+            let body = stream("Hello.", &[]);
+            format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n{body}"
+            )
+        };
+        let _ = socket.write_all(response.as_bytes());
+        tools
+    });
+    let keychain = Arc::new(MemoryKeychain::new());
+    keychain.write(OpenAi::ACCOUNT, "sk-test").unwrap();
+    let api = provider(
+        bl_shell::assistant::AssistantProvider::OpenAi,
+        &url,
+        keychain,
+    );
+    let mut shell = Shell::headless();
+
+    let turn = run_headless(&mut shell, api.as_ref(), "m", false, "hello");
+
+    let sent = server.join().unwrap();
+    assert!(turn.is_ok(), "{turn:?} after sending {sent} tools");
+}
+
 #[test]
 fn the_command_takes_no_key_and_the_binary_records_and_refuses() {
     // No option carries a key (the unit test in main.rs checks the flags);
@@ -564,7 +619,14 @@ fn the_command_takes_no_key_and_the_binary_records_and_refuses() {
         let dir = TempDir::new("binary");
         let record = dir.0.join("turn.json");
         let mock = Mock::new(vec![
-            stream("", &[("c1", "track_delete", json!({ "track": 2 }))]),
+            stream(
+                "",
+                &[(
+                    "c1",
+                    "run",
+                    json!({ "command": "track.delete", "args": { "track": 2 } }),
+                )],
+            ),
             stream("Done.", &[]),
         ]);
         let mut command = Command::new(env!("CARGO_BIN_EXE_bl-cli"));
@@ -675,7 +737,7 @@ fn scripted_replies() -> Vec<Reply> {
     ];
     let mut tracks = vec![call(
         "call_1",
-        "song_set_tempo",
+        "song.set_tempo",
         json!({ "tempo": [{ "kind": "constant", "start": 0, "bpm": TEMPO }] }),
     )];
     let mut devices = Vec::new();
@@ -684,12 +746,12 @@ fn scripted_replies() -> Vec<Reply> {
         let key = name.to_lowercase();
         tracks.push(call(
             &format!("call_track_{key}"),
-            "track_create",
+            "track.create",
             json!({ "id": { "$new": key }, "kind": "midi", "name": name, "index": 4 + index }),
         ));
         devices.push(call(
             &format!("call_device_{key}"),
-            "device_add",
+            "device.add",
             json!({
                 "device": {
                     "kind": { "native": { "device_type": POLYSYNTH } },
@@ -701,7 +763,7 @@ fn scripted_replies() -> Vec<Reply> {
         ));
         clips.push(call(
             &format!("call_clip_{key}"),
-            "clip_create",
+            "clip.create",
             json!({ "track": { "$ref": key }, "clip": midi_clip(&key, notes) }),
         ));
     }

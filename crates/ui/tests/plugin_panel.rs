@@ -385,3 +385,22 @@ fn a_remapped_knob_past_the_configured_list_follows_its_own_list() {
         "the remap is cleared, so the knob follows the list again"
     );
 }
+
+// Spec: clap-hosting R13. The wrench asks only whether the plug-in has an
+// editor and whether it's open, never for the plug-in's parameter values.
+#[test]
+fn drawing_the_wrench_reads_no_parameter_values() {
+    let (mut h, device) = harness();
+    assert!(
+        !info(&mut h, device).values.is_empty(),
+        "the plug-in has parameters to read"
+    );
+    bl_plugin_host::STATUS_VALUE_READS.store(0, std::sync::atomic::Ordering::Relaxed);
+    for _ in 0..10 {
+        h.settle();
+    }
+    assert_eq!(
+        bl_plugin_host::STATUS_VALUE_READS.load(std::sync::atomic::Ordering::Relaxed),
+        0
+    );
+}

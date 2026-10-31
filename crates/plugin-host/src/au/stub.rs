@@ -131,6 +131,12 @@ impl AuHost {
         0
     }
 
+    /// A unit's editor state: no device has a unit here.
+    #[must_use]
+    pub fn editor_state(&self, _device: DeviceId) -> Option<(bool, bool, bool)> {
+        None
+    }
+
     /// Opens a unit's own editor: there is none here.
     ///
     /// # Errors

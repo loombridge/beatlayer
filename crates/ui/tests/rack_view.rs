@@ -811,6 +811,53 @@ fn a_chains_menu_renames_and_colours() {
     assert!(doc.chain(chains[0]).unwrap().name.ends_with("Strings"));
 }
 
+/// Starts a rename of the chain in row 0 through its menu.
+fn start_chain_rename(h: &mut Harness, rack: DeviceId) {
+    let name = row(&layout_of(h, rack), 0).name.center();
+    let nodes = Harness::nodes(&right_click(h, name));
+    let b = item(&nodes, "Rename").bounds.unwrap();
+    click(
+        h,
+        pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32),
+    );
+    assert!(h.main.is_typing(), "the row's name is a text field");
+}
+
+// Spec: racks R22 (a rename never leaves the keys with a field that is gone)
+#[test]
+fn a_chain_rename_ends_when_its_rack_goes() {
+    let mut h = harness();
+    let (rack, _) = rack(&mut h, &["Pad", "Lead"]);
+    start_chain_rename(&mut h, rack);
+    h.shell
+        .run("device.remove", json!({ "device": rack }))
+        .unwrap();
+    h.settle();
+    assert!(!h.main.is_typing(), "the keys are back");
+}
+
+// Spec: racks R22
+#[test]
+fn a_chain_rename_ends_when_its_row_scrolls_out_of_the_list() {
+    let mut h = harness();
+    let names: Vec<String> = (0..40).map(|n| format!("Chain {n}")).collect();
+    let names: Vec<&str> = names.iter().map(String::as_str).collect();
+    let (rack, _) = rack(&mut h, &names);
+    start_chain_rename(&mut h, rack);
+    let list = layout_of(&mut h, rack).chain_list.unwrap();
+    h.frame(vec![
+        Event::PointerMoved(list.rows_area.center()),
+        Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2000.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    h.settle();
+    assert!(!h.main.is_typing(), "the keys are back");
+}
+
 // Spec: racks R26
 #[test]
 fn a_racks_menu_adds_ungroup_after_group_and_disables_compare() {

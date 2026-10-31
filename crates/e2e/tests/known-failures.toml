@@ -246,20 +246,9 @@ key = "clip.slice_to_midi_track of a warped clip"
 property = "finishes in the app"
 description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."
 
-[[failure]]
-suite = "scenarios"
-key = "remix/slice to a drum rack"
-property = "the sliced rack plays the loop as the warped clip did"
-description = "A one-bar drum loop at 120 BPM, warped in Beats mode in a 90 BPM song, sliced to a new MIDI track by transients with Preserve warped timing on: the rack's rendered slices don't sound as the clip plays (envelope correlation 0.16 with the clip's own export, 0.81 with the loop unstretched). The slice render reads the plain media store, without the analysed transients Beats cuts at, so it cuts at the warp markers alone. Re-Pitch and Complex slice correctly."
 
 [[failure]]
-suite = "scenarios"
-key = "mix/freeze"
-property = "the set with a frozen MIDI track keeps the model's rules"
-description = "Freezing a MIDI track (Cascade and Auto Filter, a two-bar clip) puts the freeze file's audio into the track's clips, so the document holds audio clips on a MIDI track, which Document::check_invariants refuses: \"track is a MIDI track; this needs an audio track\". The loader's clip-kind check makes no exception for a frozen track."
-
-[[failure]]
-suite = "scenarios"
-key = "mix/freeze"
-property = "the set with a frozen MIDI track saves and reopens"
-description = "A set holding a frozen MIDI track saves, but set.open refuses the file: \"the set isn't valid: track is a MIDI track; this needs an audio track\". Frozen clips hold audio data while their track is MIDI, and loading checks each clip's kind against its track's without regard to the freeze, so the saved set can't be opened again."
+suite = "background"
+key = "export flac 24-bit stereo"
+property = "round trip keeps it"
+description = "A FLAC file of the rich set's first two bars decodes 4,096 frames short: the loud block at frames 8,192 to 12,288 (peak 0.97) comes back from the decoder as nothing, and the stream after it shifts earlier. The same block written alone to a FLAC file with `AudioWriter` decodes to 0 frames, so the fault is in the FLAC encoder or the decoder reading it, not in the render, which WAV and AIFF write whole. It showed up once exports stopped starting a few frames late, which moved the audio in that block."

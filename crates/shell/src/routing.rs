@@ -350,19 +350,7 @@ fn label(labels: &HashMap<TrackId, String>, track: TrackId) -> String {
     labels.get(&track).cloned().unwrap_or_default()
 }
 
-/// A return track's letter: A to Z, then AA, AB, and on, as there's no
-/// limit on return tracks (IMP-01).
-#[must_use]
-pub fn return_letter(index: usize) -> String {
-    let mut letters = Vec::new();
-    let mut n = index + 1;
-    while n > 0 {
-        n -= 1;
-        letters.push(char::from(b'A' + (n % 26) as u8));
-        n /= 26;
-    }
-    letters.iter().rev().collect()
-}
+pub use bl_model::return_letter;
 
 fn set_input(track: TrackId, input: Value) -> Invocation {
     Invocation::new(

@@ -206,6 +206,7 @@ pub use spelling::NoteSpelling;
 pub use track::{
     Channel, CrossfadeAssign, DeviceOutput, Input, MAX_TRACK_DELAY_MS, MAX_TRACK_DELAY_SAMPLES,
     MidiTo, Mixer, Monitor, Output, PanMode, Routing, SendTap, Tap, Track, TrackDelay, TrackKind,
+    return_letter,
 };
 pub use tuning::{
     DEFAULT_REFERENCE_HZ, DEFAULT_REFERENCE_OCTAVE, MAX_CENTS, MAX_DEGREES, MAX_KEYS, Reference,

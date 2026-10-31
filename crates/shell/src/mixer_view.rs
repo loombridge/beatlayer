@@ -94,6 +94,12 @@ impl MixerView {
         };
     }
 
+    /// The racks whose chains are folded out as strips now (racks spec, R27).
+    #[must_use]
+    pub fn open_racks(&self) -> Vec<DeviceId> {
+        self.folded.iter().copied().collect()
+    }
+
     /// The columns' widths, as a save writes them (R36).
     #[must_use]
     pub fn widths(&self) -> &ColumnWidths {

@@ -68,6 +68,48 @@ fn leds(snapshot: &Snapshot) -> BTreeMap<String, ids::PushLed> {
     leds
 }
 
+/// What Mix Mode shows (push-2-tracks R42).
+fn mix_info(mix: &bl_push::mix::State) -> ids::PushMix {
+    use bl_push::mix::{Global, View};
+    ids::PushMix {
+        view: match mix.view {
+            View::Mix => "mix",
+            View::InOut => "in_out",
+        }
+        .to_owned(),
+        global: match mix.global {
+            Global::Volumes => "volumes".to_owned(),
+            Global::Pans => "pans".to_owned(),
+            Global::Send(n) => format!("send_{}", bl_model::return_letter(n).to_lowercase()),
+        },
+        sends_shift: mix.shift,
+        places: mix
+            .places
+            .iter()
+            .map(|place| ids::PushMixPlace {
+                name: place.name.clone(),
+                track: place.track,
+                chain: place.chain,
+                selected: place.selected,
+            })
+            .collect(),
+        encoders: mix
+            .encoders
+            .iter()
+            .map(|control| {
+                control.as_ref().map(|control| ids::PushMixControl {
+                    name: control.name.clone(),
+                    value: control.value.clone(),
+                    position: control.position,
+                    inert: control.inert,
+                })
+            })
+            .collect(),
+        unfolded_groups: mix.unfolded_groups.clone(),
+        unfolded_racks: mix.unfolded_racks.clone(),
+    }
+}
+
 fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::PushInfo {
     let mix = (snapshot.display_mode == DisplayMode::Mix).then_some(match snapshot.mix_page {
         MixPage::Track => ids::PushMixPage::Track,
@@ -135,6 +177,7 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 .collect(),
             in_use: browse.in_use,
         }),
+        mix_mode: snapshot.mix.as_ref().map(mix_info),
         display: ids::PushDisplay {
             text: snapshot.screen.text(),
             claimed: snapshot.display.claimed,

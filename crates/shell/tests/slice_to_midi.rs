@@ -598,6 +598,50 @@ fn a_user_slicing_preset_shapes_every_chain() {
     }
 }
 
+// Spec: slice-to-midi R11. A user preset is one in the Slicing folder: a
+// name that points outside it is refused, so an agent can't load any preset
+// on the disk.
+#[test]
+fn a_slicing_preset_outside_the_slicing_folder_is_refused() {
+    let _home = HOME.lock().unwrap();
+    let scratch = Scratch::new("escape");
+    let (mut shell, _track, clip) = loop_clip(&scratch);
+    let base = if cfg!(windows) { "Documents" } else { "Music" };
+    let library = scratch.path(&format!("{base}/Beatlayer/User Library/Defaults/Slicing"));
+    std::fs::create_dir_all(&library).unwrap();
+    let _guard = HomeGuard::set(&scratch.0);
+
+    // A valid rack preset, saved outside the library.
+    let first = slice(&mut shell, clip, json!({ "by": "quarter" }));
+    let rack = device(&shell, first.track);
+    std::fs::create_dir_all(scratch.path("outside")).unwrap();
+    let outside = scratch.path("outside/Evil");
+    shell
+        .run(
+            "device.save_preset",
+            json!({ "device": rack.id, "path": format!("{}.blpreset", outside.display()) }),
+        )
+        .unwrap();
+    let tracks = shell.editor().document().tracks().count();
+
+    // The Slicing folder is five folders under the scratch folder.
+    for preset in [
+        outside.display().to_string(),
+        "../../../../../outside/Evil".to_owned(),
+    ] {
+        let refused = shell.run(
+            ids::SLICE,
+            json!({ "clip": clip, "by": "quarter", "preset": preset }),
+        );
+        let error = refused.expect_err("a preset outside the folder is refused");
+        assert!(
+            error.to_string().contains("no slicing preset is called"),
+            "{error}"
+        );
+        assert_eq!(shell.editor().document().tracks().count(), tracks);
+    }
+}
+
 /// Sets the home folder the User Library hangs under (`HOME`, and
 /// `USERPROFILE` on Windows) for the test, and puts both back.
 struct HomeGuard {

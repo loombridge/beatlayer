@@ -491,6 +491,15 @@ impl Shell {
     /// The path of the user slicing preset `name`, if the User Library has
     /// one (R11).
     fn slicing_preset_path(&self, name: &str) -> Option<std::path::PathBuf> {
+        // Spec: R11. Only a file in the folder: a name that climbs out of
+        // it, or is a path of its own, names no preset.
+        let mut parts = std::path::Path::new(name).components();
+        if !matches!(
+            (parts.next(), parts.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        ) {
+            return None;
+        }
         let library = crate::browser::places::default_user_library()?;
         let path = library
             .join(SLICING_FOLDER)

@@ -15,6 +15,7 @@ use crate::clip::AudioData;
 use crate::error::ModelError;
 use crate::warp::{MarkerAt, WarpMarker};
 use crate::warp_settings::{WarpMode, WarpSettings};
+use bl_stretch::{MAX_BPM, MIN_BPM};
 
 /// The bar counts a short sample warped as a loop may be (the warping spec,
 /// R34).
@@ -41,6 +42,35 @@ pub struct FileBeats {
     pub bpm: Option<f64>,
     /// The times in seconds of its beats, in increasing order.
     pub beats: Vec<f64>,
+}
+
+impl FileBeats {
+    /// Refuses an analysis that doesn't describe a file: it can come from an
+    /// agent, and a zero or negative tempo or unordered beats send the
+    /// tempo-matching loops in `beats_near` round without end.
+    pub(crate) fn check(&self) -> Result<(), ModelError> {
+        let ordered = self.beats.windows(2).all(|pair| pair[0] <= pair[1]);
+        let inside = self
+            .beats
+            .iter()
+            .all(|beat| (0.0..=self.seconds).contains(beat));
+        if !(self.seconds.is_finite() && self.seconds > 0.0) {
+            Err(ModelError::InvalidInput(
+                "`analysis.seconds` must be above 0",
+            ))
+        } else if self
+            .bpm
+            .is_some_and(|bpm| !(MIN_BPM..=MAX_BPM).contains(&bpm))
+        {
+            Err(ModelError::InvalidInput("`analysis.bpm` is out of range"))
+        } else if !(ordered && inside) {
+            Err(ModelError::InvalidInput(
+                "`analysis.beats` must increase and lie inside the file",
+            ))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// What Save Default Clip keeps of an audio clip (the warping spec, R42): the
@@ -156,7 +186,9 @@ fn last_bar_bpm(markers: &[WarpMarker], fallback: Option<f64>) -> Result<f64, Mo
 /// and where `nearest`, an index into them, falls among the result.
 fn beats_near(file: &FileBeats, hint: f64, nearest: usize) -> (Vec<f64>, Option<f64>, usize) {
     let (mut beats, mut bpm, mut at) = (file.beats.clone(), file.bpm, nearest);
-    while let Some(now) = bpm.filter(|&now| now * 1.5 < hint && now * 2.0 <= *BEATS_BPM.end()) {
+    while let Some(now) =
+        bpm.filter(|&now| now > 0.0 && now * 1.5 < hint && now * 2.0 <= *BEATS_BPM.end())
+    {
         let mut doubled = Vec::with_capacity(beats.len() * 2);
         for pair in beats.windows(2) {
             doubled.extend([pair[0], (pair[0] + pair[1]) / 2.0]);
@@ -296,6 +328,7 @@ impl AudioData {
     ///
     /// If `file` has no beats or no tempo, or its tempo is out of range.
     pub fn auto_warped(&self, file: &FileBeats) -> Result<Self, ModelError> {
+        file.check()?;
         let markers = bar_markers(&file.beats, 0, Ticks::ZERO);
         if markers.is_empty() {
             return Err(ModelError::InvalidInput("the file has no beats to warp to"));
@@ -410,6 +443,7 @@ impl AudioData {
         let file = file.ok_or(ModelError::InvalidInput(
             "this needs the file's beats: `analysis`",
         ))?;
+        file.check()?;
         let nearest = file
             .beats
             .iter()
@@ -604,5 +638,83 @@ mod tests {
                 .with_warp_from_here(&at, WarpFrom::Auto, None, 90.0, None)
                 .is_err()
         );
+    }
+
+    // Spec: warping R39
+    #[test]
+    fn a_bad_analysis_is_refused_instead_of_looping_in_start_at() {
+        let warped = clip().auto_warped(&file()).unwrap();
+        let at = WarpPoint {
+            marker: Some(0),
+            ..WarpPoint::default()
+        };
+        // One beat and no growth: today this spins, so it runs on a thread.
+        for bpm in [0.0, -120.0] {
+            let bad = FileBeats {
+                seconds: 10.0,
+                bpm: Some(bpm),
+                beats: vec![0.0],
+            };
+            let warped = warped.clone();
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = tx.send(warped.with_warp_from_here(
+                    &at,
+                    WarpFrom::StartAt,
+                    Some(120.0),
+                    120.0,
+                    Some(&bad),
+                ));
+            });
+            assert!(matches!(
+                rx.recv_timeout(std::time::Duration::from_secs(5)),
+                Ok(Err(ModelError::InvalidInput(_)))
+            ));
+        }
+        // Several beats double a vector without end: only run after the check.
+        for bad in [
+            FileBeats {
+                bpm: Some(0.0),
+                beats: vec![0.0, 0.5, 1.0, 1.5, 2.0],
+                ..file()
+            },
+            FileBeats {
+                bpm: Some(f64::NAN),
+                ..file()
+            },
+            FileBeats {
+                seconds: 0.0,
+                ..file()
+            },
+            FileBeats {
+                beats: vec![1.0, 0.5],
+                ..file()
+            },
+            FileBeats {
+                beats: vec![-1.0, 0.5],
+                ..file()
+            },
+            FileBeats {
+                beats: vec![0.5, 21.0],
+                ..file()
+            },
+        ] {
+            assert!(
+                warped
+                    .with_warp_from_here(&at, WarpFrom::StartAt, Some(120.0), 120.0, Some(&bad))
+                    .is_err()
+            );
+            assert!(clip().auto_warped(&bad).is_err());
+        }
+    }
+
+    // Spec: warping R39
+    #[test]
+    fn beats_near_ends_even_for_a_tempo_the_check_would_refuse() {
+        let bad = FileBeats {
+            bpm: Some(0.0),
+            ..file()
+        };
+        assert_eq!(beats_near(&bad, 120.0, 3).0, bad.beats);
     }
 }

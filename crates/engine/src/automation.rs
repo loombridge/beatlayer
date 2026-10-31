@@ -287,7 +287,7 @@ fn played_regions(
     let first = (loop_end - contents.start).min(length);
     regions.push((start, start + first, contents.start, contents.start + first));
     let mut at = first;
-    while at < length {
+    while at < length && regions.len() < bl_model::MAX_LOOP_REPEATS {
         let repeat = loop_len.min(length - at);
         regions.push((
             start + at,
@@ -1211,6 +1211,41 @@ mod tests {
                 .collect(),
         )
         .unwrap()
+    }
+
+    // Spec: clip-envelopes R2
+    #[test]
+    fn a_linked_envelope_reads_a_one_tick_loop_brace_only_up_to_the_cap() {
+        let clip = bl_model::Clip::new(
+            bl_model::ClipId(bl_core::id::Id::new(1).unwrap()),
+            Ticks::ZERO,
+            Ticks::QUARTER * 64,
+            bl_model::ClipData::Midi(bl_model::MidiData {
+                looping: true,
+                loop_start: Ticks::ZERO,
+                loop_end: Some(Ticks(1)),
+                ..bl_model::MidiData::new([])
+            }),
+        );
+        let linked = bl_model::ClipEnvelope::new(
+            bl_model::AutomationTarget::Mixer {
+                param: bl_model::MixerParam::Volume,
+            },
+            envelope(&[(Ticks::ZERO, 0.0), (Ticks(1), 1.0)]),
+        );
+        let placed = PlacedClipEnvelope::placed(
+            &clip,
+            &linked,
+            &TempoMap::default(),
+            SampleRate::HZ_48000,
+            0,
+        )
+        .unwrap();
+        assert!(placed.segments.len() <= bl_model::MAX_LOOP_REPEATS);
+        assert_eq!(
+            played_regions(&clip, &linked).len(),
+            bl_model::MAX_LOOP_REPEATS
+        );
     }
 
     // Spec: session-automation R8

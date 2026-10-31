@@ -165,7 +165,26 @@ impl FollowActions {
     /// The chance of action B, in whole percent.
     #[must_use]
     pub fn chance_b(&self) -> u8 {
-        100 - self.chance_a
+        100u8.saturating_sub(self.chance_a)
+    }
+
+    /// Refuses follow actions a loaded set holds outside the limits the
+    /// fields keep: a chance over 100, a multiplier or a time out of range.
+    pub(crate) fn check(&self) -> Result<(), ModelError> {
+        let invalid = |what, value: f64| Err(ModelError::InvalidValue { what, value });
+        if self.chance_a > 100 {
+            return invalid(
+                "the chance of action A, in percent",
+                f64::from(self.chance_a),
+            );
+        }
+        if !(1..=FOLLOW_MULTIPLIER_MAX).contains(&self.multiplier) {
+            return invalid("the follow multiplier", f64::from(self.multiplier));
+        }
+        if !(FOLLOW_TIME_MIN..=FOLLOW_TIME_MAX).contains(&self.time) {
+            return invalid("the follow time", self.time.get() as f64);
+        }
+        Ok(())
     }
 
     /// Changes the fields `patch` names. A multiplier, a time or a jump
@@ -242,6 +261,29 @@ pub struct FollowPatch {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chance_over_100_leaves_none_to_action_b_and_fails_the_check() {
+        let follow = FollowActions {
+            chance_a: 200,
+            ..FollowActions::default()
+        };
+        assert_eq!(follow.chance_b(), 0);
+        assert!(follow.check().is_err());
+        assert!(FollowActions::default().check().is_ok());
+        for bad in [
+            FollowActions {
+                multiplier: 0,
+                ..FollowActions::default()
+            },
+            FollowActions {
+                time: Ticks::ZERO,
+                ..FollowActions::default()
+            },
+        ] {
+            assert!(bad.check().is_err());
+        }
+    }
 
     #[test]
     fn the_defaults_are_the_observed_ones() {

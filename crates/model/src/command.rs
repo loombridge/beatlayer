@@ -3550,17 +3550,39 @@ impl Document {
                     if held.is_frozen() {
                         return Err(ModelError::InvalidInput("the track is already frozen"));
                     }
-                    // The clips keep their own data: the engine builds the
-                    // frozen audio from `audio` when it plays them, and
-                    // unfreezing only drops the record (R6, R10).
-                    self.track_mut(*track)?.frozen = Some(audio.clone());
+                    // The clips play the freeze files: their own data is
+                    // kept in the frozen record and restored on unfreezing
+                    // (R6, R10).
+                    let mut played: Vec<(crate::ids::ClipId, Option<SceneId>, crate::clip::Clip)> =
+                        Vec::new();
+                    for region in &audio.clips {
+                        let Some(clip) = (match region.scene {
+                            None => held.clips.get(&region.clip),
+                            Some(scene) => held.slots.get(&scene),
+                        }) else {
+                            continue;
+                        };
+                        let mut clip = (**clip).clone();
+                        clip.data = audio.audio_for(region);
+                        played.push((region.clip, region.scene, clip));
+                    }
+                    let held = self.track_mut(*track)?;
+                    held.frozen = Some(audio.clone());
+                    for (clip, scene, played) in played {
+                        match scene {
+                            None => {
+                                held.clips.insert(clip, Shared::new(played));
+                            }
+                            Some(scene) => {
+                                held.slots.insert(scene, Shared::new(played));
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
             Command::UnfreezeTracks { tracks } => {
                 for track in tracks {
-                    // A set saved before frozen clips kept their own data holds
-                    // the freeze audio in them: put the originals back there.
                     let regions: Vec<crate::freeze::FrozenClip> = self
                         .track_ref(*track)?
                         .frozen
@@ -3569,23 +3591,24 @@ impl Document {
                         .unwrap_or_default();
                     let held = self.track_mut(*track)?;
                     for region in regions {
-                        let existing = match region.scene {
-                            None => held.clips.get(&region.clip),
-                            Some(scene) => held.slots.get(&scene),
+                        // A slot clip moved to another scene since the freeze
+                        // is found by its ID.
+                        let scene = region.scene.and_then(|_| {
+                            held.slots
+                                .iter()
+                                .find(|(_, clip)| clip.id == region.clip)
+                                .map(|(scene, _)| *scene)
+                        });
+                        let existing = match (region.scene, scene) {
+                            (None, _) => held.clips.get(&region.clip),
+                            (Some(_), scene) => scene.and_then(|scene| held.slots.get(&scene)),
                         };
                         let Some(existing) = existing.cloned() else {
                             continue;
                         };
-                        let frozen_audio = matches!(
-                            &existing.data,
-                            crate::clip::ClipData::Audio(audio) if audio.media == region.media
-                        );
-                        if !frozen_audio {
-                            continue;
-                        }
                         let mut back = (*existing).clone();
                         back.data = region.original;
-                        match region.scene {
+                        match scene {
                             None => held.clips.insert(region.clip, Shared::new(back)),
                             Some(scene) => held.slots.insert(scene, Shared::new(back)),
                         };
@@ -8946,6 +8969,15 @@ fn time_signature_map(changes: Vec<TimeSignatureChange>) -> TimeSignatureMap {
 pub(crate) fn check_clip_fits(track: &Track, data: &ClipData) -> Result<(), ModelError> {
     match (track.kind, data) {
         (TrackKind::Audio, ClipData::Audio(_)) | (TrackKind::Midi, ClipData::Midi(_)) => Ok(()),
+        // A frozen MIDI track's clips play their freeze files (R6).
+        (TrackKind::Midi, ClipData::Audio(audio))
+            if track
+                .frozen
+                .as_ref()
+                .is_some_and(|frozen| frozen.clips.iter().any(|r| r.media == audio.media)) =>
+        {
+            Ok(())
+        }
         (kind, _) => Err(ModelError::WrongTrackKind {
             track: track.id,
             kind,
@@ -9599,19 +9631,23 @@ mod tests {
         (song, track, frozen)
     }
 
-    // Spec: freeze-and-bounce R1, R6, R10. A frozen MIDI track keeps MIDI
-    // clips, so its saved set loads, and it plays the freeze file.
+    // Spec: freeze-and-bounce R1, R6. A frozen MIDI track holds its freeze
+    // audio in its clips, and its saved set loads.
     #[test]
-    fn a_frozen_midi_track_keeps_midi_clips_and_cannot_be_frozen_again() {
+    fn a_frozen_midi_track_saves_and_loads_and_cannot_be_frozen_again() {
         let (mut song, track, frozen) = frozen_midi_song();
 
         let saved = serde_json::to_string(&crate::repr::DocumentRepr::from(&song.doc)).unwrap();
         let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
         assert_eq!(Document::try_from(loaded).unwrap(), song.doc);
-        let held = song.doc.track(track).unwrap();
-        assert!(!held.clips().next().unwrap().data.is_audio());
-        assert!(held.playback_clips()[0].data.is_audio());
-        assert!(held.playback_slots()[0].1.data.is_audio());
+        song.doc.check_invariants().unwrap();
+        assert!(
+            song.doc
+                .track(track)
+                .unwrap()
+                .clips()
+                .all(|c| c.data.is_audio())
+        );
 
         let error = song.reject(Command::FreezeTracks {
             frozen: vec![(track, frozen)],
@@ -9619,28 +9655,40 @@ mod tests {
         assert!(matches!(error, ModelError::InvalidInput(_)));
     }
 
-    // A set saved while frozen clips held the freeze audio holds it on a MIDI
-    // track: loading gives the clips their own data back.
+    // Spec: freeze-and-bounce R7, R10. A frozen MIDI clip trims and moves
+    // between slots keeping its freeze audio, and unfreezing gives each clip
+    // its MIDI back where it now is.
     #[test]
-    fn a_set_saved_with_freeze_audio_on_a_midi_track_still_loads() {
-        let (mut song, track, frozen) = frozen_midi_song();
-        let expected = song.doc.clone();
-        let held = song.doc.track_mut(track).unwrap();
-        for region in &frozen.clips {
-            let mut clip = match region.scene {
-                None => (**held.clips.get(&region.clip).unwrap()).clone(),
-                Some(scene) => (**held.slots.get(&scene).unwrap()).clone(),
-            };
-            clip.data = frozen.audio_for(region);
-            match region.scene {
-                None => held.clips.insert(region.clip, Shared::new(clip)),
-                Some(scene) => held.slots.insert(scene, Shared::new(clip)),
-            };
-        }
+    fn a_frozen_midi_clip_can_be_trimmed_and_moved_and_unfreezes_to_midi() {
+        let (mut song, track, _) = frozen_midi_song();
+        let held = song.doc.track(track).unwrap();
+        let lane = held.clips().next().unwrap().id;
+        let (scene, slot) = held.slots().next().map(|(s, c)| (s, c.id)).unwrap();
+        let other = song.doc.scenes().nth(1).unwrap().id;
 
-        let saved = serde_json::to_string(&crate::repr::DocumentRepr::from(&song.doc)).unwrap();
-        let loaded: crate::repr::DocumentRepr = serde_json::from_str(&saved).unwrap();
-        assert_eq!(Document::try_from(loaded).unwrap(), expected);
+        song.apply(Command::TrimClipStart {
+            clip: lane,
+            start: Ticks::QUARTER,
+        })
+        .unwrap();
+        song.apply(Command::MoveSlotClip {
+            clip: slot,
+            track,
+            scene: other,
+        })
+        .unwrap();
+        assert_ne!(scene, other);
+        song.doc.check_invariants().unwrap();
+
+        song.apply(Command::UnfreezeTracks {
+            tracks: vec![track],
+        })
+        .unwrap();
+        song.doc.check_invariants().unwrap();
+        let held = song.doc.track(track).unwrap();
+        assert!(held.clips().all(|c| !c.data.is_audio()));
+        assert!(held.slots().all(|(_, c)| !c.data.is_audio()));
+        assert_eq!(held.slots().next().map(|(s, _)| s), Some(other));
     }
 
     #[test]

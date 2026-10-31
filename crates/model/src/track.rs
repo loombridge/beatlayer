@@ -16,20 +16,6 @@ use crate::ids::{ChainId, ClipId, DeviceId, SceneId, TakeLaneId, TrackId};
 use crate::rack::Chain;
 use crate::shared::Shared;
 
-/// `clip` as a frozen track plays it: its stretch of the freeze file in place
-/// of its own data, or unchanged where the freeze holds nothing for it.
-fn frozen_clip(clip: &Clip, frozen: &crate::freeze::FrozenTrack, scene: Option<SceneId>) -> Clip {
-    let mut played = clip.clone();
-    if let Some(region) = frozen
-        .clips
-        .iter()
-        .find(|region| region.scene == scene && (scene.is_some() || region.clip == clip.id))
-    {
-        played.data = frozen.audio_for(region);
-    }
-    played
-}
-
 /// A frozen group or return track's whole-Arrangement output as the clip
 /// its player runs (R14, R15).
 fn frozen_output_clip(output: crate::freeze::FrozenOutput) -> Clip {
@@ -870,26 +856,25 @@ impl Track {
         if let Some(output) = frozen.output {
             return vec![frozen_output_clip(output)];
         }
-        // The clips keep their own data: each plays its stretch of the freeze
-        // files.
-        self.clips
-            .values()
-            .map(|clip| frozen_clip(clip, frozen, None))
-            .collect()
+        // The freeze's audio already sits in the clips' own data, put there
+        // by the freeze command.
+        self.clips.values().map(|clip| (**clip).clone()).collect()
     }
 
     /// The Session slot clips the engine plays, as [`Track::playback_clips`].
     #[must_use]
     pub fn playback_slots(&self) -> Vec<(SceneId, Clip)> {
+        let Some(frozen) = &self.frozen else {
+            return self
+                .slots
+                .iter()
+                .map(|(scene, clip)| (*scene, (**clip).clone()))
+                .collect();
+        };
+        let _ = frozen;
         self.slots
             .iter()
-            .map(|(scene, clip)| {
-                let played = match &self.frozen {
-                    Some(frozen) => frozen_clip(clip, frozen, Some(*scene)),
-                    None => (**clip).clone(),
-                };
-                (*scene, played)
-            })
+            .map(|(scene, clip)| (*scene, (**clip).clone()))
             .collect()
     }
 

@@ -520,8 +520,8 @@ fn midi_track_with_a_note(shell: &mut Shell) -> (TrackId, ClipId) {
     (track, clip)
 }
 
-// Spec: freeze-and-bounce R1, R10. A frozen MIDI track keeps MIDI clips, so
-// its saved set opens.
+// Spec: freeze-and-bounce R1, R10. A frozen MIDI track's saved set opens, and
+// unfreezing gives its clips their MIDI back.
 #[test]
 fn a_frozen_midi_track_saves_and_reopens() {
     let scratch = Scratch::new("midi-reopen");
@@ -624,8 +624,7 @@ fn a_track_with_only_session_clips_freezes_each_slot() {
     assert_eq!(frozen.clips[0].scene, Some(scene));
 }
 
-// Spec: freeze-and-bounce R4. A frozen MIDI track's slot plays its render,
-// and its clip stays MIDI.
+// Spec: freeze-and-bounce R4. A frozen MIDI track's slot plays its render.
 #[test]
 fn a_midi_track_with_only_a_session_clip_plays_its_render() {
     let scratch = Scratch::new("midi-slots");
@@ -645,10 +644,8 @@ fn a_midi_track_with_only_a_session_clip_plays_its_render() {
     let doc = shell.editor().document();
     let held = doc.track(midi).unwrap();
     assert_eq!(held.frozen().unwrap().clips.len(), 1);
-    assert!(!doc.slot(midi, scene).unwrap().data.is_audio());
-    let played = held.playback_slots();
     assert!(
-        played[0].1.data.is_audio(),
+        doc.slot(midi, scene).unwrap().data.is_audio(),
         "the slot plays the freeze file"
     );
 }

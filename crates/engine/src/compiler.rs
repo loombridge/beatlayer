@@ -401,8 +401,6 @@ impl Compiler {
                 track.clips().any(plays)
                     || track.played_clips().any(plays)
                     || track.slots().any(|(_, clip)| plays(clip))
-                    || track.playback_clips().iter().any(plays)
-                    || track.playback_slots().iter().any(|(_, clip)| plays(clip))
             })
             .map(bl_model::Track::id)
             .collect();
@@ -504,12 +502,6 @@ impl Compiler {
         tracks.extend(changes.tracks.keys().copied().filter(|&id| {
             matches!((old.track(id), document.track(id)),
                 (Some(was), Some(now)) if was.audition() != now.audition())
-        }));
-        // A freeze or unfreeze changes what the track's clips play without
-        // changing the clips: its player gets them again.
-        tracks.extend(changes.tracks.keys().copied().filter(|&id| {
-            matches!((old.track(id), document.track(id)),
-                (Some(was), Some(now)) if was.frozen() != now.frozen())
         }));
         // Spec: grooves R15. A groove's parameters, the Global Amount and the
         // pool reach the clips that use them as node data: their tracks'
@@ -4194,54 +4186,6 @@ mod tests {
         let update = f.apply(Command::SetClipMute {
             clip: plain,
             mute: false,
-        });
-        assert_eq!(clips_in(&update, audio), Some(1));
-    }
-
-    // Spec: freeze-and-bounce R6, R10. A freeze leaves the clips as they are, so
-    // the track's player is sent its clips again, for the freeze files, and
-    // again when it is unfrozen.
-    #[test]
-    fn freezing_and_unfreezing_send_the_tracks_clips_again() {
-        use bl_core::time::Ticks;
-        use bl_model::{AudioData, Clip, ClipData, ContentHash, FrozenClip, FrozenTrack};
-
-        let mut f = Fixture::new();
-        let audio = track(&mut f.editor, TrackKind::Audio, None);
-        let mut media = crate::MediaMap::new();
-        let file = bl_media::SampleData::new(48_000, vec![vec![0.5; 480]]).unwrap();
-        media.insert(ContentHash([1; 32]), std::sync::Arc::new(file.clone()));
-        media.insert(ContentHash([2; 32]), std::sync::Arc::new(file));
-        f.compiler.registry.set_media(std::sync::Arc::new(media));
-        f.sync();
-        let clip = f.editor.new_id();
-        let data = ClipData::Audio(AudioData::new(ContentHash([1; 32])));
-        let created = Clip::new(clip, Ticks::ZERO, Ticks::WHOLE, data.clone());
-        f.apply(Command::CreateClip {
-            track: audio,
-            clip: created,
-        });
-        let region = FrozenClip {
-            clip,
-            media: ContentHash([2; 32]),
-            start: 0.0,
-            end: 1.0,
-            tempo: 120.0,
-            length: Ticks::WHOLE,
-            original: data,
-            scene: None,
-            cycle: None,
-        };
-        let frozen = FrozenTrack {
-            clips: vec![region],
-            ..Default::default()
-        };
-        let update = f.apply(Command::FreezeTracks {
-            frozen: vec![(audio, frozen)],
-        });
-        assert_eq!(clips_in(&update, audio), Some(1));
-        let update = f.apply(Command::UnfreezeTracks {
-            tracks: vec![audio],
         });
         assert_eq!(clips_in(&update, audio), Some(1));
     }

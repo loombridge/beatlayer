@@ -22,7 +22,7 @@ use crate::device::Device;
 use crate::document::{Document, Index, Settings};
 use crate::error::ModelError;
 use crate::groove::{GLOBAL_AMOUNT_MAX, check_percent};
-use crate::ids::{ClipId, SceneId, TakeLaneId, TrackId};
+use crate::ids::{SceneId, TakeLaneId, TrackId};
 use crate::launch::LaunchSettings;
 use crate::locator::{Locator, SongStart};
 use crate::scene::{Scene, default_scenes};
@@ -521,7 +521,6 @@ impl Loader {
             if let ClipData::Midi(midi) = &mut clip.data {
                 midi.drop_broken_expressions();
             }
-            restore_frozen_midi(&track, None, clip.id, &mut clip.data);
             check_clip_fits(&track, &clip.data)?;
             check_extent(clip.start, clip.length)?;
             if let ClipData::Midi(midi) = &mut clip.data {
@@ -537,7 +536,6 @@ impl Loader {
             if let ClipData::Midi(midi) = &mut slot.clip.data {
                 midi.drop_broken_expressions();
             }
-            restore_frozen_midi(&track, Some(slot.scene), slot.clip.id, &mut slot.clip.data);
             check_clip_fits(&track, &slot.clip.data)?;
             if slot.clip.start != Ticks::ZERO {
                 return Err(ModelError::SlotClipPosition(slot.clip.start));
@@ -628,24 +626,6 @@ fn wrong_kind(track: &TrackRepr, needs: &'static str) -> ModelError {
 
 fn wrong_kind_of(track: TrackId, kind: TrackKind, needs: &'static str) -> ModelError {
     ModelError::WrongTrackKind { track, kind, needs }
-}
-
-/// Gives a frozen MIDI track's clip its own data back where a set saved
-/// before frozen clips kept it holds the freeze audio instead, which a MIDI
-/// track can't load.
-fn restore_frozen_midi(track: &Track, scene: Option<SceneId>, clip: ClipId, data: &mut ClipData) {
-    if track.kind != TrackKind::Midi || !data.is_audio() {
-        return;
-    }
-    let region = track.frozen.as_ref().and_then(|frozen| {
-        frozen
-            .clips
-            .iter()
-            .find(|r| r.scene == scene && (scene.is_some() || r.clip == clip))
-    });
-    if let Some(region) = region {
-        *data = region.original.clone();
-    }
 }
 
 #[cfg(test)]

@@ -89,7 +89,7 @@ This spec covers what each command renders, what it does to the tracks and clips
 | R7 | `crates/shell/tests/freeze.rs`, `a_frozen_track_still_mixes` (volume, pan, sends, the activator and solo) | shell test |
 | R8 | `crates/shell/tests/freeze.rs`, `a_frozen_track_refuses_device_and_clip_edits_and_arming`, `a_frozen_track_s_clips_arent_reversed` | shell test |
 | R9 | not yet tested | shell test |
-| R10 | `crates/shell/tests/freeze.rs`, `unfreezing_keeps_edits_made_while_frozen`, `a_frozen_midi_track_saves_and_reopens`; `crates/model/src/command.rs`, `a_frozen_midi_track_keeps_midi_clips_and_cannot_be_frozen_again`, `a_set_saved_with_freeze_audio_on_a_midi_track_still_loads` | shell test, unit |
+| R10 | `crates/shell/tests/freeze.rs`, `unfreezing_keeps_edits_made_while_frozen`, `a_frozen_midi_track_saves_and_reopens`; `crates/model/src/command.rs`, `a_frozen_midi_track_saves_and_loads_and_cannot_be_frozen_again`, `a_frozen_midi_clip_can_be_trimmed_and_moved_and_unfreezes_to_midi` | shell test, unit |
 | R11 | not yet tested | shell test |
 | R12 | not yet tested | shell test |
 | R13 | `crates/shell/tests/freeze.rs`, `a_freeze_writes_a_processed_file_and_one_undo_step`, `the_clip_view_reports_a_frozen_track` | shell test |

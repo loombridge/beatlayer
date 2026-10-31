@@ -73,6 +73,11 @@ impl Shell {
         {
             return self.unfreeze_tracks(id, tracks);
         }
+        // A mixed selection freezes only its unfrozen tracks (R1).
+        let tracks: Vec<TrackId> = tracks
+            .into_iter()
+            .filter(|track| !doc.track(*track).is_some_and(|t| t.is_frozen()))
+            .collect();
         let mut frozen = Vec::new();
         let mut files = Vec::new();
         for track in tracks {
@@ -168,6 +173,9 @@ impl Shell {
         if held.kind() == TrackKind::Main {
             return Err(unavailable(id, "Main can't be frozen"));
         }
+        if held.is_frozen() {
+            return Err(unavailable(id, "the track is already frozen"));
+        }
         if held.kind().holds_clips() && held.clips().len() == 0 && held.slots().len() == 0 {
             return Err(unavailable(id, "a track without clips can't be frozen"));
         }
@@ -255,22 +263,22 @@ impl Shell {
                             file_end,
                         });
                     }
-                    for (scene, clip) in held.slots() {
-                        let (session_media, start_sec, end_sec, cycle) =
-                            self.freeze_session_clip(id, track, scene, clip, &mut files)?;
-                        frozen.clips.push(FrozenClip {
-                            clip: clip.id,
-                            media: session_media,
-                            start: start_sec,
-                            end: end_sec,
-                            tempo: doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
-                            markers: Vec::new(),
-                            length: clip.length,
-                            original: clip.data.clone(),
-                            scene: Some(scene),
-                            cycle,
-                        });
-                    }
+                }
+                for (scene, clip) in held.slots() {
+                    let (session_media, start_sec, end_sec, cycle) =
+                        self.freeze_session_clip(id, track, scene, clip, &mut files)?;
+                    frozen.clips.push(FrozenClip {
+                        clip: clip.id,
+                        media: session_media,
+                        start: start_sec,
+                        end: end_sec,
+                        tempo: doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
+                        markers: Vec::new(),
+                        length: clip.length,
+                        original: clip.data.clone(),
+                        scene: Some(scene),
+                        cycle,
+                    });
                 }
             }
             TrackKind::Group | TrackKind::Return => {

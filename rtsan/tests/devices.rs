@@ -1087,6 +1087,42 @@ fn the_modulation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: gated-delay R8, pitch-hack R8
+#[test]
+fn gated_delay_and_pitch_hack_pass_under_rtsan() {
+    use bl_devices::{gated_delay as gated, pitch_hack as hack};
+    run_lo_fi_device(
+        gated::GATED_DELAY,
+        &[
+            (gated::step(1), &[0.0, 1.0]),
+            (gated::step(7), &[1.0, 0.0]),
+            (gated::STEPS, &[3.0, 16.0, 11.0]),
+            (gated::RATE, &[0.0, 4.0, 11.0]),
+            (gated::DELAY_STEPS, &[1.0, 16.0]),
+            (gated::FEEDBACK, &[0.0, 90.0]),
+            (gated::RANDOM, &[0.0, 50.0, 100.0]),
+            (gated::DRY_ON_RESTS, &[0.0, 1.0]),
+            (gated::INPUT, &[0.0, 1.0, 3.98]),
+            (gated::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        hack::PITCH_HACK,
+        &[
+            (hack::SYNC, &[0.0, 1.0]),
+            (hack::DIVISION, &[0.0, 5.0, 13.0]),
+            (hack::TIME, &[10.0, 250.0, 2_000.0]),
+            (hack::TRANSPOSE, &[-24.0, 7.0, 24.0]),
+            (hack::CENTS, &[-50.0, 50.0]),
+            (hack::REVERSE, &[0.0, 50.0, 100.0]),
+            (hack::RANDOM, &[0.0, 50.0, 100.0]),
+            (hack::FEEDBACK, &[0.0, 100.0]),
+            (hack::INPUT, &[0.0, 1.0]),
+            (hack::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+}
+
 // Spec: auto-pan-tremolo R15
 #[test]
 fn auto_pan_tremolo_passes_under_rtsan() {

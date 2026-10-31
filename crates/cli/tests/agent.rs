@@ -5255,6 +5255,143 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
     }
 }
 
+// Spec: gated-delay R9 to R12, pitch-hack R9 to R11: an agent adds Gated Delay and
+// Pitch Hack, sets every parameter by ID, reads each back with its
+// descriptor, reads the step row's display, and finds every value again when
+// the saved set reopens.
+#[test]
+fn an_agent_adds_sets_and_reads_gated_delay_and_pitch_hack_and_reopens_them() {
+    use bl_devices::{gated_delay, pitch_hack};
+
+    let dir = TempDir::new("gated-delay");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("gated-delay-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let types = [
+        (gated_delay::gated_delay_type(), 24),
+        (pitch_hack::pitch_hack_type(), 10),
+    ];
+    let mut added = Vec::new();
+    for (device_type, _) in &types {
+        let reply = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.add",
+                "args": { "track": track, "device": {
+                    "kind": device_type.kind, "name": device_type.name, "role": device_type.role,
+                } },
+            }] }),
+        );
+        added.push(reply["results"][0]["result"]["device"].clone());
+    }
+    let parameters = |client: &mut Client<InProcess>, device: &Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    for ((_, count), device) in types.iter().zip(&added) {
+        assert_eq!(
+            parameters(&mut client, device).as_array().unwrap().len(),
+            *count
+        );
+    }
+    // Every parameter to the other end of its range.
+    for ((device_type, _), device) in types.iter().zip(&added) {
+        for param in &device_type.description.params {
+            let to = if param.default == param.max() {
+                param.min()
+            } else {
+                param.max()
+            };
+            call(
+                &mut client,
+                "run",
+                json!({ "commands": [{ "command": "device.set_param",
+                    "args": { "device": device, "param": param.id.0, "value": to } }] }),
+            );
+        }
+    }
+    let mut wanted = Vec::new();
+    for ((device_type, _), device) in types.iter().zip(&added) {
+        let read = parameters(&mut client, device);
+        let values: Vec<(bl_model::ParamId, f64)> = device_type
+            .description
+            .params
+            .iter()
+            .map(|param| {
+                let found = read
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["name"] == param.name)
+                    .unwrap_or_else(|| panic!("no {}", param.name));
+                assert_eq!(found["automatable"], json!(true), "{}", param.name);
+                (param.id, found["value"].as_f64().expect("a number"))
+            })
+            .collect();
+        wanted.push(values);
+    }
+    // Step 2 was off and is on now; Step 1 was on and is off.
+    let step = |n: usize| {
+        wanted[0]
+            .iter()
+            .find(|(id, _)| *id == gated_delay::step(n))
+            .unwrap()
+            .1
+    };
+    assert_eq!((step(1), step(2)), (0.0, 1.0));
+
+    // The step row reads back through the device's display.
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.display", "args": { "device": added[0] } }] }),
+    );
+    let display = &read["results"][0]["result"];
+    assert_eq!(display["live"], json!(false));
+    let steps = display["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == gated_delay::STEPS_SERIES)
+        .unwrap_or_else(|| panic!("no step row in {display}"));
+    let want: Vec<f64> = (1..=gated_delay::STEP_COUNT).map(step).collect();
+    assert_eq!(steps["values"], json!(want));
+
+    // Save and reopen.
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Gated.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let devices: Vec<_> = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .collect();
+    for (kind, values) in [
+        (gated_delay::GATED_DELAY, &wanted[0]),
+        (pitch_hack::PITCH_HACK, &wanted[1]),
+    ] {
+        let device = devices
+            .iter()
+            .find(|d| matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == kind))
+            .unwrap_or_else(|| panic!("no {kind} in the reopened set"));
+        for (param, value) in values {
+            assert_eq!(
+                device.params[param], *value,
+                "{kind}: parameter {param:?} reopened"
+            );
+        }
+    }
+}
+
 // Spec: spectrum-analyser R9, tuner R8, oscilloscope R8 (WP-5.28): an agent adds
 // Spectrum, Tuner and Oscilloscope, reads their parameters, sets some by ID,
 // reads each display, and finds the devices and values again when the saved set

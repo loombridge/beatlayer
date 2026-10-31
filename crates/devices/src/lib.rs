@@ -53,6 +53,7 @@ pub mod filter_delay;
 mod framework;
 pub mod gate;
 pub mod gate_mod;
+pub mod gated_delay;
 pub mod grain_delay;
 pub mod hardware;
 pub mod hardware_effect;
@@ -76,6 +77,7 @@ pub mod note_echo;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod phaser_flanger;
+pub mod pitch_hack;
 pub mod play_mod;
 pub mod polysynth;
 pub mod remap;
@@ -122,6 +124,7 @@ pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use gate::{GATE, Shutter, gate_type};
+pub use gated_delay::{GATED_DELAY, gated_delay_type};
 pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hardware::{HARDWARE_INSTRUMENT, hardware_instrument_type};
 pub use hardware_effect::{HARDWARE_EFFECT, hardware_effect_type};
@@ -141,6 +144,7 @@ pub use note_echo::{NOTE_ECHO, note_echo_type};
 pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
+pub use pitch_hack::{PITCH_HACK, pitch_hack_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
@@ -207,6 +211,7 @@ pub fn display_in(
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        GATED_DELAY => Some(gated_delay::display(device, description, values, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
@@ -328,6 +333,8 @@ pub fn register(registry: &mut Registry) {
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     shifter::register(registry);
+    gated_delay::register(registry);
+    pitch_hack::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);
     spectrum_analyser::register(registry);

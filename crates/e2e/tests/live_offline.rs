@@ -407,6 +407,38 @@ fn case(ratchet: &mut Ratchet, name: &str, range: Range, build: impl FnOnce(&mut
         "{name}: residual {:.1} dB, first difference {:?}",
         comparison.residual_db, comparison.first_difference
     );
+    if comparison.first_difference.is_some() && name.starts_with("warp/") {
+        // DIAG (T646, temporary)
+        let (o, l) = (&comparison.offline, &comparison.live);
+        let mut blocks = std::collections::BTreeSet::new();
+        let (mut count, mut last, mut peak) = (0usize, 0usize, 0.0f32);
+        let mut firsts = Vec::new();
+        for f in 0..o.frames() {
+            for (a, b) in o.channels.iter().zip(&l.channels) {
+                if a[f].to_bits() != b[f].to_bits() {
+                    count += 1;
+                    last = f;
+                    peak = peak.max((a[f] - b[f]).abs());
+                    blocks.insert(f / 256);
+                    if firsts.len() < 6 {
+                        firsts.push((f, a[f], b[f]));
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "DIAG {name}: {count} differing samples, last frame {last}, peak {peak:e}, blocks {:?}, first {firsts:?}",
+            blocks.iter().take(40).collect::<Vec<_>>()
+        );
+        for again in 0..2 {
+            let second = host.play_exactly(range.start, range.millis + MARGIN_MS);
+            let c2 = Comparison::of(comparison.offline.clone(), &second);
+            eprintln!(
+                "DIAG {name}: live replay {again}: first difference {:?}, residual {:.1} dB",
+                c2.first_difference, c2.residual_db
+            );
+        }
+    }
     ratchet.check(name, MATCHES, comparison.exact());
 }
 

@@ -6,6 +6,7 @@
 //! The import is pure: it reads the file's model and makes a set, with no
 //! shell and no window. What the file's media holds is the shell's business.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -111,7 +112,9 @@ pub struct Imported {
 pub struct Extracted {
     /// Its path in the container, with `/` between the parts.
     pub path: String,
-    /// Its bytes, for a file the container holds.
+    /// Its bytes, for a small file made in memory (a preset's sample). A file
+    /// of the container has neither this nor `on_disk`: the shell unpacks it
+    /// from the container at `path`, so a medium is never held in memory.
     pub bytes: Option<Vec<u8>>,
     /// Where it is on disk, for a file the file refers to (R40).
     pub on_disk: Option<PathBuf>,
@@ -140,6 +143,7 @@ pub fn import(container: &Container, context: &Context<'_>) -> Result<Imported, 
         media: Media::new(),
         files: Vec::new(),
         resolved: HashMap::new(),
+        search: None,
         made: Vec::new(),
         audio_siblings: Vec::new(),
         master_seen: false,
@@ -198,14 +202,17 @@ struct Importer<'a, 'c> {
     /// The DAWproject track id → the Beatlayer track.
     tracks: HashMap<String, TrackId>,
     /// The DAWproject timeline id → the timeline it names, for an alias
-    /// clip (R35).
-    timelines: HashMap<String, Timeline>,
+    /// clip (R35). Borrowed from the file's project.
+    timelines: HashMap<&'a str, Cow<'a, Timeline>>,
     /// The set's media.
     media: Media,
     /// The container's files the set uses, to write out.
     files: Vec<Extracted>,
     /// The DAWproject file path → the media it names.
     resolved: HashMap<String, Result<ContentHash, String>>,
+    /// The first file of each name in the `.dawproject` file's folder and the
+    /// folders inside it, made when the first file is missing (R40).
+    search: Option<HashMap<String, PathBuf>>,
     /// The tracks the import made, in the order it made them.
     made: Vec<Made>,
     /// The MIDI track and the audio track beside it, for a hybrid track
@@ -254,28 +261,29 @@ struct Importer<'a, 'c> {
     crossfades: Vec<(TrackId, Ticks, f64)>,
 }
 
-impl Importer<'_, '_> {
+impl<'a> Importer<'a, '_> {
     /// Reads the file and makes the set.
     fn run(&mut self) -> Result<Imported, Error> {
-        let project = self.container.project.clone();
+        let container: &'a Container = self.container;
+        let project = &container.project;
         self.report.application = project.application.as_ref().and_then(|a| a.label());
         self.read_report();
-        self.check_version(&project)?;
-        self.collect_timelines(&project);
-        self.build_tempo(&project);
-        self.build_signatures(&project);
+        self.check_version(project)?;
+        self.collect_timelines(project);
+        self.build_tempo(project);
+        self.build_signatures(project);
         self.apply(bl_model::Command::SetTempo {
             tempo: self.tempo.clone(),
         });
         self.apply(bl_model::Command::SetTimeSignatures {
             time_signatures: self.signatures.clone(),
         });
-        self.build_tracks(&project);
-        self.collect_lane_points(&project);
-        self.build_clips(&project);
-        self.build_scenes(&project);
+        self.build_tracks(project);
+        self.collect_lane_points(project);
+        self.build_clips(project);
+        self.build_scenes(project);
         self.write_envelopes();
-        self.build_markers(&project);
+        self.build_markers(project);
         self.report_received();
         self.report_metadata();
         if let Some(error) = self.failed.take() {
@@ -360,8 +368,8 @@ impl Importer<'_, '_> {
     }
 
     /// The timelines the file names by their `id`, for an alias clip (R35).
-    fn collect_timelines(&mut self, project: &DawProject) {
-        let mut found: Vec<(String, Timeline)> = Vec::new();
+    fn collect_timelines(&mut self, project: &'a DawProject) {
+        let mut found: Vec<(&'a str, Cow<'a, Timeline>)> = Vec::new();
         if let Some(arrangement) = &project.arrangement {
             for lane in &arrangement.lanes {
                 collect_timelines(lane, &mut found);
@@ -1345,11 +1353,14 @@ impl Importer<'_, '_> {
         file: &MediaFile,
         place: &str,
     ) -> Result<ContentHash, String> {
+        // A file on disk is read where it is; a file of the container is
+        // unpacked once into a spool file, which is hashed and decoded and
+        // then dropped, so no file is ever held in memory (R5).
         let mut found = PathBuf::new();
-        let bytes = if external {
+        let spool;
+        let at: &Path = if external {
             match self.find_external(path) {
                 Some((at, moved)) => {
-                    found = at.clone();
                     if moved {
                         let shown = at.strip_prefix(self.context.folder).unwrap_or(&at);
                         self.report.add(
@@ -1358,33 +1369,28 @@ impl Importer<'_, '_> {
                             &format!("found at {}", shown.to_string_lossy().replace('\\', "/")),
                         );
                     }
-                    match std::fs::read(&at) {
-                        Ok(bytes) => bytes,
-                        Err(_) => {
-                            return Err("left out; it couldn't be read".to_owned());
-                        }
-                    }
+                    found = at;
+                    &found
                 }
                 None => {
                     return Err("left out; it wasn't found".to_owned());
                 }
             }
         } else {
-            match self.container.files.get(path) {
-                Some(bytes) => bytes.clone(),
-                None => {
-                    return Err("left out; the container doesn't hold it".to_owned());
-                }
+            if self.container.size_of(path).is_none() {
+                return Err("left out; the container doesn't hold it".to_owned());
             }
+            spool = Spool::unpack(self.container, path)
+                .map_err(|_| "left out; it couldn't be read".to_owned())?;
+            spool.path()
         };
-        let hash = hash_of(&bytes);
-        let size = bytes.len() as u64;
+        let Ok(hash) = bl_media::ContentHash::of_file(at).map(|hash| ContentHash(*hash.as_bytes()))
+        else {
+            return Err("left out; it couldn't be read".to_owned());
+        };
+        let size = std::fs::metadata(at).map_or(0, |meta| meta.len());
         // The file has to decode to be played (R41).
-        let extension = Path::new(path)
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .unwrap_or("");
-        let Some((sample_rate, channels, frames)) = probe(&bytes, extension) else {
+        let Some((sample_rate, channels, frames)) = probe(at) else {
             return Err("left out; it isn't a file Beatlayer can play".to_owned());
         };
         self.check_media_agreement(file, sample_rate, channels, frames, path, place);
@@ -1392,8 +1398,8 @@ impl Importer<'_, '_> {
         if !self.files.iter().any(|file| file.hash == hash) {
             self.files.push(Extracted {
                 path: path.to_owned(),
-                bytes: if external { None } else { Some(bytes) },
-                on_disk: if external { Some(found) } else { None },
+                bytes: None,
+                on_disk: external.then_some(found),
                 hash,
                 size,
             });
@@ -1448,7 +1454,7 @@ impl Importer<'_, '_> {
     /// The file a path names on disk, looked for by name when it isn't there
     /// (R40): in the `.dawproject` file's folder and the folders inside it,
     /// the first match by name in path order being used.
-    fn find_external(&self, path: &str) -> Option<(PathBuf, bool)> {
+    fn find_external(&mut self, path: &str) -> Option<(PathBuf, bool)> {
         let direct = if is_absolute(path) {
             PathBuf::from(path)
         } else {
@@ -1461,14 +1467,11 @@ impl Importer<'_, '_> {
             .rsplit(['/', '\\'])
             .next()
             .filter(|name| !name.is_empty())?;
-        let mut folders = vec![self.context.folder.to_path_buf()];
-        folders.extend(walk(self.context.folder, 0, &mut 10_000));
-        folders.sort();
-        folders
-            .into_iter()
-            .map(|folder| folder.join(name))
-            .find(|found| found.is_file())
-            .map(|found| (found, true))
+        let folder = self.context.folder;
+        self.search
+            .get_or_insert_with(|| index_by_name(folder))
+            .get(&super::folded(name))
+            .map(|found| (found.clone(), true))
     }
 
     /// The scenes of the Session View (R42, R43).
@@ -1653,7 +1656,7 @@ impl Importer<'_, '_> {
         if let Some(reference) = &source.reference {
             return self
                 .timelines
-                .get(reference)
+                .get(reference.as_str())
                 .is_some_and(|timeline| timeline_is_audio(timeline, 0));
         }
         source
@@ -1695,13 +1698,46 @@ fn beats_to_ticks(beats: f64) -> Ticks {
 
 /// What a file holds, when it decodes: its rate, its channels and its
 /// length in frames.
-fn probe(bytes: &[u8], extension: &str) -> Option<(u32, u16, Option<u64>)> {
-    bl_media::Decoder::from_reader(std::io::Cursor::new(bytes.to_vec()), Some(extension))
-        .ok()
-        .map(|decoder| {
-            let info = decoder.info();
-            (info.sample_rate, info.channels, info.frames)
-        })
+fn probe(at: &Path) -> Option<(u32, u16, Option<u64>)> {
+    bl_media::Decoder::open(at).ok().map(|decoder| {
+        let info = decoder.info();
+        (info.sample_rate, info.channels, info.frames)
+    })
+}
+
+/// A file of the container unpacked into the system's temporary folder,
+/// taken back when dropped.
+struct Spool(PathBuf);
+
+impl Spool {
+    /// Unpacks the container's file at `path`, keeping its extension, which
+    /// the decoder uses to tell its format.
+    fn unpack(container: &Container, path: &str) -> std::io::Result<Self> {
+        static COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let extension = Path::new(path)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .unwrap_or("bin");
+        let number = COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let at = std::env::temp_dir().join(format!(
+            "bl-dawproject-{}-{number}.{extension}",
+            std::process::id()
+        ));
+        let mut file = std::fs::File::create_new(&at)?;
+        let spool = Self(at);
+        container.copy_to(path, &mut file)?;
+        Ok(spool)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for Spool {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Whether a timeline plays audio, looking through a timeline of clips for
@@ -1733,6 +1769,14 @@ fn is_absolute(path: &str) -> bool {
     bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic()
 }
 
+/// Whether a folder's entry is a folder, following a link as `Path::is_dir`
+/// does; the entry's type costs no further look at the disk.
+fn is_folder(entry: &std::fs::DirEntry) -> bool {
+    entry
+        .file_type()
+        .is_ok_and(|kind| kind.is_dir() || kind.is_symlink() && entry.path().is_dir())
+}
+
 /// The folders inside a folder, a few levels deep and at most `budget` of
 /// them, so a file opened from a huge folder doesn't search for long.
 fn walk(folder: &Path, depth: usize, budget: &mut usize) -> Vec<PathBuf> {
@@ -1743,20 +1787,59 @@ fn walk(folder: &Path, depth: usize, budget: &mut usize) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return found;
     };
-    let mut paths: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .filter(is_folder)
+        .map(|entry| entry.path())
+        .collect();
     paths.sort();
     for path in paths {
         if *budget == 0 {
             break;
         }
-        if path.is_dir() {
-            *budget -= 1;
-            found.push(path.clone());
-            found.extend(walk(&path, depth + 1, budget));
-        }
+        *budget -= 1;
+        found.push(path.clone());
+        found.extend(walk(&path, depth + 1, budget));
     }
     found
 }
+
+/// The first file of each name in a folder and the folders inside it, taking
+/// the folders in path order (R40). Names are folded, as the probe for a
+/// name was on macOS and Windows, whose file systems ignore case.
+fn index_by_name(root: &Path) -> HashMap<String, PathBuf> {
+    #[cfg(test)]
+    WALKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut folders = vec![root.to_path_buf()];
+    folders.extend(walk(root, 0, &mut 10_000));
+    folders.sort();
+    let mut index = HashMap::new();
+    for folder in folders {
+        let Ok(entries) = std::fs::read_dir(&folder) else {
+            continue;
+        };
+        let mut files: Vec<_> = entries
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_type()
+                    .is_ok_and(|kind| kind.is_file() || kind.is_symlink() && entry.path().is_file())
+            })
+            .map(|entry| (entry.file_name(), entry.path()))
+            .collect();
+        files.sort();
+        for (name, path) in files {
+            index
+                .entry(super::folded(&name.to_string_lossy()))
+                .or_insert(path);
+        }
+    }
+    index
+}
+
+/// How many times a folder has been searched, for the test.
+#[cfg(test)]
+static WALKS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// The letter a return's number has.
 fn letter(number: usize) -> String {
@@ -1771,9 +1854,9 @@ fn letter(number: usize) -> String {
 }
 
 /// The timelines a timeline holds, by their ids.
-fn collect_timelines(timeline: &Timeline, found: &mut Vec<(String, Timeline)>) {
+fn collect_timelines<'a>(timeline: &'a Timeline, found: &mut Vec<(&'a str, Cow<'a, Timeline>)>) {
     if let Some(id) = &timeline.info().id {
-        found.push((id.clone(), timeline.clone()));
+        found.push((id, Cow::Borrowed(timeline)));
     }
     match timeline {
         Timeline::Lanes(lanes) => {
@@ -1801,8 +1884,8 @@ fn collect_timelines(timeline: &Timeline, found: &mut Vec<(String, Timeline)>) {
         Timeline::Warps(warps) => {
             if let Some(audio) = &warps.audio {
                 found.push((
-                    audio.info.id.clone().unwrap_or_default(),
-                    Timeline::Audio(audio.clone()),
+                    audio.info.id.as_deref().unwrap_or_default(),
+                    Cow::Owned(Timeline::Audio(audio.clone())),
                 ));
             }
         }
@@ -1923,4 +2006,91 @@ fn build_tempo_map(points: &[(Ticks, f64, Interpolation)]) -> TempoMap {
 /// A tempo in the range the song holds.
 fn to_bpm(value: f64) -> Bpm {
     Bpm::new(value.clamp(Bpm::MIN.get(), Bpm::MAX.get())).unwrap_or(Bpm::DEFAULT)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::sync::atomic::Ordering;
+
+    use super::*;
+
+    /// A 16-bit mono WAV file of a tenth of a second of silence.
+    fn wav() -> Vec<u8> {
+        let frames = 4_410u32;
+        let mut out = Vec::new();
+        out.extend_from_slice(b"RIFF");
+        out.extend_from_slice(&(36 + frames * 2).to_le_bytes());
+        out.extend_from_slice(b"WAVEfmt ");
+        out.extend_from_slice(&16u32.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&1u16.to_le_bytes());
+        out.extend_from_slice(&44_100u32.to_le_bytes());
+        out.extend_from_slice(&88_200u32.to_le_bytes());
+        out.extend_from_slice(&2u16.to_le_bytes());
+        out.extend_from_slice(&16u16.to_le_bytes());
+        out.extend_from_slice(b"data");
+        out.extend_from_slice(&(frames * 2).to_le_bytes());
+        out.resize(out.len() + frames as usize * 2, 0);
+        out
+    }
+
+    /// Spec: dawproject R40. Every file the project refers to that isn't
+    /// where it says is looked for in one search of the folders, not one
+    /// search each, and the first match in path order is still the one used.
+    #[test]
+    fn missing_files_walk_the_folder_once() {
+        let folder = std::env::temp_dir().join(format!("bl-interop-walk-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        for number in 0..50 {
+            std::fs::create_dir_all(folder.join(format!("sub/{number:02}"))).unwrap();
+        }
+        std::fs::write(folder.join("sub/07/hit.wav"), wav()).unwrap();
+
+        let mut clips = String::new();
+        let names = (0..20)
+            .map(|number| format!("/nowhere/a{number}.wav"))
+            .chain(["/nowhere/hit.wav".to_owned()]);
+        for (index, name) in names.enumerate() {
+            clips.push_str(&format!(
+                r#"<Clip time="{index}" duration="1" contentTimeUnit="seconds"><Audio><File path="{name}" external="true"/></Audio></Clip>"#
+            ));
+        }
+        let xml = format!(
+            r#"<?xml version="1.0"?><Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="audio" id="a" name="A"><Channel role="regular" id="ca"/></Track></Structure>
+<Arrangement id="arr"><Lanes id="all"><Lanes track="a" timeUnit="seconds" id="la"><Clips id="cl">{clips}</Clips></Lanes></Lanes></Arrangement></Project>"#
+        );
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        writer
+            .start_file("project.xml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(xml.as_bytes()).unwrap();
+        let bytes = writer.finish().unwrap().into_inner();
+        let container = super::super::read_container(&bytes).unwrap();
+
+        let before = WALKS.load(Ordering::Relaxed);
+        let imported = import(&container, &Context::new(&folder, &folder)).unwrap();
+        assert_eq!(WALKS.load(Ordering::Relaxed) - before, 1);
+
+        let did = |what: &str| -> Vec<String> {
+            imported
+                .report
+                .entries
+                .iter()
+                .filter(|entry| entry.what == format!("the file `{what}`"))
+                .map(|entry| entry.did.clone())
+                .collect()
+        };
+        assert_eq!(did("/nowhere/hit.wav"), ["found at sub/07/hit.wav"]);
+        for number in 0..20 {
+            assert_eq!(
+                did(&format!("/nowhere/a{number}.wav")),
+                ["left out; it wasn't found"]
+            );
+        }
+        assert_eq!(imported.files.len(), 1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

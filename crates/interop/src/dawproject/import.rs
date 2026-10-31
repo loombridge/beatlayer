@@ -307,6 +307,7 @@ impl<'a> Importer<'a, '_> {
             mpe_view: bl_model::MpeView::default(),
             lane_views: bl_model::LaneViews::new(),
             column_widths: bl_model::ColumnWidths::new(),
+            pages: bl_model::DevicePages::new(),
         };
         Ok(Imported {
             project,

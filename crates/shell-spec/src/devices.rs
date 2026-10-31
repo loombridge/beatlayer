@@ -77,6 +77,8 @@ pub const DISPLAY: &str = "device.display";
 /// `device.set_display_view`: choose the view a device's display shows
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
+/// `device.set_page`: show a page of a device's pages node (WP-8.1).
+pub const SET_PAGE: &str = "device.set_page";
 
 /// `modulator.arm_map`: arm or disarm a modulator slot's Map button
 /// (WP-5.10).
@@ -186,6 +188,7 @@ pub const IDS: &[&str] = &[
     SHOW_SIDECHAIN,
     DISPLAY,
     SET_DISPLAY_VIEW,
+    SET_PAGE,
     ARM_MAP,
     WINDOWS,
     SET_WINDOW,
@@ -503,6 +506,11 @@ pub struct DevicePanel {
     /// the panel shows, a view setting that isn't saved with the set.
     #[serde(default)]
     pub selected_slot: u32,
+    /// Each pages node of the device's layout with its pages and the one
+    /// shown (device framework R43): view state, saved with the set but no
+    /// undo step. Empty for a device with none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pages: Vec<PagesFrame>,
     /// For a device with sample slots: whether each slot holds a sample.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub loaded_slots: Vec<bool>,
@@ -525,6 +533,20 @@ pub struct DevicePanel {
     pub locked: Vec<ParamId>,
 }
 
+/// A pages node of a device's layout as the panel shows it (device framework
+/// R41, R43).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PagesFrame {
+    /// The node's name.
+    pub node: String,
+    /// How its pages show.
+    pub style: bl_model::device_layout::PageStyle,
+    /// The pages' names, in order.
+    pub pages: Vec<String>,
+    /// The name of the page shown.
+    pub shown: String,
+}
+
 /// One parameter a plug-in device's panel can show (clap-hosting R5,
 /// configure mode): its ID and the name its right-click menu lists it by.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -540,7 +562,12 @@ impl DevicePanel {
     /// ([`DeviceLayout::shown`]).
     #[must_use]
     pub fn layout(&self, expanded: bool) -> DeviceLayout {
-        self.description.layout.shown(expanded)
+        let choice = self
+            .pages
+            .iter()
+            .map(|p| (p.node.clone(), p.shown.clone()))
+            .collect();
+        self.description.layout.shown(expanded).with_pages(&choice)
     }
 
     /// The value of the parameter at `index` in the description.
@@ -1882,6 +1909,29 @@ pub struct SetDisplayViewArgs {
     pub view: String,
 }
 
+/// A page of a pages node: its name, or its place in the node's list from 0.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum PageRef {
+    /// By name.
+    Name(String),
+    /// By index.
+    Index(usize),
+}
+
+/// Arguments of `device.set_page`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetPageArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The name of the pages node, as the panel's `pages` gives it.
+    pub node: String,
+    /// The page to show: its name, or its index from 0.
+    pub page: PageRef,
+}
+
 /// Adds the Device View's commands to a registry.
 ///
 /// # Errors
@@ -2519,6 +2569,19 @@ fn specs() -> Vec<CommandSpec> {
             .permission(Permission::Read)
             .context(DeviceView)
             .args::<SetDisplayViewArgs>()
+            .result::<DeviceViewState>(),
+        CommandSpec::new(SET_PAGE, "Set Page")
+            .description(
+                "Shows a page of a device's body, as its tabs or section buttons do: the \
+                 device by ID, the pages node by its name and the page by its name or its \
+                 index from 0. `device_view.state` gives each device's pages nodes in its \
+                 panel's `pages`, with the page shown. A node or page the device doesn't have \
+                 is refused. It changes only the view: it isn't an undo step and doesn't mark \
+                 the set changed, and the page is saved with the set.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<SetPageArgs>()
             .result::<DeviceViewState>(),
         CommandSpec::new(ARTICULATION_LIST, "List Articulations")
             .description(

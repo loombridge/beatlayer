@@ -28,6 +28,7 @@ mod common;
 mod control_surfaces;
 mod dawproject_window;
 mod detail_views;
+mod device_pages;
 mod device_panel;
 mod device_view;
 mod drum_racks;

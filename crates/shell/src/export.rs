@@ -1530,6 +1530,21 @@ pub fn run_command(
             offline.push((document, job));
         }
     }
+    // Spec: external-devices R24. A real-time render captures each output
+    // as it plays, with no tail past the range and no returns: it refuses
+    // the switches that need them rather than write a different file.
+    if live.iter().any(|(_, _, job)| job.render_as_loop) {
+        return Err(invalid(
+            "Render as Loop is unavailable for an export rendered in real time through external hardware"
+                .to_owned(),
+        ));
+    }
+    if args.include_return_and_main_effects && live.iter().any(|(track, _, _)| track.is_some()) {
+        return Err(invalid(
+            "Include Return and Main Effects is unavailable for an export rendered in real time through external hardware"
+                .to_owned(),
+        ));
+    }
     let failed = |error: ExportError| match error {
         ExportError::Invalid(message) => invalid(message),
         ExportError::Exists(_) => ShellError::Unavailable {
@@ -1686,7 +1701,7 @@ pub fn run_command(
     })
 }
 
-/// Converts a render down to the file's rate as it arrives, a chunk at a
+/// Converts a render to the file's rate as it arrives, a chunk at a
 /// time, exactly as [`RateConverter::convert`] converts it whole: the
 /// converter's delay dropped, and `ceil(frames × to ÷ from)` frames out.
 pub(crate) struct Downsampler {

@@ -73,8 +73,9 @@ impl SlotMaterial {
 pub struct CopiedScene {
     /// The scene as it was copied, its ID the source's.
     pub scene: Scene,
-    /// The clips it held, with the track each was in.
-    pub clips: Vec<(TrackId, Clip)>,
+    /// The clips it held, with the column of the track each was in, counted
+    /// from the first track of the set, so another set can take them.
+    pub clips: Vec<(usize, Clip)>,
 }
 
 /// Scenes copied from the Session View, for pasting.
@@ -524,7 +525,10 @@ fn scene_material(doc: &Document, scenes: &[SceneId]) -> SceneMaterial {
                 scene: scene.clone(),
                 clips: tracks
                     .iter()
-                    .filter_map(|track| Some((*track, doc.slot(*track, scene.id)?.clone())))
+                    .enumerate()
+                    .filter_map(|(column, track)| {
+                        Some((column, doc.slot(*track, scene.id)?.clone()))
+                    })
                     .collect(),
             })
             .collect(),
@@ -586,6 +590,8 @@ fn paste_scenes(
     label: &'static str,
 ) -> Result<(Vec<SceneId>, bool), EditFailure> {
     let first = after.map_or_else(|| editor.document().scenes().count(), |at| at + 1);
+    // Clips go by the column they came from, which another set may not have.
+    let tracks = lanes(editor.document());
     transaction(editor, label, |editor| {
         let mut made = Vec::with_capacity(material.scenes.len());
         for (offset, copied) in material.scenes.iter().enumerate() {
@@ -633,19 +639,22 @@ fn paste_scenes(
                     },
                 )?;
             }
-            for (track, clip) in &copied.clips {
+            for (column, clip) in &copied.clips {
                 let doc = editor.document();
-                if doc.track(*track).is_none() || !fits(doc, *track, &clip.data) {
+                let Some(track) = tracks.get(*column).copied() else {
+                    continue;
+                };
+                if !fits(doc, track, &clip.data) {
                     continue;
                 }
-                let mut clip = carried(doc, *track, clip, true);
+                let mut clip = carried(doc, track, clip, true);
                 clip.id = editor.new_id();
                 clip.start = Ticks::ZERO;
                 let (made, scale) = (clip.id, clip.scale);
                 apply(
                     editor,
                     Command::CreateSlotClip {
-                        track: *track,
+                        track,
                         scene: id,
                         clip,
                     },

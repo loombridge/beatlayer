@@ -11,7 +11,7 @@ use serde_json::json;
 use std::collections::BTreeSet;
 
 use super::{automation_command, sample_edit_command, to_value};
-use crate::arrangement::editing;
+use crate::arrangement::editing::{self, Clipboard};
 use bl_engine::session as engine_session;
 use bl_model::AutomationTarget;
 use bl_model::TrackId;
@@ -594,6 +594,7 @@ impl Shell {
             return self.run_automation(automation_id, args);
         }
         let before = self.editor.document().clone();
+        self.leave_set_before_paste(id);
         let result = if id == bl_shell_spec::editing::INSERT_EMPTY_MIDI_CLIP {
             editing::insert_empty_midi_clips(
                 args,
@@ -616,8 +617,8 @@ impl Shell {
             self.dirty = true;
             self.document_changed();
         }
-        if id == bl_shell_spec::editing::PASTE && result.is_ok() {
-            self.record_pasted_media();
+        if result.is_ok() {
+            self.note_clipboard_after(id);
         }
         // Spec: second-window R20. Pasted Session clips that weren't placed.
         if let Ok(value) = &result
@@ -630,30 +631,42 @@ impl Shell {
         result
     }
 
-    /// Lists the files of the audio clips just pasted in the open set's media
-    /// table. The clipboard outlives a set, so the clips may come from one
-    /// whose table doesn't hold their files.
-    fn record_pasted_media(&mut self) {
+    /// Before a paste, takes from a clipboard copied in another set what
+    /// only means something there (the set exchange spec, R6).
+    pub(super) fn leave_set_before_paste(&mut self, id: &str) {
+        if is_paste(id) && self.clipboard_set != self.editor_generation {
+            if let Some(clipboard) = self.clipboard.as_mut() {
+                clipboard.leave_set();
+            }
+            self.clipboard_set = self.editor_generation;
+        }
+    }
+
+    /// After a copy, notes which set the clipboard came from. After a paste,
+    /// lists the files of the audio clips the clipboard holds in the open
+    /// set's media table: the clipboard outlives a set, so the clips may come
+    /// from one whose table doesn't hold their files.
+    pub(super) fn note_clipboard_after(&mut self, id: &str) {
+        if is_copy(id) {
+            self.clipboard_set = self.editor_generation;
+        }
+        if !is_paste(id) {
+            return;
+        }
         let listed: BTreeSet<bl_model::ContentHash> = self
             .store
             .media_files()
             .into_iter()
             .map(|(hash, ..)| hash)
             .collect();
-        let doc = self.editor.document();
-        let hashes: BTreeSet<bl_model::ContentHash> = self
-            .arrangement
-            .selected_clips()
-            .iter()
-            .filter_map(|clip| match &doc.clip(*clip)?.data {
-                bl_model::ClipData::Audio(audio) => Some(audio.media),
-                _ => None,
-            })
-            .filter(|hash| !listed.contains(hash))
-            .collect();
-        for hash in hashes {
+        let hashes = self
+            .clipboard
+            .as_ref()
+            .map(Clipboard::media)
+            .unwrap_or_default();
+        for hash in hashes.difference(&listed) {
             if let Some(entry) = self.media.entry(bl_media::ContentHash::from_bytes(hash.0)) {
-                self.store.add_media(hash, &entry.path, entry.size);
+                self.store.add_media(*hash, &entry.path, entry.size);
             }
         }
     }
@@ -680,4 +693,28 @@ impl Shell {
         self.touch();
         result
     }
+}
+
+/// Whether `id` puts the Arrangement's or the Session View's clips, scenes or
+/// time on the clipboard.
+pub(super) fn is_copy(id: &str) -> bool {
+    use bl_shell_spec::{editing as arrangement, session_view as session};
+    matches!(
+        id,
+        arrangement::COPY
+            | arrangement::CUT
+            | arrangement::COPY_TIME
+            | arrangement::CUT_TIME
+            | session::COPY
+            | session::CUT
+    )
+}
+
+/// Whether `id` pastes what the clipboard holds.
+pub(super) fn is_paste(id: &str) -> bool {
+    use bl_shell_spec::{editing as arrangement, session_view as session};
+    matches!(
+        id,
+        arrangement::PASTE | arrangement::PASTE_TIME | session::PASTE
+    )
 }

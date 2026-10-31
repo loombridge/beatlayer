@@ -810,6 +810,9 @@ pub struct Shell {
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
+    /// Which set the clipboard's clips and scenes were copied in, as
+    /// `editor_generation` counts them.
+    clipboard_set: u64,
     /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
     /// as Live keeps it, and never part of a set.
     envelope_clipboard: Option<EnvelopeClipboard>,
@@ -1402,6 +1405,7 @@ impl Shell {
             document_revision: 0,
             tap: crate::tap_tempo::TapRun::default(),
             clipboard: None,
+            clipboard_set: 0,
             envelope_clipboard: None,
             clip_drag: None,
             edit_gesture: None,

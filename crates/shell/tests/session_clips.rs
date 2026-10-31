@@ -662,3 +662,56 @@ fn the_commands_are_registered_with_their_classes_and_keys() {
     assert_eq!(keys(ids::DUPLICATE), ["S-EDIT-004", "S-SES-032"]);
     assert!(registry.problems().is_empty(), "{:?}", registry.problems());
 }
+
+/// Makes a track at `index` in the open set, with the next ID the set issues.
+fn create_track(shell: &mut Shell, kind: &str, index: usize) -> TrackId {
+    let track: TrackId = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": track, "kind": kind, "name": "T", "parent": null, "index": index }),
+        )
+        .unwrap();
+    track
+}
+
+// Spec: session-view R41; set-exchange R6. A copied scene pastes into another
+// set by the column each clip was in, not by the source set's track IDs.
+#[test]
+fn scenes_pasted_into_another_set_land_by_column() {
+    let (mut shell, _control) = bl_shell::testing::rig();
+    // Set A: an audio track, then a MIDI track at column 1.
+    let midi = create_track(&mut shell, "midi", 0);
+    create_track(&mut shell, "audio", 0);
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": midi, "scene": scene }),
+        )
+        .unwrap();
+    let clip = shell.editor().document().slot(midi, scene).unwrap().id;
+    shell
+        .run("clip.rename", json!({ "clip": clip, "name": "M" }))
+        .unwrap();
+    shell.run(ids::SELECT, json!({ "scene": scene })).unwrap();
+    shell.run(ids::COPY, json!({})).unwrap();
+
+    // Set B: its audio track has the ID A's MIDI track had, and its MIDI
+    // track, in the same column, another.
+    shell.run("set.new", json!({})).unwrap();
+    let a = create_track(&mut shell, "audio", 0);
+    let m = create_track(&mut shell, "midi", 1);
+    assert_eq!(a, midi, "the IDs of the two sets collide");
+    let first = shell.editor().document().scenes().next().unwrap().id;
+    shell.run(ids::SELECT, json!({ "scene": first })).unwrap();
+    shell.run(ids::PASTE, json!({})).unwrap();
+
+    let doc = shell.editor().document();
+    let pasted = doc.scenes().nth(1).unwrap().id;
+    assert_eq!(
+        doc.slot(m, pasted).map(|clip| clip.name.as_str()),
+        Some("M")
+    );
+    assert!(doc.slot(a, pasted).is_none());
+}

@@ -390,3 +390,91 @@ fn a_copy_without_clips_keeps_the_mixer_and_delay() {
     assert_eq!(made.mixer(), source.mixer());
     assert_eq!(made.delay(), source.delay());
 }
+
+/// Makes a track of `kind` at `index` in the open set.
+fn create_track(shell: &mut Shell, kind: &str, index: usize) -> TrackId {
+    let track: TrackId = shell.new_id();
+    shell
+        .run(
+            "track.create",
+            json!({ "id": track, "kind": kind, "name": "T", "parent": null, "index": index }),
+        )
+        .unwrap();
+    track
+}
+
+// Spec: set-exchange R6, R7. Clips copied with Copy Time land on the track
+// that is in the same place in another set, and not on the track that has
+// the source's ID.
+#[test]
+fn time_pasted_into_another_set_lands_by_place() {
+    let scratch = Scratch::new("time");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0);
+    place(&mut shell, track, &file, 0);
+    shell
+        .run(
+            "arrangement.copy_time",
+            json!({ "start": 0, "end": 705_600 }),
+        )
+        .unwrap();
+
+    // The new set's third place is another audio track, and the track with
+    // the source's ID is pushed down to the fourth.
+    shell.run("set.new", json!({})).unwrap();
+    let other = create_track(&mut shell, "audio", 2);
+    shell
+        .run("arrangement.paste_time", json!({ "at": 0 }))
+        .unwrap();
+    let doc = shell.editor().document();
+    assert_eq!(doc.track(other).unwrap().clips().count(), 1);
+    assert_eq!(doc.track(track).unwrap().clips().count(), 0);
+
+    // The clip's file is in the new set's media table.
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Song.blset").display().to_string() }),
+        )
+        .unwrap();
+    let saved = bl_project::load(&PathBuf::from(saved["path"].as_str().unwrap()))
+        .unwrap()
+        .0;
+    assert_eq!(saved.media.len(), 1, "the saved set lists the file");
+}
+
+// Spec: set-exchange R7. Clips pasted into the Session View of another set
+// bring their files.
+#[test]
+fn a_session_paste_into_another_set_brings_its_files() {
+    let scratch = Scratch::new("scene-media");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0);
+    let clip = place(&mut shell, track, &file, 0);
+    shell
+        .run("arrangement.copy", json!({ "clips": [clip] }))
+        .unwrap();
+
+    shell.run("set.new", json!({})).unwrap();
+    let track = audio_track(&shell);
+    let scene = shell.editor().document().scenes().next().unwrap().id;
+    shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    shell.run("session.paste", json!({})).unwrap();
+    assert!(shell.editor().document().slot(track, scene).is_some());
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Song.blset").display().to_string() }),
+        )
+        .unwrap();
+    let saved = bl_project::load(&PathBuf::from(saved["path"].as_str().unwrap()))
+        .unwrap()
+        .0;
+    assert_eq!(saved.media.len(), 1, "the saved set lists the file");
+}

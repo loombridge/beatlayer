@@ -241,6 +241,10 @@ impl Shell {
             .file_seconds(&audio)
             .ok_or_else(|| failed(id, "the clip's file isn't in the media store"))?;
         let (region_start, region_end) = audio.crop_region(file_seconds);
+        // What plays before the Start marker is heard only after the loop
+        // turns, so the slicing starts at the marker and its notes never
+        // fall before the clip's start (R6, R9).
+        let region_start = region_start.max(audio.start);
         // The slice positions, in the clip's own form (R4).
         let points = self.slice_points(
             id,
@@ -487,6 +491,15 @@ impl Shell {
     /// The path of the user slicing preset `name`, if the User Library has
     /// one (R11).
     fn slicing_preset_path(&self, name: &str) -> Option<std::path::PathBuf> {
+        // Spec: R11. Only a file in the folder: a name that climbs out of
+        // it, or is a path of its own, names no preset.
+        let mut parts = std::path::Path::new(name).components();
+        if !matches!(
+            (parts.next(), parts.next()),
+            (Some(std::path::Component::Normal(_)), None)
+        ) {
+            return None;
+        }
         let library = crate::browser::places::default_user_library()?;
         let path = library
             .join(SLICING_FOLDER)

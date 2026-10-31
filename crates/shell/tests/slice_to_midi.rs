@@ -295,6 +295,96 @@ fn a_looped_clip_is_sliced_over_its_loop() {
     assert_eq!(cut.slices, 2);
 }
 
+/// A warped clip looping over all its contents, whose Start marker sits
+/// inside the loop, after its start.
+fn start_inside_loop(shell: &mut Shell, clip: ClipId) {
+    let quarter = Ticks::QUARTER.get();
+    shell
+        .run("clip.set_warp", json!({ "clip": clip, "warp": true }))
+        .unwrap();
+    shell
+        .run(
+            "clip.set_loop",
+            json!({ "clip": clip, "start": 0, "end": 4 * quarter, "ticks": true }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "clip.set_loop_enabled",
+            json!({ "clip": clip, "enabled": true }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "clip.set_region",
+            json!({ "clip": clip, "start": 2 * quarter, "end": 4 * quarter, "ticks": true }),
+        )
+        .unwrap();
+}
+
+/// The notes of a MIDI clip.
+fn notes(shell: &Shell, clip: ClipId) -> Vec<bl_model::Note> {
+    match &shell.editor().document().clip(clip).unwrap().data {
+        ClipData::Midi(midi) => midi.notes.iter().cloned().collect(),
+        ClipData::Audio(_) => unreachable!("a MIDI clip"),
+    }
+}
+
+// Spec: slice-to-midi R3, R6. A Start marker inside the loop starts the
+// slicing: nothing before it is heard on the first pass, so no note comes
+// before the clip's start.
+#[test]
+fn a_start_marker_inside_the_loop_slices_with_warped_timing() {
+    let scratch = Scratch::new("start-in-loop");
+    let (mut shell, _track, clip) = loop_clip(&scratch);
+    start_inside_loop(&mut shell, clip);
+    let cut = slice(
+        &mut shell,
+        clip,
+        json!({ "by": "quarter", "preserve_warped_timing": true }),
+    );
+    let notes = notes(&shell, cut.clip);
+    assert_eq!(notes.len(), cut.slices);
+    assert!(notes.iter().all(|note| note.start >= Ticks::ZERO));
+}
+
+// Spec: slice-to-midi R6, R9. The slice that starts at the Start marker
+// plays when the audio clip does: at the start of the MIDI clip.
+#[test]
+fn a_start_marker_inside_the_loop_places_the_start_slice_at_zero() {
+    let scratch = Scratch::new("start-in-loop-unwarped");
+    let (mut shell, _track, clip) = loop_clip(&scratch);
+    start_inside_loop(&mut shell, clip);
+    let marker = audio(&shell, clip);
+    let marker_frame =
+        (marker.in_file_seconds(2.0 * Ticks::QUARTER.get() as f64) * 48_000.0).round() as u64;
+    let cut = slice(
+        &mut shell,
+        clip,
+        json!({ "by": "quarter", "preserve_warped_timing": false }),
+    );
+    let rack = device(&shell, cut.track);
+    let file_frames = file_frames(&shell, media(sampler(&rack, &rack.chains[0])));
+    let chain = rack
+        .chains
+        .iter()
+        .find(|chain| region(sampler(&rack, chain), file_frames).0 == marker_frame)
+        .expect("a slice starts at the Start marker");
+    let Receive::Note(key) = chain.receive else {
+        unreachable!("a slice's chain receives a note")
+    };
+    let note = notes(&shell, cut.clip)
+        .into_iter()
+        .find(|note| note.key == key)
+        .unwrap();
+    // 1 ms at 120 bpm.
+    assert!(
+        note.start.get().abs() <= 1_411,
+        "the slice at the Start marker plays at {:?}",
+        note.start
+    );
+}
+
 // Spec: slice-to-midi R5.
 #[test]
 fn more_than_128_slices_or_64_for_one_sampler_is_refused() {
@@ -505,6 +595,50 @@ fn a_user_slicing_preset_shapes_every_chain() {
             .copied()
             .unwrap_or(0.0);
         assert_eq!(mode, 1.0, "One-Shot");
+    }
+}
+
+// Spec: slice-to-midi R11. A user preset is one in the Slicing folder: a
+// name that points outside it is refused, so an agent can't load any preset
+// on the disk.
+#[test]
+fn a_slicing_preset_outside_the_slicing_folder_is_refused() {
+    let _home = HOME.lock().unwrap();
+    let scratch = Scratch::new("escape");
+    let (mut shell, _track, clip) = loop_clip(&scratch);
+    let base = if cfg!(windows) { "Documents" } else { "Music" };
+    let library = scratch.path(&format!("{base}/Beatlayer/User Library/Defaults/Slicing"));
+    std::fs::create_dir_all(&library).unwrap();
+    let _guard = HomeGuard::set(&scratch.0);
+
+    // A valid rack preset, saved outside the library.
+    let first = slice(&mut shell, clip, json!({ "by": "quarter" }));
+    let rack = device(&shell, first.track);
+    std::fs::create_dir_all(scratch.path("outside")).unwrap();
+    let outside = scratch.path("outside/Evil");
+    shell
+        .run(
+            "device.save_preset",
+            json!({ "device": rack.id, "path": format!("{}.blpreset", outside.display()) }),
+        )
+        .unwrap();
+    let tracks = shell.editor().document().tracks().count();
+
+    // The Slicing folder is five folders under the scratch folder.
+    for preset in [
+        outside.display().to_string(),
+        "../../../../../outside/Evil".to_owned(),
+    ] {
+        let refused = shell.run(
+            ids::SLICE,
+            json!({ "clip": clip, "by": "quarter", "preset": preset }),
+        );
+        let error = refused.expect_err("a preset outside the folder is refused");
+        assert!(
+            error.to_string().contains("no slicing preset is called"),
+            "{error}"
+        );
+        assert_eq!(shell.editor().document().tracks().count(), tracks);
     }
 }
 

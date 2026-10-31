@@ -418,6 +418,14 @@ impl Shell {
         let landed = std::rc::Rc::new(std::cell::RefCell::new(None));
         let slot = std::rc::Rc::clone(&landed);
         let length = to - from;
+        // Spec: multisampler R59. Reverse leaves Simpler's flags and slices
+        // where they are; loading the copy clears them, so they go back.
+        let kept = (!crop && layer.is_none())
+            .then(|| {
+                let device = self.editor.document().device(device)?;
+                Some((device.region, device.slices.clone()))
+            })
+            .flatten();
         self.start_processed(request, move |shell, written| {
             let media = ContentHash(*written.hash.as_bytes());
             let crop_range = crop.then_some(SampleRange { from, to });
@@ -434,15 +442,23 @@ impl Shell {
                         })
                         .map(drop),
                     None => {
-                        // Loading the copy clears Simpler's edits and region,
-                        // so a crop's region is the whole of the copy.
-                        editor
-                            .apply(Command::SetDeviceSample {
-                                device,
-                                media: Some(media),
-                                slot: 0,
-                            })
-                            .map(drop)
+                        // Loading the copy clears Simpler's edits, region and
+                        // slices, so a crop's region is the whole of the copy
+                        // and a reverse puts the flags and slices back.
+                        editor.apply(Command::SetDeviceSample {
+                            device,
+                            media: Some(media),
+                            slot: 0,
+                        })?;
+                        if let Some((region, slices)) = kept {
+                            if region.is_some() {
+                                editor.apply(Command::SetDeviceRegion { device, region })?;
+                            }
+                            for frame in slices {
+                                editor.apply(Command::AddSlice { device, frame })?;
+                            }
+                        }
+                        Ok(())
                     }
                 })
                 .map_err(|error| error.to_string())?;

@@ -298,7 +298,7 @@ impl NativeDevice for ChorusEnsemble {
             let vibrato_shape_val = (f64::from(vibrato_shape_ramp[frame]) / 100.0).clamp(0.0, 1.0);
             // The filters' coefficients follow every 32nd frame of the song's
             // run, wherever the blocks fall.
-            if self.frames_done % COEFF_GRID == 0 {
+            if self.frames_done.is_multiple_of(COEFF_GRID) {
                 let hp_freq = f64::from(hp_freq_ramp[frame]).clamp(20.0, 2000.0);
                 let hp_coeffs =
                     highpass_coeffs(hp_freq, core::f64::consts::FRAC_1_SQRT_2, rate_f64);

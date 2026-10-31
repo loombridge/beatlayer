@@ -560,7 +560,7 @@ impl NativeDevice for PhaserFlanger {
             let env_amount = (f64::from(env_amount_ramp[frame]) / 100.0).clamp(-1.0, 1.0);
             // The crossover's and the warmth filter's coefficients follow every
             // 32nd frame of the run, wherever the blocks fall.
-            if self.frames_done % COEFF_GRID == 0 {
+            if self.frames_done.is_multiple_of(COEFF_GRID) {
                 let safe_bass_hz = f64::from(safe_bass_ramp[frame]).clamp(5.0, 3000.0);
                 let sb_hp_coeffs = safe_bass_hp_coeffs(safe_bass_hz, rate_f64);
                 let sb_lp_coeffs = safe_bass_lp_coeffs(safe_bass_hz, rate_f64);

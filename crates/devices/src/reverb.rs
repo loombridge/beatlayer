@@ -607,7 +607,7 @@ impl Reverb {
             let target = SIZE_SMALL + (SIZE_LARGE - SIZE_SMALL) * percent;
             let step = (target - self.size_now).abs().min(settings.size_step);
             self.size_now += step * (target - self.size_now).signum();
-            if self.frames_done % COEFF_GRID == 0 {
+            if self.frames_done.is_multiple_of(COEFF_GRID) {
                 self.slow = Slow::at(settings, params, i, self.size_now);
             }
             self.frames_done += 1;

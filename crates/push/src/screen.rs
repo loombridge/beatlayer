@@ -16,6 +16,9 @@ pub struct Label {
     pub colour: [u8; 3],
     /// Whether it stands for the selected one.
     pub selected: bool,
+    /// Whether it stands for a track armed by hand, which shows an arm icon
+    /// (notes R4).
+    pub armed: bool,
     /// The icon drawn with it, for a track that unfolds (push-2-tracks R37).
     pub icon: Icon,
 }
@@ -40,8 +43,16 @@ impl Label {
             text: text.into(),
             colour,
             selected,
+            armed: false,
             icon: Icon::None,
         }
+    }
+
+    /// The same label, with an arm icon if `armed`.
+    #[must_use]
+    pub fn with_armed(mut self, armed: bool) -> Self {
+        self.armed = armed;
+        self
     }
 
     /// The same label drawn with `icon`.
@@ -170,7 +181,12 @@ impl Screen {
                     Icon::Group => " [group]",
                     Icon::Rack => " [rack]",
                 };
-                lines.push(format!("{name} {}: {}{icon}{selected}", n + 1, label.text));
+                let armed = if label.armed { " (armed)" } else { "" };
+                lines.push(format!(
+                    "{name} {}: {}{icon}{selected}{armed}",
+                    n + 1,
+                    label.text
+                ));
             }
         };
         band("upper", &self.upper, &mut lines);

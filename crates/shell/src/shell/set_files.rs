@@ -842,7 +842,11 @@ impl Shell {
                 self.store.set_column_widths(self.mixer.widths().clone());
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
-                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
+                let copy = self.without_selection_arms();
+                let warnings = self
+                    .store
+                    .save(&path, copy.as_ref().unwrap_or(&self.editor))
+                    .map_err(failed)?;
                 self.saved_as(path, &warnings);
                 Ok(self.set_result())
             }
@@ -872,9 +876,10 @@ impl Shell {
                 self.store
                     .set_midi_tools(self.clip_view.midi_tools().saved());
                 self.store.set_temporary_folder(self.temporary_folder());
+                let copy = self.without_selection_arms();
                 let (path, warnings) = self
                     .store
-                    .save_as(Path::new(&path), &self.editor)
+                    .save_as(Path::new(&path), copy.as_ref().unwrap_or(&self.editor))
                     .map_err(failed)?;
                 // Processed files the first save moved out of the Temporary
                 // Folder: the media store follows them.
@@ -935,7 +940,11 @@ impl Shell {
                     &self.kit,
                     &mut self.editor,
                 );
-                let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
+                let copy = self.without_selection_arms();
+                let warnings = self
+                    .store
+                    .save_copy(&path, copy.as_ref().unwrap_or(&self.editor))
+                    .map_err(failed)?;
                 self.prefs.default_set = Some(path.clone());
                 self.save_preferences();
                 self.message = (!warnings.is_empty()).then(|| Message {
@@ -972,7 +981,11 @@ impl Shell {
                     &self.kit,
                     &mut self.editor,
                 );
-                let warnings = self.store.save_copy(&path, &self.editor).map_err(failed)?;
+                let copy = self.without_selection_arms();
+                let warnings = self
+                    .store
+                    .save_copy(&path, copy.as_ref().unwrap_or(&self.editor))
+                    .map_err(failed)?;
                 self.message = (!warnings.is_empty()).then(|| Message {
                     text: format!("The template was saved, but: {}", warnings.join("; ")),
                     error: false,

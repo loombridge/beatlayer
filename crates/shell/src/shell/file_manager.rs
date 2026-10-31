@@ -428,9 +428,10 @@ impl Shell {
         self.store
             .set_midi_tools(self.clip_view.midi_tools().saved());
         let files = self.store.collect_groups(groups, library)?;
+        let copy = self.without_selection_arms();
         let warnings = self
             .store
-            .save(path, &self.editor)
+            .save(path, copy.as_ref().unwrap_or(&self.editor))
             .map_err(|error| error.to_string())?;
         self.saved_as(path.to_path_buf(), &warnings);
         Ok(files)
@@ -822,9 +823,11 @@ impl Shell {
             command: id.to_owned(),
             message,
         })?;
+        // Spec: push-2-notes R3. A selection arm isn't saved.
+        let copy = self.without_selection_arms();
         let warnings = self
             .store
-            .save_copy(&placement.path, &self.editor)
+            .save_copy(&placement.path, copy.as_ref().unwrap_or(&self.editor))
             .map_err(|message| ShellError::Failed {
                 command: id.to_owned(),
                 message,

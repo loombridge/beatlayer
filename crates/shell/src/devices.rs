@@ -2203,6 +2203,16 @@ impl DeviceView {
                 self.swap_pads(editor, args)?;
                 outcome.document_changed = true;
             }
+            pad_ids::PAD_COPY => {
+                let args: pad_ids::PadCopyArgs = parse(args)?;
+                self.copy_pad(editor, args)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_SET_PUSH_COLOUR => {
+                let args: pad_ids::PadPushColourArgs = parse(args)?;
+                self.set_pad_push_colour(editor, args)?;
+                outcome.document_changed = true;
+            }
             pad_ids::PAD_SAVE_DEFAULT => {
                 let args: pad_ids::PadArgs = parse(args)?;
                 self.save_default_pad(editor.document(), args, user_library)?;

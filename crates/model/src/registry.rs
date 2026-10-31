@@ -3550,6 +3550,15 @@ const ENTRIES: &[Entry] = &[
         description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.",
     },
     Entry {
+        id: "chain.set_push_colour",
+        action: Action::Apply("set_chain_push_colour"),
+        label: "Set Chain Colour on Push",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Gives a drum rack's drum chain swatch `colour` of the palette of 5 rows of 14 (0 to 69) as the colour its pad shows on Push 2, in place of its track's, or clears it with null. `pad.set_push_colour` sets it for every chain of a pad.",
+    },
+    Entry {
         id: "chain.set_info",
         action: Action::Apply("set_chain_info"),
         label: "Edit Chain Info Text",

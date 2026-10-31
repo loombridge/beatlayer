@@ -109,6 +109,7 @@ mod preset_preview;
 mod processed_files;
 mod project_folders;
 mod push;
+mod push_beats;
 mod rack_presets;
 mod racks;
 mod realtime;

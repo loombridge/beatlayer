@@ -163,6 +163,35 @@ impl Shell {
         Ok((results, changed))
     }
 
+    /// Tries the document edits `steps` in turn on the set as it is, as
+    /// [`Shell::run_document_edits`] would run them, and then undoes them: a
+    /// dry run that applies the macro rules too (macros spec, R11). Each
+    /// step's changes, or the step that failed, counting from 0, and why.
+    ///
+    /// # Errors
+    ///
+    /// The index of the step that failed, and its [`ShellError`]; the set is
+    /// unchanged either way.
+    pub fn try_document_edits(
+        &mut self,
+        steps: &[(String, Value)],
+    ) -> Result<Vec<ChangeSet>, (usize, ShellError)> {
+        self.editor.begin("Dry run");
+        let mut results = Vec::with_capacity(steps.len());
+        let mut failure = None;
+        for (index, (id, args)) in steps.iter().enumerate() {
+            match self.run_document_edit(id, args.clone()) {
+                Ok(changes) => results.push(changes),
+                Err(error) => {
+                    failure = Some((index, error));
+                    break;
+                }
+            }
+        }
+        self.editor.cancel().ok();
+        failure.map_or(Ok(results), Err)
+    }
+
     /// The macro edit `command` makes, if it makes one.
     fn macro_edit(&self, command: &bl_model::Command) -> Option<MacroEdit> {
         let doc = self.editor.document();

@@ -1516,12 +1516,14 @@ impl Shell {
     /// command will create, and restoring a checkpoint. It runs document
     /// commands with `bl_model::registry::run`, as [`Shell::run`] does.
     ///
-    /// `edit` must leave no transaction open.
+    /// `edit` must leave no transaction open that it didn't find open: a
+    /// command run inside [`Shell::run_labelled`]'s transaction edits within it.
     pub fn edit<T>(&mut self, edit: impl FnOnce(&mut Editor) -> T) -> T {
         let before = self.editor.document().clone();
+        let nested = self.editor.in_transaction();
         let result = edit(&mut self.editor);
         debug_assert!(
-            !self.editor.in_transaction(),
+            nested || !self.editor.in_transaction(),
             "an edit left a transaction open"
         );
         if !ChangeSet::between(&before, self.editor.document()).is_empty() {

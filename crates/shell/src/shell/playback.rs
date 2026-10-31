@@ -448,39 +448,46 @@ impl Shell {
     ///
     /// A message if no engine runs.
     pub fn send_transport(&mut self, command: bl_engine::TransportCommand) -> Result<(), String> {
+        if let Some(reason) = self.transport_refusal(command) {
+            return Err(reason);
+        }
+        if command == bl_engine::TransportCommand::SetRecording(true)
+            && self.recording.is_none()
+            && let Err(reason) = self.begin_recording()
+        {
+            self.set_message(reason, true);
+        }
+        self.audio.send_transport(command)
+    }
+
+    /// Why [`Shell::send_transport`] would refuse `command`, if it would; it
+    /// changes nothing, so the agent API can say so before it queues one.
+    #[must_use]
+    pub fn transport_refusal(&mut self, command: bl_engine::TransportCommand) -> Option<String> {
         if command == bl_engine::TransportCommand::SetRecording(true) {
             // Spec: session-recording R11. One recording at a time: a new
             // plan would replace the Session recording's.
             if self.session_run.is_some() {
-                return Err("a Session recording is under way; end it first".to_owned());
+                return Some("a Session recording is under way; end it first".to_owned());
             }
             // A take is already under way, or its writer hasn't finished:
             // a second plan would orphan the first's file and start its
             // clips mid-take. The engine ignores record-on while it records.
-            if self.recording.is_some() {
-                if !self.audio.transport_state().recording {
-                    return Err(
-                        "a recording is already under way or still being finished".to_owned()
-                    );
-                }
-            } else if let Err(reason) = self.begin_recording() {
-                self.set_message(reason, true);
+            if self.recording.is_some() && !self.audio.transport_state().recording {
+                return Some("a recording is already under way or still being finished".to_owned());
             }
         }
-        if matches!(
+        // Spec: transport R29. A release is still accepted, so a held nudge
+        // can end.
+        (matches!(
             command,
             bl_engine::TransportCommand::PhaseNudge { held: true, .. }
-        ) && self.audio.transport_state().following
-        {
-            // Spec: transport R29. A release is still accepted, so a held
-            // nudge can end.
-            return Err(
-                "an incoming clock or Link session leads the tempo and keeps the \
-                        phase, so Phase Nudge is refused"
-                    .to_owned(),
-            );
-        }
-        self.audio.send_transport(command)
+        ) && self.audio.transport_state().following)
+            .then(|| {
+                "an incoming clock or Link session leads the tempo and keeps the phase, so \
+                 Phase Nudge is refused"
+                    .to_owned()
+            })
     }
 
     /// Whether the transport is currently playing.

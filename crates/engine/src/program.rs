@@ -575,6 +575,11 @@ pub(crate) struct Input {
     /// The delay line its signal is delayed through to line it up with the
     /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) delay: u32,
+    /// Whether the source track is on Monitor Auto with Reduced Latency When
+    /// Monitoring: the delay line holds its signal back only while a clip of
+    /// its plays, and the signal skips it while its input is monitored
+    /// (delay-compensation R8).
+    pub(crate) unheld_while_monitoring: bool,
 }
 
 /// An input that carries a task's own signal, not a rack chain's.
@@ -612,6 +617,9 @@ pub(crate) struct DelayLine {
     pub(crate) at: u32,
     pub(crate) len: u32,
     pub(crate) write: u32,
+    /// How far an input that skips the line while its source monitors has
+    /// moved from the held signal (0) to the direct one ([`tap_glide`]).
+    pub(crate) tap: u32,
 }
 
 /// Where the delay lines for `lengths` sit in one pool, with every write
@@ -624,6 +632,7 @@ pub(crate) fn delay_storage(lengths: &[u32], channels: usize) -> (Shared<DelayLi
             at: total as u32,
             len,
             write: 0,
+            tap: 0,
         });
         total += channels * len as usize;
     }
@@ -729,6 +738,46 @@ fn delay_into(
             line.write = w as u32;
         }
     }
+}
+
+/// How many frames the tap of a delay line takes to move between the held
+/// signal and the direct one: the mixer's glide (mixer R18).
+fn tap_glide(rate: SampleRate) -> u32 {
+    crate::mixer::smoothing_frames(rate)
+}
+
+/// Moves `held`, which [`delay_into`] wrote from `from`, toward `from` itself
+/// while `direct`, and back to it while not, a frame at a time over `glide`
+/// frames, so an input that skips its delay line while its source monitors
+/// (delay-compensation R8) never steps. The line keeps filling meanwhile.
+#[expect(clippy::too_many_arguments, reason = "the planar shape and the glide")]
+fn tap_direct(
+    line: &mut DelayLine,
+    held: &mut [f32],
+    from: &[f32],
+    channels: usize,
+    stride: usize,
+    frames: usize,
+    direct: bool,
+    glide: u32,
+) {
+    if line.tap == 0 && !direct {
+        return;
+    }
+    let mut tap = line.tap;
+    for i in 0..frames {
+        tap = if direct {
+            (tap + 1).min(glide)
+        } else {
+            tap.saturating_sub(1)
+        };
+        let share = tap as f32 / glide as f32;
+        for c in 0..channels {
+            let at = c * stride + i;
+            held[at] += (from[at] - held[at]) * share;
+        }
+    }
+    line.tap = tap;
 }
 
 /// Delays `samples` in place by its line, writing the past samples out as
@@ -1230,6 +1279,7 @@ impl EngineProgram {
                 continue;
             };
             new.write = was.write;
+            new.tap = was.tap;
             let size = channels * was.len as usize;
             let (to, from) = (new.at as usize, was.at as usize);
             self.delay_pool[to..to + size].copy_from_slice(&old.delay_pool[from..from + size]);
@@ -1548,13 +1598,7 @@ impl EngineProgram {
         // Spec: routing R11. Whether the track played a clip this block;
         // under Monitor Auto its input routes close while one did. The
         // player ran first, so it knows.
-        let playing_clip = match task.player {
-            Some(slot) => match turn.slot(slot).node.as_ref() {
-                Some(Instance::Device(node)) => node.playing_clip(),
-                _ => false,
-            },
-            None => false,
-        };
+        let playing_clip = self.plays_clip(&turn, t);
         // Spec: scales R15. The player knows which clip plays, and so which
         // scale the devices of the track, in its racks too, read; a track
         // without a player reads the set's.
@@ -1629,6 +1673,11 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
+                if input.unheld_while_monitoring {
+                    let direct = !self.plays_clip(&turn, source);
+                    let glide = tap_glide(self.sample_rate);
+                    tap_direct(line, held, theirs, channels, stride, frames, direct, glide);
+                }
                 let bus = turn.bus(frames);
                 route.mix(turn.buffer(t), held, shape, song, bus, &lane.events);
             } else {
@@ -1705,6 +1754,17 @@ impl EngineProgram {
         }
         self.record_time(t, began.elapsed());
         delivered
+    }
+
+    /// Whether task `t`'s clips played in the block it last ran.
+    fn plays_clip(&self, turn: &Turn<'_>, t: usize) -> bool {
+        match self.tasks[t].player {
+            Some(slot) => match turn.slot(slot).node.as_ref() {
+                Some(Instance::Device(node)) => node.playing_clip(),
+                _ => false,
+            },
+            None => false,
+        }
     }
 
     /// Works out every modulator's rows over `frames` frames, in the order of
@@ -1885,6 +1945,11 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
+                if input.unheld_while_monitoring {
+                    let direct = !self.plays_clip(turn, input.from as usize);
+                    let glide = tap_glide(self.sample_rate);
+                    tap_direct(line, held, theirs, channels, stride, frames, direct, glide);
+                }
                 route.mix(
                     turn.sidechain_mut(at),
                     held,

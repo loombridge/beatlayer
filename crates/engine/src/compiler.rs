@@ -1075,6 +1075,7 @@ impl Compiler {
                 output: NO_OUTPUT,
                 before: 0,
                 delay: NO_DELAY,
+                unheld_while_monitoring: false,
             };
             match edge.via.sidechain() {
                 Some(device) => sidechain_inputs.entry(device).or_default().push(input),
@@ -1112,6 +1113,7 @@ impl Compiler {
                     output: NO_OUTPUT,
                     before: 0,
                     delay: NO_DELAY,
+                    unheld_while_monitoring: false,
                 });
                 taps.insert((track.id(), Tap::PostFx));
             }
@@ -2732,7 +2734,11 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
     // while Reduced Latency When Monitoring is on and it doesn't keep its
     // monitoring latency, is given the lowest possible latency: its own input
     // isn't held back and its path doesn't raise a summing point's target.
-    let low_latency: Vec<bool> = build
+    // A track on Monitor Auto is monitored only while no clip plays, which
+    // the audio thread finds out each block (routing R11): it is compensated
+    // like any track, and its inputs skip the delay line only while it
+    // monitors.
+    let monitored: Vec<bool> = build
         .tasks
         .iter()
         .map(|task| {
@@ -2742,6 +2748,22 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                         && !track.keep_monitoring_latency()
                 })
         })
+        .collect();
+    let auto_low: Vec<bool> = build
+        .tasks
+        .iter()
+        .zip(&monitored)
+        .map(|(task, &monitored)| {
+            monitored
+                && document
+                    .track(task.track)
+                    .is_some_and(|track| track.routing().monitor == bl_model::Monitor::Auto)
+        })
+        .collect();
+    let low_latency: Vec<bool> = monitored
+        .iter()
+        .zip(&auto_low)
+        .map(|(&monitored, &auto)| monitored && !auto)
         .collect();
     // The frames into the song an input's signal has, counting the source
     // track's own delay. Negative counts make the other paths wait.
@@ -2877,6 +2899,7 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                 let key = input_key(build, &input);
                 let index = line(build, delay as u32, key);
                 build.inputs[i].delay = index;
+                build.inputs[i].unheld_while_monitoring = auto_low[input.from as usize];
             }
         }
         for s in task.sidechains.range() {
@@ -2892,6 +2915,8 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                     let key = input_key(build, &input);
                     let index = line(build, delay as u32, key);
                     build.sidechain_inputs[i].delay = index;
+                    build.sidechain_inputs[i].unheld_while_monitoring =
+                        auto_low[input.from as usize];
                 }
             }
         }

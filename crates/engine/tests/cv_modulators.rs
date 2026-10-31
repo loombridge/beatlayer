@@ -6,9 +6,7 @@
 
 use crate::common;
 use bl_commands::Registry as Commands;
-use bl_devices::cv_modulators::{
-    self, MAX, MIN, cv_curve_type, cv_level_type, cv_wave_type,
-};
+use bl_devices::cv_modulators::{self, MAX, MIN, cv_curve_type, cv_level_type, cv_wave_type};
 use bl_devices::level_mod::{FALL, RISE};
 use bl_devices::modulator::{PHASE, RATE_HZ, WAVE};
 use bl_engine::TransportCommand;
@@ -131,29 +129,51 @@ fn each_device_writes_its_signal_as_volts_and_leaves_the_audio_alone() {
     assert!(close(cv[0], -0.5), "−5 V at the start: {}", cv[0]);
     assert!(close(cv[2_400], 0.0), "0 V half way: {}", cv[2_400]);
     // The last frame is one frame short of the top of the ramp.
-    assert!((cv[4_799] - 0.5).abs() < 1e-3, "+5 V at the end: {}", cv[4_799]);
-    assert_eq!(first_difference(&main, &untouched), None, "the track's audio passes untouched");
+    assert!(
+        (cv[4_799] - 0.5).abs() < 1e-3,
+        "+5 V at the end: {}",
+        cv[4_799]
+    );
+    assert_eq!(
+        first_difference(&main, &untouched),
+        None,
+        "the track's audio passes untouched"
+    );
 
     // CV Shaper: a rise, 0 V to 5 V, at 10 Hz.
     let mut rig = rig_with_shape();
     let (cv, main) = play(&mut rig, 64, 75, 0);
     assert!(cv[0] < 1e-3 && close(cv[2_400], 0.25), "{}", cv[2_400]);
     assert!((cv[4_799] - 0.5).abs() < 1e-3, "{}", cv[4_799]);
-    assert_eq!(first_difference(&main, &untouched), None, "the track's audio passes untouched");
+    assert_eq!(
+        first_difference(&main, &untouched),
+        None,
+        "the track's audio passes untouched"
+    );
 
     // CV Envelope Follower: a signal of 0.5 through Rise 0 is 0.5, 2.5 V of
     // its 0 to 5 V.
     let (mut rig, _) = rig_with_level(0.25, &[(RISE, 0.0)]);
     let (cv, main) = play(&mut rig, 64, 20, 0);
     assert!(close(cv[1_000], 0.125), "{}", cv[1_000]);
-    assert_eq!(first_difference(&main, &untouched), None, "the track's audio passes untouched");
+    assert_eq!(
+        first_difference(&main, &untouched),
+        None,
+        "the track's audio passes untouched"
+    );
 }
 
 fn rig_with_shape() -> Rig {
     let mut rig = rig(64);
     let a = carrier(&mut rig, 0.25);
     let id = rig.editor.new_id();
-    put(&mut rig, a, cv_curve_type().device(id), 1, &[(RATE_HZ, 10.0)]);
+    put(
+        &mut rig,
+        a,
+        cv_curve_type().device(id),
+        1,
+        &[(RATE_HZ, 10.0)],
+    );
     rig.apply(Command::SetShape {
         device: id,
         points: shape_preset(1).unwrap(),
@@ -181,7 +201,13 @@ fn a_free_cv_lfo_starts_again_from_phase_when_the_transport_starts() {
         a,
         cv_wave_type().device(id),
         1,
-        &[(WAVE, 1.0), (RATE_HZ, 10.0), (PHASE, 25.0), (MIN, 0.0), (MAX, 10.0)],
+        &[
+            (WAVE, 1.0),
+            (RATE_HZ, 10.0),
+            (PHASE, 25.0),
+            (MIN, 0.0),
+            (MAX, 10.0),
+        ],
     );
     // Stopped, a free cycle runs.
     for _ in 0..20 {
@@ -200,7 +226,8 @@ fn a_free_cv_lfo_starts_again_from_phase_when_the_transport_starts() {
 fn the_follower_follows_the_sidechain_mix() {
     // The track carries 0.2 and the sidechain's source 0.8.
     for (mix, want) in [(0.0, 0.2f32), (0.5, 0.5), (1.0, 0.8)] {
-        let (mut rig, id) = rig_with_level(0.2, &[(RISE, 0.0), (FALL, 0.0), (MIN, 0.0), (MAX, 10.0)]);
+        let (mut rig, id) =
+            rig_with_level(0.2, &[(RISE, 0.0), (FALL, 0.0), (MIN, 0.0), (MAX, 10.0)]);
         let other = carrier(&mut rig, 0.8);
         run(
             &mut rig,
@@ -242,7 +269,13 @@ fn a_square_edge_waits_for_the_tracks_compensation_into_main() {
             a,
             cv_wave_type().device(id),
             1,
-            &[(WAVE, 4.0), (RATE_HZ, 10.0), (common_times_ten(), 1.0), (MIN, 0.0), (MAX, 10.0)],
+            &[
+                (WAVE, 4.0),
+                (RATE_HZ, 10.0),
+                (common_times_ten(), 1.0),
+                (MIN, 0.0),
+                (MAX, 10.0),
+            ],
         );
         let b = track(&mut rig.editor, TrackKind::Audio, None);
         device(&mut rig.editor, b, DELAY, &[(DELAY_FRAMES, 500.0)]);
@@ -250,7 +283,11 @@ fn a_square_edge_waits_for_the_tracks_compensation_into_main() {
             enabled: compensation,
         });
         let (cv, _) = play(&mut rig, 64, 30, 0);
-        let fall = cv.windows(2).position(|w| w[0] == 1.0 && w[1] == 0.0).unwrap() + 1;
+        let fall = cv
+            .windows(2)
+            .position(|w| w[0] == 1.0 && w[1] == 0.0)
+            .unwrap()
+            + 1;
         assert_eq!(fall, falls, "compensation {compensation}");
     }
 }
@@ -271,18 +308,34 @@ fn a_render_is_the_same_at_any_block_size() {
             a,
             cv_wave_type().device(id),
             1,
-            &[(WAVE, 7.0), (RATE_HZ, 12.0), (bl_devices::modulator::JITTER, 50.0)],
+            &[
+                (WAVE, 7.0),
+                (RATE_HZ, 12.0),
+                (bl_devices::modulator::JITTER, 50.0),
+            ],
         );
         let b = carrier(&mut rig, 0.6);
         let id = rig.editor.new_id();
-        put(&mut rig, b, cv_curve_type().device(id), 2, &[(RATE_HZ, 7.0)]);
+        put(
+            &mut rig,
+            b,
+            cv_curve_type().device(id),
+            2,
+            &[(RATE_HZ, 7.0)],
+        );
         rig.apply(Command::SetShape {
             device: id,
             points: shape_preset(6).unwrap(),
         });
         let c = carrier(&mut rig, 0.4);
         let id = rig.editor.new_id();
-        put(&mut rig, c, cv_level_type().device(id), 3, &[(RISE, 10.0), (FALL, 80.0)]);
+        put(
+            &mut rig,
+            c,
+            cv_level_type().device(id),
+            3,
+            &[(RISE, 10.0), (FALL, 80.0)],
+        );
         rig
     };
     let channels = |frames: usize| -> Vec<Vec<f32>> {

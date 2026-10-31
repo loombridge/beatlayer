@@ -287,8 +287,11 @@ impl Follower {
     /// Rise or Fall, held at 1 and delayed by Delay (modulation R24).
     pub(crate) fn frame(&mut self, c: &Controls<'_>, f: usize) -> f64 {
         let x = f64::from(self.heard[f]) * f64::from(c.gain[f]);
-        let coefficient =
-            self.coefficient(f64::from(if x > self.level { c.rise[f] } else { c.fall[f] }));
+        let coefficient = self.coefficient(f64::from(if x > self.level {
+            c.rise[f]
+        } else {
+            c.fall[f]
+        }));
         self.level += (x - self.level) * coefficient;
         let level = self.level.min(1.0);
         self.delay.write(level as f32);

@@ -253,13 +253,19 @@ pub fn display_in(
         CV_CLOCK_IN => Some(cv_clock_in::display(device, data)),
         CV_UTILITY => Some(cv_utility::display(device, data)),
         bl_model::modulator::CV_IN => Some(cv_in::display(device, data)),
-        bl_model::modulator::CV_WAVE => {
-            Some(cv_modulators::wave_display(device, description, values, data))
-        }
+        bl_model::modulator::CV_WAVE => Some(cv_modulators::wave_display(
+            device,
+            description,
+            values,
+            data,
+        )),
         bl_model::modulator::CV_CURVE => Some(cv_modulators::curve_display(device, data)),
-        bl_model::modulator::CV_LEVEL => {
-            Some(cv_modulators::level_display(device, description, values, data))
-        }
+        bl_model::modulator::CV_LEVEL => Some(cv_modulators::level_display(
+            device,
+            description,
+            values,
+            data,
+        )),
         _ => None,
     }
 }

@@ -15,8 +15,8 @@ use bl_engine::{DeviceType, NodeData, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DeviceLayout, LayoutNode, Widget};
 use bl_model::modulator::{CV_CURVE, CV_LEVEL, CV_WAVE, DEPTH, default_shape};
 use bl_model::{
-    DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, DisplayReading, OrdMap, ParamDescriptor,
-    ParamId, ParamUnit,
+    DeviceDescription, DeviceDisplay, DeviceId, DeviceRole, DisplayReading, OrdMap,
+    ParamDescriptor, ParamId, ParamUnit,
 };
 
 use crate::cv::{VOLTS_PER_SAMPLE, sample, volts_display};
@@ -48,7 +48,9 @@ fn output_params(min: f64, max: f64) -> Vec<ParamDescriptor> {
     vec![
         ParamDescriptor::continuous(DEPTH, "Depth", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .decimals(0)
-            .describe("How much of the span from Min to Max the signal reaches: 0 % none, 100 % all."),
+            .describe(
+                "How much of the span from Min to Max the signal reaches: 0 % none, 100 % all.",
+            ),
         volts(
             MIN,
             "Min",
@@ -142,11 +144,9 @@ pub fn register(registry: &mut Registry) {
             device.id.0.get(),
         )
     });
-    add(registry, cv_level_type(), |_, config| {
-        CvLevel {
-            follower: Follower::new(config.sample_rate.as_f64(), config.max_frames),
-            shown: 0.0,
-        }
+    add(registry, cv_level_type(), |_, config| CvLevel {
+        follower: Follower::new(config.sample_rate.as_f64(), config.max_frames),
+        shown: 0.0,
     });
 }
 

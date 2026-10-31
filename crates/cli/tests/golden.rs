@@ -653,14 +653,18 @@ fn the_cv_modulators_fixture_writes_each_signal_on_its_channel() {
     let fixture = fixture("cv-modulators").expect("the fixture exists");
     let render = fixture.render();
     assert_eq!(render.channels, 5, "Main's two and the three devices'");
-    let channel = |at: usize| -> Vec<f32> { render.samples.chunks(5).map(|frame| frame[at]).collect() };
+    let channel =
+        |at: usize| -> Vec<f32> { render.samples.chunks(5).map(|frame| frame[at]).collect() };
     // The triangle with Jitter, from −3 V to +4 V.
     let wave = channel(2);
     let (low, high) = wave
         .iter()
         .fold((f32::MAX, f32::MIN), |(l, h), &s| (l.min(s), h.max(s)));
     assert!(low >= -0.3 - 1e-5 && high <= 0.4 + 1e-5, "{low} to {high}");
-    assert!(low < -0.2 && high > 0.3, "it sweeps the span: {low} to {high}");
+    assert!(
+        low < -0.2 && high > 0.3,
+        "it sweeps the span: {low} to {high}"
+    );
     // The staircase: four levels of 5 V, a third of the way apart.
     let stairs = channel(3);
     for want in [0.0f32, 0.5 / 3.0, 1.0 / 3.0, 0.5] {
@@ -672,7 +676,10 @@ fn the_cv_modulators_fixture_writes_each_signal_on_its_channel() {
     // The follower: 0 to 5 V.
     let follower = channel(4);
     assert!(follower.iter().all(|&s| (0.0..=0.5).contains(&s)));
-    assert!(follower.iter().any(|&s| s > 0.2), "it follows the slow tone");
+    assert!(
+        follower.iter().any(|&s| s > 0.2),
+        "it follows the slow tone"
+    );
     for block in [1, 64, 4096] {
         assert!(
             fixture.render_in_blocks(block).same_bits(&render),

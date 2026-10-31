@@ -1100,24 +1100,25 @@ fn cv_modulators() -> Scene {
     use bl_model::{Input, Tap};
 
     let mut song = Song::new();
-    let put = |song: &mut Song, track, mut device: Device, channel: u16, params: &[(ParamId, f64)]| {
-        for &(param, value) in params {
-            device.params.insert(param, value);
-        }
-        device.external.as_mut().expect("it has routing").cv_outputs[0].channel = Some(channel);
-        let index = song
-            .editor
-            .document()
-            .track(track)
-            .expect("the track exists")
-            .devices()
-            .len();
-        song.apply(Command::InsertDevice {
-            track,
-            index,
-            device,
-        });
-    };
+    let put =
+        |song: &mut Song, track, mut device: Device, channel: u16, params: &[(ParamId, f64)]| {
+            for &(param, value) in params {
+                device.params.insert(param, value);
+            }
+            device.external.as_mut().expect("it has routing").cv_outputs[0].channel = Some(channel);
+            let index = song
+                .editor
+                .document()
+                .track(track)
+                .expect("the track exists")
+                .devices()
+                .len();
+            song.apply(Command::InsertDevice {
+                track,
+                index,
+                device,
+            });
+        };
     let wave = song.track(TrackKind::Audio, "Wave", None);
     let id = song.editor.new_id();
     put(
@@ -1125,7 +1126,13 @@ fn cv_modulators() -> Scene {
         wave,
         cv_wave_type().device(id),
         1,
-        &[(WAVE, 3.0), (RATE_HZ, 2.0), (JITTER, 20.0), (MIN, -3.0), (MAX, 4.0)],
+        &[
+            (WAVE, 3.0),
+            (RATE_HZ, 2.0),
+            (JITTER, 20.0),
+            (MIN, -3.0),
+            (MAX, 4.0),
+        ],
     );
     let shape = song.track(TrackKind::Audio, "Shape", None);
     let id = song.editor.new_id();
@@ -1168,7 +1175,10 @@ fn cv_modulators() -> Scene {
         enabled: true,
     });
     // All of the sidechain's signal, none of the track's own.
-    song.apply(Command::SetSidechainMix { device: id, mix: 1.0 });
+    song.apply(Command::SetSidechainMix {
+        device: id,
+        mix: 1.0,
+    });
     song.device_channels = 3;
     song.finish(2.0)
 }

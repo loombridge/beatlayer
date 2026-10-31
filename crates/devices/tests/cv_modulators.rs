@@ -7,9 +7,7 @@
 use crate::common;
 use bl_core::time::{Frames, TempoMap};
 use bl_devices::cv_modulators::{MAX, MIN, cv_curve_type, cv_level_type, cv_wave_type};
-use bl_devices::level_mod::{
-    DELAY_BEATS, DELAY_MODE, DELAY_TIME, FALL, RISE, level_mod_type,
-};
+use bl_devices::level_mod::{DELAY_BEATS, DELAY_MODE, DELAY_TIME, FALL, RISE, level_mod_type};
 use bl_devices::modulator::{
     JITTER, MANUAL, PHASE, RATE_BEATS, RATE_HZ, RESTART, SHAPE, SMOOTH, TIME_MODE, TRIGGER,
     TRIGGER_MODE, WAVE, WAVES, wave_mod_type,
@@ -170,7 +168,10 @@ fn each_waveform_equals_the_lfos_on_its_grid_points_and_follows_the_law_between(
 fn the_deterministic_waves_follow_their_law_on_every_frame() {
     // 10 Hz at 48 kHz is a cycle of 4,800 frames.
     for (index, law) in [
-        (0usize, (|p: f64| 0.5 - 0.5 * (std::f64::consts::TAU * p).cos()) as fn(f64) -> f64),
+        (
+            0usize,
+            (|p: f64| 0.5 - 0.5 * (std::f64::consts::TAU * p).cos()) as fn(f64) -> f64,
+        ),
         (1, |p| p),
         (2, |p| 1.0 - p),
         (3, |p| 1.0 - (2.0 * p - 1.0).abs()),
@@ -229,14 +230,9 @@ fn a_synced_cv_lfo_locks_to_the_song_position_and_a_free_one_starts_from_phase()
         (WAVE, 1.0),
         (PHASE, 0.0),
     ];
-    let got = render(
-        cv_wave(&synced).as_mut(),
-        24_000,
-        512,
-        &[],
-        &[],
-        |done| playing(6_000 + done),
-    )
+    let got = render(cv_wave(&synced).as_mut(), 24_000, 512, &[], &[], |done| {
+        playing(6_000 + done)
+    })
     .cv;
     for frame in [0usize, 1, 5_999, 6_000, 17_999] {
         let want = (6_000 + frame) as f32 / 24_000.0;
@@ -294,15 +290,25 @@ fn min_max_and_depth_map_the_signal_to_volts_and_min_above_max_inverts_it() {
         at(&[(MIN, -2.0), (MAX, 6.0), (DEPTH, 50.0)]),
         (-2.0, 0.0, 2.0),
     );
-    volts(at(&[(MIN, -2.0), (MAX, 6.0), (DEPTH, 0.0)]), (-2.0, -2.0, -2.0));
+    volts(
+        at(&[(MIN, -2.0), (MAX, 6.0), (DEPTH, 0.0)]),
+        (-2.0, -2.0, -2.0),
+    );
     // Min above Max inverts it, and the full range is reachable.
     volts(at(&[(MIN, 6.0), (MAX, -2.0)]), (6.0, 2.0, -2.0));
     volts(at(&[(MIN, -10.0), (MAX, 10.0)]), (-10.0, 0.0, 10.0));
     // The device's defaults: CV Shaper and CV Envelope Follower send 0 to 5 V.
-    for (device_type, name) in [(cv_curve_type(), "CV Shaper"), (cv_level_type(), "CV Envelope Follower")] {
+    for (device_type, name) in [
+        (cv_curve_type(), "CV Shaper"),
+        (cv_level_type(), "CV Envelope Follower"),
+    ] {
         let description = &device_type.description;
         let default = |id| description.param(id).unwrap().default;
-        assert_eq!((default(MIN), default(MAX), default(DEPTH)), (0.0, 5.0, 100.0), "{name}");
+        assert_eq!(
+            (default(MIN), default(MAX), default(DEPTH)),
+            (0.0, 5.0, 100.0),
+            "{name}"
+        );
     }
 }
 
@@ -355,7 +361,15 @@ fn the_shaper_plays_its_shape_in_loop_on_every_frame() {
     // The pulse preset's drop lands on its frame at 1 Hz, within the
     // preset's own 1/4096 slope.
     let pulse = shape_preset(4).unwrap();
-    let got = render(cv_curve(&pulse, &[(RATE_HZ, 1.0)]).as_mut(), 48_000, 512, &[], &[], playing).cv;
+    let got = render(
+        cv_curve(&pulse, &[(RATE_HZ, 1.0)]).as_mut(),
+        48_000,
+        512,
+        &[],
+        &[],
+        playing,
+    )
+    .cv;
     assert!(got[..23_000].iter().all(|&v| v == 1.0));
     assert!(got[24_100..].iter().all(|&v| v == 0.0));
 }
@@ -370,12 +384,24 @@ fn one_shot_plays_once_per_t_and_manual_holds_the_picked_point() {
         set(8_000, TRIGGER, 0.0),
         set(10_000, TRIGGER, 1.0),
     ];
-    let got = render(cv_curve(&rise, &params).as_mut(), 16_000, 700, &[], &events, playing).cv;
+    let got = render(
+        cv_curve(&rise, &params).as_mut(),
+        16_000,
+        700,
+        &[],
+        &events,
+        playing,
+    )
+    .cv;
     assert!(got[..1_000].iter().all(|&v| v == 0.0), "rests at the start");
     // Each frame after T turns on is a step of the shape's 4,800-frame cycle.
     for n in [0usize, 100, 2_399, 4_000] {
         let want = ((n + 1) as f32 / 4_800.0).min(1.0);
-        assert!(close(got[1_000 + n], want), "frame {n} after T: {}", got[1_000 + n]);
+        assert!(
+            close(got[1_000 + n], want),
+            "frame {n} after T: {}",
+            got[1_000 + n]
+        );
     }
     assert!(
         got[1_000 + 4_800..10_000].iter().all(|&v| v == 1.0),
@@ -412,14 +438,20 @@ fn a_new_shape_reaches_the_shaper_as_node_data() {
         }],
         &[(TRIGGER_MODE, 2.0), (MANUAL, 50.0)],
     );
-    assert_eq!(render(node.as_mut(), 256, 256, &[], &[], playing).cv[200], 1.0);
+    assert_eq!(
+        render(node.as_mut(), 256, 256, &[], &[], playing).cv[200],
+        1.0
+    );
     node.receive_data(collector.handle().data(Shape(vec![ShapePoint {
         x: 0.0,
         y: 0.25,
         bend: 0.0,
         sustain: false,
     }])));
-    assert_eq!(render(node.as_mut(), 256, 256, &[], &[], playing).cv[200], 0.25);
+    assert_eq!(
+        render(node.as_mut(), 256, 256, &[], &[], playing).cv[200],
+        0.25
+    );
 }
 
 // Spec: cv-tools R8, R35
@@ -453,7 +485,11 @@ fn random_parts_repeat_from_the_transports_start() {
         playing,
     )
     .cv;
-    assert!(close(got[1_000], 0.1), "R restarts from Phase: {}", got[1_000]);
+    assert!(
+        close(got[1_000], 0.1),
+        "R restarts from Phase: {}",
+        got[1_000]
+    );
 }
 
 /// A sine burst of `amplitude` at 1 kHz for `frames` frames, from phase 0.
@@ -509,7 +545,14 @@ fn the_envelope_followers_level_comes_through_rise_fall_and_delay() {
         )
         .rows;
         let want = want.contribution(0);
-        let got = render(cv_level(&params).as_mut(), frames, 512, &input, &[], playing);
+        let got = render(
+            cv_level(&params).as_mut(),
+            frames,
+            512,
+            &input,
+            &[],
+            playing,
+        );
         for grid in (32..frames).step_by(32) {
             assert!(
                 close(got.cv[grid - 32], want[grid]),
@@ -522,7 +565,15 @@ fn the_envelope_followers_level_comes_through_rise_fall_and_delay() {
     }
 
     // The bursts' levels: the peak of each, to the detector's Rise and Fall.
-    let got = render(cv_level(&[(RISE, 0.0)]).as_mut(), frames, 512, &input, &[], playing).cv;
+    let got = render(
+        cv_level(&[(RISE, 0.0)]).as_mut(),
+        frames,
+        512,
+        &input,
+        &[],
+        playing,
+    )
+    .cv;
     let loud = got[2_048..10_240].iter().fold(0.0f32, |m, &v| m.max(v));
     let quiet = got[26_624..34_816].iter().fold(0.0f32, |m, &v| m.max(v));
     assert!((loud - 0.251).abs() < 0.01, "−12 dBFS: {loud}");
@@ -536,7 +587,8 @@ fn every_render_is_the_same_at_any_block_size() {
     let input = bursts();
     let frames = 16_384;
     let events = [set(5_000, TRIGGER, 1.0)];
-    let renders: Vec<(&str, Box<dyn Fn(usize) -> Vec<f32>>)> = vec![
+    type Render = Box<dyn Fn(usize) -> Vec<f32>>;
+    let renders: Vec<(&str, Render)> = vec![
         (
             "CV LFO",
             Box::new(move |block| {
@@ -548,14 +600,30 @@ fn every_render_is_the_same_at_any_block_size() {
             "CV Shaper",
             Box::new(move |block| {
                 let params = [(RATE_HZ, 12.0), (JITTER, 50.0), (TRIGGER_MODE, 1.0)];
-                render(cv_curve(&shape(), &params).as_mut(), frames, block, &[], &events, playing).cv
+                render(
+                    cv_curve(&shape(), &params).as_mut(),
+                    frames,
+                    block,
+                    &[],
+                    &events,
+                    playing,
+                )
+                .cv
             }),
         ),
         (
             "CV Envelope Follower",
             Box::new(move |block| {
                 let params = [(RISE, 10.0), (FALL, 80.0), (DELAY_TIME, 5.0)];
-                render(cv_level(&params).as_mut(), frames, block, &input, &[], playing).cv
+                render(
+                    cv_level(&params).as_mut(),
+                    frames,
+                    block,
+                    &input,
+                    &[],
+                    playing,
+                )
+                .cv
             }),
         ),
     ];

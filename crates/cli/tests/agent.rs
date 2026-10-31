@@ -6902,7 +6902,10 @@ fn an_agent_routes_the_three_cv_modulators_and_reads_everything_back() {
     assert!((reading(&shown, "CV")["value"].as_f64().unwrap() - 1.0).abs() < 0.01);
     let shown = display(&mut host, &wave);
     let volts = reading(&shown, "CV")["value"].as_f64().unwrap();
-    assert!((-2.0..=2.0).contains(&volts), "half of the span from -2 V: {volts}");
+    assert!(
+        (-2.0..=2.0).contains(&volts),
+        "half of the span from -2 V: {volts}"
+    );
     assert_eq!(shown["series"][0]["name"], "Wave");
     let shown = display(&mut host, &level);
     for name in ["Direct", "S.C.", "Level", "CV"] {

@@ -40,8 +40,12 @@ fn outcome(client: &mut Client<impl Transport>, command: &str, args: Value) -> V
 // Spec: wavetable R8
 #[test]
 fn an_agent_loads_wavetables_by_command_id_and_reads_them_back() {
-    let file = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/wavetables/clm-4-frames.wav");
+    // The media store keeps an absolute path, which on Windows has no `..`.
+    let file = std::path::absolute(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/wavetables/clm-4-frames.wav"),
+    )
+    .unwrap();
     let mut client = bl_cli_mcp(&["--autonomous"]);
 
     let tracks = call(&mut client, "query", json!({ "path": "tracks" }));

@@ -44,10 +44,14 @@ impl Drop for Scratch {
     }
 }
 
+// The media store keeps an absolute path, which on Windows has no `..`.
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/fixtures/wavetables")
-        .join(name)
+    std::path::absolute(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/wavetables")
+            .join(name),
+    )
+    .unwrap()
 }
 
 fn text(path: &Path) -> String {

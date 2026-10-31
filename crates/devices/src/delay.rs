@@ -825,13 +825,13 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         // Sine, Triangle, Ramp Up, Ramp Down and Square.
-        for wave in 0..5 {
+        for (wave, shape) in WAVES.iter().enumerate().take(5) {
             let plain = cycle(wave, 0.0);
             // At 0 % it is the shape the delay has always played.
             assert_eq!(plain, {
                 let mut lfo = Lfo::new(rate, 3);
                 (0..48_000)
-                    .map(|f| lfo.step(&tempo, f, Shape::of(WAVES[wave]))[0])
+                    .map(|f| lfo.step(&tempo, f, Shape::of(*shape))[0])
                     .collect::<Vec<_>>()
             });
             // At 50 % the wave's turning point is at 55 % of the cycle and at

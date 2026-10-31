@@ -713,6 +713,7 @@ impl Shell {
         // version.
         self.editor = editor;
         self.editor_replaced();
+        self.new_set_transport();
         self.dirty = true;
         self.message = None;
         self.arrangement.reset();

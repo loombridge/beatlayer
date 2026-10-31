@@ -280,6 +280,10 @@ impl Shell {
         if self.autosample.is_none() {
             return false;
         }
+        // A track landing inside a drag would be thrown away by its next frame.
+        if self.landings_wait() {
+            return true;
+        }
         let id = ids::AUTOSAMPLE;
         match self.step_autosample(id) {
             Ok(running) => running,
@@ -359,7 +363,7 @@ impl Shell {
     }
 
     /// Stops the run, deleting the files it wrote (R73).
-    fn stop_autosample(&mut self) -> bool {
+    pub(super) fn stop_autosample(&mut self) -> bool {
         let Some(job) = self.autosample.take() else {
             return false;
         };

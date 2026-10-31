@@ -662,3 +662,36 @@ fn a_frozen_tail_that_keeps_taking_input_stays_finite() {
     let out = run_stereo_with(node.as_mut(), &silent, &silent, &[set(0, FREEZE, 0.0)]);
     assert!(out[0].iter().all(|s| s.is_finite()), "finite after Freeze");
 }
+
+/// 8,192 frames of noise in blocks of `block`, with Decay moving to
+/// `decay` on frame 1,000 of the run.
+fn render_with_decay_move(block: usize, decay: f64) -> [Vec<f32>; 2] {
+    let input = noise(8192);
+    let mut node = reverb(&with(&[(DECAY, 1.0)]), block);
+    let mut out = [Vec::new(), Vec::new()];
+    for (n, chunk) in input.chunks(block).enumerate() {
+        let start = n * block;
+        let events: Vec<_> = (start..start + chunk.len())
+            .contains(&1000)
+            .then(|| set((1000 - start) as u32, DECAY, decay))
+            .into_iter()
+            .collect();
+        let [l, r] = run_stereo_with(node.as_mut(), chunk, chunk, &events);
+        out[0].extend_from_slice(&l);
+        out[1].extend_from_slice(&r);
+    }
+    out
+}
+
+// Spec: architecture, offline rendering: a render is the same at any block size.
+#[test]
+fn a_decay_move_renders_bit_identical_at_any_block_size() {
+    let reference = render_with_decay_move(1, 8.0);
+    for block in [64, 512, 4096] {
+        assert_eq!(
+            reference,
+            render_with_decay_move(block, 8.0),
+            "Block size 1 vs {block} renders differ"
+        );
+    }
+}

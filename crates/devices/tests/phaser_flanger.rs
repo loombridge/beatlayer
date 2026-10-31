@@ -3,8 +3,9 @@
 use crate::common;
 use bl_devices::phaser_flanger::{
     AMOUNT, BLEND, CENTER, DOUBLER_TIME, DRY_WET, ENV_AMOUNT, ENV_ATTACK, ENV_ON, ENV_RELEASE,
-    FEEDBACK, FEEDBACK_INVERT, FLANGER_TIME, LFO_DUTY, LFO_HZ, LFO_WAVE, LFO2_HZ, LFO2_MIX, MODE,
-    NOTCHES, OUTPUT, PHASER_FLANGER, SAFE_BASS, SPREAD, WARMTH, WAVES, phaser_flanger_type,
+    FEEDBACK, FEEDBACK_INVERT, FLANGER_TIME, LFO_DUTY, LFO_HZ, LFO_WAVE, LFO2_DIVISION, LFO2_HZ,
+    LFO2_MIX, LFO2_MODE, MODE, NOTCHES, OUTPUT, PHASER_FLANGER, SAFE_BASS, SPREAD, WARMTH, WAVES,
+    phaser_flanger_type,
 };
 use bl_engine::{DeviceType, Node, Registry};
 use bl_model::{DeviceKind, ParamId, ParamKind};
@@ -451,6 +452,147 @@ fn renders_are_bit_identical_at_any_block_size() {
             out_by_size[0],
             out_by_size[i + 1],
             "Block size 1 vs {size} renders differ"
+        );
+    }
+}
+
+/// 8,192 frames of noise through the device in blocks of `block_size`, with
+/// `moves` landing on frame 1,000 of the run.
+fn render_with_moves(
+    params: &[(ParamId, f64)],
+    moves: &[(ParamId, f64)],
+    block_size: usize,
+) -> Vec<Vec<f32>> {
+    let frames = 8192;
+    let input = noise(frames);
+    let mut pf = phaser_flanger_node(params, block_size);
+    let mut collected = vec![Vec::new(); 2];
+    for chunk_start in (0..frames).step_by(block_size) {
+        let chunk = &input[chunk_start..chunk_start + block_size.min(frames - chunk_start)];
+        let events: Vec<_> = moves
+            .iter()
+            .filter(|_| (chunk_start..chunk_start + chunk.len()).contains(&1000))
+            .map(|&(param, value)| common::set((1000 - chunk_start) as u32, param, value))
+            .collect();
+        for (all, out) in collected.iter_mut().zip(run(&mut *pf, chunk, &events)) {
+            all.extend(out);
+        }
+    }
+    collected
+}
+
+// Spec: phaser-flanger R13
+#[test]
+fn a_knob_move_renders_bit_identical_at_any_block_size() {
+    let params = [(MODE, 0.0), (AMOUNT, 50.0), (LFO_HZ, 2.0), (DRY_WET, 0.0)];
+    let moves = [(DRY_WET, 100.0), (AMOUNT, 90.0)];
+    let reference = render_with_moves(&params, &moves, 1);
+    for block_size in [64, 512, 4096] {
+        assert_eq!(
+            reference,
+            render_with_moves(&params, &moves, block_size),
+            "Block size 1 vs {block_size} renders differ"
+        );
+    }
+}
+
+// Spec: phaser-flanger R9
+#[test]
+fn lfo2_sync_follows_the_tempo_at_the_playhead() {
+    use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};
+    use bl_engine::TransportInfo;
+    let params = [
+        (MODE, 1.0),
+        (LFO2_MIX, 100.0),
+        (LFO2_MODE, 1.0),
+        (LFO2_DIVISION, 3.0),
+        (AMOUNT, 100.0),
+        (DRY_WET, 50.0),
+    ];
+    let segment = |start: Ticks, bpm: f64| TempoSegment::Constant {
+        start,
+        bpm: Bpm::new(bpm).unwrap(),
+    };
+    let input = vec![common::sine(1_000.0, 0.5, 192_000); 2];
+    // The flanger's delay follows LFO2, so the level of the output moves with
+    // it: the spacing of the level's rises through its mean is LFO2's period.
+    let period = |tempo: &TempoMap, position: i64| {
+        let mut pf = phaser_flanger_node(&params, 192_000);
+        let out = common::run_at(
+            &mut *pf,
+            &input,
+            &[],
+            tempo,
+            TransportInfo {
+                playing: true,
+                position: Frames(position),
+                ..TransportInfo::default()
+            },
+        );
+        let level: Vec<f32> = out[0]
+            .chunks(480)
+            .map(|w| (w.iter().map(|s| s * s).sum::<f32>() / w.len() as f32).sqrt())
+            .collect();
+        let mean = level[10..].iter().sum::<f32>() / (level.len() - 10) as f32;
+        let rises: Vec<usize> = (11..level.len())
+            .filter(|&i| level[i - 1] < mean && level[i] >= mean)
+            .collect();
+        assert!(rises.len() >= 3, "the level moves: {rises:?}");
+        (rises[rises.len() - 1] - rises[0]) as f64 * 480.0 / (rises.len() - 1) as f64
+    };
+    let changing = TempoMap::new([
+        segment(Ticks::ZERO, 60.0),
+        segment(Ticks::from_quarters(4), 120.0),
+    ])
+    .unwrap();
+    let at_60 = period(&TempoMap::new([segment(Ticks::ZERO, 60.0)]).unwrap(), 0);
+    let at_120 = period(&TempoMap::new([segment(Ticks::ZERO, 120.0)]).unwrap(), 0);
+    let after_the_change = period(&changing, 8 * 48_000);
+    assert!(
+        (at_60 / at_120 - 2.0).abs() < 0.05,
+        "the control: {at_60} and {at_120}"
+    );
+    assert!(
+        (after_the_change - at_120).abs() < 0.02 * at_120,
+        "past the change LFO2 runs at 120 BPM: {after_the_change}, not {at_120}"
+    );
+}
+
+/// One second of noise through a 16-notch Phaser in blocks of `block_size`.
+fn sixteen_notches(block_size: usize) -> Vec<f32> {
+    let params = [(MODE, 0.0), (NOTCHES, 16.0), (AMOUNT, 60.0), (LFO_HZ, 3.0)];
+    let input = noise(48_000);
+    let mut pf = phaser_flanger_node(&params, block_size);
+    input
+        .chunks(block_size)
+        .flat_map(|chunk| run(&mut *pf, chunk, &[])[0].clone())
+        .collect()
+}
+
+/// The render's samples at the frames of `PHASER_GOLDEN_AT`, captured from
+/// the device before its all-pass coefficients were cached.
+const PHASER_GOLDEN_AT: [usize; 8] = [1, 500, 4_000, 12_000, 20_000, 30_000, 40_000, 47_999];
+const PHASER_GOLDEN: [f32; 8] = [
+    -0.5912591,
+    -0.029906422,
+    0.24168205,
+    0.1941399,
+    0.602565,
+    -0.63989145,
+    -0.077145614,
+    -0.45370603,
+];
+
+// Spec: phaser-flanger R13
+#[test]
+fn sixteen_notches_render_the_same_at_any_block_size_and_as_before() {
+    let out = sixteen_notches(64);
+    assert_eq!(out, sixteen_notches(512), "block sizes 64 and 512 differ");
+    for (&at, &want) in PHASER_GOLDEN_AT.iter().zip(&PHASER_GOLDEN) {
+        assert!(
+            (out[at] - want).abs() < 1e-4,
+            "frame {at}: {} isn't {want}",
+            out[at]
         );
     }
 }

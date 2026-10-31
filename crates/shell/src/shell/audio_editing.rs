@@ -189,6 +189,9 @@ impl Shell {
                 done
             }
             Err(error) => {
+                // Files still being written land inside the transaction, so
+                // cancelling takes their edits back too.
+                self.wait_processed();
                 self.editor.cancel().ok();
                 return Err(error);
             }
@@ -260,8 +263,9 @@ impl Shell {
                 parts.push((track, clip, lands));
             }
         }
-        let landed: Rc<RefCell<Vec<Reversed>>> = Rc::new(RefCell::new(Vec::new()));
-        let done = Rc::clone(&landed);
+        // Every part's file is checked before any is queued: a missing file
+        // fails the command with nothing written.
+        let mut checked = Vec::new();
         for (track, clip, lands) in parts {
             let Some(value) = self.editor.document().clip(clip).cloned() else {
                 continue;
@@ -274,6 +278,12 @@ impl Shell {
                 .edited_audio(audio.media, &[])
                 .ok_or_else(|| failed(id, "a clip's file is missing"))?;
             let seconds = decoded.frames() as f64 / f64::from(decoded.sample_rate());
+            checked.push((track, clip, lands, audio, seconds));
+        }
+        let queued = checked.len();
+        let landed: Rc<RefCell<Vec<Reversed>>> = Rc::new(RefCell::new(Vec::new()));
+        let done = Rc::clone(&landed);
+        for (track, clip, lands, audio, seconds) in checked {
             let slot = Rc::clone(&done);
             self.reverse_file(id, &audio, move |shell, written| {
                 let hash = ContentHash(*written.hash.as_bytes());
@@ -306,6 +316,11 @@ impl Shell {
             .map_err(|error| failed(id, error))?;
         }
         self.wait_processed();
+        // A part whose file or edit failed didn't land, and the span is then
+        // not reversed as a whole.
+        if landed.borrow().len() != queued {
+            return Err(failed(id, "a reversed file couldn't be written"));
+        }
         Ok(landed.borrow().clone())
     }
 
@@ -740,6 +755,9 @@ impl Shell {
                 ))
             }
             Err(error) => {
+                // Files still being written land inside the transaction, so
+                // cancelling takes their edits back too.
+                self.wait_processed();
                 self.editor.cancel().ok();
                 Err(error)
             }
@@ -761,6 +779,18 @@ impl Shell {
         let landed: Rc<RefCell<Vec<Landed>>> = Rc::new(RefCell::new(Vec::new()));
         let broke: Rc<Cell<bool>> = Rc::new(Cell::new(false));
         let mut order: Vec<(usize, TrackId, ClipId, Option<String>)> = Vec::new();
+        // Every audio track is rendered before any file is queued: a render
+        // that fails fails the command with nothing written.
+        let mut renders = Vec::new();
+        for (lane, _) in &material {
+            let audio = self.editor.document().track(lane.track).map(|t| t.kind())
+                == Some(TrackKind::Audio);
+            renders.push(if audio {
+                Some(self.consolidate_audio(id, *lane, start, end)?)
+            } else {
+                None
+            });
+        }
         for (index, entry) in material.iter().enumerate() {
             let lane = entry.0;
             let track = lane.track;
@@ -795,7 +825,7 @@ impl Shell {
                 }
                 Some(TrackKind::Audio) => {
                     let (frames, channels, gain, markers, tempo) =
-                        self.consolidate_audio(id, lane, start, end)?;
+                        renders[index].take().expect("an audio track was rendered");
                     let label = crate::routing::track_label(self.editor.document(), track);
                     let file = format!("{label} Consolidate [{}].wav", crate::recording::stamp());
                     let rate = self.engine_rate();
@@ -1460,6 +1490,13 @@ pub(super) fn consolidate_document(
             level: 0.0,
         })
         .map_err(|error| error.to_string())?;
+    }
+    // Setting a fader turns its envelope off only when the value changes, so
+    // drop the envelopes: the devices and sends are off, and the mixer isn't
+    // taken (R20).
+    for id in [track, main] {
+        doc.apply(&Command::ClearTrackAutomation { track: id })
+            .map_err(|error| error.to_string())?;
     }
     doc.apply(&Command::SetMute { track, mute: false })
         .map_err(|error| error.to_string())?;

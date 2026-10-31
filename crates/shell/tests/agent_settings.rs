@@ -551,3 +551,53 @@ fn without_a_keychain_the_tokens_last_the_session_and_never_reach_the_file() {
     assert!(text.contains("goose"), "{text}");
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn ungrouping_is_destructive_only_when_the_group_track_holds_something() {
+    // Spec: agent-permissions R1. The group track is deleted with what is on
+    // it; an empty group with the mixer as it was made loses nothing.
+    let mut shell = Shell::headless();
+    let midi = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == bl_model::TrackKind::Midi)
+        .unwrap()
+        .id();
+    let grouped = shell
+        .run("track.group", json!({ "tracks": [midi] }))
+        .unwrap();
+    let group = grouped["track"].clone();
+    let before = shell.editor().document().clone();
+    let empty = shell.call_permission("track.ungroup", &json!({ "track": group }));
+    assert!(!empty.is_destructive(), "{empty:?}");
+    // Left out, `track` is the selected track, as the command takes it.
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [group] }))
+        .unwrap();
+    assert!(
+        !shell
+            .call_permission("track.ungroup", &json!({}))
+            .is_destructive()
+    );
+
+    shell
+        .run("mixer.set_volume", json!({ "track": group, "volume": 0.5 }))
+        .unwrap();
+    let held = shell.call_permission("track.ungroup", &json!({ "track": group }));
+    assert!(held.is_destructive(), "{held:?}");
+    assert_eq!(
+        held.deletes_track.map(|track| json!(track)),
+        Some(group.clone())
+    );
+    assert!(
+        shell
+            .call_permission("track.ungroup", &json!({}))
+            .is_destructive()
+    );
+    assert_ne!(
+        *shell.editor().document(),
+        before,
+        "only the volume changed"
+    );
+}

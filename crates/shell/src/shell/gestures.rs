@@ -35,6 +35,7 @@ use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::remote as remote_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use serde_json::Value;
@@ -67,6 +68,16 @@ impl Shell {
             || (self.gesture && self.key_edit.is_none())
             // Spec: second-window R23. Clips dragged between the views.
             || self.clip_drag.is_some()
+    }
+
+    /// Whether work that finishes in the background must wait to edit the
+    /// set: a transaction is open, a drag's or a value's or a selected
+    /// breakpoint's, and an edit made now would join its undo step, and a
+    /// drag's next frame would throw it away. A Session recording's own
+    /// transaction, open from its start to its end, doesn't hold back the
+    /// take that ends it.
+    pub(super) fn landings_wait(&self) -> bool {
+        self.editor.in_transaction() && self.session_run.is_none()
     }
 
     /// Runs a command as [`Shell::run`] does, recording what it changes in
@@ -104,6 +115,22 @@ impl Shell {
                 // this one holds, so the step carries the label given.
                 || session_ids::handles(id)
                 || id == plugin_ids::LOAD
+                // Each of these opens its own transaction, which records the
+                // person as its maker unless this one holds it.
+                || locator_ids::handles(id)
+                || clip_envelope_ids::handles(id)
+                || bl_shell_spec::envelope_keys::handles(id)
+                || bl_shell_spec::cv::handles(id)
+                || automation_ids::handles(id)
+                || comping_ids::handles(id)
+                || matches!(
+                    id,
+                    remote_ids::MAP
+                        | remote_ids::UNMAP
+                        | remote_ids::SET_RANGE
+                        | remote_ids::INVERT_RANGE
+                        | remote_ids::SET_MODE
+                )
                 || matches!(
                     id,
                     browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED

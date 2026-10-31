@@ -963,3 +963,59 @@ fn undo_and_redo_restore_every_step_of_a_long_session_exactly() {
         assert_eq!(s.doc(), version);
     }
 }
+
+// Spec: clip-envelopes R7. A pasted clip keeps only the envelopes naming
+// parameters its new track has, and a paste isn't refused for the rest.
+#[test]
+fn a_pasted_clip_leaves_the_envelopes_its_track_cant_take() {
+    let mut song = midi_song(&[(0, 2, 0)]);
+    let (a, b) = (song.tracks[0], song.tracks[1]);
+    let clip = song.clips[0];
+    let device: bl_model::DeviceId = song.shell.new_id();
+    song.shell
+        .run(
+            "device.insert",
+            json!({ "track": a, "index": 0, "device": {
+                "id": device, "name": "Utility", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": "beatlayer.utility" } } } }),
+        )
+        .unwrap();
+    let target = json!({ "type": "device", "device": device, "param": 10 });
+    for at in [0, BAR] {
+        song.shell
+            .run(
+                "clip.set_envelope_breakpoint",
+                json!({ "clip": clip, "target": target, "kind": "modulation",
+                        "at": at, "value": 0.5 }),
+            )
+            .unwrap();
+    }
+    song.shell
+        .run(ids::COPY, json!({ "clips": [clip] }))
+        .unwrap();
+
+    // Onto a track with no such device the clip is pasted without it.
+    song.shell
+        .run(ids::PASTE, json!({ "track": b, "at": 0 }))
+        .unwrap();
+    let pasted: Vec<Clip> = song.doc().track(b).unwrap().clips().cloned().collect();
+    assert_eq!(pasted.len(), 1);
+    assert!(
+        pasted[0].envelopes.is_empty(),
+        "the envelope is left behind"
+    );
+    assert_eq!(song.clip(clip).envelopes.len(), 1, "the source keeps it");
+
+    // Back onto its own track the clip keeps it.
+    song.shell
+        .run(ids::PASTE, json!({ "track": a, "at": 4 * BAR }))
+        .unwrap();
+    let later = song
+        .doc()
+        .track(a)
+        .unwrap()
+        .clips()
+        .find(|c| c.start == Ticks(4 * BAR))
+        .expect("the pasted clip");
+    assert_eq!(later.envelopes.len(), 1);
+}

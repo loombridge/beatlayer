@@ -289,7 +289,10 @@ pub fn run(
                             id: editor.new_id(),
                             ..clip
                         };
+                        let scale = clip.scale;
+                        let made = clip.id;
                         apply(editor, Command::CreateTakeClip { lane: copy, clip })?;
+                        crate::tracks::keep_scale(editor, made, scale)?;
                     }
                     copies.push(copy);
                 }

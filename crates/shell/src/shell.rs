@@ -810,6 +810,9 @@ pub struct Shell {
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
+    /// Which set the clipboard's clips and scenes were copied in, as
+    /// `editor_generation` counts them.
+    clipboard_set: u64,
     /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
     /// as Live keeps it, and never part of a set.
     envelope_clipboard: Option<EnvelopeClipboard>,
@@ -931,6 +934,12 @@ pub struct Shell {
     recording: Option<crate::recording::Recording>,
     /// What the last recording that ended came to, for `transport.state`.
     last_recording: Option<RecordingReport>,
+    /// A take that ended while a transaction was open, kept until it closes
+    /// so its clips don't land inside a drag's undo step.
+    pending_recording: Option<crate::recording::Outcome>,
+    /// Parameter changes plug-ins made while a transaction was open, kept
+    /// until it closes for the same reason.
+    pending_param_changes: Vec<(bl_model::DeviceId, bl_model::ParamId, f64)>,
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
@@ -1396,6 +1405,7 @@ impl Shell {
             document_revision: 0,
             tap: crate::tap_tempo::TapRun::default(),
             clipboard: None,
+            clipboard_set: 0,
             envelope_clipboard: None,
             clip_drag: None,
             edit_gesture: None,
@@ -1422,6 +1432,8 @@ impl Shell {
             previews: crate::perception::Previews::default(),
             recording: None,
             last_recording: None,
+            pending_recording: None,
+            pending_param_changes: Vec::new(),
             recorded_takes: 0,
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
@@ -1508,12 +1520,14 @@ impl Shell {
     /// command will create, and restoring a checkpoint. It runs document
     /// commands with `bl_model::registry::run`, as [`Shell::run`] does.
     ///
-    /// `edit` must leave no transaction open.
+    /// `edit` must leave no transaction open that it didn't find open: a
+    /// command run inside [`Shell::run_labelled`]'s transaction edits within it.
     pub fn edit<T>(&mut self, edit: impl FnOnce(&mut Editor) -> T) -> T {
         let before = self.editor.document().clone();
+        let nested = self.editor.in_transaction();
         let result = edit(&mut self.editor);
         debug_assert!(
-            !self.editor.in_transaction(),
+            nested || !self.editor.in_transaction(),
             "an edit left a transaction open"
         );
         if !ChangeSet::between(&before, self.editor.document()).is_empty() {

@@ -106,9 +106,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "Replaces an audio clip's file with the file at `path`, as dropping a file from \
                  the browser on the Clip View does: the clip keeps its gain and pitch, and its \
                  warp markers only if the new file is exactly as long as the old one. One undo \
-                 step.",
+                 step. Reads a file outside the project.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(ClipView)
             .args::<ReplaceSampleArgs>()
             .result::<ReplacedSample>(),
@@ -136,6 +136,6 @@ mod tests {
         assert!(problems.is_empty(), "{problems:#?}");
         let class = |id: &str| registry.get(id).unwrap().permission;
         assert_eq!(class(EDIT_SAMPLE), Some(Permission::External));
-        assert_eq!(class(REPLACE_SAMPLE), Some(Permission::Edit));
+        assert_eq!(class(REPLACE_SAMPLE), Some(Permission::External));
     }
 }

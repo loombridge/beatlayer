@@ -415,9 +415,9 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  a file from the browser on the row does: every clip and device that used the \
                  file uses the new one, in one undo step, each keeping its warp markers only if \
                  the new file is exactly as long as the old one. A missing file is relinked to \
-                 the file given, whatever its content.",
+                 the file given, whatever its content. Reads a file outside the project.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(Global)
             .args::<ReplaceFileArgs>()
             .result::<ReplacedFile>(),

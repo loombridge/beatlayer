@@ -272,6 +272,9 @@ impl InstrumentFilter {
             return;
         }
         self.setup = setup;
+        // shortcut: a change during a fade reuses the fading structure for the
+        // new one, cutting that fade short; upgrade to a third structure if
+        // changes under 5 ms apart ever click.
         if self.played {
             self.current = 1 - self.current;
             self.fade_left = self.fade_frames;
@@ -507,7 +510,7 @@ impl Stage {
             if silent && states.iter().all(|s| s.iter().all(|v| *v == 0.0)) {
                 continue;
             }
-            let mut coef = Coef::of(setup, self.rate, 0.0, 0.0, 0.0, 0.0);
+            let mut coef = Coef::of(setup, 0.0, 0.0, 0.0, 0.0);
             let mut seen = [f32::NAN; 4];
             for frame in 0..frames {
                 let now = [
@@ -516,10 +519,15 @@ impl Stage {
                     c.morph.at(frame, stride, lane),
                     c.drive.at(frame, stride, lane),
                 ];
-                if now != seen {
-                    seen = now;
-                    coef = Coef::of(setup, self.rate, now[0], now[1], now[2], now[3]);
+                // The cutoff moves most often, and costs a `tan`; the rest costs
+                // a few `powf`s.
+                if now[0] != seen[0] {
+                    coef.g = prewarp(self.rate, now[0]);
                 }
+                if now[1..] != seen[1..] {
+                    coef = Coef::of(setup, coef.g, now[1], now[2], now[3]);
+                }
+                seen = now;
                 for (channel, state) in states.iter_mut().enumerate() {
                     let at = (frame * 2 + channel) * stride + lane;
                     let y = tick(setup, &coef, state, f64::from(audio[at]));
@@ -544,11 +552,17 @@ struct Coef {
     k: f64,
 }
 
+/// The prewarped cutoff of `pitch` (the kit's semitones) at `rate`, held to
+/// 0.45 of it (R12).
+fn prewarp(rate: f64, pitch: f32) -> f64 {
+    let hz = f64::from(hertz_of(pitch, REFERENCE_HZ));
+    let hz = if hz.is_finite() { hz } else { 1_000.0 };
+    (PI * hz.clamp(1.0, rate * CUTOFF_LIMIT) / rate).tan()
+}
+
 impl Coef {
-    fn of(setup: Setup, rate: f64, pitch: f32, res: f32, morph: f32, drive: f32) -> Self {
-        let hz = f64::from(hertz_of(pitch, REFERENCE_HZ));
-        let hz = if hz.is_finite() { hz } else { 1_000.0 };
-        let g = (PI * hz.clamp(1.0, rate * CUTOFF_LIMIT) / rate).tan();
+    /// The coefficients for prewarped cutoff `g` and the controls.
+    fn of(setup: Setup, g: f64, res: f32, morph: f32, drive: f32) -> Self {
         let r = if res.is_finite() {
             f64::from(res).clamp(0.0, 1.0)
         } else {

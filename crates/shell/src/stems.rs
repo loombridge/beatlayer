@@ -296,6 +296,16 @@ fn download(package: &Package, part: &Path, progress: &Progress) -> Result<(), S
     if !(200..300).contains(&status) {
         return Err(failed(&format!("the server answered {status}")));
     }
+    let offered = response
+        .headers()
+        .get("content-length")
+        .and_then(|v| v.to_str().ok()?.parse::<u64>().ok());
+    if let Some(len) = offered.filter(|&len| len != package.size) {
+        return Err(failed(&format!(
+            "the server offered {len} bytes, not the {} expected",
+            package.size
+        )));
+    }
     let mut body = response.into_body().into_reader();
     let mut file = std::fs::File::create(part).map_err(|e| failed(&e))?;
     let mut hasher = Sha256::new();
@@ -308,6 +318,12 @@ fn download(package: &Package, part: &Path, progress: &Progress) -> Result<(), S
         let n = body.read(&mut buffer).map_err(|e| failed(&e))?;
         if n == 0 {
             break;
+        }
+        if received + n as u64 > package.size {
+            return Err(failed(&format!(
+                "it was more than the {} bytes expected",
+                package.size
+            )));
         }
         hasher.update(&buffer[..n]);
         file.write_all(&buffer[..n]).map_err(|e| failed(&e))?;
@@ -595,5 +611,63 @@ mod tests {
         assert_eq!(&frames[..4], &[0.0; 4]);
         // Bass is 1, Vocals 3.
         assert_eq!(&frames[4..6], &[4.0, -4.0]);
+    }
+
+    /// Serves one response of `head` and 1 MiB of zeros, and gives its address.
+    fn serve_a_mebibyte(head: &'static str) -> std::net::SocketAddr {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0u8];
+            while !request.ends_with(b"\r\n\r\n") {
+                if stream.read(&mut byte).unwrap_or(0) == 0 {
+                    return;
+                }
+                request.push(byte[0]);
+            }
+            let _ = stream.write_all(head.as_bytes());
+            let _ = stream.write_all(&vec![0u8; 1 << 20]);
+        });
+        addr
+    }
+
+    /// Downloads from `addr` a package of 1024 zero bytes; gives the outcome,
+    /// the bytes counted and the bytes left on disk.
+    fn download_from(addr: std::net::SocketAddr, name: &str) -> (Result<(), String>, u64, u64) {
+        let dir = std::env::temp_dir().join(format!("bl-shell-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let part = dir.join(".download");
+        let package = Package {
+            size: 1024,
+            sha256: Box::leak(hex(&Sha256::digest([0u8; 1024])).into_boxed_str()),
+            download: Box::leak(format!("http://{addr}/m.onnx").into_boxed_str()),
+            ..model()
+        };
+        let progress = Progress::default();
+        let result = download(&package, &part, &progress);
+        let counted = progress.done.load(Ordering::Relaxed);
+        let left = std::fs::metadata(&part).map_or(0, |m| m.len());
+        let _ = std::fs::remove_file(&part);
+        (result, counted, left)
+    }
+
+    #[test]
+    fn an_oversized_download_stops_at_the_expected_size() {
+        let addr = serve_a_mebibyte("HTTP/1.1 200 OK\r\nConnection: close\r\n\r\n");
+        let (result, counted, left) = download_from(addr, "stems-endless");
+        assert!(result.is_err());
+        assert!(counted <= 1024 && left <= 1024, "{counted} {left}");
+    }
+
+    #[test]
+    fn a_download_offered_at_the_wrong_length_is_refused_before_it_is_written() {
+        let addr = serve_a_mebibyte(
+            "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Length: 1048576\r\n\r\n",
+        );
+        let (result, counted, left) = download_from(addr, "stems-offered");
+        assert!(result.is_err());
+        assert_eq!((counted, left), (0, 0));
     }
 }

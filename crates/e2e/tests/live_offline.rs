@@ -390,25 +390,6 @@ fn play_and_export(host: &mut Host, range: Range) -> Comparison {
     let live = host.play_exactly(range.start, range.millis + MARGIN_MS);
     let offline = host.export(range.start, range.length, &ExportSpec::default());
     let comparison = Comparison::of(offline, &live);
-    if comparison.live.peak_dbfs() < -60.0 {
-        // DIAG (T646, temporary)
-        let state = host.shell_mut().audio_mut().transport_state();
-        let stats = host.shell().audio().stats();
-        let disk = host.shell().audio().disk_stats();
-        eprintln!(
-            "DIAG silent live: raw {} frames peak {:.1}, state {state:?}, stats {stats:?}, disk {disk:?}",
-            live.frames(),
-            live.peak_dbfs()
-        );
-        for k in 0..3 {
-            let again = host.play_exactly(range.start, range.millis + MARGIN_MS);
-            eprintln!(
-                "DIAG replay {k}: {} frames peak {:.1}",
-                again.frames(),
-                again.peak_dbfs()
-            );
-        }
-    }
     bl_e2e::audio::assert_sounds(&comparison.offline, "the export", -60.0);
     bl_e2e::audio::assert_sounds(&comparison.live, "the live capture", -60.0);
     comparison
@@ -426,27 +407,6 @@ fn case(ratchet: &mut Ratchet, name: &str, range: Range, build: impl FnOnce(&mut
         "{name}: residual {:.1} dB, first difference {:?}",
         comparison.residual_db, comparison.first_difference
     );
-    if comparison.first_difference.is_some() && name.starts_with("warp/") {
-        // DIAG (T646, temporary)
-        let wide = best_alignment(&comparison.offline, &comparison.live, 30_000, 4_096);
-        let head = |a: &Audio| a.channels[0][..6].to_vec();
-        eprintln!(
-            "DIAG {name}: wide lag {} corr {:.4}, offline head {:?}, live head {:?}, live frames {}",
-            wide.lag,
-            wide.correlation,
-            head(&comparison.offline),
-            head(&comparison.live),
-            comparison.live.frames()
-        );
-        for again in 0..2 {
-            let second = host.play_exactly(range.start, range.millis + MARGIN_MS);
-            let c2 = Comparison::of(comparison.offline.clone(), &second);
-            eprintln!(
-                "DIAG {name}: replay {again}: first difference {:?}, residual {:.1} dB",
-                c2.first_difference, c2.residual_db
-            );
-        }
-    }
     ratchet.check(name, MATCHES, comparison.exact());
 }
 
@@ -477,7 +437,6 @@ fn warped_case(ratchet: &mut Ratchet, material: &str, mode: &str, bpm: f64) {
             place(host, track, &path, 0)
         };
         warp(host, clip, mode, bpm);
-        host.play_from(0, 50);
     });
 }
 
@@ -486,22 +445,19 @@ fn warped_case(ratchet: &mut Ratchet, material: &str, mode: &str, bpm: f64) {
 // case included: a loop at 110 BPM stretched to the set's 120.
 #[test]
 fn each_warp_mode_plays_live_as_it_exports() {
-    // DIAG (T646, temporary): three rounds, to catch a rare silent capture.
-    for _ in 0..3 {
-        let mut ratchet = Known::load().ratchet(SUITE);
-        let tempos: &[f64] = if full_depth() {
-            &[110.0, 90.0, 132.0]
-        } else {
-            &[110.0]
-        };
-        for &bpm in tempos {
-            for mode in MODES {
-                warped_case(&mut ratchet, "drum loop", mode, bpm);
-                warped_case(&mut ratchet, "melody", mode, bpm);
-            }
+    let mut ratchet = Known::load().ratchet(SUITE);
+    let tempos: &[f64] = if full_depth() {
+        &[110.0, 90.0, 132.0]
+    } else {
+        &[110.0]
+    };
+    for &bpm in tempos {
+        for mode in MODES {
+            warped_case(&mut ratchet, "drum loop", mode, bpm);
+            warped_case(&mut ratchet, "melody", mode, bpm);
         }
-        ratchet.finish();
     }
+    ratchet.finish();
 }
 
 // Spec: warp-modes R8. A change to a playing clip's mode crossfades from

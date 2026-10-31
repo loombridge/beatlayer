@@ -754,3 +754,127 @@ fn the_envelope_editors_delete_and_tab_answer_only_with_a_breakpoint() {
     editor.keys(ids::DELETE_BREAKPOINT, json!({}));
     assert_eq!(editor.points().len(), 2);
 }
+
+fn clip_setting(param: &str) -> Value {
+    json!({ "type": "clip", "param": param })
+}
+
+impl Song {
+    /// The audio clip's envelope for `target`, as `(ticks, value)`.
+    fn clip_envelope(&self, clip: bl_model::ClipId, target: &Value) -> Vec<(i64, f64)> {
+        let target: AutomationTarget = serde_json::from_value(target.clone()).unwrap();
+        self.doc()
+            .clip(clip)
+            .unwrap()
+            .envelope(&target)
+            .map(|e| e.envelope.points().map(|p| (p.at.get(), p.value)).collect())
+            .unwrap_or_default()
+    }
+}
+
+// Spec: warp-modes R29, clip-envelopes R14. A clip's Gain envelope is a share
+// from 0 to 100 %, and an offset envelope is in the setting's units, so an
+// arrow key moves them by 1 % of their travel rather than through the
+// setting's own descriptor.
+#[test]
+fn a_clip_gain_breakpoint_steps_as_a_share() {
+    let mut song = song();
+    let clip = song
+        .doc()
+        .track(song.track)
+        .unwrap()
+        .clips()
+        .next()
+        .unwrap()
+        .id;
+    song.run("arrangement.select_clips", json!({ "clips": [clip] }));
+    song.run("view.toggle_clip_view", json!({}));
+    song.run("view.clip_tab", json!({ "tab": "envelopes" }));
+    let gain = clip_setting("gain");
+    song.run("view.clip_envelope", json!({ "target": gain }));
+    song.shell.set_focused_area(Area::Detail);
+    song.run(
+        "clip.set_envelope_breakpoint",
+        json!({ "clip": clip, "target": gain, "at": Ticks(0), "value": 100.0 }),
+    );
+    song.run(
+        ids::SELECT_ENVELOPE_BREAKPOINT,
+        json!({ "clip": clip, "target": gain, "at": Ticks(0) }),
+    );
+    song.keys(ids::MOVE_SELECTED, json!({ "direction": "down" }));
+    let at_zero = |song: &Song| song.clip_envelope(clip, &gain)[0].1;
+    assert!((at_zero(&song) - 99.0).abs() < 1e-9, "{}", at_zero(&song));
+    for _ in 0..2 {
+        song.keys(ids::MOVE_SELECTED, json!({ "direction": "up" }));
+    }
+    assert!((at_zero(&song) - 100.0).abs() < 1e-9, "held at the top");
+    assert_eq!(
+        song.shell.keyboard_breakpoint_text(Ticks(0)).as_deref(),
+        Some("100%")
+    );
+    // Typed text is a share too, with or without its percent sign.
+    song.run(ids::SET_VALUE, json!({ "text": "40%" }));
+    assert!((at_zero(&song) - 40.0).abs() < 1e-9, "{}", at_zero(&song));
+
+    // Texture Flux's envelope is an offset in per cent, from -100 to 100.
+    song.run(
+        "clip.set_warp_mode",
+        json!({ "clip": clip, "mode": "texture" }),
+    );
+    let flux = clip_setting("texture_flux");
+    song.run("view.clip_envelope", json!({ "target": flux }));
+    song.run(
+        "clip.set_envelope_breakpoint",
+        json!({ "clip": clip, "target": flux, "at": Ticks(0), "value": -20.0 }),
+    );
+    song.run(
+        ids::SELECT_ENVELOPE_BREAKPOINT,
+        json!({ "clip": clip, "target": flux, "at": Ticks(0) }),
+    );
+    song.keys(ids::MOVE_SELECTED, json!({ "direction": "up" }));
+    let flux_value = song.clip_envelope(clip, &flux)[0].1;
+    assert!((flux_value + 19.0).abs() < 1e-9, "{flux_value}");
+    assert_eq!(
+        song.shell.keyboard_breakpoint_text(Ticks(0)).as_deref(),
+        Some("-19 %")
+    );
+}
+
+// Spec: warp-modes R28. A track's lane for a clip setting holds the setting's
+// own values, so typed text reads in its unit.
+#[test]
+fn a_clip_setting_lane_reads_typed_values_in_its_units() {
+    let mut song = song();
+    let target = clip_setting("transpose");
+    song.run(view_ids::AUTOMATION_MODE, json!({ "on": true }));
+    song.run(
+        view_ids::SHOW_AUTOMATION,
+        json!({ "track": song.track, "target": target }),
+    );
+    song.run(
+        "automation.set_breakpoint",
+        json!({ "track": song.track, "target": target, "at": Ticks(0), "value": 0 }),
+    );
+    song.run(
+        ids::SELECT_BREAKPOINT,
+        json!({ "track": song.track, "target": target, "at": Ticks(0) }),
+    );
+    song.run(ids::SET_VALUE, json!({ "text": "12" }));
+    let target: AutomationTarget = serde_json::from_value(target).unwrap();
+    let value = song
+        .doc()
+        .track(song.track)
+        .unwrap()
+        .automation_for(&target)
+        .unwrap()
+        .envelope
+        .points()
+        .next()
+        .unwrap()
+        .value;
+    assert!((value - 12.0).abs() < 1e-9, "{value}");
+    assert_eq!(
+        song.shell.keyboard_breakpoint_text(Ticks(0)).as_deref(),
+        Some("12 st")
+    );
+}

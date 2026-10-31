@@ -43,18 +43,6 @@ property = "value clamped to the parameter's range"
 description = "mixer.set_volume with a volume of 7.0 (about +16.9 dB) succeeds and stores 7.0, above the fader's top of +6 dB (gain 1.995). The model checks only that the volume is finite and at least 0 (crates/model/src/command.rs, Command::SetVolume)."
 
 [[failure]]
-suite = "commands"
-key = "track.set_bounced"
-property = "invariants hold"
-description = "track.set_bounced naming the Main track (with any bounced contents, such as just a name) succeeds and turns Main into an audio track, so the set no longer has exactly one Main track and fails Document::check_invariants. The apply (crates/model/src/command.rs, Command::BounceTrackInPlace and replace_with_bounced/fill_bounced) never checks the track's kind; a return or group track is replaced the same way."
-
-[[failure]]
-suite = "commands"
-key = "track.set_bounced"
-property = "no panic"
-description = "track.set_bounced naming a return track (the rich set's Verb, which the other tracks send to) succeeds and turns the return into an audio track while the sends to it stay. The engine's compiler then finds a loop in the routing graph and panics (debug assertion at crates/engine/src/compiler.rs:2645, \"the routing graph has no loop\"), so the engine never takes the set. The model's apply (Command::BounceTrackInPlace in crates/model/src/command.rs) never checks the track's kind."
-
-[[failure]]
 suite = "live_offline"
 key = "warp/complex/drum loop 110 to 120 BPM"
 property = "live matches offline"
@@ -185,43 +173,6 @@ suite = "live_offline"
 key = "flac/mono/24/192000"
 property = "length"
 description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate"
-property = "finishes without a window"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate_to_scene"
-property = "finishes without a window"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "clip.slice_to_midi_track of a warped clip"
-property = "finishes without a window"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate"
-property = "finishes in the app"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate_to_scene"
-property = "finishes in the app"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "clip.slice_to_midi_track of a warped clip"
-property = "finishes in the app"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."
-
 
 [[failure]]
 suite = "background"

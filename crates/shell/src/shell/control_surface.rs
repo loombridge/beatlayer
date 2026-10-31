@@ -16,6 +16,7 @@ use bl_commands::{NoArgs, Permission};
 use bl_control::{
     Ask, CommandRequest, ReadModel, RowConfig, RowReport, RunState, Selection, Transport,
 };
+use bl_model::TrackId;
 use bl_shell_spec::control_surface as ids;
 use serde_json::Value;
 
@@ -57,6 +58,9 @@ pub(super) struct SurfaceHost {
     /// The browser's lists a surface that browses reads, what they were made
     /// from and their revision (push-2-tracks R13).
     catalogue: Option<CatalogueCopy>,
+    /// The first selected track's In/Out section as a surface reads it, and
+    /// the document revision and track it was made for (push-2-tracks R31).
+    in_out: Option<((u64, TrackId), Option<bl_control::mix::InOut>)>,
 }
 
 /// The lists as last copied, the browser's state they were made from, and
@@ -92,6 +96,96 @@ fn info(report: RowReport, row: usize) -> ids::RowInfo {
         can_dump: report.can_dump,
         surface_state: None,
     }
+}
+
+/// A chooser as a surface reads it: the entries that set routing, in order.
+fn mix_chooser(chooser: &crate::routing::Chooser) -> bl_control::mix::Chooser {
+    let entries = chooser
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            crate::routing::Entry::Choice {
+                label,
+                run: Some(run),
+                chosen,
+                ..
+            } if run.id.starts_with("routing.set_")
+                && !matches!(
+                    run.id.as_str(),
+                    "routing.set_cue_out" | "routing.set_main_out"
+                ) =>
+            {
+                Some(bl_control::mix::Entry {
+                    label: label.clone(),
+                    chosen: *chosen,
+                    command: run.id.clone(),
+                    args: run.args.clone(),
+                })
+            }
+            _ => None,
+        })
+        .collect();
+    bl_control::mix::Chooser {
+        name: chooser.name.to_owned(),
+        text: chooser.text.clone(),
+        entries,
+    }
+}
+
+/// A track's In/Out section for Mix Mode (push-2-tracks R31): Main's
+/// choosers pick interface outputs, which Input & Output leaves to the
+/// window.
+fn mix_in_out(track: TrackId, in_out: &crate::routing::InOut) -> bl_control::mix::InOut {
+    use crate::routing::InOut;
+    let mut choosers: [Option<bl_control::mix::Chooser>; 5] = Default::default();
+    match in_out {
+        InOut::Clips {
+            input,
+            input_channel,
+            monitor,
+            output,
+            output_channel,
+            ..
+        } => {
+            choosers[0] = Some(mix_chooser(input));
+            choosers[1] = Some(mix_chooser(input_channel));
+            choosers[2] = Some(bl_control::mix::Chooser {
+                name: "Monitor".to_owned(),
+                text: match monitor.chosen {
+                    bl_model::Monitor::In => "In",
+                    bl_model::Monitor::Auto => "Auto",
+                    bl_model::Monitor::Off => "Off",
+                }
+                .to_owned(),
+                entries: monitor
+                    .runs
+                    .iter()
+                    .map(|(state, run)| bl_control::mix::Entry {
+                        label: match state {
+                            bl_model::Monitor::In => "In",
+                            bl_model::Monitor::Auto => "Auto",
+                            bl_model::Monitor::Off => "Off",
+                        }
+                        .to_owned(),
+                        chosen: *state == monitor.chosen,
+                        command: run.id.clone(),
+                        args: run.args.clone(),
+                    })
+                    .collect(),
+            });
+            choosers[3] = Some(mix_chooser(output));
+            choosers[4] = Some(mix_chooser(output_channel));
+        }
+        InOut::Output {
+            output,
+            output_channel,
+        } => {
+            choosers[3] = Some(mix_chooser(output));
+            choosers[4] = Some(mix_chooser(output_channel));
+        }
+        InOut::Main { .. } => {}
+    }
+    bl_control::mix::InOut { track, choosers }
 }
 
 impl Shell {
@@ -373,6 +467,7 @@ impl Shell {
         let session = self.session.state();
         let rows = self.row_views();
         let browse = self.surface_browse();
+        let mix = self.surface_mix();
         let doc = self.editor.document();
         let drum = crate::devices::shown_track(&self.arrangement, doc)
             .and_then(|track| self.devices.drum_view(doc, track));
@@ -410,6 +505,43 @@ impl Shell {
             }),
             session_view: self.main_view == MainView::Session,
             selection_armed: self.surface.selection_armed.iter().copied().collect(),
+            mix,
+        }
+    }
+
+    /// The folds Mix Mode acts on, and the In/Out section of the first
+    /// selected track, made again only when the set or the track changes
+    /// (push-2-tracks R31, R37).
+    fn surface_mix(&mut self) -> bl_control::mix::Mix {
+        let doc = self.editor.document();
+        let folded_groups = doc
+            .tracks()
+            .filter(|t| t.kind() == bl_model::TrackKind::Group)
+            .map(bl_model::Track::id)
+            .filter(|&track| self.arrangement.is_folded(track))
+            .collect();
+        let open_racks = self.mixer.open_racks();
+        let selected = self.arrangement.selected_tracks().first().copied();
+        let key = selected.map(|track| (self.document_revision, track));
+        if self.surface.in_out.as_ref().map(|(made, _)| *made) != key {
+            let made = key.map(|key| {
+                let interface = self.interface();
+                (
+                    key,
+                    crate::routing::in_out(self.editor.document(), key.1, &interface)
+                        .map(|in_out| mix_in_out(key.1, &in_out)),
+                )
+            });
+            self.surface.in_out = made;
+        }
+        bl_control::mix::Mix {
+            folded_groups,
+            open_racks,
+            in_out: self
+                .surface
+                .in_out
+                .as_ref()
+                .and_then(|(_, in_out)| in_out.clone()),
         }
     }
 

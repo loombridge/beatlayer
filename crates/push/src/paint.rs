@@ -10,7 +10,7 @@ use skrifa::{FontRef, MetadataProvider};
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::frame::{HEIGHT, RGB_BYTES, WIDTH};
-use crate::screen::{Column, Dot, Graphic, Label, List, Screen};
+use crate::screen::{Column, Dot, Graphic, Icon, Label, List, Screen};
 
 /// The columns' width.
 const COLUMN: f32 = 120.0;
@@ -246,6 +246,11 @@ impl Painter<'_> {
                 );
             }
         }
+        for &(from, to, colour) in &screen.underlines {
+            let x = f32::from(from) * COLUMN + 6.0;
+            let width = f32::from(to - from + 1) * COLUMN - 12.0;
+            self.rect(x, HEIGHT as f32 - 8.0, width, 2.0, colour, 255);
+        }
         if let Some(curve) = &screen.curve {
             self.curve(curve);
         }
@@ -302,6 +307,12 @@ impl Painter<'_> {
                 label.colour,
             );
         }
+        let icon_colour = if label.selected {
+            [0, 0, 0]
+        } else {
+            label.colour
+        };
+        self.icon(label.icon, x + 6.0, top, icon_colour);
     }
 
     /// A column of the content band (R20).
@@ -334,6 +345,7 @@ impl Painter<'_> {
             Graphic::Choice(entry) => {
                 self.centred(entry, centre, BAND + 76.0, 16.0, COLUMN - 12.0, TEXT);
             }
+            Graphic::Fader(value) => self.fader(centre, value.clamp(0.0, 1.0)),
         }
     }
 
@@ -370,6 +382,33 @@ impl Painter<'_> {
             };
             let text = self.fit(&text, 11.0, COLUMN - 10.0);
             self.text(&text, x + 6.0, y + 11.0, 11.0, colour);
+        }
+    }
+
+    /// A vertical fader: a track and the handle at its value.
+    fn fader(&mut self, cx: f32, value: f32) {
+        let (top, height) = (BAND + 50.0, 60.0);
+        self.rect(cx - 2.0, top, 4.0, height, [70, 70, 70], 255);
+        let y = top + height * (1.0 - value);
+        self.rect(cx - 2.0, y, 4.0, top + height - y, TEXT, 255);
+        self.rect(cx - 12.0, y - 2.0, 24.0, 4.0, TEXT, 255);
+    }
+
+    /// The icon of a label that unfolds, at its left in its band.
+    fn icon(&mut self, icon: Icon, x: f32, top: f32, colour: [u8; 3]) {
+        match icon {
+            Icon::None => {}
+            // A folder: a tab above a body.
+            Icon::Group => {
+                self.rect(x, top + 6.0, 5.0, 3.0, colour, 255);
+                self.rect(x, top + 9.0, 11.0, 7.0, colour, 255);
+            }
+            // A rack: three bars side by side.
+            Icon::Rack => {
+                for bar in 0..3 {
+                    self.rect(x + 4.0 * bar as f32, top + 6.0, 3.0, 10.0, colour, 255);
+                }
+            }
         }
     }
 

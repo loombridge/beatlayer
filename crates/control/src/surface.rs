@@ -102,6 +102,9 @@ pub struct ReadModel {
     /// The tracks armed by selection, not by hand, while a surface that arms
     /// by selection runs (Push 2 R3).
     pub selection_armed: Vec<TrackId>,
+    /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
+    /// R37).
+    pub mix: crate::mix::Mix,
 }
 
 impl ReadModel {
@@ -136,6 +139,7 @@ impl ReadModel {
             selected_device: None,
             session_view: false,
             selection_armed: Vec::new(),
+            mix: crate::mix::Mix::default(),
         }
     }
 

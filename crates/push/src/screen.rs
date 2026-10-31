@@ -19,6 +19,20 @@ pub struct Label {
     /// Whether it stands for a track armed by hand, which shows an arm icon
     /// (notes R4).
     pub armed: bool,
+    /// The icon drawn with it, for a track that unfolds (push-2-tracks R37).
+    pub icon: Icon,
+}
+
+/// What a label that unfolds is drawn with (Beatlayer's own icons).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Icon {
+    /// Nothing.
+    #[default]
+    None,
+    /// A group track.
+    Group,
+    /// A track holding an instrument rack or a drum rack.
+    Rack,
 }
 
 impl Label {
@@ -30,6 +44,7 @@ impl Label {
             colour,
             selected,
             armed: false,
+            icon: Icon::None,
         }
     }
 
@@ -37,6 +52,13 @@ impl Label {
     #[must_use]
     pub fn with_armed(mut self, armed: bool) -> Self {
         self.armed = armed;
+        self
+    }
+
+    /// The same label drawn with `icon`.
+    #[must_use]
+    pub const fn with_icon(mut self, icon: Icon) -> Self {
+        self.icon = icon;
         self
     }
 
@@ -57,6 +79,8 @@ pub enum Graphic {
     Arc(f32),
     /// The chosen entry of a list.
     Choice(String),
+    /// A vertical fader for a volume, its value from 0 (bottom) to 1.
+    Fader(f32),
 }
 
 /// The dot beside a parameter's name (R20).
@@ -134,6 +158,10 @@ pub struct Screen {
     pub title: Option<String>,
     /// The Setup menu's velocity curve, drawn over columns 4 and 5 (R31).
     pub curve: Option<Vec<u8>>,
+    /// Lines under the lower labels from one column to another, inclusive,
+    /// in a colour: the tracks inside an unfolded group or rack (push-2-tracks
+    /// R37).
+    pub underlines: Vec<(u8, u8, [u8; 3])>,
 }
 
 impl Screen {
@@ -148,8 +176,17 @@ impl Screen {
         let band = |name: &str, labels: &[Label; 8], lines: &mut Vec<String>| {
             for (n, label) in labels.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
                 let selected = if label.selected { " (selected)" } else { "" };
+                let icon = match label.icon {
+                    Icon::None => "",
+                    Icon::Group => " [group]",
+                    Icon::Rack => " [rack]",
+                };
                 let armed = if label.armed { " (armed)" } else { "" };
-                lines.push(format!("{name} {}: {}{selected}{armed}", n + 1, label.text));
+                lines.push(format!(
+                    "{name} {}: {}{icon}{selected}{armed}",
+                    n + 1,
+                    label.text
+                ));
             }
         };
         band("upper", &self.upper, &mut lines);
@@ -193,6 +230,9 @@ impl Screen {
             if let Some(progress) = progress {
                 lines.push(format!("progress {}: {:.0}%", n + 1, progress * 100.0));
             }
+        }
+        for (from, to, _) in &self.underlines {
+            lines.push(format!("underline: {} to {}", from + 1, to + 1));
         }
         if let Some(title) = &self.title {
             lines.push(format!("title: {title}"));

@@ -42,6 +42,7 @@ mod gate_mod;
 mod grain_delay;
 mod hardware;
 mod hold;
+mod instrument_voices;
 mod kit;
 mod kitbag;
 mod level_mod;

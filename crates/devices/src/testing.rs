@@ -7,19 +7,26 @@
 //! | [`DRIVE`] | Framework Test Drive | a `tanh` saturator, oversampled 1 to 8 times | generic |
 //! | [`SCOPE`] | Framework Test Scope | passes audio through; a display cell between control bands, with a row inside its bottom edge | its own |
 //! | [`EFFECTS`] | Framework Test Effects | the effects' shared parts: an LFO tremolo, or the LFO's or the envelope follower's value as the output; a menu option and an expanded part | its own |
+//! | [`INSTRUMENT`] | Framework Test Instrument | the instruments' shared parts: sine voices with every part of the voice section, or a source as the output; a menu option | generic |
 //!
 //! Between them they have a parameter of every kind: gains, continuous
 //! values with linear and logarithmic tapers, toggles, choices, and whole
 //! numbers.
 
 use bl_dsp::{EnvelopeFollower, Oversampler};
-use bl_engine::{DeviceType, NodeConfig, Registry};
+use bl_engine::{DeviceType, NodeConfig, NodeData, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::{
     Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
 };
 
+use core::f64::consts::TAU;
+
+use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, Timing};
+use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
+
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument::{self, Instrument, NoteRange, Parts, Section, Sources, State};
 use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 
 /// The test utility's device type.
@@ -31,6 +38,8 @@ pub const SCOPE: &str = "test.framework.scope";
 
 /// The test effects' device type.
 pub const EFFECTS: &str = "test.framework.effects";
+/// The test instrument's device type.
+pub const INSTRUMENT: &str = "test.framework.instrument";
 
 /// The utility's gain: −∞ to +12 dB, 0 dB by default.
 pub const UTILITY_GAIN: ParamId = ParamId(0);
@@ -94,6 +103,63 @@ pub const EFFECTS_RELEASE: ParamId = ParamId(14);
 pub const EFFECTS_HOLD: ParamId = ParamId(15);
 /// A menu option: the LFO upside down.
 pub const EFFECTS_INVERT: ParamId = ParamId(16);
+
+/// The test instrument's parts, one parameter each, as the voice section
+/// describes them.
+pub const INSTRUMENT_VOICES: ParamId = ParamId(0);
+pub const INSTRUMENT_VOICE_MODE: ParamId = ParamId(1);
+pub const INSTRUMENT_PRIORITY: ParamId = ParamId(2);
+pub const INSTRUMENT_LEGATO: ParamId = ParamId(3);
+pub const INSTRUMENT_GLIDE_TIME: ParamId = ParamId(4);
+pub const INSTRUMENT_GLIDE_MODE: ParamId = ParamId(5);
+pub const INSTRUMENT_GLIDE_PROP: ParamId = ParamId(6);
+pub const INSTRUMENT_GLIDE_LEGATO: ParamId = ParamId(7);
+pub const INSTRUMENT_USE_SCALE: ParamId = ParamId(8);
+pub const INSTRUMENT_RETRIGGER: ParamId = ParamId(9);
+pub const INSTRUMENT_UNISON_VOICES: ParamId = ParamId(10);
+pub const INSTRUMENT_UNISON_DETUNE: ParamId = ParamId(11);
+pub const INSTRUMENT_UNISON_SPREAD: ParamId = ParamId(12);
+pub const INSTRUMENT_UNISON_DELAY: ParamId = ParamId(13);
+pub const INSTRUMENT_PB_RANGE: ParamId = ParamId(14);
+pub const INSTRUMENT_NOTE_PB: ParamId = ParamId(15);
+pub const INSTRUMENT_NOTE_PB_RANGE: ParamId = ParamId(16);
+pub const INSTRUMENT_TRANSPOSE: ParamId = ParamId(17);
+pub const INSTRUMENT_STRETCH: ParamId = ParamId(18);
+pub const INSTRUMENT_ERROR: ParamId = ParamId(19);
+pub const INSTRUMENT_HI_QUALITY: ParamId = ParamId(20);
+pub const INSTRUMENT_VELOCITY_CURVE: ParamId = ParamId(21);
+pub const INSTRUMENT_KEY_CURVE: ParamId = ParamId(22);
+/// What the instrument sends out: its sine voices, or one source's value.
+pub const INSTRUMENT_OUTPUT: ParamId = ParamId(23);
+/// How far the held Pressure lowers the voices' level, on the control
+/// rate Hi-Quality sets.
+pub const INSTRUMENT_PRESSURE_LEVEL: ParamId = ParamId(24);
+
+/// What [`INSTRUMENT_OUTPUT`] chooses between, after the audio: a source of
+/// the lowest sounding voice, or a global one; or the pitch in semitones of
+/// the lowest or the highest sounding voice, frame by frame.
+pub const INSTRUMENT_OUTPUTS: [&str; 13] = [
+    "Audio",
+    "Velocity",
+    "Release Velocity",
+    "Key",
+    "Random",
+    "Pressure",
+    "Slide",
+    "Note PB",
+    "Mod Wheel",
+    "Pitch Bend",
+    "Aftertouch",
+    "Pitch",
+    "Pitch (Last)",
+];
+
+/// The most voices and the most unison copies the test instrument has.
+pub const INSTRUMENT_MAX_VOICES: usize = MAX_VOICES;
+pub const INSTRUMENT_MAX_COPIES: usize = 8;
+
+/// A voice's level at velocity 1 and full envelope.
+pub const INSTRUMENT_LEVEL: f32 = 0.1;
 
 /// The synced divisions' lengths, in quarter notes.
 pub const DIVISIONS: [f64; 6] = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0];
@@ -296,10 +362,64 @@ pub fn effects_type() -> DeviceType {
     )
 }
 
+/// The test instrument's type: the voice section's every part on sine
+/// voices, with Hi-Quality as a menu option.
+#[must_use]
+pub fn instrument_type() -> DeviceType {
+    let params = vec![
+        instrument::voices(INSTRUMENT_VOICES, INSTRUMENT_MAX_VOICES as i64, 8),
+        instrument::voice_mode(INSTRUMENT_VOICE_MODE, false),
+        instrument::priority(INSTRUMENT_PRIORITY),
+        instrument::legato(INSTRUMENT_LEGATO, false),
+        instrument::glide_time(INSTRUMENT_GLIDE_TIME, 4_000.0, 0.0),
+        instrument::glide_mode(INSTRUMENT_GLIDE_MODE),
+        instrument::glide_prop(INSTRUMENT_GLIDE_PROP),
+        instrument::glide_legato(INSTRUMENT_GLIDE_LEGATO, false),
+        ParamDescriptor::toggle(INSTRUMENT_USE_SCALE, "Use Current Scale", false)
+            .describe("Steps a Glissando through the current scale's degrees."),
+        instrument::retrigger(INSTRUMENT_RETRIGGER, false),
+        instrument::unison_voices(INSTRUMENT_UNISON_VOICES, INSTRUMENT_MAX_COPIES as i64),
+        instrument::unison_detune(INSTRUMENT_UNISON_DETUNE, 100.0, 20.0),
+        instrument::unison_spread(INSTRUMENT_UNISON_SPREAD, 0.0),
+        instrument::unison_delay(INSTRUMENT_UNISON_DELAY, 200.0),
+        instrument::pb_range(INSTRUMENT_PB_RANGE, 96, 2),
+        instrument::note_pb(INSTRUMENT_NOTE_PB, true),
+        instrument::note_pb_range(INSTRUMENT_NOTE_PB_RANGE, 96, 48),
+        instrument::transpose(INSTRUMENT_TRANSPOSE, 48),
+        instrument::stretch(INSTRUMENT_STRETCH),
+        instrument::error(INSTRUMENT_ERROR),
+        instrument::hi_quality(INSTRUMENT_HI_QUALITY),
+        instrument::curve_amount(INSTRUMENT_VELOCITY_CURVE, "Velocity Curve"),
+        instrument::curve_amount(INSTRUMENT_KEY_CURVE, "Key Curve"),
+        ParamDescriptor::choice(INSTRUMENT_OUTPUT, "Output", &INSTRUMENT_OUTPUTS, 0)
+            .describe("What the device sends out: its voices, or a modulation source's value."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_PRESSURE_LEVEL,
+            "Pressure Level",
+            (0.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("How far a note's pressure lowers its level, read on the control rate."),
+    ];
+    DeviceType::native(
+        INSTRUMENT,
+        "Framework Test Instrument",
+        DeviceRole::Instrument,
+    )
+    .with_description(DeviceDescription::new(params).with_menu_options(&[INSTRUMENT_HI_QUALITY]))
+}
+
 /// Every test device type.
 #[must_use]
 pub fn device_types() -> Vec<DeviceType> {
-    vec![utility_type(), drive_type(), scope_type(), effects_type()]
+    vec![
+        utility_type(),
+        drive_type(),
+        scope_type(),
+        effects_type(),
+        instrument_type(),
+    ]
 }
 
 /// Adds the test devices to `registry`.
@@ -308,6 +428,9 @@ pub fn register(registry: &mut Registry) {
     add(registry, drive_type(), |_, config| Drive::new(config));
     add(registry, scope_type(), |_, _| Scope);
     add(registry, effects_type(), Effects::new);
+    add(registry, instrument_type(), |_, config| {
+        TestInstrument::new(config)
+    });
 }
 
 /// The engine's own devices and the test devices.
@@ -472,5 +595,260 @@ impl NativeDevice for Effects {
                 };
             }
         }
+    }
+}
+
+/// Sine voices on the voice section, each with its unison copies, under an
+/// envelope that restarts from its level; or one source of the voices as a
+/// steady value.
+struct TestInstrument {
+    section: Section,
+    voices: Voices,
+}
+
+/// The sound engine the section drives.
+struct Voices {
+    rate: f64,
+    envelopes: EnvelopeBank,
+    levels: Vec<f32>,
+    phases: Vec<f64>,
+    /// Each voice's level factor from Pressure, held between the control
+    /// rate's points.
+    held: [f32; MAX_VOICES],
+    out: [Vec<f32>; 2],
+    output: usize,
+    pressure_level: f32,
+    velocity_curve: f64,
+    key_curve: f64,
+}
+
+/// The envelope's lanes per frame.
+const STRIDE: usize = MAX_VOICES.next_multiple_of(16);
+
+impl TestInstrument {
+    fn new(config: &NodeConfig) -> Self {
+        let rate = config.sample_rate.as_f64();
+        let frames = config.max_frames.max(1);
+        let params = EnvelopeParams {
+            attack: 5.0,
+            decay: 20.0,
+            sustain: 0.5,
+            release: 50.0,
+            steal_restart: StealRestart::CurrentLevel,
+            ..EnvelopeParams::AMP
+        };
+        Self {
+            section: Section::new(
+                Parts {
+                    voices: Some(INSTRUMENT_VOICES),
+                    voice_mode: Some(INSTRUMENT_VOICE_MODE),
+                    priority: Some(INSTRUMENT_PRIORITY),
+                    legato: Some(INSTRUMENT_LEGATO),
+                    glide_time: Some(INSTRUMENT_GLIDE_TIME),
+                    glide_mode: Some(INSTRUMENT_GLIDE_MODE),
+                    glide_prop: Some(INSTRUMENT_GLIDE_PROP),
+                    glide_legato: Some(INSTRUMENT_GLIDE_LEGATO),
+                    poly_glide: true,
+                    use_scale: Some(INSTRUMENT_USE_SCALE),
+                    retrigger: Some(INSTRUMENT_RETRIGGER),
+                    unison_voices: Some(INSTRUMENT_UNISON_VOICES),
+                    unison_detune: Some(INSTRUMENT_UNISON_DETUNE),
+                    unison_spread: Some(INSTRUMENT_UNISON_SPREAD),
+                    unison_delay: Some(INSTRUMENT_UNISON_DELAY),
+                    pb_range: Some(INSTRUMENT_PB_RANGE),
+                    note_pb: Some(INSTRUMENT_NOTE_PB),
+                    note_range: NoteRange::Own(INSTRUMENT_NOTE_PB_RANGE),
+                    transpose: Some(INSTRUMENT_TRANSPOSE),
+                    stretch: Some(INSTRUMENT_STRETCH),
+                    error: Some(INSTRUMENT_ERROR),
+                    hi_quality: Some(INSTRUMENT_HI_QUALITY),
+                    ..Parts::default()
+                },
+                INSTRUMENT_MAX_VOICES,
+                INSTRUMENT_MAX_COPIES,
+                rate,
+                0x7E57,
+            ),
+            voices: Voices {
+                rate,
+                envelopes: EnvelopeBank::new(MAX_VOICES, params, Timing::new(rate)),
+                levels: vec![0.0; frames * STRIDE],
+                phases: vec![0.0; MAX_VOICES * INSTRUMENT_MAX_COPIES],
+                held: [1.0; MAX_VOICES],
+                out: [vec![0.0; frames], vec![0.0; frames]],
+                output: 0,
+                pressure_level: 0.0,
+                velocity_curve: 0.0,
+                key_curve: 0.0,
+            },
+        }
+    }
+}
+
+impl NativeDevice for TestInstrument {
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        let frames = audio.frames();
+        let value = |id: ParamId| params.value(params.index(id).expect("the description lists it"));
+        let engine = &mut self.voices;
+        engine.output = value(INSTRUMENT_OUTPUT) as usize;
+        engine.pressure_level = (value(INSTRUMENT_PRESSURE_LEVEL) / 100.0) as f32;
+        engine.velocity_curve = value(INSTRUMENT_VELOCITY_CURVE) / 100.0;
+        engine.key_curve = value(INSTRUMENT_KEY_CURVE) / 100.0;
+        engine.out[0][..frames].fill(0.0);
+        engine.out[1][..frames].fill(0.0);
+        self.section.process(audio, params, engine);
+        for channel in 0..audio.channels() {
+            audio
+                .channel_mut(channel)
+                .copy_from_slice(&engine.out[channel.min(1)][..frames]);
+        }
+    }
+
+    fn flush(&mut self, _events: &[bl_engine::NodeEvent], _params: &ParamBank) {
+        self.section.reset();
+        for voice in 0..MAX_VOICES {
+            self.voices.envelopes.reset(voice);
+        }
+    }
+
+    fn receive_data(&mut self, data: NodeData) {
+        self.section.receive_data(&data);
+    }
+}
+
+impl Instrument for Voices {
+    fn voice_event(&mut self, voices: &mut VoiceBlock, state: &State, event: VoiceEvent) {
+        let voice = event.voice;
+        match event.kind {
+            VoiceEventKind::Start { start, .. } => {
+                let sources = Sources::of(voices);
+                self.held[voice] = 1.0 - self.pressure_level * sources.pressure(voice) as f32;
+                match start {
+                    Start::Fresh => {
+                        self.envelopes
+                            .trigger(voice, lspk_dsp::envelope::Trigger::New);
+                        let copies = INSTRUMENT_MAX_COPIES;
+                        self.phases[voice * copies..(voice + 1) * copies].fill(0.0);
+                    }
+                    Start::Steal | Start::Retrigger => self
+                        .envelopes
+                        .trigger(voice, lspk_dsp::envelope::Trigger::Retrigger),
+                    Start::Legato => self
+                        .envelopes
+                        .trigger(voice, lspk_dsp::envelope::Trigger::Legato),
+                    Start::Join { leader } => self.envelopes.join(voice, leader),
+                }
+                let _ = state;
+            }
+            VoiceEventKind::Release => self.envelopes.release(voice),
+            VoiceEventKind::End { .. } => self.envelopes.reset(voice),
+        }
+    }
+
+    fn render(&mut self, voices: &mut VoiceBlock, state: &State, frames: core::ops::Range<usize>) {
+        let count = frames.len();
+        if count == 0 {
+            return;
+        }
+        self.envelopes.process(&mut self.levels[..count * STRIDE]);
+        let config = *state.config();
+        let sources = Sources::of(voices);
+        if self.output != 0 {
+            self.read_source(voices, state, &sources, &frames);
+        } else {
+            self.sound(voices, state, &sources, &frames);
+        }
+        let mut mask = voices.active_mask();
+        while mask != 0 {
+            let voice = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            if self.envelopes.is_idle(voice) {
+                voices.end(voice);
+            }
+        }
+        let _ = config;
+    }
+}
+
+impl Voices {
+    /// Every active voice's copies as sines, mixed into the two outputs.
+    fn sound(
+        &mut self,
+        voices: &VoiceBlock,
+        state: &State,
+        sources: &Sources<'_>,
+        frames: &core::ops::Range<usize>,
+    ) {
+        let config = *state.config();
+        let copies = config.copies;
+        for voice in voices.active_voices() {
+            let gain = INSTRUMENT_LEVEL * sources.velocity(voice) as f32;
+            for frame in 0..frames.len() {
+                if state.control_due(frames.start + frame) {
+                    self.held[voice] = 1.0 - self.pressure_level * sources.pressure(voice) as f32;
+                }
+                let level = self.levels[frame * STRIDE + voice] * gain * self.held[voice];
+                let pitch = state.pitch(voices, voice, frames, frame);
+                let age = state.frames_since_start(voice, frames.start + frame);
+                for copy in 0..copies {
+                    let phase = &mut self.phases[voice * INSTRUMENT_MAX_COPIES + copy];
+                    let cents = f64::from(instrument::copy_cents(copy, copies, config.detune));
+                    let hz = 440.0 * ((pitch + cents / 100.0 - 69.0) / 12.0).exp2();
+                    *phase = (*phase + hz / self.rate).fract();
+                    let delay =
+                        instrument::copy_delay_frames(copy, copies, config.delay_ms, self.rate);
+                    if age < delay {
+                        continue;
+                    }
+                    let (left, right) = instrument::copy_gains(copy, copies, config.spread);
+                    let sample = (TAU * *phase).sin() as f32 * level;
+                    self.out[0][frames.start + frame] += sample * left;
+                    self.out[1][frames.start + frame] += sample * right;
+                }
+            }
+        }
+    }
+
+    /// The chosen source as a steady value on both outputs: the lowest
+    /// sounding voice's, or the global one; or a voice's pitch, frame by
+    /// frame.
+    fn read_source(
+        &mut self,
+        voices: &VoiceBlock,
+        state: &State,
+        sources: &Sources<'_>,
+        frames: &core::ops::Range<usize>,
+    ) {
+        let mask = voices.active_mask();
+        let (lowest, highest) = (
+            (mask != 0).then(|| mask.trailing_zeros() as usize),
+            (mask != 0).then(|| 31 - mask.leading_zeros() as usize),
+        );
+        if self.output >= 11 {
+            let voice = if self.output == 11 { lowest } else { highest };
+            for frame in 0..frames.len() {
+                let pitch = voice.map_or(0.0, |v| state.pitch(voices, v, frames, frame));
+                self.out[0][frames.start + frame] = pitch as f32;
+                self.out[1][frames.start + frame] = pitch as f32;
+            }
+            return;
+        }
+        let per_voice = |read: &dyn Fn(usize) -> f64| lowest.map_or(0.0, read);
+        let value = match self.output {
+            1 => per_voice(&|v| instrument::curve(sources.velocity(v), self.velocity_curve)),
+            2 => per_voice(&|v| sources.release_velocity(v)),
+            3 => per_voice(&|v| {
+                2.0 * instrument::curve((sources.key(v) + 1.0) / 2.0, self.key_curve) - 1.0
+            }),
+            4 => per_voice(&|v| state.random(v)),
+            5 => per_voice(&|v| sources.pressure(v)),
+            6 => per_voice(&|v| sources.slide(v)),
+            7 => per_voice(&|v| state.note_pb(v)),
+            8 => sources.mod_wheel(),
+            9 => sources.pitch_bend(),
+            _ => sources.aftertouch(),
+        } as f32;
+        self.out[0][frames.clone()].fill(value);
+        self.out[1][frames.clone()].fill(value);
     }
 }

@@ -98,7 +98,10 @@ fn a_source_receives_the_blocks_a_sink_sends_with_the_moment_they_were_sent_on()
                 && buffer.rate == 48_000
                 && buffer.samples.len() == buffer.frames * 2
                 && buffer.samples.iter().all(|&s| s == 16384);
-            first.lock().unwrap().get_or_insert((whole, buffer.begin_micros));
+            first
+                .lock()
+                .unwrap()
+                .get_or_insert((whole, buffer.begin_micros));
             got.fetch_add(1, Ordering::Relaxed);
         })
     };

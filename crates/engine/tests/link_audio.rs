@@ -82,12 +82,8 @@ impl Host {
         rig.sync();
         let (session, peers) = testing::link_session(120.0);
         rig.follow(LinkFollower::new(session));
-        let (link_audio, link) = testing::link_audio(
-            RATE.hz(),
-            block.max(512),
-            &[("Studio", "Kick")],
-            &offered,
-        );
+        let (link_audio, link) =
+            testing::link_audio(RATE.hz(), block.max(512), &[("Studio", "Kick")], &offered);
         rig.link_audio(link_audio);
         let channel = link.channel(0);
         let mut host = Self {
@@ -149,14 +145,13 @@ fn a_peers_buffers_play_on_their_beat_plus_the_latency() {
         host.run(3 * BEAT);
         // The first block ran before the log began, so frames count from
         // there: the click for beat 1 plays `LATENCY` after it.
-        let first = host.heard(0).expect("the first click") as u64 + host.done
-            - host.left.len() as u64;
+        let first =
+            host.heard(0).expect("the first click") as u64 + host.done - host.left.len() as u64;
         assert!(
             first.abs_diff(BEAT + LATENCY) <= 1,
             "block {block}: the first click played on {first}"
         );
-        let second = host.heard(host.heard(0).unwrap() + 1).expect("the second") as u64
-            + host.done
+        let second = host.heard(host.heard(0).unwrap() + 1).expect("the second") as u64 + host.done
             - host.left.len() as u64;
         assert!(
             second.abs_diff(2 * BEAT + LATENCY) <= 1,
@@ -176,10 +171,16 @@ fn a_channel_plays_on_both_sides_and_a_mono_one_as_identical_sides() {
     host.channel.push(at + 10, &[0.5], &[0.5]);
     host.run(2 * BEAT);
     let i = host.heard(0).unwrap();
-    assert!(host.right[i] > 0.01 && host.left[i] > host.right[i], "stereo");
+    assert!(
+        host.right[i] > 0.01 && host.left[i] > host.right[i],
+        "stereo"
+    );
     let j = i + 10;
     assert!(host.left[j] > 0.01);
-    assert_eq!(host.left[j], host.right[j], "a mono channel is the same on both sides");
+    assert_eq!(
+        host.left[j], host.right[j],
+        "a mono channel is the same on both sides"
+    );
 }
 
 // Spec: link-audio R6
@@ -226,7 +227,13 @@ fn a_channel_that_is_not_there_or_a_link_audio_that_is_off_is_silent() {
     host.run(2 * BEAT);
     assert_eq!(host.heard(0), None, "a missing peer");
     assert_eq!(
-        host.rig.editor.document().track(host.track).unwrap().routing().input,
+        host.rig
+            .editor
+            .document()
+            .track(host.track)
+            .unwrap()
+            .routing()
+            .input,
         bl_model::Input::LinkAudio {
             peer: "Gone".into(),
             channel: "Kick".into()
@@ -241,7 +248,12 @@ fn an_offered_track_is_sent_after_its_mixer_each_block_with_the_moment_it_is_hea
         let mut offered = None;
         let mut host = Host::offering(block, |rig| {
             let b = track(&mut rig.editor, TrackKind::Audio, None);
-            device(&mut rig.editor, b, testing::DC, &[(bl_model::ParamId(0), 0.25)]);
+            device(
+                &mut rig.editor,
+                b,
+                testing::DC,
+                &[(bl_model::ParamId(0), 0.25)],
+            );
             offered = Some(b);
             vec![b]
         });
@@ -326,7 +338,9 @@ fn an_armed_track_records_what_a_peers_channel_plays() {
     host.rig
         .sender
         .record(host.rig.collector.handle().wrap(plan));
-    host.rig.sender.transport(TransportCommand::SetRecording(true));
+    host.rig
+        .sender
+        .transport(TransportCommand::SetRecording(true));
     host.rig.sender.transport(TransportCommand::Play);
     let began = host.done;
     host.run(4 * 256);

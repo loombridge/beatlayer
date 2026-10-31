@@ -130,7 +130,12 @@ fn link_audio_settings_and_a_tracks_input_are_set_by_id_and_read_back() {
         "nothing changed"
     );
 
-    run(&mut client, "link.set_audio_name", json!({ "name": "Booth" })).unwrap();
+    run(
+        &mut client,
+        "link.set_audio_name",
+        json!({ "name": "Booth" }),
+    )
+    .unwrap();
     let latency = run(&mut client, "link.set_audio_latency", json!({ "ms": 64.0 })).unwrap();
     assert_eq!(latency["ms"], 64.0);
     run(

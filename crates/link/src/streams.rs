@@ -129,8 +129,9 @@ impl Link {
     pub fn sink(&self, name: &str) -> Sink {
         let name = c_string(name);
         // SAFETY: Link copies the name; the sink keeps the instance alive.
-        let raw =
-            unsafe { ffi::abl_link_audio_sink_create(self.inner.raw, name.as_ptr(), MAX_FRAMES * 2) };
+        let raw = unsafe {
+            ffi::abl_link_audio_sink_create(self.inner.raw, name.as_ptr(), MAX_FRAMES * 2)
+        };
         Sink {
             raw,
             _link: Arc::clone(&self.inner),

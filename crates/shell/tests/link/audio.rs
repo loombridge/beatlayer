@@ -15,11 +15,11 @@ use bl_engine::nodes::{BEAT_TONE, beat_tone};
 use bl_link::Link;
 use bl_media::MediaStore;
 use bl_model::{DeviceId, Input, TrackId};
+use bl_shell::Shell;
 use bl_shell::audio::{AudioHost, AudioSettings};
 use bl_shell::files::ProjectFiles;
 use bl_shell::routing::{self, Entry, InOut};
 use bl_shell::settings::Preferences;
-use bl_shell::Shell;
 use serde_json::{Value, json};
 
 /// A folder for one test's files, removed when the test ends.
@@ -84,7 +84,9 @@ fn pump(shells: &mut [&mut Shell], what: &str, mut done: impl FnMut(&mut [&mut S
             let states: Vec<Value> = shells.iter_mut().map(|shell| state(shell)).collect();
             let recordings: Vec<Value> = shells
                 .iter_mut()
-                .map(|shell| shell.run("transport.state", json!({})).unwrap()["last_recording"].clone())
+                .map(|shell| {
+                    shell.run("transport.state", json!({})).unwrap()["last_recording"].clone()
+                })
                 .collect();
             panic!("timed out waiting for {what}: {recordings:#?} {states:#?}");
         }
@@ -104,7 +106,9 @@ fn in_session(dir: &Path, name: &str) -> Shell {
     shell
         .run("link.set_audio_name", json!({ "name": name }))
         .unwrap();
-    shell.run("link.set_enabled", json!({ "on": true })).unwrap();
+    shell
+        .run("link.set_enabled", json!({ "on": true }))
+        .unwrap();
     shell.run("link.set_audio", json!({ "on": true })).unwrap();
     shell
 }
@@ -290,7 +294,10 @@ fn the_chooser_lists_the_peers_and_their_channels_and_a_track_keeps_them_by_name
 
     let (from, channel) = choosers(&shell, track);
     let list = labels(&from);
-    let at = list.iter().position(|label| label == "Peer").expect("the peer");
+    let at = list
+        .iter()
+        .position(|label| label == "Peer")
+        .expect("the peer");
     assert_eq!(
         &list[..3],
         ["Ext. In", "Configure…", "---"],
@@ -315,7 +322,10 @@ fn the_chooser_lists_the_peers_and_their_channels_and_a_track_keeps_them_by_name
         }
     );
     let (from, channel) = choosers(&shell, track);
-    assert!(matches!(&from.entries[at], Entry::Choice { chosen: true, .. }));
+    assert!(matches!(
+        &from.entries[at],
+        Entry::Choice { chosen: true, .. }
+    ));
     assert_eq!(labels(&channel), channels);
     assert_eq!(channel.text, channels[0]);
 
@@ -367,7 +377,11 @@ fn the_chooser_lists_the_peers_and_their_channels_and_a_track_keeps_them_by_name
     );
     assert!(matches!(
         channel.entries.last(),
-        Some(Entry::Choice { run: None, chosen: true, .. })
+        Some(Entry::Choice {
+            run: None,
+            chosen: true,
+            ..
+        })
     ));
 
     // Link Audio off lists no peer either, and the track still keeps them.
@@ -432,8 +446,11 @@ fn a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other() {
     take_link_audio(&mut b, take, "alpha", "Beat");
     b.run("mixer.set_arm", json!({ "track": take, "arm": true }))
         .unwrap();
-    b.run("routing.set_monitor", json!({ "track": take, "monitor": "in" }))
-        .unwrap();
+    b.run(
+        "routing.set_monitor",
+        json!({ "track": take, "monitor": "in" }),
+    )
+    .unwrap();
 
     // Both play; B records. Each starts on the session's bar.
     b.run("transport.set_recording", json!({ "recording": true }))
@@ -448,7 +465,9 @@ fn a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other() {
         peer(shells[1], "alpha").is_some_and(|p| p["state"] == "receiving")
     });
     let until = Instant::now() + Duration::from_secs(6);
-    pump(&mut [&mut a, &mut b], "the take", |_| Instant::now() > until);
+    pump(&mut [&mut a, &mut b], "the take", |_| {
+        Instant::now() > until
+    });
     b.run("transport.stop", json!({})).unwrap();
     a.run("transport.stop", json!({})).unwrap();
     let mut clip = None;
@@ -478,7 +497,10 @@ fn a_track_sent_from_one_session_is_recorded_on_the_beat_in_the_other() {
         "the tempo held through the take: {bpm}"
     );
     let beat_frames = 48_000.0 * 60.0 / bpm;
-    assert!(left.len() as f64 > 4.0 * beat_frames, "recorded for a few beats");
+    assert!(
+        left.len() as f64 > 4.0 * beat_frames,
+        "recorded for a few beats"
+    );
     let rate = bl_core::time::SampleRate::HZ_48000;
     let started = tempo.ticks_to_frames(clip.start, rate).get() as f64;
     let latency = LATENCY_MS / 1000.0 * 48_000.0;

@@ -2115,11 +2115,11 @@ fn link_audio_peers(ui: &mut Ui, shell: &Shell, theme: &Theme, rows: &mut Rows<'
     for peer in peers {
         let cells = rows.table_row(ui, "", &widths);
         let buffered = format!("{:.0} ms", peer.buffered_ms);
-        for (rect, text) in cells.iter().zip([
-            peer.name.as_str(),
-            peer.state.label(),
-            buffered.as_str(),
-        ]) {
+        for (rect, text) in
+            cells
+                .iter()
+                .zip([peer.name.as_str(), peer.state.label(), buffered.as_str()])
+        {
             table(ui, Role::Cell, &peer.name, text, *rect);
         }
     }

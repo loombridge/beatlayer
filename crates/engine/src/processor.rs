@@ -13,8 +13,8 @@ use rtrb::{Consumer, Producer};
 use crate::EngineConfig;
 use crate::capture::CapturedMidi;
 use crate::follower::{Ask, Follow, Follower};
-use crate::link_audio::LinkAudio;
 use crate::gc::{Owned, Program};
+use crate::link_audio::LinkAudio;
 use crate::message::{
     Action, LoopRegion, Message, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,

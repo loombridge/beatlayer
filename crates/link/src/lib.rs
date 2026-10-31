@@ -19,7 +19,7 @@
 mod ffi;
 mod streams;
 
-pub use streams::{Channel, ChannelId, PeerId, Received, Sink, Source, QUANTUM};
+pub use streams::{Channel, ChannelId, PeerId, QUANTUM, Received, Sink, Source};
 
 use std::ffi::c_void;
 use std::sync::Arc;

@@ -146,12 +146,7 @@ impl LinkAudio for Bank {
 /// shortcut: linear interpolation images a little where the rates differ
 /// (peers at 44.1 and 48 kHz); upgrade to a polyphase converter if the images
 /// are heard, which takes more latency than a network buffer has to spare.
-fn convert(
-    buffer: &Received<'_>,
-    rate: u32,
-    left: &mut Vec<f32>,
-    right: &mut Vec<f32>,
-) {
+fn convert(buffer: &Received<'_>, rate: u32, left: &mut Vec<f32>, right: &mut Vec<f32>) {
     left.clear();
     right.clear();
     let frames = buffer.frames;
@@ -166,7 +161,8 @@ fn convert(
         }
         return;
     }
-    let out = (frames as u64 * u64::from(rate) + u64::from(buffer.rate) / 2) / u64::from(buffer.rate);
+    let out =
+        (frames as u64 * u64::from(rate) + u64::from(buffer.rate) / 2) / u64::from(buffer.rate);
     let step = f64::from(buffer.rate) / f64::from(rate);
     for j in 0..out as usize {
         let p = j as f64 * step;
@@ -357,7 +353,11 @@ impl LinkAudioHost {
     ) -> Option<Arc<Plan>> {
         self.shown = Some(fingerprint);
         self.changed = false;
-        self.channels = if wanted.on { link.channels() } else { Vec::new() };
+        self.channels = if wanted.on {
+            link.channels()
+        } else {
+            Vec::new()
+        };
         let mut moved = false;
         if !wanted.on {
             moved = !self.sinks.is_empty() || !self.taken.is_empty();
@@ -397,13 +397,20 @@ impl LinkAudioHost {
                 .map(|c| c.id)
         };
         self.taken.retain(|t| {
-            wanted.inputs.iter().any(|(p, c)| *p == t.peer && *c == t.channel)
+            wanted
+                .inputs
+                .iter()
+                .any(|(p, c)| *p == t.peer && *c == t.channel)
                 && found(&t.peer, &t.channel) == Some(t.id)
                 && t.ring.rate() == rate
         });
         moved |= self.taken.len() != before;
         for (peer, channel) in &wanted.inputs {
-            if self.taken.iter().any(|t| t.peer == *peer && t.channel == *channel) {
+            if self
+                .taken
+                .iter()
+                .any(|t| t.peer == *peer && t.channel == *channel)
+            {
                 continue;
             }
             let Some(id) = found(peer, channel) else {
@@ -521,10 +528,20 @@ mod tests {
     #[test]
     fn a_mono_buffer_is_the_same_on_both_sides_and_a_stereo_one_keeps_them() {
         let (mut left, mut right) = (Vec::new(), Vec::new());
-        convert(&received(&[32767, 0, -32767], 1, 48_000), 48_000, &mut left, &mut right);
+        convert(
+            &received(&[32767, 0, -32767], 1, 48_000),
+            48_000,
+            &mut left,
+            &mut right,
+        );
         assert_eq!(left, [1.0, 0.0, -1.0]);
         assert_eq!(left, right);
-        convert(&received(&[32767, -32767, 0, 32767], 2, 48_000), 48_000, &mut left, &mut right);
+        convert(
+            &received(&[32767, -32767, 0, 32767], 2, 48_000),
+            48_000,
+            &mut left,
+            &mut right,
+        );
         assert_eq!(left, [1.0, 0.0]);
         assert_eq!(right, [-1.0, 1.0]);
     }
@@ -535,7 +552,12 @@ mod tests {
         let (mut left, mut right) = (Vec::new(), Vec::new());
         // 441 frames at 44.1 kHz of a constant are 480 at 48 kHz.
         let samples = vec![16384i16; 441];
-        convert(&received(&samples, 1, 44_100), 48_000, &mut left, &mut right);
+        convert(
+            &received(&samples, 1, 44_100),
+            48_000,
+            &mut left,
+            &mut right,
+        );
         assert_eq!(left.len(), 480);
         assert!(left.iter().all(|&s| (s - 16384.0 / 32767.0).abs() < 1e-6));
         // And a ramp stays a ramp at the same slope in time.
@@ -544,7 +566,12 @@ mod tests {
         let slope = (left[300] - left[200]) / 100.0;
         assert!((slope - 10.0 * 44_100.0 / 48_000.0 / 32767.0).abs() < 1e-7);
         // Down: 480 frames at 48 kHz are 441 at 44.1 kHz.
-        convert(&received(&vec![0i16; 960], 2, 48_000), 44_100, &mut left, &mut right);
+        convert(
+            &received(&vec![0i16; 960], 2, 48_000),
+            44_100,
+            &mut left,
+            &mut right,
+        );
         assert_eq!((left.len(), right.len()), (441, 441));
     }
 

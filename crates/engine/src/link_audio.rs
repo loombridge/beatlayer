@@ -174,7 +174,11 @@ impl Channel {
     pub fn buffered(&self) -> u64 {
         let cursor = self.cursor.load(Ordering::Acquire);
         let end = self.end.load(Ordering::Acquire);
-        if cursor == UNSET { 0 } else { end.saturating_sub(cursor) }
+        if cursor == UNSET {
+            0
+        } else {
+            end.saturating_sub(cursor)
+        }
     }
 }
 
@@ -279,7 +283,7 @@ mod tests {
         channel.read(2_000, &mut left, &mut right);
         // A buffer 2,020 frames on leaves the gap before it silent, though
         // those cells held 1.0 a lap ago.
-        channel.push(2_020, &vec![2.0; 10], &vec![2.0; 10]);
+        channel.push(2_020, &[2.0; 10], &[2.0; 10]);
         let (mut left, mut right) = ([9.0; 20], [9.0; 20]);
         channel.read(2_010, &mut left, &mut right);
         assert!(left[..10].iter().all(|&s| s == 0.0));

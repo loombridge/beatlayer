@@ -170,7 +170,10 @@ fn the_menu_ticks_its_items_runs_their_commands_and_configures_link() {
     assert!(!h.shell.link_enabled(), "only the item's own command ran");
     let nodes = open_menu(&mut h);
     h.click(bounds(&menu_item(&nodes, "✔ Link Audio")).center());
-    assert!(!h.shell.link_audio_enabled(), "the ticked item switches it off");
+    assert!(
+        !h.shell.link_audio_enabled(),
+        "the ticked item switches it off"
+    );
     let nodes = open_menu(&mut h);
     h.click(bounds(&menu_item(&nodes, "Start Stop Sync")).center());
     assert!(h.shell.link_start_stop_sync());
@@ -387,8 +390,12 @@ fn audio_peer(name: &str) -> (Link, bl_link::Sink) {
 fn the_menu_lists_the_peers_with_link_audio_on_and_they_do_nothing() {
     let (_peer, _sink) = audio_peer("Studio Mac");
     let mut h = main_window();
-    h.shell.run("link.set_enabled", json!({ "on": true })).unwrap();
-    h.shell.run("link.set_audio", json!({ "on": true })).unwrap();
+    h.shell
+        .run("link.set_enabled", json!({ "on": true }))
+        .unwrap();
+    h.shell
+        .run("link.set_audio", json!({ "on": true }))
+        .unwrap();
     wait_for(&mut h, "the peer's channel", |h| {
         h.shell
             .link_audio_peers()
@@ -416,12 +423,18 @@ fn the_menu_lists_the_peers_with_link_audio_on_and_they_do_nothing() {
 fn the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table() {
     let (_peer, _sink) = audio_peer("Studio Mac");
     let mut h = link_page(Harness::manual(Window::Settings));
-    h.shell.run("link.set_enabled", json!({ "on": true })).unwrap();
+    h.shell
+        .run("link.set_enabled", json!({ "on": true }))
+        .unwrap();
     let nodes = Harness::nodes(&h.settle());
     for label in ["Audio", "Name", "Latency", "Sync to Incoming Audio"] {
         assert!(labelled(&nodes, label), "{label}");
     }
-    assert_eq!(Harness::node(&nodes, "Audio").toggled, Some(false), "off at first");
+    assert_eq!(
+        Harness::node(&nodes, "Audio").toggled,
+        Some(false),
+        "off at first"
+    );
     assert_eq!(Harness::node(&nodes, "Latency").role, Role::Slider);
     assert_eq!(Harness::node(&nodes, "Latency").numeric, Some(20.0));
     assert!(
@@ -441,7 +454,11 @@ fn the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table() {
     // The latency slider: a click toward its right end raises it.
     let slider = bounds(Harness::node(&Harness::nodes(&h.settle()), "Latency"));
     h.click(pos2(slider.right() - 2.0, slider.center().y));
-    assert!(h.shell.link_audio_latency_ms() > 100.0, "{}", h.shell.link_audio_latency_ms());
+    assert!(
+        h.shell.link_audio_latency_ms() > 100.0,
+        "{}",
+        h.shell.link_audio_latency_ms()
+    );
 
     // The name field commits what is typed when it loses the keyboard.
     let field = bounds(Harness::node(&Harness::nodes(&h.settle()), "Name"));
@@ -471,7 +488,9 @@ fn the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table() {
     }
     for cell in ["Studio Mac", "Connected", "0 ms"] {
         assert!(
-            nodes.iter().any(|n| n.role == Role::Cell && n.label == cell),
+            nodes
+                .iter()
+                .any(|n| n.role == Role::Cell && n.label == cell),
             "{cell}"
         );
     }

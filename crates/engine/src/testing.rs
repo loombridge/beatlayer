@@ -1383,9 +1383,7 @@ mod link_audio {
             active: AtomicBool::new(true),
             channels: channels
                 .iter()
-                .map(|&(peer, channel)| {
-                    (peer.into(), channel.into(), Arc::new(Channel::new(rate)))
-                })
+                .map(|&(peer, channel)| (peer.into(), channel.into(), Arc::new(Channel::new(rate))))
                 .collect(),
             offered: offered.clone(),
             log: Log {

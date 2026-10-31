@@ -1070,11 +1070,12 @@ impl EngineProgram {
         let stride = self.max_frames;
         let frames = frames.min(stride);
         for (slot, input) in self.link_inputs.iter().enumerate() {
-            let (left, right) = self.link_input[slot * 2 * stride..(slot * 2 + 2) * stride]
-                .split_at_mut(stride);
+            let (left, right) =
+                self.link_input[slot * 2 * stride..(slot * 2 + 2) * stride].split_at_mut(stride);
             let (left, right) = (&mut left[..frames], &mut right[..frames]);
-            let channel = link
-                .and_then(|(link, moment)| Some((link.channel(&input.peer, &input.channel)?, moment)));
+            let channel = link.and_then(|(link, moment)| {
+                Some((link.channel(&input.peer, &input.channel)?, moment))
+            });
             match channel {
                 Some((channel, moment)) => {
                     channel.read(crate::frame_at(moment, rate), left, right);

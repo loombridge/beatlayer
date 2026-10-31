@@ -705,8 +705,11 @@ impl AudioHost {
         frames: usize,
     ) {
         let bank = link.zip(plan).map(|(link, plan)| {
-            Box::new(crate::link_audio::Bank::new(&link.link, Arc::clone(plan), frames))
-                as Box<dyn bl_engine::LinkAudio>
+            Box::new(crate::link_audio::Bank::new(
+                &link.link,
+                Arc::clone(plan),
+                frames,
+            )) as Box<dyn bl_engine::LinkAudio>
         });
         engine.set_link_audio(bank);
     }

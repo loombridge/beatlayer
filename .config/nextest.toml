@@ -71,5 +71,5 @@ path = "junit.xml"
 link-sessions = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = "package(bl-link) | (package(bl-shell) & test(/^link(_audio)?::/)) | (package(bl-agent) & test(/^link(_audio)?::/)) | (package(bl-ui) & test(/^link(_audio)?::/))"
+filter = "package(bl-link) | (package(bl-shell) & test(/^link::/)) | (package(bl-agent) & test(/^link::/)) | (package(bl-ui) & test(/^link::/))"
 test-group = "link-sessions"

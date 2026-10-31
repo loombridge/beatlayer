@@ -65,7 +65,7 @@ crates/shell/tests/dawproject_export.rs # waits for a real CLAP plug-in to start
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread
 crates/shell/tests/link.rs # a second Link instance plays the peer over the loopback network, so the tests wait for discovery with a deadline
-crates/shell/tests/link_audio.rs # two sessions on real-time null devices find each other over the loopback network and stream a track, so the tests wait for discovery and for audio with a deadline
+crates/shell/tests/link/audio.rs # two sessions on real-time null devices find each other over the loopback network and stream a track, so the tests wait for discovery and for audio with a deadline
 crates/shell/tests/midi_io.rs # waits for the MIDI output thread to hand messages to the port
 crates/shell/tests/multi_output.rs # waits for a real CLAP plug-in
 crates/shell/tests/offline_plugins.rs # waits for a real CLAP render

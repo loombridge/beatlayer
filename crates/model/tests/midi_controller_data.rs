@@ -357,3 +357,41 @@ fn a_clip_keeps_its_controller_envelopes_when_it_moves_to_another_midi_track() {
         .unwrap();
     assert_eq!(song.envelope(cc(1)), Some(vec![(0, 5.0)]));
 }
+
+// Spec: midi-controller-data R6
+#[test]
+fn a_session_midi_clips_controller_envelope_cannot_be_automation() {
+    let mut song = Song::new();
+    let scene = song.editor.document().scenes().next().unwrap().id;
+    let clip: ClipId = song.editor.new_id();
+    song.editor
+        .apply(Command::CreateSlotClip {
+            track: song.midi_track,
+            scene,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                Ticks::WHOLE,
+                ClipData::Midi(MidiData::new([])),
+            ),
+        })
+        .unwrap();
+    for (id, args) in [
+        (
+            "clip.set_envelope",
+            json!({ "clip": clip, "target": { "type": "midi.cc", "number": 1 }, "kind": "automation",
+                    "points": [{ "at": 0, "value": 64.0, "bend": 0.0 }] }),
+        ),
+        (
+            "clip.set_envelope_linked",
+            json!({ "clip": clip, "target": { "type": "midi.pitch_bend" }, "kind": "automation",
+                    "linked": false }),
+        ),
+    ] {
+        let error = song.run(id, args).unwrap_err();
+        assert!(error.contains("MIDI controller"), "{id}: {error}");
+    }
+    let doc = song.editor.document();
+    assert_eq!(doc.clip(clip).unwrap().envelopes().count(), 0);
+    doc.check_invariants().unwrap();
+}

@@ -1466,7 +1466,7 @@ impl Compiler {
             midi_sidechains: build.midi_sidechains,
             midi_kept: Shared::new(
                 (0..midi_kept)
-                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .map(|_| NoteBuffer::with_capacity(crate::midi_clips::TRACK_NOTE_CAPACITY))
                     .collect(),
             ),
             pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
@@ -1502,7 +1502,7 @@ impl Compiler {
                 .collect(),
             note_buffers: Shared::new(
                 (0..2 * (tasks as u32 + build.chain_buffers))
-                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .map(|_| NoteBuffer::with_capacity(crate::midi_clips::TRACK_NOTE_CAPACITY))
                     .collect(),
             ),
             releases: crate::program::Releases::new(),
@@ -3153,7 +3153,7 @@ fn with_dependents(mut tasks: Vec<Task>, dependents: &[Vec<u32>]) -> Vec<Task> {
 /// The loop the engine plays for `document`: its loop brace if the Loop
 /// switch is on.
 #[must_use]
-pub(crate) fn loop_region(document: &Document) -> Option<LoopRegion> {
+pub fn loop_region(document: &Document) -> Option<LoopRegion> {
     let brace = document.settings().arrangement_loop;
     brace.enabled.then(|| LoopRegion {
         start: brace.start,

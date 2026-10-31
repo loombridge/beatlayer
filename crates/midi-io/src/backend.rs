@@ -60,6 +60,11 @@ pub trait OutputConnection: Send {
     }
 }
 
+/// A port's identity in the system, as the system gives it. A port that is
+/// unplugged and plugged in again has a new one even when its name is the
+/// same, so an open connection to the old one is known to be dead.
+pub type PortKey = String;
+
 /// One MIDI system on this machine: it lists ports and opens them.
 ///
 /// Ports are named as the system names them, which is how Live names them in
@@ -69,12 +74,13 @@ pub trait MidiBackend: Send {
     /// The system's name, such as `Core MIDI`.
     fn name(&self) -> &'static str;
 
-    /// The names of the ports offered now, in the system's order.
+    /// The names of the ports offered now, in the system's order, each with
+    /// its [`PortKey`].
     ///
     /// # Errors
     ///
     /// [`MidiError`] if the system can't be asked.
-    fn ports(&mut self, direction: Direction) -> Result<Vec<String>, MidiError>;
+    fn ports(&mut self, direction: Direction) -> Result<Vec<(String, PortKey)>, MidiError>;
 
     /// Opens the input port called `name`. `handler` then runs for every
     /// message until the connection is dropped.

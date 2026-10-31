@@ -24,6 +24,7 @@
 //! `kit-examples` feature, off by default.
 
 pub mod alignment_delay;
+pub mod amp;
 pub mod arpeggiator;
 pub mod articulation_map;
 pub mod auto_filter;
@@ -97,6 +98,7 @@ pub mod utility;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
+pub use amp::{AMP, amp_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
@@ -325,6 +327,7 @@ pub fn register(registry: &mut Registry) {
     drum_bus::register(registry);
     overdrive::register(registry);
     tube::register(registry);
+    amp::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     shifter::register(registry);

@@ -423,7 +423,7 @@ pub(crate) fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> 
 }
 
 /// [`coeffs`] before its rounding to f32, as `[b0, b1, b2, a1, a2]`.
-fn coeffs_f64(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> [f64; 5] {
+pub(crate) fn coeffs_f64(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> [f64; 5] {
     count_design();
     let w0 = TAU * (freq / rate).clamp(1.0e-6, 0.49);
     let (sin, cos) = w0.sin_cos();

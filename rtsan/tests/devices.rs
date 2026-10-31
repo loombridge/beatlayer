@@ -13,7 +13,7 @@
 //!
 //! The lo-fi effects (WP-5.24: Erosion, Redux and Vinyl Distortion) run after a test tone
 //! with every parameter changing the same way, as do Saturator, Overdrive and Dynamic Tube
-//! (WP-5.23) with their curves, Hi-Quality and envelopes changing.
+//! (WP-5.23) with their curves, Hi-Quality and envelopes changing, and Amp (WP-8.40) with its model, controls and output changing.
 
 bl_rt::install_trap!();
 
@@ -911,6 +911,26 @@ fn the_saturation_devices_pass_under_rtsan() {
             (valve::ENVELOPE, &[-80.0, 80.0]),
             (valve::ATTACK, &[1.0, 200.0]),
             (valve::HI_QUALITY, &[1.0, 0.0]),
+        ],
+    );
+}
+
+// Spec: amp R11
+#[test]
+fn amp_passes_under_rtsan() {
+    use bl_devices::amp::*;
+    run_lo_fi_device(
+        AMP,
+        &[
+            (MODEL, &[0.0, 3.0, 5.0, 6.0, 1.0]),
+            (GAIN, &[0.0, 10.0]),
+            (BASS, &[0.0, 10.0]),
+            (MIDDLE, &[0.0, 10.0]),
+            (TREBLE, &[0.0, 10.0]),
+            (PRESENCE, &[0.0, 10.0]),
+            (VOLUME, &[0.0, 1.0, 4.0]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+            (OUTPUT, &[1.0, 0.0]),
         ],
     );
 }

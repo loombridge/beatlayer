@@ -1,8 +1,10 @@
 //! The content pane's columns and sort (spec: browser-tags R27, R28).
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::mpsc::{self, Receiver, Sender};
 
 use bl_shell_spec::browser::{
     ClipFileKind, Column, ColumnsState, Item, ItemDetails, ItemKind, SetColumnsArgs,
@@ -17,8 +19,86 @@ use super::{BrowserError, BrowserView};
 pub struct DetailsCache {
     /// When a file changed and how long it is.
     meta: HashMap<PathBuf, Option<(i64, u64)>>,
-    /// An audio file's sample rate, channels and length in seconds.
-    probe: HashMap<PathBuf, Option<(u32, u16, Option<f64>)>>,
+    /// What probing an audio file read.
+    probe: HashMap<PathBuf, AudioInfo>,
+}
+
+/// An audio file's sample rate, channels and length in seconds, or `None`
+/// when its header couldn't be read.
+type AudioInfo = Option<(u32, u16, Option<f64>)>;
+
+fn probe_audio(path: &Path) -> AudioInfo {
+    bl_media::probe(path).ok().map(|info| {
+        let seconds = info
+            .frames
+            .map(|frames| frames as f64 / f64::from(info.sample_rate.max(1)));
+        (info.sample_rate, info.channels, seconds)
+    })
+}
+
+/// Probes audio files on a thread of its own, so sorting by Length, Sample
+/// Rate or Channels never opens a file on the browser's thread.
+#[derive(Debug, Default)]
+pub struct Prober(Mutex<ProberState>);
+
+#[derive(Debug, Default)]
+struct ProberState {
+    requests: Option<Sender<PathBuf>>,
+    results: Option<Receiver<(PathBuf, AudioInfo)>>,
+    /// The files asked for whose answer hasn't been taken yet.
+    pending: HashSet<PathBuf>,
+}
+
+impl Prober {
+    /// Asks for `path` to be probed, unless that's already under way. The
+    /// answer comes in [`Prober::poll`].
+    fn request(&self, path: &Path) {
+        let Ok(mut state) = self.0.lock() else {
+            return;
+        };
+        if !state.pending.insert(path.to_path_buf()) {
+            return;
+        }
+        if state.requests.is_none() {
+            let (sender, receiver) = mpsc::channel::<PathBuf>();
+            let (results, results_receiver) = mpsc::channel();
+            let spawned = std::thread::Builder::new()
+                .name("bl-browser-probe".to_owned())
+                .spawn(move || {
+                    while let Ok(path) = receiver.recv() {
+                        let info = probe_audio(&path);
+                        if results.send((path, info)).is_err() {
+                            return;
+                        }
+                    }
+                });
+            if spawned.is_err() {
+                state.pending.remove(path);
+                return;
+            }
+            state.requests = Some(sender);
+            state.results = Some(results_receiver);
+        }
+        if let Some(sender) = &state.requests {
+            let _ = sender.send(path.to_path_buf());
+        }
+    }
+
+    /// The files probed since the last call.
+    fn poll(&self) -> Vec<(PathBuf, AudioInfo)> {
+        let Ok(mut state) = self.0.lock() else {
+            return Vec::new();
+        };
+        let probed: Vec<_> = state
+            .results
+            .as_ref()
+            .map(|results| results.try_iter().collect())
+            .unwrap_or_default();
+        for (path, _) in &probed {
+            state.pending.remove(path);
+        }
+        probed
+    }
 }
 
 /// What an item is, in words, as the Kind column says it.
@@ -93,23 +173,50 @@ impl BrowserView {
         read
     }
 
-    /// An audio file's sample rate, channels and length in seconds.
-    fn audio_info_of(&self, path: &Path) -> Option<(u32, u16, Option<f64>)> {
+    /// An audio file's sample rate, channels and length in seconds, read
+    /// now if it isn't known.
+    fn audio_info_of(&self, path: &Path) -> AudioInfo {
         if let Ok(cache) = self.details.lock()
             && let Some(known) = cache.probe.get(path)
         {
             return *known;
         }
-        let read = bl_media::probe(path).ok().map(|info| {
-            let seconds = info
-                .frames
-                .map(|frames| frames as f64 / f64::from(info.sample_rate.max(1)));
-            (info.sample_rate, info.channels, seconds)
-        });
+        let read = probe_audio(path);
         if let Ok(mut cache) = self.details.lock() {
             cache.probe.insert(path.to_path_buf(), read);
         }
         read
+    }
+
+    /// What probing the file read, or nothing while it hasn't been probed:
+    /// then it's asked of the prober thread, and [`BrowserView::take_probed`]
+    /// brings the answer.
+    fn audio_info_known(&self, path: &Path) -> AudioInfo {
+        let known = self
+            .details
+            .lock()
+            .ok()
+            .and_then(|cache| cache.probe.get(path).copied());
+        if known.is_none() {
+            self.prober.request(path);
+        }
+        known.flatten()
+    }
+
+    /// Keeps what the prober thread has read since the last call. Whether
+    /// the rows are sorted by what it read: if so they're worked out again.
+    pub(super) fn take_probed(&mut self) -> bool {
+        let probed = self.prober.poll();
+        if probed.is_empty() {
+            return false;
+        }
+        if let Ok(mut cache) = self.details.lock() {
+            cache.probe.extend(probed);
+        }
+        matches!(
+            self.columns.sort,
+            Column::Length | Column::SampleRate | Column::Channels
+        )
     }
 
     /// What the shown columns say about an item, or nothing while none
@@ -178,7 +285,7 @@ impl BrowserView {
             Column::Kind => (None, kind_text(kind, clip)),
             Column::Length | Column::SampleRate | Column::Channels => {
                 let info = (kind == ItemKind::Audio)
-                    .then(|| self.audio_info_of(path))
+                    .then(|| self.audio_info_known(path))
                     .flatten();
                 number(info.and_then(|(rate, channels, seconds)| match column {
                     Column::Length => seconds.map(|s| (s * 1000.0) as i128),
@@ -198,37 +305,27 @@ impl BrowserView {
         if sort == Column::Name && !descending {
             return;
         }
-        let keys: HashMap<PathBuf, SortKey> = entries
+        let mut keyed: Vec<(SortKey, Entry)> = entries
             .iter()
             .map(|entry| {
-                (
-                    entry.path.clone(),
-                    self.sort_key(sort, &entry.path, entry.kind, entry.clip, None),
-                )
+                let key = self.sort_key(sort, &entry.path, entry.kind, entry.clip, None);
+                (key, entry.clone())
             })
             .collect();
-        entries.sort_by(|a, b| {
+        keyed.sort_by(|(ka, a), (kb, b)| {
             let folders = (a.kind != ItemKind::Folder).cmp(&(b.kind != ItemKind::Folder));
-            folders.then_with(|| {
-                order(
-                    sort,
-                    descending,
-                    &keys[&a.path],
-                    &keys[&b.path],
-                    &a.name,
-                    &b.name,
-                )
-            })
+            folders.then_with(|| order(sort, descending, ka, kb, &a.name, &b.name))
         });
+        for (slot, (_, entry)) in entries.iter_mut().zip(keyed) {
+            *slot = entry;
+        }
     }
 
     /// Orders search results by the sort, the same way. The default order,
     /// by name, is the index's own and is kept.
-    ///
-    /// shortcut: Length, Sample Rate and Channels read every hit's header on
-    /// the calling thread, once per file (the reads are kept); a sort by one
-    /// of them over tens of thousands of audio files stalls the frame that
-    /// asks for it. Size, Date Modified and Kind come from the index.
+    /// A file whose header hasn't been read sorts as having no value until
+    /// the prober thread reads it. Size, Date Modified and Kind come from the
+    /// index.
     pub(super) fn sort_hits(&self, snapshot: &Snapshot, hits: &mut [u32]) {
         let ColumnsState {
             sort, descending, ..
@@ -236,7 +333,7 @@ impl BrowserView {
         if sort == Column::Name && !descending {
             return;
         }
-        let keys: HashMap<u32, SortKey> = hits
+        let mut keyed: Vec<(SortKey, u32)> = hits
             .iter()
             .map(|&hit| {
                 let entry = snapshot.entry(hit);
@@ -255,14 +352,17 @@ impl BrowserView {
                 } else {
                     PathBuf::new()
                 };
-                (hit, self.sort_key(sort, &path, entry.kind, clip, known))
+                (self.sort_key(sort, &path, entry.kind, clip, known), hit)
             })
             .collect();
-        hits.sort_by(|&a, &b| {
+        keyed.sort_by(|&(ka, a), &(kb, b)| {
             let (ea, eb) = (snapshot.entry(a), snapshot.entry(b));
             let folders = (ea.kind != ItemKind::Folder).cmp(&(eb.kind != ItemKind::Folder));
-            folders.then_with(|| order(sort, descending, &keys[&a], &keys[&b], &ea.name, &eb.name))
+            folders.then_with(|| order(sort, descending, &ka, &kb, &ea.name, &eb.name))
         });
+        for (slot, (_, hit)) in hits.iter_mut().zip(keyed) {
+            *slot = hit;
+        }
     }
 
     /// Sets the columns, the sort and file extensions (spec: browser-tags

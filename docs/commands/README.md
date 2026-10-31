@@ -24972,6 +24972,7 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 
 <details><summary>JSON Schema</summary>
@@ -25101,6 +25102,17 @@ One connected Push 2.
       "minimum": 0,
       "type": "integer"
     },
+    "session": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushSession"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Session Mode shows, while it is the pad mode."
+    },
     "setup": {
       "$ref": "#/$defs/PushSetup",
       "description": "The Setup menu's values."
@@ -25130,6 +25142,7 @@ One connected Push 2.
     "setup",
     "display",
     "browse",
+    "session",
     "mix_mode"
   ],
   "type": "object"
@@ -25535,6 +25548,167 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushSession`
+
+What Session Mode shows (push-2-tracks R73).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `first_track` | [`TrackId`](#trackid) or null | yes | The ring's first track. |
+| `first_scene` | [`SceneId`](#sceneid) or null | yes | The ring's first scene. |
+| `tracks` | integer, at least 0 | yes | How many tracks the ring covers. |
+| `scenes` | integer, at least 0 | yes | How many scenes the ring covers. |
+| `overview` | boolean | yes | Whether Session Overview is shown. |
+| `overview_locked` | boolean | yes | Whether Session Overview is locked on. |
+| `overview_part` | integer, at least 0 | yes | The part of 64 scenes the overview shows, from 0. |
+| `stop_clip_locked` | boolean | yes | Whether Stop Clip is locked. |
+| `pads` | array of [`PushSessionLook`](#pushsessionlook) | yes | The 64 pads, the top row first and each row from the left. |
+| `scene_buttons` | array of [`PushSessionLook`](#pushsessionlook) | yes | The eight Scene/Grid buttons, top to bottom. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Session Mode shows (push-2-tracks R73).",
+  "properties": {
+    "first_scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The ring's first scene."
+    },
+    "first_track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The ring's first track."
+    },
+    "overview": {
+      "description": "Whether Session Overview is shown.",
+      "type": "boolean"
+    },
+    "overview_locked": {
+      "description": "Whether Session Overview is locked on.",
+      "type": "boolean"
+    },
+    "overview_part": {
+      "description": "The part of 64 scenes the overview shows, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pads": {
+      "description": "The 64 pads, the top row first and each row from the left.",
+      "items": {
+        "$ref": "#/$defs/PushSessionLook"
+      },
+      "type": "array"
+    },
+    "scene_buttons": {
+      "description": "The eight Scene/Grid buttons, top to bottom.",
+      "items": {
+        "$ref": "#/$defs/PushSessionLook"
+      },
+      "type": "array"
+    },
+    "scenes": {
+      "description": "How many scenes the ring covers.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stop_clip_locked": {
+      "description": "Whether Stop Clip is locked.",
+      "type": "boolean"
+    },
+    "tracks": {
+      "description": "How many tracks the ring covers.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "first_track",
+    "first_scene",
+    "tracks",
+    "scenes",
+    "overview",
+    "overview_locked",
+    "overview_part",
+    "stop_clip_locked",
+    "pads",
+    "scene_buttons"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSessionLook`
+
+What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shows` | string | yes | Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`. |
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip in the pad's slot. |
+| `colour` | integer or null | yes | The swatch of the clip's colour, or of the scene's. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip in the pad's slot."
+    },
+    "colour": {
+      "description": "The swatch of the clip's colour, or of the scene's.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shows": {
+      "description": "Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "shows",
+    "clip",
+    "colour"
+  ],
+  "type": "object"
 }
 ```
 

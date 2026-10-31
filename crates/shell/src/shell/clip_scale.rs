@@ -14,21 +14,27 @@ impl Shell {
     }
 
     /// Points the set's current scale at the clip the Clip View shows, when
-    /// the selection changed or the clip's own scale did (the scales spec,
-    /// R10). It is no undo step, though the set is marked as changed.
-    pub(super) fn follow_shown_scale(&mut self, id: &str, shown: Option<bl_model::ClipId>) {
+    /// the selection changed or the clip's own scale did, by this command or
+    /// by undoing or redoing one (the scales spec, R10). `shown` and its
+    /// `scale` are what they were before the command. It is no undo step,
+    /// though the set is marked as changed.
+    pub(super) fn follow_shown_scale(
+        &mut self,
+        id: &str,
+        shown: Option<bl_model::ClipId>,
+        scale: Option<bl_model::Scale>,
+    ) {
         if id == scales_ids::SET_CLIP_SCALE {
             self.clip_view.forget_scale_fold_rows();
         }
         let now = self.shown_clip();
-        let changed = now != shown;
-        if !changed && id != scales_ids::SET_CLIP_SCALE {
+        let now_scale = crate::scales::shown_scale(self.editor.document(), now);
+        if (now, now_scale) == (shown, scale) && id != scales_ids::SET_CLIP_SCALE {
             return;
         }
-        let Some(scale) = crate::scales::shown_scale(self.editor.document(), now) else {
-            return;
-        };
-        self.follow_scale(scale);
+        if let Some(scale) = now_scale {
+            self.follow_scale(scale);
+        }
     }
 
     /// Points the set's current scale at `scale` (the scales spec, R10, R11

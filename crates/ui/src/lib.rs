@@ -85,6 +85,7 @@ pub mod mpe_tab;
 pub mod multisampler;
 pub mod note_filters;
 pub mod note_lanes;
+pub mod packages_page;
 pub mod palette;
 pub mod param_menu;
 pub mod plugin_list;

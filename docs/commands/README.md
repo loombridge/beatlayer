@@ -60,6 +60,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
@@ -22194,25 +22195,95 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageState`
+
+Where a package is.
+
+One of:
+
+- `"not_installed"`: Not on this computer.
+- `"queued"`: Waiting for the download before it.
+- `"downloading"`: Downloading: see `progress`.
+- `"installed"`: Installed.
+- `"removed_at_next_launch"`: Removed, but its library is loaded: its files go the next time Beatlayer starts.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a package is.",
+  "oneOf": [
+    {
+      "const": "not_installed",
+      "description": "Not on this computer.",
+      "type": "string"
+    },
+    {
+      "const": "queued",
+      "description": "Waiting for the download before it.",
+      "type": "string"
+    },
+    {
+      "const": "downloading",
+      "description": "Downloading: see `progress`.",
+      "type": "string"
+    },
+    {
+      "const": "installed",
+      "description": "Installed.",
+      "type": "string"
+    },
+    {
+      "const": "removed_at_next_launch",
+      "description": "Removed, but its library is loaded: its files go the next time Beatlayer starts.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PackageStatus`
 
-A package the separation needs.
+A package of the manifest, as `packages.list` and `stems.status` give it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `id` | string | yes | Its ID, which `packages.install` and `packages.remove` take. |
 | `name` | string | yes | Its name. |
 | `purpose` | string | yes | What it does. |
 | `version` | string | yes | Its version. |
 | `url` | string | yes | Its project's page. |
 | `size` | integer, at least 0 | yes | The download's size in bytes. |
 | `installed` | boolean | yes | Whether it's installed. |
+| `role` | string | yes | The role it fills: features share a package by role. |
+| `state` | [`PackageState`](#packagestate) | yes | Where it is. |
+| `features` | array of string | yes | The features that need it, by ID. |
+| `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A package the separation needs.",
+  "description": "A package of the manifest, as `packages.list` and `stems.status` give it.",
   "properties": {
+    "at_next_launch": {
+      "description": "Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts.",
+      "type": "boolean"
+    },
+    "features": {
+      "description": "The features that need it, by ID.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Its ID, which `packages.install` and `packages.remove` take.",
+      "type": "string"
+    },
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
@@ -22221,8 +22292,17 @@ A package the separation needs.
       "description": "Its name.",
       "type": "string"
     },
+    "progress": {
+      "description": "While it downloads, how far it is, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
     "purpose": {
       "description": "What it does.",
+      "type": "string"
+    },
+    "role": {
+      "description": "The role it fills: features share a package by role.",
       "type": "string"
     },
     "size": {
@@ -22230,6 +22310,10 @@ A package the separation needs.
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/PackageState",
+      "description": "Where it is."
     },
     "url": {
       "description": "Its project's page.",
@@ -22241,12 +22325,53 @@ A package the separation needs.
     }
   },
   "required": [
+    "id",
     "name",
     "purpose",
     "version",
     "url",
     "size",
-    "installed"
+    "installed",
+    "role",
+    "state",
+    "features"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PackagesStatus`
+
+What `packages.list` and the other commands return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages of the manifest for this platform. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `packages.list` and the other commands return.",
+  "properties": {
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "packages": {
+      "description": "The packages of the manifest for this platform.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "packages"
   ],
   "type": "object"
 }

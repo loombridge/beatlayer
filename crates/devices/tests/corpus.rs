@@ -1046,6 +1046,33 @@ fn renders_are_the_same_at_every_block_size_and_every_run() {
     }
 }
 
+// Spec: corpus R8, R12, R14
+#[test]
+fn gains_make_up_follows_decays_glide_the_same_at_every_block_size() {
+    let input = vec![common::noise(24_000), common::noise(24_000)];
+    let events = [
+        common::set(7_000, DECAY, 90.0),
+        common::set(15_003, DECAY, 10.0),
+    ];
+    let mut first: Option<Vec<Vec<f32>>> = None;
+    for block in BLOCKS.into_iter().chain([512]) {
+        let mut node = corpus(&[(GAIN, 0.25)], 4096);
+        let out = stream(
+            node.as_mut(),
+            &input,
+            block,
+            &Extras {
+                events: &events,
+                ..Extras::default()
+            },
+        );
+        match &first {
+            None => first = Some(out),
+            Some(first) => assert_eq!(&out, first, "blocks of {block}"),
+        }
+    }
+}
+
 // Spec: corpus R17
 #[test]
 fn a_set_with_corpus_saves_and_reopens_with_every_parameter_and_its_midi_source() {

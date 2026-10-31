@@ -570,8 +570,10 @@ struct Corpus {
     keys: KeyPitches,
     filters: [Biquad; 2],
     filter_key: Option<(u64, u64)>,
-    /// Gain's make-up for the ring in force ([`makeup`]).
-    makeup: f64,
+    /// Gain's make-up ([`makeup`]) and the Decay it was worked out for,
+    /// followed frame by frame so it moves with Decay's glide at any block
+    /// size.
+    makeup: (f32, f64),
     /// The limiter's gain now, and how far it moves toward 1 each frame.
     limit: f64,
     release: f64,
@@ -608,7 +610,7 @@ impl Corpus {
             keys: KeyPitches::twelve(),
             filters: [Biquad::default(); 2],
             filter_key: None,
-            makeup: 1.0,
+            makeup: (f32::NAN, 1.0),
             limit: 1.0,
             release: 1.0 - (-1.0 / (RELEASE_SECONDS * rate)).exp(),
             reduction: 0.0,
@@ -814,7 +816,6 @@ impl NativeDevice for Corpus {
                     }),
                     decay: {
                         let ring = decay_seconds(f64::from(decay[i]));
-                        self.makeup = makeup(rate, ring);
                         if self.played.damped {
                             let share = unit(off_amount[i]);
                             ring.powf(1.0 - share) * OFF_SECONDS.powf(share)
@@ -866,7 +867,10 @@ impl NativeDevice for Corpus {
             let w = unit(width[i]);
             let (a, b) = ((1.0 + w) / 2.0, (1.0 - w) / 2.0);
             let (y0, y1) = (f64::from(self.wet[0][i]), f64::from(self.wet[1][i]));
-            let gain = f64::from(gain[i]) * self.makeup;
+            if self.makeup.0.to_bits() != decay[i].to_bits() {
+                self.makeup = (decay[i], makeup(rate, decay_seconds(f64::from(decay[i]))));
+            }
+            let gain = f64::from(gain[i]) * self.makeup.1;
             let bleed = if bleeds { unit(bleed[i]) } else { 0.0 };
             let raw = [f64::from(self.input[0][i]), f64::from(self.input[1][i])];
             let sum = [

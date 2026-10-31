@@ -2873,6 +2873,117 @@ fn an_agent_inserts_sweep_by_its_type_and_sets_and_reads_its_parameters_by_id() 
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
+// Spec: roar R12, R16, R20 (WP-8.38): an agent inserts Roar by its type, sets
+// its parameters by ID (a routing mode, a stage's shaper, filter and Level,
+// the output), reads every one back with its descriptor, and reads each
+// stage's shaper curve with `device.display`.
+#[test]
+fn an_agent_inserts_roar_sets_its_parameters_by_id_and_reads_each_stages_curve() {
+    use bl_devices::roar::{
+        AMOUNT, FILTER, LEVEL, OUTPUT_GAIN, ROAR, ROUTING_MODE, SHAPER, stage_param,
+    };
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("roar-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": "Roar"}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Roar", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Roar"}, "name": "Roar",
+                                    "kind": { "native": { "device_type": ROAR } },
+                                    "enabled": true, "params": [] } } },
+            set(ROUTING_MODE, 3.0),
+            set(stage_param(1, SHAPER), 6.0),
+            set(stage_param(1, AMOUNT), 50.0),
+            set(stage_param(1, FILTER), 8.0),
+            set(stage_param(2, LEVEL), 0.5),
+            set(OUTPUT_GAIN, 2.0),
+        ] }),
+    );
+    let device = reply["ids"]["Roar"].clone();
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 43, "every parameter of part 1 is listed");
+    let get = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))
+            .clone()
+    };
+    let values: Vec<_> = [
+        ROUTING_MODE,
+        stage_param(1, SHAPER),
+        stage_param(1, AMOUNT),
+        stage_param(1, FILTER),
+        stage_param(2, LEVEL),
+        OUTPUT_GAIN,
+    ]
+    .iter()
+    .map(|id| get(*id)["value"].clone())
+    .collect();
+    assert_eq!(
+        values,
+        [
+            json!(3.0),
+            json!(6.0),
+            json!(50.0),
+            json!(8.0),
+            json!(0.5),
+            json!(2.0)
+        ]
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    // Each stage's view of the display has its own curve.
+    let curve = |client: &mut Client<_>, view: &str| {
+        call(
+            client,
+            "run",
+            json!({ "commands": [
+                { "command": "device.set_display_view",
+                  "args": { "device": device, "view": view } },
+            ] }),
+        );
+        call(
+            client,
+            "run",
+            json!({ "commands": [
+                { "command": "device.display", "args": { "device": device } },
+            ] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let first = curve(&mut client, "Stage 1");
+    let second = curve(&mut client, "Stage 2");
+    assert_eq!(first["view"], json!("Stage 1"));
+    assert_eq!(second["view"], json!("Stage 2"));
+    let points =
+        |display: &serde_json::Value| display["series"][0]["values"].as_array().unwrap().len();
+    assert_eq!((points(&first), points(&second)), (128, 128));
+    assert_ne!(first["series"][0]["values"], second["series"][0]["values"]);
+    assert!(
+        second["series"][0]["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v.as_f64().unwrap() >= 0.0),
+        "stage 2's Full Wave Rectifier"
+    );
+}
+
 // Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an
 // agent inserts Shifter by its type with its MIDI sidechain, sets its
 // parameters by ID, points its MIDI source at a MIDI track and reads both

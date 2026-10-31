@@ -2378,8 +2378,9 @@ impl BrowserView {
                         }
                     } else {
                         // The analysis cache reads files through the media
-                        // store, so a browsed file joins it first.
-                        let hash = media.import(&loaded.path);
+                        // store, so a browsed file joins it first. The loader
+                        // read it; recording it takes no hashing here.
+                        let hash = loaded.media.map(|imported| media.record_imported(imported));
                         let warp =
                             hash.as_ref()
                                 .map_or(crate::auto_warp::PreviewWarp::Unwarped, |hash| {
@@ -2392,7 +2393,7 @@ impl BrowserView {
                                     )
                                 });
                         match (warp, hash) {
-                            (crate::auto_warp::PreviewWarp::Pending, Ok(hash)) => {
+                            (crate::auto_warp::PreviewWarp::Pending, Some(hash)) => {
                                 self.pending_warp = Some(PendingPreview {
                                     path: loaded.path,
                                     hash,
@@ -2400,7 +2401,7 @@ impl BrowserView {
                                     seconds,
                                 });
                             }
-                            (crate::auto_warp::PreviewWarp::Warped(audio_data), Ok(hash)) => {
+                            (crate::auto_warp::PreviewWarp::Warped(audio_data), Some(hash)) => {
                                 self.start_warped_preview(
                                     audio,
                                     PendingPreview {
@@ -2660,7 +2661,7 @@ impl BrowserView {
         let id = if kind != Some(ItemKind::Audio) {
             self.loader.request_clip(path, rate, search.to_vec(), bpm)
         } else {
-            self.loader.request(path, rate)
+            self.loader.request(path, rate, !self.raw)
         }
         .map_err(BrowserError::Failed)?;
         self.loading = Some((id, path.to_path_buf()));

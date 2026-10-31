@@ -71,6 +71,24 @@ impl Fingerprint {
     }
 }
 
+/// A file read for import, ready to record in a store.
+#[derive(Clone, Debug)]
+pub struct Imported {
+    hash: ContentHash,
+    path: PathBuf,
+    size: u64,
+    info: MediaInfo,
+    verified: Option<Fingerprint>,
+}
+
+impl Imported {
+    /// The hash of the file's content.
+    #[must_use]
+    pub fn hash(&self) -> ContentHash {
+        self.hash
+    }
+}
+
 struct Record {
     entry: MediaEntry,
     /// The fingerprint when the file was last hashed, if it has been.
@@ -119,13 +137,44 @@ impl MediaStore {
     ///
     /// Fails if the file can't be read or isn't audio Beatlayer reads.
     pub fn import(&self, path: impl AsRef<Path>) -> Result<ContentHash, MediaError> {
+        Ok(self.record_imported(Self::read_import(path)?))
+    }
+
+    /// Reads a file for [`MediaStore::record_imported`]: hashes its content
+    /// and reads its header. It touches no store, so a background thread can
+    /// do the slow part of an import.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file can't be read or isn't audio Beatlayer reads.
+    pub fn read_import(path: impl AsRef<Path>) -> Result<Imported, MediaError> {
         let path = absolute(path.as_ref())?;
         let before = Fingerprint::of(&path)?;
         let hash = ContentHash::of_file(&path)?;
         let info = *Decoder::open(&path)?.info();
         // A file that changed while it was hashed is hashed again later.
         let verified = (Fingerprint::of(&path)? == before).then_some(before);
+        Ok(Imported {
+            hash,
+            path,
+            size: before.size,
+            info,
+            verified,
+        })
+    }
 
+    /// Records a file [`MediaStore::read_import`] read, under the same rule
+    /// as [`MediaStore::import`], and returns its hash. It doesn't hash the
+    /// file; only when the store has the content at another path does it
+    /// check that file is still there.
+    pub fn record_imported(&self, imported: Imported) -> ContentHash {
+        let Imported {
+            hash,
+            path,
+            size,
+            info,
+            verified,
+        } = imported;
         let keeps_its_path = self
             .read()
             .get(&hash)
@@ -134,7 +183,7 @@ impl MediaStore {
         let mut records = self.write();
         if keeps_its_path && let Some(record) = records.get_mut(&hash) {
             record.entry.info = Some(info);
-            return Ok(hash);
+            return hash;
         }
         records.insert(
             hash,
@@ -142,13 +191,13 @@ impl MediaStore {
                 entry: MediaEntry {
                     hash,
                     path,
-                    size: before.size,
+                    size,
                     info: Some(info),
                 },
                 verified,
             },
         );
-        Ok(hash)
+        hash
     }
 
     /// Records a reference the store hasn't seen, as a project file gives it:

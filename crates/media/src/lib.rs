@@ -61,7 +61,7 @@ pub use progressive::{Fill, ProgressiveSample};
 pub use resample::{RateConverter, convert_sample_rate, converted_len};
 pub use sample_data::SampleData;
 pub use sampler_chunk::{SamplerInfo, read_sampler_info};
-pub use store::{MediaEntry, MediaStatus, MediaStore};
+pub use store::{Imported, MediaEntry, MediaStatus, MediaStore};
 pub use stream::{
     AudioSource, Filled, MemorySource, PlanarMut, Source, StreamConfig, StreamId, StreamSource,
     StreamStats, Streamer, StreamerStats, Transition,

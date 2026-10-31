@@ -15,7 +15,7 @@ use std::time::SystemTime;
 
 use bl_core::time::{Bpm, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::preview::PreviewSamples;
-use bl_media::{Decoder, SampleData, convert_sample_rate};
+use bl_media::{Decoder, Imported, MediaStore, SampleData, convert_sample_rate};
 use bl_model::{
     Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind, DeviceRole, Document,
     Editor, MidiData, Note, PluginFormat, RackKind, Receive, TrackId, TrackKind, WarpMarker,
@@ -70,6 +70,10 @@ pub struct Loaded {
     /// For a MIDI clip file, the warp that lays its render on the set's beats
     /// (clip files R16).
     pub clip: Option<Box<bl_model::AudioData>>,
+    /// For a plain preview asked to import, the file read for the media
+    /// store: the hash and header, read here so the UI thread doesn't. `None`
+    /// when it wasn't asked for or couldn't be read.
+    pub media: Option<Imported>,
 }
 
 /// How many stretches a preview's waveform overview has.
@@ -103,6 +107,8 @@ struct Request {
     id: u64,
     path: PathBuf,
     rate: u32,
+    /// Set for a plain preview that will join the media store.
+    import: bool,
     /// Set for a clip file: the folders to search for its audio if it isn't
     /// where the file says.
     clip_search: Option<Vec<PathBuf>>,
@@ -148,13 +154,14 @@ impl Loader {
         self.cancel.store(true, Ordering::Relaxed);
     }
 
-    /// Asks for `path` decoded at `rate`; returns the request's ID.
+    /// Asks for `path` decoded at `rate`, and read for the media store when
+    /// `import` is set; returns the request's ID.
     ///
     /// # Errors
     ///
     /// If the decoding thread can't start.
-    pub fn request(&mut self, path: &Path, rate: u32) -> Result<u64, String> {
-        self.send(path, rate, None, 0.0)
+    pub fn request(&mut self, path: &Path, rate: u32, import: bool) -> Result<u64, String> {
+        self.send(path, rate, None, 0.0, import)
     }
 
     /// Asks for the audio clip in the clip file `path` and the audio it
@@ -172,7 +179,7 @@ impl Loader {
         search: Vec<PathBuf>,
         bpm: f64,
     ) -> Result<u64, String> {
-        self.send(path, rate, Some(search), bpm)
+        self.send(path, rate, Some(search), bpm, false)
     }
 
     fn send(
@@ -181,6 +188,7 @@ impl Loader {
         rate: u32,
         clip_search: Option<Vec<PathBuf>>,
         bpm: f64,
+        import: bool,
     ) -> Result<u64, String> {
         if self.requests.is_none() {
             let (sender, receiver) = mpsc::channel::<Request>();
@@ -205,12 +213,18 @@ impl Loader {
                             .as_ref()
                             .map(|data| overview(data, OVERVIEW_POINTS))
                             .unwrap_or_default();
+                        let media = (request.import
+                            && result.is_ok()
+                            && !request.cancel.load(Ordering::Relaxed))
+                        .then(|| MediaStore::read_import(&request.path).ok())
+                        .flatten();
                         let loaded = Loaded {
                             id: request.id,
                             path: request.path,
                             result,
                             overview,
                             clip,
+                            media,
                         };
                         if results.send(loaded).is_err() {
                             return;
@@ -229,6 +243,7 @@ impl Loader {
             id: self.next,
             path: path.to_path_buf(),
             rate,
+            import,
             clip_search,
             bpm,
             cancel: Arc::clone(&self.cancel),
@@ -814,6 +829,7 @@ mod tests {
             id: 1,
             path: path.clone(),
             rate: 48_000,
+            import: false,
             clip_search: Some(Vec::new()),
             bpm: 120.0,
             cancel: Arc::default(),
@@ -850,7 +866,7 @@ mod tests {
             .unwrap();
         let first = Arc::clone(&loader.cancel);
         assert!(!first.load(Ordering::Relaxed));
-        loader.request(file, 48_000).unwrap();
+        loader.request(file, 48_000, false).unwrap();
         let second = Arc::clone(&loader.cancel);
         assert!(first.load(Ordering::Relaxed), "a newer request cancels it");
         assert!(!second.load(Ordering::Relaxed));

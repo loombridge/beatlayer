@@ -1064,6 +1064,18 @@ mod tests {
             )
             .map(|_| ())
         };
+        // Any package the build plan still has to do: a named one goes stale
+        // the day it lands.
+        let json = progress.to_json();
+        let todo = json["phases"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .flat_map(|phase| phase["packages"].as_array().into_iter().flatten())
+            .find(|package| package["status"] != "done")
+            .and_then(|package| package["id"].as_str())
+            .map(|id| format!("WP-{id}"))
+            .expect("the build plan has a package still to do");
         for milestone in ["M1", "M2", "M3"] {
             let none = run(milestone, &[]).unwrap_err();
             assert!(none.contains("no package owns"), "{milestone}: {none}");
@@ -1071,7 +1083,7 @@ mod tests {
             assert!(done.contains("which is done"), "{milestone}: {done}");
             let unknown = run(milestone, &[("S-NOPE-001", "WP-99.9")]).unwrap_err();
             assert!(unknown.contains("doesn't have"), "{milestone}: {unknown}");
-            run(milestone, &[("S-NOPE-001", "WP-7.33b")]).expect("a package still to do");
+            run(milestone, &[("S-NOPE-001", &todo)]).expect("a package still to do");
         }
         // A later milestone needs none.
         run("M6", &[]).expect("M6 may wait without a package");

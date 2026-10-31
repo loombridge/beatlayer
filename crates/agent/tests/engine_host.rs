@@ -705,3 +705,270 @@ fn an_agent_s_scene_launch_moves_the_selection_as_the_person_s_does() {
         .unwrap();
     assert_eq!(state["scenes"], json!([second]), "{state}");
 }
+
+fn run_one(
+    control: &NullControl,
+    client: &mut Client<InProcess>,
+    command: &str,
+    args: Value,
+) -> Value {
+    call(
+        control,
+        client,
+        "run",
+        json!({ "commands": [{ "command": command, "args": args }] }),
+    )
+}
+
+#[test]
+fn a_set_change_cancels_scheduled_commands_and_forgets_ref_names() {
+    // Spec: agent-permissions R1, R10. What an agent scheduled and named in
+    // one set must not act on the next one, which numbers its objects alike.
+    let (mut client, control) = host();
+    client.transport().answer = Box::new(|_| true);
+    let made = run_one(
+        &control,
+        &mut client,
+        "track.create",
+        json!({ "id": { "$new": "bass" }, "kind": "midi", "name": "Bass", "index": 0 }),
+    );
+    let bass = made["ids"]["bass"].as_u64().unwrap();
+    call(
+        &control,
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "2.1.1", "command": "mixer.set_mute",
+                "args": { "track": { "$ref": "bass" }, "mute": true } }),
+    );
+    run_one(&control, &mut client, "set.new", json!({}));
+    let made = run_one(
+        &control,
+        &mut client,
+        "track.create",
+        json!({ "id": { "$new": "again" }, "kind": "midi", "name": "Again", "index": 0 }),
+    );
+    assert_eq!(made["ids"]["again"].as_u64().unwrap(), bass);
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
+    wait(&control, &mut client, "the playhead to pass 3.1.1", |c| {
+        status(&control, c)["position"]["ticks"].as_i64().unwrap() > 2 * BAR
+    });
+    let host = client.transport();
+    let track = host
+        .shell
+        .editor()
+        .document()
+        .track(bl_model::TrackId(bl_core::id::Id::new(bass).unwrap()))
+        .unwrap();
+    assert!(!track.mixer().mute, "the new set's track was muted");
+    assert!(
+        host.shell
+            .editor()
+            .undo_history()
+            .all(|label| !label.contains("Set Mute")),
+        "a step for the old set's command was recorded"
+    );
+    let list = scheduled(&control, &mut client);
+    assert_eq!(list[0]["state"], "cancelled", "{list:?}");
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "mixer.set_mute",
+                    "args": { "track": { "$ref": "bass" }, "mute": true } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(refused.text.contains("bass"), "{}", refused.text);
+    client.transport().shell.audio_mut().stop();
+}
+
+#[test]
+fn a_scheduled_phase_nudge_that_would_be_held_is_refused_and_its_release_is_taken() {
+    // Spec: transport R28. A scheduled press has no session to end with.
+    let (mut client, control) = host();
+    let refused = client
+        .call(
+            "schedule",
+            json!({ "action": "add", "at": "2.1.1", "command": "transport.phase_nudge",
+                    "args": { "direction": "up", "held": true } }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(refused.text.contains("Phase Nudge"), "{}", refused.text);
+    assert!(scheduled(&control, &mut client).is_empty());
+    call(
+        &control,
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "2.1.1", "command": "transport.phase_nudge",
+                "args": { "direction": "up", "held": false } }),
+    );
+}
+
+#[test]
+fn a_transport_refusal_reaches_the_agent_that_asked() {
+    // Spec: recording R1, session-recording R11. The shell's refusal of a
+    // second take comes back as the call's error, not "sent".
+    let (mut client, control) = host();
+    client.transport().answer = Box::new(|_| true);
+    let track = audio_track(&control, &mut client);
+    for (command, args) in [
+        (
+            "routing.set_input",
+            json!({ "track": track,
+                    "input": { "type": "external", "channel": { "type": "mono", "channel": 1 } } }),
+        ),
+        ("mixer.set_arm", json!({ "track": track, "arm": true })),
+        ("transport.set_recording", json!({ "recording": true })),
+    ] {
+        run_one(&control, &mut client, command, args);
+    }
+    wait(&control, &mut client, "the engine to record", |c| {
+        c.transport().shell.poll_engine().recording
+    });
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "stop" }),
+    );
+    // The take's writer is still being finished: the shell hasn't polled.
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "transport.set_recording",
+                    "args": { "recording": true } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(
+        refused.text.contains("still being finished"),
+        "{}",
+        refused.text
+    );
+}
+
+#[test]
+fn an_arrangement_record_is_refused_while_a_session_recording_runs() {
+    // Spec: session-recording R11.
+    let (mut client, control) = host();
+    client.transport().answer = Box::new(|_| true);
+    let midi = call(
+        &control,
+        &mut client,
+        "query",
+        json!({ "path": "track \"1 MIDI\"" }),
+    )["id"]
+        .as_u64()
+        .unwrap();
+    run_one(
+        &control,
+        &mut client,
+        "mixer.set_arm",
+        json!({ "track": midi, "arm": true }),
+    );
+    run_one(&control, &mut client, "session.record", json!({}));
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "transport.set_recording",
+                    "args": { "recording": true } }] }),
+        )
+        .unwrap();
+    assert!(refused.is_error, "{}", refused.text);
+    assert!(
+        refused.text.contains("Session recording"),
+        "{}",
+        refused.text
+    );
+    client.transport().shell.audio_mut().stop();
+}
+
+#[test]
+fn a_scheduled_macro_move_writes_the_mapped_values_as_a_run_does() {
+    // Spec: macros R13. A fired command goes through the shell, so the macro
+    // law's values reach the document, not only the macro knob.
+    const WIDTH: u32 = 6;
+    let (mut client, control) = host();
+    let (rack, utility) = {
+        let shell = &mut client.transport().shell;
+        let audio = shell.editor().document().top_level().nth(2).unwrap();
+        shell
+            .invoke("arrangement.select_tracks", json!({ "tracks": [audio] }))
+            .unwrap();
+        shell.set_focused_area(bl_shell::Area::Detail);
+        let rack = shell
+            .invoke(
+                "device.add",
+                json!({ "device": { "kind": { "rack": { "kind": "audio_effect" } },
+                                    "name": "Rack", "role": "audio_effect" } }),
+            )
+            .unwrap()["device"]
+            .as_u64()
+            .unwrap();
+        let chain = shell.new_id::<bl_model::ChainId>();
+        shell
+            .invoke(
+                "chain.add",
+                json!({ "rack": rack, "index": 0,
+                        "chain": { "id": chain, "name": "Range", "devices": [] } }),
+            )
+            .unwrap();
+        let utility = shell
+            .invoke(
+                "device.add",
+                json!({ "chain": chain,
+                        "device": { "kind": { "native": { "device_type": "beatlayer.utility" } },
+                                    "name": "Utility", "role": "audio_effect" } }),
+            )
+            .unwrap()["device"]
+            .as_u64()
+            .unwrap();
+        (rack, utility)
+    };
+    run_one(
+        &control,
+        &mut client,
+        "rack.map_macro",
+        json!({ "rack": rack, "macro_number": 1,
+                "target": { "type": "device", "device": utility, "param": WIDTH } }),
+    );
+    let width = |client: &mut Client<InProcess>| {
+        client
+            .transport()
+            .shell
+            .editor()
+            .document()
+            .device(bl_model::DeviceId(bl_core::id::Id::new(utility).unwrap()))
+            .and_then(|device| device.params.get(&bl_model::ParamId(WIDTH)).copied())
+    };
+    let knob =
+        |value: f64| json!({ "device": rack, "param": bl_model::macro_param(1), "value": value });
+    // What a run of the same move leaves in the Utility.
+    run_one(&control, &mut client, "device.set_param", knob(0.25));
+    let by_run = width(&mut client);
+    run_one(&control, &mut client, "device.set_param", knob(0.5));
+    assert_ne!(width(&mut client), by_run);
+    call(
+        &control,
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "2.1.1", "command": "device.set_param",
+                "args": knob(0.25) }),
+    );
+    call(
+        &control,
+        &mut client,
+        "transport",
+        json!({ "action": "play" }),
+    );
+    wait(&control, &mut client, "the command to fire", |c| {
+        all_fired(&control, c)
+    });
+    assert_eq!(width(&mut client), by_run);
+    client.transport().shell.audio_mut().stop();
+}

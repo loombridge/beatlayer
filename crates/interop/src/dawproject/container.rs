@@ -3,12 +3,16 @@
 //!
 //! The container is read safely: an entry whose name could escape the
 //! folder it's written to is never read, an entry compressed by anything but
-//! storing or deflate is left out, and no entry is read past the size its
-//! header gives.
+//! storing or deflate is left out, an entry larger than the limits is left
+//! out, no entry is read past the size its header gives, and only
+//! `project.xml` and `metadata.xml` are unpacked until a caller asks for
+//! another entry.
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::io::{Cursor, Read};
+use std::io::{Cursor, Read, Seek, Write};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use zip::CompressionMethod;
 
@@ -20,6 +24,32 @@ pub const MAX_ENTRIES: usize = 100_000;
 
 /// The most bytes an XML part may unpack to (R5).
 pub const MAX_XML_BYTES: u64 = 256 << 20;
+
+/// The most bytes one embedded file may unpack to (R5).
+pub const MAX_ENTRY_BYTES: u64 = 4 << 30;
+
+/// The most bytes all the embedded files may unpack to together (R5).
+pub const MAX_TOTAL_BYTES: u64 = 64 << 30;
+
+/// What an embedded file, and all of them together, may unpack to (R5): an
+/// entry whose header gives a size over `entry`, or that would take the sum
+/// past `total`, is left out and listed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    /// The most bytes one entry may unpack to.
+    pub entry: u64,
+    /// The most bytes the entries may unpack to together.
+    pub total: u64,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            entry: MAX_ENTRY_BYTES,
+            total: MAX_TOTAL_BYTES,
+        }
+    }
+}
 
 /// The name the project part has in the container's root (R1).
 pub const PROJECT_PART: &str = "project.xml";
@@ -98,18 +128,100 @@ impl fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-/// A DAWproject file, read.
-#[derive(Clone, Debug, Default)]
+/// Something a container is read from.
+trait Source: Read + Seek + Send {}
+
+impl<T: Read + Seek + Send> Source for T {}
+
+/// A file of the container: where it is in the archive and the size its
+/// header gives.
+#[derive(Clone, Copy, Debug)]
+struct Held {
+    index: usize,
+    size: u64,
+}
+
+/// A DAWproject file, read. The files it holds besides the project and its
+/// metadata stay in the archive, unpacked one at a time when asked for.
 pub struct Container {
     /// The project the file holds.
     pub project: Project,
-    /// The container's files, by their path in it, with `/` between the
-    /// parts.
-    pub files: BTreeMap<String, Vec<u8>>,
     /// The metadata the file holds, as its text (R64).
     pub metadata: Option<String>,
     /// What the reader found it couldn't use.
     pub report: ReadReport,
+    /// The container's files, by their path in it, with `/` between the
+    /// parts.
+    held: BTreeMap<String, Held>,
+    archive: Mutex<zip::ZipArchive<Box<dyn Source>>>,
+    /// How many bytes have been unpacked since the project was read.
+    unpacked: AtomicU64,
+}
+
+impl fmt::Debug for Container {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Container")
+            .field("project", &self.project)
+            .field("files", &self.held.keys().collect::<Vec<_>>())
+            .field("report", &self.report)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Container {
+    /// The size a file's header gives, or `None` when the container holds
+    /// no such file.
+    #[must_use]
+    pub fn size_of(&self, path: &str) -> Option<u64> {
+        self.held.get(path).map(|held| held.size)
+    }
+
+    /// The paths of the container's files, in order.
+    pub fn paths(&self) -> impl Iterator<Item = &str> {
+        self.held.keys().map(String::as_str)
+    }
+
+    /// How many bytes have been unpacked since the project was read: the
+    /// files nobody asked for cost nothing.
+    #[must_use]
+    pub fn unpacked(&self) -> u64 {
+        self.unpacked.load(Ordering::Relaxed)
+    }
+
+    /// Unpacks the file at `path` into `out`, never past the size its header
+    /// gives (R5).
+    ///
+    /// # Errors
+    ///
+    /// The error from reading the archive or writing `out`; `NotFound` when
+    /// the container holds no such file.
+    pub fn copy_to(&self, path: &str, out: &mut impl Write) -> std::io::Result<u64> {
+        let held = self.held.get(path).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "the container has no such file",
+            )
+        })?;
+        let mut archive = self
+            .archive
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let file = archive
+            .by_index(held.index)
+            .map_err(std::io::Error::other)?;
+        let copied = std::io::copy(&mut file.take(held.size), out)?;
+        self.unpacked.fetch_add(copied, Ordering::Relaxed);
+        Ok(copied)
+    }
+
+    /// The file at `path`, unpacked into memory: for the small files a
+    /// project names (a plug-in's state, a preset), not for media.
+    #[must_use]
+    pub fn read(&self, path: &str) -> Option<Vec<u8>> {
+        let mut data = Vec::new();
+        self.copy_to(path, &mut data).ok()?;
+        Some(data)
+    }
 }
 
 /// Reads the DAWproject file in `bytes`.
@@ -118,12 +230,38 @@ pub struct Container {
 ///
 /// [`Error`] if the bytes aren't a DAWproject file Beatlayer reads.
 pub fn read_container(bytes: &[u8]) -> Result<Container, Error> {
-    let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|_| Error::NotAProject)?;
+    read_container_with_limits(bytes, Limits::default())
+}
+
+/// Reads the DAWproject file in `bytes`, leaving out the files `limits`
+/// don't allow (R5).
+///
+/// # Errors
+///
+/// As for [`read_container`].
+pub fn read_container_with_limits(bytes: &[u8], limits: Limits) -> Result<Container, Error> {
+    read_container_from(Cursor::new(bytes.to_vec()), limits)
+}
+
+/// Reads the DAWproject file `reader` gives, without reading it into memory:
+/// the project and its metadata are unpacked, and the rest stays in the
+/// archive (R5).
+///
+/// # Errors
+///
+/// As for [`read_container`].
+pub fn read_container_from(
+    reader: impl Read + Seek + Send + 'static,
+    limits: Limits,
+) -> Result<Container, Error> {
+    let source: Box<dyn Source> = Box::new(reader);
+    let mut archive = zip::ZipArchive::new(source).map_err(|_| Error::NotAProject)?;
     if archive.len() > MAX_ENTRIES {
         return Err(Error::TooManyEntries(archive.len()));
     }
     let mut report = ReadReport::default();
-    let mut files: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let mut held: BTreeMap<String, Held> = BTreeMap::new();
+    let mut total = 0u64;
     let mut project_bytes: Option<Vec<u8>> = None;
     let mut metadata_bytes: Option<Vec<u8>> = None;
 
@@ -167,26 +305,28 @@ pub fn read_container(bytes: &[u8]) -> Result<Container, Error> {
             }
             continue;
         }
-        // Anything else is a file the project may use.
-        let Some(file) = archive.by_index(index).ok() else {
+        // Anything else is a file the project may use; only its header is
+        // read now.
+        let Some(file) = archive.by_index_raw(index).ok() else {
             report.left_out.push(format!("the entry `{name}`"));
             continue;
         };
-        if !matches!(
-            file.compression(),
-            CompressionMethod::Stored | CompressionMethod::Deflated
-        ) {
-            // An entry compressed by anything else is left out (R5).
-            report.left_out.push(format!("the entry `{name}`"));
-            continue;
-        }
         let size = file.size();
-        let mut data = Vec::new();
-        if file.take(size).read_to_end(&mut data).is_err() {
+        if file.encrypted()
+            || !matches!(
+                file.compression(),
+                CompressionMethod::Stored | CompressionMethod::Deflated
+            )
+            // An entry compressed by anything else, or larger than the
+            // limits allow, is left out (R5).
+            || size > limits.entry
+            || total.saturating_add(size) > limits.total
+        {
             report.left_out.push(format!("the entry `{name}`"));
             continue;
         }
-        files.insert(path, data);
+        total += size;
+        held.insert(path, Held { index, size });
     }
 
     let Some(project_bytes) = project_bytes else {
@@ -205,10 +345,22 @@ pub fn read_container(bytes: &[u8]) -> Result<Container, Error> {
     };
     Ok(Container {
         project,
-        files,
         metadata,
         report,
+        held,
+        archive: Mutex::new(archive),
+        unpacked: AtomicU64::new(0),
     })
+}
+
+/// A path as a case-insensitive file system sees it: two entries whose
+/// folded paths are equal are one file on macOS and Windows (R73).
+///
+/// shortcut: lower case only; macOS also treats names that differ only in
+/// Unicode normalisation as one, so fold those too if such a clash turns up.
+#[must_use]
+pub fn folded(path: &str) -> String {
+    path.to_lowercase()
 }
 
 /// A container path with `/` between the parts, whatever the file used.

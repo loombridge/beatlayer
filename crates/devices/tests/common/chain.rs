@@ -307,14 +307,22 @@ pub fn note(key: u8, at: i64, beats: i64) -> Note {
     )
 }
 
-/// Whether every note-on in `heard` has a later note-off on its key, and
-/// no key is left sounding.
+/// Whether every note-on in `heard` has a later note-off on its key, and no
+/// key is left sounding. An off that comes before the on it ends fails; an
+/// extra off after the key has ended is harmless, as the instrument ignores it.
 pub fn nothing_hangs(heard: &[Heard]) -> bool {
     let mut sounding = std::collections::BTreeMap::<u8, i32>::new();
-    for &(_, kind, key, _) in heard {
+    for (i, &(_, kind, key, _)) in heard.iter().enumerate() {
+        let count = sounding.entry(key).or_default();
         match kind {
-            NoteKind::On => *sounding.entry(key).or_default() += 1,
-            NoteKind::Off | NoteKind::Choke => *sounding.entry(key).or_default() -= 1,
+            NoteKind::On => *count += 1,
+            NoteKind::Off | NoteKind::Choke => {
+                *count -= 1;
+                let on_later = heard[i..].iter().any(|h| h.2 == key && h.1 == NoteKind::On);
+                if *count < 0 && on_later {
+                    return false;
+                }
+            }
             _ => {}
         }
     }

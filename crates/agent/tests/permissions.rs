@@ -1357,3 +1357,137 @@ fn saving_a_default_pad_and_dropping_files_on_a_pad_ask_first() {
     );
     assert_eq!(device["permission"], "edit", "{device}");
 }
+
+/// Fires the scheduled command with this ID, as the engine's report does.
+fn fire(client: &mut Client<InProcess>, id: u64) {
+    let host = client.transport();
+    host.agent.on_report(
+        &mut host.shell,
+        Report::Fired {
+            id,
+            position: Frames(0),
+            clock: 0,
+        },
+    );
+}
+
+/// A scheduled delete of the first MIDI track, cleared because the agent is
+/// autonomous, and the track.
+fn autonomous_scheduled_delete() -> (Client<InProcess>, u64) {
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    client
+        .transport()
+        .shell
+        .run(
+            "agent.set_autonomous",
+            json!({ "client": "editor", "on": true }),
+        )
+        .unwrap();
+    let asked = client.transport().asked.len();
+    call(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "2.1.1", "command": "track.delete",
+                "args": { "track": midi } }),
+    );
+    assert_eq!(client.transport().asked.len(), asked);
+    (client, midi)
+}
+
+#[test]
+fn a_scheduled_delete_cleared_by_autonomy_does_not_run_after_autonomy_is_turned_off() {
+    // Spec: agent-permissions R1, R2.
+    let (mut client, midi) = autonomous_scheduled_delete();
+    client
+        .transport()
+        .shell
+        .run(
+            "agent.set_autonomous",
+            json!({ "client": "editor", "on": false }),
+        )
+        .unwrap();
+    let steps = client.transport().shell.editor().undo_history().len();
+    fire(&mut client, 1);
+    assert!(
+        client
+            .transport()
+            .shell
+            .editor()
+            .document()
+            .track(bl_model::TrackId(bl_core::id::Id::new(midi).unwrap()))
+            .is_some(),
+        "the track is still there"
+    );
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps
+    );
+    let list = call(&mut client, "schedule", json!({ "action": "list" }));
+    let entry = &list["scheduled"][0];
+    assert_eq!(entry["state"], "failed", "{entry}");
+    assert!(
+        entry["detail"]["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("not run")),
+        "{entry}"
+    );
+}
+
+#[test]
+fn a_forgotten_agent_s_scheduled_commands_are_cancelled() {
+    // Spec: agent-permissions R1.
+    let (mut client, _) = autonomous_scheduled_delete();
+    let host = client.transport();
+    host.shell
+        .run("agent.forget_client", json!({ "client": "editor" }))
+        .unwrap();
+    host.agent.close_sessions_of("editor");
+    assert!(
+        host.agent
+            .take_engine_messages()
+            .contains(&EngineMessage::Cancel(1))
+    );
+    assert_eq!(host.agent.scheduled_waiting(), 0);
+}
+
+#[test]
+fn a_scheduled_drop_that_would_replace_clips_when_it_fires_is_not_run_though_its_external_part_was_allowed()
+ {
+    // Spec: agent-permissions R1, R4. The person was asked about the
+    // external part only; a clip put under the drop since makes it
+    // destructive too.
+    let mut client = app();
+    let audio = track(&mut client, "3 Audio");
+    client.transport().answer = Box::new(|_| true);
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.wav");
+    call(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "17.1.1", "command": "browser.add_to_arrangement",
+                "args": { "paths": [path.to_string_lossy()], "track": audio, "at": 4 * BAR } }),
+    );
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(asked.contains("(external)"), "{asked}");
+    assert!(!asked.contains("destructive"), "{asked}");
+    let held = clip(&mut client, audio, "Held", 4, 2);
+    let steps = client.transport().shell.editor().undo_history().len();
+    fire(&mut client, 1);
+    assert!(exists(&mut client, held));
+    let found = call(&mut client, "query", json!({ "id": held }));
+    assert_eq!(found["start"]["ticks"], json!(4 * BAR), "{found}");
+    assert_eq!(found["length"]["ticks"], json!(2 * BAR), "{found}");
+    assert_eq!(
+        client.transport().shell.editor().undo_history().len(),
+        steps
+    );
+    let list = call(&mut client, "schedule", json!({ "action": "list" }));
+    let entry = &list["scheduled"][0];
+    assert_eq!(entry["state"], "failed", "{entry}");
+    assert!(
+        entry["detail"]["error"]
+            .as_str()
+            .is_some_and(|error| error.starts_with("not run")),
+        "{entry}"
+    );
+}

@@ -262,6 +262,7 @@ impl Program for Beatlayer {
         args: Value,
     ) -> Result<ToolOutcome, String> {
         tools::number_session(&mut self.state, call.session);
+        tools::follow_set(&mut self.state, call.session, call.host.set_generation());
         let mut ctx = Ctx {
             mode: call.mode,
             shell: call.host,
@@ -624,6 +625,12 @@ impl Agent {
     /// Ends every session with the rights of the agent called `client`, as
     /// forgetting its approval does.
     pub fn close_sessions_of(&mut self, client: &str) {
+        // Its waiting commands never fire, in the engine either.
+        let state = &mut self.program().state;
+        let cancelled = state.schedule.cancel_waiting(Some(client));
+        state
+            .outbox
+            .extend(cancelled.into_iter().map(EngineMessage::Cancel));
         self.server.close_sessions_of(client);
     }
 
@@ -671,6 +678,7 @@ impl Agent {
     /// the engine's transport for `transport`'s `status`. A new engine, after
     /// the device changed, gets every command still scheduled.
     pub fn sync_engine(&mut self, shell: &mut Shell) {
+        tools::follow_set_schedule(&mut self.program().state, shell.set_generation());
         // Spec: transport R28. A Phase Nudge ends with the session that
         // pressed it, however the session closed.
         if !self.server.program().state.nudges.is_empty() {
@@ -719,19 +727,22 @@ impl Agent {
             // stopped, there's nothing to send to. A transport or launch
             // command goes through the shell, so recording is set up and the
             // selection follows a launch as the UI's do.
-            let _ = match message {
+            let sent = match message {
                 EngineMessage::Transport(command) => shell.send_transport(command),
                 EngineMessage::Session(command) => shell.send_session(command),
                 EngineMessage::Schedule(command) => shell.audio_mut().schedule(command),
                 EngineMessage::Cancel(id) => shell.audio_mut().cancel(id),
             };
+            // A refusal the call couldn't foresee still leaves a trace.
+            if let Err(reason) = sent {
+                shell.set_message(reason, true);
+            }
         }
         let transport = shell.audio_mut().transport_state();
         program.state.playhead = Some(Playhead::new(
             transport.playing,
             transport.position,
             transport.insert_marker,
-            transport.following,
         ));
     }
 

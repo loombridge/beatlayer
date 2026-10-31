@@ -134,18 +134,6 @@ description = "Complex Pro on the melody at a speed whose input per block isn't 
 
 [[failure]]
 suite = "live_offline"
-key = "midi effect/Arpeggiator"
-property = "live matches offline"
-description = "The Arpeggiator plays differently live than in an export: when the held notes run out it cuts its sounding notes at the start of the block, not on the note-off's frame, and restarts its step timing from the block's start, so note lengths depend on the block size (arpeggiator R20, export R14). Before Cascade with the two-bar phrase, the renders part from frame 29,697 (residual -28 dB)."
-
-[[failure]]
-suite = "live_offline"
-key = "arpeggiator pulse/eight quarter notes"
-property = "live matches offline"
-description = "The Arpeggiator plays differently live than in an export: when the held notes run out it cuts its sounding notes at the start of the block, not on the note-off's frame, and restarts its step timing from the block's start, so note lengths depend on the block size (arpeggiator R20, export R14). Eight quarter notes of half a beat each match through bar 1 and part from frame 107,521, each bar-2 note ending earlier offline (residual -21 dB)."
-
-[[failure]]
-suite = "live_offline"
 key = "tempo-synced delay under a tempo ramp"
 property = "live matches offline"
 description = "Reprise, the tempo-synced delay, works out its delay time once per block from the tempo at the block's first frame, so under a tempo ramp its repeats move in block-sized steps and the live device's 256-frame blocks render differently from an export's (device-framework S9, export R14): the drum loop sent to it while the tempo rises from 120 to 128 BPM over four bars parts from frame 23,905, at a residual of -103 dB."

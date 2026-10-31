@@ -51,11 +51,12 @@ impl Shell {
             .collect();
         // The files the tracks play go with them (R15; the set exchange
         // spec, R7), for a paste into a set that doesn't list them.
+        let used = crate::tracks::media_hashes(&tracks);
         let media = self
             .store
             .media_files()
             .into_iter()
-            .filter(|(hash, ..)| tracks.iter().any(|track| track.plays(hash)))
+            .filter(|(hash, ..)| used.contains(hash))
             .collect();
         self.clipboard = Some(Clipboard::Tracks(crate::tracks::CopiedTracks {
             tracks,
@@ -167,6 +168,15 @@ impl Shell {
     /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), Ungroup Tracks (T24),
     /// and the whole-track copies of WP-6.52.
     pub(super) fn run_tracks(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if matches!(
+            id,
+            track_ids::DUPLICATE
+                | track_ids::COPY
+                | track_ids::CUT
+                | track_ids::DUPLICATE_WITHOUT_CLIPS
+        ) {
+            self.capture_plugin_states();
+        }
         match id {
             track_ids::DUPLICATE => {
                 let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;

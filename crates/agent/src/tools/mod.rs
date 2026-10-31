@@ -42,7 +42,8 @@ pub(crate) use lspk_agent::permission::class_names;
 pub(crate) use lspk_agent::tool_definition;
 pub use time::EngineMessage;
 pub(crate) use time::{
-    Playhead, Schedule, number_session, release_orphaned_nudges, session_numbers,
+    Playhead, Schedule, follow_set, follow_set_schedule, number_session, release_orphaned_nudges,
+    session_numbers,
 };
 
 use crate::permission::{Decision, Mode, decide};
@@ -68,6 +69,9 @@ pub(crate) struct State {
     pub(crate) nudges: Vec<(u64, bl_engine::NudgeDirection)>,
     /// How many sessions have been given a number.
     pub(crate) sessions_numbered: u64,
+    /// The set the schedule and the sessions' names belong to
+    /// ([`Shell::set_generation`]).
+    pub(crate) set_generation: Option<u64>,
 }
 
 /// The transport's playback commands (WP-1.5) and the Session View's

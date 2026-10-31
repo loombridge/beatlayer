@@ -271,8 +271,8 @@ impl Importer<'_, '_> {
             );
             return None;
         } else {
-            match self.container.files.get(&path) {
-                Some(bytes) => bytes.clone(),
+            match self.container.read(&path) {
+                Some(bytes) => bytes,
                 None => {
                     self.report.add(
                         &format!("the state of {word}"),
@@ -360,11 +360,7 @@ impl Importer<'_, '_> {
     /// when the state isn't one for this device.
     fn preset_device(&mut self, device: &model::Device, place: &str) -> Option<Built> {
         let reference = device.state.as_ref().filter(|state| !state.external)?;
-        let bytes = self
-            .container
-            .files
-            .get(&reference.path.replace('\\', "/"))?
-            .clone();
+        let bytes = self.container.read(&reference.path.replace('\\', "/"))?;
         let saved = Saved::decode(&bytes).ok()?;
         let wanted = device.device_id.as_deref()?;
         match saved {

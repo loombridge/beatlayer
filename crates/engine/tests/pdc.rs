@@ -13,19 +13,22 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering::Relaxed};
 
 use bl_commands::Registry as Commands;
-use bl_core::time::Ticks;
+use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::testing::{DELAY, DELAY_FRAMES, INSTRUMENT, KEY, MULTI, THROUGH, VALUE};
 use bl_engine::{Block, MediaMap, Node, NodeConfig, TransportCommand};
 use bl_media::SampleData;
 use bl_model::{
-    AudioData, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
-    DeviceRole, Editor, MidiData, Note, RackKind, TrackDelay, TrackId, TrackKind, registry,
+    AudioData, AutomationTarget, CHAIN_SELECTOR, Chain, ChainId, Clip, ClipData, Command, ContentHash, Device, DeviceId, DeviceKind,
+    DeviceRole, Editor, MidiData, Note, RackKind, TrackDelay, TrackId, TrackKind, Zone, ZoneKind, registry,
 };
 use common::{Rig, device, drum_rack, effect_in, rack, rack_in, track};
 use serde_json::{Value, json};
 
 /// The latency the test device adds.
 const LATENCY: usize = 500;
+
+/// A beat in frames, at 120 beats a minute and 48 kHz.
+const BEAT: usize = 24_000;
 
 /// Runs a document command by ID, as an agent does.
 fn run(editor: &mut Editor, id: &str, args: Value) {
@@ -233,6 +236,65 @@ fn automation_lands_on_the_compensated_sample() {
     assert!(out[..onset].iter().all(|&s| s == 0.0), "silent before");
     let settled = onset + 960;
     assert!(out[settled + 64..].iter().all(|&s| s == 1.0), "up after");
+}
+
+// A rack's Chain Selector automation is held back with the audio it gates.
+#[test]
+fn chain_selector_automation_lands_on_the_compensated_sample() {
+    // Spec: delay-compensation R5; racks R33.
+    let mut rig = Rig::new(64);
+    let ed = &mut rig.editor;
+    let a = track(ed, TrackKind::Audio, None);
+    delay_device(ed, a);
+    // The rack's input is 1, from the first frame, whatever the latency.
+    common::dc(ed, a, 1.0);
+    let (rack_id, chains) = rack(ed, a, RackKind::AudioEffect, 2);
+    for (chain, (volume, low, high)) in chains.iter().zip([(0.25, 0, 63), (0.75, 64, 127)]) {
+        ed.apply(Command::SetChainVolume {
+            chain: *chain,
+            volume,
+        })
+        .unwrap();
+        ed.apply(Command::SetChainZone {
+            chain: *chain,
+            kind: ZoneKind::Select,
+            zone: Zone::new(low, high),
+        })
+        .unwrap();
+    }
+    let target = AutomationTarget::Device {
+        device: rack_id,
+        param: CHAIN_SELECTOR,
+    };
+    // The selector holds 0, then steps to 127 at the first beat.
+    let step = Ticks(TICKS_PER_QUARTER);
+    for (at, value) in [(Ticks::ZERO, 0.0), (step, 0.0), (step + Ticks(1), 127.0)] {
+        ed.apply(Command::SetAutomationBreakpoint {
+            track: a,
+            target,
+            at,
+            value,
+        })
+        .unwrap();
+    }
+    rig.sync();
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(BEAT + LATENCY + 4_096, 64);
+    let onset = BEAT + LATENCY;
+    assert!(
+        out[onset - 1] == out[onset - 100],
+        "chain A holds until the step reaches the rack's input"
+    );
+    assert!(
+        (out[onset - 1] - 0.25).abs() < 1e-4,
+        "A's level: {}",
+        out[onset - 1]
+    );
+    assert!(
+        (out[onset + 4_000] - 0.75).abs() < 1e-4,
+        "B's level: {}",
+        out[onset + 4_000]
+    );
 }
 
 // A sidechain's source lines up with the device's own input.

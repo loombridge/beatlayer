@@ -2988,6 +2988,10 @@ fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(
                     if rack.bypass {
                         continue;
                     }
+                    // The selector's automation gates the rack's chain inputs,
+                    // so it is held back to the rack's input (the delay
+                    // compensation spec, R5).
+                    out.push((rack.selector, before));
                     // A drum rack's return chains start where its slowest
                     // drum chain ends, which is where its sends take them.
                     let sent = rack

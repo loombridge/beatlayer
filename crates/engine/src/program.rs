@@ -653,10 +653,18 @@ impl NoteDelay {
     }
 
     /// Takes over the clock and the notes still waiting from `old`, the
-    /// delay of the same track in the last program.
+    /// delay of the same track in the last program. A delay of another
+    /// length moves the waiting notes by the difference, so they keep their
+    /// order and a note-off never falls due before its own note-on; a note
+    /// the shorter delay makes overdue sounds at the start of the next block.
     fn adopt(&mut self, old: &mut Self) {
         std::mem::swap(&mut self.clock, &mut old.clock);
         std::mem::swap(&mut self.held, &mut old.held);
+        if old.len != self.len {
+            for (due, _) in &mut self.held {
+                *due = (*due - u64::from(old.len) + u64::from(self.len)).max(self.clock);
+            }
+        }
     }
 
     /// Swaps `notes`, which the player wrote for a block of `frames` frames,
@@ -672,6 +680,7 @@ impl NoteDelay {
             // as a second's worth of events never fills it.
             if self.held.len() < NOTE_DELAY_NOTES {
                 let due = self.clock + u64::from(note.offset) + u64::from(self.len);
+                let due = due.max(self.held.back().map_or(0, |b| b.0));
                 self.held.push_back((due, note));
             }
         }
@@ -3284,5 +3293,51 @@ impl fmt::Debug for EngineProgram {
             .field("migrations", &self.migrations.len())
             .field("tasks", &self.tasks.len())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn note(kind: NoteKind, offset: u32) -> NoteEvent {
+        NoteEvent {
+            offset,
+            kind,
+            channel: 0,
+            key: 60,
+            velocity: 1.0,
+            note_id: None,
+        }
+    }
+
+    // Spec: delay-compensation R6.
+    #[test]
+    fn a_shorter_note_delay_keeps_the_notes_it_adopts_in_order() {
+        let mut old = NoteDelay::new(1000);
+        let mut buffer = NoteBuffer::with_capacity(64);
+        buffer.push(note(NoteKind::On, 0));
+        old.run(&mut buffer, 64);
+        assert!(buffer.notes().is_empty());
+        // The recompile makes the delay 0 while the note-on is still held.
+        let mut new = NoteDelay::new(0);
+        new.adopt(&mut old);
+        let mut heard = Vec::new();
+        for block in 0..20u64 {
+            buffer.clear();
+            if block == 0 {
+                buffer.push(note(NoteKind::Off, 10));
+            }
+            new.run(&mut buffer, 64);
+            let notes = buffer.notes();
+            assert!(
+                notes.windows(2).all(|w| w[0].offset <= w[1].offset),
+                "block {block}: {notes:?}"
+            );
+            heard.extend(notes.iter().map(|n| (64 + 64 * block + u64::from(n.offset), n.kind)));
+        }
+        let kinds: Vec<_> = heard.iter().map(|h| h.1).collect();
+        assert_eq!(kinds, [NoteKind::On, NoteKind::Off]);
+        assert!(heard[0].0 <= heard[1].0, "{heard:?}");
     }
 }

@@ -46,7 +46,7 @@ or an observation of Live running, as the clean-room policy allows.
 
 - **R1.** In Sync the delay time is a whole number of sixteenth notes from one
   to sixteen, per channel, and the tempo map turns it into frames at the
-  stretch's tempo; in Time it is from 1.00 ms to 5.00 s, per channel. A
+  tempo of each frame, so a tempo ramp renders the same at any block size; in Time it is from 1.00 ms to 5.00 s, per channel. A
   repeat of a signal lands on the exact frame the division names at the
   current tempo, at any tempo, and it follows a tempo change: changing the
   tempo from 120 to 60 BPM moves a one-sixteenth repeat from 6,000 to 12,000

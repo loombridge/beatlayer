@@ -456,6 +456,7 @@ fn warped_case(ratchet: &mut Ratchet, material: &str, mode: &str, bpm: f64) {
             place(host, track, &path, 0)
         };
         warp(host, clip, mode, bpm);
+        host.play_from(0, 50);
     });
 }
 

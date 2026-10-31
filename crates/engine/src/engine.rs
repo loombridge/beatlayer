@@ -1078,7 +1078,12 @@ fn compile_loop(
                 Request::Shutdown => return,
             }
         }
-        if sender.as_mut().is_none_or(Sender::flush) {
+        // A clip whose source the loader is still opening is silent, so a
+        // flush isn't done until it has answered.
+        if sender
+            .as_mut()
+            .is_none_or(|sender| sender.flush() && !compiler.loading())
+        {
             for ack in flushes.drain(..) {
                 let _ = ack.send(());
             }

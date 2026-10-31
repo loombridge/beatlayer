@@ -57,6 +57,15 @@ fn run(commit: bool) {
         peer.set_start_stop_sync(true);
         link.set_start_stop_sync(true);
     }
+    // Alone, a start commits the session's phase, which only the ignored
+    // test may do: wait until the engine's session has found the peer.
+    for _ in 0..200 {
+        if link.peers() >= 1 {
+            break;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    assert!(link.peers() >= 1, "the engine's session finds the peer");
     let session = LinkSession::new(link.audio(), Arc::new(PeerTempo::default()));
     let follower: Box<dyn bl_engine::Follower> = Box::new(LinkFollower::new(session));
     sender.follower(Some(collector.handle().wrap(follower)));

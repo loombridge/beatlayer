@@ -51,6 +51,7 @@ pub mod drum_sampler;
 mod dynamics;
 pub mod eq;
 pub mod filter_delay;
+mod filters;
 mod framework;
 pub mod gate;
 pub mod gate_mod;
@@ -82,6 +83,7 @@ pub mod polysynth;
 pub mod re_enveloper;
 pub mod remap;
 pub mod reverb;
+pub mod roar;
 pub mod sampler;
 pub mod saturator;
 mod sections;
@@ -148,6 +150,7 @@ pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
+pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
@@ -219,6 +222,7 @@ pub fn display_in(
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
+        ROAR => Some(roar::display(device, description, values, data, view)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
         bl_model::modulator::STRIKE_MOD => {
@@ -331,6 +335,7 @@ pub fn register(registry: &mut Registry) {
     drum_bus::register(registry);
     overdrive::register(registry);
     tube::register(registry);
+    roar::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     color_limiter::register(registry);

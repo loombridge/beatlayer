@@ -949,6 +949,41 @@ fn the_saturation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: roar R14
+#[test]
+fn roar_passes_under_rtsan() {
+    use bl_devices::roar::{
+        AMOUNT, COLOR_COMPENSATION, DRIVE, DRY_WET, FILTER, FREQUENCY, HIGH_CROSSOVER, LEVEL,
+        LOW_CROSSOVER, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE, SHAPER, TONE_AMOUNT,
+        stage_param,
+    };
+    run_lo_fi_device(
+        ROAR,
+        &[
+            (ROUTING_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (stage_param(0, SHAPER), &[0.0, 2.0, 4.0, 8.0, 10.0, 11.0]),
+            (stage_param(1, SHAPER), &[10.0, 3.0, 9.0, 5.0]),
+            (stage_param(2, SHAPER), &[7.0, 6.0, 1.0]),
+            (stage_param(0, FILTER), &[0.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            (stage_param(1, FILTER), &[8.0, 6.0, 2.0, 3.0]),
+            (stage_param(2, FILTER), &[1.0, 4.0, 7.0]),
+            (stage_param(0, AMOUNT), &[0.0, 60.0, 100.0]),
+            (stage_param(1, AMOUNT), &[100.0, 20.0]),
+            (stage_param(0, FREQUENCY), &[20_000.0, 600.0, 90.0]),
+            (stage_param(1, RESONANCE), &[0.0, 80.0]),
+            (stage_param(2, LEVEL), &[1.0, 0.0, 2.0]),
+            (stage_param(0, PRE), &[1.0, 0.0]),
+            (DRIVE, &[0.0, 18.0, 36.0]),
+            (TONE_AMOUNT, &[-100.0, 100.0, 0.0]),
+            (COLOR_COMPENSATION, &[1.0, 0.0]),
+            (LOW_CROSSOVER, &[50.0, 2_000.0]),
+            (HIGH_CROSSOVER, &[500.0, 16_000.0]),
+            (OUTPUT_GAIN, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+        ],
+    );
+}
+
 // Spec: drum-bus R1, R15
 #[test]
 fn drum_buss_passes_under_rtsan() {

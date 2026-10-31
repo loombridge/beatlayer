@@ -13,6 +13,7 @@ use core::f64::consts::PI;
 use bl_dsp::Oversampler;
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::param::db_to_gain;
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayReading,
     ParamDescriptor, ParamId, ParamUnit,
@@ -258,8 +259,9 @@ impl NativeDevice for ColorLimiter {
         self.limiter.limit(
             audio,
             &Settings {
-                ceiling_db: value(CEILING),
+                ceiling: db_to_gain(value(CEILING)),
                 gain: None,
+                lift: 1.0,
                 release_ms: value(RELEASE),
                 auto: false,
                 lookahead: value(LOOKAHEAD) as usize,

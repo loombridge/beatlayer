@@ -416,13 +416,13 @@ impl Section {
 /// 24 dB per octave (two Butterworth sections each), which sum to an
 /// all-pass.
 #[derive(Clone, Copy, Default)]
-struct Split {
+pub(crate) struct Split {
     low: [Section; 2],
     high: [Section; 2],
 }
 
 impl Split {
-    fn set(&mut self, hz: f64, rate: f64) {
+    pub(crate) fn set(&mut self, hz: f64, rate: f64) {
         for section in &mut self.low {
             section.set(false, hz, rate);
         }
@@ -432,7 +432,7 @@ impl Split {
     }
 
     /// The low and the high part of `x`.
-    fn process(&mut self, x: f64) -> (f64, f64) {
+    pub(crate) fn process(&mut self, x: f64) -> (f64, f64) {
         let low = self.low[0].process(x);
         let high = self.high[0].process(x);
         (self.low[1].process(low), self.high[1].process(high))

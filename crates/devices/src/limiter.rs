@@ -47,6 +47,13 @@ pub const ROUTING: ParamId = ParamId(6);
 /// Link: how much of the gain reduction both channels share, per cent.
 pub const LINK: ParamId = ParamId(7);
 
+/// Maximize: Threshold takes Ceiling's control and Output Gain's.
+pub const MAXIMIZE: ParamId = ParamId(8);
+/// Threshold: with Maximize on, the level the input is lifted from, in dB.
+pub const THRESHOLD: ParamId = ParamId(9);
+/// Output: with Maximize on, the level the output is limited at.
+pub const OUTPUT: ParamId = ParamId(10);
+
 /// The parameters', descriptors', and bank's order.
 const CEILING_INDEX: usize = 0;
 const GAIN_INDEX: usize = 1;
@@ -56,6 +63,9 @@ const LOOKAHEAD_INDEX: usize = 4;
 const MODE_INDEX: usize = 5;
 const ROUTING_INDEX: usize = 6;
 const LINK_INDEX: usize = 7;
+const MAXIMIZE_INDEX: usize = 8;
+const THRESHOLD_INDEX: usize = 9;
+const OUTPUT_INDEX: usize = 10;
 
 /// The look-ahead times the chooser offers, in seconds.
 const LOOKAHEAD_SECONDS: [f64; 3] = [0.0015, 0.003, 0.006];
@@ -116,6 +126,20 @@ pub fn limiter_type() -> DeviceType {
             .describe("Whether the channels are left/right or mid/side."),
         ParamDescriptor::continuous(LINK, "Link", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("How much of the gain reduction both channels share."),
+        ParamDescriptor::toggle(MAXIMIZE, "Maximize", false).describe(
+            "Turns Ceiling into Threshold and Gain into Output: the level the signal is \
+             lifted from, and the level it is limited at.",
+        ),
+        ParamDescriptor::continuous(
+            THRESHOLD,
+            "Threshold",
+            (-24.0, 0.0),
+            0.0,
+            ParamUnit::Decibels,
+        )
+        .describe("With Maximize on, the level the signal is lifted from: lower is louder."),
+        ParamDescriptor::gain(OUTPUT, "Output", 0.0, -0.3)
+            .describe("With Maximize on, the level the output is limited at."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &[(GAIN, Widget::Knob)])),
@@ -129,6 +153,7 @@ pub fn limiter_type() -> DeviceType {
                 (RELEASE, Widget::Knob),
                 (LINK, Widget::Knob),
                 (AUTO, Widget::Toggle),
+                (MAXIMIZE, Widget::Toggle),
                 (LOOKAHEAD, Widget::Chooser),
                 (CEILING_MODE, Widget::Chooser),
                 (ROUTING, Widget::Chooser),
@@ -138,19 +163,24 @@ pub fn limiter_type() -> DeviceType {
     DeviceType::native(LIMITER, "Limiter", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
-            .with_banks(&[(
-                "Limiter",
-                &[
-                    "Ceiling",
-                    "Gain",
-                    "Release",
-                    "Auto",
-                    "Lookahead",
-                    "Ceiling Mode",
-                    "Routing Mode",
-                    "Link",
-                ],
-            )]),
+            .with_alternate(MAXIMIZE, CEILING, THRESHOLD)
+            .with_alternate(MAXIMIZE, GAIN, OUTPUT)
+            .with_banks(&[
+                (
+                    "Limiter",
+                    &[
+                        "Ceiling",
+                        "Gain",
+                        "Release",
+                        "Auto",
+                        "Lookahead",
+                        "Ceiling Mode",
+                        "Routing Mode",
+                        "Link",
+                    ],
+                ),
+                ("Maximize", &["Maximize", "Threshold", "Output"]),
+            ]),
     )
 }
 
@@ -328,10 +358,12 @@ fn soft_clip(sample: f32, ceiling: f32) -> f32 {
 /// What one run of the look-ahead stage needs, whether Limiter's
 /// parameters or another device's choices (Color Limiter's).
 pub(crate) struct Settings<'a> {
-    /// The ceiling, in dB.
-    pub ceiling_db: f64,
+    /// The ceiling, as a gain.
+    pub ceiling: f64,
     /// The input gain per frame, or `None` for none.
     pub gain: Option<&'a [f32]>,
+    /// A constant gain on the input, after `gain` (Maximize's lift).
+    pub lift: f32,
     pub release_ms: f64,
     pub auto: bool,
     /// The Lookahead chooser's index.
@@ -346,9 +378,26 @@ pub(crate) struct Settings<'a> {
 
 impl NativeDevice for Brickwall {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        // Maximize (Spec: limiter R11): the limit is Output, and the input is
+        // lifted by Output minus Threshold in dB.
+        let maximize = params.value(MAXIMIZE_INDEX) >= 0.5;
+        let (ceiling, gain, lift) = if maximize {
+            (
+                params.value(OUTPUT_INDEX),
+                params.ramp(OUTPUT_INDEX),
+                (1.0 / db_to_gain(params.value(THRESHOLD_INDEX))) as f32,
+            )
+        } else {
+            (
+                db_to_gain(params.value(CEILING_INDEX)),
+                params.ramp(GAIN_INDEX),
+                1.0,
+            )
+        };
         let settings = Settings {
-            ceiling_db: params.value(CEILING_INDEX),
-            gain: Some(params.ramp(GAIN_INDEX)),
+            ceiling,
+            gain: Some(gain),
+            lift,
             release_ms: params.value(RELEASE_INDEX),
             auto: params.value(AUTO_INDEX) >= 0.5,
             lookahead: params.value(LOOKAHEAD_INDEX) as usize,
@@ -378,7 +427,7 @@ impl Brickwall {
             return;
         }
 
-        let ceiling = db_to_gain(settings.ceiling_db).max(1e-6) as f32;
+        let ceiling = settings.ceiling.max(1e-6) as f32;
         let mode = settings.mode.min(MODE_TRUE_PEAK);
         // True Peak leaves a little headroom for the reconstruction filters.
         let limit = if mode == MODE_TRUE_PEAK {
@@ -396,13 +445,18 @@ impl Brickwall {
         for channel in 0..channels {
             let src = audio.channel_mut(channel);
             let work = &mut self.work[channel][..frames];
+            let lift = settings.lift;
             match settings.gain {
                 Some(gain) => {
                     for ((sample, out), g) in src.iter().zip(work.iter_mut()).zip(gain) {
-                        *out = *sample * *g;
+                        *out = *sample * *g * lift;
                     }
                 }
-                None => work.copy_from_slice(src),
+                None => {
+                    for (sample, out) in src.iter().zip(work.iter_mut()) {
+                        *out = *sample * lift;
+                    }
+                }
             }
         }
 

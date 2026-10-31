@@ -168,6 +168,15 @@ impl Shell {
     /// Clips (WP-2.19b, IMP-12), Group Tracks (T24), Ungroup Tracks (T24),
     /// and the whole-track copies of WP-6.52.
     pub(super) fn run_tracks(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
+        if matches!(
+            id,
+            track_ids::DUPLICATE
+                | track_ids::COPY
+                | track_ids::CUT
+                | track_ids::DUPLICATE_WITHOUT_CLIPS
+        ) {
+            self.capture_plugin_states();
+        }
         match id {
             track_ids::DUPLICATE => {
                 let track_ids::DuplicateTracksArgs { tracks } = Self::args(id, args)?;

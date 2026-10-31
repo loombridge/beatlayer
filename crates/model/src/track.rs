@@ -1282,3 +1282,17 @@ impl Track {
             || !(self.devices.ptr_eq(&other.devices) || self.same_chain_shape(other))
     }
 }
+
+/// A return track's letter: A to Z, then AA, AB, and on, as there's no
+/// limit on return tracks (IMP-01).
+#[must_use]
+pub fn return_letter(index: usize) -> String {
+    let mut letters = Vec::new();
+    let mut n = index + 1;
+    while n > 0 {
+        n -= 1;
+        letters.push(char::from(b'A' + (n % 26) as u8));
+        n /= 26;
+    }
+    letters.iter().rev().collect()
+}

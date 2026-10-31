@@ -93,6 +93,10 @@ struct Record {
     entry: MediaEntry,
     /// The fingerprint when the file was last hashed, if it has been.
     verified: Option<Fingerprint>,
+    /// The fingerprint and content hash of the file when it was last found
+    /// holding other content, so a changed file isn't hashed again until it
+    /// changes again.
+    changed: Option<(Fingerprint, ContentHash)>,
 }
 
 /// The media a project uses, by content hash. Shareable between threads.
@@ -195,6 +199,7 @@ impl MediaStore {
                     info: Some(info),
                 },
                 verified,
+                changed: None,
             },
         );
         hash
@@ -213,6 +218,7 @@ impl MediaStore {
                 info: None,
             },
             verified: None,
+            changed: None,
         });
     }
 
@@ -243,10 +249,10 @@ impl MediaStore {
     /// Fails if the hash is unknown, or on a read error other than the file
     /// being missing.
     pub fn check(&self, hash: ContentHash) -> Result<MediaStatus, MediaError> {
-        let (path, verified) = {
+        let (path, verified, changed) = {
             let records = self.read();
             let record = records.get(&hash).ok_or(MediaError::UnknownMedia(hash))?;
-            (record.entry.path.clone(), record.verified)
+            (record.entry.path.clone(), record.verified, record.changed)
         };
         let fingerprint = match Fingerprint::of(&path) {
             Ok(f) => f,
@@ -256,15 +262,26 @@ impl MediaStore {
         if verified == Some(fingerprint) {
             return Ok(MediaStatus::Available);
         }
-        let now = ContentHash::of_file(&path)?;
-        if now != hash {
+        if let Some((at, now)) = changed
+            && at == fingerprint
+        {
             return Ok(MediaStatus::Changed { now });
         }
+        let now = ContentHash::of_file(&path)?;
         let mut records = self.write();
+        if now != hash {
+            if let Some(record) = records.get_mut(&hash)
+                && record.entry.path == path
+            {
+                record.changed = Some((fingerprint, now));
+            }
+            return Ok(MediaStatus::Changed { now });
+        }
         if let Some(record) = records.get_mut(&hash)
             && record.entry.path == path
         {
             record.verified = Some(fingerprint);
+            record.changed = None;
             record.entry.size = fingerprint.size;
         }
         Ok(MediaStatus::Available)
@@ -539,6 +556,7 @@ impl MediaStore {
         if let Some(record) = self.write().get_mut(&hash) {
             record.entry.path = absolute(path).unwrap_or_else(|_| path.to_owned());
             record.verified = fingerprint;
+            record.changed = None;
             if let Some(f) = fingerprint {
                 record.entry.size = f.size;
             }

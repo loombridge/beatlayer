@@ -601,3 +601,27 @@ fn ungrouping_is_destructive_only_when_the_group_track_holds_something() {
         "only the volume changed"
     );
 }
+
+#[test]
+fn unreadable_preferences_survive_the_save_the_app_makes_on_quit() {
+    // Spec: the app carries on with the defaults after a failed load
+    // (host.rs), and saves on every setting change and on quit.
+    let dir = std::env::temp_dir().join(format!("bl-shell-unreadable-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(bl_shell::settings::PREFERENCES_FILE), "not json {").unwrap();
+    let prefs = Preferences::load(&dir).unwrap_or_default();
+    let mut shell = Shell::new(
+        prefs.clone(),
+        Some(dir.clone()),
+        AudioHost::null(prefs.audio),
+        Box::new(ProjectFiles::new()),
+    );
+    shell.save_preferences();
+    assert!(
+        std::fs::read_dir(&dir)
+            .unwrap()
+            .any(|e| std::fs::read(e.unwrap().path()).is_ok_and(|b| b == b"not json {"))
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}

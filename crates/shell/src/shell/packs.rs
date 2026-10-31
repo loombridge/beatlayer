@@ -356,7 +356,7 @@ impl Shell {
 }
 
 /// Whether two paths are the same folder, even through links.
-fn same_folder(a: &Path, b: &Path) -> bool {
+pub(super) fn same_folder(a: &Path, b: &Path) -> bool {
     a == b
         || matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
 }

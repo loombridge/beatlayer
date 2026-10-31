@@ -241,6 +241,10 @@ impl Shell {
             .file_seconds(&audio)
             .ok_or_else(|| failed(id, "the clip's file isn't in the media store"))?;
         let (region_start, region_end) = audio.crop_region(file_seconds);
+        // What plays before the Start marker is heard only after the loop
+        // turns, so the slicing starts at the marker and its notes never
+        // fall before the clip's start (R6, R9).
+        let region_start = region_start.max(audio.start);
         // The slice positions, in the clip's own form (R4).
         let points = self.slice_points(
             id,

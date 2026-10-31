@@ -30,6 +30,12 @@ pub const STRIKE_MOD: &str = "beatlayer.strike_mod";
 pub const PLAY_MOD: &str = "beatlayer.play_mod";
 /// CV In's device type (`docs/specs/cv-tools.md`, R26).
 pub const CV_IN: &str = "beatlayer.cv_in";
+/// CV Envelope Follower's device type (`docs/specs/cv-tools.md`, R32, R36).
+pub const CV_LEVEL: &str = "beatlayer.cv_level";
+/// CV LFO's device type (`docs/specs/cv-tools.md`, R32, R34).
+pub const CV_WAVE: &str = "beatlayer.cv_wave";
+/// CV Shaper's device type (`docs/specs/cv-tools.md`, R32, R35).
+pub const CV_CURVE: &str = "beatlayer.cv_curve";
 
 /// How many targets a modulator maps: the first slot is always shown, and
 /// Show Multimap shows the other seven (R17).
@@ -109,11 +115,15 @@ pub fn is_signal_kind(kind: &DeviceKind) -> bool {
     )
 }
 
-/// Whether `kind` keeps a breakpoint shape: the Shaper and the Shaper
-/// MIDI (R23, R26).
+/// Whether `kind` keeps a breakpoint shape: the Shaper, the Shaper MIDI and
+/// CV Shaper (R23, R26; `docs/specs/cv-tools.md`, R35).
 #[must_use]
 pub fn has_shape_kind(kind: &DeviceKind) -> bool {
-    matches!(kind, DeviceKind::Native { device_type } if device_type == CURVE_MOD || device_type == STRIKE_MOD)
+    matches!(
+        kind,
+        DeviceKind::Native { device_type }
+            if matches!(device_type.as_str(), CURVE_MOD | STRIKE_MOD | CV_CURVE)
+    )
 }
 
 /// How many slots a modulator of `kind` has (R17).
@@ -569,7 +579,7 @@ impl Document {
         Ok(())
     }
 
-    /// Replaces the shape of the Shaper or Shaper MIDI `device` (R23, R26).
+    /// Replaces the shape of the Shaper, Shaper MIDI or CV Shaper `device` (R23, R26).
     pub(crate) fn set_shape(
         &mut self,
         device: DeviceId,
@@ -578,7 +588,7 @@ impl Document {
         let current = self.device_ref(device)?;
         if !has_shape_kind(&current.kind) {
             return Err(ModelError::InvalidInput(
-                "only a Shaper or a Shaper MIDI has a shape",
+                "only a Shaper, a Shaper MIDI or a CV Shaper has a shape",
             ));
         }
         check_shape(points)?;

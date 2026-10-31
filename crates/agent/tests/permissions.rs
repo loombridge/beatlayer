@@ -1533,3 +1533,38 @@ fn a_scheduled_drop_that_would_replace_clips_when_it_fires_is_not_run_though_its
         "{entry}"
     );
 }
+
+#[test]
+fn headless_the_file_managers_read_commands_do_not_list_files() {
+    // Spec: agent-permissions R2. `view.toggle_file_manager` and
+    // `file_manager.set_search_folder` are `read`, so they must not hand back
+    // the listing `file_manager.state` keeps behind `external`.
+    let folder = std::env::temp_dir().join(format!("bl-agent-file-manager-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("a.wav"), b"RIFF").unwrap();
+    let mut client = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    client.initialize("script").unwrap();
+    for (command, args) in [
+        (
+            "view.toggle_file_manager",
+            json!({ "view": "project", "project": folder.to_string_lossy(), "open": true }),
+        ),
+        ("file_manager.set_search_folder", json!({})),
+    ] {
+        let result = client
+            .call(
+                "run",
+                json!({ "commands": [{ "command": command, "args": args }] }),
+            )
+            .unwrap();
+        assert!(!result.text.contains("a.wav"), "{command}: {}", result.text);
+    }
+    let state = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "file_manager.state", "args": {} }] }),
+        )
+        .unwrap();
+    assert!(state.is_error, "{}", state.text);
+    let _ = std::fs::remove_dir_all(&folder);
+}

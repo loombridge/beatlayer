@@ -4,13 +4,13 @@
 //! crossfade, and cut.
 
 use crate::common;
-use bl_core::time::{Bpm, Frames, TempoMap};
+use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
 use bl_devices::delay::{
     DRY_WET, FEEDBACK, FILTER, FREEZE, FREQ, L_OFFSET, L_SYNC, L_TIME, LINK, PING_PONG, R_SYNC,
     SYNC, TIME_MODE, delay_type,
 };
 use bl_engine::{Registry, TransportInfo};
-use common::{device, node, run_at, set};
+use common::{device, node, noise, run_at, run_blocks, set};
 
 fn registry() -> Registry {
     let mut registry = Registry::new();
@@ -211,6 +211,28 @@ fn a_synced_repeat_follows_a_tempo_change() {
         "not at the old 6,000: {}",
         second[0][3_000]
     );
+}
+
+// Spec: device-framework S9, export R14
+#[test]
+fn a_synced_delay_under_a_tempo_ramp_renders_the_same_at_any_block_size() {
+    let ramp = TempoMap::from_breakpoints([
+        (Ticks::ZERO, Bpm::new(120.0).unwrap()),
+        (Ticks::QUARTER * 4, Bpm::new(240.0).unwrap()),
+    ])
+    .unwrap();
+    let frames = 40_000;
+    let input = vec![noise(frames), noise(frames)];
+    let mut params = clean();
+    params.push((FEEDBACK, 50.0));
+    let render = |block: usize| {
+        let mut delay = node(&registry(), &device(&delay_type(), &params), frames);
+        run_blocks(delay.as_mut(), &input, block, &[], &ramp)
+    };
+    let whole = render(frames);
+    for block in [256, 1_000, 4_096] {
+        assert!(render(block) == whole, "blocks of {block} frames");
+    }
 }
 
 // Spec: delay R2

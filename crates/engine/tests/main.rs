@@ -20,6 +20,7 @@ mod crossfades;
 mod cue;
 mod cv_clock;
 mod cv_modular;
+mod cv_modulators;
 mod cv_tools;
 mod deactivated;
 mod device_chains;

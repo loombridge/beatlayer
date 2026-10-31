@@ -81,14 +81,17 @@ pub struct Sender {
 
 impl Sender {
     /// Sends a compiler update: its program, then its node data (clip
-    /// players' clips), then its transport commands (the Arrangement loop),
-    /// then its parameter changes.
+    /// players' clips), then the Session View's tables, then its transport
+    /// commands (the Arrangement loop), then its parameter changes.
     pub fn send_update(&mut self, update: Update) {
         if let Some(program) = update.program {
             self.push(Message::Program(program));
         }
         for (key, data) in update.data {
             self.push(Message::Data { key, data });
+        }
+        if let Some(tables) = update.scene_tables {
+            self.push(Message::SceneTables(tables));
         }
         for command in update.transport {
             self.push(Message::Transport(command, When::Now));

@@ -75,6 +75,13 @@ pub struct EngineProgram {
     /// Slot of each node key, sorted by key.
     pub(crate) index: Vec<(NodeKey, u32)>,
     pub(crate) migrations: Vec<Migration>,
+    /// For a swap to tell what departed without searching ([`Self::index_swap`]):
+    /// the task whose chain holds each slot (or [`NO_TASK`]), the slot each
+    /// old slot migrated to, and the old slot each slot migrated from (both
+    /// [`NO_TASK`] where there is none).
+    pub(crate) slot_task: Vec<u32>,
+    pub(crate) migrated_to: Vec<u32>,
+    pub(crate) migrated_from: Vec<u32>,
     pub(crate) tasks: Vec<Task>,
     /// The order the audio thread runs the tasks in.
     pub(crate) order: Vec<u32>,
@@ -583,6 +590,11 @@ pub(crate) struct Input {
     /// The delay line its signal is delayed through to line it up with the
     /// destination's other inputs (WP-2.11), or [`NO_DELAY`].
     pub(crate) delay: u32,
+    /// Whether the source track is on Monitor Auto with Reduced Latency When
+    /// Monitoring: the delay line holds its signal back only while a clip of
+    /// its plays, and the signal skips it while its input is monitored
+    /// (delay-compensation R8).
+    pub(crate) unheld_while_monitoring: bool,
 }
 
 /// An input that carries a task's own signal, not a rack chain's.
@@ -633,6 +645,9 @@ pub(crate) struct DelayLine {
     pub(crate) at: u32,
     pub(crate) len: u32,
     pub(crate) write: u32,
+    /// How far an input that skips the line while its source monitors has
+    /// moved from the held signal (0) to the direct one ([`tap_glide`]).
+    pub(crate) tap: u32,
 }
 
 /// Where the delay lines for `lengths` sit in one pool, with every write
@@ -645,6 +660,7 @@ pub(crate) fn delay_storage(lengths: &[u32], channels: usize) -> (Shared<DelayLi
             at: total as u32,
             len,
             write: 0,
+            tap: 0,
         });
         total += channels * len as usize;
     }
@@ -674,10 +690,18 @@ impl NoteDelay {
     }
 
     /// Takes over the clock and the notes still waiting from `old`, the
-    /// delay of the same track in the last program.
+    /// delay of the same track in the last program. A delay of another
+    /// length moves the waiting notes by the difference, so they keep their
+    /// order and a note-off never falls due before its own note-on; a note
+    /// the shorter delay makes overdue sounds at the start of the next block.
     fn adopt(&mut self, old: &mut Self) {
         std::mem::swap(&mut self.clock, &mut old.clock);
         std::mem::swap(&mut self.held, &mut old.held);
+        if old.len != self.len {
+            for (due, _) in &mut self.held {
+                *due = (*due - u64::from(old.len) + u64::from(self.len)).max(self.clock);
+            }
+        }
     }
 
     /// Swaps `notes`, which the player wrote for a block of `frames` frames,
@@ -693,6 +717,7 @@ impl NoteDelay {
             // as a second's worth of events never fills it.
             if self.held.len() < NOTE_DELAY_NOTES {
                 let due = self.clock + u64::from(note.offset) + u64::from(self.len);
+                let due = due.max(self.held.back().map_or(0, |b| b.0));
                 self.held.push_back((due, note));
             }
         }
@@ -741,6 +766,46 @@ fn delay_into(
             line.write = w as u32;
         }
     }
+}
+
+/// How many frames the tap of a delay line takes to move between the held
+/// signal and the direct one: the mixer's glide (mixer R18).
+fn tap_glide(rate: SampleRate) -> u32 {
+    crate::mixer::smoothing_frames(rate)
+}
+
+/// Moves `held`, which [`delay_into`] wrote from `from`, toward `from` itself
+/// while `direct`, and back to it while not, a frame at a time over `glide`
+/// frames, so an input that skips its delay line while its source monitors
+/// (delay-compensation R8) never steps. The line keeps filling meanwhile.
+#[expect(clippy::too_many_arguments, reason = "the planar shape and the glide")]
+fn tap_direct(
+    line: &mut DelayLine,
+    held: &mut [f32],
+    from: &[f32],
+    channels: usize,
+    stride: usize,
+    frames: usize,
+    direct: bool,
+    glide: u32,
+) {
+    if line.tap == 0 && !direct {
+        return;
+    }
+    let mut tap = line.tap;
+    for i in 0..frames {
+        tap = if direct {
+            (tap + 1).min(glide)
+        } else {
+            tap.saturating_sub(1)
+        };
+        let share = tap as f32 / glide as f32;
+        for c in 0..channels {
+            let at = c * stride + i;
+            held[at] += (from[at] - held[at]) * share;
+        }
+    }
+    line.tap = tap;
 }
 
 /// Delays `samples` in place by its line, writing the past samples out as
@@ -1294,6 +1359,7 @@ impl EngineProgram {
                 continue;
             };
             new.write = was.write;
+            new.tap = was.tap;
             let size = channels * was.len as usize;
             let (to, from) = (new.at as usize, was.at as usize);
             self.delay_pool[to..to + size].copy_from_slice(&old.delay_pool[from..from + size]);
@@ -1330,12 +1396,37 @@ impl EngineProgram {
             })
     }
 
+    /// Fills the tables a swap's [`release_departed`](Self::release_departed)
+    /// reads, once the program's tasks and migrations are known, so the swap
+    /// on the audio thread looks each slot up instead of searching.
+    pub(crate) fn index_swap(&mut self) {
+        let mut slot_task = vec![NO_TASK; self.slots.len()];
+        for task in 0..self.tasks.len() {
+            for slot in self.top_slots(task) {
+                slot_task[slot as usize] = task as u32;
+            }
+        }
+        let mut migrated_to = Vec::new();
+        let mut migrated_from = vec![NO_TASK; self.slots.len()];
+        for &Migration { from, to } in &self.migrations {
+            if migrated_to.len() <= from as usize {
+                migrated_to.resize(from as usize + 1, NO_TASK);
+            }
+            migrated_to[from as usize] = to;
+            migrated_from[to as usize] = from;
+        }
+        self.slot_task = slot_task;
+        self.migrated_to = migrated_to;
+        self.migrated_from = migrated_from;
+    }
+
     /// Spec: device-framework R32. Asks the devices that left their chain
     /// in this swap to end their notes: those the swap removed, and those it
     /// moved relative to the others that stayed. Each device's note-offs
     /// enter the chain in front of the first node that sat after it, so the
     /// nodes after it end the notes it made as they would have when it ended
-    /// them itself. Real-time safe: bounded loops, nothing allocated.
+    /// them itself. Real-time safe: bounded loops over tables made with the
+    /// program, nothing allocated.
     fn release_departed(&mut self, old: &mut EngineProgram) {
         // Most swaps remove and move nothing: every device node migrated, in
         // the order it was in. Skip the search then.
@@ -1347,8 +1438,11 @@ impl EngineProgram {
         if !removed && !reordered {
             return;
         }
-        let old_task_of = |old: &EngineProgram, slot: u32| -> Option<usize> {
-            (0..old.tasks.len()).find(|&t| old.top_slots(t).any(|s| s == slot))
+        // Where a table has an entry for `at`: the task of an old slot, the
+        // slot it moved to, or the slot a new one came from.
+        let look = |table: &[u32], at: u32| {
+            count_departed_step();
+            table.get(at as usize).copied().filter(|&v| v != NO_TASK)
         };
         // Where, in the new chain of `task`, the device that sat in old slot
         // `slot` of task `from_task` left a gap: in front of the first node
@@ -1357,9 +1451,8 @@ impl EngineProgram {
             program
                 .top_slots(task)
                 .filter(|&to| {
-                    program.migrations.iter().any(|m| {
-                        m.to == to && m.from < slot && old_task_of(old, m.from) == Some(from_task)
-                    })
+                    look(&program.migrated_from, to)
+                        .is_some_and(|from| from < slot && look(&old.slot_task, from) == from_task)
                 })
                 .count() as u32
         };
@@ -1371,15 +1464,10 @@ impl EngineProgram {
             if !matches!(old.slots[s].key, NodeKey::Device(_)) {
                 continue;
             }
-            let Some(from_task) = old_task_of(old, slot) else {
+            let Some(from_task) = look(&old.slot_task, slot) else {
                 continue;
             };
-            let Some(to) = self
-                .migrations
-                .iter()
-                .find(|m| m.from == slot)
-                .map(|m| m.to)
-            else {
+            let Some(to) = look(&self.migrated_to, slot) else {
                 continue;
             };
             if !self.slots[to as usize].bypass {
@@ -1388,11 +1476,11 @@ impl EngineProgram {
             let Some(task) = self
                 .tasks
                 .iter()
-                .position(|t| t.track == old.tasks[from_task].track)
+                .position(|t| t.track == old.tasks[from_task as usize].track)
             else {
                 continue;
             };
-            let at = gap(self, old, task, from_task, slot);
+            let at = gap(self, old, task, Some(from_task), slot);
             if let Some(Instance::Device(node)) = self.slots[to as usize].node.as_mut() {
                 self.releases.take(node.as_mut(), task as u32, at);
             }
@@ -1403,43 +1491,43 @@ impl EngineProgram {
             if !matches!(old.slots[s].key, NodeKey::Device(_)) || old.slots[s].node.is_none() {
                 continue;
             }
-            let Some(from_task) = old_task_of(old, slot) else {
+            let Some(from_task) = look(&old.slot_task, slot) else {
                 continue;
             };
             let Some(task) = self
                 .tasks
                 .iter()
-                .position(|t| t.track == old.tasks[from_task].track)
+                .position(|t| t.track == old.tasks[from_task as usize].track)
             else {
                 continue;
             };
-            let at = gap(self, old, task, from_task, slot);
+            let at = gap(self, old, task, Some(from_task), slot);
             if let Some(Instance::Device(node)) = old.slots[s].node.as_mut() {
                 self.releases.take(node.as_mut(), task as u32, at);
             }
         }
         // Moved: a node that stayed but now sits before one it sat after.
         for task in 0..self.tasks.len() {
-            let mut high: Option<(u32, usize)> = None;
+            let mut high: Option<(u32, u32)> = None;
             for i in 0..self.tasks[task].chain.range().len() {
                 let Some(to) = self.top_slots(task).nth(i) else {
                     continue;
                 };
-                let Some(from) = self.migrations.iter().find(|m| m.to == to).map(|m| m.from) else {
+                let Some(from) = look(&self.migrated_from, to) else {
                     continue;
                 };
-                let Some(from_task) = old_task_of(old, from) else {
+                let Some(from_task) = look(&old.slot_task, from) else {
                     continue;
                 };
                 let moved = match high {
                     Some((h, t)) => from_task != t || from < h,
-                    None => old.tasks[from_task].track != self.tasks[task].track,
+                    None => old.tasks[from_task as usize].track != self.tasks[task].track,
                 };
                 high = Some((high.map_or(from, |(h, _)| h.max(from)), from_task));
                 if !moved || !matches!(self.slots[to as usize].key, NodeKey::Device(_)) {
                     continue;
                 }
-                let at = gap(self, old, task, from_task, from);
+                let at = gap(self, old, task, Some(from_task), from);
                 if let Some(Instance::Device(node)) = self.slots[to as usize].node.as_mut() {
                     self.releases.take(node.as_mut(), task as u32, at);
                 }
@@ -1612,13 +1700,7 @@ impl EngineProgram {
         // Spec: routing R11. Whether the track played a clip this block;
         // under Monitor Auto its input routes close while one did. The
         // player ran first, so it knows.
-        let playing_clip = match task.player {
-            Some(slot) => match turn.slot(slot).node.as_ref() {
-                Some(Instance::Device(node)) => node.playing_clip(),
-                _ => false,
-            },
-            None => false,
-        };
+        let playing_clip = self.plays_clip(&turn, t);
         // Spec: scales R15. The player knows which clip plays, and so which
         // scale the devices of the track, in its racks too, read; a track
         // without a player reads the set's.
@@ -1698,6 +1780,11 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
+                if input.unheld_while_monitoring {
+                    let direct = !self.plays_clip(&turn, source);
+                    let glide = tap_glide(self.sample_rate);
+                    tap_direct(line, held, theirs, channels, stride, frames, direct, glide);
+                }
                 let bus = turn.bus(frames);
                 route.mix(turn.buffer(t), held, shape, song, bus, &lane.events);
             } else {
@@ -1774,6 +1861,17 @@ impl EngineProgram {
         }
         self.record_time(t, began.elapsed());
         delivered
+    }
+
+    /// Whether task `t`'s clips played in the block it last ran.
+    fn plays_clip(&self, turn: &Turn<'_>, t: usize) -> bool {
+        match self.tasks[t].player {
+            Some(slot) => match turn.slot(slot).node.as_ref() {
+                Some(Instance::Device(node)) => node.playing_clip(),
+                _ => false,
+            },
+            None => false,
+        }
     }
 
     /// Works out every modulator's rows over `frames` frames, in the order of
@@ -1954,6 +2052,11 @@ impl EngineProgram {
                 let (line, ring) = turn.delay(input.delay);
                 let held = &mut lane.delay[..size];
                 delay_into(line, ring, held, theirs, channels, stride, frames);
+                if input.unheld_while_monitoring {
+                    let direct = !self.plays_clip(turn, input.from as usize);
+                    let glide = tap_glide(self.sample_rate);
+                    tap_direct(line, held, theirs, channels, stride, frames, direct, glide);
+                }
                 route.mix(
                     turn.sidechain_mut(at),
                     held,
@@ -3362,5 +3465,143 @@ impl fmt::Debug for EngineProgram {
             .field("migrations", &self.migrations.len())
             .field("tasks", &self.tasks.len())
             .finish_non_exhaustive()
+    }
+}
+
+// How many table entries the swaps of a test looked at in
+// `EngineProgram::release_departed`. Below the real-time code, so the test
+// clock check reads this file as it reads any other.
+#[cfg(test)]
+thread_local!(static DEPARTED_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
+
+#[inline]
+fn count_departed_step() {
+    #[cfg(test)]
+    DEPARTED_STEPS.with(|steps| steps.set(steps.get() + 1));
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use bl_core::time::SampleRate;
+    use bl_model::{Command, Device, DeviceKind, Editor, TrackKind};
+
+    use super::*;
+    use crate::EngineConfig;
+    use crate::compiler::Compiler;
+    use crate::gc::Collector;
+    use crate::nodes::TEST_TONE;
+    use crate::registry::Registry;
+
+    fn note(kind: NoteKind, offset: u32) -> NoteEvent {
+        NoteEvent {
+            offset,
+            kind,
+            channel: 0,
+            key: 60,
+            velocity: 1.0,
+            note_id: None,
+        }
+    }
+
+    // Spec: delay-compensation R6.
+    #[test]
+    fn a_shorter_note_delay_keeps_the_notes_it_adopts_in_order() {
+        let mut old = NoteDelay::new(1000);
+        let mut buffer = NoteBuffer::with_capacity(64);
+        buffer.push(note(NoteKind::On, 0));
+        old.run(&mut buffer, 64);
+        assert!(buffer.notes().is_empty());
+        // The recompile makes the delay 0 while the note-on is still held.
+        let mut new = NoteDelay::new(0);
+        new.adopt(&mut old);
+        let mut heard = Vec::new();
+        for block in 0..20u64 {
+            buffer.clear();
+            if block == 0 {
+                buffer.push(note(NoteKind::Off, 10));
+            }
+            new.run(&mut buffer, 64);
+            let notes = buffer.notes();
+            assert!(
+                notes.windows(2).all(|w| w[0].offset <= w[1].offset),
+                "block {block}: {notes:?}"
+            );
+            heard.extend(
+                notes
+                    .iter()
+                    .map(|n| (64 + 64 * block + u64::from(n.offset), n.kind)),
+            );
+        }
+        let kinds: Vec<_> = heard.iter().map(|h| h.1).collect();
+        assert_eq!(kinds, [NoteKind::On, NoteKind::Off]);
+        assert!(heard[0].0 <= heard[1].0, "{heard:?}");
+    }
+
+    /// The steps the swap that follows deleting one device from track 0 of
+    /// `tracks` tracks of eight devices each looks at.
+    fn departure_steps(tracks: usize) -> usize {
+        let mut editor = Editor::new();
+        let mut first = None;
+        for _ in 0..tracks {
+            let track = editor.new_id();
+            editor
+                .apply(Command::CreateTrack {
+                    id: track,
+                    kind: TrackKind::Midi,
+                    name: String::new(),
+                    parent: None,
+                    index: 0,
+                })
+                .unwrap();
+            first = Some(track);
+            for index in 0..8 {
+                let device = Device::new(
+                    editor.new_id(),
+                    "",
+                    DeviceKind::Native {
+                        device_type: TEST_TONE.to_owned(),
+                    },
+                );
+                editor
+                    .apply(Command::InsertDevice {
+                        track,
+                        index,
+                        device,
+                    })
+                    .unwrap();
+            }
+        }
+        let collector = Collector::new();
+        let config = EngineConfig::new(SampleRate::HZ_48000, 64);
+        let mut compiler = Compiler::new(config, Registry::new(), collector.handle());
+        let mut old = compiler.sync(editor.document()).program.unwrap();
+        let device = editor
+            .document()
+            .track(first.unwrap())
+            .unwrap()
+            .devices()
+            .nth(3)
+            .unwrap()
+            .id;
+        editor.apply(Command::RemoveDevice { device }).unwrap();
+        let mut new = compiler.sync(editor.document()).program.unwrap();
+        let before = DEPARTED_STEPS.with(Cell::get);
+        assert!(new.get_mut().adopt(old.get_mut()));
+        DEPARTED_STEPS.with(Cell::get) - before
+    }
+
+    // Spec: device-framework R32. The swap that follows an edit that removes
+    // a device looks each device up in a table, so what it does grows with
+    // the set, not with its square.
+    #[test]
+    fn a_swap_after_a_device_is_removed_does_work_in_proportion_to_the_set() {
+        let (small, large) = (departure_steps(32), departure_steps(64));
+        assert!(small > 0, "the swap looked at nothing");
+        assert!(
+            large * 10 <= small * 25,
+            "{small} steps at 32 tracks, {large} at 64"
+        );
     }
 }

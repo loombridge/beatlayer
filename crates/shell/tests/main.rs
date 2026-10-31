@@ -57,6 +57,7 @@ mod device_pages;
 mod devices;
 mod drum_racks;
 mod drum_sampler;
+mod echo;
 mod editing;
 mod effect_parts;
 mod envelope_keys;

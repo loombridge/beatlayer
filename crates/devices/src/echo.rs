@@ -14,7 +14,9 @@ use core::f64::consts::{FRAC_PI_2, TAU};
 use bl_core::time::TempoMap;
 use bl_dsp::{EnvelopeFollower, Random};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayHandle,
     DisplayMarker, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
@@ -490,77 +492,132 @@ pub fn echo_type() -> DeviceType {
     )
 }
 
-/// The layout: the left section, the display, and the controls of the three
-/// tabs.
+/// The name of the node that holds the three tabs, which `device.set_page`
+/// and the saved page name (R1).
+pub const TABS: &str = "Tabs";
+
+/// The layout: the left section, the three tabs (Echo with the display,
+/// Modulation and Character) and the global controls.
 fn layout() -> DeviceLayout {
     use Widget::{Chooser, Knob, Number, Toggle};
-    let band = |controls: &[(ParamId, Widget)]| {
-        LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, controls))
+    let band = |height, controls: &[(ParamId, Widget)]| {
+        LayoutNode::Band(ControlBand::stacked(height, controls))
     };
     let line = |n: usize| {
-        band(&[
-            (line_param(n, SYNC), Toggle),
-            (line_param(n, SYNC_MODE), Chooser),
-            (line_param(n, NOTES), Chooser),
-            (line_param(n, TRIPLET), Chooser),
-            (line_param(n, DOTTED), Chooser),
-            (line_param(n, SIXTEENTHS), Number),
-            (line_param(n, TIME), Knob),
-            (line_param(n, OFFSET), Knob),
-        ])
+        band(
+            BODY_HEIGHT,
+            &[
+                (line_param(n, SYNC), Toggle),
+                (line_param(n, SYNC_MODE), Chooser),
+                (line_param(n, NOTES), Chooser),
+                (line_param(n, TRIPLET), Chooser),
+                (line_param(n, DOTTED), Chooser),
+                (line_param(n, SIXTEENTHS), Number),
+                (line_param(n, TIME), Knob),
+                (line_param(n, OFFSET), Knob),
+            ],
+        )
     };
+    let tab = BODY_HEIGHT - TAB_HEIGHT;
+    let tabs = PagesNode::new(
+        TABS,
+        PageStyle::Tabs,
+        vec![
+            Page::new(
+                "Echo",
+                LayoutNode::Row(vec![
+                    LayoutNode::Cell(DisplayCell::new("Echo", 220.0, tab, 1.0)),
+                    band(
+                        tab,
+                        &[
+                            (FILTER, Toggle),
+                            (HP_FREQ, Knob),
+                            (HP_RES, Knob),
+                            (LP_FREQ, Knob),
+                            (LP_RES, Knob),
+                        ],
+                    ),
+                ]),
+            ),
+            Page::new(
+                "Modulation",
+                LayoutNode::Row(vec![
+                    band(
+                        tab,
+                        &[
+                            (WAVE, Chooser),
+                            (LFO_SYNC, Toggle),
+                            (LFO_RATE, Chooser),
+                            (LFO_FREQ, Knob),
+                            (PHASE, Knob),
+                        ],
+                    ),
+                    band(
+                        tab,
+                        &[
+                            (MOD_DELAY, Knob),
+                            (MOD_X4, Toggle),
+                            (MOD_FILTER, Knob),
+                            (ENV_MIX, Knob),
+                        ],
+                    ),
+                ]),
+            ),
+            Page::new(
+                "Character",
+                LayoutNode::Row(vec![
+                    band(
+                        tab,
+                        &[
+                            (GATE, Toggle),
+                            (GATE_THRESHOLD, Knob),
+                            (GATE_RELEASE, Knob),
+                            (DUCKING, Toggle),
+                            (DUCK_THRESHOLD, Knob),
+                            (DUCK_RELEASE, Knob),
+                        ],
+                    ),
+                    band(
+                        tab,
+                        &[
+                            (NOISE, Toggle),
+                            (NOISE_AMOUNT, Knob),
+                            (NOISE_MORPH, Knob),
+                            (WOBBLE, Toggle),
+                            (WOBBLE_AMOUNT, Knob),
+                            (WOBBLE_MORPH, Knob),
+                            (REPITCH, Toggle),
+                        ],
+                    ),
+                ]),
+            ),
+        ],
+    );
     DeviceLayout::new(LayoutNode::Row(vec![
-        band(&[(CHANNEL_MODE, Chooser), (LINK, Toggle)]),
+        band(BODY_HEIGHT, &[(CHANNEL_MODE, Chooser), (LINK, Toggle)]),
         line(0),
         line(1),
-        band(&[
-            (INPUT, Knob),
-            (DRIVE, Toggle),
-            (FEEDBACK, Knob),
-            (FEEDBACK_INVERT, Toggle),
-        ]),
-        LayoutNode::Cell(DisplayCell::new("Echo", 220.0, BODY_HEIGHT, 1.0)),
-        band(&[
-            (FILTER, Toggle),
-            (HP_FREQ, Knob),
-            (HP_RES, Knob),
-            (LP_FREQ, Knob),
-            (LP_RES, Knob),
-        ]),
-        band(&[
-            (WAVE, Chooser),
-            (LFO_SYNC, Toggle),
-            (LFO_RATE, Chooser),
-            (LFO_FREQ, Knob),
-            (PHASE, Knob),
-            (MOD_DELAY, Knob),
-            (MOD_X4, Toggle),
-            (MOD_FILTER, Knob),
-            (ENV_MIX, Knob),
-        ]),
-        band(&[
-            (GATE, Toggle),
-            (GATE_THRESHOLD, Knob),
-            (GATE_RELEASE, Knob),
-            (DUCKING, Toggle),
-            (DUCK_THRESHOLD, Knob),
-            (DUCK_RELEASE, Knob),
-            (NOISE, Toggle),
-            (NOISE_AMOUNT, Knob),
-            (NOISE_MORPH, Knob),
-            (WOBBLE, Toggle),
-            (WOBBLE_AMOUNT, Knob),
-            (WOBBLE_MORPH, Knob),
-            (REPITCH, Toggle),
-        ]),
-        band(&[
-            (REVERB, Knob),
-            (REVERB_LOCATION, Chooser),
-            (DECAY, Knob),
-            (STEREO, Knob),
-            (OUTPUT, Knob),
-            (DRY_WET, Knob),
-        ]),
+        band(
+            BODY_HEIGHT,
+            &[
+                (INPUT, Knob),
+                (DRIVE, Toggle),
+                (FEEDBACK, Knob),
+                (FEEDBACK_INVERT, Toggle),
+            ],
+        ),
+        LayoutNode::Pages(tabs),
+        band(
+            BODY_HEIGHT,
+            &[
+                (REVERB, Knob),
+                (REVERB_LOCATION, Chooser),
+                (DECAY, Knob),
+                (STEREO, Knob),
+                (OUTPUT, Knob),
+                (DRY_WET, Knob),
+            ],
+        ),
     ]))
 }
 

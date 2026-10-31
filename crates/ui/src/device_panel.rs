@@ -449,7 +449,7 @@ pub fn show(
                 id,
                 frame.enabled,
                 display,
-                &panel.description.views,
+                panel,
                 events,
             );
         }
@@ -1122,7 +1122,7 @@ impl Control<'_> {
 
 /// The value `steps` key presses from `value`: one step of a stepped
 /// parameter, or 1% of the travel.
-fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
+pub(crate) fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
     if param.is_stepped() {
         param.clamp(value + f64::from(steps))
     } else {

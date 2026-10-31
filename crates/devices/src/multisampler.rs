@@ -19,10 +19,12 @@ use bl_engine::{
     Audition, DeviceLayers, DeviceType, KeyPitches, LayerSample, NodeConfig, NodeData, NoteEvent,
     NoteExpression, NoteKind, Registry,
 };
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, Widget,
+};
 use bl_model::{
     DeviceDescription, DeviceLayout, DeviceRole, FadeMode, ParamDescriptor, ParamId, ParamUnit,
-    ReleaseMode, SustainMode,
+    ReleaseMode, SamplerTab, SustainMode,
 };
 use lspk_dsp::filter::pitch_of;
 
@@ -274,9 +276,10 @@ pub fn multisampler_type() -> DeviceType {
         .with_description(DeviceDescription::new(params).with_layout(layout()))
 }
 
-/// The device's layout (R1): one group of nodes per tab after Zone, in the
-/// tabs' order, because the tabs show one group at a time and the device is
-/// as wide as the widest of them. The Sample tab's group holds the zone and
+/// The device's layout (R1, R75): a pages node in the title-bar style named
+/// `Tabs`, one page per tab after Zone, in the tabs' order, because the tabs
+/// show one page at a time and the device is as wide as the widest of them.
+/// The Sample page holds the zone and
 /// voice controls and the sample's display; Filter/Global's the filter, its
 /// envelope, the shaper, the volume envelope and the output controls. The
 /// zone editor and the Sample tab's waveform are the app's own views.
@@ -328,13 +331,22 @@ fn layout() -> DeviceLayout {
     let mut filter = filter_bands();
     filter.push(LayoutNode::Band(envelope));
     filter.push(LayoutNode::Band(output));
-    DeviceLayout::new(LayoutNode::Row(vec![
+    let nodes = [
         LayoutNode::Row(vec![LayoutNode::Band(zones), LayoutNode::Cell(display)]),
         LayoutNode::Row(pitch_osc_bands()),
         LayoutNode::Row(filter),
         LayoutNode::Row(modulation_bands()),
         LayoutNode::Row(midi_bands()),
-    ]))
+    ];
+    DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+        SamplerTab::PAGES,
+        PageStyle::TitleBar,
+        SamplerTab::ALL
+            .into_iter()
+            .zip(nodes)
+            .map(|(tab, node)| Page::new(tab.page_name(), node))
+            .collect(),
+    )))
 }
 
 /// Adds the multisampler to `registry`.

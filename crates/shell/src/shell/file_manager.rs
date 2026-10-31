@@ -416,6 +416,7 @@ impl Shell {
         );
         self.store.set_windows(self.devices.windows().clone());
         self.store.set_rack_views(self.devices.rack_views().clone());
+        self.store.set_pages(self.devices.pages().clone());
         self.store
             .set_multisampler_views(self.devices.multisampler_views().clone());
         self.store.set_folds(self.clip_view.folds().clone());

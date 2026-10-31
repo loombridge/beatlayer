@@ -450,7 +450,11 @@ impl Document {
         let held = self
             .tracks()
             .flat_map(|t| t.devices_deep())
-            .any(|d| self.in_remote_control(d) && d.mappings.iter().any(|m| m.target == target));
+            .any(|d| {
+                d.enabled
+                    && self.in_remote_control(d)
+                    && d.mappings.iter().any(|m| m.target == target)
+            });
         if held {
             Err(ModelError::InvalidInput(
                 "a modulator in Remote Control holds that parameter",

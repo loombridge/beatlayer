@@ -80,7 +80,10 @@ pub trait SetStore {
     /// The set as it would be saved: the editor's document with the open
     /// set's media table and views (WP-6.62, the crash-recovery spec R21).
     /// The journal holds this, so a recovered set is the set as it was.
-    fn project(&self, editor: &Editor) -> Project {
+    /// A set never saved has no folder its files are listed from, so its
+    /// table lists them from `untitled_root`, the journal's folder.
+    fn project(&self, editor: &Editor, untitled_root: Option<&Path>) -> Project {
+        let _ = untitled_root;
         Project::from_editor(editor, Media::new())
     }
 
@@ -89,6 +92,15 @@ pub trait SetStore {
     /// crash-recovery spec R3).
     fn adopt(&mut self, set: Option<SetFile>, project: Project) {
         let _ = (set, project);
+    }
+
+    /// Takes over a set that has no file, as `adopt` does, when its media
+    /// table lists its files from `folder`: the journal's folder for a
+    /// recovered set, the default set's for a new one. The files stay
+    /// listed by their paths, so the first save lists them from its own
+    /// folder.
+    fn adopt_untitled(&mut self, folder: &Path, project: Project) {
+        let _ = (folder, project);
     }
 
     /// Reads the set at `path` into an editor with an empty undo history,
@@ -511,10 +523,16 @@ impl SetStore for ProjectFiles {
         self.set.as_ref()
     }
 
-    fn project(&self, editor: &Editor) -> Project {
+    fn project(&self, editor: &Editor, untitled_root: Option<&Path>) -> Project {
         let mut media = self.media.clone();
-        if let Some(set) = &self.set {
-            self.add_media_to(&mut media, set.path());
+        match (&self.set, untitled_root) {
+            (Some(set), _) => {
+                self.add_media_to(&mut media, set.path());
+            }
+            (None, Some(root)) => {
+                self.add_media_to(&mut media, &root.join("Untitled.blset"));
+            }
+            (None, None) => {}
         }
         Project::from_editor(editor, media)
             .with_windows(&self.windows)
@@ -545,6 +563,18 @@ impl SetStore for ProjectFiles {
         self.lane_views = project.lane_views;
         self.column_widths = project.column_widths;
         self.added.clear();
+    }
+
+    fn adopt_untitled(&mut self, folder: &Path, mut project: Project) {
+        let files: Vec<_> = std::mem::replace(&mut project.media, Media::new())
+            .iter()
+            .filter_map(|file| {
+                let path = lexical(&file.path.resolve(folder)?);
+                Some((file.hash, (path, file.size, file.reversed_from)))
+            })
+            .collect();
+        self.adopt(None, project);
+        self.added.extend(files);
     }
 
     fn merge_media(&mut self, media: &Media) {
@@ -1309,17 +1339,23 @@ pub(crate) fn after_load(project: &mut Project, info: &SetInfo) -> Option<String
 /// Beatlayer Set As Default Set makes the open set the one a new set starts
 /// from, as Live's does. The main view and second window a saved default
 /// set keeps come with it (second-window R14); the factory default set
-/// opens in the Arrangement View with one window.
+/// opens in the Arrangement View with one window. A saved default set also
+/// comes back whole, with the folder its media table lists its files from,
+/// for the store to take over.
 #[must_use]
-pub fn new_set_from(path: Option<&Path>) -> (Editor, WindowViews) {
+pub fn new_set_from(path: Option<&Path>) -> (Editor, Option<(PathBuf, Project)>) {
     path.and_then(|path| SetFile::open(path).ok())
         .map(|(set, mut project)| {
             if let Some(info) = set.info() {
                 after_load(&mut project, info);
             }
-            (project.editor(), project.window_views)
+            let folder = std::path::absolute(set.path())
+                .ok()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+                .unwrap_or_default();
+            (project.editor(), Some((folder, project)))
         })
-        .unwrap_or_else(|| (factory_default_set(), WindowViews::default()))
+        .unwrap_or_else(|| (factory_default_set(), None))
 }
 
 #[cfg(test)]

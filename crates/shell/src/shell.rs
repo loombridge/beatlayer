@@ -1250,7 +1250,7 @@ impl Shell {
         audio.set_preview_gain(prefs.browser.preview_volume as f32);
         // Spec: file-management R1. A saved default set is what a new set
         // starts from; without one, the factory default set.
-        let (editor, window_views) = new_set_from(prefs.default_set.as_deref());
+        let (editor, default_set) = new_set_from(prefs.default_set.as_deref());
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
@@ -1464,9 +1464,13 @@ impl Shell {
             plugins_generation: 0,
             ara_selection: (Vec::new(), Vec::new()),
         };
-        // Spec: second-window R14. A saved default set keeps its main view
-        // and the second window.
-        shell.apply_window_views(window_views);
+        // Spec: second-window R14, file-management R1. A saved default set
+        // keeps its main view and the second window, and its files, launch
+        // quantisation and views.
+        shell.adopt_default_set(default_set);
+        shell.arrangement.restore_lanes(shell.store.lane_views());
+        shell.mixer.restore_widths(shell.store.column_widths());
+        shell.audio.set_launch_settings(shell.store.launch());
         shell.start_link();
         shell.agent_tokens_in_file = !agent::StoredTokens::of(&shell.prefs.agent).is_empty();
         shell.give_agents_tokens();

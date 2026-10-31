@@ -625,6 +625,15 @@ impl AudioHost {
         self.midi_out = Some(bus);
     }
 
+    /// Tells the engine that output `port` opened or its Track switch went
+    /// on, so an MPE MIDI To sends its configuration to it again (the MPE
+    /// spec, R17).
+    pub fn midi_output_opened(&self, port: bl_core::midi::PortId) {
+        if let Some(engine) = &self.engine {
+            engine.midi_output_opened(port);
+        }
+    }
+
     /// Sets the output ports with Sync on and their options, which the
     /// engine sends MIDI clock to (the MIDI clock spec, R3): now, and for
     /// every engine that starts.

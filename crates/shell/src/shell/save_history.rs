@@ -147,9 +147,7 @@ impl Shell {
         // (R18).
         let (mut project, info) = history::load(&set, &args.id)
             .map_err(|error| failed(format!("couldn't read {}: {error}", args.id)))?;
-        if info.before_relative_modulation() {
-            bl_devices::relative_clip_envelopes(&mut project.document);
-        }
+        crate::files::after_load(&mut project, &info);
         self.store.merge_media(&project.media);
         for (hash, path, size) in self.store.media_files() {
             self.media

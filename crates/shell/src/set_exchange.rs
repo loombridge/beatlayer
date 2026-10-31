@@ -110,9 +110,7 @@ pub fn open(path: &Path) -> Result<Arc<Opened>, String> {
         return Ok(Arc::clone(&found.3));
     }
     let (mut project, info) = bl_project::load(path).map_err(|e| e.to_string())?;
-    if info.before_relative_modulation() {
-        bl_devices::relative_clip_envelopes(&mut project.document);
-    }
+    crate::files::after_load(&mut project, &info);
     let folder = std::path::absolute(path)
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
@@ -599,11 +597,12 @@ pub fn write(
 
 /// The files of `store` that `data` plays.
 fn store_hashes(store: &MediaStore, data: &[TrackData]) -> BTreeSet<ContentHash> {
+    let used = crate::tracks::media_hashes(data);
     store
         .entries()
         .into_iter()
         .map(|entry| ContentHash(*entry.hash.as_bytes()))
-        .filter(|hash| data.iter().any(|track| track.plays(hash)))
+        .filter(|hash| used.contains(hash))
         .collect()
 }
 

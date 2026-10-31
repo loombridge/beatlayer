@@ -318,6 +318,11 @@ impl Lfo {
         self.speed = audio.speed();
     }
 
+    /// Changes how the channels differ from the next frame on.
+    pub fn set_stereo(&mut self, stereo: Stereo) {
+        self.stereo = stereo;
+    }
+
     fn configure(
         &mut self,
         start: i64,

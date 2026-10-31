@@ -136,9 +136,9 @@ fn the_media_are_embedded_or_referred_to_by_their_paths() {
     export(&mut shell, json!({ "path": embedded.to_string_lossy() })).expect("exported");
     let container = read_container(&std::fs::read(&embedded).unwrap()).unwrap();
     assert!(
-        container.files.keys().any(|path| path == "audio/drum.wav"),
+        container.paths().any(|path| path == "audio/drum.wav"),
         "{:?}",
-        container.files.keys().collect::<Vec<_>>()
+        container.paths().collect::<Vec<_>>()
     );
 
     let referred = folder.0.join("Referred.dawproject");
@@ -149,12 +149,9 @@ fn the_media_are_embedded_or_referred_to_by_their_paths() {
     .expect("exported");
     let container = read_container(&std::fs::read(&referred).unwrap()).unwrap();
     assert!(
-        !container
-            .files
-            .keys()
-            .any(|path| path.starts_with("audio/")),
+        !container.paths().any(|path| path.starts_with("audio/")),
         "{:?}",
-        container.files.keys().collect::<Vec<_>>()
+        container.paths().collect::<Vec<_>>()
     );
     let audio = container
         .project
@@ -193,6 +190,86 @@ fn an_exported_file_imports_as_the_same_set() {
     };
     assert_eq!(names(after), names(&before));
     assert_eq!(after.clip_count(), before.clip_count());
+}
+
+/// A 16-bit mono WAV file of a tenth of a second of `level`.
+fn wav_of(level: i16) -> Vec<u8> {
+    let frames = 4_410u32;
+    let mut out = Vec::new();
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + frames * 2).to_le_bytes());
+    out.extend_from_slice(b"WAVEfmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&44_100u32.to_le_bytes());
+    out.extend_from_slice(&88_200u32.to_le_bytes());
+    out.extend_from_slice(&2u16.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(frames * 2).to_le_bytes());
+    for _ in 0..frames {
+        out.extend_from_slice(&level.to_le_bytes());
+    }
+    out
+}
+
+/// Spec: dawproject R73. Two embedded files whose paths differ only in case
+/// are two files on disk, as they would be one on macOS and Windows, so each
+/// clip keeps its own audio.
+#[test]
+fn embedded_files_whose_paths_differ_only_in_case_are_both_kept() {
+    use std::io::Write;
+
+    let folder = TempDir::new("case-import");
+    let (kick, other) = (wav_of(1_000), wav_of(-1_000));
+    let xml = r#"<?xml version="1.0"?><Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="audio" id="a" name="A"><Channel role="regular" id="ca"/></Track></Structure>
+<Arrangement id="arr"><Lanes id="all"><Lanes track="a" timeUnit="seconds" id="la"><Clips id="cl">
+<Clip time="0" duration="0.1" contentTimeUnit="seconds"><Audio><File path="audio/Kick.wav"/></Audio></Clip>
+<Clip time="1" duration="0.1" contentTimeUnit="seconds"><Audio><File path="audio/kick.wav"/></Audio></Clip>
+</Clips></Lanes></Lanes></Arrangement></Project>"#;
+    let file = folder.0.join("Case.dawproject");
+    let mut writer = zip::ZipWriter::new(std::fs::File::create(&file).unwrap());
+    let stored = zip::write::SimpleFileOptions::default();
+    for (name, bytes) in [
+        ("project.xml", xml.as_bytes()),
+        ("audio/Kick.wav", &kick),
+        ("audio/kick.wav", &other),
+    ] {
+        writer.start_file(name, stored).unwrap();
+        writer.write_all(bytes).unwrap();
+    }
+    writer.finish().unwrap();
+
+    let temporary = folder.0.join("Temporary");
+    let (mut shell, _control) = rig();
+    shell
+        .run(
+            "settings.set_temporary_folder",
+            json!({ "path": temporary.to_string_lossy() }),
+        )
+        .expect("the temporary folder is set");
+    shell
+        .run(IMPORT_DAWPROJECT, json!({ "path": file.to_string_lossy() }))
+        .expect("the file imports");
+
+    let store = shell.media_store();
+    for bytes in [&kick, &other] {
+        let hash = bl_media::ContentHash::of_bytes(bytes);
+        assert_eq!(
+            store.check(hash).expect("the medium is known"),
+            bl_media::MediaStatus::Available
+        );
+    }
+    let written: std::collections::BTreeSet<String> =
+        std::fs::read_dir(temporary.join("Imported/Case/audio"))
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().to_lowercase())
+            .collect();
+    assert_eq!(written.len(), 2, "{written:?}");
 }
 
 mod render {

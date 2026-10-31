@@ -518,3 +518,156 @@ fn cancel_deletes_the_files_and_changes_nothing() {
     );
     assert_eq!(shell.editor().undo_history().len(), history, "no undo step");
 }
+
+// Spec: multisampler R73. A run under way belongs to the set it began in:
+// a new set gets no track from it, and its files are deleted.
+#[test]
+fn a_new_set_drops_the_run_under_way() {
+    let scratch = Scratch::new("new-set");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    shell
+        .run(
+            ids::AUTOSAMPLE,
+            json!({ "device": device, "name": "Drift", "lowest": 60, "highest": 84,
+                    "step": 3, "velocity_layers": 2, "note_length": 0.3,
+                    "release_tail": 0.1, "wait": false }),
+        )
+        .unwrap();
+    shell.poll();
+    assert!(shell.autosample_status().running);
+    let folder = scratch.path("Song Project/Samples/Processed/Autosample/Drift");
+    assert!(folder.is_dir(), "a sample was written");
+
+    shell.run("set.new", json!({})).unwrap();
+    assert!(!shell.autosample_status().running, "it ends with its set");
+    let fresh = shell.editor().document().clone();
+    for _ in 0..200 {
+        shell.poll();
+    }
+
+    assert!(!shell.autosample_status().running);
+    assert_eq!(*shell.editor().document(), fresh, "no track from the run");
+    assert_eq!(shell.editor().undo_history().len(), 0);
+    let left = std::fs::read_dir(&folder).map_or(0, |entries| entries.count());
+    assert_eq!(left, 0, "the file is deleted");
+}
+
+// Spec: multisampler R70. A run that ends while the person drags a clip
+// lands its track when the drag ends, inside no drag's transaction.
+#[test]
+fn a_run_that_ends_during_a_drag_lands_after_it() {
+    let scratch = Scratch::new("drag");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    let tracks = |shell: &Shell| shell.editor().document().top_level().count();
+    let before = tracks(&shell);
+    shell
+        .run(
+            ids::AUTOSAMPLE,
+            json!({ "device": device, "name": "Drift", "lowest": 60, "highest": 60,
+                    "step": 1, "velocity_layers": 1, "note_length": 0.1,
+                    "release_tail": 0.1, "wait": false }),
+        )
+        .unwrap();
+    shell.begin_gesture("Change volume");
+    for _ in 0..200 {
+        shell.poll();
+    }
+    assert!(shell.autosample_status().running, "it waits for the drag");
+    assert_eq!(tracks(&shell), before);
+    shell.end_gesture();
+    for _ in 0..200 {
+        shell.poll();
+    }
+    assert!(!shell.autosample_status().running);
+    assert_eq!(tracks(&shell), before + 1, "the track landed");
+}
+
+// Spec: multisampler R69, R73
+#[test]
+fn a_second_autosample_keeps_the_first_ones_samples() {
+    let scratch = Scratch::new("twice");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    let args = json!({ "device": device, "name": "Drift", "lowest": 60, "highest": 60,
+                       "note_length": 0.3, "release_tail": 0.1 });
+    let first = autosample(&mut shell, args.clone());
+    let p1 = PathBuf::from(&first.files[0].path);
+    let h1 = layers(&shell, first.device.unwrap())[0].media;
+    let second = autosample(&mut shell, args.clone());
+    let p2 = PathBuf::from(&second.files[0].path);
+    assert_ne!(p2, p1, "a second run writes beside the first, not over it");
+    assert_eq!(p2.parent().unwrap().file_name().unwrap(), "Drift 2");
+    assert_eq!(
+        bl_model::ContentHash(*bl_media::ContentHash::of_file(&p1).unwrap().as_bytes()),
+        h1,
+        "the first track's sample is unchanged"
+    );
+    // A third run, cancelled after one sample, takes only its own files.
+    let mut more = args;
+    more["highest"] = json!(72);
+    more["wait"] = json!(false);
+    shell.run(ids::AUTOSAMPLE, more).unwrap();
+    shell.poll();
+    shell.run(ids::AUTOSAMPLE_CANCEL, json!({})).unwrap();
+    assert!(p1.exists(), "cancel leaves the earlier runs' files");
+    assert!(p2.exists(), "cancel leaves the earlier runs' files");
+    assert!(
+        !scratch
+            .path("Song Project/Samples/Processed/Autosample/Drift 3")
+            .exists(),
+        "a cancelled run leaves no empty folder"
+    );
+}
+
+// Spec: multisampler R69
+#[test]
+fn autosample_names_stay_one_folder_inside_the_project() {
+    let scratch = Scratch::new("unsafe-names");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    shell
+        .run(
+            "device.rename",
+            json!({ "device": device, "name": "Pad 1/2" }),
+        )
+        .unwrap();
+    let base = scratch.path("Song Project/Samples/Processed/Autosample");
+    let args = json!({ "device": device, "lowest": 60, "highest": 60,
+                       "note_length": 0.3, "release_tail": 0.1 });
+    let mut escaping = args.clone();
+    escaping["name"] = json!("../escape");
+    for args in [args, escaping] {
+        let result = autosample(&mut shell, args);
+        for file in &result.files {
+            let path = Path::new(&file.path);
+            assert_eq!(path.parent().unwrap().parent().unwrap(), base);
+            assert!(path.exists());
+        }
+    }
+    assert!(
+        !scratch
+            .path("Song Project/Samples/Processed/escape")
+            .exists()
+    );
+}
+
+// Spec: multisampler R73
+#[test]
+fn a_failed_wait_autosample_stops_the_job() {
+    let scratch = Scratch::new("failed");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    // A file where the Autosample folder goes, so no folder can be made.
+    let blocker = scratch.path("Song Project/Samples/Processed/Autosample");
+    std::fs::create_dir_all(blocker.parent().unwrap()).unwrap();
+    std::fs::write(&blocker, b"not a folder").unwrap();
+    let args = json!({ "device": device, "name": "Drift", "lowest": 60, "highest": 60,
+                       "note_length": 0.3, "release_tail": 0.1 });
+    assert!(shell.run(ids::AUTOSAMPLE, args.clone()).is_err());
+    assert!(!shell.autosample_status().running, "the failed job is gone");
+    std::fs::remove_file(&blocker).unwrap();
+    let result = autosample(&mut shell, args);
+    assert_eq!(result.files.len(), 1);
+}

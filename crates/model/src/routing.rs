@@ -226,6 +226,51 @@ impl Document {
         }
     }
 
+    /// Puts every MIDI route to `gone` out of use, for a track that stops
+    /// being a MIDI track: MIDI inputs from it No Input, MIDI outputs to it
+    /// No Output, and devices' MIDI sidechain sources No Input. Audio routes
+    /// stay.
+    pub(crate) fn forget_midi_routes_to(&mut self, gone: TrackId) {
+        let only = BTreeSet::from([gone]);
+        let touched: Vec<TrackId> = self
+            .tracks
+            .iter()
+            .filter(|(_, t)| {
+                (t.kind == TrackKind::Midi
+                    && matches!(&t.routing.input, Input::Track { track, .. } if *track == gone))
+                    || t.routing.midi_output.as_ref().and_then(MidiTo::track) == Some(gone)
+                    || t.devices_deep().any(|d| hears(d, &only))
+            })
+            .map(|(&id, _)| id)
+            .collect();
+        for id in touched {
+            let Some(track) = self.tracks.get_mut(&id) else {
+                continue;
+            };
+            let track = crate::shared::Shared::make_mut(track);
+            for device in track.devices.iter_mut() {
+                if device.walk().any(|d| hears(d, &only)) {
+                    crate::shared::Shared::make_mut(device).walk_mut(&mut |device| {
+                        if hears(device, &only)
+                            && let Some(sidechain) = &mut device.midi_sidechain
+                        {
+                            sidechain.source = None;
+                        }
+                    });
+                }
+            }
+            let routing = &mut track.routing;
+            if track.kind == TrackKind::Midi
+                && matches!(&routing.input, Input::Track { track, .. } if *track == gone)
+            {
+                routing.input = Input::None;
+            }
+            if routing.midi_output.as_ref().and_then(MidiTo::track) == Some(gone) {
+                routing.midi_output = None;
+            }
+        }
+    }
+
     /// Checks that a MIDI track an audio track takes as its input holds an
     /// instrument, which makes it a source (the racks spec, R38). Once set,
     /// the input stays if the instrument goes, and carries silence.

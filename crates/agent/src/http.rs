@@ -83,9 +83,10 @@ impl Pending {
         self.0.question()
     }
 
-    /// Answers the question and sends the reply to the waiting connection.
-    pub fn finish(self, agent: &mut Agent, shell: &mut Shell, allow: bool) {
-        self.0.finish(agent.server(), shell, allow);
+    /// Answers the question and sends the reply to the waiting connection,
+    /// or keeps an allowed call that waits for the host: [`Served::Parked`].
+    pub fn finish(self, agent: &mut Agent, shell: &mut Shell, allow: bool) -> Served {
+        self.0.finish(agent.server(), shell, allow).into()
     }
 }
 

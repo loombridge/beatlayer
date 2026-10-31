@@ -50,6 +50,13 @@ use crate::theme::Theme;
 /// (L-DEV-010).
 pub const PLUGIN_WINDOW_BUTTON: &str = "Show/Hide Plug-In Window";
 
+/// The contexts Simpler's own menu items are enabled in: its menus belong to
+/// the Device View, whatever has the keyboard.
+pub(crate) const MENU_CONTEXTS: [bl_commands::Context; 2] = [
+    bl_commands::Context::DeviceView,
+    bl_commands::Context::Global,
+];
+
 /// `plugin.show_window`, which the window button runs.
 const PLUGIN_SHOW_WINDOW: &str = bl_shell::plugin_commands::SHOW_WINDOW;
 
@@ -309,6 +316,7 @@ impl DeviceViewUi {
             number,
             text: None,
             focused: false,
+            drawn: false,
         });
     }
 
@@ -320,6 +328,7 @@ impl DeviceViewUi {
             index,
             text: None,
             focused: false,
+            drawn: false,
         });
     }
 
@@ -330,6 +339,7 @@ impl DeviceViewUi {
             chain,
             text: name.to_owned(),
             focused: false,
+            drawn: false,
         });
     }
 
@@ -344,14 +354,30 @@ impl DeviceViewUi {
         });
     }
 
-    /// Ends a rename whose title wasn't drawn this frame: the device is gone
-    /// or the Detail View hidden, so the field can never lose its focus, and
-    /// the keys would stay with it. Called at the end of every frame.
+    /// Ends a rename whose field wasn't drawn this frame (a device title, a
+    /// chain, a macro or a variation): the device is gone, the Detail View
+    /// hidden or the row scrolled out, so the field can never lose its focus,
+    /// and the keys would stay with it. Called at the end of every frame.
     pub(crate) fn end_undrawn_rename(&mut self) {
         if let Some(renaming) = self.renaming.as_mut()
             && !std::mem::take(&mut renaming.drawn)
         {
             self.renaming = None;
+        }
+        if let Some(renaming) = self.renaming_chain.as_mut()
+            && !std::mem::take(&mut renaming.drawn)
+        {
+            self.renaming_chain = None;
+        }
+        if let Some(renaming) = self.renaming_macro.as_mut()
+            && !std::mem::take(&mut renaming.drawn)
+        {
+            self.renaming_macro = None;
+        }
+        if let Some(renaming) = self.renaming_variation.as_mut()
+            && !std::mem::take(&mut renaming.drawn)
+        {
+            self.renaming_variation = None;
         }
     }
 
@@ -1426,6 +1452,24 @@ impl DeviceViewUi {
                     json!({ "device": frame.id, "to": "multisampler" }),
                 );
                 ui.close();
+            }
+            // Spec: slice-to-midi R15, R16. In Slice mode with a slice.
+            for (label, id) in [
+                (
+                    "Slice to Drum Rack",
+                    bl_shell::slice_commands::SLICE_TO_DRUM_RACK,
+                ),
+                (
+                    "Slice to New MIDI Track",
+                    bl_shell::slice_commands::SLICE_TO_MIDI_TRACK,
+                ),
+            ] {
+                let args = json!({ "device": frame.id });
+                let enabled = shell.can_invoke_in(id, &args, &MENU_CONTEXTS);
+                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                    invoke(events, id, args);
+                    ui.close();
+                }
             }
         }
         // Spec: multisampler R64. Autosample… is in an instrument's title

@@ -517,15 +517,21 @@ impl KeyRows {
     /// The key at `y` in `grid`: continuous while unfolded, the shown row
     /// whose band holds `y` while folded. `None` while folded with no rows.
     fn key_at(&self, grid: Rect, y: f32) -> Option<f32> {
-        if self.keys.is_empty() {
+        self.key_among(&self.keys, grid, y)
+    }
+
+    /// [`Self::key_at`] with the rows `keys` in place of the ones held, which
+    /// a drag keeps from its press: the notes it moves change the rows.
+    fn key_among(&self, keys: &[u8], grid: Rect, y: f32) -> Option<f32> {
+        if keys.is_empty() {
             return None;
         }
         let row = (y - grid.top()) / self.height + self.top_row();
         if !self.folded {
             return Some(127.0 - row);
         }
-        let row = row.floor().clamp(0.0, (self.keys.len() - 1) as f32);
-        self.keys.get(row as usize).map(|key| f32::from(*key))
+        let row = row.floor().clamp(0.0, (keys.len() - 1) as f32);
+        keys.get(row as usize).map(|key| f32::from(*key))
     }
 
     /// The continuous row index at the grid's top edge.
@@ -680,6 +686,9 @@ enum NoteDrag {
         start: Ticks,
         grab_key: f32,
         grab: Ticks,
+        /// The key rows when the drag began, which stay while a folded editor
+        /// would drop the rows the moved notes leave (piano-roll R16).
+        rows: Vec<u8>,
         /// The furthest the drag may move them: earlier in time, and in
         /// pitch.
         limits: (Ticks, i32, i32),
@@ -1738,10 +1747,22 @@ fn step_buttons(ui: &mut Ui, theme: &Theme, view: Rect, events: &mut Vec<UiEvent
 mod multi;
 pub use multi::{BAR_HEIGHT, Geometry, geometry};
 
+/// The editors the Clip View switches between, each with drags of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum View {
+    /// The note editor, with its MPE tab.
+    Notes,
+    Multi,
+    Envelopes,
+    Audio,
+}
+
 /// The Clip View's own state: the vertical scroll, the lane's drag, the
 /// note drags, and the marquee.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClipViewUi {
+    /// The editor drawn last frame.
+    view: View,
     /// The clip the editor was last laid out for.
     shown: Option<ClipId>,
     /// How the editor was folded when it was last laid out for that clip.
@@ -1809,6 +1830,7 @@ pub struct ClipViewUi {
 impl Default for ClipViewUi {
     fn default() -> Self {
         Self {
+            view: View::Notes,
             shown: None,
             fold: Fold::default(),
             top: DEFAULT_TOP,
@@ -1841,6 +1863,42 @@ impl Default for ClipViewUi {
 }
 
 impl ClipViewUi {
+    /// Drops every drag under way and the held preview, as showing another
+    /// clip does, and commits the edit gesture they may have opened: the
+    /// shell would otherwise stay locked on a drag nobody ends. Commit, not
+    /// Cancel, so the selection the change came with stays.
+    fn abandon_drags(&mut self, events: &mut Vec<UiEvent>) {
+        self.end_preview(events);
+        let dragged = [
+            self.drag.take().is_some(),
+            self.strip_drag.take().is_some(),
+            self.split_drag.take().is_some(),
+            self.chop_drag.take().is_some(),
+            self.stretch_drag.take().is_some(),
+            self.lanes.reset(),
+            self.envelope.reset(),
+            self.mpe.reset(),
+            self.sample.reset(),
+        ];
+        self.marquee = None;
+        self.time_drag = None;
+        self.end_chop(events);
+        if dragged.contains(&true) {
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Commit,
+                invocation: None,
+            });
+        }
+    }
+
+    /// Notes that `view` is the editor drawn now, and abandons the drags
+    /// another one left, which would never see their release.
+    fn enter(&mut self, view: View, events: &mut Vec<UiEvent>) {
+        if std::mem::replace(&mut self.view, view) != view {
+            self.abandon_drags(events);
+        }
+    }
+
     /// Ends the chop Cmd-E opened, if one is open, as one undo step.
     fn end_chop(&mut self, events: &mut Vec<UiEvent>) {
         if self.chop.take().is_some() {
@@ -1917,7 +1975,6 @@ impl ClipViewUi {
             self.show_audio(ui, shell, theme, rect, audio, events, peaks);
             return;
         }
-        self.sample.reset();
         let shown = shell.clip_view().shown_clip(doc, shell.arrangement());
         let editor = shown
             .and_then(|id| doc.clip(id))
@@ -1926,19 +1983,8 @@ impl ClipViewUi {
                 ClipData::Audio(_) => None,
             });
         let Some((clip, midi, length)) = editor else {
-            self.end_preview(events);
+            self.abandon_drags(events);
             self.shown = None;
-            self.drag = None;
-            self.strip_drag = None;
-            self.lanes.reset();
-            self.marquee = None;
-            self.time_drag = None;
-            self.end_chop(events);
-            self.split_drag = None;
-            self.chop_drag = None;
-            self.stretch_drag = None;
-            self.envelope.reset();
-            self.mpe.reset();
             return;
         };
         // The panel groups take the left of the view (L-CLIP-003), or stack
@@ -1952,17 +1998,7 @@ impl ClipViewUi {
             self.fold = fold;
             self.top = default_top(&midi);
             self.first = first_row(&midi, &fold);
-            self.drag = None;
-            self.strip_drag = None;
-            self.lanes.reset();
-            self.marquee = None;
-            self.time_drag = None;
-            self.end_chop(events);
-            self.split_drag = None;
-            self.chop_drag = None;
-            self.stretch_drag = None;
-            self.envelope.reset();
-            self.mpe.reset();
+            self.abandon_drags(events);
         }
         let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
         let mpe_tab = shell.clip_view().tab() == ClipTab::Mpe;
@@ -1970,7 +2006,18 @@ impl ClipViewUi {
         // Spec: multi-clip-editing R1. Several clips share the note editor,
         // under loop bars. The MPE tab edits the foreground clip's notes.
         let several = shell.clip_view().shown(doc, shell.arrangement());
-        if several.len() > 1 && !envelopes && !mpe_tab {
+        let multi = several.len() > 1 && !envelopes && !mpe_tab;
+        self.enter(
+            if multi {
+                View::Multi
+            } else if envelopes {
+                View::Envelopes
+            } else {
+                View::Notes
+            },
+            events,
+        );
+        if multi {
             // Several clips share an axis of their own, which the note
             // editor's zoom doesn't reach.
             self.zoomable = false;
@@ -2007,6 +2054,7 @@ impl ClipViewUi {
         };
         let strip = strip_rect(body);
         if grid.width() < 1.0 || grid.height() < KEY_HEIGHT || strip.height() < 1.0 {
+            self.end_preview(events);
             return;
         }
         toolbar(ui, shell, theme, rect, false, events);
@@ -2081,10 +2129,8 @@ impl ClipViewUi {
         let rows = rows.with_limit(tuning_of_clip(shell, clip).map_or(127, key_limit));
         self.top = rows.top;
         self.first = rows.first;
-        let selected = shell
-            .clip_view()
-            .selected_notes(doc, shell.arrangement())
-            .to_vec();
+        let selected = shell.clip_view().selected_notes(doc, shell.arrangement());
+        let chosen_mask = note_lanes::selection_mask(notes.len(), selected);
         // Spec: piano-roll R32. The span of the clip's contents the note
         // area shows: the shell holds it, and it is the whole clip until a
         // zoom or a scroll chooses another. While the Start marker is
@@ -2130,7 +2176,8 @@ impl ClipViewUi {
             length: span_len,
             notes: &notes,
             groups: &midi.groups,
-            selected: &selected,
+            selected,
+            selected_mask: &chosen_mask,
             face,
             hovered,
             step: shell.arrangement().grid_ticks(doc),
@@ -2177,13 +2224,13 @@ impl ClipViewUi {
             start: axis,
             length: span_len,
             notes: &notes,
-            selected: &selected,
+            selected,
             face,
             step: shell.arrangement().grid_ticks(doc),
             grid_on: mpe_view.grid_on(clip),
             pitch: pitch_rows
                 .iter()
-                .filter(|(place, _)| selected.contains(place))
+                .filter(|(place, _)| frame.chosen(*place as usize))
                 .copied()
                 .collect(),
             focus: held.as_ref().map(|(envelope, _)| *envelope),
@@ -2194,7 +2241,6 @@ impl ClipViewUi {
         let toggled: Vec<MpeLane> = mpe_view.shown.iter().copied().collect();
         self.paint(
             ui, shell, theme, clip, strip, &frame, &rows, &midi, axis, span_len, length, &notes,
-            &selected,
         );
         if let (Some(mpe_frame), Some(mpe_layout)) = (&mpe_frame, &mpe_layout) {
             mpe_tab::paint_band(ui, theme, mpe_frame, mpe_layout, &toggled, mpe_view.hidden);
@@ -2215,7 +2261,7 @@ impl ClipViewUi {
             span_len,
             length,
             &notes,
-            &selected,
+            selected,
             mpe_frame.as_ref(),
             events,
         );
@@ -2324,12 +2370,13 @@ impl ClipViewUi {
             (true, Some(press), pos) if grid.contains(press) => match &self.drag {
                 Some(NoteDrag::Move {
                     grab_key,
+                    rows: frozen,
                     limits,
                     grabbed: (key, velocity),
                     ..
                 }) => {
                     let now = pos
-                        .and_then(|pos| rows.key_at(*grid, pos.y))
+                        .and_then(|pos| rows.key_among(frozen, *grid, pos.y))
                         .unwrap_or(*grab_key);
                     let semitones = ((now - *grab_key).round() as i32).clamp(limits.1, limits.2);
                     Some(((i32::from(*key) + semitones).clamp(0, 127) as u8, *velocity))
@@ -2405,24 +2452,21 @@ impl ClipViewUi {
         // A file dropped from the browser on the Clip View replaces the
         // clip's sample (R18, I-DROP-009).
         drop_sample(ui, rect, clip, events);
+        let envelopes = shell.clip_view().tab() == ClipTab::Envelopes;
+        self.enter(
+            if envelopes {
+                View::Envelopes
+            } else {
+                View::Audio
+            },
+            events,
+        );
         if self.shown != Some(clip) {
             self.shown = Some(clip);
-            self.drag = None;
-            self.strip_drag = None;
-            self.lanes.reset();
-            self.marquee = None;
-            self.time_drag = None;
-            self.end_chop(events);
-            self.split_drag = None;
-            self.chop_drag = None;
-            self.stretch_drag = None;
-            self.envelope.reset();
-            self.mpe.reset();
-            self.sample.reset();
+            self.abandon_drags(events);
         }
         toolbar(ui, shell, theme, rect, true, events);
-        if shell.clip_view().tab() == ClipTab::Envelopes {
-            self.sample.reset();
+        if envelopes {
             // An audio clip's envelopes run from the clip's start, one tick
             // per tick (the clip envelopes spec, R2).
             let target = clip_envelope::shown_target(shell, doc, clip);
@@ -2436,8 +2480,6 @@ impl ClipViewUi {
             self.envelope.show(ui, shell, theme, &frame, events);
             return;
         }
-        self.envelope.reset();
-        self.mpe.reset();
         let ready = peaks(audio.media);
         self.sample
             .show(ui, shell, theme, rect, clip, ready, events);
@@ -2462,7 +2504,6 @@ impl ClipViewUi {
         length: Ticks,
         extent: Ticks,
         notes: &[Note],
-        selected: &[u32],
     ) {
         let painter = ui.painter();
         let colours = &theme.colors;
@@ -2508,9 +2549,7 @@ impl ClipViewUi {
             let corner = theme.sizes.corner.min(2.0);
             // Spec: piano-roll R43. The note is drawn in its clip's colour,
             // paler the softer its velocity; a deactivated note is grey.
-            let colour = if note.mute
-                || (self.mpe_on && !selected.contains(&u32::try_from(place).unwrap_or(u32::MAX)))
-            {
+            let colour = if note.mute || (self.mpe_on && !frame.chosen(place)) {
                 colours.clip_muted.0
             } else {
                 crate::theme::note_colour(face, note.velocity)
@@ -2530,7 +2569,7 @@ impl ClipViewUi {
                     StrokeKind::Outside,
                 );
             }
-            if selected.contains(&u32::try_from(place).unwrap_or(u32::MAX)) {
+            if frame.chosen(place) {
                 // Spec: arrangement-editing R15's selection colour, as the
                 // Arrangement's selected clips wear.
                 painter.rect_stroke(
@@ -2896,6 +2935,7 @@ impl ClipViewUi {
                         grab_key: rows
                             .key_at(grid, press.y)
                             .unwrap_or_else(|| f32::from(note.key)),
+                        rows: rows.keys.clone(),
                         grab: tick_at(grid, start, length, press.x) - note.start,
                         // Spec: piano-roll R29. Option-dragging a note
                         // copies it.
@@ -4076,6 +4116,7 @@ impl NoteDrag {
                 start: from,
                 grab_key,
                 grab,
+                rows: frozen,
                 limits,
                 copy,
                 grabbed: _,
@@ -4084,7 +4125,7 @@ impl NoteDrag {
                 // start lands on the grid, and Cmd (Alt) bypasses it.
                 let snapped = arrangement.snap_drag(doc, at - *grab, keys.bypass);
                 let by = (snapped - *from).max(limits.0);
-                let key = rows.key_at(grid, pos.y).unwrap_or(*grab_key);
+                let key = rows.key_among(frozen, grid, pos.y).unwrap_or(*grab_key);
                 let semitones = ((key - *grab_key).round() as i32).clamp(limits.1, limits.2);
                 (
                     ids::MOVE_NOTES,

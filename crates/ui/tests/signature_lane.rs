@@ -207,6 +207,40 @@ fn clicking_a_marker_selects_it_and_cmd_r_types_a_signature() {
 }
 
 #[test]
+fn a_marker_dragged_past_the_lane_commits_on_release() {
+    // Spec: time-editing R32.
+    let mut h = with_marker(Ticks(2 * BAR), sig(3, 4));
+    let layout = layout(&h);
+    let lane = layout.signature_lane.unwrap();
+    let (x, y) = (x_of(&h, &layout, Ticks(2 * BAR)) + 6.0, lane.center().y);
+    let end = lane.right() + 30.0;
+    let before = steps(&h);
+    h.frame(vec![
+        Event::PointerMoved(pos2(x, y)),
+        Event::PointerButton {
+            pos: pos2(x, y),
+            button: PointerButton::Primary,
+            pressed: true,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    for step in 1..=10 {
+        let at = x + (end - x) * step as f32 / 10.0;
+        h.frame(vec![Event::PointerMoved(pos2(at, y))]);
+    }
+    h.frame(vec![Event::PointerMoved(pos2(end, y))]);
+    h.frame(vec![Event::PointerButton {
+        pos: pos2(end, y),
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    assert!(!h.shell.gesture_open(), "the release ended the gesture");
+    assert_eq!(steps(&h), before + 1);
+}
+
+#[test]
 fn dragging_a_marker_moves_it_in_one_undo_step_and_the_first_stays() {
     // Spec: time-editing R32.
     let mut h = with_marker(Ticks(4 * BAR), sig(3, 4));

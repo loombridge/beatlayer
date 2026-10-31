@@ -86,10 +86,21 @@ impl Shell {
     /// Whether the set has changes that aren't saved (the crash-recovery
     /// spec, R25): with Save Continuously on, a set that has a file has
     /// none, because every finished edit of it is committed within a
-    /// second. A set that has never been saved still has some.
+    /// second. A set that has never been saved still has some, and so has
+    /// one whose journal can't hold save points (a project folder that can't
+    /// be written, a set that didn't open at its file).
+    ///
+    /// shortcut: the first edit in a folder that can't be written still
+    /// counts as committed until the journal has tried it, a moment.
     #[must_use]
     pub fn unsaved_changes(&self) -> bool {
-        self.dirty && !(self.prefs.save_continuously && self.set_path.is_some())
+        let committed = self.prefs.save_continuously
+            && self.set_path.is_some()
+            && self.autosave.as_ref().is_some_and(|autosave| {
+                let status = autosave.status();
+                status.committing && status.error.is_none()
+            });
+        self.dirty && !committed
     }
 
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
@@ -108,6 +119,14 @@ impl Shell {
         // A file still being written was for the set that's gone: its worker
         // deletes it when it finds nobody waiting (WP-4.20).
         self.processed.clear();
+        self.pending_param_changes.clear();
+        // A stem separation or autosample still running was for the set
+        // that's gone: its clip, track or device would name something else
+        // in this one.
+        self.drop_separation();
+        self.stop_autosample();
+        self.autosample_dialog = None;
+        self.autosample_result_value = None;
         if self.session_run.take().is_some() {
             // The recording's document is gone; its take ends unplaced.
             let _ = self
@@ -122,6 +141,14 @@ impl Shell {
         self.vst3.clear();
         self.lv2.clear();
         self.kit.clear();
+    }
+
+    /// A number that changes whenever the set is replaced (a new or opened
+    /// one, or a recovered one), so what the agent API keeps about the old
+    /// set, such as scheduled commands, names no objects of the new one.
+    #[must_use]
+    pub fn set_generation(&self) -> u64 {
+        self.editor_generation
     }
 
     /// Notes that the editor was replaced, so the journal doesn't hold the
@@ -611,6 +638,7 @@ impl Shell {
         // The recordings and automation takes under way belong to the set
         // that was replaced: finishing them would put them in this one.
         self.recording = None;
+        self.pending_recording = None;
         self.session_run = None;
         self.session_automation = crate::automation_record::SessionTake::default();
         self.automation_take = crate::automation_record::Take::default();
@@ -839,8 +867,7 @@ impl Shell {
                 if self.dirty {
                     self.set_replaced();
                     self.editor = snapshot(&self.saved);
-                    self.gesture = false;
-                    self.key_edit = None;
+                    self.new_set_transport();
                     self.dirty = false;
                     self.document_changed();
                     // Spec: crash-recovery R6. The changes are gone, so

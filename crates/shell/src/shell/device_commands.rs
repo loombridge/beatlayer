@@ -303,6 +303,20 @@ impl Shell {
         )
     }
 
+    /// Takes the state of every running plug-in into the set, so a copy of a
+    /// device, a chain or a track starts from the state its plug-in has now.
+    /// Spec: clap-hosting R8, track-context-menu R13.
+    pub(super) fn capture_plugin_states(&mut self) {
+        crate::plugins::capture_states(
+            &self.plugins,
+            &self.au,
+            &self.vst3,
+            &self.lv2,
+            &self.kit,
+            &mut self.editor,
+        );
+    }
+
     /// Runs a Device View command and carries out what it asks of the rest
     /// of the shell.
     pub(super) fn run_devices(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
@@ -323,17 +337,11 @@ impl Shell {
                 | device_ids::SAVE_PRESET
                 | device_ids::SAVE_DEFAULT_PRESET
                 | device_ids::CHAIN_SAVE_PRESET
+                | device_ids::CHAIN_COPY
+                | device_ids::CHAIN_CUT
+                | device_ids::CHAIN_DUPLICATE
         ) {
-            // Spec: clap-hosting R8. A copy of a plug-in device starts
-            // from its plug-in's state now.
-            crate::plugins::capture_states(
-                &self.plugins,
-                &self.au,
-                &self.vst3,
-                &self.lv2,
-                &self.kit,
-                &mut self.editor,
-            );
+            self.capture_plugin_states();
         }
         if id == device_ids::DISPLAY && self.audio.engine_running() {
             // Spec: device-framework R37. The newest the nodes published,

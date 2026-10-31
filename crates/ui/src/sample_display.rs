@@ -1434,6 +1434,21 @@ fn menu(
             json!({ "device": device, "what": "volume" }),
             true,
         );
+        // Spec: slice-to-midi R15, R16. In Slice mode with a slice.
+        for (label, id) in [
+            (
+                "Slice to Drum Rack",
+                bl_shell::slice_commands::SLICE_TO_DRUM_RACK,
+            ),
+            (
+                "Slice to New MIDI Track",
+                bl_shell::slice_commands::SLICE_TO_MIDI_TRACK,
+            ),
+        ] {
+            let args = json!({ "device": device });
+            let enabled = shell.can_invoke_in(id, &args, &crate::device_view::MENU_CONTEXTS);
+            run(ui, label, id, args, enabled);
+        }
     }
     if let Some(folder) = shell.layer_folder(media) {
         run(

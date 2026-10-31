@@ -1171,6 +1171,9 @@ pub(crate) struct ChainRenaming {
     pub chain: ChainId,
     pub text: String,
     pub focused: bool,
+    /// Whether the field was drawn this frame: see
+    /// [`DeviceViewUi::end_undrawn_rename`].
+    pub drawn: bool,
 }
 
 /// A macro being renamed in its Macro Controls slot (macros spec, R14).
@@ -1182,6 +1185,9 @@ pub(crate) struct MacroRenaming {
     /// starts from the name the macro has.
     pub text: Option<String>,
     pub focused: bool,
+    /// Whether the field was drawn this frame: see
+    /// [`DeviceViewUi::end_undrawn_rename`].
+    pub drawn: bool,
 }
 
 /// A variation being renamed in its row of the Macro Variations view (macros
@@ -1194,6 +1200,9 @@ pub(crate) struct VariationRenaming {
     /// from the name the variation has.
     pub text: Option<String>,
     pub focused: bool,
+    /// Whether the field was drawn this frame: see
+    /// [`DeviceViewUi::end_undrawn_rename`].
+    pub drawn: bool,
 }
 
 impl DeviceViewUi {
@@ -2050,6 +2059,7 @@ impl DeviceViewUi {
             .as_mut()
             .filter(|r| r.rack == frame.id && r.number == item.number);
         if let Some(renaming) = renaming {
+            renaming.drawn = true;
             let mut text = renaming.text.take().unwrap_or_else(|| name.clone());
             let edit = ui.put(
                 item.name,
@@ -2152,6 +2162,7 @@ impl DeviceViewUi {
                     number: item.number,
                     text: None,
                     focused: false,
+                    drawn: true,
                 });
                 ui.close();
             }
@@ -2614,6 +2625,7 @@ impl DeviceViewUi {
                 .as_mut()
                 .filter(|r| r.rack == frame.id && r.index == row.index);
             if let Some(renaming) = renaming {
+                renaming.drawn = true;
                 let mut text = renaming.text.take().unwrap_or_else(|| name.clone());
                 let edit = ui.put(
                     row.name,
@@ -2659,6 +2671,7 @@ impl DeviceViewUi {
                         index: row.index,
                         text: None,
                         focused: false,
+                        drawn: true,
                     });
                     ui.close();
                 }
@@ -2888,6 +2901,7 @@ impl DeviceViewUi {
     ) {
         let c = &theme.colors;
         if let Some(renaming) = self.renaming_chain.as_mut().filter(|r| r.chain == row.id) {
+            renaming.drawn = true;
             let edit = ui.put(
                 rects.name,
                 egui::TextEdit::singleline(&mut renaming.text)

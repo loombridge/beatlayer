@@ -454,6 +454,9 @@ struct Slot {
     /// Its base and the value it played at the stretch's last frame, while
     /// a clip's modulation acts on it.
     modulated: Option<(f64, f64)>,
+    /// What it played at the stretch's last frame, while an envelope, a hold
+    /// or a modulation acts on it.
+    played_last: Option<f64>,
     /// An envelope or a clip's modulation acts on it in the current stretch.
     automated: bool,
 }
@@ -491,6 +494,7 @@ impl ParamBank {
                     smoother: LinearSmoother::new(value, frames),
                     ramp: vec![value as f32; config.max_frames.max(1)],
                     modulated: None,
+                    played_last: None,
                     automated: false,
                 }
             })
@@ -578,6 +582,7 @@ impl ParamBank {
             let id = slot.descriptor.id;
             let descriptor = &slot.descriptor;
             slot.modulated = None;
+            slot.played_last = None;
             slot.automated = false;
             let Some(list) = automation else {
                 Self::glide(slot, frames);
@@ -620,6 +625,7 @@ impl ParamBank {
             if frames == 0 {
                 continue;
             }
+            slot.played_last = Some(played);
             // A parameter an envelope set in the block's last frame leaves
             // its control's glide at that value.
             if set && !held {
@@ -676,23 +682,31 @@ impl ParamBank {
 
     /// The parameter at `index`'s value at the end of the stretch (or now,
     /// between stretches): for a stepped parameter, the value throughout.
+    /// While an envelope, a modulator's hold or a modulation acts on it, it's
+    /// the value played at the stretch's last frame.
     ///
     /// # Panics
     ///
     /// If there's no parameter at `index`.
     #[must_use]
     pub fn value(&self, index: usize) -> f64 {
-        self.slots[index].smoother.value()
+        self.slots[index]
+            .played_last
+            .unwrap_or_else(|| self.slots[index].smoother.value())
     }
 
-    /// The value the parameter at `index` is heading for.
+    /// The value the parameter at `index` is heading for; while an envelope,
+    /// a hold or a modulation acts on it, the value played at the stretch's
+    /// last frame.
     ///
     /// # Panics
     ///
     /// If there's no parameter at `index`.
     #[must_use]
     pub fn target(&self, index: usize) -> f64 {
-        self.slots[index].smoother.target()
+        self.slots[index]
+            .played_last
+            .unwrap_or_else(|| self.slots[index].smoother.target())
     }
 
     /// Whether the parameter at `index` is still gliding.

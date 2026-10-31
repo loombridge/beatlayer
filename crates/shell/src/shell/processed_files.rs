@@ -90,14 +90,27 @@ impl Shell {
     /// as an agent's call does before it returns (R6).
     pub fn wait_processed(&mut self) {
         while self.is_processing() {
-            self.poll_processed();
+            self.land_processed_files();
             std::thread::sleep(WAIT);
         }
     }
 
-    /// Lands the files the workers have finished. Returns whether any file
-    /// is still being written, so a window keeps redrawing its progress.
+    /// Lands the files the workers have finished, unless a transaction is
+    /// open: a landing inside a drag would join the drag's undo step and be
+    /// thrown away by its next frame, so it waits for the drag to end.
+    /// Returns whether any file is still being written, so a window keeps
+    /// redrawing its progress.
     pub(super) fn poll_processed(&mut self) -> bool {
+        if self.landings_wait() {
+            self.show_processing();
+            return self.is_processing();
+        }
+        self.land_processed_files()
+    }
+
+    /// [`Shell::poll_processed`] without the wait for an open transaction,
+    /// for a command that waits for its own file.
+    pub(super) fn land_processed_files(&mut self) -> bool {
         let mut index = 0;
         let mut failed = false;
         while index < self.processed.len() {

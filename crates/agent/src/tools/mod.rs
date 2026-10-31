@@ -42,7 +42,8 @@ pub(crate) use lspk_agent::permission::class_names;
 pub(crate) use lspk_agent::tool_definition;
 pub use time::EngineMessage;
 pub(crate) use time::{
-    Playhead, Schedule, number_session, release_orphaned_nudges, session_numbers,
+    Playhead, Schedule, follow_set, follow_set_schedule, number_session, release_orphaned_nudges,
+    session_numbers,
 };
 
 use crate::permission::{Decision, Mode, decide};
@@ -68,6 +69,9 @@ pub(crate) struct State {
     pub(crate) nudges: Vec<(u64, bl_engine::NudgeDirection)>,
     /// How many sessions have been given a number.
     pub(crate) sessions_numbered: u64,
+    /// The set the schedule and the sessions' names belong to
+    /// ([`Shell::set_generation`]).
+    pub(crate) set_generation: Option<u64>,
 }
 
 /// The transport's playback commands (WP-1.5) and the Session View's
@@ -133,9 +137,11 @@ pub(crate) type ToolOutcome = lspk_agent::ToolOutcome<Deferred>;
 
 /// A line of the person's question: the command's label, the classes it
 /// asks for, its arguments, and the clips it would replace or shorten, by
-/// name (spec: agent-permissions R4).
+/// name (spec: agent-permissions R4). The commands that open the sample
+/// editor say which command line they start.
 pub(crate) fn question_line(
     shell: &Shell,
+    id: &str,
     label: &str,
     call: &CallPermission,
     args: &Value,
@@ -168,6 +174,30 @@ pub(crate) fn question_line(
             fewer.leaves,
             fewer.has
         ));
+    }
+    if let Some(track) = call.deletes_track {
+        let name = shell
+            .editor()
+            .document()
+            .track(track)
+            .map(|track| track.name().to_owned())
+            .filter(|name| !name.is_empty())
+            .map_or_else(
+                || format!("track {}", track.0),
+                |name| format!("track \u{201c}{name}\u{201d}"),
+            );
+        line.push_str(&format!(
+            ". It deletes {name} with the devices, automation and settings on it."
+        ));
+    }
+    if matches!(
+        id,
+        bl_shell::audio_panel_commands::EDIT_SAMPLE | bl_shell::file_manager_commands::EDIT_FILE
+    ) {
+        match shell.sample_editor() {
+            Some(editor) => line.push_str(&format!(". It starts \u{201c}{editor}\u{201d}.")),
+            None => line.push_str(". It opens the File & Folder page."),
+        }
     }
     if let Some(clip) = call.cropped {
         line.push_str(". ");
@@ -204,6 +234,19 @@ fn replaced_clips(shell: &Shell, call: &CallPermission) -> String {
     } else {
         format!("It replaces or shortens {names}.")
     }
+}
+
+/// The command IDs a call is judged by: its own, and for `keymap.bind` the
+/// command it binds too, so the agent server's commands stay the person's
+/// alone (spec: agent-permissions R18).
+pub(crate) fn judged_ids<'a>(command: &'a str, args: &'a Value) -> Vec<&'a str> {
+    let mut ids = vec![command];
+    if command == bl_shell::commands::KEYMAP_BIND
+        && let Some(bound) = args.get("command").and_then(Value::as_str)
+    {
+        ids.push(bound);
+    }
+    ids
 }
 
 impl Ctx<'_> {

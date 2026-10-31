@@ -743,6 +743,72 @@ impl SessionLauncher {
         }
     }
 
+    /// Moves the grid lines the launcher counts from, as [`Self::remap_pending`]
+    /// moves its frames, when playback wraps from the loop's end to its start:
+    /// a line at or past `end` moves by `back`, so a follow action or a Repeat
+    /// that works its next frame out from it lands in the next pass (the
+    /// launch quantisation spec, R37).
+    pub(crate) fn wrap_lines(&mut self, end: Ticks, back: Ticks) {
+        let moved = |tick: &mut Ticks| {
+            if *tick >= end {
+                *tick += back;
+            }
+        };
+        for slot in &mut self.slots {
+            if slot.due.is_some() {
+                moved(&mut slot.line);
+            }
+            if let FollowState::Armed { tick, .. } = &mut slot.follow {
+                moved(tick);
+            }
+        }
+        if let Some(run) = &mut self.scene_run {
+            moved(&mut run.line);
+            if let FollowState::Armed { tick, .. } = &mut run.follow {
+                moved(tick);
+            }
+        }
+    }
+
+    /// Moves everything a launch, restart, stop, scene tempo and mark waits
+    /// for to the first line of its grid after the playhead, which has just
+    /// jumped there (the launch quantisation spec, R39). A clip that plays
+    /// keeps the frame it launched on (R38).
+    pub(crate) fn requantise_pending(&mut self, playhead: Playhead<'_>) {
+        for i in 0..self.slots.len() {
+            let slot = self.slots[i];
+            let Some(old) = slot.due else {
+                continue;
+            };
+            let line = self.next_line(slot.quantization, playhead.position, playhead.signatures);
+            let due = playhead.frames(line);
+            let slot = &mut self.slots[i];
+            slot.due = Some(due);
+            if slot.started.is_none() || slot.restart {
+                slot.line = line;
+            }
+            slot.then_stop = slot.then_stop.map(|stop| stop + (due - old));
+        }
+        let line = self.next_line(None, playhead.position, playhead.signatures);
+        // A scene whose launch still waits takes its follow with it.
+        if let Some(run) = &mut self.scene_run
+            && self
+                .slots
+                .iter()
+                .any(|slot| slot.scene == run.scene && slot.started.is_none() && slot.due.is_some())
+        {
+            let moved = line - run.line;
+            run.line = line;
+            if let FollowState::Armed { tick, due } = &mut run.follow {
+                *tick += moved;
+                *due = playhead.frames(*tick);
+            }
+        }
+        let due = playhead.frames(line);
+        self.scenes.iter_mut().for_each(|(_, at)| *at = due);
+        self.marks.iter_mut().for_each(|(_, at)| *at = due);
+    }
+
     /// Launches `(track, scene)` to play from `at`, already worked out: a
     /// recorded slot that plays on from where its recording ended (WP-3.11).
     /// A slot the launcher already holds is left alone. It starts in the
@@ -934,7 +1000,10 @@ impl SessionLauncher {
                 None => slot.due = None,
             }
         }
-        self.slots.retain(|slot| slot.started.is_some());
+        // Spec: launch-quantisation R6. A track's stop drops only its own
+        // queued launches.
+        self.slots
+            .retain(|slot| slot.started.is_some() || track.is_some_and(|only| slot.track != only));
     }
 
     /// Queues taking `track` over at `at`, keeping the earlier of two marks.

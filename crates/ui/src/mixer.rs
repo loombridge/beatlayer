@@ -234,7 +234,23 @@ fn open_drag_id() -> Id {
     Id::new("mixer-open-value-drag")
 }
 
-/// Ends a value drag whose control was scrolled out of view, and so never
+/// Notes that a drag holds a gesture open, so [`end_orphaned_drag`] ends it
+/// if the control is scrolled away before the release.
+pub(crate) fn open_drag(ui: &Ui) {
+    ui.data_mut(|d| d.insert_temp(open_drag_id(), true));
+}
+
+/// Whether a drag noted by [`open_drag`] still holds its gesture open.
+pub(crate) fn drag_is_open(ui: &Ui) -> bool {
+    ui.data(|d| d.get_temp::<bool>(open_drag_id())).is_some()
+}
+
+/// Notes that the drag's own `drag_stopped` ended its gesture.
+pub(crate) fn close_drag(ui: &Ui) {
+    ui.data_mut(|d| d.remove::<bool>(open_drag_id()));
+}
+
+/// Ends a drag whose control was scrolled out of view, and so never
 /// drawn again, before the button came up: its own `drag_stopped` is never
 /// seen. Called at the end of every frame.
 pub(crate) fn end_orphaned_drag(ctx: &egui::Context, events: &mut Vec<UiEvent>) {
@@ -2053,6 +2069,7 @@ impl StripParts<'_> {
         let drag_id = id.with("drag");
         if response.drag_started() {
             ui.data_mut(|d| d.insert_temp(drag_id, (delay, 0.0f64)));
+            open_drag(ui);
             events.push(UiEvent::BeginGesture(TRACK_DELAY_GESTURE));
         }
         if response.dragged() {
@@ -2078,6 +2095,7 @@ impl StripParts<'_> {
         }
         if response.drag_stopped() {
             ui.data_mut(|d| d.remove::<(TrackDelay, f64)>(drag_id));
+            close_drag(ui);
             events.push(UiEvent::EndGesture);
         }
         let typed = self.delay_typing(ui, &response, delay, events);
@@ -2471,6 +2489,7 @@ impl StripParts<'_> {
         let drag_id = id.with("drag");
         if response.drag_started() {
             ui.data_mut(|d| d.insert_temp(drag_id, (pan, 0.0f64)));
+            open_drag(ui);
             events.push(UiEvent::BeginGesture(split_gesture(side)));
         }
         if response.dragged() {
@@ -2491,6 +2510,7 @@ impl StripParts<'_> {
         }
         if response.drag_stopped() {
             ui.data_mut(|d| d.remove::<(f64, f64)>(drag_id));
+            close_drag(ui);
             events.push(UiEvent::EndGesture);
         }
         if response.double_clicked() && pan != 0.0 {
@@ -2728,7 +2748,7 @@ impl StripParts<'_> {
                     },
                 );
             });
-            ui.data_mut(|d| d.insert_temp(open_drag_id(), true));
+            open_drag(ui);
             events.push(UiEvent::BeginGesture(control.gesture()));
         }
         if response.dragged() {
@@ -2756,10 +2776,8 @@ impl StripParts<'_> {
             }
         }
         if response.drag_stopped() {
-            ui.data_mut(|d| {
-                d.remove::<ValueDrag>(id);
-                d.remove::<bool>(open_drag_id());
-            });
+            ui.data_mut(|d| d.remove::<ValueDrag>(id));
+            close_drag(ui);
             events.push(UiEvent::EndGesture);
         }
     }

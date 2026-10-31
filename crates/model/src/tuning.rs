@@ -229,7 +229,8 @@ impl Tuning {
     #[must_use]
     pub fn note_frequency(&self, note: TuningNote) -> Option<f64> {
         let reference = self.reference;
-        let cents = f64::from(note.octave - reference.octave) * self.pseudo_octave()
+        let cents = (i64::from(note.octave) - i64::from(reference.octave)) as f64
+            * self.pseudo_octave()
             + self.degree_cents(note.degree)
             - self.degree_cents(reference.degree);
         let frequency = reference.frequency * (cents / 1200.0).exp2();
@@ -550,6 +551,25 @@ mod tests {
             .map(|i| 1200.0 * i as f64 / steps as f64)
             .collect();
         Tuning::new("equal".into(), String::new(), cents).unwrap()
+    }
+
+    // Octaves at the ends of i32 neither overflow nor sound.
+    #[test]
+    fn an_octave_at_the_end_of_i32_has_no_frequency() {
+        let tuning = equal(12);
+        assert!(tuning.with_reference(Some(i32::MIN), None, None).is_err());
+        let low = TuningNote {
+            octave: i32::MIN,
+            degree: 0,
+        };
+        let ranged = tuning.with_range(Some(low), None).unwrap();
+        assert!((0..128u8).all(|key| ranged.key_frequency(key).is_none()));
+        let moved = tuning.with_reference(Some(-5), None, None).unwrap();
+        let high = TuningNote {
+            octave: i32::MAX,
+            degree: 0,
+        };
+        assert_eq!(moved.note_frequency(high), None);
     }
 
     #[test]

@@ -150,6 +150,11 @@ impl Router {
         self.dropped
     }
 
+    /// Counts a note the device dropped itself, for lack of room of its own.
+    pub(crate) fn note_dropped(&mut self) {
+        self.dropped += 1;
+    }
+
     /// The device's clock at the stretch's first frame.
     #[must_use]
     pub(crate) fn now(&self) -> i64 {

@@ -286,6 +286,59 @@ fn revert_edits_clears_the_list_as_one_step() {
 
 // Spec: multisampler R59
 #[test]
+fn simplers_reverse_keeps_its_flags_and_slices() {
+    let scratch = Scratch::new("reverse-keeps");
+    let file = scratch.path("Ramp.wav");
+    wav(&file);
+    let mut shell = shell(&scratch);
+    let snap = snapshot(&mut shell, &file);
+    shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Song.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    let original = device(&shell, snap).media_at(0).unwrap();
+    set_region(&mut shell, snap, 1_000, 3_000);
+    shell
+        .edit(|editor| {
+            editor.apply(bl_model::Command::AddSlice {
+                device: snap,
+                frame: 2_000,
+            })
+        })
+        .unwrap();
+
+    shell
+        .run("device.reverse_sample", json!({ "device": snap }))
+        .unwrap();
+    let now = device(&shell, snap);
+    assert_eq!(
+        now.region,
+        Some(bl_model::SampleRegion::Frames {
+            start: 1_000,
+            end: 3_000
+        })
+    );
+    assert_eq!(now.slices, vec![2_000]);
+    assert!(now.sample_edits.is_empty());
+    assert_ne!(now.media_at(0).unwrap(), original);
+
+    // One undo step puts the original and its region back.
+    undo(&mut shell);
+    let back = device(&shell, snap);
+    assert_eq!(back.media_at(0).unwrap(), original);
+    assert_eq!(
+        back.region,
+        Some(bl_model::SampleRegion::Frames {
+            start: 1_000,
+            end: 3_000
+        })
+    );
+}
+
+// Spec: multisampler R59
+#[test]
 fn crop_and_reverse_write_a_processed_copy_and_keep_the_original() {
     let scratch = Scratch::new("copies");
     let file = scratch.path("Ramp.wav");

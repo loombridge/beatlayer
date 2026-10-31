@@ -345,8 +345,19 @@ impl NoteBuffer {
     /// before it. Never allocates.
     pub fn insert(&mut self, note: NoteEvent) {
         if self.notes.len() == self.notes.capacity() {
+            // A release outranks a note's expression: it takes the place of
+            // the last one, so a full buffer never leaves a note sounding.
+            let release = matches!(note.kind, NoteKind::Off | NoteKind::Choke);
+            let expression = self
+                .notes
+                .iter()
+                .rposition(|n| matches!(n.kind, NoteKind::Expression { .. }))
+                .filter(|_| release);
             self.dropped += 1;
-            return;
+            let Some(last) = expression else {
+                return;
+            };
+            self.notes.remove(last);
         }
         let ons = |n: &NoteEvent| n.kind == NoteKind::On;
         let mut at = self
@@ -482,7 +493,7 @@ impl TransportInfo {
     #[must_use]
     pub fn window_end(&self, frames: usize) -> i64 {
         if self.speed == 1.0 {
-            self.position.get() + frames as i64
+            self.position.get().saturating_add(frames as i64)
         } else {
             ((self.exact(frames) - self.speed / 2.0 - TIE).ceil() as i64).min(self.until)
         }
@@ -1499,6 +1510,36 @@ mod tests {
                 (4, bend.kind),
             ]
         );
+    }
+
+    #[test]
+    fn a_full_buffer_gives_a_release_the_place_of_an_expression() {
+        let event = |offset, kind| NoteEvent {
+            offset,
+            kind,
+            channel: 0,
+            key: 60,
+            velocity: 1.0,
+            note_id: None,
+        };
+        let bend = NoteKind::Expression {
+            expression: NoteExpression::Bend,
+            value: 0.5,
+        };
+        let mut buffer = NoteBuffer::with_capacity(2);
+        buffer.insert(event(0, NoteKind::On));
+        buffer.insert(event(1, bend));
+        // A note-on or an expression finds no room; a note-off does.
+        buffer.insert(event(2, NoteKind::On));
+        buffer.insert(event(2, bend));
+        assert_eq!(buffer.dropped(), 2);
+        buffer.insert(event(3, NoteKind::Off));
+        let kinds: Vec<_> = buffer.notes().iter().map(|n| n.kind).collect();
+        assert_eq!(kinds, [NoteKind::On, NoteKind::Off]);
+        assert_eq!(buffer.dropped(), 3);
+        // With nothing to give way, the release is dropped.
+        buffer.insert(event(4, NoteKind::Off));
+        assert_eq!(buffer.dropped(), 4);
     }
 
     #[test]

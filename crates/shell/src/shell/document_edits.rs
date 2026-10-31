@@ -350,7 +350,7 @@ impl Shell {
             .and_then(|device| self.devices.description(&device.kind))
             .and_then(|description| description.param(param));
         if let Some(descriptor) = descriptor.filter(|_| value.is_finite()) {
-            args["value"] = json!(descriptor.clamp(value));
+            args["value"] = json!(value.clamp(descriptor.min(), descriptor.max()));
         }
         args
     }

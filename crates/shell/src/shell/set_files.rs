@@ -648,6 +648,7 @@ impl Shell {
         self.apply_window_views(self.store.window_views());
         self.devices.set_windows(self.store.windows());
         self.devices.set_rack_views(self.store.rack_views());
+        self.devices.set_pages(self.store.pages());
         self.devices
             .set_multisampler_views(self.store.multisampler_views());
         self.clip_view.set_folds(self.store.folds());
@@ -752,6 +753,7 @@ impl Shell {
                 self.devices.set_windows(self.store.windows());
                 // Spec: racks R19. So do the views each rack shows.
                 self.devices.set_rack_views(self.store.rack_views());
+                self.devices.set_pages(self.store.pages());
                 self.devices
                     .set_multisampler_views(self.store.multisampler_views());
                 // Spec: piano-roll. Folded note editors too.
@@ -831,6 +833,7 @@ impl Shell {
                 );
                 self.store.set_windows(self.devices.windows().clone());
                 self.store.set_rack_views(self.devices.rack_views().clone());
+                self.store.set_pages(self.devices.pages().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());
@@ -860,6 +863,7 @@ impl Shell {
                 );
                 self.store.set_windows(self.devices.windows().clone());
                 self.store.set_rack_views(self.devices.rack_views().clone());
+                self.store.set_pages(self.devices.pages().clone());
                 self.store
                     .set_multisampler_views(self.devices.multisampler_views().clone());
                 self.store.set_folds(self.clip_view.folds().clone());

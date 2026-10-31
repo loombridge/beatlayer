@@ -17,8 +17,15 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::ParamId;
+use crate::ids::{DeviceId, ParamId};
 use crate::param::{ParamDescriptor, ParamKind};
+
+/// The page each pages node of one device shows, by the node's name and the
+/// page's name; a node it doesn't name shows its first (device framework R43).
+pub type PageChoice = std::collections::BTreeMap<String, String>;
+
+/// Each device's page choice, as a set saves them beside its document.
+pub type DevicePages = std::collections::BTreeMap<DeviceId, PageChoice>;
 
 /// A device body's height in the Device View at 100%, in points: the view's
 /// 188 points (layout L-DEV-001, observed in Live 12.4.3) less the 7-point
@@ -306,6 +313,211 @@ pub enum LayoutNode {
     Row(Vec<LayoutNode>),
     /// Parts top to bottom.
     Column(Vec<LayoutNode>),
+    /// Named pages, one of which shows at a time (WP-8.1).
+    Pages(PagesNode),
+}
+
+/// The height of a pages node's tab row in the body, in points at 100%.
+/// (Beatlayer's own size.)
+pub const TAB_HEIGHT: f32 = 16.0;
+
+/// The least width of a tab in a body's tab row, or of a shell's section, in
+/// points at 100%. (Beatlayer's own size.)
+pub const TAB_WIDTH: f32 = 48.0;
+
+/// How a pages node shows its pages (device framework R41).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PageStyle {
+    /// A row of tabs along the top of the node's area.
+    Tabs,
+    /// Tabs in the device's title bar, after its name, that the device's
+    /// title bar draws: the node's area is the shown page's alone.
+    TitleBar,
+    /// A strip of sections, each its page's main controls under a section
+    /// button, beside a display area the shown page fills.
+    Shell,
+}
+
+/// One page of a pages node.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Page {
+    /// Its name, which its tab or section button shows and a command names.
+    pub name: String,
+    /// What fills the node's area while it shows: the display area of a
+    /// shell.
+    pub node: LayoutNode,
+    /// In the shell style, the page's section of the strip: its main
+    /// controls, which show whichever page does.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<LayoutNode>,
+}
+
+impl Page {
+    /// A page named `name` holding `node`.
+    #[must_use]
+    pub fn new(name: &str, node: LayoutNode) -> Self {
+        Self {
+            name: name.to_owned(),
+            node,
+            section: None,
+        }
+    }
+
+    /// The parameters whose controls the page holds, its section's included.
+    #[must_use]
+    pub fn params(&self) -> Vec<ParamId> {
+        let mut found = Vec::new();
+        let mut band = |band: &ControlBand| {
+            let (stride, count) = band.slots.map_or((0, 1), |g| (g.stride, g.count));
+            for control in &band.controls {
+                found.extend((0..count).map(|slot| ParamId(control.param.0 + stride * slot)));
+            }
+        };
+        for node in self.section.iter().chain([&self.node]) {
+            node.visit(&mut |n| match n {
+                LayoutNode::Band(b) => band(b),
+                LayoutNode::Cell(cell) => {
+                    cell.top.iter().chain(&cell.bottom).for_each(&mut band);
+                }
+                LayoutNode::Row(_) | LayoutNode::Column(_) | LayoutNode::Pages(_) => {}
+            });
+        }
+        found
+    }
+
+    /// The same page, with `section` as its section of a shell's strip.
+    #[must_use]
+    pub fn with_section(mut self, section: LayoutNode) -> Self {
+        self.section = Some(section);
+        self
+    }
+}
+
+/// Pages of a device's body, one shown at a time (device framework R41).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PagesNode {
+    /// The node's name, which `device.set_page` and the page choice use; it
+    /// is unique in the layout.
+    pub name: String,
+    /// How the pages show.
+    pub style: PageStyle,
+    /// The pages, in order; the first shows in a new device.
+    pub pages: Vec<Page>,
+    /// The page shown, as an index; [`DeviceLayout::with_pages`] sets it.
+    #[serde(default, skip_serializing_if = "is_first")]
+    pub shown: usize,
+}
+
+fn is_first(index: &usize) -> bool {
+    *index == 0
+}
+
+impl PagesNode {
+    /// A node of `pages` in `style`, showing the first.
+    #[must_use]
+    pub fn new(name: &str, style: PageStyle, pages: Vec<Page>) -> Self {
+        Self {
+            name: name.to_owned(),
+            style,
+            pages,
+            shown: 0,
+        }
+    }
+
+    /// The index of the page that shows.
+    #[must_use]
+    pub fn shown_index(&self) -> usize {
+        self.shown.min(self.pages.len().saturating_sub(1))
+    }
+
+    /// The width of page `page`'s section in a shell's strip.
+    fn section_width(page: &Page) -> f32 {
+        page.section
+            .as_ref()
+            .map_or(0.0, |s| s.natural().width)
+            .max(TAB_WIDTH)
+    }
+
+    /// The strip of a shell: its sections side by side, each under its button.
+    fn strip(&self) -> Size {
+        let height = self
+            .pages
+            .iter()
+            .filter_map(|p| p.section.as_ref())
+            .map(|s| s.natural().height)
+            .fold(0.0, f32::max);
+        Size::new(
+            self.pages.iter().map(Self::section_width).sum(),
+            TAB_HEIGHT + height,
+        )
+    }
+
+    /// The largest of the pages' docked sizes in each direction, with the
+    /// tab row or the strip (R42).
+    fn natural(&self) -> Size {
+        let pages = self.pages.iter().fold(Size::default(), |s, p| {
+            let n = p.node.natural();
+            Size::new(s.width.max(n.width), s.height.max(n.height))
+        });
+        match self.style {
+            PageStyle::TitleBar => pages,
+            PageStyle::Tabs => Size::new(
+                pages.width.max(self.pages.len() as f32 * TAB_WIDTH),
+                pages.height + TAB_HEIGHT,
+            ),
+            PageStyle::Shell => {
+                let strip = self.strip();
+                Size::new(strip.width + pages.width, strip.height.max(pages.height))
+            }
+        }
+    }
+
+    fn place(&self, at: Rect, slot: u32, placed: &mut Placed) {
+        let Some(page) = self.pages.get(self.shown_index()) else {
+            return;
+        };
+        let mut buttons = Vec::new();
+        let area = match self.style {
+            PageStyle::TitleBar => at,
+            PageStyle::Tabs => {
+                let width = at.width / self.pages.len() as f32;
+                buttons.extend(
+                    (0..self.pages.len())
+                        .map(|i| Rect::new(at.x + width * i as f32, at.y, width, TAB_HEIGHT)),
+                );
+                Rect::new(
+                    at.x,
+                    at.y + TAB_HEIGHT,
+                    at.width,
+                    (at.height - TAB_HEIGHT).max(0.0),
+                )
+            }
+            PageStyle::Shell => {
+                let strip = self.strip();
+                let mut x = at.x;
+                for each in &self.pages {
+                    let width = Self::section_width(each);
+                    buttons.push(Rect::new(x, at.y, width, TAB_HEIGHT));
+                    if let Some(section) = &each.section {
+                        let below =
+                            Rect::new(x, at.y + TAB_HEIGHT, width, strip.height - TAB_HEIGHT);
+                        section.place(below, slot, placed);
+                    }
+                    x += width;
+                }
+                Rect::new(x, at.y, (at.width - strip.width).max(0.0), at.height)
+            }
+        };
+        placed.pages.push(PlacedPages {
+            name: self.name.clone(),
+            style: self.style,
+            names: self.pages.iter().map(|p| p.name.clone()).collect(),
+            buttons,
+            shown: self.shown_index(),
+        });
+        page.node.place(area, slot, placed);
+    }
 }
 
 impl LayoutNode {
@@ -322,6 +534,7 @@ impl LayoutNode {
                 let n = c.natural();
                 Size::new(s.width.max(n.width), s.height + n.height)
             }),
+            Self::Pages(pages) => pages.natural(),
         }
     }
 
@@ -332,6 +545,10 @@ impl LayoutNode {
             Self::Cell(cell) => cell.weight,
             Self::Row(children) => children.iter().map(Self::grows_across).sum(),
             Self::Column(children) => children.iter().map(Self::grows_across).fold(0.0, f32::max),
+            Self::Pages(pages) => pages
+                .pages
+                .get(pages.shown_index())
+                .map_or(0.0, |p| p.node.grows_across()),
         }
     }
 
@@ -342,6 +559,10 @@ impl LayoutNode {
             Self::Cell(cell) => cell.weight,
             Self::Row(children) => children.iter().map(Self::grows_down).fold(0.0, f32::max),
             Self::Column(children) => children.iter().map(Self::grows_down).sum(),
+            Self::Pages(pages) => pages
+                .pages
+                .get(pages.shown_index())
+                .map_or(0.0, |p| p.node.grows_down()),
         }
     }
 
@@ -409,15 +630,48 @@ impl LayoutNode {
                     y += height;
                 }
             }
+            Self::Pages(pages) => pages.place(at, slot, placed),
         }
     }
 
+    /// Calls `f` on this node and every node below it, every page of a pages
+    /// node (and its sections) included, shown or not.
     fn visit<'a>(&'a self, f: &mut impl FnMut(&'a LayoutNode)) {
         f(self);
-        if let Self::Row(children) | Self::Column(children) = self {
-            for child in children {
-                child.visit(f);
+        match self {
+            Self::Row(children) | Self::Column(children) => {
+                for child in children {
+                    child.visit(f);
+                }
             }
+            Self::Pages(pages) => {
+                for page in &pages.pages {
+                    page.section
+                        .iter()
+                        .chain([&page.node])
+                        .for_each(|n| n.visit(f));
+                }
+            }
+            Self::Band(_) | Self::Cell(_) => {}
+        }
+    }
+
+    /// Calls `f` on every pages node at or below this node.
+    fn visit_pages_mut(&mut self, f: &mut impl FnMut(&mut PagesNode)) {
+        match self {
+            Self::Row(children) | Self::Column(children) => {
+                children.iter_mut().for_each(|c| c.visit_pages_mut(f));
+            }
+            Self::Pages(pages) => {
+                f(pages);
+                for page in &mut pages.pages {
+                    page.section
+                        .iter_mut()
+                        .chain([&mut page.node])
+                        .for_each(|n| n.visit_pages_mut(f));
+                }
+            }
+            Self::Band(_) | Self::Cell(_) => {}
         }
     }
 }
@@ -484,6 +738,23 @@ pub struct PlacedCell {
     pub rect: Rect,
 }
 
+/// A pages node where a layout placed it (device framework R41).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlacedPages {
+    /// The node's name.
+    pub name: String,
+    /// How its pages show.
+    pub style: PageStyle,
+    /// The pages' names, in order.
+    pub names: Vec<String>,
+    /// Where each page's tab or section button sits, from the body's top-left
+    /// corner, parallel to `names`; empty in the title-bar style, whose tabs
+    /// the title bar draws.
+    pub buttons: Vec<Rect>,
+    /// The index of the page that shows.
+    pub shown: usize,
+}
+
 /// A layout placed at a size.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Placed {
@@ -496,6 +767,8 @@ pub struct Placed {
     pub controls: Vec<PlacedControl>,
     /// Its display cells, in the layout's order.
     pub cells: Vec<PlacedCell>,
+    /// Its pages nodes, in the layout's order.
+    pub pages: Vec<PlacedPages>,
 }
 
 impl DeviceLayout {
@@ -537,6 +810,43 @@ impl DeviceLayout {
         }
     }
 
+    /// The same layout showing the page `choice` names for each pages node
+    /// (the first where it names none, or one the node doesn't have), so
+    /// [`docked_size`](Self::docked_size), [`place`](Self::place) and the
+    /// rest answer for what is shown.
+    #[must_use]
+    pub fn with_pages(&self, choice: &PageChoice) -> Self {
+        let mut layout = self.clone();
+        let mut show = |node: &mut PagesNode| {
+            node.shown = choice
+                .get(&node.name)
+                .and_then(|name| node.pages.iter().position(|p| &p.name == name))
+                .unwrap_or(0);
+        };
+        layout.root.visit_pages_mut(&mut show);
+        if let Some(part) = &mut layout.expanded {
+            part.visit_pages_mut(&mut show);
+        }
+        layout
+    }
+
+    /// Its pages nodes, in the layout's order, the expanded part's included.
+    #[must_use]
+    pub fn pages(&self) -> Vec<&PagesNode> {
+        let mut found = Vec::new();
+        let mut take = |node| {
+            let node: &LayoutNode = node;
+            if let LayoutNode::Pages(pages) = node {
+                found.push(pages);
+            }
+        };
+        self.root.visit(&mut take);
+        if let Some(part) = &self.expanded {
+            part.visit(&mut take);
+        }
+        found
+    }
+
     /// The generic UI's layout of `params`: a band [`BODY_HEIGHT`] tall
     /// holding each parameter's control ([`Widget::for_kind`]) top to
     /// bottom, in further columns as each fills. No display cell, so it
@@ -569,7 +879,7 @@ impl DeviceLayout {
         self.root.visit(&mut |node| match node {
             LayoutNode::Cell(cell) => count = count.max(cell.slot.map_or(0, |slot| slot + 1)),
             LayoutNode::Band(band) => count = count.max(band.slots.map_or(0, |g| g.count)),
-            LayoutNode::Row(_) | LayoutNode::Column(_) => {}
+            LayoutNode::Row(_) | LayoutNode::Column(_) | LayoutNode::Pages(_) => {}
         });
         count
     }
@@ -637,6 +947,7 @@ impl DeviceLayout {
         // Every control counts, in the part that is always there or in the
         // expanded one.
         let whole = self.shown(true);
+        let mut named: Vec<&str> = Vec::new();
         whole.root.visit(&mut |node| {
             if problem.is_some() {
                 return;
@@ -669,6 +980,25 @@ impl DeviceLayout {
                             format!("display cell {}'s bands don't fit inside it", cell.name)
                         });
                     }
+                }
+                LayoutNode::Pages(node) => {
+                    let mut names: Vec<&str> = node.pages.iter().map(|p| p.name.as_str()).collect();
+                    names.sort_unstable();
+                    if node.pages.is_empty()
+                        || names.contains(&"")
+                        || names.windows(2).any(|w| w[0] == w[1])
+                    {
+                        problem = Some(format!(
+                            "pages node {} needs pages with names, each its own",
+                            node.name
+                        ));
+                    } else if named.contains(&node.name.as_str()) {
+                        problem = Some(format!(
+                            "the layout has two pages nodes named {}",
+                            node.name
+                        ));
+                    }
+                    named.push(&node.name);
                 }
                 LayoutNode::Row(_) | LayoutNode::Column(_) => {}
             }
@@ -995,5 +1325,225 @@ mod tests {
             &knobs(0, 4),
         )));
         assert!(unknown.check(&p).is_err());
+    }
+
+    /// Three pages of different sizes: parameters 0 to 1, 2 to 4 and 5 (and a
+    /// cell on the second), each its own section in the shell style.
+    fn paged(style: PageStyle) -> DeviceLayout {
+        let band = |height, first, count| {
+            LayoutNode::Band(ControlBand::stacked(height, &knobs(first, count)))
+        };
+        let shell = style == PageStyle::Shell;
+        let section = |page: Page, first| {
+            if shell {
+                page.with_section(LayoutNode::Band(ControlBand::stacked(
+                    60.0,
+                    &knobs(first, 1),
+                )))
+            } else {
+                page
+            }
+        };
+        DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+            "Pages",
+            style,
+            vec![
+                section(Page::new("One", band(60.0, 0, 1)), 6),
+                section(
+                    Page::new(
+                        "Two",
+                        LayoutNode::Row(vec![
+                            band(100.0, 1, 3),
+                            LayoutNode::Cell(DisplayCell::new("Graph", 80.0, 100.0, 1.0)),
+                        ]),
+                    ),
+                    7,
+                ),
+                section(Page::new("Three", band(BODY_HEIGHT - TAB_HEIGHT, 4, 2)), 8),
+            ],
+        )))
+    }
+
+    fn on(layout: &DeviceLayout, page: &str) -> DeviceLayout {
+        layout.with_pages(&PageChoice::from([("Pages".to_owned(), page.to_owned())]))
+    }
+
+    fn overlap(a: &Rect, b: &Rect) -> bool {
+        a.x < b.right() - 1e-3
+            && b.x < a.right() - 1e-3
+            && a.y < b.bottom() - 1e-3
+            && b.y < a.bottom() - 1e-3
+    }
+
+    // Spec: device-framework R41, R42
+    #[test]
+    fn a_pages_node_places_only_the_page_that_shows_and_docks_at_the_largest() {
+        for style in [PageStyle::Tabs, PageStyle::TitleBar, PageStyle::Shell] {
+            let layout = paged(style);
+            layout
+                .check(&params(if style == PageStyle::Shell { 9 } else { 6 }))
+                .unwrap();
+            let docked = layout.docked_size();
+            let tab_row = if style == PageStyle::Tabs {
+                TAB_HEIGHT
+            } else {
+                0.0
+            };
+            assert_eq!(
+                docked.height,
+                BODY_HEIGHT - TAB_HEIGHT + tab_row,
+                "the largest page's height"
+            );
+            for page in ["One", "Two", "Three"] {
+                let shown = on(&layout, page);
+                assert_eq!(
+                    shown.docked_size(),
+                    docked,
+                    "{style:?}: the size whichever page shows"
+                );
+                let placed = shown.place(docked);
+                assert_eq!(placed.size, docked);
+                let params: Vec<u32> = placed.controls.iter().map(|c| c.param.0).collect();
+                let page_params: &[u32] = match page {
+                    "One" => &[0],
+                    "Two" => &[1, 2, 3],
+                    _ => &[4, 5],
+                };
+                for param in page_params {
+                    assert!(
+                        params.contains(param),
+                        "{style:?} {page}: {param} is placed"
+                    );
+                }
+                // The other pages' controls aren't placed; a shell's sections are.
+                let sections = if style == PageStyle::Shell { 3 } else { 0 };
+                assert_eq!(
+                    params.len(),
+                    page_params.len() + sections,
+                    "{style:?} {page}"
+                );
+                // Nothing overlaps and everything is inside the body.
+                let whole = Rect::new(0.0, 0.0, docked.width, docked.height);
+                for (i, a) in placed.controls.iter().enumerate() {
+                    assert!(whole.contains(&a.rect), "{style:?} {page}: inside");
+                    for b in &placed.controls[i + 1..] {
+                        assert!(!overlap(&a.rect, &b.rect), "{style:?} {page}: {a:?} {b:?}");
+                    }
+                }
+                let named = &placed.pages[0];
+                assert_eq!(named.names, ["One", "Two", "Three"]);
+                assert_eq!(
+                    named.shown,
+                    ["One", "Two", "Three"]
+                        .iter()
+                        .position(|n| *n == page)
+                        .unwrap()
+                );
+                assert_eq!(
+                    named.buttons.len(),
+                    if style == PageStyle::TitleBar { 0 } else { 3 }
+                );
+                for (i, a) in named.buttons.iter().enumerate() {
+                    assert!(whole.contains(a));
+                    for b in &named.buttons[i + 1..] {
+                        assert!(!overlap(a, b), "{style:?}: buttons");
+                    }
+                }
+            }
+            // The first page shows in a new device, and a name the node doesn't
+            // have is the first.
+            assert_eq!(layout.place(docked).pages[0].shown, 0);
+            assert_eq!(on(&layout, "Four").place(docked).pages[0].shown, 0);
+        }
+    }
+
+    // Spec: device-framework R42
+    #[test]
+    fn extra_room_goes_to_the_display_cells_of_the_page_shown() {
+        let layout = paged(PageStyle::Tabs);
+        let docked = layout.docked_size();
+        assert_eq!(
+            layout.with_pages(&PageChoice::new()).grows(),
+            (false, false),
+            "page One has none"
+        );
+        let two = on(&layout, "Two");
+        assert_eq!(two.grows(), (true, true));
+        let grown = two.place(Size::new(docked.width + 100.0, docked.height + 40.0));
+        let cell = &grown.cells[0];
+        assert!(
+            (cell.rect.width - 180.0).abs() < 1e-3,
+            "the cell takes all the extra width"
+        );
+        assert!((cell.rect.height - (docked.height - TAB_HEIGHT + 40.0)).abs() < 1e-3);
+        let tabs = &grown.pages[0].buttons;
+        assert!(
+            (tabs[2].right() - (docked.width + 100.0)).abs() < 1e-3,
+            "the tabs span the node"
+        );
+    }
+
+    // Spec: device-framework R10, R42
+    #[test]
+    fn the_check_counts_the_controls_on_hidden_pages() {
+        let layout = paged(PageStyle::Tabs);
+        assert!(layout.check(&params(6)).is_ok());
+        assert!(
+            layout.check(&params(7)).unwrap_err().contains("no control"),
+            "a missing one is found"
+        );
+        let twice = DeviceLayout::new(LayoutNode::Row(vec![
+            paged(PageStyle::Tabs).root,
+            LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(5, 1))),
+        ]));
+        assert!(
+            twice.check(&params(6)).unwrap_err().contains("twice"),
+            "a page and outside the node"
+        );
+        let across = LayoutNode::Pages(PagesNode::new(
+            "Pages",
+            PageStyle::Tabs,
+            vec![
+                Page::new(
+                    "A",
+                    LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(0, 2))),
+                ),
+                Page::new(
+                    "B",
+                    LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &knobs(1, 1))),
+                ),
+            ],
+        ));
+        assert!(
+            DeviceLayout::new(across)
+                .check(&params(2))
+                .unwrap_err()
+                .contains("twice"),
+            "on two pages"
+        );
+        let named = |pages: Vec<Page>| {
+            DeviceLayout::new(LayoutNode::Pages(PagesNode::new(
+                "P",
+                PageStyle::Tabs,
+                pages,
+            )))
+        };
+        let blank = || LayoutNode::Row(Vec::new());
+        assert!(named(Vec::new()).check(&[]).is_err());
+        assert!(
+            named(vec![Page::new("A", blank()), Page::new("A", blank())])
+                .check(&[])
+                .is_err()
+        );
+        let two = LayoutNode::Row(vec![
+            named(vec![Page::new("A", blank())]).root,
+            named(vec![Page::new("A", blank())]).root,
+        ]);
+        assert!(
+            DeviceLayout::new(two).check(&[]).is_err(),
+            "two nodes of one name"
+        );
+        assert_eq!(layout.pages().len(), 1);
+        assert_eq!(layout.pages()[0].name, "Pages");
     }
 }

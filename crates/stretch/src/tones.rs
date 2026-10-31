@@ -91,8 +91,8 @@ pub fn detect_period_fractional(signal: &[f32], rate: f64) -> Option<f64> {
 
     count_ops((max_lag - min_lag + 1) * window_len);
     let mut d = [0.0f64; MAX_LAG + 1];
-    for tau in min_lag..=max_lag {
-        d[tau] = difference(x, tau, window_len);
+    for (tau, slot) in d.iter_mut().enumerate().take(max_lag + 1).skip(min_lag) {
+        *slot = difference(x, tau, window_len);
     }
 
     let mut d_prime = [1.0f64; MAX_LAG + 1];

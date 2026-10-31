@@ -25,6 +25,9 @@ use crate::warp_settings::{WarpMode, WarpSettings};
 /// The most sample slots a device's media can fill.
 pub const MAX_MEDIA_SLOTS: usize = 16;
 
+/// The wavetable oscillators a device has (the wavetable spec, R8).
+pub const MAX_WAVETABLES: usize = 2;
+
 /// The most modifiable parameters a plug-in may have and still start with
 /// them all configured (manual 24.1); one with more starts with none.
 pub const CONFIGURE_THRESHOLD: usize = 64;
@@ -145,6 +148,14 @@ pub struct Device {
     /// there are none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sample_edits: Vec<SampleEdit>,
+    /// What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7,
+    /// R8): oscillator 1's choice first. A user table's file is the media in
+    /// the oscillator's own sample slot, so the set's media table, missing
+    /// files and Collect All and Save treat it as a sample. An oscillator
+    /// with no choice plays the device's default table, and the list never
+    /// ends in one. Left out of the saved set for a device that has none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub wavetables: Vec<Option<WavetableChoice>>,
     /// The part of slot 0's sample a Simpler plays, between its Start and End
     /// flags (the sampler spec, R22): `None` for the whole sample. Loading
     /// another sample clears it; an edit that changes the sample's length
@@ -191,6 +202,26 @@ pub struct Device {
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
+}
+
+/// What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum WavetableChoice {
+    /// One of Beatlayer's factory tables, by category and name.
+    Factory {
+        /// The table's category.
+        category: String,
+        /// The table's name in it.
+        name: String,
+    },
+    /// A table made from the file in the oscillator's sample slot.
+    User {
+        /// Whether the file's frames are used as they are, with no clean-up.
+        raw: bool,
+        /// How many frames the file made.
+        frames: u16,
+    },
 }
 
 /// Warp settings for a device that plays media (WP-5.15b, Simpler).
@@ -462,6 +493,7 @@ impl Device {
             configured: None,
             media: Vec::new(),
             sample_edits: Vec::new(),
+            wavetables: Vec::new(),
             region: None,
             layers: Layers::default(),
             mappings: Vec::new(),
@@ -500,6 +532,29 @@ impl Device {
         while self.media.last() == Some(&None) {
             self.media.pop();
         }
+    }
+
+    /// What oscillator `oscillator` (counted from 0) plays, if it was given
+    /// a table.
+    #[must_use]
+    pub fn wavetable_at(&self, oscillator: usize) -> Option<&WavetableChoice> {
+        self.wavetables.get(oscillator)?.as_ref()
+    }
+
+    /// Gives oscillator `oscillator` (counted from 0) `choice`, with the file
+    /// of a user table in its sample slot, and clears the slot for a factory
+    /// table.
+    pub fn set_wavetable(
+        &mut self,
+        oscillator: usize,
+        choice: WavetableChoice,
+        media: Option<ContentHash>,
+    ) {
+        if self.wavetables.len() <= oscillator {
+            self.wavetables.resize(oscillator + 1, None);
+        }
+        self.wavetables[oscillator] = Some(choice);
+        self.set_media(oscillator, media);
     }
 
     /// Whether the device can float in a window of its own: native devices

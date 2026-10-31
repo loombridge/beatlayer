@@ -94,6 +94,7 @@ pub mod touch;
 pub mod tube;
 pub mod tuner;
 pub mod utility;
+pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};

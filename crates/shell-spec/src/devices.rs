@@ -58,6 +58,9 @@ pub const REPLACE: &str = "device.replace";
 /// `device.load_sample`: load an audio file into a device that plays one
 /// sample (WP-2.16).
 pub const LOAD_SAMPLE: &str = "device.load_sample";
+/// `device.load_wavetable`: give a wavetable oscillator a factory table by
+/// name or a user table from a file (WP-8.8).
+pub const LOAD_WAVETABLE: &str = "device.load_wavetable";
 /// `device.swap_to_snapshot`: replace a Drum Sampler with the Simpler
 /// sampler, keeping its sample's start and length (one-shot drum sampler
 /// R22).
@@ -179,6 +182,7 @@ pub const IDS: &[&str] = &[
     ADD_PRESET,
     REPLACE,
     LOAD_SAMPLE,
+    LOAD_WAVETABLE,
     SWAP_TO_SNAPSHOT,
     SELECT_SLOT,
     HOT_SWAP,
@@ -1807,6 +1811,44 @@ pub struct LoadSampleArgs {
     pub slot: Option<u8>,
 }
 
+/// Arguments of `device.load_wavetable`: a factory table by `category` and
+/// `name`, or a user table by `file`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct LoadWavetableArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The oscillator that takes the table: 1 or 2.
+    pub oscillator: u8,
+    /// A factory table's category, with `name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// A factory table's name in its category.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// A WAV or AIFF file to make the table from, instead of a factory
+    /// table.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    /// For a file: use its frames as they are, with no clean-up.
+    #[serde(default)]
+    pub raw: bool,
+}
+
+/// What `device.load_wavetable` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct LoadWavetableResult {
+    /// The device that took the table.
+    pub device: DeviceId,
+    /// The oscillator that took it.
+    pub oscillator: u8,
+    /// What the oscillator plays now.
+    pub choice: bl_model::WavetableChoice,
+    /// How many frames the table has.
+    pub frames: u16,
+}
+
 /// Arguments of `device.select_slot`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -2123,6 +2165,25 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<LoadSampleArgs>()
             .result::<LoadSampleResult>(),
+        CommandSpec::new(LOAD_WAVETABLE, "Load Wavetable")
+            .description(
+                "Gives a wavetable oscillator (`oscillator` 1 or 2) its table: a factory table \
+                 by its `category` and `name`, or a user table made from the WAV or AIFF \
+                 `file`. A WAV with a `clm ` chunk is cut into frames of its frame size; any \
+                 other file into frames of 2,048 samples, up to 256, and a file shorter than \
+                 a frame fills one. With `raw` off (the default) each frame's DC offset is \
+                 removed and its ends are made to meet; with `raw` on the frames are used as \
+                 they are. A file goes into the set's media store like a sample, so the set \
+                 reopens with it and Collect All and Save copies it. One undo step, named \
+                 Load Wavetable. An unknown table, an unreadable file, a file with no audio \
+                 or a device that plays no wavetable is refused. Reads a file outside the \
+                 project. What each oscillator plays is `wavetables` in the `device` query \
+                 result.",
+            )
+            .permission(Permission::External)
+            .context(DeviceView)
+            .args::<LoadWavetableArgs>()
+            .result::<LoadWavetableResult>(),
         CommandSpec::new(SWAP_TO_SNAPSHOT, "Swap to Simpler")
             .description(
                 "Replaces a Drum Sampler with Simpler in One-Shot mode, as \

@@ -2023,7 +2023,9 @@ fn link_audio_section(
         ui,
         theme,
         "link-audio",
-        "Audio",
+        // The page list has an Audio of its own, so the switch's name says
+        // what it switches.
+        "Link Audio",
         rect,
         shell.link_audio_enabled(),
     ) {

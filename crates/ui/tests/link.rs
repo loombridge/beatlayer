@@ -427,11 +427,11 @@ fn the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table() {
         .run("link.set_enabled", json!({ "on": true }))
         .unwrap();
     let nodes = Harness::nodes(&h.settle());
-    for label in ["Audio", "Name", "Latency", "Sync to Incoming Audio"] {
+    for label in ["Link Audio", "Name", "Latency", "Sync to Incoming Audio"] {
         assert!(labelled(&nodes, label), "{label}");
     }
     assert_eq!(
-        Harness::node(&nodes, "Audio").toggled,
+        Harness::node(&nodes, "Link Audio").toggled,
         Some(false),
         "off at first"
     );
@@ -442,10 +442,10 @@ fn the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table() {
         "an empty list says so"
     );
 
-    click(&mut h, "Audio");
+    click(&mut h, "Link Audio");
     assert!(h.shell.link_audio_enabled());
     assert_eq!(
-        Harness::node(&Harness::nodes(&h.settle()), "Audio").toggled,
+        Harness::node(&Harness::nodes(&h.settle()), "Link Audio").toggled,
         Some(true)
     );
     click(&mut h, "Sync to Incoming Audio");

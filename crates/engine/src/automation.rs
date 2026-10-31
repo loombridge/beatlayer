@@ -1313,6 +1313,74 @@ mod tests {
         );
     }
 
+    /// A list that drives `param` to a constant 0.5.
+    fn driving(param: ParamId) -> AutomationList {
+        AutomationList {
+            track: TrackId(bl_core::id::Id::new(1).unwrap()),
+            envelopes: vec![(
+                param,
+                PlacedEnvelope::placed(
+                    &envelope(&[(Ticks::ZERO, 0.5)]),
+                    &TempoMap::default(),
+                    SampleRate::HZ_48000,
+                    0,
+                ),
+            )],
+            modulation: Vec::new(),
+            session: Vec::new(),
+            mapped: Vec::new(),
+            macros: Vec::new(),
+            stepped: Vec::new(),
+        }
+    }
+
+    // Spec: automation R2. What an automated node plays depends on the frame
+    // alone, so it is worked out once a frame whatever the channel count.
+    #[test]
+    fn a_track_mixer_and_a_route_work_out_each_frame_once_for_all_channels() {
+        use crate::mixer::{ENVELOPE_GAINS, EVALUATIONS, Planar, Route, TrackMixer};
+        use crate::node::{Block, Node, NodeConfig, TransportInfo};
+        let collector = crate::Collector::new();
+        let config = NodeConfig {
+            round_trip_latency: 0,
+            sample_rate: SampleRate::HZ_48000,
+            max_frames: 256,
+            channels: 2,
+        };
+        let playing = TransportInfo::at(true, Frames::ZERO);
+
+        let mut node = TrackMixer::new(&bl_model::Mixer::default(), 0.0, &config);
+        node.receive_data(collector.handle().data(driving(mixer::track::VOLUME)));
+        let mut data = vec![1.0f32; 512];
+        let mut block = Block::new(&mut data, 2, 256, 256, &[], playing, SampleRate::HZ_48000);
+        EVALUATIONS.with(|n| n.set(0));
+        node.process(&mut block);
+        // The mute and the volume on each frame, and again where the mixer
+        // comes to rest.
+        assert_eq!(EVALUATIONS.with(std::cell::Cell::get), 2 * 256 + 2);
+        assert!(data.iter().all(|&s| s == 0.5), "at the envelope's level");
+
+        let mut route = Route::new(1.0, false, &config);
+        route.receive_data(collector.handle().data(driving(mixer::route::LEVEL)));
+        let (mut to, from) = (vec![0.0f32; 512], vec![1.0f32; 512]);
+        let tempo = TempoMap::default();
+        let song = Song {
+            transport: playing,
+            session: &[],
+            tempo: &tempo,
+            rate: SampleRate::HZ_48000,
+        };
+        let shape = Planar {
+            channels: 2,
+            stride: 256,
+            frames: 256,
+        };
+        ENVELOPE_GAINS.with(|n| n.set(0));
+        route.mix(&mut to, &from, shape, Some(song), Bus::EMPTY, &[]);
+        assert_eq!(ENVELOPE_GAINS.with(std::cell::Cell::get), 256 + 1);
+        assert!(to.iter().all(|&s| s > 0.0 && s == to[0]));
+    }
+
     // Spec: automation R12
     #[test]
     fn a_curved_segment_follows_its_bend() {

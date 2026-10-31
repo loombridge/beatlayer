@@ -133,12 +133,13 @@ impl Shell {
         let mut results = Vec::with_capacity(steps.len());
         for (index, (id, args)) in steps.iter().enumerate() {
             let shown = self.shown_clip();
+            let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
             match self.run_document_edit(id, args.clone()) {
                 Ok(changes) => {
                     // Spec: scales R10. A change to the shown clip's scale
                     // changes the current scale with it, however the change
                     // was made.
-                    self.follow_shown_scale(id, shown);
+                    self.follow_shown_scale(id, shown, shown_scale);
                     results.push(json!({ "command": id, "result": changes }))
                 }
                 Err(error) => {

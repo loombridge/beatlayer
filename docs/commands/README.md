@@ -9908,6 +9908,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
@@ -9964,6 +9965,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "pages": {
+      "description": "Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none.",
+      "items": {
+        "$ref": "#/$defs/PagesFrame"
       },
       "type": "array"
     },
@@ -17785,6 +17793,7 @@ One of:
 - an object with `cell` ([`DisplayCell`](#displaycell)): A display cell, which grows.
 - an object with `row` (array of [`LayoutNode`](#layoutnode)): Parts left to right.
 - an object with `column` (array of [`LayoutNode`](#layoutnode)): Parts top to bottom.
+- an object with `pages` ([`PagesNode`](#pagesnode)): Named pages, one of which shows at a time (WP-8.1).
 
 <details><summary>JSON Schema</summary>
 
@@ -17847,6 +17856,19 @@ One of:
       },
       "required": [
         "column"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Named pages, one of which shows at a time (WP-8.1).",
+      "properties": {
+        "pages": {
+          "$ref": "#/$defs/PagesNode"
+        }
+      },
+      "required": [
+        "pages"
       ],
       "type": "object"
     }
@@ -22571,6 +22593,219 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `Page`
+
+One page of a pages node.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name, which its tab or section button shows and a command names. |
+| `node` | [`LayoutNode`](#layoutnode) | yes | What fills the node's area while it shows: the display area of a shell. |
+| `section` | [`LayoutNode`](#layoutnode) or null | no | In the shell style, the page's section of the strip: its main controls, which show whichever page does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One page of a pages node.",
+  "properties": {
+    "name": {
+      "description": "Its name, which its tab or section button shows and a command names.",
+      "type": "string"
+    },
+    "node": {
+      "$ref": "#/$defs/LayoutNode",
+      "description": "What fills the node's area while it shows: the display area of a shell."
+    },
+    "section": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayoutNode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "In the shell style, the page's section of the strip: its main controls, which show whichever page does."
+    }
+  },
+  "required": [
+    "name",
+    "node"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PageRef`
+
+A page of a pages node: its name, or its place in the node's list from 0.
+
+One of:
+
+- string: By name.
+- integer, at least 0: By index.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "description": "By name.",
+      "type": "string"
+    },
+    {
+      "description": "By index.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  ],
+  "description": "A page of a pages node: its name, or its place in the node's list from 0."
+}
+```
+
+</details>
+
+### `PageStyle`
+
+How a pages node shows its pages (device framework R41).
+
+One of:
+
+- `"tabs"`: A row of tabs along the top of the node's area.
+- `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
+- `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a pages node shows its pages (device framework R41).",
+  "oneOf": [
+    {
+      "const": "tabs",
+      "description": "A row of tabs along the top of the node's area.",
+      "type": "string"
+    },
+    {
+      "const": "title_bar",
+      "description": "Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.",
+      "type": "string"
+    },
+    {
+      "const": "shell",
+      "description": "A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PagesFrame`
+
+A pages node of a device's layout as the panel shows it (device framework R41, R43).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `node` | string | yes | The node's name. |
+| `style` | [`PageStyle`](#pagestyle) | yes | How its pages show. |
+| `pages` | array of string | yes | The pages' names, in order. |
+| `shown` | string | yes | The name of the page shown. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pages node of a device's layout as the panel shows it (device framework R41, R43).",
+  "properties": {
+    "node": {
+      "description": "The node's name.",
+      "type": "string"
+    },
+    "pages": {
+      "description": "The pages' names, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "The name of the page shown.",
+      "type": "string"
+    },
+    "style": {
+      "$ref": "#/$defs/PageStyle",
+      "description": "How its pages show."
+    }
+  },
+  "required": [
+    "node",
+    "style",
+    "pages",
+    "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PagesNode`
+
+Pages of a device's body, one shown at a time (device framework R41).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The node's name, which `device.set_page` and the page choice use; it is unique in the layout. |
+| `style` | [`PageStyle`](#pagestyle) | yes | How the pages show. |
+| `pages` | array of [`Page`](#page) | yes | The pages, in order; the first shows in a new device. |
+| `shown` | integer, at least 0 | no | The page shown, as an index; [`DeviceLayout::with_pages`] sets it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Pages of a device's body, one shown at a time (device framework R41).",
+  "properties": {
+    "name": {
+      "description": "The node's name, which `device.set_page` and the page choice use; it is unique in the layout.",
+      "type": "string"
+    },
+    "pages": {
+      "description": "The pages, in order; the first shows in a new device.",
+      "items": {
+        "$ref": "#/$defs/Page"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "The page shown, as an index; [`DeviceLayout::with_pages`] sets it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "style": {
+      "$ref": "#/$defs/PageStyle",
+      "description": "How the pages show."
+    }
+  },
+  "required": [
+    "name",
+    "style",
+    "pages"
+  ],
+  "type": "object"
 }
 ```
 

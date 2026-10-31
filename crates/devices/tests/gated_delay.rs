@@ -24,6 +24,9 @@ const RAMP: f64 = 96.0;
 /// The steps a new device has on, from 1.
 const ON: [usize; 5] = [1, 4, 7, 11, 14];
 
+/// A gate test case: its name, tempo, settings, steps to a pass and step ticks.
+type Case = (&'static str, TempoMap, Vec<(ParamId, f64)>, usize, i64);
+
 fn registry() -> Registry {
     let mut registry = Registry::empty();
     gated_delay::register(&mut registry);
@@ -66,7 +69,9 @@ fn render_as(
     let mut device = common::device(&gated_delay_type(), params);
     device.id = DeviceId(Id::new(id).expect("an ID"));
     let mut gated = node(&registry(), &device, block);
-    let mut out = vec![Vec::with_capacity(input.len()); CHANNELS];
+    let mut out: Vec<Vec<f32>> = (0..CHANNELS)
+        .map(|_| Vec::with_capacity(input.len()))
+        .collect();
     for from in (0..input.len()).step_by(block) {
         let to = (from + block).min(input.len());
         let mut data: Vec<f32> = (0..CHANNELS)
@@ -194,7 +199,7 @@ fn gated_delay_is_described_with_its_steps_in_the_layout_and_no_latency() {
 #[test]
 fn the_gate_opens_on_its_steps_frames_through_a_tempo_change_at_four_block_sizes() {
     let input = vec![1.0; 100_000];
-    let cases: [(&str, TempoMap, Vec<(ParamId, f64)>, usize, i64); 4] = [
+    let cases: [Case; 4] = [
         ("120 BPM", constant(120.0), steady(), 16, RATES[4].1),
         ("90 BPM", constant(90.0), steady(), 16, RATES[4].1),
         ("a tempo change", changing(), steady(), 16, RATES[4].1),
@@ -249,9 +254,9 @@ fn step_one_begins_on_each_bar_line_whatever_the_rows_length() {
 fn the_gate_ramps_over_two_milliseconds_so_no_click_is_heard() {
     let out = render(&steady(), &vec![1.0; 20_000], 4096, &constant(120.0));
     // Step 1 is on from frame 0: the dry signal ramps down over 96 frames.
-    for i in 0..96 {
+    for (i, level) in out[0][..96].iter().enumerate() {
         let want = 1.0 - (i as f64 + 1.0) / RAMP;
-        assert!((f64::from(out[0][i]) - want).abs() < 1e-5, "frame {i}");
+        assert!((f64::from(*level) - want).abs() < 1e-5, "frame {i}");
     }
     assert!(out[0][96].abs() < 1e-6);
 }
@@ -280,7 +285,7 @@ fn click(frames: usize, at: &[usize]) -> Vec<f32> {
 fn an_echo_lands_delay_steps_later_and_only_from_an_on_step() {
     let echoes = |bpm: f64, rate: usize| {
         let tempo = constant(bpm);
-        let step_frames = frame(&tempo, RATES[rate].1) as usize;
+        let step_frames = frame(&tempo, RATES[rate].1);
         // A click inside step 1 (on) and one inside step 2 (off).
         let (on, off) = (step_frames / 2, step_frames * 3 / 2);
         let params = [

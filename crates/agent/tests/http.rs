@@ -17,7 +17,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use bl_agent::client::{Client, Http};
-use bl_agent::http::{HttpConfig, HttpServer, Parked, Pending, Served, resume, serve};
+use bl_agent::http::{
+    HttpConfig, HttpServer, MAX_CONNECTIONS, Parked, Pending, Served, resume, serve,
+};
 use bl_agent::{Agent, QuestionKind};
 use bl_shell::{GesturePhase, Invocation, Shell};
 use serde_json::{Value, json};
@@ -73,6 +75,9 @@ impl App {
             let served = serve(&mut self.agent, &mut self.shell, job);
             self.served(served, answer);
         }
+        // An export the shell runs, as the app's loop answers its call.
+        self.shell.poll();
+        self.agent.sync_export(&mut self.shell);
         while let Some(served) = resume(&mut self.agent, &mut self.shell, &mut self.parked) {
             self.served(served, answer);
         }
@@ -83,6 +88,13 @@ impl App {
             Served::Done => {}
             Served::Waiting(pending) => answer(self, pending),
             Served::Parked(parked) => self.parked.push(parked),
+        }
+    }
+
+    /// Answers a question, keeping an allowed call that waits for the host.
+    fn finish(&mut self, pending: Pending, allow: bool) {
+        if let Served::Parked(parked) = pending.finish(&mut self.agent, &mut self.shell, allow) {
+            self.parked.push(parked);
         }
     }
 
@@ -131,7 +143,7 @@ impl App {
 
 /// Allows every question.
 fn allow(app: &mut App, pending: Pending) {
-    pending.finish(&mut app.agent, &mut app.shell, true);
+    app.finish(pending, true);
 }
 
 #[test]
@@ -265,7 +277,7 @@ fn a_destructive_command_waits_for_the_person_s_confirmation() {
             assert!(!answered.load(Ordering::SeqCst), "the call didn't wait");
             assert_eq!(app.track_names().len(), 4 - (confirmations - 1));
             let allow = confirmations == 1;
-            pending.finish(&mut app.agent, &mut app.shell, allow);
+            app.finish(pending, allow);
         },
     );
     assert_eq!(confirmations, 2);
@@ -286,7 +298,7 @@ fn an_agent_the_person_refuses_gets_no_session() {
             assert!(client.transport().session().is_none());
             error
         },
-        |app, pending| pending.finish(&mut app.agent, &mut app.shell, false),
+        |app, pending| app.finish(pending, false),
     );
     assert!(error.contains("didn't allow"), "{error}");
     assert!(app.shell.agent_settings().clients.is_empty());
@@ -534,6 +546,86 @@ fn chunked_bodies_and_expect_continue_are_read() {
 }
 
 #[test]
+fn a_chunk_size_that_overflows_is_refused_and_takes_no_connection_slot() {
+    use std::io::{Read, Write};
+    let mut app = App::start();
+    let (refused, init) = app.run(
+        |addr, token| {
+            // One more than the server has slots: each would hold its slot
+            // for good if its thread panicked.
+            let refused: Vec<String> = (0..=MAX_CONNECTIONS)
+                .map(|_| {
+                    let mut stream = std::net::TcpStream::connect(addr).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    write!(
+                        stream,
+                        "POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n\
+                         Transfer-Encoding: chunked\r\n\r\n1\r\nA\r\nffffffffffffffff\r\n",
+                        addr.port()
+                    )
+                    .unwrap();
+                    let mut text = String::new();
+                    let _ = stream.read_to_string(&mut text);
+                    text
+                })
+                .collect();
+            let init = Client::new(Http::new(addr, token)).initialize("slots");
+            (refused, init)
+        },
+        allow,
+    );
+    for text in &refused {
+        assert!(text.starts_with("HTTP/1.1 413"), "{text}");
+    }
+    assert!(init.is_ok(), "{init:?}");
+}
+
+#[test]
+fn an_export_the_person_allows_answers_its_agent() {
+    // Spec: export R44. In the app an agent that isn't autonomous asks before
+    // it exports, and once the person allows it the call waits for the export
+    // and answers with its result.
+    let mut app = App::start();
+    app.agent.set_view_capture(true);
+    app.shell
+        .run("agent.approve_client", json!({ "client": "exporter" }))
+        .unwrap();
+    let folder = std::env::temp_dir().join(format!("bl-agent-http-export-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let path = folder.join("Export.wav");
+    let asked_for = path.clone();
+    let mut asked = 0;
+    let own = app.token_of("exporter");
+    let reply = app.run_with(
+        own,
+        move |addr, token| {
+            let mut client = Client::new(Http::new(addr, token));
+            client.initialize("exporter").unwrap();
+            client
+                .call(
+                    "run",
+                    json!({ "commands": [{ "command": "export.audio", "args": {
+                        "path": asked_for.to_string_lossy(), "bit_depth": 16,
+                        "sample_rate": 8000, "start": 0, "length": BAR } }] }),
+                )
+                .unwrap()
+        },
+        |app, pending| {
+            asked += 1;
+            app.finish(pending, true);
+        },
+    );
+    let exists = path.is_file();
+    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_dir(&folder);
+    assert_eq!(asked, 1);
+    assert!(!reply.is_error, "{}", reply.text);
+    assert!(exists, "the export wrote its file");
+}
+
+#[test]
 fn stopping_the_server_closes_it() {
     let app = App::start();
     let addr = app.addr();
@@ -607,7 +699,7 @@ fn a_client_presenting_another_agent_s_name_gets_none_of_its_rights() {
         },
         |app, pending| {
             asked.push(pending.question().clone());
-            pending.finish(&mut app.agent, &mut app.shell, false);
+            app.finish(pending, false);
         },
     );
     assert!(refused.contains("didn't allow"), "{refused}");
@@ -632,7 +724,7 @@ fn a_client_presenting_another_agent_s_name_gets_none_of_its_rights() {
                         false
                     }
                 };
-                pending.finish(&mut app.agent, &mut app.shell, allow);
+                app.finish(pending, allow);
             },
         )
     };
@@ -740,7 +832,7 @@ fn an_agent_s_clip_move_over_another_clip_waits_for_confirmation() {
             thread::sleep(Duration::from_millis(300));
             assert!(!answered.load(Ordering::SeqCst), "the call didn't wait");
             assert!(app.shell.editor().document().clip(clip_id(b)).is_some());
-            pending.finish(&mut app.agent, &mut app.shell, true);
+            app.finish(pending, true);
         },
     );
     assert_eq!(empty["asked_first"], false);

@@ -51,11 +51,12 @@ impl Shell {
             .collect();
         // The files the tracks play go with them (R15; the set exchange
         // spec, R7), for a paste into a set that doesn't list them.
+        let used = crate::tracks::media_hashes(&tracks);
         let media = self
             .store
             .media_files()
             .into_iter()
-            .filter(|(hash, ..)| tracks.iter().any(|track| track.plays(hash)))
+            .filter(|(hash, ..)| used.contains(hash))
             .collect();
         self.clipboard = Some(Clipboard::Tracks(crate::tracks::CopiedTracks {
             tracks,

@@ -276,11 +276,12 @@ impl Shell {
     /// folder, or, when the file isn't there, found by its content in that
     /// folder and the browser's places. Returns how many couldn't be found.
     fn register_set_media(&mut self, opened: &Opened, data: &[TrackData]) -> usize {
+        let used = crate::tracks::media_hashes(data);
         let wanted: Vec<_> = opened
             .project
             .media
             .iter()
-            .filter(|file| data.iter().any(|track| track.plays(&file.hash)))
+            .filter(|file| used.contains(&file.hash))
             .cloned()
             .collect();
         let mut missing = Vec::new();

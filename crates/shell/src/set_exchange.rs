@@ -599,11 +599,12 @@ pub fn write(
 
 /// The files of `store` that `data` plays.
 fn store_hashes(store: &MediaStore, data: &[TrackData]) -> BTreeSet<ContentHash> {
+    let used = crate::tracks::media_hashes(data);
     store
         .entries()
         .into_iter()
         .map(|entry| ContentHash(*entry.hash.as_bytes()))
-        .filter(|hash| data.iter().any(|track| track.plays(hash)))
+        .filter(|hash| used.contains(hash))
         .collect()
 }
 

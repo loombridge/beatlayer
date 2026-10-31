@@ -6,6 +6,8 @@
 //! transaction, so it's one undo step and each part of it is checked as any
 //! edit is.
 
+use std::collections::BTreeSet;
+
 use bl_model::{
     Automation, AutomationTarget, ChainId, Clip, ClipId, Command, Device, DeviceId, Document,
     EditError, Editor, FrozenTrack, Input, MidiTo, Mixer, NewTakeLane, Output, Routing, SceneId,
@@ -110,13 +112,15 @@ pub struct CopiedTracks {
 }
 
 impl TrackData {
-    /// Whether this track or one inside it plays the file with `hash`:
-    /// through a clip, a take lane, its frozen audio or a device's sample.
-    #[must_use]
-    pub fn plays(&self, hash: &bl_model::ContentHash) -> bool {
-        // shortcut: finds the hash in the saved text of what the track holds,
-        // since the model has no walk over every place a file is named;
-        // replace it with one when a second caller needs it.
+    /// Adds to `out` the hash of every file this track or one inside it
+    /// plays: through a clip, a take lane, its frozen audio or a device's
+    /// sample.
+    pub fn media_hashes(&self, out: &mut BTreeSet<bl_model::ContentHash>) {
+        #[cfg(test)]
+        SERIALISED.with(|n| n.set(n.get() + 1));
+        // shortcut: finds the hashes in the saved text of what the track
+        // holds, since the model has no walk over every place a file is
+        // named; replace it with one when a caller needs more than hashes.
         let held = serde_json::to_string(&(
             &self.devices,
             &self.clips,
@@ -125,8 +129,31 @@ impl TrackData {
             &self.frozen,
         ))
         .unwrap_or_default();
-        held.contains(&hash.to_string()) || self.children.iter().any(|child| child.plays(hash))
+        out.extend(
+            held.split(|c: char| !c.is_ascii_hexdigit())
+                .filter(|run| run.len() == 64)
+                .filter_map(|run| run.parse::<bl_model::ContentHash>().ok()),
+        );
+        for child in &self.children {
+            child.media_hashes(out);
+        }
     }
+}
+
+/// The hash of every file `tracks` play, found in one pass over them.
+#[must_use]
+pub fn media_hashes(tracks: &[TrackData]) -> BTreeSet<bl_model::ContentHash> {
+    let mut out = BTreeSet::new();
+    for track in tracks {
+        track.media_hashes(&mut out);
+    }
+    out
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many tracks `media_hashes` has saved as text on this thread.
+    static SERIALISED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// What a track holds, as data: the copy the clipboard keeps and the
@@ -472,8 +499,8 @@ fn create(
     Ok(id)
 }
 
-/// Points a clip's envelopes at the copies of the devices and returns they
-/// drive, and drops the ones whose device or return the copy has no match
+/// Points a clip's envelopes at the copies of the devices, chains and returns
+/// they drive, and drops the ones whose device or return the copy has no match
 /// for; and takes away a groove the copy's set doesn't hold.
 fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
     // Spec: grooves R3, R22. A clip's groove is one of its set's pool: in
@@ -487,15 +514,7 @@ fn remap_clip(clip: &mut Clip, copies: &Copies, doc: &Document) {
         clip.groove = None;
     }
     clip.envelopes.retain_mut(|envelope| {
-        let target = match envelope.target {
-            AutomationTarget::Device { device, param } => copies
-                .device_or_same(doc, device)
-                .map(|device| AutomationTarget::Device { device, param }),
-            AutomationTarget::Send { to } => {
-                settle_return(copies, doc, to, None).map(|to| AutomationTarget::Send { to })
-            }
-            other => Some(other),
-        };
+        let target = settle_target(copies, doc, &envelope.target);
         target.is_some_and(|target| {
             envelope.target = target;
             true
@@ -1562,6 +1581,208 @@ mod tests {
         assert_eq!(order[1], copy);
         assert_eq!(doc.track(copy).unwrap().name(), "2 Audio");
         assert_eq!(editor.undo_history().next(), Some("Duplicate Track(s)"));
+    }
+
+    /// A MIDI track holding `rack`, and a Session clip in scene 0 whose
+    /// envelope drives `target`.
+    fn track_with_enveloped_clip(
+        editor: &mut Editor,
+        rack: Device,
+        target: AutomationTarget,
+    ) -> TrackId {
+        let track = add(editor, TrackKind::Midi, "1 MIDI", None);
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: rack,
+            })
+            .unwrap();
+        let scene = scene_at(editor, 0).unwrap();
+        let id: ClipId = editor.new_id();
+        editor
+            .apply(Command::CreateSlotClip {
+                track,
+                scene,
+                clip: Clip::new(
+                    id,
+                    Ticks(0),
+                    Ticks(960_000),
+                    ClipData::Midi(bl_model::MidiData::default()),
+                ),
+            })
+            .unwrap();
+        editor
+            .apply(Command::SetClipEnvelopeBreakpoint {
+                clip: id,
+                target,
+                kind: bl_model::EnvelopeKind::default(),
+                at: Ticks(0),
+                value: 0.5,
+            })
+            .unwrap();
+        track
+    }
+
+    /// The only envelope target of the only Session clip of `track`.
+    fn envelope_target(editor: &Editor, track: TrackId) -> AutomationTarget {
+        let (_, clip) = editor
+            .document()
+            .track(track)
+            .unwrap()
+            .slots()
+            .next()
+            .unwrap();
+        assert_eq!(clip.envelopes.len(), 1, "the envelope came with the clip");
+        clip.envelopes[0].target
+    }
+
+    // Spec: clip-envelopes R7, track-context-menu R13
+    #[test]
+    fn duplicate_maps_clip_chain_envelopes() {
+        use bl_model::{Chain, MixerParam, RackKind};
+        let mut editor = Editor::new();
+        let (rack, chain) = (editor.new_id::<DeviceId>(), editor.new_id::<ChainId>());
+        let one = track_with_enveloped_clip(
+            &mut editor,
+            Device::rack(rack, RackKind::Instrument).with_chain(Chain::new(chain, "Pad")),
+            AutomationTarget::Chain {
+                chain,
+                param: MixerParam::Volume,
+            },
+        );
+        let copy = duplicate_tracks(&mut editor, &[one], "Duplicate").unwrap()[0];
+        let made = editor.document().track(copy).unwrap();
+        let copied_chain = made.devices().next().unwrap().chains[0].id;
+        assert_ne!(copied_chain, chain);
+        assert_eq!(
+            envelope_target(&editor, copy),
+            AutomationTarget::Chain {
+                chain: copied_chain,
+                param: MixerParam::Volume
+            }
+        );
+
+        // Copy and paste into the same set does the same.
+        let data = vec![snapshot(editor.document(), one).unwrap()];
+        let place = Place {
+            parent: None,
+            index: 0,
+            returns: 0,
+        };
+        let pasted = copy_tracks(&mut editor, &data, place, None, "Paste").unwrap()[0];
+        let pasted_chain = editor
+            .document()
+            .track(pasted)
+            .unwrap()
+            .devices()
+            .next()
+            .unwrap()
+            .chains[0]
+            .id;
+        assert_eq!(
+            envelope_target(&editor, pasted),
+            AutomationTarget::Chain {
+                chain: pasted_chain,
+                param: MixerParam::Volume
+            }
+        );
+    }
+
+    // Spec: clip-envelopes R7, track-context-menu R13
+    #[test]
+    fn duplicate_maps_clip_chain_send_envelopes() {
+        use bl_model::{Chain, RackKind};
+        let mut editor = Editor::new();
+        let (rack, pad, ret) = (
+            editor.new_id::<DeviceId>(),
+            editor.new_id::<ChainId>(),
+            editor.new_id::<ChainId>(),
+        );
+        let one = track_with_enveloped_clip(
+            &mut editor,
+            Device::rack(rack, RackKind::Drum)
+                .with_chain(Chain::for_pad(pad, "Kick", 36))
+                .with_chain(Chain::new_return(ret, "Verb")),
+            AutomationTarget::ChainSend {
+                chain: pad,
+                to: ret,
+            },
+        );
+        let copy = duplicate_tracks(&mut editor, &[one], "Duplicate").unwrap()[0];
+        let chains = &editor
+            .document()
+            .track(copy)
+            .unwrap()
+            .devices()
+            .next()
+            .unwrap()
+            .chains;
+        let (pad_copy, ret_copy) = (chains[0].id, chains[1].id);
+        assert_eq!(
+            envelope_target(&editor, copy),
+            AutomationTarget::ChainSend {
+                chain: pad_copy,
+                to: ret_copy
+            }
+        );
+    }
+
+    // Spec: track-context-menu R15, set-exchange R7
+    #[test]
+    fn the_files_tracks_play_are_found_in_one_pass_over_them() {
+        let mut editor = Editor::new();
+        let group = add(&mut editor, TrackKind::Group, "1 Group", None);
+        let child = add(&mut editor, TrackKind::Audio, "2 Audio", Some(group));
+        let other = add(&mut editor, TrackKind::Audio, "3 Audio", None);
+        clip(&mut editor, child, 0, 960_000);
+        editor
+            .apply(Command::AddTakeLane {
+                track: other,
+                lane: NewTakeLane {
+                    id: None,
+                    name: "Take 1".to_owned(),
+                    clips: Vec::new(),
+                },
+                index: None,
+            })
+            .unwrap();
+        let lane = editor
+            .document()
+            .track(other)
+            .unwrap()
+            .take_lanes()
+            .next()
+            .unwrap()
+            .id;
+        let take: ClipId = editor.new_id();
+        editor
+            .apply(Command::CreateTakeClip {
+                lane,
+                clip: Clip::new(
+                    take,
+                    Ticks(0),
+                    Ticks(960_000),
+                    ClipData::Audio(AudioData::new(ContentHash([8; 32]))),
+                ),
+            })
+            .unwrap();
+        let data: Vec<TrackData> = [group, other]
+            .iter()
+            .map(|&track| snapshot(editor.document(), track).unwrap())
+            .collect();
+        SERIALISED.with(|n| n.set(0));
+        let used = media_hashes(&data);
+        assert_eq!(
+            used,
+            BTreeSet::from([ContentHash([7; 32]), ContentHash([8; 32])]),
+            "a group's child and a take lane's clip are found"
+        );
+        assert_eq!(
+            SERIALISED.with(std::cell::Cell::get),
+            3,
+            "each track is saved as text once, however many files the set holds"
+        );
     }
 
     // Spec: track-context-menu R12 (a group, a return track)

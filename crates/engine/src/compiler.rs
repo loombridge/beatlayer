@@ -3127,7 +3127,7 @@ fn with_dependents(mut tasks: Vec<Task>, dependents: &[Vec<u32>]) -> Vec<Task> {
 /// The loop the engine plays for `document`: its loop brace if the Loop
 /// switch is on.
 #[must_use]
-pub(crate) fn loop_region(document: &Document) -> Option<LoopRegion> {
+pub fn loop_region(document: &Document) -> Option<LoopRegion> {
     let brace = document.settings().arrangement_loop;
     brace.enabled.then(|| LoopRegion {
         start: brace.start,

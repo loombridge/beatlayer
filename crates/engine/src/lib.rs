@@ -150,7 +150,7 @@ pub use clips::{
     SourceCues, media_edits,
 };
 pub use clock_in::{MAX_SYNC_INPUTS, SyncInState, TimecodeState};
-pub use compiler::{Compiler, Update};
+pub use compiler::{Compiler, Update, loop_region};
 pub use display::{DisplayData, DisplayReader, DisplayWriter, Displays, display_channel};
 pub use drum::ChainHits;
 pub use engine::{CompileCounts, Engine, Restarter, Sender, channel};

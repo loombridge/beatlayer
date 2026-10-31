@@ -954,7 +954,8 @@ const ENTRIES: &[Entry] = &[
             -6 dB (10^(dB/20) converts decibels), 2 is about +6 dB, and 0 is silence (-inf \
             dB). Use it to balance tracks; the Main track's volume sets the song's output \
             level. The engine glides to the new level over 20 ms, so a change never clicks. \
-            The value must be finite and at least 0.",
+            The value must be finite and at least 0; a value above the fader's top, 1.995 \
+            (+6 dB), is stored as 1.995, and `query` reads back what is stored.",
     },
     Entry {
         id: "mixer.set_pan",
@@ -1335,8 +1336,8 @@ const ENTRIES: &[Entry] = &[
             audio clip on the track as it plays. A parameter with no envelope yet gets its \
             first breakpoint and its envelope drives it from then on. Values are in the parameter's \
             own units: volume as linear gain, pan from -1 to 1, the Track Activator 1 for \
-            muted, and a device parameter as the device's own value. `at` is 0 (1.1.1) or \
-            later. The value between two breakpoints follows the segment's shape: the straight \
+            muted, and a device parameter as the device's own value, which a value outside the \
+            parameter's range is cut to. `at` is 0 (1.1.1) or later. The value between two breakpoints follows the segment's shape: the straight \
             line unless `automation.set_curve` bent it; before the first and after the last \
             the nearest one's value holds.",
     },
@@ -2915,8 +2916,9 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Sets one of a device's parameters to a value in the parameter's own \
-            units. The value must be finite. Parameters that haven't been set keep their \
-            defaults.",
+            units. The value must be finite. A value outside the parameter's range is stored \
+            as the nearest end of it, and `device.parameters` reads back what is stored. \
+            Parameters that haven't been set keep their defaults.",
     },
     Entry {
         id: "device.set_configured_params",
@@ -3527,7 +3529,7 @@ const ENTRIES: &[Entry] = &[
         permission: Permission::Edit,
         contexts: &[DeviceView],
         keys: &[],
-        description: "Moves a chain to `index` in a rack's list of chains, within its rack or into another rack, on the same track or another, keeping its devices' settings and running state. The index counts positions after the chain is taken out of its current place. The chain must fit the other rack's kind, and a chain can't go into a rack it holds.",
+        description: "Moves a chain to `index` in a rack's list of chains, within its rack or into another rack, on the same track or another, keeping its devices' settings and running state. The index counts positions after the chain is taken out of its current place. The chain's devices must fit the other rack's kind, and the chain loses the zones and the Volume and Pan that kind lacks, with their envelopes. A chain can't go into a rack it holds.",
     },
     Entry {
         id: "chain.rename",
@@ -3901,7 +3903,7 @@ const ENTRIES: &[Entry] = &[
         description: "Sets where the song starts: at a locator, or at the loop brace's start. \
             Choosing it where it is set clears it, so the song starts at the insert marker \
             again. While it is set, Play starts the song there instead of at the insert \
-            marker. One undo step, `Set Song Start Time`.",
+            marker. A locator the set doesn't hold is refused. One undo step, `Set Song Start Time`.",
     },
     Entry {
         id: "song.insert_time",

@@ -199,6 +199,9 @@ pub struct AudioStatus {
     pub test_tone: bool,
     /// The test tone's level and frequency.
     pub tone: ToneSettings,
+    /// Whether the stream stopped because its device changed (unplugged, a
+    /// new rate, stalled) and the host is opening it again; `error` says why.
+    pub interrupted: bool,
     /// The last error from the device, if the stream couldn't open or failed.
     pub error: Option<String>,
 }

@@ -149,6 +149,35 @@ pub(crate) fn check_fades(
     Ok(())
 }
 
+/// `audio` with its fades cut to what `clip`, at its length now, allows
+/// (R25): none longer than the clip's room before its loop wraps, and a
+/// fade-in and fade-out that overlap shrunk in proportion.
+pub(crate) fn fit(clip: &Clip, audio: &AudioData, tempo: &TempoMap) -> AudioData {
+    let longest = seconds_long(clip, tempo);
+    let wraps = wraps(clip, audio, tempo);
+    let mut fitted = audio.clone();
+    fitted.fade_in = fitted.fade_in.min(wraps.first.unwrap_or(f64::INFINITY));
+    fitted.fade_out = fitted
+        .fade_out
+        .min(
+            wraps
+                .before_end
+                .map_or(f64::INFINITY, |wrap| longest - wrap),
+        )
+        .max(0.0);
+    fitted.fade_out_after = fitted
+        .fade_out_after
+        .min(wraps.from_end.map_or(f64::INFINITY, |wrap| wrap - longest))
+        .max(0.0);
+    let total = fitted.fade_in + fitted.fade_out;
+    if total > longest {
+        let scale = longest / total;
+        fitted.fade_in *= scale;
+        fitted.fade_out *= scale;
+    }
+    fitted
+}
+
 impl Document {
     /// How far the fades of the audio clip `clip` may go (R25); `None` if
     /// there is no such audio clip.

@@ -118,7 +118,10 @@ fn link_audio_sends_and_receives_under_rtsan() {
         if let Some(channel) = peer.channels().into_iter().find(|c| c.name == "Beat") {
             break channel;
         }
-        assert!(Instant::now() < deadline, "the offered track never reached the peer");
+        assert!(
+            Instant::now() < deadline,
+            "the offered track never reached the peer"
+        );
         thread::sleep(Duration::from_millis(20));
     };
     let received = Arc::new(std::sync::atomic::AtomicU64::new(0));

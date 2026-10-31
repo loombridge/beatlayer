@@ -982,7 +982,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.32 | done | 30 October 2026 | [#510](https://github.com/loombridge/beatlayer/pull/510): Edit ▸ Record Quantization has its nine values, saved with the set and set by `transport.set_record_quantization`; recorded notes are quantised in Arrangement takes as their own undo step, inside Session slot takes, and note by note in looping overdubs, with the menu locked during a take |
 | 7.33 | done | 29 October 2026 | [#512](https://github.com/loombridge/beatlayer/pull/512): Simpler's region is the Start and End flags in the sample's own frames, set by `device.set_sample_region` as one undo step; Classic plays S Start, S Length and S Loop Length inside the flags and One-Shot and Slice play flag to flag; the display, Crop, Normalize, the conversions and Slice to New MIDI Track read the flags, and schema 13 moves older sets over |
 | 7.33b | done | 31 October 2026 | [#525](https://github.com/loombridge/beatlayer/pull/525): Simpler's Slice mode has the Playback chooser (Mono, Poly, Thru, parameter 56, in the Slicing bank), and Slice to Drum Rack and Slice to New MIDI Track run from Simpler's title-bar and display menus as one undo step each, and by ID for agents |
-| 8.1 | todo |  |  |
+| 8.1 | done | 31 October 2026 | [#640](https://github.com/loombridge/beatlayer/pull/640): a native device's body switches between named pages, as tabs or as a shell and display, set by clicks or `device.set_page` without an undo step and read back in `device_view.state`; the page saves with the set, and the multisampler's tabs are now pages that open on their saved tab |
 | 8.2 | todo |  |  |
 | 8.3 | todo |  |  |
 | 8.4 | todo |  |  |

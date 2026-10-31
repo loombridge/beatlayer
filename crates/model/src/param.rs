@@ -64,6 +64,11 @@ pub struct DeviceDescription {
     /// is shown is view state (`device.set_display_view`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<String>,
+    /// The parameter a vertical drag on the display changes, one for each of
+    /// `views`, in their order (Roar's shaper display drags the shown
+    /// stage's Shaper Amount); empty for a display that isn't dragged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_drag: Vec<ParamId>,
     /// The switches the device lists as its own items in its Show Options
     /// menu, after Save as Default Preset (C-DEVICE-015), in this order.
     /// They are parameters like any other, but the layout places no control
@@ -102,6 +107,7 @@ impl DeviceDescription {
             params,
             layout,
             views: Vec::new(),
+            display_drag: Vec::new(),
             menu_options: Vec::new(),
             title_switch: None,
             banks: Vec::new(),
@@ -114,6 +120,14 @@ impl DeviceDescription {
     #[must_use]
     pub fn with_views(mut self, views: &[&str]) -> Self {
         self.views = views.iter().map(|v| (*v).to_owned()).collect();
+        self
+    }
+
+    /// The same, with `params` as the parameters a drag on the display
+    /// changes, one for each view.
+    #[must_use]
+    pub fn with_display_drag(mut self, params: &[ParamId]) -> Self {
+        self.display_drag = params.to_vec();
         self
     }
 

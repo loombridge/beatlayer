@@ -559,6 +559,7 @@ impl DeviceView {
                 params: selected,
                 layout,
                 views: Vec::new(),
+                display_drag: Vec::new(),
                 menu_options: Vec::new(),
                 title_switch: None,
                 banks: Vec::new(),

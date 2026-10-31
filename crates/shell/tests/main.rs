@@ -120,6 +120,7 @@ mod recording;
 mod recovery;
 mod remote_feedback;
 mod remote_mapping;
+mod roar;
 mod routing;
 mod sample_editor;
 mod sample_edits;

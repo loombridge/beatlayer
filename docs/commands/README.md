@@ -9031,6 +9031,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
 | `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
+| `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
@@ -9052,6 +9053,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
       "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
       "items": {
         "$ref": "#/$defs/Bank"
+      },
+      "type": "array"
+    },
+    "display_drag": {
+      "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
       },
       "type": "array"
     },

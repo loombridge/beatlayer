@@ -1613,6 +1613,7 @@ pub fn display(
             moved.shift = f64::from(hz) / plan.hz;
             out.series.push(curve(&format!("{name} Curve"), &moved));
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: format!("{name} Cutoff"),
                 series: format!("{name} Curve"),
                 x: hz,

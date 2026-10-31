@@ -689,6 +689,7 @@ pub fn display(
         if input > LEVEL_FLOOR_DB {
             let x = (db_to_gain(f64::from(input + value(DRIVE))) as f32).min(CURVE_SPAN);
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: "Level".to_owned(),
                 series: "Shaper Curve".to_owned(),
                 x,

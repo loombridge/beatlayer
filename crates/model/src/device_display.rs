@@ -7,7 +7,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ids::DeviceId;
+use crate::ids::{DeviceId, ParamId};
 
 /// A curve or a spectrum: values at evenly spaced places along an axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -73,6 +73,21 @@ pub struct DisplayMarker {
     pub y: f32,
     /// How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`.
     pub text: String,
+    /// The parameters dragging it sets, for a marker that is a handle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub handle: Option<DisplayHandle>,
+}
+
+/// What dragging a marker sets: where the marker sits across the cell (and
+/// up it, with a vertical parameter) is the parameters' travel, so a drag is
+/// the parameters' own control at another place.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct DisplayHandle {
+    /// The parameter its horizontal place is.
+    pub x: ParamId,
+    /// The parameter its vertical place is, if it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<ParamId>,
 }
 
 /// A single reading, such as a gain reduction.

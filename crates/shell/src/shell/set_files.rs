@@ -987,7 +987,8 @@ impl Shell {
                 // Spec: file-management R4, R15, R16. The groups to collect
                 // from, and the project to collect for.
                 let crate::commands::CollectArgs { groups, project } = Self::args(id, args)?;
-                let library = self.browser_view.user_library();
+                let library = self.browser_view.user_library().map(Path::to_path_buf);
+                let library = library.as_deref();
                 let groups = if groups.is_empty() {
                     vec![
                         file_manager_ids::ExternalGroup::OtherProject,
@@ -1014,33 +1015,9 @@ impl Shell {
                          folder to collect into",
                     )
                 })?;
-                crate::plugins::capture_states(
-                    &self.plugins,
-                    &self.au,
-                    &self.vst3,
-                    &self.lv2,
-                    &self.kit,
-                    &mut self.editor,
-                );
-                self.store.set_windows(self.devices.windows().clone());
-                self.store.set_rack_views(self.devices.rack_views().clone());
-                self.store
-                    .set_multisampler_views(self.devices.multisampler_views().clone());
-                self.store.set_folds(self.clip_view.folds().clone());
-                self.store
-                    .set_scale_folds(self.clip_view.scale_folds().clone());
-                self.store.set_mpe_view(self.clip_view.mpe().clone());
-                self.store
-                    .set_lane_views(self.arrangement.lane_views().clone());
-                self.store.set_column_widths(self.mixer.widths().clone());
-                self.store
-                    .set_midi_tools(self.clip_view.midi_tools().saved());
                 let files = self
-                    .store
-                    .collect_groups(&groups, library)
+                    .collect_open_set(&path, &groups, library)
                     .map_err(failed)?;
-                let warnings = self.store.save(&path, &self.editor).map_err(failed)?;
-                self.saved_as(path.clone(), &warnings);
                 Ok(to_value(&FileReport {
                     path: Some(path.to_string_lossy().into_owned()),
                     files,

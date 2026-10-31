@@ -634,6 +634,12 @@ impl Push {
                     self.display_mode = DisplayMode::Browse;
                     self.enter(Enter::AddTrack, cx);
                 }
+                // Add Device leads to Browse Mode with every device the
+                // track can hold (push-2-tracks R25).
+                if button == cc::ADD_DEVICE {
+                    self.display_mode = DisplayMode::Browse;
+                    self.enter(Enter::AddDevice, cx);
+                }
             }
             return;
         }
@@ -1142,6 +1148,8 @@ impl Push {
                     },
                     model,
                     modifiers: &modifiers,
+                    row: cx.row(),
+                    colours: &colours,
                 });
             }
         }
@@ -1357,6 +1365,7 @@ impl Push {
         snapshot.setup = self.shared.setup();
         snapshot.screen = self.screen.clone();
         snapshot.browse = self.display_content().browse_state();
+        snapshot.device = self.display_content().device_state();
         snapshot.display = self
             .display
             .as_ref()

@@ -10,7 +10,7 @@ use skrifa::{FontRef, MetadataProvider};
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::frame::{HEIGHT, RGB_BYTES, WIDTH};
-use crate::screen::{Column, Dot, Graphic, Label, List, Screen};
+use crate::screen::{Column, Dot, Graphic, Icon, Label, List, Screen, Shade};
 
 /// The columns' width.
 const COLUMN: f32 = 120.0;
@@ -222,12 +222,27 @@ impl Painter<'_> {
             self.label(label, n, lower);
         }
         for (n, column) in screen.columns.iter().enumerate() {
-            self.column(column, n);
+            self.column(column, n, screen.shades[n]);
         }
         for (n, list) in screen.lists.iter().enumerate() {
             if let Some(list) = list {
                 self.list(list, n);
             }
+        }
+        for (depth, (from, to)) in screen.folds.iter().enumerate() {
+            let (left, right) = (
+                *from as f32 * COLUMN + 6.0,
+                (*to as f32 + 1.0) * COLUMN - 6.0,
+            );
+            let colour = screen.upper[*from].colour;
+            self.rect(
+                left,
+                BAND - 2.0 + depth as f32 * 2.0,
+                right - left,
+                1.5,
+                colour,
+                255,
+            );
         }
         for (n, progress) in screen.progress.iter().enumerate() {
             if let Some(progress) = progress {
@@ -268,7 +283,7 @@ impl Painter<'_> {
         }
         let x = column as f32 * COLUMN;
         let centre = x + COLUMN / 2.0;
-        if label.selected {
+        let ink = if label.selected {
             self.rect(
                 x + 3.0,
                 top + 2.0,
@@ -277,33 +292,101 @@ impl Painter<'_> {
                 label.colour,
                 255,
             );
-            self.centred(
-                &label.text,
-                centre,
-                top + 17.0,
-                14.0,
-                COLUMN - 14.0,
-                [0, 0, 0],
-            );
+            [0, 0, 0]
         } else {
-            self.centred(
-                &label.text,
-                centre,
-                top + 17.0,
-                14.0,
-                COLUMN - 14.0,
-                label.colour,
-            );
+            label.colour
+        };
+        match label.icon {
+            Some(icon) if label.text.is_empty() => {
+                self.icon(icon, centre, top + BAND / 2.0, ink);
+            }
+            Some(icon) => {
+                self.icon(icon, x + 14.0, top + BAND / 2.0, ink);
+                self.centred(
+                    &label.text,
+                    centre + 8.0,
+                    top + 17.0,
+                    14.0,
+                    COLUMN - 36.0,
+                    ink,
+                );
+            }
+            None => self.centred(&label.text, centre, top + 17.0, 14.0, COLUMN - 14.0, ink),
+        }
+    }
+
+    /// An icon about 12 pixels across, centred on `x`, `y` (push-2-tracks
+    /// R22): a rack is a frame with a mark for what it holds.
+    fn icon(&mut self, icon: Icon, x: f32, y: f32, colour: [u8; 3]) {
+        let mut path = PathBuilder::new();
+        match icon {
+            Icon::Left | Icon::Right => {
+                let d = if icon == Icon::Left { -1.0 } else { 1.0 };
+                path.move_to(x + d * 5.0, y);
+                path.line_to(x - d * 4.0, y - 6.0);
+                path.line_to(x - d * 4.0, y + 6.0);
+                path.close();
+                if let Some(path) = path.finish() {
+                    self.fill(&path, colour);
+                }
+                return;
+            }
+            _ => {}
+        }
+        let mut frame = PathBuilder::new();
+        frame.move_to(x - 6.0, y - 6.0);
+        frame.line_to(x + 6.0, y - 6.0);
+        frame.line_to(x + 6.0, y + 6.0);
+        frame.line_to(x - 6.0, y + 6.0);
+        frame.close();
+        if let Some(frame) = frame.finish() {
+            self.stroke(&frame, colour, 1.5);
+        }
+        match icon {
+            // Keys: two bars.
+            Icon::InstrumentRack => {
+                self.rect(x - 2.5, y - 3.0, 1.5, 6.0, colour, 255);
+                self.rect(x + 1.0, y - 3.0, 1.5, 6.0, colour, 255);
+            }
+            // A wave.
+            Icon::AudioEffectRack => {
+                path.move_to(x - 4.0, y + 1.0);
+                path.line_to(x - 2.0, y - 3.0);
+                path.line_to(x + 1.0, y + 3.0);
+                path.line_to(x + 4.0, y - 1.0);
+                if let Some(path) = path.finish() {
+                    self.stroke(&path, colour, 1.2);
+                }
+            }
+            // A dot and a stem: a note.
+            Icon::MidiEffectRack => {
+                self.rect(x + 0.5, y - 4.0, 1.5, 7.0, colour, 255);
+                if let Some(dot) = PathBuilder::from_circle(x - 0.5, y + 3.0, 2.0) {
+                    self.fill(&dot, colour);
+                }
+            }
+            // A grid of pads.
+            Icon::DrumRack => {
+                for (dx, dy) in [(-3.5, -3.5), (0.5, -3.5), (-3.5, 0.5), (0.5, 0.5)] {
+                    self.rect(x + dx, y + dy, 3.0, 3.0, colour, 255);
+                }
+            }
+            Icon::Left | Icon::Right => {}
         }
     }
 
     /// A column of the content band (R20).
-    fn column(&mut self, column: &Column, n: usize) {
+    fn column(&mut self, column: &Column, n: usize, shade: Shade) {
         if column.is_empty() {
             return;
         }
         let x = n as f32 * COLUMN;
         let centre = x + COLUMN / 2.0;
+        let (text, value) = match shade {
+            Shade::Normal => (TEXT, DIM),
+            Shade::Dimmed => ([95, 95, 95], [70, 70, 70]),
+            Shade::Grey => ([120, 120, 120], [90, 90, 90]),
+        };
         if column.touched {
             self.rect(
                 x + 2.0,
@@ -319,13 +402,27 @@ impl Painter<'_> {
             Dot::Automated => self.dot(x + 10.0, BAND + 14.0, [255, 255, 255]),
             Dot::Overridden => self.dot(x + 10.0, BAND + 14.0, [120, 120, 120]),
         }
-        self.centred(&column.name, centre, BAND + 19.0, 15.0, COLUMN - 28.0, TEXT);
-        self.centred(&column.value, centre, BAND + 40.0, 13.0, COLUMN - 10.0, DIM);
+        self.centred(&column.name, centre, BAND + 19.0, 15.0, COLUMN - 28.0, text);
+        self.centred(
+            &column.value,
+            centre,
+            BAND + 40.0,
+            13.0,
+            COLUMN - 10.0,
+            value,
+        );
         match &column.graphic {
             Graphic::None => {}
-            Graphic::Arc(value) => self.arc(centre, BAND + 76.0, value.clamp(0.0, 1.0)),
+            Graphic::Arc(position) => {
+                let lit = if shade == Shade::Normal {
+                    [255, 255, 255]
+                } else {
+                    text
+                };
+                self.arc(centre, BAND + 76.0, position.clamp(0.0, 1.0), lit);
+            }
             Graphic::Choice(entry) => {
-                self.centred(entry, centre, BAND + 76.0, 16.0, COLUMN - 12.0, TEXT);
+                self.centred(entry, centre, BAND + 76.0, 16.0, COLUMN - 12.0, text);
             }
         }
     }
@@ -373,7 +470,7 @@ impl Painter<'_> {
     }
 
     /// An arc of 270 degrees, open at the bottom, with its value in light.
-    fn arc(&mut self, cx: f32, cy: f32, value: f32) {
+    fn arc(&mut self, cx: f32, cy: f32, value: f32, lit: [u8; 3]) {
         let (radius, start, sweep) = (22.0f32, 135.0f32.to_radians(), 270.0f32.to_radians());
         let arc = |to: f32| {
             let mut path = PathBuilder::new();
@@ -395,7 +492,7 @@ impl Painter<'_> {
         if value > 0.0
             && let Some(path) = arc(value)
         {
-            self.stroke(&path, [255, 255, 255], 4.0);
+            self.stroke(&path, lit, 4.0);
         }
     }
 

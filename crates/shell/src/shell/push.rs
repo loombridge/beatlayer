@@ -135,6 +135,49 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 .collect(),
             in_use: browse.in_use,
         }),
+        device: snapshot.device.as_ref().map(|device| ids::PushDeviceMode {
+            devices: device
+                .devices
+                .iter()
+                .map(|d| ids::PushDevice {
+                    button: d.button,
+                    device: d.device,
+                    name: d.name.clone(),
+                    depth: d.depth,
+                    kind: d.kind.to_owned(),
+                    enabled: d.enabled,
+                    selected: d.selected,
+                    unfolded: d.unfolded,
+                })
+                .collect(),
+            left_arrow: device.arrows.0,
+            right_arrow: device.arrows.1,
+            empty: device.empty,
+            edit: device.edit,
+            bank: device.bank,
+            banks: device.banks.clone(),
+            bank_page: device.page,
+            bank_pages: device.pages,
+            params: device
+                .params
+                .iter()
+                .map(|p| ids::PushParam {
+                    name: p.name.clone(),
+                    value: p.value.clone(),
+                    held: p.held,
+                })
+                .collect(),
+            chains: device
+                .chains
+                .iter()
+                .map(|c| ids::PushChain {
+                    chain: c.chain,
+                    name: c.name.clone(),
+                    selected: c.selected,
+                })
+                .collect(),
+            mute_locked: snapshot.locked.contains(&"mute"),
+        }),
         display: ids::PushDisplay {
             text: snapshot.screen.text(),
             claimed: snapshot.display.claimed,

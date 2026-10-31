@@ -370,8 +370,9 @@ impl Shell {
         let rows = self.row_views();
         let browse = self.surface_browse();
         let doc = self.editor.document();
-        let drum = crate::devices::shown_track(&self.arrangement, doc)
-            .and_then(|track| self.devices.drum_view(doc, track));
+        let shown = crate::devices::shown_track(&self.arrangement, doc);
+        let drum = shown.and_then(|track| self.devices.drum_view(doc, track));
+        let devices = self.devices.surface_views(doc, shown);
         ReadModel {
             document,
             slots: self.session_states().to_vec(),
@@ -404,6 +405,7 @@ impl Shell {
                     .is_some_and(|place| self.arrangement.selected_tracks().contains(&place.track))
             }),
             session_view: self.main_view == MainView::Session,
+            devices,
         }
     }
 

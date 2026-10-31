@@ -24514,6 +24514,232 @@ One column of Browse Mode (push-2-tracks R14).
 
 </details>
 
+### `PushChain`
+
+A chain on one of the lower buttons while a rack's button is held.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | Its name. |
+| `selected` | boolean | yes | Whether it is the selected chain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain on one of the lower buttons while a rack's button is held.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the selected chain.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "chain",
+    "name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDevice`
+
+A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper display button, from 1. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. |
+| `depth` | integer, at least 0 | yes | How deep it is inside racks: 0 on the track's own chain. |
+| `kind` | string | yes | What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`. |
+| `enabled` | boolean | yes | Whether it is switched on. |
+| `selected` | boolean | yes | Whether it is the device in focus, which is the window's selected one. |
+| `unfolded` | boolean | yes | For a rack, whether its devices follow it on the buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device on one of the upper buttons in Device Mode (push-2-tracks R27).",
+  "properties": {
+    "button": {
+      "description": "The upper display button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "depth": {
+      "description": "How deep it is inside racks: 0 on the track's own chain.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "enabled": {
+      "description": "Whether it is switched on.",
+      "type": "boolean"
+    },
+    "kind": {
+      "description": "What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the device in focus, which is the window's selected one.",
+      "type": "boolean"
+    },
+    "unfolded": {
+      "description": "For a rack, whether its devices follow it on the buttons.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "button",
+    "device",
+    "name",
+    "depth",
+    "kind",
+    "enabled",
+    "selected",
+    "unfolded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDeviceMode`
+
+What Device Mode shows (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`PushDevice`](#pushdevice) | yes | The devices on the upper buttons, in order. |
+| `left_arrow` | boolean | yes | Whether the first upper button is an arrow that moves the devices shown back. |
+| `right_arrow` | boolean | yes | Whether the last upper button is an arrow that moves them on. |
+| `empty` | boolean | yes | Whether the track has no devices. |
+| `edit` | boolean | yes | Whether Edit Mode is on. |
+| `bank` | integer, at least 0 | yes | The bank on the encoders, from 0. |
+| `banks` | array of string | yes | Every bank's name. |
+| `bank_page` | integer, at least 0 | yes | The page of banks the lower buttons show in Edit Mode, from 0. |
+| `bank_pages` | integer, at least 0 | yes | How many pages the banks make. |
+| `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
+| `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
+| `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows (push-2-tracks R27).",
+  "properties": {
+    "bank": {
+      "description": "The bank on the encoders, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_page": {
+      "description": "The page of banks the lower buttons show in Edit Mode, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_pages": {
+      "description": "How many pages the banks make.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "banks": {
+      "description": "Every bank's name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "chains": {
+      "description": "The chains the lower buttons show while a rack's button is held.",
+      "items": {
+        "$ref": "#/$defs/PushChain"
+      },
+      "type": "array"
+    },
+    "devices": {
+      "description": "The devices on the upper buttons, in order.",
+      "items": {
+        "$ref": "#/$defs/PushDevice"
+      },
+      "type": "array"
+    },
+    "edit": {
+      "description": "Whether Edit Mode is on.",
+      "type": "boolean"
+    },
+    "empty": {
+      "description": "Whether the track has no devices.",
+      "type": "boolean"
+    },
+    "left_arrow": {
+      "description": "Whether the first upper button is an arrow that moves the devices shown back.",
+      "type": "boolean"
+    },
+    "mute_locked": {
+      "description": "Whether Mute is locked, so each device button switches its device.",
+      "type": "boolean"
+    },
+    "params": {
+      "description": "The parameters on the eight encoders.",
+      "items": {
+        "$ref": "#/$defs/PushParam"
+      },
+      "type": "array"
+    },
+    "right_arrow": {
+      "description": "Whether the last upper button is an arrow that moves them on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "devices",
+    "left_arrow",
+    "right_arrow",
+    "empty",
+    "edit",
+    "bank",
+    "banks",
+    "bank_page",
+    "bank_pages",
+    "params",
+    "chains",
+    "mute_locked"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -24689,6 +24915,7 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
 
 <details><summary>JSON Schema</summary>
 
@@ -24710,6 +24937,17 @@ One connected Push 2.
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
+    },
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushDeviceMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Device Mode shows, while it is the display mode."
     },
     "display": {
       "$ref": "#/$defs/PushDisplay",
@@ -24834,7 +25072,8 @@ One connected Push 2.
     "touch_strip",
     "setup",
     "display",
-    "browse"
+    "browse",
+    "device"
   ],
   "type": "object"
 }
@@ -25051,6 +25290,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushParam`
+
+A parameter on one of the encoders in Device Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `value` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so the encoder doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter on one of the encoders in Device Mode.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so the encoder doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "held"
+  ],
+  "type": "object"
 }
 ```
 

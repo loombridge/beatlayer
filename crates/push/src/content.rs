@@ -256,6 +256,8 @@ pub enum Enter {
     Button,
     /// Add Track was pressed (push-2-tracks R12).
     AddTrack,
+    /// Add Device was pressed (push-2-tracks R25).
+    AddDevice,
 }
 
 /// How the touch strip is configured (R11).
@@ -381,6 +383,10 @@ pub struct Paint<'a> {
     pub model: &'a ReadModel,
     /// The modifiers held or locked.
     pub modifiers: &'a Modifiers,
+    /// The surface's row in the Control Surfaces table, from 0.
+    pub row: usize,
+    /// The 14 track colours the swatches are made from (R14).
+    pub colours: &'a [[u8; 3]],
 }
 
 /// The content of one pad mode or display mode.
@@ -408,6 +414,11 @@ pub trait Content: Send {
 
     /// What Browse Mode shows, for `push.state` (push-2-tracks R14).
     fn browse_state(&self) -> Option<crate::browse::State> {
+        None
+    }
+
+    /// What Device Mode shows, for `push.state` (push-2-tracks R27).
+    fn device_state(&self) -> Option<crate::device::State> {
         None
     }
 

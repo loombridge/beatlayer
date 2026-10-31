@@ -1,6 +1,6 @@
 # The multisampler, sample editing in the sampler devices, and the autosampler
 
-- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built; R75, the tabs on device pages, and R76, the filter's circuits and per-frame values, are drafted for WP-8.1 and WP-8.3 and have no tests yet)
+- **Status:** partial (WP-5.13, WP-5.14 and WP-5.15, R1 to R63, are built; WP-5.16 builds R64 to R67 and R69 to R73, and R68's real-time route for the external instrument is not built; R75, the tabs on device pages, is built with WP-8.1; R76, the filter's circuits and per-frame values, is drafted for WP-8.3 and has no tests yet)
 - **Work packages:** WP-5.13 (zones, the zone editor, the Sample tab, the volume envelope and voices), WP-5.14 (the Pitch/Osc, Filter/Global, Modulation and MIDI tabs, and SFZ import), WP-5.15 (sample editing in the sampler devices' displays, IMP-28), WP-5.16 (the autosampler, IMP-27), WP-6.9 (tuning systems: R74); WP-8.1 (the tabs on [the device framework](device-framework.md)'s pages: R75); WP-8.3 (the filter on [the instruments' filter](instrument-filter.md): R37 and R76)
 - **Parity-matrix row:** Instruments: Sampler (multisample, zones, modulation), plus SFZ import; Instruments: Simpler (the display's edits); [the improvements](../05-improvements.md), IMP-27 and IMP-28
 - **Checked against:** the Live 12 reference manual (online edition), read 17 October 2026: chapter 31, sections 31.10 "Sampler" (31.10.1 to 31.10.11) and 31.11 "Simpler" (its sample display and 31.11.7 "Context Menu Options for Simpler"); chapter 23, sections 23.2 and 23.2.4.1; and the SFZ format reference at sfzformat.com, read 17 October 2026
@@ -231,7 +231,7 @@ This spec covers the multisampler, the IMP-28 edits in both sampler devices' dis
 | R72 | `crates/shell/tests/autosample.rs`, `three_octaves_and_two_layers_match_the_synth` | shell test (golden comparison) |
 | R73 | `crates/shell/tests/autosample.rs`, `cancel_deletes_the_files_and_changes_nothing`, `a_second_autosample_keeps_the_first_ones_samples`, `a_failed_wait_autosample_stops_the_job` | shell test |
 | R74 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_sounding_note_does_not_move_when_the_tuning_changes` | unit |
-| R75 | to be written in WP-8.1 | UI script and layout test (the tabs unchanged); shell test (an older set opens on its tab); agent API (`device.set_page`) |
+| R75 | `crates/shell/tests/device_pages.rs`, `the_multisamplers_tabs_are_pages_and_a_set_saved_before_them_opens_on_its_tab`; `crates/ui/tests/multisampler_tabs.rs` (the tabs unchanged) | UI script and layout test; shell test; agent API |
 | R76 | to be written in WP-8.3 | engine test under the allocation trap (per-frame values; the circuits); golden render of an older set |
 
 ## Not built yet

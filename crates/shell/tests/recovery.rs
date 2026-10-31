@@ -433,6 +433,92 @@ fn a_read_only_recovery_folder_says_so_once_and_the_set_still_edits() {
     std::fs::set_permissions(&recovery, permissions).unwrap();
 }
 
+/// Writes a short 16-bit mono WAV file at 48 kHz.
+fn wav(path: &Path) {
+    let data = 480u32 * 2;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&(36 + data).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&48_000u32.to_le_bytes());
+    bytes.extend_from_slice(&96_000u32.to_le_bytes());
+    bytes.extend_from_slice(&2u16.to_le_bytes());
+    bytes.extend_from_slice(&16u16.to_le_bytes());
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&data.to_le_bytes());
+    for i in 0..480u32 {
+        let phase = f64::from(i) * 440.0 / 48_000.0 * std::f64::consts::TAU;
+        bytes.extend_from_slice(&((phase.sin() * 32.0) as i16).to_le_bytes());
+    }
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, bytes).unwrap();
+}
+
+#[test]
+fn an_untitled_sets_imported_audio_survives_a_crash() {
+    // Spec: crash-recovery R3, R21. The journal of a set never saved lists
+    // the files its clips play, so the recovered set finds them.
+    let scratch = Scratch::new("untitled-media");
+    let recovery = scratch.path("Recovery");
+    let file = scratch.path("Music/Kick.wav");
+    wav(&file);
+    // A session that stopped without closing its untitled set.
+    {
+        let mut shell = shell(&recovery);
+        let track = shell
+            .editor()
+            .document()
+            .tracks()
+            .find(|track| track.kind() == bl_model::TrackKind::Audio)
+            .unwrap()
+            .id();
+        shell
+            .run(
+                "browser.add_to_arrangement",
+                json!({ "paths": [file.to_string_lossy()], "track": track, "at": 0 }),
+            )
+            .unwrap();
+        shell.flush_recovery().unwrap();
+    }
+    let mut shell = shell(&recovery);
+    let offers = shell.recovery_offers();
+    assert_eq!(offers.len(), 1, "the set is offered");
+    shell
+        .run("set.recover", json!({ "id": offers[0].id }))
+        .unwrap();
+    assert_eq!(shell.missing_files(), 0);
+    std::fs::rename(&file, scratch.path("Moved.wav")).unwrap();
+    assert_eq!(
+        shell.missing_files(),
+        1,
+        "the recovered set knows the file, so it reports it missing"
+    );
+    std::fs::rename(scratch.path("Moved.wav"), &file).unwrap();
+
+    // Saving the recovered set lists the file from the set's own folder.
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Saved/Song.blset").to_string_lossy() }),
+        )
+        .unwrap();
+    let song = PathBuf::from(saved["path"].as_str().unwrap());
+    let (_, project) = bl_project::SetFile::open(&song).unwrap();
+    let listed: Vec<PathBuf> = project
+        .media
+        .iter()
+        .filter_map(|media| media.path.resolve(song.parent().unwrap()))
+        .collect();
+    assert_eq!(listed.len(), 1, "the saved set lists the file");
+    assert_eq!(
+        listed[0].canonicalize().unwrap(),
+        file.canonicalize().unwrap()
+    );
+}
+
 // Windows has no read-only folder to make: its read-only attribute doesn't
 // stop files being made in one.
 #[cfg(unix)]

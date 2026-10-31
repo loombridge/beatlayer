@@ -22,7 +22,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use bl_engine::DeviceType;
@@ -321,6 +322,34 @@ struct StoreFile {
     cache: BTreeMap<String, CachedFile>,
     #[serde(default)]
     blocked: BTreeMap<String, BlockedPlugin>,
+    /// The size and modification time (see [`fingerprint`]) of each blocklisted
+    /// file the plug-in itself is to blame for, so a plain scan skips it until
+    /// it changes (the plug-in scanning spec, R4).
+    #[serde(default)]
+    blocked_at: BTreeMap<String, (u64, u128)>,
+}
+
+/// Why a file couldn't be described.
+struct Failure {
+    reason: String,
+    /// Whether the plug-in is to blame, rather than the scanner's own set-up.
+    plugin_fault: bool,
+}
+
+impl Failure {
+    fn plugin(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            plugin_fault: true,
+        }
+    }
+
+    fn scanner(reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            plugin_fault: false,
+        }
+    }
 }
 
 /// The plug-in scanner.
@@ -417,21 +446,21 @@ impl Scanner {
         // it while a scan runs in the background (WP-2.9b).
         for path in plugin_files(format, paths) {
             let key = path.to_string_lossy().into_owned();
-            let metadata = match std::fs::metadata(fingerprint(format, &path)) {
-                Ok(metadata) => metadata,
+            let (size, modified) = match fingerprint(format, &path) {
+                Ok(fingerprint) => fingerprint,
                 Err(e) => {
                     let blocked = BlockedPlugin {
                         format,
                         path: path.clone(),
                         reason: format!("couldn't read the file: {e}"),
                     };
-                    self.lock().blocked.insert(key, blocked.clone());
+                    let mut guard = self.lock();
+                    guard.blocked_at.remove(&key);
+                    guard.blocked.insert(key, blocked.clone());
                     report.blocked.push(blocked);
                     continue;
                 }
             };
-            let size = metadata.len();
-            let modified = nanos(metadata.modified().ok());
             if !fresh {
                 let guard = self.lock();
                 if let Some(cached) = guard.cache.get(&key)
@@ -442,12 +471,21 @@ impl Scanner {
                     report.plugins.extend(cached.plugins.iter().cloned());
                     continue;
                 }
+                // A blocklisted file that hasn't changed isn't loaded again:
+                // only Rescan tries it.
+                if let Some(blocked) = guard.blocked.get(&key)
+                    && guard.blocked_at.get(&key) == Some(&(size, modified))
+                {
+                    report.blocked.push(blocked.clone());
+                    continue;
+                }
             }
             report.scanned += 1;
             let described = self.describe(format, &path);
             let mut guard = self.lock();
             guard.cache.remove(&key);
             guard.blocked.remove(&key);
+            guard.blocked_at.remove(&key);
             match described {
                 Ok(plugins) => {
                     guard.cache.insert(
@@ -460,12 +498,15 @@ impl Scanner {
                     );
                     report.plugins.extend(plugins);
                 }
-                Err(reason) => {
+                Err(failure) => {
                     let blocked = BlockedPlugin {
                         format,
                         path: path.clone(),
-                        reason,
+                        reason: failure.reason,
                     };
+                    if failure.plugin_fault {
+                        guard.blocked_at.insert(key.clone(), (size, modified));
+                    }
                     guard.blocked.insert(key, blocked.clone());
                     report.blocked.push(blocked);
                 }
@@ -486,11 +527,11 @@ impl Scanner {
     }
 
     /// Describes one file in the child process, with a timeout.
-    fn describe(&self, format: PluginFormat, path: &Path) -> Result<Vec<ScannedPlugin>, String> {
+    fn describe(&self, format: PluginFormat, path: &Path) -> Result<Vec<ScannedPlugin>, Failure> {
         let Some(program) = &self.program else {
-            return Err(format!(
+            return Err(Failure::scanner(format!(
                 "the scanner program `{SCANNER_BINARY}` wasn't found beside the app"
-            ));
+            )));
         };
         let mut child = Command::new(program)
             .arg(format_name(format))
@@ -500,57 +541,80 @@ impl Scanner {
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .spawn()
-            .map_err(|e| format!("couldn't start the scanner: {e}"))?;
+            .map_err(|e| Failure::scanner(format!("couldn't start the scanner: {e}")))?;
         // Read the reply while the child runs: a reply bigger than the pipe's
         // buffer would otherwise block the child's write and look like a hang.
+        // The reader keeps what it has read where this thread can take it,
+        // because a helper process the plug-in started can hold the pipe open
+        // after the child has exited.
         let mut out = child.stdout.take();
-        let reader = std::thread::spawn(move || {
-            let mut bytes = Vec::new();
-            if let Some(out) = &mut out {
-                let _ = out.read_to_end(&mut bytes);
+        let output = Arc::new(Mutex::new(Vec::new()));
+        let (done, reader_done) = channel();
+        let sink = Arc::clone(&output);
+        std::thread::spawn(move || {
+            let mut chunk = [0u8; 64 * 1024];
+            while let Some(out) = &mut out {
+                match out.read(&mut chunk) {
+                    Ok(0) => break,
+                    Ok(n) => sink
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .extend_from_slice(&chunk[..n]),
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => break,
+                }
             }
-            bytes
+            let _ = done.send(());
         });
         let deadline = Instant::now() + self.timeout;
-        loop {
+        let status = loop {
             match child.try_wait() {
-                Ok(Some(status)) if status.success() => break,
-                Ok(Some(status)) => {
-                    return Err(format!(
-                        "it crashed or exited while being scanned ({status})"
-                    ));
-                }
+                Ok(Some(status)) => break status,
                 Ok(None) if Instant::now() < deadline => {
                     std::thread::sleep(Duration::from_millis(10));
                 }
                 Ok(None) => {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Err(format!(
+                    return Err(Failure::plugin(format!(
                         "it didn't answer within {} seconds",
                         self.timeout.as_secs()
-                    ));
+                    )));
                 }
-                Err(e) => return Err(format!("couldn't wait for the scanner: {e}")),
+                Err(e) => {
+                    return Err(Failure::scanner(format!(
+                        "couldn't wait for the scanner: {e}"
+                    )));
+                }
             }
-        }
-        let bytes = reader
-            .join()
-            .map_err(|_| "couldn't read the scanner's answer".to_owned())?;
+        };
+        // The child has exited, so its whole reply is in the pipe. Wait a
+        // bounded time for the reader to reach the end, then use what it has.
+        let wait = deadline
+            .max(Instant::now() + Duration::from_secs(1))
+            .saturating_duration_since(Instant::now());
+        let _ = reader_done.recv_timeout(wait);
+        let bytes = std::mem::take(&mut *output.lock().unwrap_or_else(|e| e.into_inner()));
         // The reply is the last line that reads as one: a plug-in may print
-        // its own text to standard output, before or after it.
+        // its own text to standard output, before or after it. It counts
+        // whatever the exit status, which `beatlayer-scan` sets to 1 when it
+        // refuses a file, so the reason it gave isn't lost.
         let text = String::from_utf8_lossy(&bytes);
-        let reply: ChildReply = text
+        let reply: Option<ChildReply> = text
             .lines()
             .rev()
-            .find_map(|line| serde_json::from_str(line.trim()).ok())
-            .ok_or_else(|| "it crashed or wrote nothing readable".to_owned())?;
-        if reply.ok {
-            Ok(reply.plugins)
-        } else {
-            Err(reply
-                .error
-                .unwrap_or_else(|| "it refused to be scanned".to_owned()))
+            .find_map(|line| serde_json::from_str(line.trim()).ok());
+        match (reply, status.success()) {
+            (Some(reply), _) if reply.ok => Ok(reply.plugins),
+            (Some(reply), _) => Err(Failure::plugin(
+                reply
+                    .error
+                    .unwrap_or_else(|| "it refused to be scanned".to_owned()),
+            )),
+            (None, true) => Err(Failure::plugin("it crashed or wrote nothing readable")),
+            (None, false) => Err(Failure::plugin(format!(
+                "it crashed or exited while being scanned ({status})"
+            ))),
         }
     }
 
@@ -652,17 +716,44 @@ pub fn scan_program() -> Option<PathBuf> {
     None
 }
 
-/// The file whose size and modification time say whether a plug-in changed:
-/// the file itself, or for an LV2 bundle folder its manifest, which a folder's
-/// own modification time (changed only by adding or removing a file) would
-/// miss an edit of.
-fn fingerprint(format: PluginFormat, path: &Path) -> PathBuf {
+/// The size and modification time (nanoseconds since the Unix epoch) that say
+/// whether a plug-in changed: the file's own; for an LV2 bundle folder its
+/// manifest; for any other bundle folder, the total size of the files in it
+/// and the newest modification time of anything in it. A folder's own size
+/// and time change only when an entry is added or removed, so an update that
+/// rewrites a file inside it would be missed.
+fn fingerprint(format: PluginFormat, path: &Path) -> std::io::Result<(u64, u128)> {
     let manifest = path.join("manifest.ttl");
-    if format == PluginFormat::Lv2 && manifest.is_file() {
+    let file = if format == PluginFormat::Lv2 && manifest.is_file() {
         manifest
     } else {
         path.to_owned()
+    };
+    let metadata = std::fs::metadata(&file)?;
+    let mut modified = nanos(metadata.modified().ok());
+    if !metadata.is_dir() {
+        return Ok((metadata.len(), modified));
     }
+    let mut size = 0;
+    let mut folders = vec![file];
+    while let Some(folder) = folders.pop() {
+        let Ok(entries) = std::fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            // Not following links, so a bundle's links can't loop.
+            let Ok(metadata) = entry.metadata() else {
+                continue;
+            };
+            modified = modified.max(nanos(metadata.modified().ok()));
+            if metadata.is_dir() {
+                folders.push(entry.path());
+            } else {
+                size += metadata.len();
+            }
+        }
+    }
+    Ok((size, modified))
 }
 
 /// The folders an `LV2_PATH` value names, `~` standing for `home`.

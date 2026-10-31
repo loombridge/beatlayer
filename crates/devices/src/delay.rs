@@ -288,6 +288,9 @@ fn lfo_shape(index: usize, morph: f64) -> Shape {
 struct Delay {
     lines: Vec<Line>,
     lfo: Lfo,
+    /// Frames in a sixteenth note at each frame of the stretch, so the
+    /// synced time follows a tempo ramp the same at any block size (R14).
+    sixteenths: Vec<f64>,
     sample_rate: f64,
     glide: f64,
     mod_depth: f64,
@@ -300,6 +303,7 @@ impl Delay {
         Self {
             lines: (0..config.channels).map(|_| Line::new(len)).collect(),
             lfo: Lfo::new(config.sample_rate, device.id.0.get()),
+            sixteenths: vec![0.0; config.max_frames.max(1)],
             sample_rate: rate,
             glide: (TRANSITION_SECONDS * rate).max(1.0),
             mod_depth: MODULATION_SECONDS * rate,
@@ -312,7 +316,7 @@ impl NativeDevice for Delay {
         if audio.frames() == 0 {
             return;
         }
-        let settings = Settings::new(audio, params, self.sample_rate, self.glide, self.mod_depth);
+        let settings = Settings::new(params, self.sample_rate, self.glide, self.mod_depth);
         self.lfo.set(
             audio,
             Rate::Hertz(settings.lfo_rate),
@@ -320,6 +324,11 @@ impl NativeDevice for Delay {
             0.0,
         );
         let tempo = audio.tempo();
+        if settings.sync {
+            for (frame, sixteenth) in self.sixteenths[..audio.frames()].iter_mut().enumerate() {
+                *sixteenth = sixteenth_frames_at(audio, frame);
+            }
+        }
         let mut channels = audio.channels_mut();
         let Some(first) = channels.next() else {
             return;
@@ -353,8 +362,9 @@ impl Delay {
             let bandwidth = settings.ramp(params, WIDTH)[i] as f64;
             let feedback = settings.ramp(params, FEEDBACK)[i] as f64 / 100.0;
             let dry_wet = settings.ramp(params, DRY_WET)[i] as f64 / 100.0;
-            let base_left = settings.base_delay(params, false);
-            let base_right = settings.base_delay(params, true);
+            let sixteenth = self.sixteenths[i];
+            let base_left = settings.base_delay(params, sixteenth, false);
+            let base_right = settings.base_delay(params, sixteenth, true);
             let tap_left = self.lines[0].tap(base_left, modulation, settings.mode, settings.glide);
             let tap_right = has_second
                 .then(|| self.lines[1].tap(base_right, modulation, settings.mode, settings.glide));
@@ -408,11 +418,16 @@ impl Delay {
 /// Frames in a sixteenth note at the tempo of the stretch's first frame: the
 /// synced delays' unit, shared by the delays (the delay spec, R1).
 pub(crate) fn sixteenth_frames(audio: &Audio<'_, '_>) -> f64 {
-    audio.sample_rate().as_f64() * 60.0 / audio.bpm() / 4.0
+    sixteenth_frames_at(audio, 0)
+}
+
+/// [`sixteenth_frames`] at frame `frame` of the stretch.
+fn sixteenth_frames_at(audio: &Audio<'_, '_>, frame: usize) -> f64 {
+    audio.sample_rate().as_f64() * 60.0 / audio.bpm_at(frame) / 4.0
 }
 
 /// One stretch's settings, worked out once: the parameters the engine
-/// doesn't smooth, each parameter's place in the bank, and the tempo.
+/// doesn't smooth and each parameter's place in the bank.
 struct Settings {
     sync: bool,
     link: bool,
@@ -421,8 +436,6 @@ struct Settings {
     ping_pong: bool,
     mode: Mode,
     wave: usize,
-    /// Frames in a sixteenth note at the stretch's tempo.
-    sixteenth: f64,
     rate: f64,
     glide: f64,
     mod_depth: f64,
@@ -431,13 +444,7 @@ struct Settings {
 }
 
 impl Settings {
-    fn new(
-        audio: &Audio<'_, '_>,
-        params: &ParamBank,
-        rate: f64,
-        glide: f64,
-        mod_depth: f64,
-    ) -> Self {
+    fn new(params: &ParamBank, rate: f64, glide: f64, mod_depth: f64) -> Self {
         let index = core::array::from_fn(|id| {
             params
                 .index(ParamId(id as u32))
@@ -451,7 +458,6 @@ impl Settings {
             ping_pong: params.value(index[PING_PONG.0 as usize]) >= 0.5,
             mode: Mode::of(params.value(index[TIME_MODE.0 as usize]) as usize),
             wave: params.value(index[LFO_WAVE.0 as usize]) as usize,
-            sixteenth: sixteenth_frames(audio),
             rate,
             glide,
             mod_depth,
@@ -478,7 +484,7 @@ impl Settings {
     /// One channel's delay before modulation, in frames. The delay time is
     /// the parameter's target rather than its smoothed value: the time
     /// change modes (Repitch, Fade, Jump) do the smoothing themselves.
-    fn base_delay(&self, params: &ParamBank, right: bool) -> f64 {
+    fn base_delay(&self, params: &ParamBank, sixteenth: f64, right: bool) -> f64 {
         if self.sync {
             let division = if right && !self.link {
                 self.value(params, R_SYNC)
@@ -490,7 +496,7 @@ impl Settings {
             } else {
                 self.target(params, L_OFFSET)
             };
-            division * self.sixteenth * (1.0 + offset / 100.0)
+            division * sixteenth * (1.0 + offset / 100.0)
         } else {
             let milliseconds = if right && !self.link {
                 self.target(params, R_TIME)

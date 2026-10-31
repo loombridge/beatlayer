@@ -477,6 +477,108 @@ fn a_projects_collect_and_save_rewrites_its_sets_with_a_backup() {
     );
 }
 
+// Spec: file-management R16.
+#[test]
+fn collecting_the_open_sets_project_survives_the_next_save() {
+    let scratch = Scratch::new("project-collect-open");
+    let elsewhere = scratch.path("elsewhere/Tone.wav");
+    wav(&elsewhere, 480);
+    let (mut shell, song) = set_with_files(&scratch, "Song", std::slice::from_ref(&elsewhere));
+    let project = song.parent().unwrap().to_path_buf();
+
+    let report = shell
+        .run(
+            "set.collect_all_and_save",
+            json!({ "groups": ["elsewhere"], "project": text(&project) }),
+        )
+        .unwrap();
+    assert_eq!(report["files"], 1, "the open set's file was copied in");
+    // A plain save, as Cmd-S or a Save Continuously commit does.
+    shell.run("set.save", json!({})).unwrap();
+
+    let paths: Vec<String> = bl_project::load(&song)
+        .unwrap()
+        .0
+        .media
+        .iter()
+        .map(|file| file.path.to_string())
+        .collect();
+    assert_eq!(
+        paths,
+        ["Samples/Imported/Tone.wav"],
+        "the open set keeps the collected path after the next save"
+    );
+    shell
+        .run(
+            "view.toggle_file_manager",
+            json!({ "view": "project", "open": true }),
+        )
+        .unwrap();
+    let state = shell.run("file_manager.state", json!({})).unwrap();
+    assert!(
+        state["unused"].as_array().unwrap().is_empty(),
+        "the copy is used: {state}"
+    );
+}
+
+// Spec: file-management R16.
+#[test]
+fn a_projects_collect_and_save_refuses_while_the_open_set_has_unsaved_changes() {
+    let scratch = Scratch::new("project-collect-dirty");
+    let elsewhere = scratch.path("elsewhere/Tone.wav");
+    wav(&elsewhere, 480);
+    let (mut shell, song) = set_with_files(&scratch, "Song", std::slice::from_ref(&elsewhere));
+    shell
+        .run(
+            "song.set_tempo",
+            json!({ "tempo": [{ "kind": "constant", "start": 0, "bpm": 99.0 }] }),
+        )
+        .unwrap();
+    let result = shell.run(
+        "set.collect_all_and_save",
+        json!({ "groups": ["elsewhere"], "project": text(song.parent().unwrap()) }),
+    );
+    assert!(result.is_err(), "the unsaved set blocks it");
+    assert!(
+        !scratch.path("Samples/Imported/Tone.wav").exists(),
+        "nothing was copied"
+    );
+}
+
+// Spec: file-management R17.
+#[test]
+fn delete_unused_refuses_a_file_the_section_does_not_list() {
+    let scratch = Scratch::new("unused-refuse");
+    let kick = scratch.path("Kick.wav");
+    wav(&kick, 480);
+    let (mut shell, song) = set_with_files(&scratch, "Song", std::slice::from_ref(&kick));
+    let recording = scratch.path("Samples/Recorded/Take 1.wav");
+    wav(&recording, 480);
+    let outside = scratch.path("outside.wav");
+    shell
+        .run(
+            "view.toggle_file_manager",
+            json!({ "view": "project", "open": true }),
+        )
+        .unwrap();
+
+    // The set, a file it uses, and a file nothing lists are refused, and a
+    // listed file in the same call isn't trashed either.
+    for path in [&song, &kick, &outside] {
+        let result = shell.run(
+            "file_manager.delete_unused",
+            json!({ "paths": [text(&recording), text(path)] }),
+        );
+        assert!(
+            matches!(result, Err(bl_shell::ShellError::InvalidArgs { .. })),
+            "{}: {result:?}",
+            path.display()
+        );
+        assert!(path.exists() || path == &outside);
+        assert!(recording.exists(), "nothing moved");
+    }
+}
+
 // Spec: file-management R17.
 #[test]
 fn an_unused_recording_is_listed_and_deleted_to_the_trash() {
@@ -795,4 +897,85 @@ fn the_file_manager_commands_are_registered_and_reach_the_agent_api() {
             "{id} reads back with {shown:?}, which doesn't name {field}"
         );
     }
+}
+
+/// What the set saved at `song` lists for `hash`, resolved from its folder.
+fn listed_in(song: &Path, hash: ContentHash) -> Option<PathBuf> {
+    let (_, project) = SetFile::open(song).unwrap();
+    project
+        .media
+        .get(&bl_model::ContentHash(*hash.as_bytes()))?
+        .path
+        .resolve(song.parent().unwrap())
+}
+
+// Spec: file-management R1. A new set starts from the saved default set
+// with its files and its launch quantisation, so it plays them and a save
+// lists them, after a restart and after File > New Set.
+#[test]
+fn a_new_set_from_a_default_set_keeps_its_files_and_launch_quantisation() {
+    let scratch = Scratch::new("default-set-media");
+    let file = scratch.path("samples/k.wav");
+    wav(&file, 480);
+    let hash = ContentHash::of_file(&file).unwrap();
+    let mut shell = headless_with_config(&scratch.path("config"));
+    shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [text(&file)], "track": audio_track(&shell), "at": 0 }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "session.set_quantization",
+            json!({ "quantization": "quarter" }),
+        )
+        .unwrap();
+    let default = scratch.path("Default.blset");
+    shell
+        .run("set.save_as_default", json!({ "path": text(&default) }))
+        .unwrap();
+
+    let check = |shell: &mut Shell, name: &str| {
+        assert_eq!(
+            shell.launch_settings().quantization,
+            bl_model::LaunchQuantization::Quarter
+        );
+        let song = PathBuf::from(
+            shell
+                .run(
+                    "set.save_as",
+                    json!({ "path": text(&scratch.path(&format!("{name}/{name}.blset"))) }),
+                )
+                .unwrap()["path"]
+                .as_str()
+                .unwrap(),
+        );
+        let listed = listed_in(&song, hash).expect("the saved set lists the default set's file");
+        assert_eq!(listed.canonicalize().unwrap(), file.canonicalize().unwrap());
+    };
+
+    // The next launch.
+    let mut launched = Shell::new(
+        Preferences {
+            default_set: Some(default.clone()),
+            ..Preferences::default()
+        },
+        Some(scratch.path("config2")),
+        AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    );
+    assert_eq!(clip_media(&launched).len(), 1, "the default set's clip");
+    std::fs::rename(&file, scratch.path("moved.wav")).unwrap();
+    assert_eq!(
+        launched.missing_files(),
+        1,
+        "the media store knows the file, so it reports it missing"
+    );
+    std::fs::rename(scratch.path("moved.wav"), &file).unwrap();
+    check(&mut launched, "launched");
+
+    // File > New Set in the session that saved it.
+    shell.run("set.new", json!({})).unwrap();
+    check(&mut shell, "new");
 }

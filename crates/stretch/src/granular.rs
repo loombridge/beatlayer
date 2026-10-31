@@ -6,7 +6,7 @@
 //! flat unity gain and no amplitude ripple even with varying grain sizes or
 //! Flux jitter.
 
-use crate::interp::Interpolation;
+use crate::interp::{Interpolation, Taps};
 use crate::mode::Window;
 
 /// One grain on the synthesis timeline.
@@ -30,26 +30,6 @@ pub fn hann_window(m: usize, len: usize) -> f32 {
     }
     let phase = std::f64::consts::TAU * (m as f64 + 0.5) / len as f64;
     0.5 * (1.0 - phase.cos() as f32)
-}
-
-/// Samples `channel` at `pos` through `interpolation`, or silence if outside.
-#[inline]
-pub fn sample_window(
-    channel: &[f32],
-    window_first: i64,
-    pos: f64,
-    interpolation: Interpolation,
-    speed: f64,
-) -> f32 {
-    let floor = pos.floor();
-    let at_i64 = floor as i64 - window_first;
-    let (reach_before, reach_after) = interpolation.reach(speed);
-    if at_i64 < reach_before as i64 || at_i64 + reach_after as i64 >= channel.len() as i64 {
-        return 0.0;
-    }
-    let at = at_i64 as usize;
-    let fraction = pos - floor;
-    interpolation.sample(channel, at, fraction, speed)
 }
 
 const MAX_ACTIVE_GRAINS: usize = 8;
@@ -114,17 +94,17 @@ impl ActiveGrains {
 /// The most channels a grain is summed into.
 const CHANNELS: usize = 8;
 
-/// Writes song frame `t`'s frame to `out` (planar, `stride` apart):
+/// Writes song frame `t`'s frame to the start of `out` (planar, `stride` apart):
 /// every grain sounding on it, overlap-added and divided by the windows'
 /// weights there, so the level stays flat whatever the grains' lengths or
 /// places (R18, R19, R20). A grain is read from `window` at its own pitch
 /// ratio, through `interpolation`.
-pub fn render_frame(
+pub(crate) fn render_frame(
     grains: &ActiveGrains,
     window: &Window<'_>,
     interpolation: Interpolation,
+    taps: &mut Taps,
     t: i64,
-    i: usize,
     out: &mut [f32],
     stride: usize,
 ) {
@@ -136,23 +116,121 @@ pub fn render_frame(
             let m = (t - grain.start) as usize;
             let w = hann_window(m, grain.len);
             let pos = grain.file_pos + m as f64 * grain.pitch_ratio;
-            for (c, slot) in sum_ch.iter_mut().enumerate().take(channels) {
-                *slot += w * sample_window(
-                    window.channel(c),
-                    window.first,
-                    pos,
-                    interpolation,
-                    grain.pitch_ratio,
-                );
+            // A grain outside the window is silence, in every channel.
+            let floor = pos.floor();
+            let at = floor as i64 - window.first;
+            let (before, after) = interpolation.reach(grain.pitch_ratio);
+            if at >= before as i64 && at + (after as i64) < window.frames as i64 {
+                interpolation.weights(at as usize, pos - floor, grain.pitch_ratio, taps);
+                for (c, slot) in sum_ch.iter_mut().enumerate().take(channels) {
+                    *slot += w * taps.dot(window.channel(c));
+                }
             }
             weight_sum += w;
         }
     }
     for (c, &sum) in sum_ch.iter().enumerate().take(channels) {
-        out[c * stride + i] = if weight_sum > 1e-6 {
+        out[c * stride] = if weight_sum > 1e-6 {
             sum / weight_sum
         } else {
             sum
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Two different channels: a sine, and a ramp.
+    fn stereo(frames: usize) -> Vec<f32> {
+        let left = (0..frames).map(|i| (i as f32 * 0.0123 * std::f32::consts::TAU).sin());
+        let right = (0..frames).map(|i| i as f32 / frames as f32);
+        left.chain(right).collect()
+    }
+
+    fn grains() -> ActiveGrains {
+        let mut grains = ActiveGrains::default();
+        for (start, pitch_ratio) in [(0, 1.5), (40, 0.5)] {
+            grains.push(Grain {
+                start,
+                len: 200,
+                file_pos: 1_000.3,
+                pitch_ratio,
+            });
+        }
+        grains
+    }
+
+    // Spec: warp-modes R18 to R20. Each channel is the overlap-add of the
+    // grains the interpolator reads from it alone.
+    #[test]
+    fn a_frame_is_the_overlap_add_of_each_channel_read_alone() {
+        let data = stereo(4_000);
+        let window = Window {
+            data: &data,
+            stride: 4_000,
+            channels: 2,
+            frames: 4_000,
+            first: 0,
+        };
+        let grains = grains();
+        for interpolation in [Interpolation::Short, Interpolation::Sinc] {
+            for t in [10, 60, 150] {
+                let mut out = [0.0; 2];
+                let mut taps = Taps::new();
+                render_frame(&grains, &window, interpolation, &mut taps, t, &mut out, 1);
+                for (c, &got) in out.iter().enumerate() {
+                    let (mut sum, mut weights) = (0.0_f32, 0.0_f32);
+                    for grain in grains.iter().filter(|g| t >= g.start) {
+                        let m = (t - grain.start) as usize;
+                        let w = hann_window(m, grain.len);
+                        let pos = grain.file_pos + m as f64 * grain.pitch_ratio;
+                        let at = pos.floor();
+                        sum += w * interpolation.sample(
+                            window.channel(c),
+                            at as usize,
+                            pos - at,
+                            grain.pitch_ratio,
+                        );
+                        weights += w;
+                    }
+                    assert_eq!(got.to_bits(), (sum / weights).to_bits());
+                }
+            }
+        }
+    }
+
+    // Spec: warp-modes R82
+    #[test]
+    fn a_grain_computes_kernel_weights_once_for_every_channel() {
+        let data = stereo(4_000);
+        let window = Window {
+            data: &data,
+            stride: 4_000,
+            channels: 2,
+            frames: 4_000,
+            first: 0,
+        };
+        let mut grains = ActiveGrains::default();
+        grains.push(Grain {
+            start: 0,
+            len: 200,
+            file_pos: 1_000.3,
+            pitch_ratio: 1.5,
+        });
+        let mut out = [0.0; 2];
+        crate::interp::KERNEL_EVALS.with(|evals| evals.set(0));
+        let mut taps = Taps::new();
+        render_frame(
+            &grains,
+            &window,
+            Interpolation::Sinc,
+            &mut taps,
+            10,
+            &mut out,
+            1,
+        );
+        assert_eq!(crate::interp::KERNEL_EVALS.with(std::cell::Cell::get), 1);
     }
 }

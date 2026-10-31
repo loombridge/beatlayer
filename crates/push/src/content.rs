@@ -381,6 +381,10 @@ pub struct Paint<'a> {
     pub model: &'a ReadModel,
     /// The modifiers held or locked.
     pub modifiers: &'a Modifiers,
+    /// The theme's 14 track colours the swatches are made from.
+    pub colours: &'a [[u8; 3]],
+    /// The Control Surfaces table's row the surface runs in, from 0.
+    pub row: usize,
 }
 
 /// The content of one pad mode or display mode.
@@ -408,6 +412,11 @@ pub trait Content: Send {
 
     /// What Browse Mode shows, for `push.state` (push-2-tracks R14).
     fn browse_state(&self) -> Option<crate::browse::State> {
+        None
+    }
+
+    /// What Session Mode shows, for `push.state` (push-2-tracks R73).
+    fn session_state(&self) -> Option<crate::session::State> {
         None
     }
 

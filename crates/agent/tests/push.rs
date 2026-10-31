@@ -78,8 +78,76 @@ fn an_agent_reads_and_sets_a_simulated_push_2() {
     // Spec: push-2-tracks R14. Browse Mode's fields are part of the state,
     // empty while another mode is shown.
     assert!(push["browse"].is_null());
+    assert!(push["session"].is_null(), "Note Mode");
 
     let frame = run(&mut client, "push.display_frame", json!({}));
     assert_eq!(frame["width"], 960);
     assert!(frame["png"].as_str().unwrap().starts_with("iVBOR"));
+}
+
+// Spec: push-2-tracks R73. Session Mode's fields are part of the state: the
+// ring, what each pad and Scene/Grid button shows, Session Overview and the
+// Stop Clip lock.
+#[test]
+fn an_agent_reads_what_session_mode_shows() {
+    let test = TestBackend::new();
+    let clock = TestClock::new();
+    let mut sim = Simulated::new(&test, &clock);
+    let mut shell = Shell::headless();
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell.use_test_clock(clock.clone());
+    shell.use_push_display(sim.frames().claim());
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+        .unwrap();
+    sim.plug_in();
+    shell.refresh_midi();
+    // The surface paints on its tick, so the test ticks it before the agent
+    // reads.
+    let step = |shell: &mut Shell, sim: &mut Simulated| {
+        for _ in 0..3 {
+            shell.poll();
+            shell.midi().surfaces().tick();
+            while sim.pump() > 0 {
+                shell.midi().surfaces().settle();
+            }
+            shell.midi().surfaces().settle();
+        }
+    };
+    step(&mut shell, &mut sim);
+    let doc = shell.editor().document();
+    let first = doc.top_level().next().unwrap();
+    let (track, scene) = (
+        doc.top_level()
+            .find(|t| doc.track(*t).unwrap().kind() == bl_model::TrackKind::Midi)
+            .unwrap(),
+        doc.scenes().next().unwrap().id,
+    );
+    shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    shell
+        .run("push.set_mode", json!({ "pad": "session" }))
+        .unwrap();
+    step(&mut shell, &mut sim);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+
+    let state = run(&mut client, "push.state", json!({}));
+    let session = &state["pushes"][0]["session"];
+    assert_eq!(session["first_track"], json!(first));
+    assert_eq!(session["first_scene"], json!(scene));
+    assert_eq!(session["scenes"], 8);
+    assert_eq!(session["overview"], false);
+    assert_eq!(session["stop_clip_locked"], false);
+    assert_eq!(session["pads"].as_array().unwrap().len(), 64);
+    let pad = |row: usize, column: usize| session["pads"][row * 8 + column].clone();
+    assert_eq!(pad(0, 0)["shows"], "stopped");
+    assert!(pad(0, 0)["clip"].is_number());
+    assert_eq!(pad(1, 0)["shows"], "empty");
+    assert_eq!(pad(0, 7)["shows"], "none", "past the last track");
+    assert_eq!(session["scene_buttons"].as_array().unwrap().len(), 8);
 }

@@ -135,6 +135,25 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 .collect(),
             in_use: browse.in_use,
         }),
+        session: snapshot.session.as_ref().map(|session| {
+            let look = |look: &bl_push::session::Look| ids::PushSessionLook {
+                shows: look.what.to_owned(),
+                clip: look.clip,
+                colour: look.colour,
+            };
+            ids::PushSession {
+                first_track: session.first_track,
+                first_scene: session.first_scene,
+                tracks: session.tracks,
+                scenes: session.scenes,
+                overview: session.overview,
+                overview_locked: session.locked,
+                overview_part: session.part,
+                stop_clip_locked: snapshot.locked.contains(&"stop_clip"),
+                pads: session.pads.iter().map(look).collect(),
+                scene_buttons: session.scene_buttons.iter().map(look).collect(),
+            }
+        }),
         display: ids::PushDisplay {
             text: snapshot.screen.text(),
             claimed: snapshot.display.claimed,

@@ -149,6 +149,7 @@ impl Content for Recorder {
 enum Contents {
     Recorders,
     Browse,
+    Session,
     Placeholders,
 }
 
@@ -180,6 +181,14 @@ impl Rig {
         Self::build(Contents::Browse)
     }
 
+    /// A rig whose Session Mode is the real one, with the other modes
+    /// recording.
+    pub fn sessions() -> Self {
+        let mut rig = Self::build(Contents::Session);
+        rig.ring_at(0, 0);
+        rig
+    }
+
     /// A rig whose modes have no content of their own yet: the placeholders.
     pub fn placeholders() -> Self {
         Self::build(Contents::Placeholders)
@@ -209,7 +218,14 @@ impl Rig {
                     }) as Box<dyn Content>
                 };
                 bl_push::Contents {
-                    pads: [recorder("Note"), recorder("Session")],
+                    pads: [
+                        recorder("Note"),
+                        if which == Contents::Session {
+                            Box::new(bl_push::session::Session::new())
+                        } else {
+                            recorder("Session")
+                        },
+                    ],
                     display: [
                         recorder("Device"),
                         if which == Contents::Browse {
@@ -280,6 +296,30 @@ impl Rig {
             editor,
             taken: Vec::new(),
         }
+    }
+
+    /// Puts the ring's first slot at track `track_at` and scene `scene_at`
+    /// of the set, as the shell's read model does: the tracks it runs along
+    /// are every track, in order.
+    pub fn ring_at(&mut self, track_at: usize, scene_at: usize) {
+        let doc = self.editor.document();
+        let columns: Vec<TrackId> = doc.top_level().chain(doc.returns()).collect();
+        let scenes: Vec<bl_model::SceneId> = doc.scenes().map(|s| s.id).collect();
+        fn cover<T: Copy>(all: &[T], at: usize) -> Vec<T> {
+            all.iter().skip(at).take(8).copied().collect()
+        }
+        let ring = self.model.rows[0].ring.as_mut().expect("a ring");
+        ring.tracks = cover(&columns, track_at);
+        ring.scenes = cover(&scenes, scene_at);
+        ring.first_track = columns.get(track_at).copied();
+        ring.first_scene = scenes.get(scene_at).copied();
+        ring.moves = bl_control::Moves {
+            left: track_at > 0,
+            right: track_at + 8 < columns.len(),
+            up: scene_at > 0,
+            down: scene_at + 8 < scenes.len(),
+        };
+        self.model.columns = columns;
     }
 
     /// Applies `command` to the set and gives the surfaces the new document.

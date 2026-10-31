@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bl_control::{ControlSurface, Cx, ReadModel, SurfaceState};
+use bl_control::{ControlSurface, Cx, ReadModel, SlotState, SurfaceState};
 use bl_core::midi::MidiMessage;
 use bl_model::TrackId;
 use serde_json::{Value, json};
@@ -75,6 +75,8 @@ enum Phase {
 #[derive(Clone, Copy)]
 enum Who {
     Pads,
+    /// Session Mode's pads, whichever pad mode is active.
+    SessionPads,
     Display,
     Both,
 }
@@ -389,6 +391,7 @@ impl Push {
             let display = self.contents.display[self.display_mode.index()].as_mut();
             let chosen: Vec<&mut dyn Content> = match who {
                 Who::Pads => vec![pad],
+                Who::SessionPads => vec![self.contents.pads[1].as_mut()],
                 Who::Display => vec![display],
                 Who::Both => vec![pad, display],
             };
@@ -514,6 +517,9 @@ impl Push {
             self.buttons.mark_used(button);
             return;
         }
+        if self.stop_clip(button, cx) {
+            return;
+        }
         if self.is_core(button) {
             if others_held {
                 self.combination(button, &others, cx);
@@ -634,6 +640,16 @@ impl Push {
                     self.display_mode = DisplayMode::Browse;
                     self.enter(Enter::AddTrack, cx);
                 }
+                // Stop Clip stops the selected track's clip (push-2-tracks
+                // R68).
+                if button == cc::STOP_CLIP
+                    && let Some(&track) = self
+                        .model
+                        .as_ref()
+                        .and_then(|model| model.selection.tracks.first())
+                {
+                    Self::run(cx, "session.stop_track", json!({ "track": track }));
+                }
             }
             return;
         }
@@ -688,6 +704,44 @@ impl Push {
                 }
             }
         }
+    }
+
+    // ----- Stop Clip, in every mode (push-2-tracks R68) -----
+
+    fn stop_clip_on(&self) -> bool {
+        self.buttons.is_down(cc::STOP_CLIP) || self.buttons.locked().any(|b| b == cc::STOP_CLIP)
+    }
+
+    /// The Stop Clip combinations on a press: Shift stops every clip, and a
+    /// lower display button, with Stop Clip held or locked, stops its track.
+    /// Whether the press was one.
+    fn stop_clip(&mut self, button: u8, cx: &mut Cx) -> bool {
+        if button == cc::STOP_CLIP && self.buttons.is_down(cc::SHIFT) {
+            Self::run(cx, "session.stop_all", json!({}));
+            return true;
+        }
+        let Some(column) = controls::lower_column(button) else {
+            return false;
+        };
+        if !self.stop_clip_on() {
+            return false;
+        }
+        self.buttons.mark_used(button);
+        if let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column)) {
+            Self::run(cx, "session.stop_track", json!({ "track": track }));
+        }
+        true
+    }
+
+    /// Whether `track` has a clip that plays or records now.
+    fn plays(model: &ReadModel, track: TrackId) -> bool {
+        model.slots.iter().any(|s| {
+            s.track == track
+                && matches!(
+                    s.state,
+                    SlotState::Playing | SlotState::QueuedToStop | SlotState::Recording
+                )
+        })
     }
 
     fn toggle_menu(&mut self, menu: Menu) {
@@ -760,6 +814,13 @@ impl Push {
             return;
         }
         self.with_contents(cx, Who::Pads, |content, ctx| content.pad(pad, event, ctx));
+        // A pad pressed in Session Mode and let go after the pad mode changed
+        // still gets its release, which a Gate clip needs (push-2-tracks R61).
+        if matches!(event, PadEvent::Off) && self.pad_mode != PadMode::Session {
+            self.with_contents(cx, Who::SessionPads, |content, ctx| {
+                content.pad(pad, event, ctx)
+            });
+        }
     }
 
     fn strip_event(&mut self, event: StripEvent, cx: &mut Cx) {
@@ -1142,16 +1203,32 @@ impl Push {
                     },
                     model,
                     modifiers: &modifiers,
+                    colours: &colours,
+                    row: cx.row(),
                 });
             }
         }
 
         // A display button's LED follows its label: off when empty, its
         // colour dim, full while selected (R18), unless the mode lit it.
+        let stopping = self.stop_clip_on();
         let mut lights = Lights {
             leds: &mut self.leds,
             palette: &mut self.palette,
         };
+        // With Stop Clip held or locked, the lower buttons of the tracks that
+        // play a clip pulse (push-2-tracks R68).
+        if stopping {
+            for (column, &track) in tracks.iter().take(8).enumerate() {
+                if let Some(t) = model.document.track(track)
+                    && Self::plays(model, track)
+                {
+                    let rgb = swatch(t.colour());
+                    let (full, dimmed) = (lights.colour(rgb), lights.colour(dim(rgb)));
+                    lights.button(controls::lower(column as u8), Led::pulsing(full, dimmed));
+                }
+            }
+        }
         for column in 0..8u8 {
             for (labels, button) in [
                 (&self.screen.upper, controls::upper(column)),
@@ -1208,6 +1285,25 @@ impl Push {
             if controls::button(button).is_some_and(|b| b.led == LedKind::White) {
                 lights.button(button, Led::steady(crate::leds::white::FULL));
             }
+        }
+
+        // Stop Clip: dim red, full while held and pulsing while locked
+        // (push-2-tracks R68).
+        {
+            let mut lights = Lights {
+                leds: &mut self.leds,
+                palette: &mut self.palette,
+            };
+            let red = [255, 0, 0];
+            let (full, dimmed) = (lights.colour(red), lights.colour(dim(red)));
+            let led = if self.buttons.locked().any(|b| b == cc::STOP_CLIP) {
+                Led::pulsing(full, dimmed)
+            } else if self.buttons.is_down(cc::STOP_CLIP) {
+                Led::steady(full)
+            } else {
+                Led::steady(dimmed)
+            };
+            lights.button(cc::STOP_CLIP, led);
         }
 
         // The menus (R23, R31).
@@ -1357,6 +1453,9 @@ impl Push {
         snapshot.setup = self.shared.setup();
         snapshot.screen = self.screen.clone();
         snapshot.browse = self.display_content().browse_state();
+        if self.pad_mode == PadMode::Session {
+            snapshot.session = self.pad_content().session_state();
+        }
         snapshot.display = self
             .display
             .as_ref()
@@ -1373,7 +1472,7 @@ fn all_leds() -> impl Iterator<Item = Addr> {
 }
 
 /// A colour dimmed for a button that isn't selected.
-fn dim([r, g, b]: [u8; 3]) -> [u8; 3] {
+pub(crate) fn dim([r, g, b]: [u8; 3]) -> [u8; 3] {
     let scale = |c: u8| (u16::from(c) * 35 / 100) as u8;
     [scale(r), scale(g), scale(b)]
 }

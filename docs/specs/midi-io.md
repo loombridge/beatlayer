@@ -65,7 +65,7 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 - **R23.** Its notes reach the tracks whose input is Computer Keyboard or All Ins, as a source of their own. (S3)
 - **R24.** Its actions are commands people and agents run by ID: `midi.toggle_computer_keyboard` (M; edit-class, as a kept preference), and `midi.computer_keyboard_octave`, `midi.computer_keyboard_velocity`, and `midi.computer_keyboard_key` (read-class: they change nothing in the set or on disk). (D17)
 - **R25.** The Control Bar's MIDI track input indicator (L-CTRL-026) lights for a moment whenever a message reaches the tracks' inputs. The lower lamp is the output indicator: it lights the same way whenever a message leaves for a port ([external devices](external-devices.md) R7). (S7)
-- **R26.** No note hangs: every note-on a track's devices received from its input gets a note-off on the first frame of the block after the edit that ends it, when monitoring stops (Monitor Off, or Auto with the track disarmed), or the track's input or channel changes. A track that is deleted takes its devices with it. Edits that change none of these keep the notes sounding. (Beatlayer's design)
+- **R26.** No note hangs: every note-on a track's devices received from its input gets a note-off on the first frame of the block after the edit that ends it, when monitoring stops (Monitor Off, or Auto with the track disarmed), or the track's input or channel changes. A track that is deleted takes its devices with it. A note-on that reached a track from an input gets its note-off from that input too, whatever the input's switches, a control surface or the mappings say by then, and an input that closes ends the notes it started. Edits that change none of these keep the notes sounding. (Beatlayer's design)
 
 ### MPE input (WP-6.17)
 
@@ -76,11 +76,13 @@ This spec covers ports and their switches, a MIDI track's input and channel, the
 
 | Rule | Test | Kind |
 |---|---|---|
+| R3 | `bl-midi-io` `ports::tests::a_port_replugged_between_refreshes_opens_again` | unit |
 | R3, R17 | `bl-shell` `midi_io::port_switches_and_the_keyboard_persist_across_restarts` | integration |
 | R2 | `bl-ui` `midi_input::the_tempo_and_midi_page_lists_each_port_with_its_switches` | UI |
 | R4, R5 | `bl-shell` `midi_io::switching_a_ports_track_off_stops_its_notes_reaching_tracks`, `midi_io::a_mapped_message_never_reaches_an_armed_tracks_input_and_an_unmapped_one_does` | integration |
 | R7, R8, R9 | `bl-shell` `midi_io::midi_from_one_port_ignores_another_and_a_channel_ignores_the_rest`, `midi_io::midi_from_lists_the_ports_and_the_channel_chooser_follows_the_input` | integration |
 | R10, R12 | `bl-engine` `midi_play::a_monitored_tracks_devices_play_its_input_on_the_exact_frames`, `midi_play::input_merges_with_a_playing_clips_notes_in_frame_order`, `midi_play::a_track_that_doesnt_monitor_sends_its_devices_nothing`; `bl-shell` `midi_io::the_computer_keyboard_plays_snapshot_on_a_monitoring_track`; `rtsan` `midi_input` | integration, real-time |
+| R26 | `bl-midi-io` `ports::tests::a_note_off_reaches_the_track_after_track_is_switched_off_or_a_surface_holds_the_input`, `ports::tests::closing_an_input_ends_the_notes_it_started` | unit |
 | R26 | `bl-engine` `midi_play::switching_monitoring_off_ends_the_held_notes`, `midi_play::disarming_a_track_on_auto_ends_the_held_notes`, `midi_play::changing_the_input_or_its_channel_ends_the_held_notes`, `midi_play::an_edit_that_keeps_the_input_keeps_the_held_notes_sounding` | integration |
 | R14 | `bl-shell` `midi_io::the_audio_hosts_engine_takes_the_queue`; `bl-midi-io` `queue::tests::attaching_again_sends_to_the_new_end_only` | integration, unit |
 | R17 | `bl-ui` `midi_input::the_control_bars_switch_follows_and_changes_the_keyboard` | UI |

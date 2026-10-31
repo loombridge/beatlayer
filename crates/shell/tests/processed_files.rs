@@ -7,12 +7,12 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use bl_media::{BitDepth, Decoder, Dither, EncodeSpec, FileType};
-use bl_model::{ClipData, TrackId, TrackKind};
+use bl_model::{ClipData, Command, TrackId, TrackKind};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::processed::{Kind, Request, Written};
 use bl_shell::settings::Preferences;
-use bl_shell::{Effect, Shell};
+use bl_shell::{Effect, GesturePhase, Invocation, Shell};
 use serde_json::json;
 
 /// A folder for one test's files, removed when the test ends.
@@ -527,4 +527,96 @@ fn a_new_set_drops_a_file_still_being_written() {
         std::thread::sleep(Duration::from_millis(5));
     }
     assert!(!landed.get());
+}
+
+/// Polls until a started file has had every chance to
+/// land: its worker is done, and the shell has looked many times since.
+fn poll_until_it_could_have_landed(shell: &mut Shell, done: &std::sync::atomic::AtomicBool) {
+    while !done.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::yield_now();
+    }
+    for _ in 0..2_000 {
+        shell.poll();
+        std::thread::yield_now();
+    }
+}
+
+// Spec: audio-clip-editing R6. A file whose worker finishes while the
+// person drags a clip lands once the drag has ended: inside the drag's
+// transaction its edit would be thrown away by the drag's next frame.
+#[test]
+fn a_file_that_lands_during_a_drag_survives_the_drags_next_frame() {
+    let scratch = Scratch::new("land-during-drag");
+    let mut shell = shell(&scratch.path("config"));
+    write(&mut shell, request(Kind::Crop, "Clip.wav", 500, 0.1));
+    let clip = shell
+        .editor()
+        .document()
+        .tracks()
+        .flat_map(|track| track.clips())
+        .map(|clip| clip.id)
+        .next()
+        .expect("the file made a clip");
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let finished = std::sync::Arc::clone(&done);
+    let mut quick = request(Kind::Consolidate, "Landed.wav", 500, 0.5);
+    let produce = std::mem::replace(&mut quick.produce, Box::new(|_| Ok(())));
+    quick.produce = Box::new(move |sink| {
+        let result = produce(sink);
+        finished.store(true, std::sync::atomic::Ordering::SeqCst);
+        result
+    });
+    shell
+        .start_processed(quick, |shell, _| {
+            shell
+                .edit(|editor| {
+                    editor.transact("Landed", |editor| {
+                        let id = editor.new_id();
+                        editor.apply(Command::CreateTrack {
+                            id,
+                            kind: TrackKind::Midi,
+                            name: "Landed".to_owned(),
+                            parent: None,
+                            index: 0,
+                        })
+                    })
+                })
+                .map(drop)
+                .map_err(|e| e.to_string())
+        })
+        .unwrap();
+
+    let tracks = |shell: &Shell| shell.editor().document().tracks().count();
+    let before = tracks(&shell);
+    let start = |shell: &Shell| shell.editor().document().clip(clip).unwrap().start;
+    let frame = |by: i64| Invocation::new("arrangement.move_clips", json!({ "by": by }));
+    shell
+        .gesture(GesturePhase::Update, Some(&frame(960)))
+        .unwrap();
+    poll_until_it_could_have_landed(&mut shell, &done);
+    shell
+        .gesture(GesturePhase::Update, Some(&frame(1_920)))
+        .unwrap();
+    assert_eq!(tracks(&shell), before, "nothing lands inside the drag");
+    shell
+        .gesture(GesturePhase::Commit, Some(&frame(1_920)))
+        .unwrap();
+    for _ in 0..2_000 {
+        if !shell.is_processing() {
+            break;
+        }
+        shell.poll();
+        std::thread::yield_now();
+    }
+
+    assert_eq!(tracks(&shell), before + 1, "the landed edit is in the set");
+    let moved = start(&shell);
+    assert_eq!(shell.editor().undo_history().next(), Some("Landed"));
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(tracks(&shell), before, "the landing is a step of its own");
+    assert_eq!(start(&shell), moved, "and the drag is still done");
 }

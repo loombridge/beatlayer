@@ -211,7 +211,7 @@ pub struct Worker<T> {
 }
 
 impl<T: Send + 'static> Worker<T> {
-    fn start(
+    pub(crate) fn start(
         name: &str,
         work: impl FnOnce(&Progress) -> Ended<T> + Send + 'static,
     ) -> Result<Self, String> {

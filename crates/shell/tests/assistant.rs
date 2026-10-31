@@ -173,11 +173,12 @@ impl Prompter for ScriptedPrompter {
     }
 }
 
-fn call(id: &str, tool: &str, args: serde_json::Value) -> ToolCall {
+/// A `run` call of the command `command`.
+fn call(id: &str, command: &str, args: serde_json::Value) -> ToolCall {
     ToolCall {
         id: id.to_owned(),
-        name: tool.to_owned(),
-        arguments: args,
+        name: "run".to_owned(),
+        arguments: json!({ "command": command, "args": args }),
     }
 }
 
@@ -199,7 +200,7 @@ fn answer(text: &str) -> Reply {
 
 /// Runs one turn of the loop through the shell's assistant host.
 fn one_turn(shell: &mut Shell, provider: &dyn Provider, prompter: &mut dyn Prompter) -> Turn {
-    let agent = Agent::new(shell.registry().iter());
+    let agent = Agent::new();
     let mut request = Request::new("test-model");
     let mut commands = AssistantCommands::new(shell, prompter);
     agent
@@ -223,12 +224,137 @@ fn a_track(shell: &Shell) -> bl_model::TrackId {
         .id()
 }
 
+/// The tool results in the conversation a request carried, in order.
+fn results_in(request: &Request) -> Vec<String> {
+    request
+        .messages
+        .iter()
+        .flat_map(|message| &message.parts)
+        .filter_map(|part| match part {
+            bl_assistant::message::Part::Result(result) => Some(result.content.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_model_is_offered_a_few_tools_not_one_per_command() {
+    // OpenAI refuses a request with more than 128 tools, and the registry
+    // holds hundreds of commands.
+    let mut shell = Shell::headless();
+    let commands = shell.registry().len();
+    let provider = Script::new(vec![answer("Hello.")]);
+    one_turn(
+        &mut shell,
+        &provider,
+        &mut ScriptedPrompter::new(Vec::new()),
+    );
+    let offered = provider.seen()[0].tools.len();
+    assert!(offered <= 128, "{offered} tools");
+    assert!(
+        offered < commands,
+        "{offered} tools for {commands} commands"
+    );
+}
+
+#[test]
+fn the_model_finds_a_command_and_reads_its_schema() {
+    let mut shell = Shell::headless();
+    let provider = Script::new(vec![
+        calls(vec![
+            ToolCall {
+                id: "c1".to_owned(),
+                name: "list_commands".to_owned(),
+                arguments: json!({}),
+            },
+            ToolCall {
+                id: "c2".to_owned(),
+                name: "list_commands".to_owned(),
+                arguments: json!({ "search": "create track" }),
+            },
+            ToolCall {
+                id: "c3".to_owned(),
+                name: "describe_command".to_owned(),
+                arguments: json!({ "command": "track.create" }),
+            },
+        ]),
+        answer("Found it."),
+    ]);
+
+    one_turn(
+        &mut shell,
+        &provider,
+        &mut ScriptedPrompter::new(Vec::new()),
+    );
+
+    let results = results_in(&provider.seen()[1]);
+    let areas: serde_json::Value = serde_json::from_str(&results[0]).unwrap();
+    assert!(areas["areas"]["track"].as_u64().unwrap() > 0, "{areas}");
+    assert!(results[1].contains("track.create"), "{}", results[1]);
+    let described: serde_json::Value = serde_json::from_str(&results[2]).unwrap();
+    assert_eq!(described["command"], "track.create");
+    assert!(described["arguments"].is_object(), "{described}");
+    assert!(shell.assistant_log().is_empty(), "reading isn't a command");
+}
+
+#[test]
+fn a_call_to_a_command_that_doesnt_exist_says_so_and_asks_nothing() {
+    let mut shell = Shell::headless();
+    let provider = Script::new(vec![
+        calls(vec![call("c1", "track.make_it_so", json!({}))]),
+        answer("That failed."),
+    ]);
+
+    one_turn(
+        &mut shell,
+        &provider,
+        &mut ScriptedPrompter::new(Vec::new()),
+    );
+
+    let results = results_in(&provider.seen()[1]);
+    assert!(
+        results[0].contains("no command `track.make_it_so`"),
+        "{results:?}"
+    );
+}
+
+#[test]
+fn query_reads_through_the_hosts_query_and_says_so_when_it_has_none() {
+    let mut shell = Shell::headless();
+    let ask = || {
+        Script::new(vec![
+            calls(vec![ToolCall {
+                id: "c1".to_owned(),
+                name: "query".to_owned(),
+                arguments: json!({ "path": "tracks" }),
+            }]),
+            answer("Read."),
+        ])
+    };
+    let provider = ask();
+    one_turn(
+        &mut shell,
+        &provider,
+        &mut ScriptedPrompter::new(Vec::new()),
+    );
+    assert!(results_in(&provider.seen()[1])[0].contains("can't read"));
+
+    shell.set_assistant_query(|_, args| Ok(json!({ "asked": args["path"] })));
+    let provider = ask();
+    one_turn(
+        &mut shell,
+        &provider,
+        &mut ScriptedPrompter::new(Vec::new()),
+    );
+    assert_eq!(results_in(&provider.seen()[1])[0], r#"{"asked":"tracks"}"#);
+}
+
 #[test]
 fn a_consent_class_call_waits_for_the_prompt_and_a_denial_reaches_the_model() {
     let mut shell = Shell::headless();
     let track = a_track(&shell);
     let provider = Script::new(vec![
-        calls(vec![call("c1", "track_delete", json!({ "track": track }))]),
+        calls(vec![call("c1", "track.delete", json!({ "track": track }))]),
         answer("I couldn't delete the track."),
     ]);
     let mut prompter = ScriptedPrompter::new(vec![Decision::Deny]);
@@ -268,7 +394,7 @@ fn an_allowed_call_runs_records_its_result_and_always_stops_asking() {
     let mut shell = Shell::headless();
     let track = a_track(&shell);
     let provider = Script::new(vec![
-        calls(vec![call("c1", "track_delete", json!({ "track": track }))]),
+        calls(vec![call("c1", "track.delete", json!({ "track": track }))]),
         answer("Deleted it."),
     ]);
     let mut prompter = ScriptedPrompter::new(vec![Decision::Always]);
@@ -283,7 +409,7 @@ fn an_allowed_call_runs_records_its_result_and_always_stops_asking() {
     // A later call of the same command doesn't ask again: the prompter here
     // has no answer to give.
     let provider = Script::new(vec![
-        calls(vec![call("c2", "track_delete", json!({ "track": track }))]),
+        calls(vec![call("c2", "track.delete", json!({ "track": track }))]),
         answer("Done."),
     ]);
     let mut empty = ScriptedPrompter::new(Vec::new());
@@ -301,7 +427,7 @@ fn an_edit_call_runs_without_a_prompt_and_is_recorded() {
     let provider = Script::new(vec![
         calls(vec![call(
             "c1",
-            "track_rename",
+            "track.rename",
             json!({ "track": track, "name": "Assistant Track" }),
         )]),
         answer("Renamed the track."),
@@ -331,17 +457,17 @@ fn a_new_id_placeholder_is_issued_and_a_later_call_refers_to_it() {
         calls(vec![
             call(
                 "c1",
-                "track_create",
+                "track.create",
                 json!({ "id": { "$new": "lead" }, "kind": "midi", "name": "Lead", "index": 0 }),
             ),
             call(
                 "c2",
-                "track_rename",
+                "track.rename",
                 json!({ "track": { "$ref": "lead" }, "name": "Lead synth" }),
             ),
             call(
                 "c3",
-                "track_rename",
+                "track.rename",
                 json!({ "track": { "$ref": "nobody" }, "name": "x" }),
             ),
         ]),
@@ -366,7 +492,7 @@ fn a_command_only_a_person_runs_is_refused_and_recorded() {
     let provider = Script::new(vec![
         calls(vec![call(
             "c1",
-            "assistant_set_model",
+            "assistant.set_model",
             json!({ "model": "gpt-4o" }),
         )]),
         answer("I can't change that."),

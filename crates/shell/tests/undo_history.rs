@@ -171,8 +171,11 @@ fn an_assistants_turn_is_one_row_marked_with_the_assistant() {
             text: "Muting the track.".to_owned(),
             tool_calls: vec![ToolCall {
                 id: "c1".to_owned(),
-                name: "mixer_set_mute".to_owned(),
-                arguments: json!({ "track": track, "mute": true }),
+                name: "run".to_owned(),
+                arguments: json!({
+                    "command": "mixer.set_mute",
+                    "args": { "track": track, "mute": true },
+                }),
             }],
             stop: Stop::End,
         },

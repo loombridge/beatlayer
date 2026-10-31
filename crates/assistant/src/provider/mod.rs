@@ -68,8 +68,10 @@ pub enum Error {
         /// What the provider said, without its JSON wrapper.
         message: String,
     },
-    /// The stream didn't follow the provider's protocol: malformed JSON, a
-    /// missing terminator, or tool call arguments that aren't JSON.
+    /// The stream didn't follow the provider's protocol: malformed JSON or a
+    /// missing terminator. A tool call whose arguments aren't JSON is not
+    /// one: it is kept ([`ToolCall::unparsed`](crate::tools::ToolCall::unparsed))
+    /// and the agent loop tells the model.
     Protocol(String),
 }
 

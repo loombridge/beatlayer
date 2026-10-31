@@ -100,6 +100,7 @@ mod gc;
 mod input;
 mod layers;
 pub mod link;
+pub mod link_audio;
 mod message;
 mod metronome;
 mod midi;
@@ -158,6 +159,7 @@ pub use gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned, Program};
 pub use input::{DeviceInput, NoInput};
 pub use layers::{DeviceLayers, Group, LayerAudio, LayerSample, RoundRobin};
 pub use link::{LinkFollower, Session};
+pub use link_audio::{Channel as LinkChannel, LinkAudio, frame_at};
 pub use message::{
     Action, LoopRegion, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,

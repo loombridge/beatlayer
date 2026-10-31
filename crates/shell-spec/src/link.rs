@@ -16,8 +16,32 @@ pub const SET_START_STOP_SYNC: &str = "link.set_start_stop_sync";
 /// `link.set_show_toggle`: shows or hides the Control Bar's Link toggle.
 pub const SET_SHOW_TOGGLE: &str = "link.set_show_toggle";
 
+/// `link.set_audio`: switches Link Audio.
+pub const SET_AUDIO: &str = "link.set_audio";
+/// `link.set_audio_name`: sets the name other peers see this app by.
+pub const SET_AUDIO_NAME: &str = "link.set_audio_name";
+/// `link.set_audio_latency`: sets the input latency of incoming audio.
+pub const SET_AUDIO_LATENCY: &str = "link.set_audio_latency";
+/// `link.set_sync_to_incoming_audio`: switches Sync to Incoming Audio.
+pub const SET_SYNC_TO_INCOMING_AUDIO: &str = "link.set_sync_to_incoming_audio";
+
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[STATE, SET_ENABLED, SET_START_STOP_SYNC, SET_SHOW_TOGGLE];
+pub const IDS: &[&str] = &[
+    STATE,
+    SET_ENABLED,
+    SET_START_STOP_SYNC,
+    SET_SHOW_TOGGLE,
+    SET_AUDIO,
+    SET_AUDIO_NAME,
+    SET_AUDIO_LATENCY,
+    SET_SYNC_TO_INCOMING_AUDIO,
+];
+
+/// The longest Latency, in milliseconds, and the one a new install has
+/// (`docs/specs/link-audio.md`, R7).
+pub const MAX_LATENCY_MS: f64 = 200.0;
+/// See [`MAX_LATENCY_MS`].
+pub const DEFAULT_LATENCY_MS: f64 = 20.0;
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -25,8 +49,9 @@ pub fn handles(id: &str) -> bool {
     IDS.contains(&id)
 }
 
-/// Arguments of `link.set_enabled`, `link.set_start_stop_sync` and
-/// `link.set_show_toggle`.
+/// Arguments of `link.set_enabled`, `link.set_start_stop_sync`,
+/// `link.set_show_toggle`, `link.set_audio` and
+/// `link.set_sync_to_incoming_audio`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SetArgs {
@@ -35,12 +60,93 @@ pub struct SetArgs {
     pub on: Option<bool>,
 }
 
-/// What `link.set_enabled`, `link.set_start_stop_sync` and
-/// `link.set_show_toggle` return.
+/// What `link.set_enabled`, `link.set_start_stop_sync`, `link.set_show_toggle`,
+/// `link.set_audio` and `link.set_sync_to_incoming_audio` return.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Switched {
     /// Whether it's on now.
     pub on: bool,
+}
+
+/// Arguments of `link.set_audio_name`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAudioNameArgs {
+    /// The name other peers see this app by; empty for the computer's name.
+    pub name: String,
+}
+
+/// What `link.set_audio_name` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct AudioName {
+    /// The name in effect now.
+    pub name: String,
+}
+
+/// Arguments of `link.set_audio_latency`.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAudioLatencyArgs {
+    /// The latency, in milliseconds, from 0 to 200; a value outside that
+    /// range is brought into it.
+    pub ms: f64,
+}
+
+/// What `link.set_audio_latency` returns.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AudioLatency {
+    /// The latency in effect now, in milliseconds.
+    pub ms: f64,
+}
+
+/// Whether audio is arriving from a Link Audio peer (`link.state`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PeerState {
+    /// A track takes one of the peer's channels and audio is arriving.
+    Receiving,
+    /// The peer is in the session with Link Audio on, and nothing arrives.
+    Connected,
+}
+
+impl PeerState {
+    /// The word the peers list shows.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Receiving => "Receiving",
+            Self::Connected => "Connected",
+        }
+    }
+}
+
+/// A peer in the session that has Link Audio on (`link.state`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LinkAudioPeer {
+    /// The peer's name.
+    pub name: String,
+    /// Whether audio is arriving from it.
+    pub state: PeerState,
+    /// The audio buffered from it, in milliseconds.
+    pub buffered_ms: f64,
+    /// The channels it offers, in its order.
+    pub channels: Vec<String>,
+}
+
+/// Link Audio's part of `link.state`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct LinkAudioState {
+    /// Whether Link Audio is switched on (it streams only while Link is on
+    /// too).
+    pub enabled: bool,
+    /// The name other peers see this app by.
+    pub name: String,
+    /// The input latency of incoming audio, in milliseconds.
+    pub latency_ms: f64,
+    /// Whether Beatlayer delays its own playback by the latency.
+    pub sync_to_incoming_audio: bool,
+    /// The peers with Link Audio on, as the Link page lists them.
+    pub peers: Vec<LinkAudioPeer>,
 }
 
 /// What `link.state` returns.
@@ -70,6 +176,9 @@ pub struct LinkState {
     /// How many seconds until a waiting start begins, once it has been
     /// worked out; null otherwise.
     pub starts_in: Option<f64>,
+    /// Link Audio: its switch, name, latency, Sync to Incoming Audio and the
+    /// peers.
+    pub audio: LinkAudioState,
 }
 
 /// Adds the Link commands to a registry.
@@ -85,9 +194,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  session's tempo, the quantum (the global launch quantisation's length at the \
                  play position, in quarter notes) and how far the session is through it, \
                  whether the session plays, whether Start Stop Sync is on, whether the Control \
-                 Bar shows the Link toggle, and whether a start waits for the session's phase and how many seconds until it begins. Changes \
-                 nothing. Switch Link with `link.set_enabled` and Start Stop Sync with \
-                 `link.set_start_stop_sync`.",
+                 Bar shows the Link toggle, and whether a start waits for the session's phase and how many seconds until it begins. Also \
+                 Link Audio: whether it is on, the name other peers see this app by, the \
+                 latency in milliseconds, whether Sync to Incoming Audio is on, and the peers \
+                 with Link Audio on, each with its name, whether audio is arriving from it, \
+                 the audio buffered from it in milliseconds, and its channels. Changes \
+                 nothing. Switch Link with `link.set_enabled`, Start Stop Sync with \
+                 `link.set_start_stop_sync` and Link Audio with `link.set_audio`.",
             )
             .permission(Permission::Read)
             .context(Global)
@@ -134,6 +247,64 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  page's Show Link Toggle does. Hiding it leaves Link as it is. `on` is whether \
                  it shows; left out, it switches to the other state. It is a preference kept \
                  between starts, not part of the set. `link.state` reports it.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<SetArgs>()
+            .result::<Switched>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_AUDIO, "Link Audio")
+            .description(
+                "Switches Link Audio, as Settings' Link page and the Link menu do: on, with \
+                 Link on, every track with an audio output is offered to the other apps in the \
+                 session as a channel, and the channels they offer can be an audio track's \
+                 input (`routing.set_input` with the `link_audio` input). It sends audio over \
+                 the network, so it is external. It does nothing while Link is off, and keeps \
+                 its state. `on` left out switches to the other state. It is a preference kept \
+                 between starts, not part of the set. `link.state` reports it.",
+            )
+            .permission(Permission::External)
+            .context(Global)
+            .args::<SetArgs>()
+            .result::<Switched>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_AUDIO_NAME, "Link Audio Name")
+            .description(
+                "Sets the name other apps in the Link session see this app by, as Settings' \
+                 Link page's Name does. An empty name is the computer's name, which a new \
+                 install has. It is a preference kept between starts, not part of the set. \
+                 `link.state` reports it.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<SetAudioNameArgs>()
+            .result::<AudioName>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_AUDIO_LATENCY, "Link Audio Latency")
+            .description(
+                "Sets the input latency of audio that arrives from the other apps in the Link \
+                 session, in milliseconds from 0 to 200 (20 at first), as Settings' Link page's \
+                 Latency does: incoming audio plays on the beat it was sent on, that much \
+                 later, and more of it is buffered. It is a preference kept between starts, \
+                 not part of the set. `link.state` reports it.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<SetAudioLatencyArgs>()
+            .result::<AudioLatency>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SYNC_TO_INCOMING_AUDIO, "Sync to Incoming Audio")
+            .description(
+                "Switches Sync to Incoming Audio, as Settings' Link page does: with it on, and \
+                 Link Audio on, Beatlayer delays its own playback by the latency so that the \
+                 audio it monitors from other apps in the session lines up with its own clips. \
+                 Only one of the session's apps should have it on. `on` left out switches to \
+                 the other state. It is a preference kept between starts, not part of the set. \
+                 `link.state` reports it.",
             )
             .permission(Permission::Edit)
             .context(Global)

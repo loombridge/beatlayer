@@ -426,6 +426,27 @@ fn case(ratchet: &mut Ratchet, name: &str, range: Range, build: impl FnOnce(&mut
         "{name}: residual {:.1} dB, first difference {:?}",
         comparison.residual_db, comparison.first_difference
     );
+    if comparison.first_difference.is_some() && name.starts_with("warp/") {
+        // DIAG (T646, temporary)
+        let wide = best_alignment(&comparison.offline, &comparison.live, 30_000, 4_096);
+        let head = |a: &Audio| a.channels[0][..6].to_vec();
+        eprintln!(
+            "DIAG {name}: wide lag {} corr {:.4}, offline head {:?}, live head {:?}, live frames {}",
+            wide.lag,
+            wide.correlation,
+            head(&comparison.offline),
+            head(&comparison.live),
+            comparison.live.frames()
+        );
+        for again in 0..2 {
+            let second = host.play_exactly(range.start, range.millis + MARGIN_MS);
+            let c2 = Comparison::of(comparison.offline.clone(), &second);
+            eprintln!(
+                "DIAG {name}: replay {again}: first difference {:?}, residual {:.1} dB",
+                c2.first_difference, c2.residual_db
+            );
+        }
+    }
     ratchet.check(name, MATCHES, comparison.exact());
 }
 

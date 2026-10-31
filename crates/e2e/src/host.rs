@@ -408,7 +408,9 @@ impl Host {
             }
             self.pump();
         }
-        panic!("waited ten seconds of test time for {what}");
+        let state = self.shell_mut().audio_mut().transport_state();
+        let stats = self.shell().audio().stats();
+        panic!("waited ten seconds of test time for {what}: DIAG state {state:?} stats {stats:?}");
     }
 
     /// Whether the engine's transport is playing.
@@ -515,6 +517,10 @@ impl Host {
         let started = state.clock - before - u64::try_from(played).unwrap_or_default();
         self.advance_ms(millis);
         let capture = self.recorder.stop();
+        eprintln!(
+            "DIAG started {started} played {played} position {:?} clock {} before {before}",
+            state.position, state.clock
+        );
         self.stop();
         capture.slice(
             usize::try_from(started).unwrap_or_default(),

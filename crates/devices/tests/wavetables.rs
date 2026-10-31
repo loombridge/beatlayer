@@ -404,7 +404,7 @@ fn a_table_is_built_off_the_audio_thread() {
     let mut built = None;
     for _ in 0..50_000_000u32 {
         // The audio thread's side, under the allocation trap.
-        bl_rt::rt_test!({ built = ready.next() });
+        bl_rt::rt_test!({ built = ready.poll() });
         if built.is_some() {
             break;
         }
@@ -415,5 +415,5 @@ fn a_table_is_built_off_the_audio_thread() {
     assert_eq!(built.table.frame_count(), 32);
     let expected = factory("Additive", "Odd Rise").unwrap().shared();
     assert!(built.table.ptr_eq(&expected), "shared through the cache");
-    assert!(ready.next().is_none(), "the missing file built nothing");
+    assert!(ready.poll().is_none(), "the missing file built nothing");
 }

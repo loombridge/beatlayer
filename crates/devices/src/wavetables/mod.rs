@@ -362,7 +362,7 @@ impl Ready {
     /// The next table a worker finished, if one did. A table whose request
     /// a later one has overtaken is dropped, so a slow build never replaces
     /// a newer choice. For the audio thread.
-    pub fn next(&mut self) -> Option<Built> {
+    pub fn poll(&mut self) -> Option<Built> {
         while let Ok(built) = self.built.pop() {
             let newest = self
                 .newest
@@ -399,8 +399,8 @@ mod tests {
             sink.push(built(2, "Odd Rise")).ok().unwrap();
             sink.push(built(1, "Falling Bells")).ok().unwrap();
         }
-        let first = ready.next().expect("the newer one");
+        let first = ready.poll().expect("the newer one");
         assert_eq!(first.sequence, 2);
-        assert!(ready.next().is_none(), "the older one is dropped");
+        assert!(ready.poll().is_none(), "the older one is dropped");
     }
 }

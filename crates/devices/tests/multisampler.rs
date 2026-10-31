@@ -1525,9 +1525,9 @@ fn the_filters_types_and_morph_match_their_prototypes() {
             (3.0, [FilterType::Notch12, FilterType::Notch24]),
         ] {
             for (slope, prototype) in types.into_iter().enumerate() {
-                // Drive acts on low-pass, high-pass and band-pass.
-                let drive = if kind < 3.0 { 0.5 } else { 0.0 };
-                cases.push((patch(kind, slope as f64, 0.0), prototype, drive));
+                // Clean ignores Drive, which is set to 12 dB here (the
+                // instrument filter spec, R9).
+                cases.push((patch(kind, slope as f64, 0.0), prototype, 0.0));
             }
         }
         // Morph passes through low-pass, band-pass, high-pass, notch and
@@ -2152,9 +2152,13 @@ fn every_destination_is_reachable() {
     let play = |extra: &[(bl_model::ParamId, f64)], dest: usize| {
         let mut params = patch.clone();
         params.extend_from_slice(extra);
-        // Morph's own destination needs the Morph type.
+        // Morph's own destination needs the Morph type, and Drive's a circuit
+        // that isn't Clean.
         if dest == dest::FILTER_MORPH {
             params.push((FILTER_TYPE, 4.0));
+        }
+        if dest == dest::FILTER_DRIVE {
+            params.push((FILTER_CIRCUIT, 2.0));
         }
         let mut rig = Rig::new(&params, 512);
         let (mut low, a) = tone(1, 1000.0);
@@ -2179,7 +2183,7 @@ fn every_destination_is_reachable() {
             &[(midi_param(1, 0), dest as f64), (midi_param(1, 2), amount)],
             dest,
         );
-        let reference = if dest == dest::FILTER_MORPH {
+        let reference = if dest == dest::FILTER_MORPH || dest == dest::FILTER_DRIVE {
             play(&[], dest)
         } else {
             base.clone()
@@ -2422,7 +2426,9 @@ fn an_older_sets_filters_render_as_they_did() {
         let mut l = layer(1, &noise);
         l.sustain = SustainMode::Loop;
         rig.give(vec![(l, Arc::clone(&noise))], false);
-        hashes.push(hash_of(&rig.render(9_600, &[on(0, 60, 1.0), on(2_000, 67, 0.7)])));
+        hashes.push(hash_of(
+            &rig.render(9_600, &[on(0, 60, 1.0), on(2_000, 67, 0.7)]),
+        ));
     }
     println!("{hashes:#x?}");
     assert_eq!(hashes, OLDER_RENDERS);

@@ -129,7 +129,7 @@ impl Per<'_> {
 
 /// What a block's filtering reads, for every frame (R11).
 #[derive(Clone, Copy)]
-pub struct Controls<'a> {
+pub struct PerFrame<'a> {
     /// Each voice's cutoff in the kit's semitones (69 is A4 at 440 Hz): per
     /// frame, one value per slot.
     pub cutoff: &'a [f32],
@@ -212,8 +212,9 @@ pub struct InstrumentFilter {
     /// Whether a block has played, before which a new setup replaces the
     /// first with nothing to fade from.
     played: bool,
-    /// The slots that started afresh since the last block.
-    fresh: Vec<u16>,
+    /// The slots that started afresh since the last block, and the frame
+    /// each started on.
+    fresh: Vec<(u16, u32)>,
     stride: usize,
     /// Work space for a block: the outgoing structure's audio, and Morph's
     /// two buffers.
@@ -226,7 +227,10 @@ impl InstrumentFilter {
     #[must_use]
     pub fn new(rate: f32, slots: usize, max_frames: usize) -> Self {
         let setup = Setup::new(0, false, 0);
-        let mut stages = [Stage::new(rate, slots, setup), Stage::new(rate, slots, setup)];
+        let mut stages = [
+            Stage::new(rate, slots, setup),
+            Stage::new(rate, slots, setup),
+        ];
         for stage in &mut stages {
             stage.start(setup);
         }
@@ -242,6 +246,17 @@ impl InstrumentFilter {
             stride,
             scratch: core::array::from_fn(|_| vec![0.0; max_frames.max(1) * 2 * stride]),
         }
+    }
+
+    /// Has a new voice start from the settings its slot last held and glide
+    /// to the current ones, as Simpler's voices did before this filter, so
+    /// older sets render as they did (R15).
+    #[must_use]
+    pub fn starting_from_last_settings(mut self) -> Self {
+        for stage in &mut self.stages {
+            stage.from_last = true;
+        }
+        self
     }
 
     /// How many values a frame of the per-voice buffers holds.
@@ -265,16 +280,21 @@ impl InstrumentFilter {
     }
 
     /// Starts slot `slot`'s voice afresh: its state clears and its settings
-    /// take their first frame's values, without gliding.
-    pub fn reset_voice(&mut self, slot: usize) {
-        if !self.fresh.contains(&(slot as u16)) {
-            self.fresh.push(slot as u16);
+    /// take their values at `frame`, where its sound starts, without
+    /// gliding.
+    pub fn reset_voice(&mut self, slot: usize, frame: usize) {
+        if !self
+            .fresh
+            .iter()
+            .any(|(lane, _)| usize::from(*lane) == slot)
+        {
+            self.fresh.push((slot as u16, frame as u32));
         }
     }
 
     /// Filters `frames` frames of `audio` (per frame, then per channel, one
     /// value per slot) for the first `hi` slots, in place.
-    pub fn process(&mut self, hi: usize, frames: usize, c: &Controls<'_>, audio: &mut [f32]) {
+    pub fn process(&mut self, hi: usize, frames: usize, c: &PerFrame<'_>, audio: &mut [f32]) {
         self.played = true;
         let used = frames * 2 * self.stride;
         let [work, a, b] = &mut self.scratch;
@@ -282,7 +302,14 @@ impl InstrumentFilter {
         if fading {
             work[..used].copy_from_slice(&audio[..used]);
             let old = &mut self.stages[1 - self.current];
-            old.run(hi, frames, c, &self.fresh, &mut work[..used], [&mut *a, &mut *b]);
+            old.run(
+                hi,
+                frames,
+                c,
+                &self.fresh,
+                &mut work[..used],
+                [&mut *a, &mut *b],
+            );
         }
         self.stages[self.current].run(hi, frames, c, &self.fresh, &mut audio[..used], [a, b]);
         if fading {
@@ -310,6 +337,10 @@ struct Stage {
     last: Vec<VoiceParams>,
     /// Each slot's two channels' states.
     state: Vec<[f64; STATES]>,
+    /// Whether a voice starts from the settings its slot last held.
+    from_last: bool,
+    /// The frame each slot's voice started on in this block, or 0.
+    first: Vec<u32>,
     rate: f64,
 }
 
@@ -320,6 +351,8 @@ impl Stage {
             banks: (0..4).map(|_| FilterBank::new(rate, slots, 2)).collect(),
             last: vec![VoiceParams::default(); slots],
             state: vec![[0.0; STATES]; slots * 2],
+            first: vec![0; slots],
+            from_last: false,
             rate: f64::from(rate),
         }
     }
@@ -329,26 +362,29 @@ impl Stage {
         self.setup = setup;
         self.state.fill([0.0; STATES]);
         let types = kit_types(setup.kind, setup.slope24);
+        self.last.fill(VoiceParams::default());
         for (bank, kind) in self.banks.iter_mut().zip(types) {
             bank.set_type(kind);
+            for lane in 0..self.last.len() {
+                bank.set_params(lane, &VoiceParams::default());
+            }
             bank.reset();
         }
-        // A NaN never equals the settings the next block brings.
-        self.last.fill(VoiceParams {
-            resonance: f32::NAN,
-            ..VoiceParams::default()
-        });
     }
 
     fn run(
         &mut self,
         hi: usize,
         frames: usize,
-        c: &Controls<'_>,
-        fresh: &[u16],
+        c: &PerFrame<'_>,
+        fresh: &[(u16, u32)],
         audio: &mut [f32],
         scratch: [&mut Vec<f32>; 2],
     ) {
+        self.first.fill(0);
+        for &(lane, frame) in fresh {
+            self.first[usize::from(lane)] = frame;
+        }
         if self.setup.circuit == Circuit::Clean {
             self.clean(hi, frames, c, fresh, audio, scratch);
         } else {
@@ -363,28 +399,41 @@ impl Stage {
         &mut self,
         hi: usize,
         frames: usize,
-        c: &Controls<'_>,
-        fresh: &[u16],
+        c: &PerFrame<'_>,
+        fresh: &[(u16, u32)],
         audio: &mut [f32],
         [work, sum]: [&mut Vec<f32>; 2],
     ) {
         let stride = self.banks[0].stride();
         let morph = self.setup.kind == Kind::Morph;
         let banks = if morph { 4 } else { 1 };
+        // A voice's values before its sound starts are what an earlier
+        // voice left in the buffers: they count from its first frame.
+        let first = &self.first;
+        let res = |lane: usize, frame: usize| {
+            c.res
+                .at(frame.max(first[lane] as usize), stride, lane)
+                .clamp(0.0, 1.0)
+        };
         let mut start = 0;
         while start < frames {
             for lane in 0..hi {
                 let params = VoiceParams {
-                    resonance: c.res.at(start, stride, lane).clamp(0.0, 1.0),
+                    resonance: res(lane, start),
                     ..VoiceParams::default()
                 };
-                let is_fresh = (start == 0 && fresh.contains(&(lane as u16)))
-                    || self.last[lane].resonance.is_nan();
+                let is_fresh = start == 0 && fresh.iter().any(|(l, _)| usize::from(*l) == lane);
+                let from = if is_fresh && self.from_last {
+                    self.last[lane]
+                } else {
+                    params
+                };
                 if is_fresh || params != self.last[lane] {
                     for bank in &mut self.banks[..banks] {
                         if is_fresh {
-                            bank.reset_voice(lane, &params);
-                        } else {
+                            bank.reset_voice(lane, &from);
+                        }
+                        if from != params || !is_fresh {
                             bank.set_params(lane, &params);
                         }
                     }
@@ -392,11 +441,7 @@ impl Stage {
                 }
             }
             let mut end = start + 1;
-            while end < frames
-                && (0..hi).all(|lane| {
-                    c.res.at(end, stride, lane) == c.res.at(start, stride, lane)
-                })
-            {
+            while end < frames && (0..hi).all(|lane| res(lane, end) == res(lane, start)) {
                 end += 1;
             }
             let cutoff = &c.cutoff[start * stride..end * stride];
@@ -439,12 +484,19 @@ impl Stage {
 
     /// OSR, MS2, SMP and PRD: each slot's channels through the scalar
     /// section, a voice at a time.
-    fn circuit(&mut self, hi: usize, frames: usize, c: &Controls<'_>, fresh: &[u16], audio: &mut [f32]) {
+    fn circuit(
+        &mut self,
+        hi: usize,
+        frames: usize,
+        c: &PerFrame<'_>,
+        fresh: &[(u16, u32)],
+        audio: &mut [f32],
+    ) {
         let stride = self.banks[0].stride();
         let setup = self.setup;
         for lane in 0..hi {
             let states = &mut self.state[lane * 2..lane * 2 + 2];
-            if fresh.contains(&(lane as u16)) {
+            if fresh.iter().any(|(l, _)| usize::from(*l) == lane) {
                 states.fill([0.0; STATES]);
             }
             // A voice that heard nothing and holds nothing makes nothing.
@@ -497,15 +549,27 @@ impl Coef {
         let hz = f64::from(hertz_of(pitch, REFERENCE_HZ));
         let hz = if hz.is_finite() { hz } else { 1_000.0 };
         let g = (PI * hz.clamp(1.0, rate * CUTOFF_LIMIT) / rate).tan();
-        let r = if res.is_finite() { f64::from(res).clamp(0.0, 1.0) } else { 0.0 };
+        let r = if res.is_finite() {
+            f64::from(res).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         let q_of = |q0: f64| q0 * (Q_MAX / q0).powf(r);
         let q = if setup.slope24 {
             [Q_FIRST, q_of(Q_SECOND)]
         } else {
             [q_of(FRAC_1_SQRT_2), 0.0]
         };
-        let d = if drive.is_finite() { f64::from(drive).clamp(0.0, 1.0) } else { 0.0 };
-        let m = if morph.is_finite() { f64::from(morph).clamp(0.0, 1.0) } else { 0.0 };
+        let d = if drive.is_finite() {
+            f64::from(drive).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let m = if morph.is_finite() {
+            f64::from(morph).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         Self {
             g,
             q,

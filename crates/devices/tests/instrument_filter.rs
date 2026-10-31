@@ -6,7 +6,7 @@
 use std::f64::consts::{PI, TAU};
 
 use bl_devices::instrument_filter::{
-    CIRCUITS, Circuit, Controls, InstrumentFilter, Kind, Per, Setup, offered,
+    CIRCUITS, Circuit, InstrumentFilter, Kind, Per, PerFrame, Setup, offered,
 };
 
 type C = (f64, f64);
@@ -46,7 +46,7 @@ impl Knobs {
 fn render(setup: Setup, rate: f64, knobs: Knobs, input: &[f32], block: usize) -> Vec<f32> {
     let mut filter = InstrumentFilter::new(rate as f32, 1, block);
     filter.set_setup(setup);
-    filter.reset_voice(0);
+    filter.reset_voice(0, 0);
     let stride = filter.stride();
     let mut out = Vec::with_capacity(input.len());
     for chunk in input.chunks(block) {
@@ -62,7 +62,7 @@ fn render(setup: Setup, rate: f64, knobs: Knobs, input: &[f32], block: usize) ->
             vec![knobs.morph; n],
             vec![knobs.drive; n],
         );
-        let controls = Controls {
+        let controls = PerFrame {
             cutoff: &cutoff,
             res: Per::Shared(&res),
             morph: Per::Shared(&morph),
@@ -130,7 +130,11 @@ fn prototype(setup: Setup, rate: f64, fc: f64, res: f64, hz: f64) -> C {
         let one = (1.0, 0.0);
         let low = div(one, (1.0 + s.0, s.1));
         let high = div(s, (1.0 + s.0, s.1));
-        let stage = if setup.kind == Kind::HighPass { high } else { low };
+        let stage = if setup.kind == Kind::HighPass {
+            high
+        } else {
+            low
+        };
         let pow = |z: C, n: usize| (0..n).fold(one, |acc, _| mul(acc, z));
         let loop_ = pow(stage, 4);
         let out = pow(stage, if setup.slope24 { 4 } else { 2 });
@@ -283,22 +287,48 @@ fn scratch_levels() {
             k.drive = 1.0;
             let out = render(s, rate, k, &noise(48_000, 1.0), 512);
             // A sine at the cutoff.
-            let sin = render(s, rate, Knobs { drive: 0.0, ..Knobs::at(1_000.0, 1.0) }, &sine(rate, 1_000.0, 1.0, 48_000), 512);
+            let sin = render(
+                s,
+                rate,
+                Knobs {
+                    drive: 0.0,
+                    ..Knobs::at(1_000.0, 1.0)
+                },
+                &sine(rate, 1_000.0, 1.0, 48_000),
+                512,
+            );
             // A kick, then silence.
             let mut kick = vec![0.0f32; 96_000];
             kick[..64].fill(0.5);
             let ring = render(s, rate, Knobs::at(1_000.0, 1.0), &kick, 512);
             let tail = &ring[48_000..];
-            let found = (900..1100).map(|hz| (hz, amplitude_at(&tail[..24_000], rate, f64::from(hz)))).fold((0, 0.0), |m, x| if x.1 > m.1 { x } else { m });
-            println!("{circuit:?} 24={slope24}: noise peak {:.3} ({:.1} dBFS); sine peak {:.3}; ring peak {:.3}, tail peak {:.4} at {} Hz amp {:.4}",
-                peak(&out), 20.0*peak(&out).log10(), peak(&sin), peak(&ring), peak(tail), found.0, found.1);
+            let found = (900..1100)
+                .map(|hz| (hz, amplitude_at(&tail[..24_000], rate, f64::from(hz))))
+                .fold((0, 0.0), |m, x| if x.1 > m.1 { x } else { m });
+            println!(
+                "{circuit:?} 24={slope24}: noise peak {:.3} ({:.1} dBFS); sine peak {:.3}; ring peak {:.3}, tail peak {:.4} at {} Hz amp {:.4}",
+                peak(&out),
+                20.0 * peak(&out).log10(),
+                peak(&sin),
+                peak(&ring),
+                peak(tail),
+                found.0,
+                found.1
+            );
         }
     }
     // R8's distortion
     for circuit in [Circuit::Ms2, Circuit::Smp, Circuit::Prd] {
         let s = setup(0, false, circuit);
-        let k = Knobs { drive: 0.5, ..Knobs::at(1_000.0, 0.7) };
+        let k = Knobs {
+            drive: 0.5,
+            ..Knobs::at(1_000.0, 0.7)
+        };
         let out = render(s, rate, k, &sine(rate, 100.0, 0.5, 48_000), 512);
-        println!("{circuit:?} THD {:.4}  peak {:.3}", thd(&out[24_000..], rate, 100.0), peak(&out));
+        println!(
+            "{circuit:?} THD {:.4}  peak {:.3}",
+            thd(&out[24_000..], rate, 100.0),
+            peak(&out)
+        );
     }
 }

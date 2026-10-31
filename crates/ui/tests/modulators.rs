@@ -243,11 +243,10 @@ fn unmap_removes_the_mapping() {
     );
 }
 
-/// The Shaper's shape display and its device.
-fn curve_rig() -> (Rig, DeviceId, Rect) {
+/// The shape display of a Shaper (or a CV Shaper) and its device.
+fn curve_rig(kind: &bl_model::DeviceKind, name: &str) -> (Rig, DeviceId, Rect) {
     let mut rig = rig();
-    let curve_type = bl_devices::modulator::curve_mod_type();
-    let curve = add(&mut rig.h, &curve_type.kind, &curve_type.name);
+    let curve = add(&mut rig.h, kind, name);
     let area = node_rect(&mut rig.h, "Curve Shape");
     (rig, curve, area)
 }
@@ -287,7 +286,29 @@ fn drag(h: &mut Harness, from: Pos2, to: Pos2, modifiers: Modifiers) {
 // Spec: modulation R23
 #[test]
 fn shaper_display_adds_moves_curves_and_deletes_breakpoints() {
-    let (mut rig, curve, area) = curve_rig();
+    let shaper = bl_devices::modulator::curve_mod_type();
+    shaper_gestures(&shaper.kind, &shaper.name);
+}
+
+// Spec: cv-tools R35
+#[test]
+fn cv_shapers_display_takes_the_shapers_gestures_and_has_no_mapping_cells() {
+    let shaper = bl_devices::cv_curve_type();
+    shaper_gestures(&shaper.kind, &shaper.name);
+    let (mut rig, _, _) = curve_rig(&shaper.kind, &shaper.name);
+    let nodes = Harness::nodes(&rig.h.frame(vec![]));
+    // The rig's LFO has the one Map button; CV Shaper has none.
+    assert_eq!(
+        nodes.iter().filter(|n| n.label == "Map 1").count(),
+        1,
+        "no Map button"
+    );
+}
+
+/// Adds, moves, curves and deletes a shape's breakpoints in the display of
+/// the Shaper of `kind`, and clears it and draws a preset.
+fn shaper_gestures(kind: &bl_model::DeviceKind, name: &str) {
+    let (mut rig, curve, area) = curve_rig(kind, name);
     assert_eq!(
         shape(&rig.h, curve).len(),
         3,

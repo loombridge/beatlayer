@@ -13,6 +13,7 @@
 //! | [`measure`] | A steady tone's pitch, a vowel's first two formants, how far below its harmonics the rest of a tone lies, and a swept tone's level against the rest of the output (warp-modes R34 to R36) | The strongest peak of one-second Hann frames with a parabolic refinement; the peaks of an all-pole fit to the average spectrum; the power outside the harmonics' bins; Kaiser-windowed frames around the swept frequency |
 //! | [`onsets`] | Transient times | Spectral flux with adaptive peak picking (after Böck, Krebs and Schedl, 2012), refined in the waveform |
 //! | [`tempo`] | Tempo (BPM) | The onset function's autocorrelation, weighted towards 120 BPM (after Ellis, 2007), refined by a line through the transients |
+//! | [`tempo_tracker`] | Tempo, beat phase and confidence in real time, for Tempo Follower (WP-9.12) | A comb-filter bank over the last 6 s of spectral-flux onset strength, a causal beat grid, and a lock-free copy of the input off the audio thread |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
 //! | [`loops`] | The span of a sample that repeats, for the autosampler | Rising zero crossings of the left channel, matched over 10 ms |
 //!
@@ -35,6 +36,10 @@ pub mod onsets;
 pub mod spectrum;
 pub mod stems;
 pub mod tempo;
+pub mod tempo_tracker;
+
+#[cfg(test)]
+bl_rt::install_trap!();
 
 mod stft;
 

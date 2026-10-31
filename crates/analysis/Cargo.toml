@@ -11,6 +11,9 @@ publish.workspace = true
 [dependencies]
 bl-dsp.workspace = true
 bl-media.workspace = true
+# The lock-free ring from the audio callback to the tempo tracker (WP-9.12), the
+# version the engine's rings use.
+rtrb = "0.4.0"
 # Spectra for the spectrum, the onsets, and the chroma (WP-1.16). The
 # version rubato's FFT resampler already brings in, so nothing new enters
 # the build.
@@ -23,6 +26,10 @@ rayon = "1.12.0"
 # nothing is fetched or linked at build time (`load-dynamic`, no default
 # features). API 28 is ONNX Runtime 1.28, the version the packages install.
 ort = { version = "=2.0.0-rc.14", default-features = false, features = ["std", "load-dynamic", "api-28"], optional = true }
+
+[dev-dependencies]
+# The allocation trap and real-time sections the copy's test runs under (WP-9.12).
+bl-rt.workspace = true
 
 [features]
 # Stem separation through ONNX Runtime.

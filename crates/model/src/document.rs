@@ -137,8 +137,11 @@ pub struct Settings {
     /// The archives of the set's ARA plug-ins (IMP-20), taken from the
     /// running plug-ins when the set is saved and given back when it opens.
     /// A set with no ARA plug-in doesn't write them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub ara_archives: Vec<crate::ara::AraArchive>,
+    ///
+    /// Shared, so the copies of the document that every command and undo
+    /// step make don't each copy the archives' bytes.
+    #[serde(default, skip_serializing_if = "no_archives")]
+    pub ara_archives: std::sync::Arc<Vec<crate::ara::AraArchive>>,
     /// The set's MIDI and key mappings (WP-7.1; the remote mapping spec, R1
     /// to R6). A set saved before them loads with none, and a set with none
     /// doesn't write them.
@@ -173,7 +176,7 @@ impl Default for Settings {
             grooves: GroovePool::default(),
             scale: Scale::default(),
             tuning: None,
-            ara_archives: Vec::new(),
+            ara_archives: std::sync::Arc::default(),
             remote: Vec::new(),
         }
     }
@@ -220,6 +223,10 @@ fn is_first_record_quantization(value: &RecordQuantization) -> bool {
 
 fn is_off(value: &bool) -> bool {
     !*value
+}
+
+fn no_archives(archives: &std::sync::Arc<Vec<crate::ara::AraArchive>>) -> bool {
+    archives.is_empty()
 }
 
 /// The Arrangement loop: where the loop brace sits, and whether the Loop

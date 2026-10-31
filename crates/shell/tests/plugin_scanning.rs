@@ -346,7 +346,9 @@ fn a_plugin_that_fails_a_scan_is_blocklisted_and_reported() {
     .unwrap();
     assert!(scan.plugins.is_empty());
     assert_eq!(scan.blocked.len(), 1);
-    assert!(!scan.blocked[0].reason.is_empty());
+    let reason = &scan.blocked[0].reason;
+    assert!(!reason.is_empty());
+    assert!(!reason.contains("crashed"), "{reason}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

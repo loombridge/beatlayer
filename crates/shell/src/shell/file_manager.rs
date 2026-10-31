@@ -12,11 +12,12 @@ use bl_model::{ClipData, Command, Document};
 use bl_project::ProjectFolder;
 use bl_shell_spec::file_manager::{
     self as ids, Backup, Backups, DeleteUnusedArgs, DeletedFiles, ExternalFiles, FileManagerState,
-    FileRow, FileSection, Location, OpenBackupArgs, ReplaceFileArgs, ReplacedFile, SaveCopyArgs,
-    SavedCopy, Scope, Search, ToggleArgs, UnusedFile, UnusedFiles, UnusedKind,
+    FileManagerView, FileRow, FileSection, Location, OpenBackupArgs, ReplaceFileArgs, ReplacedFile,
+    SaveCopyArgs, SavedCopy, Scope, Search, ToggleArgs, UnusedFile, UnusedFiles, UnusedKind,
 };
 use serde_json::Value;
 
+use super::packs::same_folder;
 use super::*;
 
 /// The File Manager's state (WP-6.63): whether it shows, which files it
@@ -152,12 +153,7 @@ impl Shell {
                 count: 0,
             });
         }
-        let search = Search {
-            folder: self.file_manager.search.folder.clone(),
-            project: self.file_manager.search.project,
-            library: self.file_manager.search.library,
-            candidates: self.file_manager.search.candidates.clone(),
-        };
+        let search = self.file_manager_search();
         FileManagerState {
             open: self.file_manager.open,
             scope,
@@ -172,6 +168,16 @@ impl Shell {
             search,
             hot_swap: self.file_manager.hot_swap.as_ref().map(|hot| hex(hot.hash)),
             packing: scope == Scope::Project,
+        }
+    }
+
+    /// The Automatic Search's settings and what its last search found (R14).
+    fn file_manager_search(&self) -> Search {
+        Search {
+            folder: self.file_manager.search.folder.clone(),
+            project: self.file_manager.search.project,
+            library: self.file_manager.search.library,
+            candidates: self.file_manager.search.candidates.clone(),
         }
     }
 
@@ -392,18 +398,70 @@ impl Shell {
         }
     }
 
+    /// Collects the open set's external files into its project folder and
+    /// saves it. Returns how many files were copied.
+    pub(super) fn collect_open_set(
+        &mut self,
+        path: &Path,
+        groups: &[ids::ExternalGroup],
+        library: Option<&Path>,
+    ) -> Result<usize, String> {
+        crate::plugins::capture_states(
+            &self.plugins,
+            &self.au,
+            &self.vst3,
+            &self.lv2,
+            &self.kit,
+            &mut self.editor,
+        );
+        self.store.set_windows(self.devices.windows().clone());
+        self.store.set_rack_views(self.devices.rack_views().clone());
+        self.store
+            .set_multisampler_views(self.devices.multisampler_views().clone());
+        self.store.set_folds(self.clip_view.folds().clone());
+        self.store
+            .set_scale_folds(self.clip_view.scale_folds().clone());
+        self.store.set_mpe_view(self.clip_view.mpe().clone());
+        self.store
+            .set_lane_views(self.arrangement.lane_views().clone());
+        self.store.set_column_widths(self.mixer.widths().clone());
+        self.store
+            .set_midi_tools(self.clip_view.midi_tools().saved());
+        let files = self.store.collect_groups(groups, library)?;
+        let copy = self.without_selection_arms();
+        let warnings = self
+            .store
+            .save(path, copy.as_ref().unwrap_or(&self.editor))
+            .map_err(|error| error.to_string())?;
+        self.saved_as(path.to_path_buf(), &warnings);
+        Ok(files)
+    }
+
     /// Collects the files every set in a project folder uses from outside
     /// it, and saves each set, which keeps the version it replaces in its
     /// project's `Backup` folder (R16). Returns how many files were copied.
     pub(super) fn collect_project(
-        &self,
+        &mut self,
         folder: &Path,
         groups: &[ids::ExternalGroup],
         library: Option<&Path>,
     ) -> Result<usize, String> {
+        // The open set is collected through its own store, so the next save
+        // keeps the new paths (R16); its file on disk isn't rewritten behind
+        // the editor's back.
+        let open = self
+            .set_path
+            .clone()
+            .filter(|open| open.parent().is_some_and(|open| same_folder(open, folder)));
+        if open.is_some() && self.dirty {
+            return Err("the open set has unsaved changes: save it first".to_owned());
+        }
         let imported = ProjectFolder::new(folder).imported();
         let mut copied = 0usize;
         for set in ProjectFolder::new(folder).sets().unwrap_or_default() {
+            if open.as_deref().is_some_and(|open| same_folder(open, &set)) {
+                continue;
+            }
             let (mut project, _) = bl_project::load(&set).map_err(|error| error.to_string())?;
             for file in project.media.iter().cloned().collect::<Vec<_>>() {
                 if file.path.is_inside() {
@@ -447,6 +505,9 @@ impl Shell {
                 bl_project::SetFile::open(&set).map_err(|error| error.to_string())?;
             file.save(&project).map_err(|error| error.to_string())?;
         }
+        if let Some(open) = open {
+            copied += self.collect_open_set(&open, groups, library)?;
+        }
         Ok(copied)
     }
 
@@ -472,7 +533,13 @@ impl Shell {
             // the other.
             self.plugin_list.hide();
         }
-        Ok(to_value(&self.file_manager_state()))
+        Ok(to_value(&FileManagerView {
+            open: self.file_manager.open,
+            scope: self.file_manager.scope,
+            project: self
+                .file_manager_root()
+                .map(|root| root.to_string_lossy().into_owned()),
+        }))
     }
 
     /// Runs `file_manager.replace_file` (R11, R13): every clip and device
@@ -640,13 +707,29 @@ impl Shell {
         if let Some(folder) = folder {
             self.file_manager.search.folder = Some(folder);
         }
-        Ok(to_value(&self.file_manager_state()))
+        Ok(to_value(&self.file_manager_search()))
     }
 
     /// Runs `file_manager.delete_unused` (R17): the files go to the
     /// system's trash.
     fn run_delete_unused(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let DeleteUnusedArgs { paths } = Self::args(id, args)?;
+        // Spec: file-management R17. Only the files the Unused Files section
+        // lists go, and none goes unless every path is one of them.
+        let listed: std::collections::BTreeSet<PathBuf> = self
+            .unused_files()
+            .into_iter()
+            .flat_map(|group| group.files)
+            .filter_map(|file| std::fs::canonicalize(file.path).ok())
+            .collect();
+        for path in &paths {
+            if !std::fs::canonicalize(path).is_ok_and(|path| listed.contains(&path)) {
+                return Err(ShellError::InvalidArgs {
+                    command: id.to_owned(),
+                    message: format!("{path} isn't in the Unused Files section"),
+                });
+            }
+        }
         let mut deleted = Vec::new();
         for path in paths {
             let path = PathBuf::from(path);

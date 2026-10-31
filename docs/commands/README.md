@@ -12918,6 +12918,48 @@ What the File Manager shows (R10 to R17).
 
 </details>
 
+### `FileManagerView`
+
+What `view.toggle_file_manager` returns: whether the File Manager shows and what it is set to list. The listing itself is `file_manager.state`.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `open` | boolean | yes | Whether the File Manager shows. |
+| `scope` | [`Scope`](#scope) | yes | Which files it shows. |
+| `project` | string or null | no | The project folder it works on, when it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `view.toggle_file_manager` returns: whether the File Manager shows and what it is set to list. The listing itself is `file_manager.state`.",
+  "properties": {
+    "open": {
+      "description": "Whether the File Manager shows.",
+      "type": "boolean"
+    },
+    "project": {
+      "description": "The project folder it works on, when it has one.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope": {
+      "$ref": "#/$defs/Scope",
+      "description": "Which files it shows."
+    }
+  },
+  "required": [
+    "open",
+    "scope"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FileReport`
 
 What `set.collect_all_and_save` and `set.relink_missing` return.

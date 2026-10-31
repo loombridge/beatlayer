@@ -528,7 +528,7 @@ Result: [`DetailState`](README.md#detailstate).
 
 **File Manager**. Permission: `read`. Contexts: `global`.
 
-Shows the File Manager in the detail area's place, or hides it, as File ▸ Manage Files and View ▸ File Manager do. `view` chooses which files it lists: "set" for the open set's, "project" for a project folder's, "user-library" for the User Library's. `project` names the project folder Manage Project works on, when it isn't the open set's. The File Manager's state is view state: it isn't saved in the set and it isn't an undo step.
+Shows the File Manager in the detail area's place, or hides it, as File ▸ Manage Files and View ▸ File Manager do. `view` chooses which files it lists: "set" for the open set's, "project" for a project folder's, "user-library" for the User Library's. `project` names the project folder Manage Project works on, when it isn't the open set's. The File Manager's state is view state: it isn't saved in the set and it isn't an undo step. It returns whether the File Manager shows and what it lists; the listing is `file_manager.state`.
 
 Default keys: none.
 
@@ -540,7 +540,7 @@ Arguments:
 | `project` | string or null | no | The project folder Manage Project shows, when it isn't the open set's. |
 | `view` | [`Scope`](README.md#scope) or null | no | Which files the File Manager shows: "set", "project" or "user-library". Left out, it keeps the view it shows. |
 
-Result: [`FileManagerState`](README.md#filemanagerstate).
+Result: [`FileManagerView`](README.md#filemanagerview).
 
 ### `view.toggle_full_height_browser`
 

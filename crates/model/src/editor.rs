@@ -78,6 +78,11 @@ struct Step {
     /// redoing brings it back. A step that only followed a selection leaves
     /// the scale as it is (the scales spec, R12).
     scale: Option<Scale>,
+    /// The set's tempo the step set, when the step changed it: redoing
+    /// brings it back. A peer's tempo in a Link session is no undo step, so
+    /// a step that didn't change the tempo leaves it as it is (the Link
+    /// spec, R3).
+    tempo: Option<bl_core::time::TempoMap>,
 }
 
 /// Who made a step in the history: the person, an agent by the name the
@@ -291,6 +296,10 @@ impl Editor {
             .is_some_and(|step| *step.document == self.document)
         {
             self.undo.pop_back();
+        } else if let Some(step) = self.undo.back_mut() {
+            // The step ends with the amended tempo, which redoing restores.
+            step.tempo = (step.document.settings.tempo != self.document.settings.tempo)
+                .then(|| self.document.settings.tempo.clone());
         }
         Ok(ChangeSet::between(&before, &self.document))
     }
@@ -319,10 +328,10 @@ impl Editor {
     /// archive, so it is a note for the set file. Returns whether the set
     /// changed.
     pub fn amend_ara_archives(&mut self, archives: Vec<crate::ara::AraArchive>) -> bool {
-        if self.document.settings.ara_archives == archives {
+        if *self.document.settings.ara_archives == archives {
             return false;
         }
-        self.document.settings.ara_archives = archives;
+        self.document.settings.ara_archives = archives.into();
         true
     }
 
@@ -353,6 +362,11 @@ impl Editor {
     pub fn follow_scale(&mut self, scale: Scale) -> ChangeSet {
         let before = self.document.clone();
         self.document.settings.scale = scale;
+        // An open transaction began with the followed scale, so cancelling
+        // it, or recording it, doesn't count the follow as its own.
+        for open in &mut self.open {
+            open.start.settings.scale = scale;
+        }
         ChangeSet::between(&before, &self.document)
     }
 
@@ -382,6 +396,10 @@ impl Editor {
     pub fn follow_tempo(&mut self, bpm: bl_core::time::Bpm) -> ChangeSet {
         let before = self.document.clone();
         self.document.settings.tempo = bl_core::time::TempoMap::constant(bpm);
+        // As in [`Editor::follow_scale`].
+        for open in &mut self.open {
+            open.start.settings.tempo = self.document.settings.tempo.clone();
+        }
         ChangeSet::between(&before, &self.document)
     }
 
@@ -552,6 +570,7 @@ impl Editor {
             maker,
             document,
             scale,
+            tempo,
         } = self.undo.pop_back().ok_or(EditError::NothingToUndo)?;
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
@@ -562,12 +581,17 @@ impl Editor {
         if scale.is_none() {
             document.settings.scale = self.document.settings.scale;
         }
+        // So is a peer's tempo, which no step made.
+        if tempo.is_none() {
+            document.settings.tempo = self.document.settings.tempo.clone();
+        }
         let after = std::mem::replace(&mut self.document, document);
         self.redo.push(Step {
             label,
             maker,
             document: Box::new(after),
             scale,
+            tempo,
         });
         Ok(())
     }
@@ -596,20 +620,26 @@ impl Editor {
             maker,
             document,
             scale,
+            tempo,
         } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
         // A step that changed the scale brings it back; one that didn't
         // leaves it as it is.
-        if let Some(scale) = scale {
-            document.settings.scale = scale;
+        match scale {
+            Some(scale) => document.settings.scale = scale,
+            None => document.settings.scale = self.document.settings.scale,
         }
+        document.settings.tempo = tempo
+            .clone()
+            .unwrap_or_else(|| self.document.settings.tempo.clone());
         let before = std::mem::replace(&mut self.document, document);
         self.undo.push_back(Step {
             label,
             maker,
             document: Box::new(before),
             scale,
+            tempo,
         });
         Ok(())
     }
@@ -733,11 +763,14 @@ impl Editor {
         self.redo.clear();
         let scale = (before.settings.scale != self.document.settings.scale)
             .then_some(self.document.settings.scale);
+        let tempo = (before.settings.tempo != self.document.settings.tempo)
+            .then(|| self.document.settings.tempo.clone());
         self.undo.push_back(Step {
             label,
             maker,
             document: Box::new(before),
             scale,
+            tempo,
         });
         self.trim();
     }
@@ -1298,5 +1331,106 @@ mod tests {
         assert_eq!(editor.document().track(track).unwrap().mixer().volume, 0.2);
         editor.clear_history().unwrap();
         assert!(!editor.can_redo());
+    }
+
+    fn bpm(editor: &Editor) -> f64 {
+        editor.document().settings().tempo.bpm_at(Ticks::ZERO).get()
+    }
+
+    #[test]
+    fn a_peers_tempo_survives_undo_and_redo_of_an_earlier_step() {
+        // Spec: link R3
+        use bl_core::time::Bpm;
+        let mut editor = Editor::new();
+        midi_track(&mut editor);
+        editor.follow_tempo(Bpm::new(130.0).unwrap());
+        editor.undo().unwrap();
+        assert_eq!(bpm(&editor), 130.0);
+        editor.redo().unwrap();
+        assert_eq!(bpm(&editor), 130.0);
+    }
+
+    #[test]
+    fn a_step_that_set_the_tempo_brings_it_back_on_redo_and_a_taps_amend_is_kept() {
+        use bl_core::time::{Bpm, TempoMap};
+        let tempo = |bpm| TempoMap::constant(Bpm::new(bpm).unwrap());
+        let mut editor = Editor::new();
+        editor
+            .apply(Command::SetTempo {
+                tempo: tempo(100.0),
+            })
+            .unwrap();
+        editor
+            .apply_into_newest(Command::SetTempo {
+                tempo: tempo(110.0),
+            })
+            .unwrap();
+        editor.undo().unwrap();
+        assert_ne!(bpm(&editor), 110.0);
+        editor.redo().unwrap();
+        assert_eq!(bpm(&editor), 110.0);
+    }
+
+    #[test]
+    fn cancelling_a_transaction_keeps_a_tempo_and_scale_followed_inside_it() {
+        // Spec: link R3; scales R12
+        use bl_core::time::Bpm;
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        let scale = Scale::new(2, crate::scale::ScaleName::Minor);
+        editor.begin("Drag");
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        editor.follow_tempo(Bpm::new(130.0).unwrap());
+        editor.follow_scale(scale);
+        editor.cancel().unwrap();
+        assert_eq!(bpm(&editor), 130.0);
+        assert_eq!(editor.document().settings().scale, scale);
+        assert_eq!(editor.document().track(track).unwrap().mixer().volume, 1.0);
+    }
+
+    #[test]
+    fn a_follow_inside_a_transaction_is_not_the_steps_own_tempo() {
+        use bl_core::time::Bpm;
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        editor.begin("Drag");
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        editor.follow_tempo(Bpm::new(130.0).unwrap());
+        editor.commit().unwrap();
+        editor.undo().unwrap();
+        editor.follow_tempo(Bpm::new(140.0).unwrap());
+        editor.redo().unwrap();
+        assert_eq!(bpm(&editor), 140.0);
+    }
+
+    #[test]
+    fn undo_steps_share_ara_archives() {
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        editor.amend_ara_archives(vec![crate::AraArchive {
+            plugin: "p".into(),
+            archive_id: "a".into(),
+            data: vec![7_u8; 4 << 20],
+        }]);
+        for step in 1..=100_u32 {
+            editor
+                .apply(Command::SetVolume {
+                    track,
+                    volume: f64::from(step) / 100.0,
+                })
+                .unwrap();
+        }
+        let current = &editor.document.settings.ara_archives;
+        // The track's own step predates the archives, so check the 100 after.
+        for step in editor.undo.iter().rev().take(100) {
+            assert!(std::sync::Arc::ptr_eq(
+                &step.document.settings.ara_archives,
+                current
+            ));
+        }
     }
 }

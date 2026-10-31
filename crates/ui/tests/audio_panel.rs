@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use bl_model::{ClipData, ClipId, Document};
 use common::{Harness, Node, Window};
-use egui::{Pos2, Rect};
+use egui::{Event, PointerButton, Pos2, Rect};
 use serde_json::json;
 
 /// A folder of its own under the system's temporary folder, removed when
@@ -500,4 +500,77 @@ fn a_file_dropped_on_the_clip_view_replaces_the_sample() {
     );
     p.h.click(at);
     assert_ne!(p.audio().media, before, "the clip plays the new file");
+}
+
+fn press(at: Pos2, pressed: bool) -> Event {
+    Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Default::default(),
+    }
+}
+
+// Spec: sample-editor R15. Dragging a number box is one undo step, not one
+// for each step of the drag.
+#[test]
+fn dragging_gain_is_one_undo_step() {
+    let mut p = Panel::new("gain-drag");
+    let all = p.nodes();
+    let at = centre(Harness::node(&all, "Gain"));
+    let before = steps(&p.h);
+    p.h.frame(vec![Event::PointerMoved(at)]);
+    p.h.frame(vec![press(at, true)]);
+    for i in 1..=20 {
+        p.h.frame(vec![Event::PointerMoved(
+            at - egui::vec2(0.0, 3.0 * i as f32),
+        )]);
+    }
+    p.h.frame(vec![press(at - egui::vec2(0.0, 60.0), false)]);
+    p.h.settle();
+    assert!(p.audio().gain > 1.0, "the drag raised the gain");
+    assert_eq!(steps(&p.h), before + 1, "one undo step for the drag");
+}
+
+// Spec: sample-editor R15. A click on a control with several clips selected
+// is one undo step, and one Undo puts every clip back.
+#[test]
+fn warp_on_two_selected_clips_is_one_undo_step() {
+    let mut p = Panel::new("warp-two");
+    let track = p.doc().clip_track(p.clip).unwrap();
+    let path = p.path.display().to_string();
+    p.h.shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [path], "track": track, "at": bl_core::time::Ticks::WHOLE.get() * 3 }),
+        )
+        .unwrap();
+    let clips: Vec<ClipId> = p
+        .doc()
+        .track(track)
+        .unwrap()
+        .clips()
+        .map(|c| c.id)
+        .collect();
+    assert_eq!(clips.len(), 2);
+    p.h.shell
+        .run("arrangement.select_clips", json!({ "clips": clips }))
+        .unwrap();
+    let warp = |p: &Panel| -> Vec<bool> {
+        clips
+            .iter()
+            .map(|c| match &p.doc().clip(*c).unwrap().data {
+                ClipData::Audio(a) => a.warp,
+                ClipData::Midi(_) => unreachable!("an audio clip"),
+            })
+            .collect()
+    };
+    let start = warp(&p);
+    let before = steps(&p.h);
+    let all = p.nodes();
+    p.h.click(centre(Harness::node(&all, "Warp")));
+    assert!(warp(&p).iter().zip(&start).all(|(now, was)| now != was));
+    assert_eq!(steps(&p.h), before + 1);
+    p.h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(warp(&p), start);
 }

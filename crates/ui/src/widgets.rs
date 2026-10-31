@@ -710,6 +710,30 @@ pub fn switch(
     pressed.then_some(!on)
 }
 
+/// Opens a named gesture while the number box or field of `id_salt` is
+/// dragged, and closes it when the drag ends, so the drag is one undo step.
+/// Call it before the box, so the Begin comes ahead of the drag's first
+/// command.
+pub(crate) fn number_box_gesture(
+    ui: &Ui,
+    id_salt: &str,
+    label: &str,
+    events: &mut Vec<crate::main_window::UiEvent>,
+) {
+    use crate::main_window::UiEvent;
+    let id = Id::new(("number-box", id_salt));
+    let flag = id.with("drag-gesture");
+    let open = ui.data(|d| d.get_temp::<bool>(flag)).unwrap_or(false);
+    let dragged = ui.ctx().is_being_dragged(id);
+    if dragged && !open {
+        ui.data_mut(|d| d.insert_temp(flag, true));
+        events.push(UiEvent::BeginNamedGesture(label.to_owned()));
+    } else if !dragged && open {
+        ui.data_mut(|d| d.remove::<bool>(flag));
+        events.push(UiEvent::EndGesture);
+    }
+}
+
 /// A number box in the Settings window, as Live's are: it shows the value
 /// with its unit, and dragging up or down, Up and Down with the keyboard
 /// focus on it, or a screen reader's increment and decrement step

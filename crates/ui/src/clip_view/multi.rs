@@ -313,6 +313,7 @@ impl ClipViewUi {
                 .collect()
         };
         let rows_of_keys = KeyRows::of(fold, &keys_held, self.top, self.first);
+        self.first = rows_of_keys.first;
 
         // Where each note is drawn, the foreground clip's last so it wins.
         let hovered_bar = ui
@@ -392,6 +393,7 @@ impl ClipViewUi {
                 ..note.clone()
             })
             .collect();
+        let chosen_mask = note_lanes::selection_mask(moved.len(), &fg.selected);
         let frame = note_lanes::Frame {
             clip: fg.clip,
             layout: &geometry.layout,
@@ -400,6 +402,7 @@ impl ClipViewUi {
             notes: &moved,
             groups: &fg.midi.groups,
             selected: &fg.selected,
+            selected_mask: &chosen_mask,
             face: fg.colour,
             hovered: None,
             step: arrangement.grid_ticks(doc),
@@ -846,6 +849,7 @@ impl ClipViewUi {
                             grab_key: keys_rows
                                 .key_at(grid, press.y)
                                 .unwrap_or_else(|| f32::from(note.map_or(60, |note| note.key))),
+                            rows: keys_rows.keys.clone(),
                             grab: at_press - origin,
                             copy: keys.copy,
                             targets: targets.clone(),
@@ -1043,8 +1047,9 @@ impl ClipViewUi {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll != 0.0 {
                 if keys_rows.folded {
+                    // Row 0 is the highest key: up shows the rows before.
                     self.first =
-                        (self.first + scroll / KEY_HEIGHT).clamp(0.0, keys_rows.scroll_room());
+                        (self.first - scroll / KEY_HEIGHT).clamp(0.0, keys_rows.scroll_room());
                 } else {
                     self.top = (self.top + scroll / KEY_HEIGHT).clamp(0.0, 127.0);
                 }
@@ -1053,7 +1058,7 @@ impl ClipViewUi {
         if let Some(delta) = crate::middle::pan(ui, grid) {
             if keys_rows.folded {
                 self.first =
-                    (self.first + delta.y / KEY_HEIGHT).clamp(0.0, keys_rows.scroll_room());
+                    (self.first - delta.y / KEY_HEIGHT).clamp(0.0, keys_rows.scroll_room());
             } else {
                 self.top = (self.top + delta.y / KEY_HEIGHT).clamp(0.0, 127.0);
             }

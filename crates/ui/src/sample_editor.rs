@@ -355,8 +355,9 @@ impl SampleEditorUi {
     }
 
     /// Forgets the drag, as showing another clip or the Envelopes tab does.
-    pub fn reset(&mut self) {
-        self.drag = None;
+    /// Returns whether a drag, which may hold a gesture open, was dropped.
+    pub fn reset(&mut self) -> bool {
+        self.drag.take().is_some()
     }
 
     /// Whether a drag is under way.

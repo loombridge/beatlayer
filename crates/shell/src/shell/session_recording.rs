@@ -456,9 +456,12 @@ impl Shell {
                 settings.record_quantization,
             )
         };
-        let length = (tempo.frames_to_ticks(so_far.end, rate)
+        // Rounded up to the grid, so the clip's length changes (and the
+        // engine syncs) once per sixteenth, not once per poll.
+        let raw = (tempo.frames_to_ticks(so_far.end, rate)
             - tempo.frames_to_ticks(so_far.start, rate))
         .max(MIN_LENGTH);
+        let length = Ticks((raw.0 + MIN_LENGTH.0 - 1) / MIN_LENGTH.0 * MIN_LENGTH.0);
         let mut changed = false;
         let mut failure = None;
         for slot in run
@@ -537,6 +540,7 @@ impl Shell {
     ) {
         let crate::recording::Outcome {
             take,
+            rate,
             delay,
             files,
             midi,
@@ -544,8 +548,7 @@ impl Shell {
             launches: _,
         } = outcome;
         let files = files.unwrap_or_default();
-        let (Some(take), Some(rate)) = (take, self.audio.sample_rate().and_then(SampleRate::new))
-        else {
+        let Some(take) = take else {
             // The take never began: Stop came before the grid line.
             self.abandon_session_recording_with(run);
             return;

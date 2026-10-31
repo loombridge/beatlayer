@@ -389,6 +389,19 @@ impl Default for LaneUi {
     }
 }
 
+/// Which of `len` notes the places `selected` name, for a lookup that costs
+/// the same however many notes are selected.
+#[must_use]
+pub fn selection_mask(len: usize, selected: &[u32]) -> Vec<bool> {
+    let mut mask = vec![false; len];
+    for place in selected {
+        if let Some(on) = mask.get_mut(*place as usize) {
+            *on = true;
+        }
+    }
+    mask
+}
+
 /// What the lanes need of the editor's frame.
 pub struct Frame<'a> {
     pub clip: ClipId,
@@ -401,6 +414,9 @@ pub struct Frame<'a> {
     /// The clip's probability groups.
     pub groups: &'a [NoteGroup],
     pub selected: &'a [u32],
+    /// Which notes are selected, by place: [`selection_mask`] of `selected`,
+    /// which every per-note lookup in a frame goes through.
+    pub selected_mask: &'a [bool],
     /// The clip's track colour.
     pub face: Color32,
     /// The note the pointer marks, by hovering it or its marker (R4).
@@ -411,6 +427,14 @@ pub struct Frame<'a> {
     /// The tuning the clip's track plays, which names the notes (the tunings
     /// spec, R29).
     pub tuning: Option<&'a bl_model::Tuning>,
+}
+
+impl Frame<'_> {
+    /// Whether the note at `place` is selected.
+    #[must_use]
+    pub fn chosen(&self, place: usize) -> bool {
+        self.selected_mask.get(place).copied().unwrap_or(false)
+    }
 }
 
 /// The values of the selected notes' `field`, for the footer.
@@ -625,13 +649,14 @@ impl LaneUi {
         }
     }
 
-    /// Drops everything under way, as another clip showing does.
-    pub fn reset(&mut self) {
-        self.drag = None;
-        self.footer_drag = None;
+    /// Drops everything under way, as another clip showing does. Returns
+    /// whether a drag, which may hold a gesture open, was dropped.
+    pub fn reset(&mut self) -> bool {
+        let dragged = self.drag.take().is_some() | self.footer_drag.take().is_some();
         self.divider = false;
         self.focus = None;
         self.typed = None;
+        dragged
     }
 
     /// Esc: drops a drag, or else a number being typed.
@@ -705,6 +730,17 @@ impl LaneUi {
                 );
             }
             let leads = (*field == NoteField::Chance).then(|| leaders(frame.notes));
+            // The groups a selected note belongs to, whose markers wear the
+            // selection too.
+            let chosen_groups: std::collections::HashSet<u32> = if leads.is_some() {
+                frame
+                    .selected
+                    .iter()
+                    .filter_map(|s| frame.notes.get(*s as usize)?.group)
+                    .collect()
+            } else {
+                std::collections::HashSet::new()
+            };
             for (index, note) in frame.notes.iter().enumerate() {
                 if leads.as_ref().is_some_and(|leads| !leads[index]) {
                     continue;
@@ -713,20 +749,14 @@ impl LaneUi {
                 if x + STEM_WIDTH < grid.left() || x > grid.right() {
                     continue;
                 }
-                let place = u32::try_from(index).unwrap_or(u32::MAX);
                 let top = y_of_value(*lane, *field, note_value(note, *field));
                 let stem = Rect::from_min_max(pos2(x, top), pos2(x + STEM_WIDTH, lane.bottom()));
                 // A group's marker stands for every note of it: it is chosen
                 // when one is, and marked when the pointer marks one.
-                let chosen = frame.selected.contains(&place)
-                    || (leads.is_some()
-                        && note.group.is_some()
-                        && frame.selected.iter().any(|s| {
-                            frame
-                                .notes
-                                .get(*s as usize)
-                                .is_some_and(|n| n.group == note.group)
-                        }));
+                let chosen = frame.chosen(index)
+                    || note
+                        .group
+                        .is_some_and(|group| chosen_groups.contains(&group));
                 let marked = is_marked(frame.notes, frame.hovered, index);
                 let ink = if chosen {
                     colours.time_selection.0
@@ -1043,12 +1073,10 @@ impl LaneUi {
                 let top = y_of_value(lane, field, note_value(note, field));
                 let rect = Rect::from_min_max(pos2(x, top), pos2(x + STEM_WIDTH, lane.bottom()));
                 let item = ui.interact(rect, id.with(("marker", place)), Sense::hover());
-                let value = value_text(field, note_value(note, field));
-                let name = crate::clip_view::key_label(frame.tuning, note.key);
                 ui.ctx().accesskit_node_builder(item.id, |node| {
                     node.set_role(Role::ListItem);
-                    node.set_label(name);
-                    node.set_value(value);
+                    node.set_label(crate::clip_view::key_label(frame.tuning, note.key));
+                    node.set_value(value_text(field, note_value(note, field)));
                 });
             }
         }
@@ -1936,4 +1964,75 @@ fn paint_button(
             colours.pending.0
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_mask_names_the_selected_notes_and_ignores_places_past_the_end() {
+        assert_eq!(selection_mask(4, &[1, 3, 9]), [false, true, false, true]);
+    }
+
+    /// How many rectangles the Velocity lane filled in the selection's colour
+    /// for 4,000 notes, given the selection as a list and as a mask.
+    fn chosen_stems(selected: &[u32], mask: &[bool]) -> usize {
+        let notes: Vec<Note> = (0..4000)
+            .map(|i| {
+                Note::new(
+                    60 + (i % 12) as u8,
+                    Ticks(i64::from(i) * 10),
+                    Ticks(10),
+                    100,
+                )
+            })
+            .collect();
+        let shell =
+            crate::arrangement::benchmark::shell_with(bl_shell::files::factory_default_set());
+        let theme = Theme::bundled(true);
+        let view = Rect::from_min_size(pos2(0.0, 0.0), vec2(1600.0, 900.0));
+        let layout = note_layout(view, &[(NoteField::Velocity, 80.0)]);
+        let frame = Frame {
+            clip: ClipId(bl_core::id::Id::new(1).unwrap()),
+            layout: &layout,
+            start: Ticks::ZERO,
+            length: Ticks(40_000),
+            notes: &notes,
+            groups: &[],
+            selected,
+            selected_mask: mask,
+            face: Color32::GRAY,
+            hovered: None,
+            step: Ticks(120),
+            snap: true,
+            tuning: None,
+        };
+        let lanes = LaneUi::default();
+        let mut output = egui::Context::default().run_ui(egui::RawInput::default(), |ui| {
+            lanes.paint(ui, &shell, &theme, &frame);
+        });
+        output.textures_delta.clear();
+        output
+            .shapes
+            .iter()
+            .filter(|shape| {
+                matches!(&shape.shape, Shape::Rect(rect)
+                    if rect.fill == theme.colors.time_selection.0)
+            })
+            .count()
+    }
+
+    // Spec: note-editing R2. A lane marks the selected notes by looking each
+    // one up in the frame's mask, which costs the same however many are
+    // selected; the list itself isn't scanned for every marker.
+    #[test]
+    fn markers_are_chosen_by_the_mask_and_not_by_scanning_the_selection() {
+        // The notes at the grid's edges are cut off.
+        assert!(chosen_stems(&[], &[true; 4000]) > 3990);
+        assert_eq!(
+            chosen_stems(&(0..4000).collect::<Vec<_>>(), &[false; 4000]),
+            0
+        );
+    }
 }

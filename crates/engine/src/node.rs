@@ -482,7 +482,7 @@ impl TransportInfo {
     #[must_use]
     pub fn window_end(&self, frames: usize) -> i64 {
         if self.speed == 1.0 {
-            self.position.get() + frames as i64
+            self.position.get().saturating_add(frames as i64)
         } else {
             ((self.exact(frames) - self.speed / 2.0 - TIE).ceil() as i64).min(self.until)
         }

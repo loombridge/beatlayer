@@ -287,6 +287,10 @@ struct Instance {
     /// it sends for them are dropped when they arrive, rather than made
     /// undo steps of their own (oldest first, at most [`ECHOES`]).
     echoes: Vec<(u32, f64)>,
+    /// Each parameter's value as the set has it: what the plug-in last
+    /// reported, or what a command set. A values rescan reports the values
+    /// that differ.
+    known: BTreeMap<u32, f64>,
 }
 
 /// An editor embedded in a host window of Beatlayer's own (WP-2.10): the
@@ -541,9 +545,21 @@ impl ClapHost {
         instance
             .echoes
             .extend(changes.iter().map(|(param, value)| (param.0, *value)));
+        instance
+            .known
+            .extend(changes.iter().map(|(param, value)| (param.0, *value)));
         let over = instance.echoes.len().saturating_sub(ECHOES);
         instance.echoes.drain(..over);
         Ok(CommandRun { result, changes })
+    }
+
+    /// How many plug-ins let go of are still kept for their processors.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn closing(&self) -> usize {
+        lock(&self.inner.main)
+            .get()
+            .map_or(0, |main| main.closing.len())
     }
 
     /// The plug-ins loaded so far, as device types.
@@ -813,7 +829,7 @@ impl ClapHost {
         let instance = main.instances.get_mut(&device)?;
         let mut plugin = instance.instance.plugin_handle();
         let has_editor = has_editor(&mut plugin);
-        let values = plugin
+        let values: Vec<(ParamId, f64)> = plugin
             .get_extension::<PluginParams>()
             .map(|params| {
                 describe::params(&mut plugin)
@@ -825,6 +841,8 @@ impl ClapHost {
                     .collect()
             })
             .unwrap_or_default();
+        #[cfg(feature = "test-hooks")]
+        crate::count_value_reads(values.len());
         let editor_scale = instance.editor.as_ref().map(|editor| editor.scale);
         let editor_size = instance.editor.as_ref().map(|editor| editor.window.size());
         Some(PluginStatus {
@@ -844,6 +862,22 @@ impl ClapHost {
             editor_size,
             values,
         })
+    }
+
+    /// Whether the device's plug-in has an editor, whether it's open, and
+    /// whether it's hidden, or `None` if the device has no CLAP plug-in:
+    /// what [`ClapHost::status`] says of the editor, without reading the
+    /// parameters.
+    #[must_use]
+    pub fn editor_state(&self, device: DeviceId) -> Option<(bool, bool, bool)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        if main.missing.contains_key(&device) {
+            return Some((false, false, false));
+        }
+        let instance = main.instances.get_mut(&device)?;
+        let has_editor = has_editor(&mut instance.instance.plugin_handle());
+        Some((has_editor, instance.editor_open, instance.editor_hidden))
     }
 
     /// Lets go of every plug-in whose device isn't in `keep`, as when a set
@@ -1344,6 +1378,11 @@ fn close(main: &mut Main, device: DeviceId, mut instance: Instance) {
         ends.status.hand_back.store(true, Relaxed);
     }
     instance.refused = Some("let go of".to_owned());
+    // Its current ends too: once its node is gone, an abandoned queue is
+    // dropped with the processor still in it, which `try_deactivate` needs.
+    if let Some(ends) = instance.ends.take() {
+        instance.retired.push(ends);
+    }
     let mut discarded = Vec::new();
     pump(device, &mut instance, &mut discarded);
     if instance.out {
@@ -1450,6 +1489,7 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         held: BTreeMap::new(),
         commands: None,
         echoes: Vec::new(),
+        known: BTreeMap::new(),
     };
     instance.commands = list_commands(&mut instance.instance);
     // Spec: clap-hosting R9, R11. The saved state first, then the set's
@@ -1460,6 +1500,10 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         instance.failure = Some(format!("{error}; it starts from its defaults"));
     }
     set_values(&mut instance, device);
+    instance.known = values(&mut instance.instance.plugin_handle())
+        .into_iter()
+        .map(|(id, value)| (id.0, value))
+        .collect();
     main.instances.insert(device.id, instance);
     main.generation += 1;
     true
@@ -1636,7 +1680,11 @@ fn take_back(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamC
         while let Ok(change) = ends.params.pop() {
             take_change(
                 device,
-                (&mut instance.gestures, &mut instance.held),
+                (
+                    &mut instance.gestures,
+                    &mut instance.held,
+                    &mut instance.known,
+                ),
                 &mut instance.echoes,
                 change,
                 changes,
@@ -1756,13 +1804,38 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
             };
             take_change(
                 device,
-                (&mut instance.gestures, &mut instance.held),
+                (
+                    &mut instance.gestures,
+                    &mut instance.held,
+                    &mut instance.known,
+                ),
                 &mut instance.echoes,
                 change,
                 changes,
             );
         }
         changed = true;
+    }
+    // Spec: clap-hosting R6. A plug-in that changed its values in bulk, as
+    // by loading a preset in its own editor, asks the host to read them
+    // again: each value that isn't the set's comes into it.
+    if instance.lent.is_none()
+        && instance
+            .instance
+            .access_handler(|m| m.rescan.replace(false))
+    {
+        let now = values(&mut instance.instance.plugin_handle());
+        for (param, value) in &now {
+            if instance.known.insert(param.0, *value) != Some(*value) {
+                changes.retain(|c| !(c.device == device && c.param == *param));
+                changes.push(ParamChange {
+                    device,
+                    param: *param,
+                    value: *value,
+                });
+                changed = true;
+            }
+        }
     }
     if instance
         .instance
@@ -1791,12 +1864,17 @@ fn pump(device: DeviceId, instance: &mut Instance, changes: &mut Vec<ParamChange
 /// holds, is dropped.
 fn take_change(
     device: DeviceId,
-    (gestures, held): (&mut BTreeSet<u32>, &mut BTreeMap<u32, f64>),
+    (gestures, held, known): (
+        &mut BTreeSet<u32>,
+        &mut BTreeMap<u32, f64>,
+        &mut BTreeMap<u32, f64>,
+    ),
     echoes: &mut Vec<(u32, f64)>,
     change: ParamOut,
     changes: &mut Vec<ParamChange>,
 ) {
     let mut emit = |id: u32, value: f64| {
+        known.insert(id, value);
         if let Some(at) = echoes.iter().position(|echo| *echo == (id, value)) {
             echoes.remove(at);
             return;

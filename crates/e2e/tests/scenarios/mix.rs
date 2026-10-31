@@ -247,19 +247,8 @@ fn a_mix_ducks_groups_sends_freezes_and_undoes_to_the_start() {
             )
         }),
     );
-    // Spec: freeze-and-bounce R6. A frozen track is part of the set, which
-    // saves and opens like any other.
-    ratchet.check(
-        "mix/freeze",
-        "the set with a frozen MIDI track keeps the model's rules",
-        host.document().check_invariants(),
-    );
-    ratchet.check(
-        "mix/freeze",
-        "the set with a frozen MIDI track saves and reopens",
-        save_and_reopen(&mut host),
-    );
-    // Unfrozen again, so the rest of the mix can save.
+    // Unfrozen again; the frozen set is saved and reopened at the end, since
+    // reopening ends the undo history the mix steps back through.
     host.run_ok("track.unfreeze", json!({ "tracks": [pad] }));
     host.settle();
     let thawed = host.export(0, 3 * BAR, &solo(pad));
@@ -341,5 +330,19 @@ fn a_mix_ducks_groups_sends_freezes_and_undoes_to_the_start() {
             ensure(residual < -60.0, || format!("residual {residual:.1} dB")),
         );
     }
+    // Spec: freeze-and-bounce R6, R10. A frozen track is part of the set,
+    // which saves and opens like any other.
+    host.run_ok("track.freeze", json!({ "tracks": [pad] }));
+    host.settle();
+    ratchet.check(
+        "mix/freeze",
+        "the set with a frozen MIDI track keeps the model's rules",
+        host.document().check_invariants(),
+    );
+    ratchet.check(
+        "mix/freeze",
+        "the set with a frozen MIDI track saves and reopens",
+        save_and_reopen(&mut host),
+    );
     ratchet.finish();
 }

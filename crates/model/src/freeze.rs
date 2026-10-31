@@ -46,6 +46,11 @@ pub struct FrozenClip {
     /// The tempo the clip was rendered at, in BPM: its warp map keeps the
     /// file on the beats it played then (R6).
     pub tempo: f64,
+    /// Warp markers between the first and last, where the tempo map changes
+    /// inside the clip, so a ramp doesn't stretch the file between two
+    /// markers (R6). Empty where the tempo is steady.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<crate::warp::WarpMarker>,
     /// The clip's length in ticks, for the warp map.
     pub length: Ticks,
     /// The clip's own data before the freeze, kept so unfreezing plays it
@@ -148,16 +153,15 @@ impl FrozenTrack {
         audio.warp = true;
         audio.tempo = Some(region.tempo);
         audio.warp_mode = crate::warp_settings::WarpMode::Beats;
-        audio.warp_markers = vec![
-            WarpMarker {
-                time: region.start,
-                beat: Ticks::ZERO,
-            },
-            WarpMarker {
-                time: region.end,
-                beat: played,
-            },
-        ];
+        audio.warp_markers.push(WarpMarker {
+            time: region.start,
+            beat: Ticks::ZERO,
+        });
+        audio.warp_markers.extend(region.markers.iter().copied());
+        audio.warp_markers.push(WarpMarker {
+            time: region.end,
+            beat: played,
+        });
         if region.cycle.is_some() {
             audio.looping = true;
             audio.loop_start = 0.0;

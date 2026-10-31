@@ -1710,7 +1710,11 @@ impl ArrangementUi {
         // (accessibility R10).
         for locator in doc.locators() {
             let x = (horizontal.x(locator.position) + f64::from(layout.scrub.left())) as f32;
-            if x < layout.scrub.left() - 40.0 || x > layout.scrub.right() + 40.0 {
+            // The locator being dragged keeps its widget, which alone sees
+            // the release.
+            if self.locator_drag != Some(locator.id)
+                && (x < layout.scrub.left() - 40.0 || x > layout.scrub.right() + 40.0)
+            {
                 continue;
             }
             let id = locator_id(locator.id);
@@ -1861,6 +1865,15 @@ impl ArrangementUi {
                     invocation: None,
                 });
             }
+        }
+        // A drag whose locator is gone (deleted mid-drag) never sees its
+        // release: end it once the pointer is up.
+        if self.locator_drag.is_some() && ui.input(|i| !i.pointer.any_down()) {
+            self.locator_drag = None;
+            events.push(UiEvent::Gesture {
+                phase: GesturePhase::Commit,
+                invocation: None,
+            });
         }
         // The locators this frame drew, so the next frame can tell a new
         // one and give it the focus (time-editing R3).

@@ -762,7 +762,7 @@ fn the_file_manager_commands_are_registered_and_reach_the_agent_api() {
     }
     for (id, permission) in [
         ("file_manager.state", Permission::External),
-        ("file_manager.replace_file", Permission::Edit),
+        ("file_manager.replace_file", Permission::External),
         ("file_manager.hot_swap", Permission::Edit),
         ("file_manager.edit_file", Permission::External),
         ("file_manager.set_search_folder", Permission::Read),

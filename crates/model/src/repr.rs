@@ -320,6 +320,7 @@ impl TryFrom<DocumentRepr> for Document {
                 if let Some(colour) = scene.colour {
                     crate::colour::check_swatch("scene colour", colour)?;
                 }
+                scene.follow.check()?;
             }
         }
         let mut document = Self {
@@ -1251,6 +1252,17 @@ mod tests {
         let follow = loaded.slot(track, scene).unwrap().launch.follow;
         assert_eq!((follow.chance_a, follow.linked), (40, false));
         assert_eq!(loaded.scene(scene).unwrap().follow, follow);
+        // A chance over 100 in a saved set, on the clip or on the scene (the
+        // set holds one of each, saved as `"chance_a":40`), is refused.
+        let saved = serde_json::to_string(&doc).unwrap();
+        let (before, after) = saved.split_once(r#""chance_a":40"#).unwrap();
+        let (middle, last) = after.split_once(r#""chance_a":40"#).unwrap();
+        for text in [
+            format!(r#"{before}"chance_a":200{middle}"chance_a":40{last}"#),
+            format!(r#"{before}"chance_a":40{middle}"chance_a":200{last}"#),
+        ] {
+            assert!(load(serde_json::from_str(&text).unwrap()).is_err());
+        }
 
         // The set as it was saved without them opens with the defaults.
         let older = load(plain.clone()).unwrap();

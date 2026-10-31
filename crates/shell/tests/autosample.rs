@@ -518,3 +518,68 @@ fn cancel_deletes_the_files_and_changes_nothing() {
     );
     assert_eq!(shell.editor().undo_history().len(), history, "no undo step");
 }
+
+// Spec: multisampler R73. A run under way belongs to the set it began in:
+// a new set gets no track from it, and its files are deleted.
+#[test]
+fn a_new_set_drops_the_run_under_way() {
+    let scratch = Scratch::new("new-set");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    shell
+        .run(
+            ids::AUTOSAMPLE,
+            json!({ "device": device, "name": "Drift", "lowest": 60, "highest": 84,
+                    "step": 3, "velocity_layers": 2, "note_length": 0.3,
+                    "release_tail": 0.1, "wait": false }),
+        )
+        .unwrap();
+    shell.poll();
+    assert!(shell.autosample_status().running);
+    let folder = scratch.path("Song Project/Samples/Processed/Autosample/Drift");
+    assert!(folder.is_dir(), "a sample was written");
+
+    shell.run("set.new", json!({})).unwrap();
+    assert!(!shell.autosample_status().running, "it ends with its set");
+    let fresh = shell.editor().document().clone();
+    for _ in 0..200 {
+        shell.poll();
+    }
+
+    assert!(!shell.autosample_status().running);
+    assert_eq!(*shell.editor().document(), fresh, "no track from the run");
+    assert_eq!(shell.editor().undo_history().len(), 0);
+    let left = std::fs::read_dir(&folder).map_or(0, |entries| entries.count());
+    assert_eq!(left, 0, "the file is deleted");
+}
+
+// Spec: multisampler R70. A run that ends while the person drags a clip
+// lands its track when the drag ends, inside no drag's transaction.
+#[test]
+fn a_run_that_ends_during_a_drag_lands_after_it() {
+    let scratch = Scratch::new("drag");
+    let mut shell = saved_shell(&scratch);
+    let device = polysynth(&mut shell);
+    let tracks = |shell: &Shell| shell.editor().document().top_level().count();
+    let before = tracks(&shell);
+    shell
+        .run(
+            ids::AUTOSAMPLE,
+            json!({ "device": device, "name": "Drift", "lowest": 60, "highest": 60,
+                    "step": 1, "velocity_layers": 1, "note_length": 0.1,
+                    "release_tail": 0.1, "wait": false }),
+        )
+        .unwrap();
+    shell.begin_gesture("Change volume");
+    for _ in 0..200 {
+        shell.poll();
+    }
+    assert!(shell.autosample_status().running, "it waits for the drag");
+    assert_eq!(tracks(&shell), before);
+    shell.end_gesture();
+    for _ in 0..200 {
+        shell.poll();
+    }
+    assert!(!shell.autosample_status().running);
+    assert_eq!(tracks(&shell), before + 1, "the track landed");
+}

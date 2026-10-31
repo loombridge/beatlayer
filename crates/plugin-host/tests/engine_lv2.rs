@@ -173,3 +173,43 @@ fn the_latency_a_plugin_reports_lines_the_tracks_up() {
     );
     assert_eq!(second.heap_operations(), 0);
 }
+
+// Spec: delay-compensation R6, offline-plugin-renders R12. A render's copy of
+// the plug-in starts from the latency the engine's plug-in last reported, so
+// the render holds the other track back from its first frame.
+#[test]
+fn a_lent_lv2_plugin_renders_with_its_latency_compensated() {
+    let Some(host) = lv2_host() else { return };
+    let mut editor = Editor::new();
+    dc_track(&mut editor);
+    let (through, _) = dc_track(&mut editor);
+    let id = plugin(&mut editor, through, 1.0);
+
+    // The engine's plug-in runs once and reports its latency.
+    {
+        let mut first = offline(&host);
+        first.sync(editor.document());
+        first.render(FRAMES as u64, |_| {});
+        host.idle();
+        assert_eq!(host.status(id).unwrap().latency, LATENCY);
+    }
+
+    let loan = host.lend().unwrap();
+    let mut registry = testing::registry(&Arc::new(Probe::default()));
+    registry.add(loan.factory());
+    let mut render = Offline::new(EngineConfig::new(RATE, FRAMES), registry);
+    render.sync(editor.document());
+    let mut out = Vec::new();
+    render.render(FRAMES as u64, |o| out.extend_from_slice(o.channel(0)));
+    let latency = LATENCY as usize;
+    assert!(
+        out[..latency].iter().all(|s| *s == 1.0),
+        "{:?}",
+        &out[..latency]
+    );
+    assert!(
+        out[latency..].iter().all(|s| *s == 2.0),
+        "{:?}",
+        &out[latency..]
+    );
+}

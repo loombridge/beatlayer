@@ -1459,3 +1459,152 @@ fn a_new_set_gets_neither_the_recording_nor_the_automation_take_of_the_old_one()
             .all(|label| label != "Record Automation")
     );
 }
+
+/// Starts the recording with Automation Arm on, plays, and moves the fader
+/// of `track` part way through, as the new-set test does.
+fn record_with_automation(control: &NullControl, shell: &mut Shell, track: TrackId) {
+    control.set_input_tone(2, 12_000.0, 0.5);
+    shell
+        .run("arrangement.automation_arm", json!({ "on": true }))
+        .unwrap();
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(control, shell, 100);
+    shell
+        .run("mixer.set_volume", json!({ "track": track, "volume": 0.5 }))
+        .unwrap();
+    play_for(control, shell, 100);
+}
+
+/// Spec: recording R4. Nothing of a recording is left in `shell`: no clips,
+/// no take lanes, no Automation step.
+fn assert_no_take_in_the_set(shell: &mut Shell) {
+    let state = transport_state(shell);
+    assert_eq!(state["recording"], Value::Null);
+    assert_eq!(state["last_recording"], Value::Null);
+    assert!(
+        shell
+            .editor()
+            .document()
+            .tracks()
+            .all(|track| track.clips().next().is_none() && track.take_lanes().len() == 0),
+        "no clips in the set"
+    );
+    assert!(
+        shell
+            .editor()
+            .undo_history()
+            .all(|label| label != "Record Automation")
+    );
+}
+
+// Spec: recording R4. Throwing the changes away ends the recording and the
+// automation take under way: they were made against the set that's gone.
+#[test]
+fn discard_changes_drops_the_recording_and_the_automation_take() {
+    let dir = TestDir::new("discard");
+    let (mut shell, control) = duplex_shell();
+    save_set(&mut shell, &dir);
+    let track = armed_track(&mut shell, 3, "Guitar");
+    assert!(shell.is_dirty(), "the new track is an unsaved change");
+    record_with_automation(&control, &mut shell, track);
+
+    shell.run("set.discard_changes", json!({})).unwrap();
+    shell.run("transport.stop", json!({})).unwrap();
+    play_for(&control, &mut shell, 400);
+
+    assert!(!shell.is_dirty(), "the take didn't dirty the set again");
+    assert_no_take_in_the_set(&mut shell);
+}
+
+// Spec: recording R4. A backup that opens as the set doesn't receive the
+// recording and the automation take of the song it replaced.
+#[test]
+fn open_backup_gets_neither_the_recording_nor_the_automation_take() {
+    let dir = TestDir::new("open-backup");
+    let (mut shell, control) = duplex_shell();
+    let folder = save_set(&mut shell, &dir);
+    let track = armed_track(&mut shell, 3, "Guitar");
+    shell.run("set.save", json!({})).unwrap();
+    let older = bl_project::backups(folder.join("Backup").as_path(), "Take")
+        .pop()
+        .expect("the second save backed up the first")
+        .path;
+    record_with_automation(&control, &mut shell, track);
+    // Moving the fader changed the set; a backup opens over a saved one.
+    shell.run("set.save", json!({})).unwrap();
+
+    shell
+        .run(
+            "set.open_backup",
+            json!({ "path": older.to_string_lossy() }),
+        )
+        .unwrap();
+    shell.run("transport.stop", json!({})).unwrap();
+    play_for(&control, &mut shell, 400);
+
+    assert_no_take_in_the_set(&mut shell);
+}
+
+// Spec: recording R4. A take and an automation take that end while the
+// person drags a clip land when the drag ends: inside the drag's
+// transaction, the drag's next frame would throw them away.
+#[test]
+fn takes_that_end_during_a_drag_land_after_it() {
+    let dir = TestDir::new("drag");
+    let (mut shell, control) = duplex_shell();
+    save_set(&mut shell, &dir);
+    let track = armed_track(&mut shell, 3, "Guitar");
+    shell
+        .invoke("track.create", json!({ "kind": "audio", "name": "Loop" }))
+        .unwrap();
+    let loop_track = shell.editor().document().top_level().last().unwrap();
+    impulse_wav(&dir.0.join("tick.wav"), 48_000, 0);
+    let placed = shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [dir.arg("tick.wav")], "track": loop_track, "at": 0 }),
+        )
+        .unwrap();
+    let clip = placed["clips"][0]["clip"].clone();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    record_with_automation(&control, &mut shell, track);
+
+    // The take stops and a drag begins before its clips are made.
+    shell.run("transport.stop", json!({})).unwrap();
+    let frame = |by: i64| bl_shell::Invocation::new("arrangement.move_clips", json!({ "by": by }));
+    shell
+        .gesture(bl_shell::GesturePhase::Update, Some(&frame(960)))
+        .unwrap();
+    testing::wait_for(&control, &mut shell, "the take to end", |shell| {
+        transport_state(shell)["recording"] == Value::Null
+    });
+    let on_track = |shell: &Shell| {
+        shell
+            .editor()
+            .document()
+            .track(track)
+            .map_or(0, |track| track.clips().count())
+    };
+    assert_eq!(on_track(&shell), 0, "the clips wait for the drag");
+    shell
+        .gesture(bl_shell::GesturePhase::Update, Some(&frame(1_920)))
+        .unwrap();
+    shell
+        .gesture(bl_shell::GesturePhase::Commit, Some(&frame(1_920)))
+        .unwrap();
+
+    // The recorded clip is on the armed track, and the fader's moves are an
+    // automation step of their own.
+    wait_for_clip(&control, &mut shell, track);
+    testing::wait_for(&control, &mut shell, "the automation take", |shell| {
+        shell
+            .editor()
+            .undo_history()
+            .any(|label| label == "Record Automation")
+    });
+}

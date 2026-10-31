@@ -517,9 +517,9 @@ pub(crate) fn specs() -> Vec<CommandSpec> {
                 "Saves the pad's chain as the default pad: a sample dropped on an empty pad \
                  afterwards makes its chain from that default, with the sample in the \
                  first sampler. The one saved last is used. A pad of one chain only. It \
-                 changes nothing in the set.",
+                 changes nothing in the set. Writes a file outside the project.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(DeviceView)
             .args::<PadArgs>()
             .result::<DeviceViewState>(),

@@ -1,12 +1,12 @@
 //! Offline rendering: the engine without a device and without threads.
 
-use bl_model::{ContentHash, DeviceId, Document};
+use bl_model::{ContentHash, DeviceId, Document, MetronomeSettings};
 
 use crate::EngineConfig;
-use crate::compiler::Compiler;
+use crate::compiler::{Compiler, Update};
 use crate::engine::{Sender, channel};
 use crate::gc::Collector;
-use crate::message::Report;
+use crate::message::{Report, TransportCommand};
 use crate::processor::{Output, Processor};
 use crate::registry::Registry;
 use crate::sched::{Pool, PoolConfig};
@@ -117,10 +117,20 @@ impl Offline {
     /// is kept for [`Offline::missing_media`].
     pub fn sync(&mut self, document: &Document) -> Vec<DeviceId> {
         let mut update = self.compiler.sync(document);
+        without_clicks(&mut update);
         let unhosted = std::mem::take(&mut update.unhosted);
         self.missing = std::mem::take(&mut update.missing);
         self.sender.send_update(update);
         unhosted
+    }
+
+    /// How far Main's output lags song time under the last program, in
+    /// frames: what a render discards from its start so that its first frame
+    /// is the frame the song starts on (delay-compensation R10). A plug-in's
+    /// latency counts from the compile that follows its first block.
+    #[must_use]
+    pub fn output_latency(&self) -> u64 {
+        u64::from(self.compiler.main_latency())
     }
 
     /// The media that clips sent to the engine by the last
@@ -166,7 +176,19 @@ impl Offline {
         let scene_override = self.monitor.state().scene_override;
         if scene_override != self.override_sent {
             self.override_sent = scene_override;
-            let update = self.compiler.set_override(scene_override);
+            let mut update = self.compiler.set_override(scene_override);
+            without_clicks(&mut update);
+            self.sender.send_update(update);
+        }
+        // Spec: delay-compensation R6. What the shell does for an engine on a
+        // device: each device whose node reports another latency than the
+        // compensated one is reported back, and compiled again. The document
+        // is the same, so the transport keeps what the render set: its loop,
+        // and no metronome (export R3).
+        let changes = self.monitor.state().latency_changes.clone();
+        for (device, frames) in changes {
+            let mut update = self.compiler.latency(device, frames);
+            update.transport.clear();
             self.sender.send_update(update);
         }
         self.processor.output()
@@ -212,6 +234,17 @@ impl Offline {
     }
 }
 
+/// A render has no clicks and no count-in, whatever the set's metronome says
+/// (the export spec, R3): nothing it plays is a take, and a count-in would
+/// delay the song.
+fn without_clicks(update: &mut Update) {
+    for command in &mut update.transport {
+        if let TransportCommand::SetMetronome(settings) = command {
+            *settings = MetronomeSettings::default();
+        }
+    }
+}
+
 impl Drop for Offline {
     fn drop(&mut self) {
         // The program and its nodes are freed here, before the engine is
@@ -245,7 +278,7 @@ impl std::fmt::Debug for Offline {
 #[cfg(test)]
 mod tests {
     use bl_core::time::{Bpm, SampleRate, TempoMap, Ticks};
-    use bl_model::{Command, Device, DeviceKind, Editor, TrackId, TrackKind};
+    use bl_model::{Command, CountIn, Device, DeviceKind, Editor, TrackId, TrackKind};
 
     use super::*;
     use crate::message::{Action, ScheduledCommand, TransportCommand};
@@ -356,6 +389,33 @@ mod tests {
         assert_eq!(offline.heap_operations(), 0);
         let (second, _) = render(512);
         assert_eq!(bits(&first), bits(&second));
+    }
+
+    #[test]
+    fn a_render_has_no_clicks_and_no_count_in() {
+        // Spec: export R3
+        let play = |editor: &Editor| {
+            let mut offline = Offline::new(
+                EngineConfig::new(SampleRate::HZ_48000, 512),
+                Registry::new(),
+            );
+            offline.sync(editor.document());
+            offline.sender().transport(TransportCommand::Play);
+            let mut out = Vec::new();
+            offline.render(96_000, |output| out.extend_from_slice(output.channel(0)));
+            bits(&out)
+        };
+        let (mut editor, _, _) = song();
+        let quiet = play(&editor);
+        for count_in in [CountIn::None, CountIn::Bars1] {
+            editor
+                .apply(Command::SetMetronomeEnabled { enabled: true })
+                .unwrap();
+            editor
+                .apply(Command::SetMetronomeCountIn { count_in })
+                .unwrap();
+            assert_eq!(quiet, play(&editor), "{count_in:?}");
+        }
     }
 
     #[test]

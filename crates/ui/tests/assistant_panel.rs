@@ -203,8 +203,11 @@ fn a_scripted_turns_messages_and_calls_are_drawn_in_order_and_every_control_is_n
             text: "Adding a track.".to_owned(),
             tool_calls: vec![ToolCall {
                 id: "c1".to_owned(),
-                name: "track_create".to_owned(),
-                arguments: json!({ "id": track, "kind": "audio", "name": "New", "index": 0 }),
+                name: "run".to_owned(),
+                arguments: json!({
+                    "command": "track.create",
+                    "args": { "id": track, "kind": "audio", "name": "New", "index": 0 },
+                }),
             }],
             stop: Stop::End,
         },

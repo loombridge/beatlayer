@@ -105,8 +105,11 @@ fn new_track(shell: &mut Shell, call: &str) -> ToolCall {
     let track: bl_model::TrackId = shell.new_id();
     ToolCall {
         id: call.to_owned(),
-        name: "track_create".to_owned(),
-        arguments: json!({ "id": track, "kind": "audio", "name": "New", "index": 0 }),
+        name: "run".to_owned(),
+        arguments: json!({
+            "command": "track.create",
+            "args": { "id": track, "kind": "audio", "name": "New", "index": 0 },
+        }),
     }
 }
 
@@ -146,7 +149,7 @@ fn a_scripted_turns_messages_and_tool_calls_appear_in_order() {
             result,
             ..
         } => {
-            assert_eq!(name, "track_create");
+            assert_eq!(name, "run");
             assert_eq!(command.as_deref(), Some("track.create"));
             assert!(matches!(result, Some(Ok(_))), "{result:?}");
         }
@@ -165,8 +168,11 @@ fn a_refused_call_shows_why_it_didnt_run() {
             "",
             vec![ToolCall {
                 id: "c1".to_owned(),
-                name: "assistant_set_model".to_owned(),
-                arguments: json!({ "model": "other" }),
+                name: "run".to_owned(),
+                arguments: json!({
+                    "command": "assistant.set_model",
+                    "args": { "model": "other" },
+                }),
             }],
         ),
         say("I can't change that.", vec![]),
@@ -418,8 +424,8 @@ impl Provider for CutOff {
     fn stream(&self, _request: &Request, on_event: &mut dyn FnMut(Event)) -> Result<Reply, Error> {
         on_event(Event::ToolCall(ToolCall {
             id: "c1".to_owned(),
-            name: "track_create".to_owned(),
-            arguments: json!({}),
+            name: "run".to_owned(),
+            arguments: json!({ "command": "track.create" }),
         }));
         Err(Error::Transport("the connection closed".to_owned()))
     }
@@ -441,4 +447,34 @@ fn a_failed_turn_leaves_no_call_running() {
         "{rows:?}"
     );
     assert!(matches!(rows.last(), Some(Row::Notice(_))), "{rows:?}");
+}
+
+#[test]
+fn a_turns_changes_are_journalled_as_the_one_edit_it_was() {
+    // Spec: crash-recovery R1, R21.
+    let dir = temp_dir("journal");
+    let set = dir.join("Song Project").join("Song.blset");
+    bl_project::SetFile::new(&set)
+        .save(&bl_project::Project::new())
+        .unwrap();
+    let mut shell = Shell::headless();
+    shell.use_recovery(dir.join("recovery")).unwrap();
+    shell
+        .run("set.open", json!({ "path": set.to_string_lossy() }))
+        .unwrap();
+    shell
+        .run("settings.set_continuous_save", json!({ "on": true }))
+        .unwrap();
+    let provider = Script::new(vec![
+        say("Adding.", vec![new_track(&mut shell, "c1")]),
+        say("Done.", vec![]),
+    ]);
+
+    run_turn(&mut shell, &provider, &mut Quiet, "Add a track").unwrap();
+    shell.flush_recovery().unwrap();
+
+    let history = shell.run("set.save_history", json!({})).unwrap();
+    assert_eq!(history["rows"][0]["kind"], "save_point", "{history}");
+    assert_eq!(history["rows"][0]["label"], "Assistant", "{history}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

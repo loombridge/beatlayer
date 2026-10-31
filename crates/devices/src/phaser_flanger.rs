@@ -142,6 +142,9 @@ pub const DIVISIONS: [(&str, f64); 17] = [
 const MAX_NOTCHES: usize = 16;
 const MAX_DELAY_SECS: f64 = 0.5;
 
+/// Frames between updates of the filters' coefficients.
+const COEFF_GRID: u64 = 32;
+
 /// Phaser-Flanger's device type.
 #[must_use]
 pub fn phaser_flanger_type() -> DeviceType {
@@ -432,6 +435,13 @@ pub struct PhaserFlanger {
     safe_bass_lp: [Biquad; 2],
     warmth_filter: [Biquad; 2],
     delays: [ModDelayLine; 2],
+    /// Frames processed so far: the Safe Bass and warmth filters' coefficients
+    /// follow the parameters on a grid counted from it, so a render doesn't
+    /// depend on the block size.
+    frames_done: u64,
+    /// Each channel's centre, spread and notch count the all-passes'
+    /// coefficients were last made for.
+    allpass_key: [Option<(f64, f64, usize)>; 2],
     feedback_state: [f32; 2],
     input: [Vec<f32>; 2],
     output: [Vec<f32>; 2],
@@ -455,6 +465,8 @@ impl PhaserFlanger {
             safe_bass_lp: [Biquad::default(); 2],
             warmth_filter: [Biquad::default(); 2],
             delays: [ModDelayLine::new(max_len), ModDelayLine::new(max_len)],
+            frames_done: 0,
+            allpass_key: [None; 2],
             feedback_state: [0.0; 2],
             input: [vec![0.0; frames], vec![0.0; frames]],
             output: [vec![0.0; frames], vec![0.0; frames]],
@@ -481,97 +493,112 @@ impl NativeDevice for PhaserFlanger {
         let rate_f64 = self.sample_rate.as_f64();
 
         let mode_idx = val(MODE).round() as usize;
-        let amount = (val(AMOUNT) / 100.0).clamp(0.0, 1.0);
-        let feedback = (val(FEEDBACK) / 100.0).clamp(0.0, 0.99) as f32;
         let fb_invert = val(FEEDBACK_INVERT) >= 0.5;
-        let fb_coeff = if fb_invert { -feedback } else { feedback };
-        let warmth = (val(WARMTH) / 100.0).clamp(0.0, 1.0) as f32;
-        let dry_wet = (val(DRY_WET) / 100.0).clamp(0.0, 1.0) as f32;
-
         let notches = (val(NOTCHES).round() as usize).clamp(1, MAX_NOTCHES);
-        let center = val(CENTER).clamp(20.0, 20_000.0);
-        let spread = val(SPREAD).clamp(0.0, 100.0);
-        let blend = val(BLEND).clamp(0.0, 1.0);
-
-        let flanger_time_ms = val(FLANGER_TIME).clamp(0.05, 20.0);
-        let doubler_time_ms = val(DOUBLER_TIME).clamp(5.0, 100.0);
 
         let lfo_wave = WAVE_OF[(val(LFO_WAVE).round() as usize).min(WAVE_OF.len() - 1)];
         let lfo_mode_idx = val(LFO_MODE).round() as usize;
-        let lfo_hz = val(LFO_HZ).clamp(0.01, 40.0);
         let lfo_div_idx = (val(LFO_DIVISION).round() as usize).min(DIVISIONS.len() - 1);
+        // In Hz the LFO runs at 1 Hz times the rate's ramp, frame by frame.
         let lfo_rate = if lfo_mode_idx == 0 {
-            Rate::Hertz(lfo_hz)
+            Rate::Hertz(1.0)
         } else {
             Rate::Beats(DIVISIONS[lfo_div_idx].1)
         };
-
         let lfo_stereo_idx = val(LFO_STEREO).round() as usize;
-        let lfo_phase = val(LFO_PHASE);
-        let lfo_spin = val(LFO_SPIN);
-        let lfo_stereo = if lfo_stereo_idx == 0 {
-            Stereo::Phase(lfo_phase)
-        } else {
-            Stereo::Spin(lfo_spin)
-        };
-        let lfo_duty = (val(LFO_DUTY) / 100.0).clamp(-1.0, 1.0);
 
-        let lfo2_mix = (val(LFO2_MIX) / 100.0).clamp(0.0, 1.0);
         let lfo2_mode_idx = val(LFO2_MODE).round() as usize;
-        let lfo2_hz = val(LFO2_HZ).clamp(0.01, 40.0);
         let lfo2_div_idx = (val(LFO2_DIVISION).round() as usize).min(DIVISIONS.len() - 1);
-        let lfo2_effective_hz = if lfo2_mode_idx == 0 {
-            lfo2_hz
-        } else {
-            let bpm = audio.tempo().bpm_at(bl_core::time::Ticks(0)).get() * audio.speed();
-            bpm / 60.0 / DIVISIONS[lfo2_div_idx].1.max(1e-9)
-        };
+        let lfo2_sync_hz = audio.bpm() / 60.0 / DIVISIONS[lfo2_div_idx].1.max(1e-9);
 
         let env_on = val(ENV_ON) >= 0.5;
-        let env_amount = (val(ENV_AMOUNT) / 100.0).clamp(-1.0, 1.0);
         let env_attack = val(ENV_ATTACK).clamp(0.1, 500.0) / 1000.0;
         let env_release = val(ENV_RELEASE).clamp(1.0, 1000.0) / 1000.0;
         for follower in &mut self.followers {
             follower.set(env_attack, env_release, false);
         }
 
-        let safe_bass_hz = val(SAFE_BASS).clamp(5.0, 3000.0);
+        self.lfo.set(audio, lfo_rate, Stereo::Phase(0.0), 0.0);
 
-        self.lfo.set(audio, lfo_rate, lfo_stereo, 0.0);
-        let shape = Shape {
-            wave: lfo_wave,
-            morph: None,
-            duty: lfo_duty,
-        };
-
+        // The continuous controls are read on each frame, so a move glides
+        // the same at any block size.
+        let amount_ramp = ramp(AMOUNT);
+        let feedback_ramp = ramp(FEEDBACK);
+        let warmth_ramp = ramp(WARMTH);
+        let dry_wet_ramp = ramp(DRY_WET);
+        let center_ramp = ramp(CENTER);
+        let spread_ramp = ramp(SPREAD);
+        let blend_ramp = ramp(BLEND);
+        let flanger_time_ramp = ramp(FLANGER_TIME);
+        let doubler_time_ramp = ramp(DOUBLER_TIME);
+        let lfo_hz_ramp = ramp(LFO_HZ);
+        let lfo_phase_ramp = ramp(LFO_PHASE);
+        let lfo_spin_ramp = ramp(LFO_SPIN);
+        let lfo_duty_ramp = ramp(LFO_DUTY);
+        let lfo2_mix_ramp = ramp(LFO2_MIX);
+        let lfo2_hz_ramp = ramp(LFO2_HZ);
+        let env_amount_ramp = ramp(ENV_AMOUNT);
+        let safe_bass_ramp = ramp(SAFE_BASS);
         let output_ramp = ramp(OUTPUT);
-
-        // Update the Safe Bass crossover's two halves.
-        let sb_hp_coeffs = safe_bass_hp_coeffs(safe_bass_hz, rate_f64);
-        let sb_lp_coeffs = safe_bass_lp_coeffs(safe_bass_hz, rate_f64);
-        for sb in &mut self.safe_bass_hp {
-            sb.set(sb_hp_coeffs);
-        }
-        for sb in &mut self.safe_bass_lp {
-            sb.set(sb_lp_coeffs);
-        }
-
-        // Update warmth gentle low-pass filter
-        let warmth_cutoff = (20_000.0 - warmth as f64 * 12_000.0).clamp(2000.0, 20_000.0);
-        let warmth_coeffs = lowpass_coeffs(warmth_cutoff, 0.707, rate_f64);
-        for wf in &mut self.warmth_filter {
-            wf.set(warmth_coeffs);
-        }
-
-        let lfo2_step = lfo2_effective_hz / rate_f64;
 
         for ch in 0..channels {
             self.input[ch][..frames].copy_from_slice(audio.channel_mut(ch));
         }
 
         for frame in 0..frames {
-            let lfo_vals = self.lfo.step(audio.tempo(), frame, shape);
-            self.lfo2_phase = (self.lfo2_phase + lfo2_step).rem_euclid(1.0);
+            let amount = (f64::from(amount_ramp[frame]) / 100.0).clamp(0.0, 1.0);
+            let feedback = (feedback_ramp[frame] / 100.0).clamp(0.0, 0.99);
+            let fb_coeff = if fb_invert { -feedback } else { feedback };
+            let warmth = (warmth_ramp[frame] / 100.0).clamp(0.0, 1.0);
+            let dry_wet = (dry_wet_ramp[frame] / 100.0).clamp(0.0, 1.0);
+            let center = f64::from(center_ramp[frame]).clamp(20.0, 20_000.0);
+            let spread = f64::from(spread_ramp[frame]).clamp(0.0, 100.0);
+            let blend = f64::from(blend_ramp[frame]).clamp(0.0, 1.0);
+            let flanger_time_ms = f64::from(flanger_time_ramp[frame]).clamp(0.05, 20.0);
+            let doubler_time_ms = f64::from(doubler_time_ramp[frame]).clamp(5.0, 100.0);
+            let lfo2_mix = (f64::from(lfo2_mix_ramp[frame]) / 100.0).clamp(0.0, 1.0);
+            let env_amount = (f64::from(env_amount_ramp[frame]) / 100.0).clamp(-1.0, 1.0);
+            // The crossover's and the warmth filter's coefficients follow every
+            // 32nd frame of the run, wherever the blocks fall.
+            if self.frames_done.is_multiple_of(COEFF_GRID) {
+                let safe_bass_hz = f64::from(safe_bass_ramp[frame]).clamp(5.0, 3000.0);
+                let sb_hp_coeffs = safe_bass_hp_coeffs(safe_bass_hz, rate_f64);
+                let sb_lp_coeffs = safe_bass_lp_coeffs(safe_bass_hz, rate_f64);
+                for sb in &mut self.safe_bass_hp {
+                    sb.set(sb_hp_coeffs);
+                }
+                for sb in &mut self.safe_bass_lp {
+                    sb.set(sb_lp_coeffs);
+                }
+                let warmth_cutoff =
+                    (20_000.0 - f64::from(warmth) * 12_000.0).clamp(2000.0, 20_000.0);
+                let warmth_coeffs = lowpass_coeffs(warmth_cutoff, 0.707, rate_f64);
+                for wf in &mut self.warmth_filter {
+                    wf.set(warmth_coeffs);
+                }
+            }
+            self.frames_done += 1;
+            let lfo_hz = f64::from(lfo_hz_ramp[frame]).clamp(0.01, 40.0);
+            self.lfo.set_stereo(if lfo_stereo_idx == 0 {
+                Stereo::Phase(f64::from(lfo_phase_ramp[frame]))
+            } else {
+                Stereo::Spin(f64::from(lfo_spin_ramp[frame]))
+            });
+            let shape = Shape {
+                wave: lfo_wave,
+                morph: None,
+                duty: (f64::from(lfo_duty_ramp[frame]) / 100.0).clamp(-1.0, 1.0),
+            };
+            let multiplier = if lfo_mode_idx == 0 { lfo_hz } else { 1.0 };
+            let lfo_vals = self
+                .lfo
+                .step_with_multiplier(audio.tempo(), frame, shape, multiplier);
+            let lfo2_hz = if lfo2_mode_idx == 0 {
+                f64::from(lfo2_hz_ramp[frame]).clamp(0.01, 40.0)
+            } else {
+                lfo2_sync_hz
+            };
+            self.lfo2_phase = (self.lfo2_phase + lfo2_hz / rate_f64).rem_euclid(1.0);
             let tri_val = 1.0 - 4.0 * (self.lfo2_phase - 0.5).abs();
 
             for ch in 0..channels {
@@ -600,12 +627,26 @@ impl NativeDevice for PhaserFlanger {
                             (center * 2.0_f64.powf(center_mod * 2.0)).clamp(20.0, rate_f64 * 0.45);
                         let mod_spread = (spread + spread_mod * 50.0).clamp(0.0, 100.0);
 
+                        // The notches' coefficients are made again only when the
+                        // centre, the spread or the count moved.
+                        let key = (mod_center, mod_spread, notches);
+                        if self.allpass_key[ch] != Some(key) {
+                            self.allpass_key[ch] = Some(key);
+                            let spacing = 0.5 * (0.2 + 1.8 * mod_spread / 100.0);
+                            let ratio = spacing.exp2();
+                            let mut fk =
+                                mod_center * (-((notches - 1) as f64) / 2.0 * spacing).exp2();
+                            for k in 0..notches {
+                                self.allpasses[ch][k].set(allpass_coeffs(
+                                    fk.clamp(20.0, rate_f64 * 0.45),
+                                    10.0,
+                                    rate_f64,
+                                ));
+                                fk *= ratio;
+                            }
+                        }
                         let mut s = fb_in;
                         for k in 0..notches {
-                            let fk = phaser_notch_freq(mod_center, notches, mod_spread, k)
-                                .clamp(20.0, rate_f64 * 0.45);
-                            let ap_c = allpass_coeffs(fk, 10.0, rate_f64);
-                            self.allpasses[ch][k].set(ap_c);
                             s = self.allpasses[ch][k].process(s);
                         }
                         // All-pass output forms the wet signal; mixing with input at 50% dry/wet cancels at notches
@@ -671,11 +712,12 @@ fn allpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
     let w0 = (TAU * freq / sample_rate).clamp(1e-5, PI * 0.98);
     let alpha = (w0.sin() / (2.0 * q)).max(1e-6);
     let a0 = 1.0 + alpha;
+    let b1 = ((-2.0 * w0.cos()) / a0) as f32;
     Coeffs {
         b0: ((1.0 - alpha) / a0) as f32,
-        b1: ((-2.0 * w0.cos()) / a0) as f32,
+        b1,
         b2: 1.0,
-        a1: ((-2.0 * w0.cos()) / a0) as f32,
+        a1: b1,
         a2: ((1.0 - alpha) / a0) as f32,
     }
 }

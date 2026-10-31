@@ -120,6 +120,55 @@ fn a_next_chain_follows_at_each_clips_end_and_wraps_at_any_block_size() {
     }
 }
 
+// Spec: follow-actions R2; launch-quantisation R37
+#[test]
+fn a_follow_action_due_round_the_loop_launches_its_target_on_that_line() {
+    for block in BLOCKS {
+        let (mut rig, track, scenes) = rig();
+        let first = clip(&mut rig.editor, track, scenes[0], 60);
+        clip(&mut rig.editor, track, scenes[1], 62);
+        follow(
+            &mut rig.editor,
+            first,
+            FollowPatch {
+                linked: Some(false),
+                time: Some(BAR * 4),
+                ..on()
+            },
+        );
+        rig.editor
+            .apply(Command::SetLoop {
+                start: Ticks::ZERO,
+                length: BAR * 4,
+            })
+            .unwrap();
+        rig.editor
+            .apply(Command::SetLoopEnabled { enabled: true })
+            .unwrap();
+        rig.sync();
+        rig.sender
+            .session(SessionCommand::SetQuantization(LaunchSettings {
+                quantization: LaunchQuantization::Bar,
+                enabled: true,
+                follow_actions: true,
+            }));
+        rig.sender.transport(TransportCommand::Play);
+        play(&mut rig, 1_000, block);
+        // The clip starts on 2.1.1, so its follow, four bars later, is due
+        // past the loop's end: on 2.1.1 of the next pass.
+        rig.sender.session(SessionCommand::Launch {
+            track,
+            scene: scenes[0],
+        });
+        play(&mut rig, BAR_FRAMES * 5 + 4_096 - 1_000, block);
+        let started = starts(&mut rig);
+        assert!(
+            started.contains(&(BAR_FRAMES, 62)),
+            "the target starts where the follow is due, blocks of {block}: {started:?}"
+        );
+    }
+}
+
 // Spec: follow-actions R2, R9
 #[test]
 fn an_unlinked_time_shorter_than_the_clip_cuts_it_and_a_longer_one_waits() {

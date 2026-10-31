@@ -84,3 +84,4 @@ mod tuning_engine;
 mod utility;
 mod vinyl_distortion;
 mod wave_mod;
+mod wavetables;

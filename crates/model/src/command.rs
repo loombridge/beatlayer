@@ -20,7 +20,7 @@ use crate::clip::{
     TakeLane, clip_entry, crossfades,
 };
 use crate::clip_param::ClipParam;
-use crate::device::{Device, DeviceKind, DeviceRole};
+use crate::device::{Device, DeviceKind, DeviceRole, WavetableChoice};
 use crate::document::Document;
 use crate::error::ModelError;
 use crate::external::{CvCalibration, ExternalPort, HardwareLatency};
@@ -2004,6 +2004,20 @@ pub enum Command {
         #[serde(default)]
         slot: u8,
     },
+    /// Gives a wavetable oscillator its table (WP-8.8; the wavetable spec,
+    /// R8).
+    SetDeviceWavetable {
+        /// The device.
+        device: DeviceId,
+        /// The oscillator: 1 or 2.
+        oscillator: u8,
+        /// The table: a factory table by category and name, or a user table.
+        choice: WavetableChoice,
+        /// A user table's file, as media by content hash; left out for a
+        /// factory table.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media: Option<ContentHash>,
+    },
     /// Switches a device's Warp on or off (WP-5.15b).
     SetDeviceWarp {
         /// The device.
@@ -3103,6 +3117,7 @@ impl Command {
             Self::SetArticulation { .. } => "Change Articulation",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            Self::SetDeviceWavetable { .. } => "Load Wavetable",
             // WP-5.15b: Warp controls and slices.
             Self::SetDeviceWarp { .. } => "Switch Warp",
             Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
@@ -4950,6 +4965,29 @@ impl Document {
                     self.device_mut(*device)?
                         .set_media(usize::from(*slot), *media);
                 }
+                Ok(())
+            }
+            Command::SetDeviceWavetable {
+                device,
+                oscillator,
+                choice,
+                media,
+            } => {
+                check_value(
+                    "oscillator",
+                    f64::from(*oscillator),
+                    (1..=crate::device::MAX_WAVETABLES as u8).contains(oscillator),
+                )?;
+                check_value(
+                    "wavetable media",
+                    f64::from(u8::from(media.is_some())),
+                    media.is_some() == matches!(choice, WavetableChoice::User { .. }),
+                )?;
+                self.device_mut(*device)?.set_wavetable(
+                    usize::from(*oscillator) - 1,
+                    choice.clone(),
+                    *media,
+                );
                 Ok(())
             }
             Command::SetDeviceWarp { device, warp } => {

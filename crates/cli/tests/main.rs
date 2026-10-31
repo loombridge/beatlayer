@@ -21,6 +21,7 @@ mod agent_modulation;
 mod agent_remote_mapping;
 mod agent_session_recording;
 mod agent_slice;
+mod agent_wavetables;
 mod audio;
 mod capacity;
 mod clip_goldens;

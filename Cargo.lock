@@ -843,6 +843,7 @@ dependencies = [
  "bl-midi-tools",
  "bl-model",
  "bl-rt",
+ "libm",
  "lspk-dsp",
  "lspk-example-gain",
  "lspk-example-sine",

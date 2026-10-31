@@ -538,6 +538,12 @@ impl View<'_> {
                 "list": self.page.slice(layers),
             });
         }
+        // Spec: wavetable R8. What each wavetable oscillator plays, which
+        // `device.load_wavetable` changes.
+        let wavetables = self.shell.wavetables_of(device);
+        if !wavetables.is_empty() {
+            value["wavetables"] = json!(wavetables);
+        }
         // Spec: modulation R18. A modulator's mappings, which
         // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {

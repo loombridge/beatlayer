@@ -2228,7 +2228,8 @@ impl Host {
             Served::Done => {}
             Served::Waiting(pending) => {
                 let allow = self.ask_for_agent(&pending.question().text());
-                pending.finish(&mut self.agent, &mut self.shell, allow);
+                let served = pending.finish(&mut self.agent, &mut self.shell, allow);
+                self.agent_served(served);
             }
             Served::Parked(parked) => self.agent_parked.push(parked),
         }

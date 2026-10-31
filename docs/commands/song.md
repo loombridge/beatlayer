@@ -299,7 +299,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Set Song Start Time**. Permission: `edit`. Contexts: `arrangement`.
 
-Sets where the song starts: at a locator, or at the loop brace's start. Choosing it where it is set clears it, so the song starts at the insert marker again. While it is set, Play starts the song there instead of at the insert marker. One undo step, `Set Song Start Time`.
+Sets where the song starts: at a locator, or at the loop brace's start. Choosing it where it is set clears it, so the song starts at the insert marker again. While it is set, Play starts the song there instead of at the insert marker. A locator the set doesn't hold is refused. One undo step, `Set Song Start Time`.
 
 Default keys: none.
 

@@ -64,9 +64,6 @@ pub(super) enum Driven {
     Unsupported(&'static str),
 }
 
-/// The furthest tick from zero a point is placed at.
-const TICK_LIMIT: i64 = i64::MAX / 4;
-
 /// One automation point in ticks: where, what and whether it holds.
 pub(super) type Step = (Ticks, f64, bool);
 

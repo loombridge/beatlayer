@@ -66,7 +66,7 @@ Result: [`KeymapState`](#keymapstate).
 
 **Unbind Keys**. Permission: `edit`. Contexts: `global`.
 
-Takes a shortcut's keys away: the default shortcut by its ID, such as `S-EDIT-004`, or a command with the keys themselves. The keys go on one platform, or on both without a platform. The file is written at once; nothing is part of the set and nothing is an undo step.
+Takes a shortcut's keys away: the default shortcut by its ID, such as `S-EDIT-004`, or a command with the keys themselves. Only the keys named go, on one platform, or on both without a platform. The file is written at once; nothing is part of the set and nothing is an undo step.
 
 Default keys: none.
 

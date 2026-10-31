@@ -630,12 +630,13 @@ pub struct MpeUi {
 }
 
 impl MpeUi {
-    /// Drops everything under way, as another clip showing does.
-    pub fn reset(&mut self) {
-        self.drag = None;
+    /// Drops everything under way, as another clip showing does. Returns
+    /// whether a drag, which may hold a gesture open, was dropped.
+    pub fn reset(&mut self) -> bool {
+        let dragged = self.drag.take().is_some() | std::mem::take(&mut self.splitting);
         self.typed = None;
         self.menu = None;
-        self.splitting = false;
+        dragged
     }
 
     /// Whether a number is being typed, so the keys go to it and not to

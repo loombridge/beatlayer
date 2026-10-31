@@ -243,6 +243,8 @@ pub struct Strip {
     rate: f64,
     chains: [Chain; 2],
     plan: Plan,
+    /// The values the plan was worked out for.
+    last: Option<(bool, [f64; 4])>,
     /// Frames since the device was made, so the sections are redesigned on
     /// the same frames at any block size.
     tick: usize,
@@ -258,6 +260,7 @@ impl Strip {
             rate,
             chains: [Chain::default(); 2],
             plan: Plan::new(false, 0.0, 0.0, MID_DEFAULT_HZ, 0.0, rate),
+            last: None,
             tick: 0,
             analyser: Analyser::new(rate),
         }
@@ -286,16 +289,14 @@ impl NativeDevice for Strip {
         let mut i = 0;
         while i < frames {
             if self.tick.is_multiple_of(REFRESH_FRAMES) {
-                self.plan = Plan::new(
-                    high_pass,
-                    f64::from(low[i]),
-                    f64::from(mid[i]),
-                    f64::from(mid_hz[i]),
-                    f64::from(high[i]),
-                    self.rate,
-                );
-                for chain in &mut self.chains {
-                    chain.set(&self.plan);
+                let values = [low[i], mid[i], mid_hz[i], high[i]].map(f64::from);
+                if self.last != Some((high_pass, values)) {
+                    self.last = Some((high_pass, values));
+                    let [low, mid, mid_hz, high] = values;
+                    self.plan = Plan::new(high_pass, low, mid, mid_hz, high, self.rate);
+                    for chain in &mut self.chains {
+                        chain.set(&self.plan);
+                    }
                 }
             }
             let n = (REFRESH_FRAMES - self.tick % REFRESH_FRAMES).min(frames - i);

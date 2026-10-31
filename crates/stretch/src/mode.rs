@@ -12,7 +12,7 @@
 //! the audio thread, and `render` allocates and locks nothing (R5).
 
 use crate::beats::{Mix, Plan};
-use crate::interp::Interpolation;
+use crate::interp::{Interpolation, Taps};
 
 /// A planar block of frames: channel `c` is `data[c * stride..]`.
 #[derive(Clone, Copy, Debug)]
@@ -242,19 +242,26 @@ impl Beats {
 /// Reads the run's positions from the window, into `out`: the nearest file
 /// frame where the run is neutral, the interpolator's value otherwise.
 pub(crate) fn read(request: &Request<'_>, window: &Window<'_>, out: &mut [f32], stride: usize) {
+    if request.neutral {
+        for (i, &position) in request.positions.iter().enumerate() {
+            // Spec: warp-modes R4. The nearest frame, untouched.
+            let at = (position.round() as i64 - window.first) as usize;
+            for c in 0..window.channels {
+                out[c * stride + i] = window.channel(c)[at];
+            }
+        }
+        return;
+    }
     let interpolation = Interpolation::of(request.high_quality);
-    for c in 0..window.channels {
-        let source = window.channel(c);
-        let out = &mut out[c * stride..c * stride + request.positions.len()];
-        for (frame, &position) in out.iter_mut().zip(request.positions) {
-            *frame = if request.neutral {
-                // Spec: warp-modes R4. The nearest frame, untouched.
-                source[(position.round() as i64 - window.first) as usize]
-            } else {
-                let floor = position.floor();
-                let at = (floor as i64 - window.first) as usize;
-                interpolation.sample(source, at, position - floor, request.speed)
-            };
+    let mut taps = Taps::new();
+    for (i, &position) in request.positions.iter().enumerate() {
+        let floor = position.floor();
+        let at = (floor as i64 - window.first) as usize;
+        // The weights depend on the position alone: work them out once for
+        // every channel.
+        interpolation.weights(at, position - floor, request.speed, &mut taps);
+        for c in 0..window.channels {
+            out[c * stride + i] = taps.dot(window.channel(c));
         }
     }
 }
@@ -354,5 +361,102 @@ mod tests {
         let mut out = vec![0.0; 10];
         RePitch.render(&request, &window, &mut out, 10);
         assert_eq!(out, (20..30).map(|i| i as f32).collect::<Vec<_>>());
+    }
+
+    /// Two different channels: a sine, and a ramp with noise from a fixed seed.
+    fn stereo(frames: usize) -> Vec<f32> {
+        let mut seed = 12_345_u32;
+        let mut noise = || {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1 << 24) as f32 - 0.5
+        };
+        let left = (0..frames).map(|i| (i as f32 * 0.0123 * std::f32::consts::TAU).sin());
+        let right: Vec<f32> = (0..frames)
+            .map(|i| i as f32 / frames as f32 + 0.1 * noise())
+            .collect();
+        left.chain(right).collect()
+    }
+
+    fn run<'a>(
+        positions: &'a [f64],
+        plan: &'a Plan,
+        speed: f64,
+        high_quality: bool,
+    ) -> Request<'a> {
+        Request {
+            positions,
+            first: 0,
+            speed,
+            neutral: false,
+            high_quality,
+            beats: plan,
+            transient_envelope: 100.0,
+            pitch: 1.0,
+            clip: 1,
+            step: 1.0,
+            song: f64::NAN,
+        }
+    }
+
+    // Spec: warp-modes R12. Guards the weights being worked out once for every
+    // channel: each channel reads as if it had been read alone.
+    #[test]
+    fn read_gives_each_channel_what_the_interpolator_gives_it_alone() {
+        let data = stereo(4_000);
+        let window = Window {
+            data: &data,
+            stride: 4_000,
+            channels: 2,
+            frames: 4_000,
+            first: 0,
+        };
+        for speed in [0.5, 1.5, 4.0] {
+            let positions: Vec<f64> = (0..200).map(|i| 1_000.3 + speed * f64::from(i)).collect();
+            for high_quality in [false, true] {
+                let mut out = vec![0.0; 2 * 200];
+                read(
+                    &run(&positions, &Plan::default(), speed, high_quality),
+                    &window,
+                    &mut out,
+                    200,
+                );
+                let interpolation = Interpolation::of(high_quality);
+                for c in 0..2 {
+                    for (i, &position) in positions.iter().enumerate() {
+                        let at = position.floor();
+                        let want = interpolation.sample(
+                            window.channel(c),
+                            at as usize,
+                            position - at,
+                            speed,
+                        );
+                        assert_eq!(out[c * 200 + i].to_bits(), want.to_bits());
+                    }
+                }
+            }
+        }
+    }
+
+    // Spec: warp-modes R82
+    #[test]
+    fn read_computes_kernel_weights_once_per_frame() {
+        let data = stereo(4_000);
+        let window = Window {
+            data: &data,
+            stride: 4_000,
+            channels: 2,
+            frames: 4_000,
+            first: 0,
+        };
+        let positions: Vec<f64> = (0..256).map(|i| 1_000.5 + 1.5 * f64::from(i)).collect();
+        let mut out = vec![0.0; 2 * 256];
+        crate::interp::KERNEL_EVALS.with(|evals| evals.set(0));
+        read(
+            &run(&positions, &Plan::default(), 1.5, true),
+            &window,
+            &mut out,
+            256,
+        );
+        assert_eq!(crate::interp::KERNEL_EVALS.with(std::cell::Cell::get), 256);
     }
 }

@@ -8,7 +8,7 @@
 //! the next grain.
 
 use crate::granular::{ActiveGrains, Grain, render_frame};
-use crate::interp::Interpolation;
+use crate::interp::{Interpolation, Taps};
 use crate::mode::{Request, WarpMode, Window, read};
 
 /// Default Grain Size for Tones: 30 ms (R2).
@@ -239,6 +239,7 @@ impl Tones {
             self.prime_at(start, request, window);
         }
 
+        let mut taps = Taps::new();
         for (i, &pos_i) in request.positions.iter().enumerate() {
             let t = start + i as i64;
             while self.next_grain_start <= t {
@@ -249,9 +250,9 @@ impl Tones {
                 &self.active_grains,
                 window,
                 interpolation,
+                &mut taps,
                 t,
-                i,
-                out,
+                &mut out[i..],
                 stride,
             );
         }

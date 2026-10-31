@@ -347,6 +347,12 @@ impl Envelope {
         self.points.iter().copied()
     }
 
+    /// Its breakpoints as a slice, in position order, for a binary search.
+    #[must_use]
+    pub fn as_slice(&self) -> &[Breakpoint] {
+        &self.points
+    }
+
     /// Whether it holds no breakpoints.
     #[must_use]
     pub fn is_empty(&self) -> bool {

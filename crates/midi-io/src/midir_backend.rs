@@ -12,7 +12,7 @@ use midir::MidiOutputConnection;
 use midir::{MidiIO, MidiInput, MidiInputConnection, MidiOutput};
 
 use crate::backend::{
-    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection,
+    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection, PortKey,
 };
 use crate::stamp::StampClock;
 
@@ -73,16 +73,26 @@ impl MidiBackend for MidirBackend {
         SYSTEM
     }
 
-    fn ports(&mut self, direction: Direction) -> Result<Vec<String>, MidiError> {
-        fn names<T: MidiIO>(io: &T) -> Vec<String> {
-            io.ports()
-                .iter()
-                .filter_map(|port| io.port_name(port).ok())
-                .collect()
-        }
+    fn ports(&mut self, direction: Direction) -> Result<Vec<(String, PortKey)>, MidiError> {
+        // `midir`'s id carries ALSA's client and port, Core MIDI's unique id
+        // and Windows' device index.
         match direction {
-            Direction::Input => Ok(names(&MidiInput::new(CLIENT).map_err(system)?)),
-            Direction::Output => Ok(names(&MidiOutput::new(CLIENT).map_err(system)?)),
+            Direction::Input => {
+                let io = MidiInput::new(CLIENT).map_err(system)?;
+                Ok(io
+                    .ports()
+                    .iter()
+                    .filter_map(|port| Some((io.port_name(port).ok()?, port.id())))
+                    .collect())
+            }
+            Direction::Output => {
+                let io = MidiOutput::new(CLIENT).map_err(system)?;
+                Ok(io
+                    .ports()
+                    .iter()
+                    .filter_map(|port| Some((io.port_name(port).ok()?, port.id())))
+                    .collect())
+            }
         }
     }
 

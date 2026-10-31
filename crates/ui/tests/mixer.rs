@@ -2306,6 +2306,61 @@ fn a_racks_chains_fold_out_as_strips_without_slots() {
     );
 }
 
+// Spec: racks R27. A clip dragged over a chain's strip, which has no slots,
+// is dropped nowhere, not into the rack's track.
+#[test]
+fn a_drop_under_a_chain_strip_targets_no_slot() {
+    let mut h = session();
+    let (rack_track, _rack, _chains) = folded_rack(&mut h);
+    let other = tracks(&h.shell)[1];
+    let scene = h.shell.editor().document().scenes().next().unwrap().id;
+    h.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": other, "scene": scene }),
+        )
+        .unwrap();
+    let clip = h.shell.editor().document().slot(other, scene).unwrap().id;
+    let nodes = tree(&mut h);
+    let slot = rect_of(
+        nodes
+            .iter()
+            .find(|n| n.label.starts_with("2 MIDI: 1"))
+            .expect("the other track's first slot"),
+    );
+    let strip = rect_of(Harness::node(&nodes, "Chain Strip Keys of Instrument Rack"));
+    let (from, to) = (slot.center(), pos2(strip.center().x, slot.center().y));
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![Event::PointerButton {
+        pos: from,
+        button: PointerButton::Primary,
+        pressed: true,
+        modifiers: Modifiers::NONE,
+    }]);
+    for step in 1..=4 {
+        h.frame(vec![Event::PointerMoved(
+            from + (to - from) * (step as f32 / 4.0),
+        )]);
+    }
+    h.frame(vec![Event::PointerButton {
+        pos: to,
+        button: PointerButton::Primary,
+        pressed: false,
+        modifiers: Modifiers::NONE,
+    }]);
+    h.settle();
+    let doc = h.shell.editor().document();
+    assert!(
+        doc.slot(rack_track, scene).is_none(),
+        "nothing dropped on the rack's track"
+    );
+    assert_eq!(
+        doc.slot(other, scene).map(|c| c.id),
+        Some(clip),
+        "the clip stayed"
+    );
+}
+
 // Spec: racks R27.
 #[test]
 fn a_nested_rack_folds_out_from_its_chains_strip() {

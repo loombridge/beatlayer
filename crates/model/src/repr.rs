@@ -560,6 +560,9 @@ impl Loader {
             self.claim(lane.id.0)?;
             for clip in lane.clips.iter_mut() {
                 self.claim(clip.id.0)?;
+                if let ClipData::Midi(midi) = &mut clip.data {
+                    midi.drop_broken_expressions();
+                }
                 check_clip_fits(&track, &clip.data)?;
                 check_extent(clip.start, clip.length)?;
                 if let ClipData::Midi(midi) = &mut clip.data {
@@ -1983,6 +1986,58 @@ mod tests {
         }]);
         let error = load(audio).unwrap_err();
         assert!(error.contains("audio clip"), "{error}");
+    }
+
+    // Spec: mpe R9
+    #[test]
+    fn a_take_lane_note_loads_without_an_envelope_that_breaks_r1() {
+        use crate::clip::{MidiData, Note};
+        use crate::{NewTakeLane, TakeClip, TakeClipData};
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let clip: ClipId = editor.new_id();
+        editor
+            .apply(Command::AddTakeLane {
+                track,
+                lane: NewTakeLane {
+                    id: None,
+                    name: "Take 1".to_owned(),
+                    clips: vec![TakeClip {
+                        id: Some(clip),
+                        name: String::new(),
+                        start: Ticks::ZERO,
+                        length: Ticks::WHOLE,
+                        data: TakeClipData::Tagged(ClipData::Midi(MidiData::new([Note::new(
+                            60,
+                            Ticks::ZERO,
+                            Ticks::QUARTER,
+                            100,
+                        )]))),
+                    }],
+                },
+                index: None,
+            })
+            .unwrap();
+        let mut value = serde_json::to_value(editor.document()).unwrap();
+        // A pressure point past the end of the note breaks R1.
+        find_clip_mut(&mut value, clip)["data"]["midi"]["notes"][0]["pressure"] =
+            json!([{ "at": 5_000_000, "value": 20.0 }]);
+        let back = load(value).unwrap();
+        let ClipData::Midi(data) = &back.clip(clip).unwrap().data else {
+            panic!("a MIDI clip")
+        };
+        assert!(data.notes[0].pressure.is_empty());
+        assert_eq!(data.notes[0].key, 60);
+        assert_eq!(data.notes[0].length, Ticks::QUARTER);
     }
 
     /// Where a clip's saved form sits in the tree of tracks, as a JSON

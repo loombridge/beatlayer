@@ -36,6 +36,7 @@ crates/engine/tests/session_recording.rs # stamps messages with the system's clo
 crates/engine/tests/streaming.rs # measures disk streaming in real time
 crates/engine/tests/stress.rs # a real-time stress test
 crates/engine/tests/warp_streaming.rs # measures a warp's real-time load
+crates/link/tests/link_audio.rs # two Link instances find each other over the loopback network and stream a channel, so the tests wait for discovery and for buffers with a deadline
 crates/link/tests/loopback.rs # two Link instances find each other over the loopback network, so the tests wait for discovery with a deadline
 crates/media/tests/stream.rs # measures a disk read
 crates/media/tests/stream_realtime.rs # measures real-time streaming and dropouts

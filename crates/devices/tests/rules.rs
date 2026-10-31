@@ -230,6 +230,101 @@ fn every_parameter_is_modulatable_to_the_frame() {
     assert!(count >= 12);
 }
 
+// Spec: modulation R4 (rule G2): a clip's modulation envelope on a parameter a
+// device reads through the bank's value, not its ramp, still changes what the
+// real device plays.
+#[test]
+fn a_clip_modulation_reaches_a_parameter_a_device_reads_by_value() {
+    let play = |device_type: &DeviceType, param: ParamId, modulated: bool| {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let id: DeviceId = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: device_type.device(id),
+            })
+            .unwrap();
+        let clip = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    clip,
+                    Ticks::ZERO,
+                    Ticks::WHOLE,
+                    ClipData::Midi(MidiData::default()),
+                ),
+            })
+            .unwrap();
+        if modulated {
+            editor
+                .apply(Command::SetClipEnvelopeBreakpoint {
+                    kind: bl_model::EnvelopeKind::Modulation,
+                    clip,
+                    target: AutomationTarget::Device { device: id, param },
+                    at: Ticks::ZERO,
+                    value: 0.5,
+                })
+                .unwrap();
+        }
+        let collector = Collector::new();
+        let mut compiler = Compiler::new(
+            EngineConfig::new(RATE, 2048),
+            registry(),
+            collector.handle(),
+        );
+        let update: Update = compiler.sync(editor.document());
+        let mut node = node(&registry(), &device(device_type, &[]), 2048);
+        if let Some((_, data)) = update
+            .data
+            .into_iter()
+            .find(|(key, _)| matches!(key, NodeKey::Device(device) if *device == id))
+        {
+            node.receive_data(data);
+        }
+        let input = common::noise(512);
+        run_at(
+            &mut *node,
+            &[input.clone(), input],
+            &[],
+            &editor.document().settings().tempo,
+            TransportInfo {
+                playing: true,
+                position: Frames(0),
+                ..TransportInfo::default()
+            },
+        )
+    };
+    for (device_type, param) in [
+        (
+            bl_devices::phaser_flanger::phaser_flanger_type(),
+            bl_devices::phaser_flanger::DRY_WET,
+        ),
+        (
+            bl_devices::chorus_ensemble::chorus_ensemble_type(),
+            bl_devices::chorus_ensemble::DRY_WET,
+        ),
+    ] {
+        assert_ne!(
+            play(&device_type, param, true),
+            play(&device_type, param, false),
+            "{}: Dry/Wet's modulation is heard",
+            device_type.name
+        );
+    }
+}
+
 // Spec: info-view R6 (D17, WP-2.24): the Info View reads a parameter's
 // registered description, so every parameter of every device type
 // Beatlayer registers — shipped, kit plug-ins, and the framework's test

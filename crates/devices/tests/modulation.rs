@@ -34,6 +34,7 @@ impl Rig {
         let mut registry = engine_testing::registry(&Arc::new(Probe::default()));
         bl_devices::testing::register(&mut registry);
         bl_devices::modulator::register(&mut registry);
+        bl_devices::phaser_flanger::register(&mut registry);
         let compiler = Compiler::new(config, registry, collector.handle());
         let (sender, processor, monitor) = channel(&config);
         Self {
@@ -257,6 +258,68 @@ fn remote_control_holds_the_target_between_min_and_max() {
         (f64::from(back[100 * 32]) - want).abs() < 1e-4,
         "the control's value is the base again"
     );
+}
+
+/// A Flanger on a track carrying a signal of 1, its Dry/Wet at `dry_wet`; with
+/// `hold`, a Wave Mod on another track holds Dry/Wet at 0 in Remote Control.
+/// Its output over 9,600 frames of the song playing.
+fn flanger_render(dry_wet: f64, hold: bool) -> Vec<f32> {
+    use bl_devices::phaser_flanger::{DRY_WET, FEEDBACK, MODE as FLANGER_MODE, PHASER_FLANGER};
+    let mut rig = Rig::new(64);
+    let source = rig.track(TrackKind::Audio);
+    let target = rig.track(TrackKind::Midi);
+    rig.insert(
+        target,
+        bl_engine::testing::DC,
+        &[(bl_engine::testing::VALUE, 1.0)],
+    );
+    let flanger = rig.insert(
+        target,
+        PHASER_FLANGER,
+        &[(FLANGER_MODE, 1.0), (FEEDBACK, 90.0), (DRY_WET, dry_wet)],
+    );
+    if hold {
+        let wave = rig.insert(
+            source,
+            modulator::WAVE_MOD,
+            &[
+                (MODE, 1.0),
+                (modulator::amount(0), 100.0),
+                (modulator::min(0), 0.0),
+                (modulator::max(0), 0.0),
+            ],
+        );
+        rig.apply(Command::MapModulator {
+            device: wave,
+            slot: 0,
+            target: ModTarget::Device {
+                device: flanger,
+                param: DRY_WET,
+            },
+        });
+    }
+    rig.sender.transport(TransportCommand::Play);
+    rig.render(9_600, 64)
+}
+
+// Spec: modulation R2, R16; rule G2
+#[test]
+fn remote_control_holds_a_value_read_parameter() {
+    let dry = flanger_render(0.0, false);
+    let half = flanger_render(50.0, false);
+    let held = flanger_render(50.0, true);
+    // The Safe Bass stage drops the wet path's DC, so the signal of 1 tells
+    // wet from dry only in its first frames.
+    let frames = 0..2_400;
+    let gap = |a: &[f32], b: &[f32]| {
+        frames
+            .clone()
+            .map(|i| (a[i] - b[i]).abs())
+            .fold(0.0, f32::max)
+    };
+    assert!(gap(&dry, &half) > 1e-3, "the two references differ");
+    assert!(gap(&held, &dry) < 1e-5, "Dry/Wet is held at 0 %");
+    assert!(gap(&held, &half) > 1e-3, "not the control's 50 %");
 }
 
 // Spec: modulation R15, R20

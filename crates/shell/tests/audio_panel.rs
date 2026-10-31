@@ -285,3 +285,99 @@ fn an_edited_file_reaches_every_clip_of_it_in_one_step() {
         "the change is one undo step"
     );
 }
+
+/// Saves the shell's set to `name` in the scratch folder and returns the
+/// set file's path.
+fn save_as(shell: &mut Shell, scratch: &Scratch, name: &str) -> PathBuf {
+    let saved = shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.0.join(name).display().to_string() }),
+        )
+        .unwrap();
+    PathBuf::from(saved["path"].as_str().unwrap())
+}
+
+/// Where the saved set at `song` lists the file `media`, if it does.
+fn listed_at(song: &Path, media: bl_model::ContentHash) -> Option<PathBuf> {
+    let (_, project) = bl_project::SetFile::open(song).unwrap();
+    project
+        .media
+        .get(&media)?
+        .path
+        .resolve(song.parent().unwrap())
+}
+
+/// A shell that opens `song`, as a new launch of the app does.
+fn reopened(scratch: &Scratch, song: &Path) -> Shell {
+    let mut shell = Shell::new(
+        Preferences::default(),
+        Some(scratch.0.join("config")),
+        AudioHost::null(Default::default()),
+        Box::new(ProjectFiles::new()),
+    );
+    shell
+        .run("set.open", json!({ "path": song.display().to_string() }))
+        .unwrap();
+    shell
+}
+
+/// Spec: sample-editor R18. The file a clip was given lands in the set's
+/// media table, so the set finds it again when it's opened.
+#[test]
+fn replaced_sample_survives_save_and_reopen() {
+    let scratch = Scratch::new("replace-reopen");
+    let (mut shell, clip, _) = shell_with(&scratch);
+    let song = save_as(&mut shell, &scratch, "Set.blset");
+    let other = scratch.0.join("Elsewhere/Other.wav");
+    std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+    wav(&other, 3, 880.0);
+    shell
+        .run(
+            "clip.replace_sample",
+            json!({ "clip": clip, "path": other.display().to_string() }),
+        )
+        .unwrap();
+    shell.run("set.save", json!({})).unwrap();
+
+    let media = audio(&shell, clip).media;
+    let listed = listed_at(&song, media).expect("the saved set lists the new file");
+    assert_eq!(
+        listed.canonicalize().unwrap(),
+        other.canonicalize().unwrap()
+    );
+    let again = reopened(&scratch, &song);
+    assert_eq!(again.missing_files(), 0);
+    std::fs::remove_file(&other).unwrap();
+    assert_eq!(
+        again.missing_files(),
+        1,
+        "the reopened set knows the file, so it reports it missing"
+    );
+}
+
+/// Spec: sample-editor R16. A file edited in the external editor is listed
+/// in the saved set under its new content.
+#[test]
+fn an_externally_edited_sample_survives_save_and_reopen() {
+    let scratch = Scratch::new("edited-reopen");
+    let (mut shell, clip, path) = shell_with(&scratch);
+    let song = save_as(&mut shell, &scratch, "Set.blset");
+    shell
+        .run(
+            "settings.set_sample_editor",
+            json!({ "path": harmless_editor() }),
+        )
+        .unwrap();
+    shell
+        .run("clip.edit_sample", json!({ "clip": clip }))
+        .unwrap();
+    wav(&path, 2, 880.0);
+    shell.check_edited_samples();
+    shell.run("set.save", json!({})).unwrap();
+
+    let media = audio(&shell, clip).media;
+    let listed = listed_at(&song, media).expect("the saved set lists the edited file");
+    assert_eq!(listed.canonicalize().unwrap(), path.canonicalize().unwrap());
+    assert_eq!(reopened(&scratch, &song).missing_files(), 0);
+}

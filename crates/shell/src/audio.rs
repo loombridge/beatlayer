@@ -36,9 +36,9 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
 use bl_audio_io::{
-    AudioBuffer, AudioBufferMut, AudioCallback, Backend, BackendKind, BufferSizes, DeviceId,
-    DeviceInfo, DeviceSelector, Error, PortRequest, ProcessContext, Stream, StreamInfo,
-    StreamRequest, StreamStats,
+    AudioBuffer, AudioBufferMut, AudioCallback, Backend, BackendKind, BufferSizes, Cause, DeviceId,
+    DeviceInfo, DeviceSelector, Error, Interruption, PortRequest, ProcessContext, Stream,
+    StreamInfo, StreamRequest, StreamStats,
 };
 use bl_core::clock::TestClock;
 use bl_core::time::{SampleRate, Ticks};
@@ -348,6 +348,19 @@ impl bl_engine::DeviceInput for InputPart<'_> {
     }
 }
 
+/// How long a running stream may go without a block before it's taken for
+/// dead, and how often a closed one is opened again (the device changes spec,
+/// R2, R5): the supervisor's defaults.
+const STALL_TIMEOUT: Duration = Duration::from_secs(3);
+const RETRY_INTERVAL: Duration = Duration::from_secs(1);
+
+/// A stream the host closed because its device changed, and when it tries
+/// to open it again.
+struct Interrupted {
+    since: Instant,
+    retry_at: Instant,
+}
+
 /// How long opening a device waits for the engine's compiler to put the
 /// set and the transport on the audio thread's queue, so the first block
 /// takes them all at once.
@@ -495,6 +508,12 @@ pub struct AudioHost {
     /// A test clock for the next stream's blocks, with the null device's
     /// manual pacing (T199).
     test_clock: Option<TestClock>,
+    /// The open stream's block count, and when it was last seen to move: a
+    /// stream that stops calling back is dead (the device changes spec, R5).
+    blocks_seen: (u64, Instant),
+    /// Set while the stream is closed after an interruption and the host
+    /// reopens it.
+    interrupted: Option<Interrupted>,
 }
 
 impl std::fmt::Debug for AudioHost {
@@ -582,6 +601,8 @@ impl AudioHost {
             link: None,
             latency_sent: (0, 0),
             test_clock: None,
+            blocks_seen: (0, Instant::now()),
+            interrupted: None,
         }
     }
 
@@ -813,6 +834,7 @@ impl AudioHost {
     /// Closes the device, and with it the engine.
     pub fn stop(&mut self) {
         self.close();
+        self.interrupted = None;
         self.cpu_load = None;
     }
 
@@ -1504,6 +1526,8 @@ impl AudioHost {
         }
         self.stream = Some(stream);
         self.engine = Some(engine);
+        self.blocks_seen = (0, self.now());
+        self.interrupted = None;
         self.engines += 1;
         self.preview = Some(preview);
         self.last_sample = (
@@ -1646,6 +1670,97 @@ impl AudioHost {
             engine.set_latency(now.0, now.1);
             self.latency_sent = now;
         }
+    }
+
+    /// The time the device watch goes by: the test clock's, where a test
+    /// drives one.
+    fn now(&self) -> Instant {
+        self.test_clock
+            .as_ref()
+            .map_or_else(Instant::now, TestClock::now)
+    }
+
+    /// Watches the open stream (the device changes spec, R1 to R5). A stream
+    /// whose device went away, whose rate changed, that was invalidated, that
+    /// stopped calling back for three seconds, or that records and whose
+    /// default device changed is closed, keeping the transport where it was,
+    /// and opened again: at once, unless the device is gone, then once a
+    /// second until it opens. Returns what the Status Bar says, and whether
+    /// it's an error: on an interruption, and when audio is back. The host
+    /// calls it every frame.
+    pub fn poll_device(&mut self) -> Option<(String, bool)> {
+        let now = self.now();
+        let Some(stream) = &self.stream else {
+            let interrupted = self.interrupted.as_ref()?;
+            if !self.engine_on || now < interrupted.retry_at {
+                return None;
+            }
+            let since = interrupted.since;
+            return self.reopen(now, since).map(|message| (message, false));
+        };
+        let (stats, info) = (stream.stats(), stream.info());
+        if stats.blocks != self.blocks_seen.0 {
+            self.blocks_seen = (stats.blocks, now);
+        }
+        let cause = if stats.device_lost {
+            Cause::DeviceLost
+        } else if stats.invalidated || (stats.device_changes > 0 && info.input_device.is_some()) {
+            Cause::StreamFailed
+        } else if now.saturating_duration_since(self.blocks_seen.1) >= STALL_TIMEOUT {
+            Cause::Stalled
+        } else {
+            return None;
+        };
+        let lost = cause == Cause::DeviceLost;
+        let message = Interruption {
+            cause,
+            device: info.output_device.clone(),
+            since: now,
+            attempts: 0,
+            last_error: None,
+            stream_stats: None,
+        }
+        .message();
+        // The device runs at another rate now, and the stream follows it
+        // from here on (R3): a pinned rate would only reopen the old one.
+        if stats.invalidated {
+            self.settings.sample_rate = None;
+        }
+        self.close();
+        self.error = Some(message.clone());
+        let retry_at = if lost { now + RETRY_INTERVAL } else { now };
+        self.interrupted = Some(Interrupted {
+            since: now,
+            retry_at,
+        });
+        if !lost && self.reopen(now, now).is_some() {
+            // Back already, on the device's new rate: the message says what
+            // happened and that it's over.
+            return Some((message, false));
+        }
+        Some((message, true))
+    }
+
+    /// Opens the stream again after an interruption that began at `since`:
+    /// the message for the Status Bar if it opened, and otherwise the next
+    /// try a second on.
+    fn reopen(&mut self, now: Instant, since: Instant) -> Option<String> {
+        if self.open().is_err() {
+            if let Some(interrupted) = self.interrupted.as_mut() {
+                interrupted.retry_at = now + RETRY_INTERVAL;
+            }
+            return None;
+        }
+        self.error = None;
+        let device = self.status().output_device.map_or_else(
+            || "the default audio device".to_owned(),
+            |device| format!("\"{}\"", device.name),
+        );
+        let rate = self.sample_rate().unwrap_or(0);
+        let after = now.saturating_duration_since(since).as_secs_f64();
+        Some(format!(
+            "Audio is back on {device} at {rate} Hz, after {after:.1} s."
+        ))
     }
 
     /// Measures the CPU load since the last call: the share of the audio
@@ -1797,6 +1912,7 @@ impl AudioHost {
             dropouts: stats.map_or(0, |stats| stats.dropouts),
             test_tone: self.test_tone(),
             tone: self.tone,
+            interrupted: self.interrupted.is_some(),
             error: self.error.clone(),
         }
     }

@@ -3435,6 +3435,11 @@ impl Document {
             }
             Command::LoopToNextLocator { locator } => self.loop_to_next_locator(*locator),
             Command::SetSongStart { start } => {
+                if let Some(SongStart::Locator(id)) = start
+                    && self.locator(*id).is_none()
+                {
+                    return Err(ModelError::NoSuchLocator(*id));
+                }
                 self.settings.song_start = *start;
                 Ok(())
             }
@@ -3641,6 +3646,17 @@ impl Document {
                 Ok(())
             }
             Command::BounceTrackInPlace { track, bounced } => {
+                // Only audio, MIDI and group tracks bounce: a Main track would
+                // leave the set without one, and a return that became an audio
+                // track would still take sends from tracks that feed it.
+                let kind = self.track_ref(*track)?.kind;
+                if kind == TrackKind::Main || kind == TrackKind::Return {
+                    return Err(ModelError::WrongTrackKind {
+                        track: *track,
+                        kind,
+                        needs: "an audio, MIDI or group track",
+                    });
+                }
                 // A group's tracks go with it (R23).
                 let children: Vec<TrackId> =
                     self.track_ref(*track)?.children.iter().copied().collect();
@@ -3682,9 +3698,11 @@ impl Document {
                     param: MixerParam::Volume,
                 })?;
                 check_value("volume", *volume, volume.is_finite() && *volume >= 0.0)?;
-                if self.track_ref(*track)?.mixer.volume != *volume {
+                // Spec: mixer-view R6. The fader stops at +6 dB.
+                let volume = volume.min(crate::MAX_CUE_VOLUME);
+                if self.track_ref(*track)?.mixer.volume != volume {
                     let track_ref = self.track_mut(*track)?;
-                    track_ref.mixer.volume = *volume;
+                    track_ref.mixer.volume = volume;
                     track_ref.override_target(&AutomationTarget::Mixer {
                         param: MixerParam::Volume,
                     });
@@ -4083,8 +4101,17 @@ impl Document {
             Command::SetClipLength { clip, length } => {
                 let current = self.clip_ref(*clip)?;
                 check_extent(current.start, *length)?;
-                if current.length != *length {
-                    self.clip_mut(*clip)?.length = *length;
+                // Spec: audio-clips R25, R26. A shorter clip keeps fades that
+                // fit it.
+                let mut next = current.clone();
+                next.length = *length;
+                if let ClipData::Audio(audio) = &next.data {
+                    let fitted = crate::fades::fit(&next, audio, &self.settings.tempo);
+                    crate::fades::check_fades(&next, &fitted, &self.settings.tempo)?;
+                    next.data = ClipData::Audio(fitted);
+                }
+                if *current != next {
+                    *self.clip_mut(*clip)? = next;
                 }
                 Ok(())
             }
@@ -7828,6 +7855,9 @@ impl Document {
             self.put_device(place.track, place.chain, place.index + offset, device)?;
         }
         self.forget_in(place.track, &gone)?;
+        // Spec: modulation R19, remote mapping R6. The rack and its chain are
+        // gone, and their mappings go with them.
+        self.prune_mappings();
         check_chain(self.track_ref(place.track)?)
     }
 
@@ -8543,11 +8573,19 @@ impl Document {
                 .keys()
                 .copied()
                 .chain(track.slots.values().map(|clip| clip.id))
+                .chain(
+                    track
+                        .take_lanes
+                        .iter()
+                        .flat_map(|lane| lane.clips.iter().map(|clip| clip.id)),
+                )
                 .collect();
             for clip in clips {
                 if let Some(ClipData::Midi(midi)) = track.clip_mut(clip).map(|clip| &mut clip.data)
                 {
                     crate::tuning::retune(&mut midi.notes, &from, &to);
+                    // Spec: note-editing R22. A merge leaves a group of one.
+                    midi.tidy_groups();
                 }
             }
         }
@@ -9643,6 +9681,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn main_and_return_tracks_do_not_bounce_in_place() {
+        let mut song = Song::new();
+        let ret = song.track(TrackKind::Return, None);
+        for track in [song.main(), ret] {
+            let bounced = crate::bounce::BouncedTrack {
+                name: "x".to_owned(),
+                ..Default::default()
+            };
+            let kind = song.doc.track(track).unwrap().kind();
+            assert_eq!(
+                song.reject(Command::BounceTrackInPlace { track, bounced }),
+                ModelError::WrongTrackKind {
+                    track,
+                    kind,
+                    needs: "an audio, MIDI or group track",
+                }
+            );
+        }
+        assert_eq!(song.doc.track(ret).unwrap().kind(), TrackKind::Return);
+        song.doc.check_invariants().unwrap();
+    }
+
     fn frozen_region(clip: &Clip, scene: Option<SceneId>) -> crate::freeze::FrozenClip {
         crate::freeze::FrozenClip {
             clip: clip.id,
@@ -10512,6 +10573,37 @@ mod tests {
         let cropped = full.cropped(Ticks::ZERO, Ticks::QUARTER);
         assert_eq!(cropped.notes.len(), 1);
         assert!(cropped.groups.is_empty() && cropped.notes[0].group.is_none());
+    }
+
+    // Spec: audio-clips R25, R26. Shortening a clip cuts its fades to fit.
+    #[test]
+    fn shortening_a_clip_fits_its_fades_to_the_new_length() {
+        let mut song = Song::new();
+        let track = song.track(TrackKind::Audio, None);
+        // A clip of a bar at 120 BPM: two seconds.
+        let clip = song.clip(track, 0);
+        let fades = |fade_in, fade_out| Command::SetClipFades {
+            clip,
+            fade_in,
+            fade_out,
+            fade_in_curve: None,
+            fade_out_curve: None,
+        };
+        song.apply(fades(1.0, 1.0)).unwrap();
+        // A quarter note is half a second.
+        song.apply(Command::SetClipLength {
+            clip,
+            length: Ticks::QUARTER,
+        })
+        .unwrap();
+        let c = song.doc.clip(clip).unwrap();
+        let ClipData::Audio(a) = &c.data else {
+            panic!("an audio clip")
+        };
+        assert!(crate::fades::check_fades(c, a, &song.doc.settings().tempo).is_ok());
+        assert!((a.fade_in + a.fade_out - 0.5).abs() < 1e-9);
+        let fade_out = a.fade_out;
+        song.apply(fades(0.1, fade_out)).unwrap();
     }
 
     // Spec: audio-clips R23, R25, R30

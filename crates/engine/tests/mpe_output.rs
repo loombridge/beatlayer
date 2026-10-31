@@ -10,13 +10,14 @@ use std::time::{Duration, Instant};
 
 use bl_core::midi::{MidiOutputEvent, PortId};
 use bl_core::time::{TICKS_PER_QUARTER, Ticks};
-use bl_engine::{NoInput, TransportCommand};
+use bl_engine::{NoInput, NoteKind, TransportCommand, testing};
 use bl_model::{
     AutomationTarget, Breakpoint, Clip, ClipData, Command, EnvelopeKind, MidiData, MidiTo, MpeMode,
     MpeSettings, MpeZone, Note, TrackKind,
 };
-use common::{Rig, track};
+use common::{Rig, device, track};
 use rtrb::{Consumer, RingBuffer};
+use std::collections::HashSet;
 
 const BEAT: Ticks = Ticks(TICKS_PER_QUARTER);
 
@@ -319,4 +320,121 @@ fn the_tracks_controllers_go_on_the_master_channel_or_every_channel_of_a_range()
         cc(&multi, BEAT_FRAMES),
         [vec![0xB2, 1, 10], vec![0xB3, 1, 10], vec![0xB4, 1, 10]]
     );
+}
+
+// Spec: mpe R17
+#[test]
+fn a_port_that_opens_gets_the_configuration_again() {
+    let mut rig = Rig::with_config(64, |config| config.output_latency = 0);
+    let (producer, mut output): (_, Consumer<MidiOutputEvent>) = RingBuffer::new(1 << 16);
+    assert!(rig.processor.set_midi_output(producer).is_none());
+    let keys = track(&mut rig.editor, TrackKind::Midi, None);
+    let id = rig.editor.new_id();
+    rig.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(id, Ticks::ZERO, BEAT * 4, ClipData::Midi(clip())),
+    });
+    rig.apply(Command::SetMidiOutput {
+        track: keys,
+        to: Some(MidiTo::Port {
+            name: "Synth".to_owned(),
+            channel: 3,
+            mpe: Some(MpeSettings::default()),
+        }),
+    });
+    let start = Instant::now();
+    let mut drain = |rig: &mut Rig| -> Vec<Vec<u8>> {
+        let processor = &mut rig.processor;
+        bl_rt::rt_test!({
+            processor.process_at(64, &NoInput, start);
+        });
+        let mut messages = Vec::new();
+        while let Ok(event) = output.pop() {
+            messages.push(event.message.bytes().to_vec());
+        }
+        messages
+    };
+    // The first block, with the song stopped, sends the opening to a port
+    // that may not be open yet.
+    let opening = drain(&mut rig);
+    assert_eq!(
+        opening[..3],
+        [vec![0xB0, 101, 0], vec![0xB0, 100, 6], vec![0xB0, 6, 15]]
+    );
+    // A recompile that keeps the route sends it no more.
+    common::device(&mut rig.editor, keys, bl_engine::testing::TRANSPOSE, &[]);
+    assert!(rig.sync().program);
+    assert!(drain(&mut rig).is_empty());
+    // The port opens: the configuration and bend range go out again, before
+    // the first note.
+    rig.sender.midi_output_opened(PortId::from_name("Synth"));
+    rig.sender.transport(TransportCommand::Play);
+    assert!(rig.sender.flush());
+    let again = drain(&mut rig);
+    assert_eq!(again[..opening.len()], opening);
+    assert_eq!(
+        again[opening.len()..][..3],
+        [vec![0xE1, 0, 64], vec![0xB1, 74, 127], vec![0xD1, 127]]
+    );
+}
+
+/// Twenty long notes with sloped Pitch, Slide and Pressure envelopes into a
+/// test instrument for four bars, in blocks of `block` frames: every
+/// note-on and note-off the instrument heard, as (note ID, key, frame, on).
+fn pad(block: usize) -> Vec<(Option<u32>, u8, i64, bool)> {
+    let mut rig = Rig::new(block);
+    let keys = track(&mut rig.editor, TrackKind::Midi, None);
+    device(&mut rig.editor, keys, testing::INSTRUMENT, &[]);
+    let length = BEAT * 8;
+    let notes: Vec<Note> = (44..64)
+        .map(|key| {
+            let mut note = Note::new(key, Ticks::ZERO, length, 100);
+            note.pitch = vec![point(Ticks::ZERO, 0.0), point(length, 12.0)];
+            note.slide = vec![point(Ticks::ZERO, 0.0), point(length, 127.0)];
+            note.pressure = vec![point(Ticks::ZERO, 127.0), point(length, 0.0)];
+            note
+        })
+        .collect();
+    let id = rig.editor.new_id();
+    rig.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            id,
+            Ticks::ZERO,
+            BEAT * 16,
+            ClipData::Midi(MidiData::new(notes)),
+        ),
+    });
+    rig.sender.transport(TransportCommand::Play);
+    let mut heard = Vec::new();
+    for _ in 0..16 * BEAT_FRAMES as usize / block {
+        rig.block(block);
+        // The probe's queue holds 4,096 notes: more than a block sends.
+        for note in rig.probe.recorded_notes() {
+            let on = match note.event.kind {
+                NoteKind::On => true,
+                NoteKind::Off => false,
+                _ => continue,
+            };
+            heard.push((note.event.note_id, note.event.key, note.frame, on));
+        }
+    }
+    heard
+}
+
+// Spec: mpe R19
+#[test]
+fn a_block_of_expressions_never_crowds_out_a_note_off() {
+    let ids = |heard: &[(Option<u32>, u8, i64, bool)], on: bool| -> HashSet<Option<u32>> {
+        heard.iter().filter(|h| h.3 == on).map(|h| h.0).collect()
+    };
+    let big = pad(4096);
+    assert_eq!(ids(&big, true).len(), 20);
+    assert_eq!(ids(&big, true), ids(&big, false), "a note is left sounding");
+    // The same notes end on the same frames in a small block.
+    let mut small = pad(64);
+    let mut big = big;
+    small.sort_unstable();
+    big.sort_unstable();
+    assert!(small == big, "block size changes what plays");
 }

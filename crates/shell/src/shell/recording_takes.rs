@@ -107,7 +107,7 @@ impl Shell {
         let Some(recording) = self.recording.as_mut() else {
             return;
         };
-        recording.follow(engine.take, engine.take_running);
+        recording.follow(engine.take, engine.take_so_far, engine.take_running);
         // Spec: recording R22. Messages drained now are taken under the
         // value the set has now.
         recording.quantization = self.editor.document().settings().record_quantization;
@@ -175,6 +175,7 @@ impl Shell {
     fn finish_recording(&mut self, outcome: crate::recording::Outcome) {
         let crate::recording::Outcome {
             take,
+            rate,
             delay,
             files,
             midi,
@@ -216,6 +217,7 @@ impl Shell {
                 run,
                 crate::recording::Outcome {
                     take,
+                    rate,
                     delay,
                     files: Ok(files),
                     midi,
@@ -230,10 +232,6 @@ impl Shell {
         }
         let Some(take) = take else {
             self.fail_recording("Recording stopped without a position, so its clips weren't made");
-            return;
-        };
-        let Some(rate) = self.audio.sample_rate().and_then(SampleRate::new) else {
-            self.fail_recording("Recording stopped: the audio device closed");
             return;
         };
         let tempo = self.editor.document().settings().tempo.clone();

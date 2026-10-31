@@ -34,7 +34,7 @@ This spec covers the user keymap file, how it layers over the default keymap, wh
 - **R3.** The keymap in use is the default keymap without the shortcuts the file unbinds, with every bind entry added. A bind entry's keys win over a default shortcut with the same keys in the same context, whose keys go for as long as the entry stays; the default shortcut's command keeps its other keys. A command can have several shortcuts. (S1, S4)
 - **R4.** Keys resolve as they always do ([app-shell.md](app-shell.md) R11): the focused area's context, then `tab-focus` while Use Tab Key to Move Focus is on, then `global`. A user shortcut keeps its command's trigger: a command whose default shortcut acts while held, or latches (S4), does so on its new keys too. (S4, S6)
 - **R5.** Only key shortcuts can be rebound. Mouse gestures, modifiers held during a gesture, and sequences keep Live's; so do the shortcuts the keymap marks as the system's or a focused control's (menu navigation, Hide, the value and text field keys), and the `text-field`, `value-field`, `menu`, `dialog` and `computer-midi-keyboard` contexts take no user shortcut, so typing a name or a value, and playing the computer keyboard, always work as in Live. (S4, S6)
-- **R6.** An entry the file holds but can't use (a command ID the registry doesn't have, keys that don't parse, a context the keymap doesn't have, a context R5 refuses, a shortcut ID that doesn't exist) is skipped and the rest load. At launch the Status Bar says how many entries were skipped, and `keymap.state` lists each with why. A skipped entry stays in the file until the person changes or resets it. (S1)
+- **R6.** An entry the file holds but can't use (a command ID the registry doesn't have, keys that don't parse, a context the keymap doesn't have, a context R5 refuses, a shortcut ID that doesn't exist) is skipped and the rest load. At launch the Status Bar says how many entries were skipped, and `keymap.state` lists each with why. A skipped entry stays in the file until the person changes or resets it. A file that isn't a keymap at all is renamed `keymap.toml.bad`, beside the preferences, so the next change can't overwrite it, and the keymap is Live's until the person binds again. (S1)
 
 **The Shortcuts page**
 
@@ -49,7 +49,7 @@ This spec covers the user keymap file, how it layers over the default keymap, wh
 **Commands**
 
 - **R14.** `keymap.state` (read) reports the keymap in use on each platform: every shortcut with its keys, context, trigger and commands, and whether it's Live's, a person's own, or a default one the file unbinds; and each entry R6 skipped, with why. (S7)
-- **R15.** `keymap.bind` (command, arguments, keys, platform, optional context), `keymap.unbind` (a shortcut's ID, or a command and keys) and `keymap.reset` (a command, or every command) are registered commands in the `edit` class, each read back through `keymap.state`; `keymap.bind` refuses the keys R5 refuses and, when the keys run another command where R9 would warn, refuses unless `replace` is true. A person's gesture on the page runs one of them. (S1, S7)
+- **R15.** `keymap.bind` (command, arguments, keys, platform, optional context), `keymap.unbind` (a shortcut's ID, or a command and keys) and `keymap.reset` (a command, or every command) are registered commands in the `edit` class, each read back through `keymap.state`; `keymap.bind` refuses the keys R5 refuses and, when the keys run another command where R9 would warn, refuses unless `replace` is true; it refuses arguments that don't fit the bound command's schema or that hold null, and its class for an agent is that of the command it binds when that is higher ([agent-permissions.md](agent-permissions.md) R18). `keymap.unbind` with a command takes away only the keys named, on both platforms without a `platform`, and refuses a key that parses on none of them. A person's gesture on the page runs one of them. (S1, S7)
 - **R16.** The default keymap's own test still holds: with no user file, every shortcut in the reference is bound or marked with the milestone that binds it, and the keymap is the one `cargo xtask keymap` generates. (S7)
 - **R17.** Key Map Mode's mappings (milestone M7) are the set's and aren't shortcuts: the user keymap neither holds nor changes them. (S2)
 
@@ -62,15 +62,15 @@ This spec covers the user keymap file, how it layers over the default keymap, wh
 | R3 | `crates/shell/tests/keymap.rs`, `a_bind_gives_a_command_other_keys`, `a_bind_over_lives_own_key_takes_it`, `a_replace_keeps_the_other_keys_of_lives_own_shortcut` | unit |
 | R4 | `crates/shell/tests/keymap.rs`, `a_latching_command_keeps_its_latch_on_new_keys` | unit |
 | R5 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` (the refused context) | unit |
-| R6 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` | unit |
+| R6 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed`, `a_keymap_file_that_cant_be_read_is_kept_aside` | unit |
 | R7 | `crates/ui/tests/user_keymap.rs`, `the_shortcuts_page_sits_after_display_and_input` | UI script |
 | R8 | `crates/ui/tests/user_keymap.rs`, `recording_sets_a_key` | UI script |
 | R9 | `crates/ui/tests/user_keymap.rs`, `a_conflict_asks_and_replace_moves_the_key` | UI script |
 | R10 | `crates/ui/tests/user_keymap.rs`, `reset_and_reset_all_give_lives_keys_back` | UI script |
-| R11 | `crates/shell/tests/keymap.rs`, `undo_leaves_the_keymap_alone` | unit |
+| R11 | `crates/shell/tests/keymap.rs`, `undo_leaves_the_keymap_alone`, `a_bound_arrays_arguments_survive_a_restart`; `crates/shell-spec/src/keymap.rs`, `to_file_round_trips_any_args` | unit |
 | R12 | `crates/ui/tests/user_keymap.rs`, `every_row_reaches_accesskit` | UI script |
 | R13 | `crates/ui/tests/zoom.rs`, `the_settings_window_draws_its_rows_scaled_at_every_step` | UI script |
 | R14 | `crates/shell/tests/keymap.rs`, `the_commands_read_back_through_keymap_state`; `crates/cli/tests/agent.rs`, `an_agent_binds_keys_and_reads_them_back` | unit, through the agent API |
-| R15 | `crates/shell/tests/keymap.rs`, `the_commands_read_back_through_keymap_state`, `a_reset_gives_the_command_lives_keys_back`; `crates/cli/tests/agent.rs`, `an_agent_binds_keys_and_reads_them_back` | unit, through the agent API |
+| R15 | `crates/shell/tests/keymap.rs`, `the_commands_read_back_through_keymap_state`, `a_reset_gives_the_command_lives_keys_back`, `a_bind_refuses_arguments_the_command_doesnt_take`, `an_unbind_of_one_key_keeps_the_bindings_other_keys`, `an_unbind_without_a_platform_acts_on_both`, `an_unbind_refuses_keys_that_dont_parse`; `crates/cli/tests/agent.rs`, `an_agent_binds_keys_and_reads_them_back` | unit, through the agent API |
 | R16 | `crates/ui/tests/keymap/reference.rs`, `every_shortcut_is_bound_or_marked_with_the_milestone_that_binds_it` | unit |
 | R17 | `crates/shell/tests/keymap.rs`, `entries_that_cant_be_used_are_skipped_and_listed` (the file holds no Key Map Mode mapping, and one it held would be skipped) | unit |

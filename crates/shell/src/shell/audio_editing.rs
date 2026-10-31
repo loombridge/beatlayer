@@ -1463,6 +1463,10 @@ pub(super) fn consolidate_document(
         .filter(|id| *id != track && *id != main)
         .collect();
     for other in others {
+        // Deleting a group takes the tracks inside it too.
+        if doc.track(other).is_none() {
+            continue;
+        }
         doc.apply(&Command::DeleteTrack { track: other })
             .map_err(|error| error.to_string())?;
     }

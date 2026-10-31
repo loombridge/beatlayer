@@ -97,6 +97,10 @@ pub enum RequestKind {
     Stop = 2,
     /// Set the song's tempo to the value given in BPM.
     Tempo = 3,
+    /// Set the device's Transport to the choice given in the ticks field,
+    /// after the node left its state on its own: a fixed-length recording
+    /// ended, Clear ran, or a set reopened a Looper saved recording (R6, R9).
+    Transport = 4,
 }
 
 /// Looper's transport state.
@@ -282,7 +286,15 @@ pub fn make(device: &Device, config: &NodeConfig) -> Looper {
         .params
         .get(&REVERSE)
         .is_some_and(|value| *value >= 0.5);
-    Looper::new(config, transport, reverse)
+    let mut looper = Looper::new(config, transport, reverse);
+    // R3: a set reopens with an empty buffer, so a Looper saved recording or
+    // overdubbing starts stopped. `seen` keeps the saved value, so the node
+    // sees no change to act on, and the document is asked to follow.
+    if matches!(transport, RECORD | OVERDUB) {
+        looper.state = State::Stop;
+        looper.ask(RequestKind::Transport, STOP as i64, 0.0);
+    }
+    looper
 }
 
 /// What the main thread asks a Looper's node to do (the looper spec, R25):
@@ -346,6 +358,9 @@ pub struct Looper {
     request: Option<(RequestKind, u32, i64, f64)>,
     /// The serial the next request takes.
     serial: u32,
+    /// How many samples `decay` has scaled, for the tests.
+    #[cfg(test)]
+    decay_samples: usize,
     /// What the display published last (R26).
     display: [f32; DISPLAY_LEN],
 }
@@ -379,6 +394,8 @@ impl Looper {
             recorded_tempo: 120.0,
             request: None,
             serial: 0,
+            #[cfg(test)]
+            decay_samples: 0,
             display: [0.0; DISPLAY_LEN],
         }
     }
@@ -485,7 +502,13 @@ impl Looper {
                 self.record_end = if playing && record_length > 0 {
                     let bar = signatures.signature_at(self.record_start).bar_length();
                     let end = self.record_start + bar * record_length;
-                    Some(tempo.ticks_to_frames(end, self.rate).get())
+                    // The buffer holds only so much: the take ends there.
+                    Some(
+                        tempo
+                            .ticks_to_frames(end, self.rate)
+                            .get()
+                            .min(song + self.max_frames as i64),
+                    )
                 } else {
                     None
                 };
@@ -518,23 +541,28 @@ impl Looper {
     ) {
         let frames = (self.pos.floor() as usize).min(self.max_frames).max(1);
         self.length = frames;
-        let seconds = frames as f64 / self.rate.as_f64();
-        let bar = signatures
-            .signature_at(self.record_start)
-            .bar_length()
-            .get() as f64;
-        let bars = if record_length > 0 {
-            record_length as f64
+        if playing {
+            // R20: while the song plays, the recording takes the song's tempo.
+            self.recorded_tempo = self.record_tempo;
         } else {
-            // R22's guess: the whole number of bars nearest to what Looper's
-            // tempo was when the recording began.
-            let bar_seconds = bar / TICKS_PER_QUARTER as f64 * 60.0 / self.record_tempo;
-            (seconds / bar_seconds).round().max(1.0)
-        };
-        let quarters = bar * bars / TICKS_PER_QUARTER as f64;
-        let recorded = quarters / seconds * 60.0;
-        if recorded.is_finite() && recorded > 0.0 {
-            self.recorded_tempo = recorded;
+            let seconds = frames as f64 / self.rate.as_f64();
+            let bar = signatures
+                .signature_at(self.record_start)
+                .bar_length()
+                .get() as f64;
+            let bars = if record_length > 0 {
+                record_length as f64
+            } else {
+                // R22's guess: the whole number of bars nearest to what
+                // Looper's tempo was when the recording began.
+                let bar_seconds = bar / TICKS_PER_QUARTER as f64 * 60.0 / self.record_tempo;
+                (seconds / bar_seconds).round().max(1.0)
+            };
+            let quarters = bar * bars / TICKS_PER_QUARTER as f64;
+            let recorded = quarters / seconds * 60.0;
+            if recorded.is_finite() && recorded > 0.0 {
+                self.recorded_tempo = recorded;
+            }
         }
         self.record_end = None;
         self.pos = 0.0;
@@ -579,9 +607,14 @@ impl Looper {
         std::mem::swap(&mut self.buffer, &mut self.undo);
     }
 
-    /// Empties the buffer (R9): while overdubbing, the samples alone.
+    /// Empties the buffer (R9): while overdubbing, the samples alone. Only
+    /// the recorded length holds anything: recording writes from the start
+    /// before it reads.
     fn clear(&mut self, keep_length: bool) {
-        self.buffer.fill(0.0);
+        for channel in 0..self.channels {
+            let start = channel * self.max_frames;
+            self.buffer[start..start + self.length].fill(0.0);
+        }
         self.snapshot_clear();
         if !keep_length {
             self.length = 0;
@@ -589,7 +622,9 @@ impl Looper {
             self.recorded_tempo = self.record_tempo;
             self.record_end = None;
             self.state = State::Stop;
-            self.seen = STOP;
+            // `seen` stays the document's value; the shell is asked to write
+            // Stop back.
+            self.ask(RequestKind::Transport, STOP as i64, 0.0);
         }
     }
 
@@ -665,6 +700,14 @@ impl Looper {
     /// The whole buffer scaled by `gain`, the feedback of one repetition
     /// (R15).
     fn decay(&mut self, gain: f32) {
+        // At 100 % the layers never fall: nothing to scale.
+        if gain >= 1.0 {
+            return;
+        }
+        #[cfg(test)]
+        {
+            self.decay_samples += self.length * self.channels;
+        }
         for channel in 0..self.channels {
             let start = channel * self.max_frames;
             for sample in &mut self.buffer[start..start + self.length] {
@@ -824,18 +867,20 @@ impl NativeDevice for Looper {
                 self.reverse = value;
             }
             // A fixed-length recording ends after its bars (R6).
-            if self.state == State::Record {
-                if let Some(end) = self.record_end {
-                    if song >= end {
-                        self.end_recording(playing, signatures, tempo_control, record_length);
-                        self.state = after;
-                        self.pending = None;
-                    }
-                } else if self.pos >= self.max_frames as f64 {
-                    self.end_recording(playing, signatures, tempo_control, record_length);
-                    self.state = after;
-                    self.pending = None;
-                }
+            // The buffer's end ends a recording too, fixed-length or not.
+            if self.state == State::Record
+                && (self.record_end.is_some_and(|end| song >= end)
+                    || self.pos >= self.max_frames as f64)
+            {
+                // `seen` stays the document's value; the shell is asked to
+                // write the new state back (R6). shortcut: one request at a
+                // time, so a Set & Follow tempo request from a recording
+                // that ends stopped replaces this one, and the chooser stays
+                // stale until the next Transport change.
+                self.ask(RequestKind::Transport, after.choice() as i64, 0.0);
+                self.end_recording(playing, signatures, tempo_control, record_length);
+                self.state = after;
+                self.pending = None;
             }
 
             let speed = params.ramp(SPEED_INDEX)[i] as f64;
@@ -985,5 +1030,76 @@ fn empty(device: DeviceId) -> DeviceDisplay {
         series: Vec::new(),
         markers: Vec::new(),
         readings: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LENGTH: usize = 48_000;
+
+    /// An overdubbing Looper at 48 kHz holding a one-second ramp.
+    fn looper() -> Looper {
+        let config = NodeConfig {
+            round_trip_latency: 0,
+            sample_rate: SampleRate::HZ_48000,
+            max_frames: 128,
+            channels: 2,
+        };
+        let mut looper = Looper::new(&config, OVERDUB, false);
+        looper.length = LENGTH;
+        for channel in 0..2 {
+            for i in 0..LENGTH {
+                looper.buffer[channel * looper.max_frames + i] = i as f32 + 1.0;
+            }
+        }
+        looper
+    }
+
+    // Spec: looper R15
+    #[test]
+    fn a_wrap_at_unity_feedback_scales_nothing_and_below_it_scales_the_loop() {
+        let mut looper = looper();
+        let before = looper.buffer.clone();
+        for _ in 0..3 {
+            looper.decay(1.0);
+        }
+        assert_eq!(looper.decay_samples, 0, "unity feedback does no work");
+        assert_eq!(
+            looper.buffer, before,
+            "and the loop is bit for bit as it was"
+        );
+        looper.decay(0.5);
+        assert_eq!(looper.decay_samples, LENGTH * 2, "half scales the loop");
+        assert_eq!(looper.buffer[LENGTH - 1], LENGTH as f32 / 2.0);
+    }
+
+    // Spec: looper R9
+    #[test]
+    fn clear_zeroes_only_the_recorded_length_of_each_channel() {
+        for keep in [true, false] {
+            let mut looper = looper();
+            for channel in 0..2 {
+                let start = channel * looper.max_frames;
+                looper.buffer[start + LENGTH..start + looper.max_frames].fill(7.0);
+            }
+            looper.clear(keep);
+            for channel in 0..2 {
+                let start = channel * looper.max_frames;
+                assert!(
+                    looper.buffer[start..start + LENGTH]
+                        .iter()
+                        .all(|s| *s == 0.0),
+                    "the recorded length is cleared"
+                );
+                assert!(
+                    looper.buffer[start + LENGTH..start + looper.max_frames]
+                        .iter()
+                        .all(|s| *s == 7.0),
+                    "past it nothing was written"
+                );
+            }
+        }
     }
 }

@@ -511,6 +511,31 @@ fn a_command_only_a_person_runs_is_refused_and_recorded() {
 }
 
 #[test]
+fn the_assistant_cannot_bind_keys_to_a_command_only_a_person_runs() {
+    // Spec: agent-permissions R18.
+    let mut shell = Shell::headless();
+    let provider = Script::new(vec![
+        calls(vec![call(
+            "c1",
+            "keymap.bind",
+            json!({ "command": "assistant.set_model", "args": { "model": "gpt-4o" },
+                    "keys": ["Cmd+Option+Shift+F6"], "platform": "mac", "context": "global" }),
+        )]),
+        answer("I can't bind that."),
+    ]);
+    let mut prompter = ScriptedPrompter::new(Vec::new());
+
+    one_turn(&mut shell, &provider, &mut prompter);
+
+    assert!(prompter.asked.is_empty(), "it's refused, not asked about");
+    assert!(shell.user_keymap().binds.is_empty(), "no key was bound");
+    assert!(matches!(
+        shell.assistant_log()[0].outcome,
+        Outcome::Denied(_)
+    ));
+}
+
+#[test]
 fn the_settings_commands_are_the_person_s_own() {
     // The agent API refuses every assistant command, whatever the agent's
     // permissions (agent-permissions R9, by analogy).

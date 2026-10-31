@@ -196,6 +196,32 @@ fn a_message_a_mapping_takes_never_reaches_the_surface() {
     );
 }
 
+// Spec: control-surfaces R4, R10. A surface stopped by a fault, a panic or
+// the watchdog, lets go of its input: messages reach tracks under Track, as
+// after a normal stop.
+#[test]
+fn a_faulted_surface_lets_its_input_reach_tracks() {
+    for fault in [Journal::panic, |j: &Journal| {
+        j.sleep(Duration::from_millis(200))
+    }] {
+        let mut rig = Rig::with_ports();
+        rig.set(0, Some("test"), "Pads", "Pads Out").unwrap();
+        fault(&rig.journal(0));
+        let now = TestClock::new().now();
+        rig.send("Pads", now, &[0x90, 60, 100]);
+        rig.surfaces.settle();
+        assert_eq!(rig.run(0), RunState::Stopped);
+        // Reconciling marks the row halted.
+        rig.sync();
+        let _ = rig.reached_tracks();
+        rig.send("Pads", now, &[0x90, 61, 100]);
+        rig.surfaces.settle();
+        let reached = rig.reached_tracks();
+        assert_eq!(reached.len(), 1, "the note reaches tracks under Track");
+        assert_eq!(reached[0].message.bytes(), &[0x90, 61, 100]);
+    }
+}
+
 // Spec: control-surfaces R4. A message the surface takes reaches no track;
 // one it hands back does while the port's Track switch is on.
 #[test]

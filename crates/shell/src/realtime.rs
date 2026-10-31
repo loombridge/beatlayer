@@ -18,7 +18,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use bl_core::time::{Frames, SampleRate, Ticks};
-use bl_engine::{RenderOutput, RenderPlan, TransportCommand};
+use bl_engine::{RenderOutput, RenderPlan, TransportCommand, loop_region};
 use bl_model::{Device, Document, TrackId};
 use rtrb::{Consumer, PopError, RingBuffer};
 
@@ -393,6 +393,11 @@ pub fn render(
             "the range is shorter than one frame".to_owned(),
         ));
     }
+    // What the render changes in the transport and puts back when it ends
+    // (R24): the set's Arrangement loop, and the insert marker unless the
+    // render finishes.
+    let marker = audio.transport_state().insert_marker;
+    let looped = TransportCommand::SetLoop(loop_region(document));
     // The dialog's switch starts as the export's argument says.
     session.set_auto_restart(auto_restart);
     let cancel = session.cancel_flag();
@@ -417,6 +422,8 @@ pub fn render(
             first,
             frames,
             rate.hz(),
+            looped,
+            marker,
             &cancel,
             session,
             attempt,
@@ -461,6 +468,8 @@ fn play(
     first: i64,
     frames: u64,
     rate: u32,
+    looped: TransportCommand,
+    marker: Ticks,
     cancel: &Arc<AtomicBool>,
     session: &Session,
     attempt: u32,
@@ -487,7 +496,7 @@ fn play(
         let out = export::open(job, &scratch, &targets)?;
         // Spec: export R33. Convert to Mono makes the file one channel.
         let channels = usize::from(targets[0].1.channels);
-        let converter = if job.sample_rate < rate {
+        let converter = if job.sample_rate != rate {
             Some(Downsampler::new(rate, job.sample_rate, channels, frames)?)
         } else {
             None
@@ -530,6 +539,8 @@ fn play(
     let _ = audio.send_transport(TransportCommand::Play);
     let mut seen = Seen::default();
     let mut found: Vec<Dropout> = Vec::new();
+    // Whether the engine rendered the range and stopped the song itself.
+    let mut ended = false;
     loop {
         if cancel.load(Ordering::Relaxed) {
             break;
@@ -542,6 +553,7 @@ fn play(
         let new = dropouts(&mut seen, stats, &dropped, position);
         found.extend(new);
         if done || !audio.engine_running() {
+            ended = done;
             break;
         }
         let share = captured.first().map_or(0.0, |count| {
@@ -553,9 +565,18 @@ fn play(
         progress(share);
         thread::sleep(POLL);
     }
-    // The song stops at the range's end; the rings close when the plan
-    // goes, which the empty plan below does.
-    let _ = audio.send_transport(TransportCommand::Stop);
+    // The engine stopped the song at the range's end, where it stays with
+    // the insert marker: a second Stop would send the playhead to the start.
+    // A render that ends early stops the song here and puts the marker
+    // back. The rings close when the plan goes, which the empty plan below
+    // does.
+    if ended {
+        let _ = audio.send_transport(TransportCommand::InsertMarkerToPlayhead);
+    } else {
+        let _ = audio.send_transport(TransportCommand::Stop);
+        let _ = audio.send_transport(TransportCommand::SetInsertMarker(marker));
+    }
+    let _ = audio.send_transport(looped);
     let _ = audio.render(RenderPlan {
         start: Frames(first),
         frames: 0,

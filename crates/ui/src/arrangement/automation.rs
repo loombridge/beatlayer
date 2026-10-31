@@ -98,7 +98,7 @@ pub(super) struct Lane<'a> {
     pub horizontal: Horizontal,
     pub scale: LaneScale,
     /// The breakpoints that are selected in this lane (the automation
-    /// editing spec, R2).
+    /// editing spec, R2), in position order.
     pub selected: Vec<Ticks>,
     /// The time selection covering the lane, if any (R4).
     pub span: Option<(Ticks, Ticks)>,
@@ -1399,10 +1399,19 @@ pub(super) fn paint_envelope(
             Stroke::new(1.5, theme.colors.automation.0),
         ));
     }
-    for point in envelope.points() {
+    // Only the breakpoints in view are painted: a recorded touch can hold
+    // thousands.
+    let all = envelope.as_slice();
+    let from = lane.horizontal.at(-f64::from(BREAKPOINT_SIZE));
+    let to = lane
+        .horizontal
+        .at(f64::from(lane.rect.width() + BREAKPOINT_SIZE));
+    let first = all.partition_point(|point| point.at < from);
+    let last = all.partition_point(|point| point.at <= to);
+    for &point in &all[first..last] {
         // Spec: automation-editing R2. A selected breakpoint is drawn in
         // the selection colour.
-        let selected = lane.selected.contains(&point.at);
+        let selected = lane.selected.binary_search(&point.at).is_ok();
         let keyed = keys
             .and_then(|keys| crate::envelope_keys::breakpoint_colour(theme, point.at, keys, time));
         painter.rect_filled(

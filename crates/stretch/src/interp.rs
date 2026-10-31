@@ -32,6 +32,10 @@ use std::sync::OnceLock;
 const SINC_WIDEN: f64 = 16.0;
 /// Kernel table entries per input frame.
 const SINC_RESOLUTION: usize = 512;
+/// The long kernel's reach in input frames each side of the position at rate 1.
+const LONG_HALF: usize = 64;
+/// The most taps any kernel has: both sides of the long kernel at its widest.
+const MAX_TAPS: usize = 2 * LONG_HALF * SINC_WIDEN as usize;
 
 /// One kernel's shape: its reach in input frames each side of the position at
 /// rate 1, the Kaiser window's β, and its cutoff in fractions of the rate;
@@ -45,7 +49,7 @@ struct Shape {
 
 /// HiQ on: about 90 dB of attenuation.
 static LONG: Shape = Shape {
-    half: 64,
+    half: LONG_HALF,
     beta: 9.0,
     cutoff: 0.475,
     table: OnceLock::new(),
@@ -88,6 +92,8 @@ impl Interpolation {
 
     /// How many file frames the interpolator reads before and after the
     /// frame a position falls in, at `speed` file frames per output frame.
+    /// The speed is negative for a backward read; its magnitude sets how far
+    /// the kernel widens.
     #[must_use]
     pub fn reach(self, speed: f64) -> (usize, usize) {
         let half = half(self.shape(), speed);
@@ -95,14 +101,30 @@ impl Interpolation {
     }
 
     /// The frame at `position + fraction` (0 to under 1) of `channel`, from
-    /// `window`, whose frame `at` is the one `position` falls in, at `speed`.
-    /// The window must hold the frames [`reach`](Self::reach) says.
+    /// `window`, whose frame `at` is the one `position` falls in, at `speed`
+    /// (negative for a backward read, which widens the kernel by its
+    /// magnitude). The window must hold the frames [`reach`](Self::reach) says.
     #[must_use]
     pub fn sample(self, window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
         if fraction == 0.0 && speed == 1.0 {
             return window[at];
         }
-        interpolate(self.shape(), window, at, fraction, speed)
+        let mut taps = Taps::new();
+        self.weights(at, fraction, speed, &mut taps);
+        taps.dot(window)
+    }
+
+    /// Works out the weights [`sample`](Self::sample) reads one position
+    /// through, once for every channel: [`Taps::dot`] applies them to a
+    /// channel's window, which must hold the frames [`reach`](Self::reach)
+    /// says.
+    pub(crate) fn weights(self, at: usize, fraction: f64, speed: f64, taps: &mut Taps) {
+        if fraction == 0.0 && speed == 1.0 {
+            // Spec: warp-modes R4. The frame itself, untouched.
+            (taps.first, taps.len, taps.sum, taps.weights[0]) = (at, 1, 1.0, 1.0);
+        } else {
+            fill(self.shape(), at, fraction, speed, taps);
+        }
     }
 
     fn shape(self) -> &'static Shape {
@@ -115,21 +137,58 @@ impl Interpolation {
 
 /// A kernel's half width in frames at `speed`.
 fn half(shape: &Shape, speed: f64) -> usize {
-    (shape.half as f64 * speed.clamp(1.0, SINC_WIDEN)).ceil() as usize
+    (shape.half as f64 * speed.abs().clamp(1.0, SINC_WIDEN)).ceil() as usize
 }
 
-/// The windowed sinc at `position + fraction`, its weights scaled to sum to 1
-/// so a steady level passes unchanged.
-fn interpolate(shape: &Shape, window: &[f32], at: usize, fraction: f64, speed: f64) -> f32 {
-    let widen = speed.clamp(1.0, SINC_WIDEN);
+/// The weights of one position's taps: `len` frames from `first`, scaled by
+/// `sum` so a steady level passes unchanged.
+pub(crate) struct Taps {
+    weights: [f64; MAX_TAPS],
+    first: usize,
+    len: usize,
+    sum: f64,
+}
+
+impl Taps {
+    pub(crate) fn new() -> Self {
+        Self {
+            weights: [0.0; MAX_TAPS],
+            first: 0,
+            len: 0,
+            sum: 1.0,
+        }
+    }
+
+    /// The taps' weighted sum over `window`.
+    pub(crate) fn dot(&self, window: &[f32]) -> f32 {
+        let frames = &window[self.first..self.first + self.len];
+        let mut sum = 0.0_f64;
+        for (&sample, &weight) in frames.iter().zip(&self.weights) {
+            sum += f64::from(sample) * weight;
+        }
+        (sum / self.sum) as f32
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many positions' weights this thread has worked out.
+    pub(crate) static KERNEL_EVALS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The windowed sinc's weights at `position + fraction`.
+fn fill(shape: &Shape, at: usize, fraction: f64, speed: f64, taps: &mut Taps) {
+    #[cfg(test)]
+    KERNEL_EVALS.with(|evals| evals.set(evals.get() + 1));
+    let widen = speed.abs().clamp(1.0, SINC_WIDEN);
     let half = half(shape, speed);
     let table = kernel(shape);
     // The kernel is the prototype stretched by `widen` in frames: a tap `k`
     // frames from the position sits `(k - fraction) / widen` along it.
     let step = SINC_RESOLUTION as f64 / widen;
-    let (mut sum, mut weights) = (0.0_f64, 0.0_f64);
     let first = at + 1 - half;
-    for (offset, &sample) in window[first..=at + half].iter().enumerate() {
+    let mut sum = 0.0_f64;
+    for (offset, slot) in taps.weights[..2 * half].iter_mut().enumerate() {
         // The tap's distance from the position, in input frames.
         let distance = ((first + offset) as f64 - at as f64 - fraction).abs() * step;
         let i = distance as usize;
@@ -141,10 +200,10 @@ fn interpolate(shape: &Shape, window: &[f32], at: usize, fraction: f64, speed: f
         } else {
             0.0
         };
-        sum += f64::from(sample) * weight;
-        weights += weight;
+        *slot = weight;
+        sum += weight;
     }
-    (sum / weights) as f32
+    (taps.first, taps.len, taps.sum) = (first, 2 * half, sum);
 }
 
 /// The prototype kernel of `shape`: a Kaiser-windowed sinc with its cutoff at
@@ -213,6 +272,18 @@ mod tests {
         let window = sine(0.4, 1_200);
         for kind in [Interpolation::Short, Interpolation::Sinc] {
             let got = kind.sample(&window, 600, 0.0, 2.0);
+            assert!(got.abs() < 1e-3, "{kind:?}: {got}");
+        }
+    }
+
+    // Spec: warp-modes R12, R36. A Back-and-Forth Beats pass reads backwards
+    // (slope -ratio); its filter must widen just as a forward read's does.
+    #[test]
+    fn a_backward_read_is_filtered_like_a_forward_one() {
+        let window = sine(0.4, 1_200);
+        for kind in [Interpolation::Short, Interpolation::Sinc] {
+            assert_eq!(kind.reach(-2.0), kind.reach(2.0), "{kind:?}");
+            let got = kind.sample(&window, 600, 0.0, -2.0);
             assert!(got.abs() < 1e-3, "{kind:?}: {got}");
         }
     }

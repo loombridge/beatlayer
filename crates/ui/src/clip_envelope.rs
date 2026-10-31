@@ -512,10 +512,11 @@ pub struct Frame<'a> {
 }
 
 impl EnvelopeEditor {
-    /// Forgets a drag, as another clip showing does.
-    pub fn reset(&mut self) {
-        self.drag = None;
+    /// Forgets a drag, as another clip showing does. Returns whether a
+    /// drag, which may hold a gesture open, was dropped.
+    pub fn reset(&mut self) -> bool {
         self.menu = None;
+        self.drag.take().is_some()
     }
 
     /// Draws the editor and its footer, and turns the pointer's gestures

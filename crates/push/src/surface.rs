@@ -94,6 +94,8 @@ pub struct Push {
     contents: Contents,
     phase: Phase,
     user_mode: bool,
+    /// Whether the sustain pedal (footswitch 1) is down.
+    sustain_down: bool,
     firmware: Option<String>,
     external_power: Option<bool>,
     error: Option<String>,
@@ -152,6 +154,7 @@ impl Push {
             contents: contents(),
             phase: Phase::Live,
             user_mode: false,
+            sustain_down: false,
             firmware: None,
             external_power: None,
             error: None,
@@ -758,7 +761,20 @@ impl Push {
         };
     }
 
+    /// Lets go of the sustain pedal if it is down: its release can no longer
+    /// arrive once the surface stops or Push 2 is in User mode.
+    fn release_sustain(&mut self, cx: &mut Cx) {
+        if std::mem::take(&mut self.sustain_down)
+            && let Some(message) = MidiMessage::from_bytes(&[0xB0, 64, 0])
+        {
+            cx.play(message);
+        }
+    }
+
     fn set_user_mode(&mut self, on: bool, cx: &mut Cx) {
+        if on {
+            self.release_sustain(cx);
+        }
         self.user_mode = on;
         self.buttons.clear();
         self.picker = None;
@@ -966,6 +982,7 @@ impl Push {
     fn footswitch(&mut self, number: u8, value: u8, at: Instant, cx: &mut Cx) {
         let down = value >= 64;
         if number == cc::FOOTSWITCH_1 {
+            self.sustain_down = down;
             if let Some(message) = MidiMessage::from_bytes(&[0xB0, 64, if down { 127 } else { 0 }])
             {
                 cx.play(message);
@@ -1464,6 +1481,7 @@ impl ControlSurface for Push {
     fn stop(&mut self, cx: &mut Cx) {
         // Every LED off, the display dark, and Push 2 left in Live mode
         // (R4).
+        self.release_sustain(cx);
         self.leds.clear();
         self.leds.forget();
         for bytes in self.leds.flush(false) {

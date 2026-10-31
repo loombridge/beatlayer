@@ -589,6 +589,20 @@ impl ControlSurface for Grid {
     }
 
     fn stop(&mut self, cx: &mut Cx) {
+        // The pads still down can no longer be released: let their notes and
+        // slots go.
+        for (_, key) in std::mem::take(&mut self.drums_down) {
+            cx.play(MidiMessage::note_off(0, key));
+        }
+        for note in std::mem::take(&mut self.slots_down) {
+            if let Some((column, row)) = pad_at(note) {
+                cx.control(
+                    Role::Slot { column, row },
+                    RemoteMode::Absolute,
+                    Hit::NoteOff { key: note },
+                );
+            }
+        }
         // Every light out, then the controller's own state back (R17).
         for ((layer, number), _) in std::mem::take(&mut self.lit) {
             for bytes in light_bytes(layer, number, None) {
@@ -639,5 +653,55 @@ impl ControlSurface for Grid {
                 .map(|f| (0..8).map(|i| f.role(i)).collect())
                 .unwrap_or_default(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bl_core::clock::TestClock;
+    use bl_core::id::Id;
+    use bl_model::{DeviceId, Editor};
+
+    use super::*;
+    use crate::surface::Ask;
+
+    fn played(cx: &Cx) -> Vec<MidiMessage> {
+        cx.played.iter().map(|(_, message)| *message).collect()
+    }
+
+    // Spec: supported-controllers R4. A surface stopped with pads down lets
+    // their notes and slots go, since the releases can no longer arrive.
+    #[test]
+    fn stopping_with_pads_down_ends_their_notes_and_slots() {
+        let mut grid = Grid::new(Model::X);
+        let mut model = ReadModel::at_rest(Arc::new(Editor::new().document().clone()));
+        model.drum = Some(DrumView {
+            rack: DeviceId(Id::new(5).unwrap()),
+            first: 36,
+            selected: None,
+            filled: 0,
+        });
+        let now = TestClock::new().now();
+        let mut cx = Cx::new(0, now);
+        grid.tick(&model, &mut cx);
+        let note = |column, row| {
+            (0..128)
+                .find(|n| pad_at(*n) == Some((column, row)))
+                .unwrap()
+        };
+        grid.message(now, &[0x98, note(0, 7), 100], &mut cx);
+        grid.message(now, &[0x90, note(0, 0), 100], &mut cx);
+        assert_eq!(played(&cx), [MidiMessage::note_on(0, 36, 100)]);
+
+        let mut cx = Cx::new(0, now);
+        grid.stop(&mut cx);
+        assert_eq!(played(&cx), [MidiMessage::note_off(0, 36)]);
+        assert!(cx.requests.iter().any(|ask| matches!(
+            ask,
+            Ask::Control(c) if c.role == (Role::Slot { column: 0, row: 0 })
+                && c.hit == (Hit::NoteOff { key: note(0, 0) })
+        )));
     }
 }

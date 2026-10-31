@@ -240,6 +240,11 @@ pub(crate) fn open_drag(ui: &Ui) {
     ui.data_mut(|d| d.insert_temp(open_drag_id(), true));
 }
 
+/// Whether a drag noted by [`open_drag`] still holds its gesture open.
+pub(crate) fn drag_is_open(ui: &Ui) -> bool {
+    ui.data(|d| d.get_temp::<bool>(open_drag_id())).is_some()
+}
+
 /// Notes that the drag's own `drag_stopped` ended its gesture.
 pub(crate) fn close_drag(ui: &Ui) {
     ui.data_mut(|d| d.remove::<bool>(open_drag_id()));

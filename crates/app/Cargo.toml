@@ -11,6 +11,8 @@ publish.workspace = true
 # The agent server (WP-1.15): the agent API over Streamable HTTP on
 # 127.0.0.1, while the person has it switched on in Settings.
 bl-agent.workspace = true
+# The provider a turn of the built-in assistant asks (WP-2.23).
+bl-assistant.workspace = true
 bl-core.workspace = true
 bl-model.workspace = true
 bl-project.workspace = true

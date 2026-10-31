@@ -725,6 +725,9 @@ pub struct Shell {
     /// The panel's Stop button, which the turn running looks at between
     /// calls.
     assistant_stop_flag: crate::assistant::StopFlag,
+    /// How the assistant's `query` tool reads the project, once the host
+    /// has given it one.
+    assistant_query: Option<crate::assistant::QueryFn>,
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
@@ -928,6 +931,12 @@ pub struct Shell {
     recording: Option<crate::recording::Recording>,
     /// What the last recording that ended came to, for `transport.state`.
     last_recording: Option<RecordingReport>,
+    /// A take that ended while a transaction was open, kept until it closes
+    /// so its clips don't land inside a drag's undo step.
+    pending_recording: Option<crate::recording::Outcome>,
+    /// Parameter changes plug-ins made while a transaction was open, kept
+    /// until it closes for the same reason.
+    pending_param_changes: Vec<(bl_model::DeviceId, bl_model::ParamId, f64)>,
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
@@ -1374,6 +1383,7 @@ impl Shell {
             assistant_open: false,
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
+            assistant_query: None,
             undo_history_open: false,
             save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
@@ -1418,6 +1428,8 @@ impl Shell {
             previews: crate::perception::Previews::default(),
             recording: None,
             last_recording: None,
+            pending_recording: None,
+            pending_param_changes: Vec::new(),
             recorded_takes: 0,
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),
@@ -1631,6 +1643,7 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        self.close_missing_plug_in_windows();
         // Spec: control-surfaces R24, R26, R30. Locks and rings follow the
         // set.
         self.sync_instant();

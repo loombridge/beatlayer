@@ -747,6 +747,40 @@ fn close_all_plug_in_windows_closes_every_editor_without_an_undo_step() {
     assert!(!shell.can_invoke("view.close_plug_in_windows", &json!({})));
 }
 
+// Spec: clap-hosting R15; device-chains R40. Deleting a device closes its
+// plug-in's editor window, but the plug-in keeps its state so undo brings
+// it back.
+#[test]
+fn deleting_a_device_closes_its_editor_and_undo_restores_the_plugin() {
+    let mut shell = Shell::headless();
+    shell.start_audio();
+    let track = audio_track(&shell);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let device = load(&mut shell, track);
+    wait(&mut shell, device, |i| i.active);
+    shell
+        .run(ids::SHOW_WINDOW, json!({ "device": device }))
+        .unwrap();
+    assert!(info(&mut shell, device).window_open);
+
+    shell
+        .invoke("device.remove", json!({ "device": device }))
+        .unwrap();
+    for _ in 0..3 {
+        shell.poll();
+    }
+    assert!(
+        !shell.can_invoke("view.close_plug_in_windows", &json!({})),
+        "no editor stays open for a device the set no longer has"
+    );
+
+    shell.run("edit.undo", json!({})).unwrap();
+    let back = wait(&mut shell, device, |i| i.active);
+    assert!(!back.window_open, "the editor stays closed after undo");
+}
+
 // Spec: vst3-hosting R1, R3, R4, R9. A VST3 plug-in loads by path through
 // the commands as an agent runs them, the Device View describes it, and it
 // processes a block through the shell's host with its parameters.
@@ -784,7 +818,7 @@ fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
         serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
     let frame = view.devices.iter().find(|d| d.id == device).unwrap();
     assert!(frame.selected);
-    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 3);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 5);
     let params: DeviceParameters = serde_json::from_value(
         shell
             .run("device.parameters", json!({ "device": device }))

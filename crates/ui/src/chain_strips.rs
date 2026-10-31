@@ -398,6 +398,7 @@ fn slider(
                 },
             )
         });
+        crate::mixer::open_drag(ui);
         events.push(UiEvent::BeginNamedGesture(format!(
             "Change \"Chain {name}\""
         )));
@@ -418,6 +419,7 @@ fn slider(
     }
     if response.drag_stopped() {
         ui.data_mut(|d| d.remove::<SliderDrag>(drag_id));
+        crate::mixer::close_drag(ui);
         events.push(UiEvent::EndGesture);
     } else if response.clicked()
         && !response.double_clicked()
@@ -531,10 +533,13 @@ fn moved(chain: ChainId, starts: &[Start], place: f64, volume: bool) -> Vec<Invo
     // for the pan.
     let (now, shift) = if volume {
         let now = crate::rack_view::volume_at(place);
-        let shift = if now <= 0.0 || start.gain <= 0.0 {
+        // A chain that starts at -inf shifts the others from the lowest
+        // fader step, as the tracks' faders do.
+        let shift = if now <= 0.0 {
             f64::NEG_INFINITY
         } else {
-            mixer_controls::gain_db(now) - mixer_controls::gain_db(start.gain)
+            mixer_controls::gain_db(now)
+                - mixer_controls::gain_db(start.gain).max(bl_model::fader::LOWEST_DB)
         };
         (now, shift)
     } else {
@@ -670,4 +675,45 @@ fn solo(
         node.set_label(format!("Solo of {}", strip.name));
         node.set_value(if strip.solo { "on" } else { "off" }.to_owned());
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bl_core::id::Id;
+
+    fn chain(raw: u64) -> ChainId {
+        ChainId::from(Id::new(raw).unwrap())
+    }
+
+    // Spec: racks R28 (a chain at -inf moved up doesn't silence the others)
+    #[test]
+    fn dragging_a_silent_chain_up_keeps_the_other_chains_audible() {
+        let (a, b) = (chain(1), chain(2));
+        let starts = [
+            Start {
+                chain: a,
+                gain: 0.0,
+                pan: 0.0,
+            },
+            Start {
+                chain: b,
+                gain: 1.0,
+                pan: 0.0,
+            },
+        ];
+        let target = mixer_controls::db_gain(-6.0);
+        let place = bl_model::fader::fader_position(target);
+        let out = moved(a, &starts, place, true);
+        let volume = |chain: ChainId| {
+            out.iter()
+                .find(|i| i.args["chain"] == json!(chain))
+                .unwrap()
+                .args["volume"]
+                .as_f64()
+                .unwrap()
+        };
+        assert!(volume(b) > 0.0, "b was silenced: {}", volume(b));
+        assert!((volume(a) - target).abs() < 1e-6);
+    }
 }

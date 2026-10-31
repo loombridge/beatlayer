@@ -545,6 +545,7 @@ impl DeviceViewUi {
         let Some(renaming) = self.renaming_chain.as_mut() else {
             return;
         };
+        renaming.drawn = true;
         let area = Rect::from_min_max(
             pos2(rects.pad.left() + 2.0, rects.pad.top() + 8.0),
             pos2(rects.pad.right() - 2.0, rects.pad.top() + 20.0),

@@ -49,7 +49,9 @@ use block2::RcBlock;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
 use objc2::{AllocAnyThread, MainThreadMarker, MainThreadOnly, msg_send};
-use objc2_app_kit::{NSBackingStoreType, NSViewController, NSWindow, NSWindowStyleMask};
+use objc2_app_kit::{
+    NSApplication, NSBackingStoreType, NSViewController, NSWindow, NSWindowStyleMask,
+};
 use objc2_audio_toolbox::{
     AUAudioUnit, AUAudioUnitBus, AUParameter, AUParameterAutomationEvent,
     AUParameterAutomationEventType, AUParameterObserverToken, AUParameterTree,
@@ -69,7 +71,7 @@ use crate::scan::ScannedPlugin;
 use super::{AuError, description_id};
 #[path = "node.rs"]
 mod node;
-use node::{AuNode, HostEnds, MAX_CHANNELS, Processor};
+use node::{AuNode, Echoes, HostEnds, MAX_CHANNELS, Processor};
 
 /// An Audio Unit Beatlayer can make devices of.
 #[derive(Clone, Debug, PartialEq)]
@@ -160,6 +162,9 @@ struct Instance {
     /// processor back yet.
     ends: Option<HostEnds>,
     retired: Vec<HostEnds>,
+    /// What its nodes scheduled lately, which the editor's observer leaves
+    /// out of the person's changes.
+    echoes: Arc<Echoes>,
     config: Option<NodeConfig>,
     /// A node has its processor.
     out: bool,
@@ -509,6 +514,9 @@ impl AuHost {
             NSRunLoop::currentRunLoop().runUntilDate(&NSDate::dateWithTimeIntervalSinceNow(0.01));
         }
         let requests = std::mem::take(&mut *lock(&self.inner.requests));
+        // A hidden app has no window on screen, closed or not.
+        let app_hidden = MainThreadMarker::new()
+            .is_some_and(|mtm| NSApplication::sharedApplication(mtm).isHidden());
         let mut guard = lock(&self.inner.main);
         let Ok(main) = guard.get() else { return false };
         let mut changed = !requests.is_empty() || opening;
@@ -517,6 +525,18 @@ impl AuHost {
         }
         for instance in main.instances.values_mut() {
             changed |= pump(instance);
+            // A window that is not hidden by us, yet not on screen or
+            // minimised, is one the person closed.
+            if !app_hidden
+                && !instance.editor_hidden
+                && instance
+                    .editor
+                    .as_ref()
+                    .is_some_and(|e| !e.window.isVisible() && !e.window.isMiniaturized())
+            {
+                teardown_editor(instance);
+                changed = true;
+            }
         }
         for (_, instance) in &mut main.closing {
             pump(instance);
@@ -573,11 +593,9 @@ impl AuHost {
                 Some((*param, value))
             })
             .collect();
-        // SAFETY: reading a unit property is a read on the thread that owns
-        // the unit.
-        let provides_interface = unsafe { instance.unit.providesUserInterface() };
-        let has_editor =
-            instance.editor.is_some() || (instance.editor_failure.is_none() && provides_interface);
+        #[cfg(feature = "test-hooks")]
+        crate::count_value_reads(values.len());
+        let (has_editor, editor_open, editor_hidden) = instance.editor_state();
         Some(PluginStatus {
             plugin_id: instance.plugin_id.clone(),
             path: PathBuf::new(),
@@ -589,12 +607,26 @@ impl AuHost {
                 .clone()
                 .or_else(|| instance.refused.clone()),
             has_editor,
-            editor_open: instance.editor.is_some(),
-            editor_hidden: instance.editor_hidden,
+            editor_open,
+            editor_hidden,
             editor_scale: None,
             editor_size: None,
             values,
         })
+    }
+
+    /// Whether the device's unit has an editor, whether it's open, and
+    /// whether it's hidden, or `None` if the device has no Audio Unit: what
+    /// [`AuHost::status`] says of the editor, without reading the
+    /// parameters.
+    #[must_use]
+    pub fn editor_state(&self, device: DeviceId) -> Option<(bool, bool, bool)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        if main.missing.contains_key(&device) {
+            return Some((false, false, false));
+        }
+        Some(main.instances.get(&device)?.editor_state())
     }
 
     /// Opens the device's unit's own editor in a window of its own, titled
@@ -649,25 +681,7 @@ impl AuHost {
     /// [`AuError::NoInstance`] without a unit.
     pub fn close_editor(&self, device: DeviceId) -> Result<(), AuError> {
         let mut guard = lock(&self.inner.main);
-        let instance = instance(guard.get()?, device)?;
-        // A view controller still on its way is dropped when it arrives:
-        // `finish_editor` leaves a closed editor closed.
-        instance.opening = false;
-        instance.pending = None;
-        instance.editor_failure = None;
-        if let Some(editor) = instance.editor.take() {
-            if let Some(ends) = &instance.ends {
-                ends.status.observer.store(std::ptr::null_mut(), Relaxed);
-            }
-            // SAFETY: the unit's tree is alive; removing an observer blocks
-            // until in-flight callbacks finish, and ours never blocks.
-            unsafe { editor.tree.removeParameterObserver(editor.token) };
-            editor.window.orderOut(None);
-            // The window was made with releasedWhenClosed false, so this
-            // only orders it out; our own reference drops with the editor.
-            editor.window.close();
-        }
-        instance.editor_hidden = false;
+        teardown_editor(instance(guard.get()?, device)?);
         Ok(())
     }
 
@@ -683,21 +697,50 @@ impl AuHost {
     pub fn set_editor_visible(&self, device: DeviceId, shown: bool) -> Result<(), AuError> {
         let mut guard = lock(&self.inner.main);
         let instance = instance(guard.get()?, device)?;
-        let hidden = match &instance.editor {
-            Some(editor) => {
-                if editor.window.isVisible() != shown {
-                    if shown {
-                        editor.window.makeKeyAndOrderFront(None);
-                    } else {
-                        editor.window.orderOut(None);
-                    }
-                }
-                !shown
-            }
-            None => return Ok(()),
+        let Some(editor) = &instance.editor else {
+            return Ok(());
         };
-        instance.editor_hidden = hidden;
+        // The shell asks every frame: only a change touches the window, so
+        // one the person minimised stays minimised.
+        if instance.editor_hidden == shown {
+            if shown {
+                editor.window.makeKeyAndOrderFront(None);
+            } else {
+                editor.window.orderOut(None);
+            }
+            instance.editor_hidden = !shown;
+        }
         Ok(())
+    }
+
+    /// How many render calls the device's node made, and how many parameter
+    /// changes it scheduled on its unit, for tests of how a block is split.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn render_counts(&self, device: DeviceId) -> Option<(u32, u32)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        let status = &main.instances.get(&device)?.ends.as_ref()?.status;
+        Some((status.renders.load(Relaxed), status.scheduled.load(Relaxed)))
+    }
+
+    /// The editor windows the host holds, those of units being let go of
+    /// included, for tests of what the person sees.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn editor_windows(&self) -> Vec<Retained<NSWindow>> {
+        let mut guard = lock(&self.inner.main);
+        let Ok(main) = guard.get() else {
+            return Vec::new();
+        };
+        let closing = main.closing.iter().map(|(_, instance)| instance);
+        main.instances
+            .values()
+            .chain(closing)
+            .filter_map(|instance| Some(instance.editor.as_ref()?.window.clone()))
+            .collect()
     }
 
     /// The devices whose unit's editor window is open, hidden or shown.
@@ -891,9 +934,24 @@ impl Drop for Instance {
 }
 
 impl Instance {
-    /// A parameter's value, as the unit reports it.
+    /// Whether the unit has an editor, whether it's open, and whether it's
+    /// hidden.
+    fn editor_state(&self) -> (bool, bool, bool) {
+        // SAFETY: reading a unit property is a read on the thread that owns
+        // the unit.
+        let provides_interface = unsafe { self.unit.providesUserInterface() };
+        let has_editor =
+            self.editor.is_some() || (self.editor_failure.is_none() && provides_interface);
+        (has_editor, self.editor.is_some(), self.editor_hidden)
+    }
+
+    /// A parameter's value: the last one the host scheduled for it, else as
+    /// the unit reports it.
     fn unit_value(&self, param: u32) -> Option<f64> {
         let (parameter, _) = self.params.get(param as usize)?;
+        if let Some(value) = self.echoes.latest(param) {
+            return Some(f64::from(value));
+        }
         // SAFETY: reading a value is a property read on the thread that
         // owns the unit, and the parameter belongs to its tree.
         Some(f64::from(unsafe { parameter.value() }))
@@ -1080,6 +1138,7 @@ fn finish_editor(
     let window = make_window(&controller, title);
     let events: Arc<Mutex<Vec<RawEvent>>> = Arc::new(Mutex::new(Vec::with_capacity(EDITOR_EVENTS)));
     let sink = Arc::clone(&events);
+    let echoes = Arc::clone(&instance.echoes);
     let observer = RcBlock::new(
         move |count: isize, list: NonNull<AUParameterAutomationEvent>| {
             // Never block or allocate here: this may run on the audio
@@ -1092,6 +1151,10 @@ fn finish_editor(
             for event in events {
                 if out.len() >= EDITOR_EVENTS {
                     break;
+                }
+                // The host's own scheduled change, not the person's.
+                if echoes.contains(event.address, event.value) {
+                    continue;
                 }
                 out.push(RawEvent {
                     address: event.address,
@@ -1115,11 +1178,6 @@ fn finish_editor(
     });
     instance.editor_hidden = false;
     instance.editor_failure = None;
-    // The host's own parameter changes must not come back as the unit's:
-    // the node passes this token to setValue:originator:.
-    if let Some(ends) = &instance.ends {
-        ends.status.observer.store(token, Relaxed);
-    }
 }
 
 /// A window of its own holding `controller`, titled `title`, shown and made
@@ -1136,8 +1194,9 @@ fn make_window(controller: &NSViewController, title: &str) -> Retained<NSWindow>
         origin: objc2_foundation::NSPoint { x: 0.0, y: 0.0 },
         size,
     };
-    let style =
-        NSWindowStyleMask::Titled | NSWindowStyleMask::Closable | NSWindowStyleMask::Miniaturizable;
+    // Not miniaturizable: a miniaturised window is not visible, which is how
+    // `idle` tells that the person closed it.
+    let style = NSWindowStyleMask::Titled | NSWindowStyleMask::Closable;
     let mtm = MainThreadMarker::new().expect("a unit's editor opens on the main thread");
     // SAFETY: the window is made on the main thread, as AppKit requires.
     let window = unsafe {
@@ -1522,13 +1581,9 @@ fn serve(main: &mut Main, request: Request) {
     };
     if let Some(old) = instance.ends.take() {
         old.status.hand_back.store(true, Relaxed);
-        // An open editor's observer is the originator of the new node's own
-        // parameter sets too, so they don't come back as the unit's edits.
-        ends.status
-            .observer
-            .store(old.status.observer.load(Relaxed), Relaxed);
         instance.retired.push(old);
     }
+    let _ = ends.status.echoes.set(Arc::clone(&instance.echoes));
     instance.ends = Some(ends);
     instance.config = Some(config);
     instance.refused = None;
@@ -1590,12 +1645,8 @@ fn borrow(
         return Ok(());
     }
     // Spec: offline-plugin-renders R3. The rendered set's values, and the
-    // render's rate and block size. An open editor's observer is the
-    // originator, so it doesn't report the values as the unit's own.
-    let observer = instance.ends.as_ref().map_or(std::ptr::null_mut(), |ends| {
-        ends.status.observer.load(Relaxed)
-    });
-    lent.ends.status.observer.store(observer, Relaxed);
+    // render's rate and block size.
+    let _ = lent.ends.status.echoes.set(Arc::clone(&instance.echoes));
     set_values(instance, device);
     // Spec: au-hosting R12. One that won't activate for the render leaves
     // its node passing its input through.
@@ -1701,6 +1752,7 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
     };
     main.missing.remove(&device.id);
     let (descriptors, params, visible) = describe(&unit);
+    let param_count = params.len();
     let mut instance = Instance {
         plugin_id: plugin_id.clone(),
         unit,
@@ -1709,6 +1761,7 @@ fn ensure_instance(main: &mut Main, device: &Device) -> bool {
         descriptors,
         ends: None,
         retired: Vec::new(),
+        echoes: Arc::new(Echoes::new(param_count)),
         config: None,
         out: false,
         refused: None,
@@ -1810,9 +1863,30 @@ fn take_back(instance: &mut Instance) -> bool {
     returned
 }
 
+/// Closes the unit's editor: its window goes and its parameter observer is
+/// removed. A unit let go of with its editor open keeps neither.
+fn teardown_editor(instance: &mut Instance) {
+    // A view controller still on its way is dropped when it arrives:
+    // `finish_editor` leaves a closed editor closed.
+    instance.opening = false;
+    instance.pending = None;
+    instance.editor_failure = None;
+    if let Some(editor) = instance.editor.take() {
+        // SAFETY: the unit's tree is alive; removing an observer blocks
+        // until in-flight callbacks finish, and ours never blocks.
+        unsafe { editor.tree.removeParameterObserver(editor.token) };
+        editor.window.orderOut(None);
+        // The window was made with releasedWhenClosed false, so this only
+        // orders it out; our own reference drops with the editor.
+        editor.window.close();
+    }
+    instance.editor_hidden = false;
+}
+
 /// Lets go of a unit: asks its nodes for their processors, keeping it until
 /// they're back.
 fn close(main: &mut Main, device: DeviceId, mut instance: Instance) {
+    teardown_editor(&mut instance);
     for ends in instance.ends.iter().chain(&instance.retired) {
         ends.status.hand_back.store(true, Relaxed);
     }
@@ -1868,9 +1942,13 @@ fn activate(
     // runtime's method takes (the header's `AUAudioFrameCount` is the v2
     // name); the blocks are cached before activation, as Apple's
     // documentation asks.
-    let (render, midi) = unsafe {
+    let (render, midi, schedule) = unsafe {
         let _: () = msg_send![unit, setMaximumFramesToRender: max_frames as usize];
-        (unit.renderBlock(), unit.scheduleMIDIEventBlock())
+        (
+            unit.renderBlock(),
+            unit.scheduleMIDIEventBlock(),
+            unit.scheduleParameterBlock(),
+        )
     };
     if render.is_null() {
         return Err("it gives no render block".to_owned());
@@ -1910,8 +1988,7 @@ fn activate(
         config,
         params.to_vec(),
         drive,
-        render,
-        midi,
+        (render, midi, schedule),
         (input_channels, output_channels),
     );
     Ok((processor, latency))
@@ -2020,40 +2097,36 @@ mod tests {
         assert!(events.lock().unwrap().capacity() >= EDITOR_EVENTS);
     }
 
-    /// Spec: au-hosting R6. A node made after the editor opened sets the
-    /// unit's parameters with the editor's observer as their originator.
+    /// Spec: au-hosting R6. The editor's observer drops what the node
+    /// scheduled lately, and no other change, whatever the address.
     #[test]
-    fn a_new_node_keeps_the_open_editors_observer() {
-        let host = AuHost::new();
-        host.load("aufx", "dely", "appl")
-            .expect("AUDelay is installed");
-        let device = Device::new(
-            DeviceId(bl_core::id::Id::new(1).expect("an ID")),
-            "Test AU",
-            kind("aufx/dely/appl"),
+    fn echoes_recognise_the_changes_scheduled() {
+        let echoes = Echoes::default();
+        assert!(!echoes.contains(0, 0.0), "an empty ring matches nothing");
+        echoes.push(0, 7, 0.5);
+        assert!(echoes.contains(7, 0.5));
+        assert!(!echoes.contains(7, 0.25), "another value is the person's");
+        assert!(
+            !echoes.contains(8, 0.5),
+            "another parameter is the person's"
         );
-        let config = NodeConfig {
-            round_trip_latency: 0,
-            sample_rate: bl_core::time::SampleRate::HZ_48000,
-            max_frames: 512,
-            channels: 2,
-        };
-        let factory = host.factory();
-        let _first = factory.create(&device, &config).expect("a node");
-        let token = 0x10 as *mut std::ffi::c_void;
-        let observer = |set: Option<*mut std::ffi::c_void>| {
-            let mut guard = lock(&host.inner.main);
-            let instance = guard.get().unwrap().instances.get_mut(&device.id).unwrap();
-            let status = &instance.ends.as_ref().unwrap().status;
-            if let Some(token) = set {
-                status.observer.store(token, Relaxed);
-            }
-            status.observer.load(Relaxed)
-        };
-        // The first node's ends hold the token finish_editor stores.
-        observer(Some(token));
-        let _second = factory.create(&device, &config).expect("a node");
-        assert_eq!(observer(None), token);
+        for value in 0..node::ECHOES {
+            echoes.push(0, 1, value as f32 + 1.0);
+        }
+        assert!(!echoes.contains(7, 0.5), "the oldest slot was reused");
+    }
+
+    /// Spec: au-hosting R6. The value reported for a parameter is the last
+    /// one scheduled for it, whatever the unit's own value says.
+    #[test]
+    fn the_last_value_scheduled_is_kept_per_parameter() {
+        let echoes = Echoes::new(2);
+        assert_eq!(echoes.latest(1), None);
+        echoes.push(1, 9, 0.25);
+        echoes.push(1, 9, 0.75);
+        assert_eq!(echoes.latest(1), Some(0.75));
+        assert_eq!(echoes.latest(0), None);
+        assert_eq!(echoes.latest(2), None, "no such parameter");
     }
 
     #[test]

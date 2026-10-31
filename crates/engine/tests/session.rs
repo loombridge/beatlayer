@@ -228,6 +228,96 @@ fn a_queued_stop_lands_on_its_grid_frame() {
     assert!(rig.monitor.state().session.is_empty(), "the slot stopped");
 }
 
+// Spec: launch-quantisation R6
+#[test]
+fn a_track_stop_keeps_another_tracks_queued_launch() {
+    for block in [1, 64, 256, 4096] {
+        let mut rig = Rig::new(block);
+        rig.editor
+            .apply(Command::SetTempo { tempo: tempo() })
+            .unwrap();
+        let a = midi_track(&mut rig);
+        let b = midi_track(&mut rig);
+        let scene = scene(&rig);
+        let note = |key| [Note::new(key, Ticks::ZERO, Ticks::WHOLE * 8, 100)];
+        slot_clip(&mut rig.editor, a, scene, &note(60));
+        slot_clip(&mut rig.editor, b, scene, &note(62));
+        rig.sync();
+        rig.sender.transport(bl_engine::TransportCommand::Play);
+        // Half a bar in, both launches queue for 2.1.1 and B's stop drops
+        // only B's.
+        at_frame(&mut rig, BAR_FRAMES as usize / 2, block, |rig| {
+            rig.sender
+                .session(SessionCommand::Launch { track: a, scene });
+            rig.sender
+                .session(SessionCommand::Launch { track: b, scene });
+            rig.sender.session(SessionCommand::StopTrack(b));
+        });
+        play(&mut rig, BAR_FRAMES as usize / 2 + 8, block);
+        assert_eq!(
+            notes(&mut rig),
+            vec![(BAR_FRAMES, 60, true)],
+            "block size {block}"
+        );
+        assert_eq!(rig.monitor.state().session.len(), 1, "only A's slot plays");
+    }
+}
+
+/// A rig playing a clip of key 60 in one slot at 1 Bar quantisation. The
+/// song plays from `from`; at frame 1,000 the clip is launched, and at frame
+/// 2,000 the playhead jumps to `to`. Returns the song frames key 60 starts
+/// on.
+fn launch_then_locate(block: usize, from: Ticks, to: Ticks, frames: usize) -> Vec<i64> {
+    let mut rig = Rig::new(block);
+    rig.editor
+        .apply(Command::SetTempo { tempo: tempo() })
+        .unwrap();
+    let track = midi_track(&mut rig);
+    let scene = scene(&rig);
+    slot_clip(
+        &mut rig.editor,
+        track,
+        scene,
+        &[Note::new(60, Ticks::ZERO, Ticks::WHOLE * 8, 100)],
+    );
+    rig.sync();
+    rig.sender.transport(TransportCommand::Locate(from));
+    rig.sender.transport(TransportCommand::Play);
+    at_frame(&mut rig, 1_000, block, |rig| {
+        rig.sender.session(SessionCommand::Launch { track, scene });
+    });
+    at_frame(&mut rig, 1_000, block, |rig| {
+        rig.sender.transport(TransportCommand::Locate(to));
+    });
+    play(&mut rig, frames, block);
+    notes(&mut rig)
+        .into_iter()
+        .filter(|&(_, key, on)| key == 60 && on)
+        .map(|(frame, ..)| frame)
+        .collect()
+}
+
+// Spec: launch-quantisation R39
+#[test]
+fn a_locate_moves_a_queued_launch_to_the_first_line_after_the_playhead() {
+    let (bar, beat) = (Ticks::WHOLE, Ticks::QUARTER);
+    for block in [1, 64, 512, 4096] {
+        // Queued for 9.1.1; the playhead goes back to 2.2.1, so the clip
+        // starts on 3.1.1 and not when the song gets to bar 9.
+        let back = launch_then_locate(
+            block,
+            bar * 7 + beat * 2,
+            bar + beat,
+            2 * BAR_FRAMES as usize,
+        );
+        assert_eq!(back, [2 * BAR_FRAMES], "backward, block size {block}");
+        // Queued for 2.1.1; the playhead goes on to 5.2.1, so the clip
+        // starts on 6.1.1 and not at once, partway through.
+        let forward = launch_then_locate(block, beat * 2, bar * 4 + beat, 2 * BAR_FRAMES as usize);
+        assert_eq!(forward, [5 * BAR_FRAMES], "forward, block size {block}");
+    }
+}
+
 // Spec: launch-quantisation R5
 #[test]
 fn two_launches_on_a_track_act_in_order() {
@@ -1741,6 +1831,37 @@ fn a_launch_and_a_stop_queued_for_the_loops_end_land_as_the_playhead_wraps() {
             "blocks of {block}: the stop lands as the loop wraps"
         );
         assert!(rig.monitor.state().session.is_empty());
+    }
+}
+
+// Spec: launch-quantisation R37
+#[test]
+fn a_held_repeat_restarts_on_every_bar_round_the_loop() {
+    for block in [64, 512, 4096] {
+        let (mut rig, track, scene) = mode_rig(LaunchMode::Repeat, LaunchQuantization::Bar);
+        loop_bars(&mut rig, 4);
+        let bar = BAR_FRAMES;
+        // Pressed in bar 3 and held: it starts on 4.1.1, restarts as the
+        // loop wraps, and goes on restarting on every bar of the next pass.
+        cued(
+            &mut rig,
+            block,
+            7 * bar as usize + 4_096,
+            &[(
+                2 * bar as usize + 1,
+                SessionCommand::Launch { track, scene },
+            )],
+        );
+        let starts: Vec<i64> = notes(&mut rig)
+            .into_iter()
+            .filter(|&(_, _, on)| on)
+            .map(|(frame, ..)| frame)
+            .collect();
+        assert_eq!(
+            starts,
+            [3 * bar, 0, bar, 2 * bar, 3 * bar],
+            "blocks of {block}"
+        );
     }
 }
 

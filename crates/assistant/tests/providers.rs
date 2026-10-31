@@ -3,8 +3,7 @@
 //! Every test starts a one-request HTTP server on localhost, answers with a
 //! canned SSE stream or an error, and checks both what the provider sent
 //! (the key, the tool schemas, the URL) and what it made of the answer
-//! (streamed text, a tool call resolved to its registry command, a clean
-//! error).
+//! (streamed text, a tool call with its arguments, a clean error).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
@@ -13,26 +12,22 @@ use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use bl_assistant::agent::{Agent, Commands};
 use bl_assistant::keychain::{Keychain, MemoryKeychain};
 use bl_assistant::message::{Event, Message, Request, Stop, Usage};
 use bl_assistant::provider::{Anthropic, Error, Gemini, OpenAi, Provider};
-use bl_assistant::tools::ToolSet;
-use bl_commands::{CommandSpec, Registry};
+use bl_assistant::tools::{ToolCall, ToolSpec};
 use schemars::JsonSchema;
 use serde_json::{Value, json};
 
 /// The command the mock model calls, its argument type naming another, so
 /// the schema carries `$defs` and a `$ref`.
-fn tools() -> ToolSet {
-    let mut registry = Registry::new();
-    registry
-        .register(
-            CommandSpec::new("clip.create", "Add a clip")
-                .description("Adds a clip to a track. Undo removes it.")
-                .args::<CreateClip>(),
-        )
-        .unwrap();
-    ToolSet::new(registry.iter())
+fn tools() -> Vec<ToolSpec> {
+    vec![ToolSpec {
+        name: "clip_create".to_owned(),
+        description: "Adds a clip to a track. Undo removes it.".to_owned(),
+        input: serde_json::to_value(schemars::schema_for!(CreateClip)).unwrap(),
+    }]
 }
 
 /// The arguments of `clip.create`.
@@ -57,13 +52,13 @@ fn the_mock_arguments_are_the_commands_own_shape() {
 }
 
 /// One turn to send, with the command above as its one tool.
-fn request(tools: &ToolSet) -> Request {
+fn request(tools: &[ToolSpec]) -> Request {
     let mut request = Request::new("test-model");
     request.system = "You build songs.".to_owned();
     request
         .messages
         .push(Message::user("Add a clip to track 1."));
-    request.tools = tools.tools().to_vec();
+    request.tools = tools.to_vec();
     request
 }
 
@@ -145,6 +140,45 @@ impl Mock {
 
     /// What arrived, once the request has.
     fn arrived(self) -> Arrived {
+        self.handle.join().expect("the server's thread")
+    }
+}
+
+/// A server answering one SSE stream per request, in order, and handing
+/// back what arrived.
+struct Sequence {
+    url: String,
+    handle: JoinHandle<Vec<Arrived>>,
+}
+
+impl Sequence {
+    fn new(streams: &[String]) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("a local port");
+        listener
+            .set_nonblocking(true)
+            .expect("a non-blocking listener");
+        let url = format!("http://{}", listener.local_addr().expect("the address"));
+        let streams = streams.to_vec();
+        let handle = thread::spawn(move || {
+            streams
+                .iter()
+                .map(|body| {
+                    let mut stream = accept(&listener);
+                    let arrived = read_request(&mut stream);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    stream.write_all(response.as_bytes()).expect("the response");
+                    stream.flush().expect("the response flushes");
+                    arrived
+                })
+                .collect()
+        });
+        Self { url, handle }
+    }
+
+    fn arrived(self) -> Vec<Arrived> {
         self.handle.join().expect("the server's thread")
     }
 }
@@ -234,11 +268,11 @@ fn open_ai_streams_text_and_a_tool_call_against_a_local_server() {
             Event::ToolCall(reply.tool_calls[0].clone()),
         ]
     );
-    let command = reply.tool_calls[0]
-        .command(&tools)
-        .expect("an offered tool");
-    assert_eq!(command.command, "clip.create");
-    assert_eq!(command.args, json!({"track": {"number": 1}}));
+    assert_eq!(reply.tool_calls[0].name, "clip_create");
+    assert_eq!(
+        reply.tool_calls[0].arguments,
+        json!({"track": {"number": 1}})
+    );
 
     let arrived = mock.arrived();
     assert_eq!(arrived.line, "POST /chat/completions HTTP/1.1");
@@ -332,11 +366,11 @@ fn anthropic_streams_text_and_a_tool_call() {
             Event::ToolCall(reply.tool_calls[0].clone()),
         ]
     );
-    let command = reply.tool_calls[0]
-        .command(&tools)
-        .expect("an offered tool");
-    assert_eq!(command.command, "clip.create");
-    assert_eq!(command.args, json!({"track": {"number": 2}}));
+    assert_eq!(reply.tool_calls[0].name, "clip_create");
+    assert_eq!(
+        reply.tool_calls[0].arguments,
+        json!({"track": {"number": 2}})
+    );
 
     let arrived = mock.arrived();
     assert_eq!(arrived.line, "POST /messages HTTP/1.1");
@@ -407,9 +441,8 @@ fn gemini_streams_text_and_a_tool_call_and_converts_the_schema() {
     );
     let call = &reply.tool_calls[0];
     assert_eq!(call.id, "call_1", "Gemini's calls have no ID of their own");
-    let command = call.command(&tools).expect("an offered tool");
-    assert_eq!(command.command, "clip.create");
-    assert_eq!(command.args, json!({"track": {"number": 3}}));
+    assert_eq!(call.name, "clip_create");
+    assert_eq!(call.arguments, json!({"track": {"number": 3}}));
 
     let arrived = mock.arrived();
     assert_eq!(
@@ -503,7 +536,7 @@ fn a_provider_without_a_key_says_so() {
 }
 
 /// The usage events a provider sent for a stream.
-fn usage_of(provider: &dyn Provider, tools: &ToolSet) -> Vec<Usage> {
+fn usage_of(provider: &dyn Provider, tools: &[ToolSpec]) -> Vec<Usage> {
     let mut seen = Vec::new();
     provider
         .stream(&request(tools), &mut |event| {
@@ -565,4 +598,163 @@ fn each_provider_reports_the_tokens_it_counted() {
     ]));
     let provider = Gemini::new(keychain(Gemini::ACCOUNT, "goog-test")).base_url(mock.url());
     assert!(usage_of(&provider, &tools).is_empty());
+}
+
+/// The commands a turn ran, with nothing to ask.
+#[derive(Default)]
+struct Recording {
+    ran: Vec<String>,
+}
+
+impl Commands for Recording {
+    fn begin_turn(&mut self, _label: &str) {}
+
+    fn end_turn(&mut self) {}
+
+    fn permit(&mut self, _command: &str, _args: &Value) -> Result<(), String> {
+        Ok(())
+    }
+
+    fn run(&mut self, command: &str, _args: Value) -> Result<Value, String> {
+        self.ran.push(command.to_owned());
+        Ok(json!({}))
+    }
+
+    fn read(&mut self, _tool: &str, _args: Value) -> Result<Value, String> {
+        Ok(json!({}))
+    }
+}
+
+/// An OpenAI stream whose one chunk holds `calls` and ends with `finish`.
+fn open_ai_calls(calls: &[Value], finish: &str) -> String {
+    let mut stream = sse(&[
+        json!({"choices": [{"index": 0, "delta": {"tool_calls": calls}}]}),
+        json!({"choices": [{"index": 0, "delta": {}, "finish_reason": finish}]}),
+    ]);
+    stream.push_str("data: [DONE]\n\n");
+    stream
+}
+
+#[test]
+fn a_call_with_malformed_arguments_goes_back_to_the_model_and_the_rest_run() {
+    // A trailing comma in the first call's arguments; the second is whole.
+    let first = open_ai_calls(
+        &[
+            json!({"index": 0, "id": "call_1", "function": {"name": "run", "arguments": "{\"command\":\"track.create\",}"}}),
+            json!({"index": 1, "id": "call_2", "function": {"name": "run", "arguments": "{\"command\":\"clip.create\",\"args\":{\"track\":{\"number\":1}}}"}}),
+        ],
+        "tool_calls",
+    );
+    let second = sse(&[
+        json!({"choices": [{"index": 0, "delta": {"content": "One of them failed."}, "finish_reason": "stop"}]}),
+    ]);
+    let mock = Sequence::new(&[first, second]);
+    let provider = OpenAi::new(keychain(OpenAi::ACCOUNT, "sk-test")).base_url(&mock.url);
+    let mut request = request(&[]);
+    let mut commands = Recording::default();
+
+    let turn = Agent::new()
+        .run(
+            &provider,
+            &mut request,
+            &mut commands,
+            &|| false,
+            &mut |_| {},
+        )
+        .expect("a finished turn");
+
+    assert_eq!(turn.steps.len(), 2);
+    let why = turn.steps[0]
+        .result
+        .as_ref()
+        .expect_err("the bad call fails");
+    assert!(why.contains("aren't JSON"), "{why}");
+    assert!(turn.steps[1].result.is_ok(), "{:?}", turn.steps[1]);
+    assert_eq!(commands.ran, ["clip.create"]);
+    let arrived = mock.arrived();
+    let tool_messages: Vec<Value> = arrived[1].body()["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|message| message["role"] == "tool")
+        .cloned()
+        .collect();
+    let ids: Vec<&str> = tool_messages
+        .iter()
+        .map(|message| message["tool_call_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(ids, ["call_1", "call_2"], "every call has its result");
+}
+
+#[test]
+fn a_reply_cut_off_in_a_tool_call_ends_with_length_not_an_error() {
+    let mock = Mock::sse(&open_ai_calls(
+        &[
+            json!({"index": 0, "id": "call_1", "function": {"name": "run", "arguments": "{\"command\":\"track.cr"}}),
+        ],
+        "length",
+    ));
+    let provider = OpenAi::new(keychain(OpenAi::ACCOUNT, "sk-test")).base_url(mock.url());
+
+    let reply = provider
+        .stream(&request(&tools()), &mut |_| {})
+        .expect("a reply, not an error");
+
+    assert_eq!(reply.stop, Stop::Length);
+    assert!(reply.tool_calls[0].unparsed_because().is_some());
+}
+
+#[test]
+fn open_ai_calls_with_no_index_stay_separate() {
+    let mock = Mock::sse(&sse(&[
+        json!({"choices": [{"index": 0, "delta": {"tool_calls": [{"id": "call_1", "function": {"name": "list_commands", "arguments": "{\"area\":"}}]}}]}),
+        json!({"choices": [{"index": 0, "delta": {"tool_calls": [{"function": {"arguments": "\"clip\"}"}}]}}]}),
+        json!({"choices": [{"index": 0, "delta": {"tool_calls": [{"id": "call_2", "function": {"name": "query", "arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}),
+    ]));
+    let provider = OpenAi::new(keychain(OpenAi::ACCOUNT, "sk-test")).base_url(mock.url());
+
+    let reply = provider
+        .stream(&request(&tools()), &mut |_| {})
+        .expect("a finished turn");
+
+    let calls: Vec<(&str, &Value)> = reply
+        .tool_calls
+        .iter()
+        .map(|call: &ToolCall| (call.name.as_str(), &call.arguments))
+        .collect();
+    assert_eq!(
+        calls,
+        [
+            ("list_commands", &json!({"area": "clip"})),
+            ("query", &json!({}))
+        ]
+    );
+}
+
+#[test]
+fn anthropic_and_gemini_keep_a_call_with_malformed_arguments_too() {
+    let mock = Mock::sse(&sse(&[
+        json!({"type": "message_start", "message": {"id": "m", "usage": {"input_tokens": 1, "output_tokens": 1}}}),
+        json!({"type": "content_block_start", "index": 0, "content_block": {"type": "tool_use", "id": "tu_1", "name": "run", "input": {}}}),
+        json!({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "{\"command\":,}"}}),
+        json!({"type": "content_block_stop", "index": 0}),
+        json!({"type": "message_delta", "delta": {"stop_reason": "tool_use"}, "usage": {"output_tokens": 2}}),
+        json!({"type": "message_stop"}),
+    ]));
+    let provider = Anthropic::new(keychain(Anthropic::ACCOUNT, "sk-ant-test")).base_url(mock.url());
+    let reply = provider
+        .stream(&request(&tools()), &mut |_| {})
+        .expect("a finished turn");
+    assert_eq!(reply.tool_calls.len(), 1);
+    assert!(reply.tool_calls[0].unparsed_because().is_some());
+
+    let mock = Mock::sse(&sse(&[
+        json!({"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "run", "args": "{\"command\":,}"}}]}, "finishReason": "STOP"}]}),
+    ]));
+    let provider = Gemini::new(keychain(Gemini::ACCOUNT, "goog-test")).base_url(mock.url());
+    let reply = provider
+        .stream(&request(&tools()), &mut |_| {})
+        .expect("a finished turn");
+    assert_eq!(reply.tool_calls.len(), 1);
+    assert!(reply.tool_calls[0].unparsed_because().is_some());
 }

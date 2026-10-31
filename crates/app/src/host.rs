@@ -33,7 +33,9 @@ use std::time::{Duration, Instant};
 
 use bl_agent::http::{HttpConfig, HttpServer, Parked, Served};
 use bl_agent::{Agent, Captured, RenderOutcome, RenderRequest};
+use bl_assistant::provider::Provider;
 use bl_shell::agent::AgentServerStatus;
+use bl_shell::assistant::{Decision, PromptRequest, Prompter};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::menus::{Menu, MenuPlatform, menu_bar};
@@ -402,6 +404,56 @@ fn track_palette(theme: &Theme) -> Vec<[u8; 3]> {
         .collect()
 }
 
+/// Runs the turn the person's message asked for, if one is waiting: the
+/// shell leaves it to the host (`assistant.send` only queues the message).
+/// `make` builds the provider the settings name; a failed turn is already
+/// a notice in the panel. Returns whether a turn ran.
+pub(crate) fn answer_assistant(
+    shell: &mut Shell,
+    make: &dyn Fn(&Shell) -> Box<dyn Provider>,
+    prompter: &mut dyn Prompter,
+) -> bool {
+    let Some(text) = shell.take_assistant_prompt() else {
+        return false;
+    };
+    let provider = make(shell);
+    let _ = bl_shell::assistant::run_turn(shell, &*provider, prompter, &text);
+    true
+}
+
+/// Asks the person, in a dialog, before the assistant runs a command that
+/// needs consent (the agent-permissions spec).
+struct UiPrompter<'a> {
+    parent: Option<&'a Window>,
+}
+
+impl Prompter for UiPrompter<'_> {
+    fn ask(&mut self, request: &PromptRequest) -> Decision {
+        let mut dialog = rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Beatlayer")
+            .set_description(request.question())
+            .set_buttons(rfd::MessageButtons::YesNoCancelCustom(
+                "Allow".to_owned(),
+                "Always Allow".to_owned(),
+                "Don't Allow".to_owned(),
+            ));
+        if let Some(parent) = self.parent {
+            parent.request_user_attention(Some(winit::window::UserAttentionType::Critical));
+            dialog = dialog.set_parent(parent);
+        }
+        match dialog.show() {
+            rfd::MessageDialogResult::Yes => Decision::Once,
+            rfd::MessageDialogResult::No => Decision::Always,
+            rfd::MessageDialogResult::Custom(choice) if choice == "Allow" => Decision::Once,
+            rfd::MessageDialogResult::Custom(choice) if choice == "Always Allow" => {
+                Decision::Always
+            }
+            _ => Decision::Deny,
+        }
+    }
+}
+
 struct Host {
     args: Args,
     shell: Shell,
@@ -540,6 +592,7 @@ pub fn run(args: Args) -> Result<(), String> {
         if keep_tokens {
             shell.use_agent_keychain(bl_shell::agent::os_keychain());
         }
+        shell.set_assistant_query(bl_agent::assistant_query);
         shell
     };
     // A headless run (`--null-audio`) opens no MIDI device either.
@@ -1645,6 +1698,17 @@ impl Host {
         // its thread, and gets its answer once it ends.
         self.agent.sync_export(&mut self.shell);
         self.resume_agents();
+        // The message the person sent the assistant, from its panel or over
+        // the agent API, runs here. It blocks the interface while the model
+        // answers; the panel's rows and the shell's revision bump bring the
+        // reply to the screen below.
+        answer_assistant(
+            &mut self.shell,
+            &Shell::assistant_provider,
+            &mut UiPrompter {
+                parent: self.main.as_ref().map(|main| main.window.as_ref()),
+            },
+        );
         self.agent.sync_engine(&mut self.shell);
         if self.shown_revision != Some(self.shell.revision()) {
             self.sync_device_windows(event_loop);
@@ -2781,5 +2845,82 @@ impl ApplicationHandler<UserEvent> for Host {
             }
         }
         event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
+    }
+}
+
+#[cfg(test)]
+mod assistant_tests {
+    use super::*;
+    use bl_assistant::message::{Event, Reply, Request, Stop};
+    use bl_assistant::provider::Error;
+    use bl_shell::assistant::Row;
+
+    /// A model that answers every message with the same words.
+    struct Say(&'static str);
+
+    impl Provider for Say {
+        fn stream(
+            &self,
+            _request: &Request,
+            on_event: &mut dyn FnMut(Event),
+        ) -> Result<Reply, Error> {
+            on_event(Event::Text(self.0.to_owned()));
+            Ok(Reply {
+                text: self.0.to_owned(),
+                tool_calls: Vec::new(),
+                stop: Stop::End,
+            })
+        }
+    }
+
+    struct Yes;
+
+    impl Prompter for Yes {
+        fn ask(&mut self, _request: &PromptRequest) -> Decision {
+            Decision::Once
+        }
+    }
+
+    #[test]
+    fn a_message_the_person_sends_is_answered_and_the_next_is_accepted() {
+        let mut shell = Shell::headless();
+        let make = |_: &Shell| -> Box<dyn Provider> { Box::new(Say("Done.")) };
+        shell
+            .invoke("assistant.send", json!({ "text": "Add a MIDI track" }))
+            .unwrap();
+        assert!(shell.assistant_running(), "the panel shows Stop");
+
+        assert!(answer_assistant(&mut shell, &make, &mut Yes));
+
+        assert_eq!(shell.take_assistant_prompt(), None);
+        assert!(!shell.assistant_running());
+        assert!(
+            shell
+                .assistant_rows()
+                .contains(&Row::Assistant("Done.".to_owned())),
+            "{:?}",
+            shell.assistant_rows()
+        );
+        assert!(
+            !answer_assistant(&mut shell, &make, &mut Yes),
+            "nothing waits"
+        );
+        shell
+            .invoke("assistant.send", json!({ "text": "And another" }))
+            .expect("a second message is accepted");
+    }
+
+    #[test]
+    fn the_host_answers_the_assistant_when_commands_are_done() {
+        // The turn itself is tested above; this guards that the host's
+        // after-commands step calls it, which only a window could show.
+        // shortcut: reads the source, upgrade when the host can run headless.
+        let source = include_str!("host.rs");
+        let after_commands = source
+            .split("fn after_commands")
+            .nth(1)
+            .and_then(|rest| rest.split("\n    fn ").next())
+            .expect("after_commands is in the host");
+        assert!(after_commands.contains("answer_assistant("));
     }
 }

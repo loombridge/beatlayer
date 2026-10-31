@@ -1263,6 +1263,15 @@ fn cropped_end(marker: Option<Ticks>, from: Ticks, to: Ticks) -> Option<Ticks> {
     }
 }
 
+/// The shortest loop brace a MIDI clip may have: a 2048th note, which holds a
+/// 32-bar clip to 65,536 repetitions. A shorter one repeats the clip into
+/// millions of stretches.
+pub const MIN_MIDI_BRACE: Ticks = Ticks(Ticks::QUARTER.0 / 512);
+
+/// The most repetitions of a loop brace that Consolidate and the engine's
+/// clip envelopes read: a backstop for a set whose brace is too short.
+pub const MAX_LOOP_REPEATS: usize = 65_536;
+
 /// The song stretches the MIDI clip `clip` plays over `start`..`end`, each
 /// with the part of its contents that plays there, as `(song start, song
 /// end, content start, content end)`, in order: the clip's first pass and
@@ -1288,7 +1297,7 @@ fn played_stretches(
             let first = (loop_end - marker).min(clip.length);
             windows.push((marker, marker + first));
             let mut at = first;
-            while at < clip.length {
+            while at < clip.length && windows.len() < MAX_LOOP_REPEATS {
                 let repeat = brace.min(clip.length - at);
                 windows.push((midi.loop_start, midi.loop_start + repeat));
                 at += repeat;
@@ -1345,9 +1354,10 @@ pub fn consolidated_midi(
         let ClipData::Midi(midi) = &clip.data else {
             continue;
         };
-        for (song_start, song_end, content_start, content_end) in
-            played_stretches(clip, midi, start, end)
+        let stretches = played_stretches(clip, midi, start, end);
+        for (n, &(song_start, song_end, content_start, content_end)) in stretches.iter().enumerate()
         {
+            let seam = n + 1 < stretches.len();
             // Spec: note-editing R31. Each repetition written out holds
             // groups of its own.
             let mut own: BTreeMap<u32, u32> = BTreeMap::new();
@@ -1385,7 +1395,14 @@ pub fn consolidated_midi(
                             slot.insert(at, Breakpoint { at, ..point });
                         }
                     }
-                    for (content, song) in [(content_start, song_start), (content_end, song_end)] {
+                    // Where the next repetition begins at `song_end`, this
+                    // one's last value is held up to the tick before it, so
+                    // the jump back at the wrap stays.
+                    let tick = if seam { Ticks(1) } else { Ticks::ZERO };
+                    for (content, song) in [
+                        (content_start, song_start),
+                        (content_end - tick, song_end - tick),
+                    ] {
                         if let Some(value) = envelope.envelope.value_at(content) {
                             slot.entry(song - start).or_insert(Breakpoint {
                                 at: song - start,
@@ -1629,6 +1646,81 @@ mod tests {
         };
         assert_eq!(merged.notes[0].length, Ticks(500));
         assert_eq!(merged.notes[0].pitch, [point(0, 0.0), point(500, 5.0)]);
+    }
+
+    /// A MIDI clip 4 bars long, looping over its first bar, with a linked
+    /// volume envelope through `points`, consolidated over its length.
+    fn consolidated_loop(points: &[(Ticks, f64)]) -> Envelope {
+        let mut clip = Clip::new(
+            ClipId(bl_core::id::Id::new(1).unwrap()),
+            Ticks::ZERO,
+            Ticks::WHOLE * 4,
+            ClipData::Midi(MidiData {
+                looping: true,
+                loop_start: Ticks::ZERO,
+                loop_end: Some(Ticks::WHOLE),
+                ..MidiData::new([Note::new(60, Ticks::ZERO, Ticks::QUARTER, 100)])
+            }),
+        );
+        let points = points
+            .iter()
+            .map(|&(at, value)| Breakpoint {
+                at,
+                value,
+                bend: 0.0,
+            })
+            .collect();
+        clip.envelopes.push(ClipEnvelope::new(
+            AutomationTarget::Mixer {
+                param: crate::automation::MixerParam::Volume,
+            },
+            Envelope::from_points(points).unwrap(),
+        ));
+        let id = ClipId(bl_core::id::Id::new(2).unwrap());
+        let merged = consolidated_midi(id, String::new(), &[&clip], Ticks::ZERO, Ticks::WHOLE * 4);
+        merged.envelopes[0].envelope.clone()
+    }
+
+    // Spec: audio-clip-editing R23. Each pass of a looped clip writes out
+    // the shape its linked envelope had that pass.
+    #[test]
+    fn a_consolidated_loop_keeps_its_linked_envelope_shape_each_pass() {
+        let env = consolidated_loop(&[(Ticks::ZERO, 0.0), (Ticks::WHOLE, 1.0)]);
+        for k in 0..4 {
+            let half = env.value_at(Ticks::WHOLE * k + Ticks::WHOLE / 2).unwrap();
+            assert!((half - 0.5).abs() < 0.01, "pass {k} ramps: {half}");
+            assert!(env.value_at(Ticks::WHOLE * (k + 1) - Ticks(1)).unwrap() > 0.99);
+            if k >= 1 {
+                assert_eq!(env.value_at(Ticks::WHOLE * k), Some(0.0));
+            }
+        }
+        // With no breakpoint at the loop start, the start value is held at
+        // the wrap.
+        let env = consolidated_loop(&[(Ticks::WHOLE / 4, 0.0), (Ticks::WHOLE, 1.0)]);
+        assert_eq!(env.value_at(Ticks::WHOLE), Some(0.0));
+        assert!(env.value_at(Ticks::WHOLE + Ticks::WHOLE / 8).unwrap().abs() < 1e-9);
+    }
+
+    // Spec: audio-clip-editing R23. A set with a loop brace of one tick still
+    // consolidates, with the repetitions held to a cap.
+    #[test]
+    fn a_consolidated_loop_of_one_tick_stops_at_the_repetition_cap() {
+        let clip = Clip::new(
+            ClipId(bl_core::id::Id::new(1).unwrap()),
+            Ticks::ZERO,
+            Ticks::QUARTER * 64,
+            ClipData::Midi(MidiData {
+                looping: true,
+                loop_start: Ticks::ZERO,
+                loop_end: Some(Ticks(1)),
+                ..MidiData::new([Note::new(60, Ticks::ZERO, Ticks(1), 100)])
+            }),
+        );
+        let ClipData::Midi(midi) = &clip.data else {
+            panic!("a MIDI clip");
+        };
+        let stretches = played_stretches(&clip, midi, Ticks::ZERO, clip.length);
+        assert_eq!(stretches.len(), MAX_LOOP_REPEATS);
     }
 
     // Spec: warp-modes R25. A clip's pitch change is its Transpose plus its

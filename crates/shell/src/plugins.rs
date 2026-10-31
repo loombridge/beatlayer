@@ -446,6 +446,25 @@ pub fn info(
     })
 }
 
+/// Whether `device`'s plug-in has an editor and whether it's open, from
+/// whichever host has it, without reading its parameters: what the Device
+/// View's wrench needs on every frame.
+#[must_use]
+pub fn window_state(
+    plugins: &ClapHost,
+    au: &AuHost,
+    vst3: &Vst3Host,
+    lv2: &Lv2Host,
+    device: DeviceId,
+) -> Option<(bool, bool)> {
+    let (has_editor, open, _) = plugins
+        .editor_state(device)
+        .or_else(|| au.editor_state(device))
+        .or_else(|| vst3.editor_state(device))
+        .or_else(|| lv2.editor_state(device))?;
+    Some((has_editor, open))
+}
+
 /// What `ara.state` reports: every running ARA plug-in's document.
 #[must_use]
 pub fn ara_state(vst3: &Vst3Host) -> bl_shell_spec::plugins::AraState {

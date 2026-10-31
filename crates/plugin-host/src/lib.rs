@@ -27,6 +27,18 @@
 //!   Windows, an AppKit utility panel on macOS, and an X11 window
 //!   elsewhere, with the editor's view embedded as a child.
 
+/// How many parameter values the hosts' `status` calls have read, so a test
+/// can tell a cheap query from a full report.
+#[cfg(feature = "test-hooks")]
+pub static STATUS_VALUE_READS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// Counts `n` parameter values read for a report.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn count_value_reads(n: usize) {
+    STATUS_VALUE_READS.fetch_add(n, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub mod ara;
 pub mod au;
 pub mod clap;

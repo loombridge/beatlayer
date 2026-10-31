@@ -419,6 +419,148 @@ fn a_node_whose_latency_moves_is_published_until_it_is_reported() {
     assert!(rig.monitor.state().latency_changes.is_empty(), "reported");
 }
 
+/// A look-ahead that always delays by `FRAMES` but only reports it once it
+/// has run, as an LV2 plug-in does: its latency port is written in `run`.
+struct LateReport {
+    ring: Vec<f32>,
+    write: usize,
+    ran: bool,
+}
+
+impl LateReport {
+    const FRAMES: usize = 64;
+
+    fn new() -> Self {
+        Self {
+            ring: vec![0.0; Self::FRAMES],
+            write: 0,
+            ran: false,
+        }
+    }
+}
+
+impl Node for LateReport {
+    fn process(&mut self, block: &mut Block<'_>) {
+        self.ran = true;
+        // The first channel is enough for the test's impulses.
+        for sample in block.channel_mut(0) {
+            std::mem::swap(sample, &mut self.ring[self.write]);
+            self.write = (self.write + 1) % Self::FRAMES;
+        }
+    }
+
+    fn latency(&self) -> u32 {
+        if self.ran { Self::FRAMES as u32 } else { 0 }
+    }
+}
+
+// Delay-compensation R6 offline. A device that only reports its latency
+// after it has run is reported back to the compiler by `Offline`, as the
+// shell does for an engine on a device, so a render lines the tracks up.
+#[test]
+fn an_offline_render_follows_a_latency_reported_after_the_first_block() {
+    const LATE: &str = "test.late";
+    let mut editor = Editor::new();
+    let a = track(&mut editor, TrackKind::Audio, None);
+    let b = track(&mut editor, TrackKind::Audio, None);
+    clip(&mut editor, a, hash(1));
+    clip(&mut editor, b, hash(2));
+    device(&mut editor, b, LATE, &[]);
+    let mut media = MediaMap::new();
+    media.insert(hash(1), impulse(1.0));
+    media.insert(hash(2), impulse(-1.0));
+    let mut registry = bl_engine::Registry::new();
+    registry.set_media(Arc::new(media));
+    registry.add_native(LATE, |_device, _config| Box::new(LateReport::new()));
+    let mut offline = bl_engine::Offline::new(
+        bl_engine::EngineConfig::new(bl_core::time::SampleRate::HZ_48000, 64),
+        registry,
+    );
+    offline.sync(editor.document());
+    // The first blocks run the device and learn its latency.
+    offline.sender().transport(TransportCommand::Play);
+    offline.render(256, |_| {});
+    assert!(offline.state().latency_changes.is_empty(), "reported");
+    offline.sender().transport(TransportCommand::Stop);
+    offline.sender().transport(TransportCommand::Play);
+    let mut out = Vec::new();
+    offline.render(512, |block| out.extend_from_slice(block.channel(0)));
+    assert_null(&out, "aligned at the reported latency");
+}
+
+// Export R3 with delay-compensation R6. The compile a reported latency
+// brings changes nothing a render set: the set's metronome and loop stay out.
+#[test]
+fn a_latency_reported_during_a_render_brings_back_no_clicks_and_no_loop() {
+    const LATE: &str = "test.late";
+    let render = |editor: &Editor| {
+        let mut media = MediaMap::new();
+        media.insert(hash(1), impulse(1.0));
+        let mut registry = bl_engine::Registry::new();
+        registry.set_media(Arc::new(media));
+        registry.add_native(LATE, |_device, _config| Box::new(LateReport::new()));
+        let mut offline = bl_engine::Offline::new(
+            bl_engine::EngineConfig::new(bl_core::time::SampleRate::HZ_48000, 64),
+            registry,
+        );
+        offline.sync(editor.document());
+        offline.sender().transport(TransportCommand::SetLoop(None));
+        offline.sender().transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        offline.render(96_000, |block| out.extend_from_slice(block.channel(0)));
+        out.iter().map(|s| s.to_bits()).collect::<Vec<_>>()
+    };
+    let mut editor = Editor::new();
+    let a = track(&mut editor, TrackKind::Audio, None);
+    clip(&mut editor, a, hash(1));
+    device(&mut editor, a, LATE, &[]);
+    let quiet = render(&editor);
+    editor
+        .apply(Command::SetMetronomeEnabled { enabled: true })
+        .unwrap();
+    editor
+        .apply(Command::SetLoop {
+            start: Ticks::ZERO,
+            length: Ticks::QUARTER,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetLoopEnabled { enabled: true })
+        .unwrap();
+    let heard = render(&editor);
+    let first = quiet.iter().zip(&heard).position(|(a, b)| a != b);
+    assert_eq!(first, None, "the first frame that differs");
+}
+
+// Delay-compensation R10. Main's output lags song time by what its devices
+// and the slowest path into it add, which a render discards.
+#[test]
+fn offline_reports_how_far_main_lags_song_time() {
+    let mut editor = Editor::new();
+    let a = track(&mut editor, TrackKind::Audio, None);
+    track(&mut editor, TrackKind::Audio, None);
+    delay_device(&mut editor, a);
+    let registry = bl_engine::testing::registry(&Arc::default());
+    let mut offline = bl_engine::Offline::new(
+        bl_engine::EngineConfig::new(bl_core::time::SampleRate::HZ_48000, 64),
+        registry,
+    );
+    offline.sync(editor.document());
+    assert_eq!(offline.output_latency(), LATENCY as u64, "the slowest path");
+    let main = editor.document().main_id();
+    delay_device(&mut editor, main);
+    offline.sync(editor.document());
+    assert_eq!(offline.output_latency(), 2 * LATENCY as u64, "and Main's");
+    // Delay compensation off holds nothing back; Main's own device still delays.
+    run(
+        &mut editor,
+        "mixer.set_delay_compensation",
+        json!({"enabled": false}),
+    );
+    offline.sync(editor.document());
+    assert_eq!(offline.output_latency(), LATENCY as u64);
+}
+
 /// A rig with an impulse of `value` for each of `values`, playing.
 fn impulses(values: &[f32]) -> Rig {
     let mut media = MediaMap::new();

@@ -11,12 +11,13 @@ use std::sync::Arc;
 
 use bl_core::time::{Bpm, Frames, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_devices::sampler::{
-    ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_ENV_AMOUNT, FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN,
-    FILTER_FREQ, FILTER_KEY, FILTER_RES, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH,
-    LFO, LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, LOOP_LENGTH, MODE, PAN,
-    PITCH_ENV_AMOUNT, PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN,
-    PLAYBACK, RELEASE, RETRIG, SAMPLER, SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY,
-    START, SUSTAIN, TRIGGER, VELOCITY, VOICES, VOLUME, sampler_type,
+    ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_CIRCUIT, FILTER_DRIVE, FILTER_ENV_AMOUNT,
+    FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN, FILTER_FREQ, FILTER_KEY, FILTER_MORPH, FILTER_RES,
+    FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO, LFO_DIVISION, LFO_FILTER,
+    LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, LOOP_LENGTH, MODE, PAN, PITCH_ENV_AMOUNT,
+    PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN, PLAYBACK, RELEASE,
+    RETRIG, SAMPLER, SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY, START, SUSTAIN,
+    TRIGGER, VELOCITY, VOICES, VOLUME, sampler_type,
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
@@ -2298,3 +2299,61 @@ const OLDER_RENDERS: [u64; 8] = [
     0x1d2a_04d3_642e_bf85,
     0xb083_8c87_fd58_b521,
 ];
+
+// Spec: sampler R15; instrument filter R2, R9, R10 (Simpler's circuits,
+// Drive and the Morph type)
+#[test]
+fn simplers_circuits_drive_and_morph_play() {
+    let sines = sample(24_000, |i| {
+        let t = i as f64 / HZ;
+        let sum: f64 = [200.0, 1_000.0, 5_000.0]
+            .iter()
+            .map(|hz| (core::f64::consts::TAU * hz * t).sin())
+            .sum();
+        (sum / 3.0 * 0.8) as f32
+    });
+    let collector = Collector::new();
+    let play = |extra: &[(ParamId, f64)]| {
+        let mut params = vec![
+            (LOOP, 1.0),
+            (FILTER, 1.0),
+            (FILTER_FREQ, 1_000.0),
+            (FILTER_RES, 40.0),
+        ];
+        params.extend_from_slice(extra);
+        let mut simpler = sampler(&params, 24_000);
+        give(simpler.as_mut(), &collector, &sines);
+        run_notes(simpler.as_mut(), 24_000, &[note(0, NoteKind::On, 60, 1.0)])
+    };
+    let clean = play(&[]);
+    for circuit in 1..5 {
+        assert_ne!(
+            play(&[(FILTER_CIRCUIT, f64::from(circuit))]),
+            clean,
+            "circuit {circuit}"
+        );
+        // Drive raises the level into a circuit.
+        let loud = play(&[(FILTER_CIRCUIT, f64::from(circuit)), (FILTER_DRIVE, 12.0)]);
+        let plain = play(&[(FILTER_CIRCUIT, f64::from(circuit))]);
+        assert!(
+            amplitude_at(&loud[0][8_000..16_000], 200.0)
+                > amplitude_at(&plain[0][8_000..16_000], 200.0) * 1.5,
+            "circuit {circuit}: Drive"
+        );
+    }
+    assert_eq!(play(&[(FILTER_DRIVE, 20.0)]), clean, "Clean ignores Drive");
+    // A circuit the type doesn't offer plays Clean.
+    assert_eq!(
+        play(&[(FILTER_TYPE, 4.0), (FILTER_CIRCUIT, 4.0)]),
+        play(&[(FILTER_TYPE, 4.0)])
+    );
+    // Morph 12 sits on each type at its stops: low-pass, band-pass,
+    // high-pass, notch.
+    for (morph, pure) in [(0.0, 0.0), (25.0, 4.0), (50.0, 2.0), (75.0, 6.0)] {
+        assert_eq!(
+            play(&[(FILTER_TYPE, 8.0), (FILTER_MORPH, morph)]),
+            play(&[(FILTER_TYPE, pure)]),
+            "Morph at {morph} %"
+        );
+    }
+}

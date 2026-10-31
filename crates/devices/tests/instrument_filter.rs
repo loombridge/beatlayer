@@ -3,7 +3,19 @@
 //! distortion, Morph, Drive, per-frame values, type changes and stability.
 //! Every block runs as a real-time section under the allocation trap.
 
+use crate::common;
 use std::f64::consts::{PI, TAU};
+use std::sync::Arc;
+use std::time::Instant;
+
+use bl_devices::sampler::{
+    FILTER, FILTER_CIRCUIT, FILTER_DRIVE, FILTER_FREQ, FILTER_RES, FILTER_TYPE, LOOP, VOICES,
+    sampler_type,
+};
+use bl_engine::{
+    Block, Collector, DeviceType, NoteBuffer, NoteEvent, NoteKind, Registry, SlotSample,
+    TransportInfo,
+};
 
 use bl_devices::instrument_filter::{
     CIRCUITS, Circuit, InstrumentFilter, Kind, Per, PerFrame, Setup, offered,
@@ -785,3 +797,95 @@ fn a_long_silence_after_loud_input_is_exactly_silent() {
     }
 }
 
+/// Whether the tests run at full depth: `BL_TEST_DEPTH=full`, as on pushes
+/// to main, manual CI runs, and the nightly run. The device budget is judged
+/// only then, so a loaded machine can't fail it.
+fn full_depth() -> bool {
+    match std::env::var("BL_TEST_DEPTH").as_deref() {
+        Ok("full") => true,
+        Ok("quick") | Err(_) => false,
+        Ok(other) => {
+            panic!("BL_TEST_DEPTH is `{other}`: set it to quick or full, or leave it unset")
+        }
+    }
+}
+
+// Spec: instrument filter R13 (sixteen voices through any circuit)
+#[test]
+fn sixteen_voices_render_faster_than_the_device_budget_with_no_allocation() {
+    let mut registry = Registry::empty();
+    bl_devices::sampler::register(&mut registry);
+    let rate = common::RATE.hz() as usize;
+    let noise = noise(rate, 0.5);
+    let sample = Arc::new(bl_media::SampleData::new(common::RATE.hz(), vec![noise]).unwrap());
+    for circuit in 0..5u8 {
+        let device_type: DeviceType = sampler_type();
+        let device = common::device(
+            &device_type,
+            &[
+                (LOOP, 1.0),
+                (VOICES, 16.0),
+                (FILTER, 1.0),
+                (FILTER_TYPE, 1.0),
+                (FILTER_CIRCUIT, f64::from(circuit)),
+                (FILTER_FREQ, 1_500.0),
+                (FILTER_RES, 70.0),
+                (FILTER_DRIVE, 12.0),
+            ],
+        );
+        let mut node = common::node(&registry, &device, 128);
+        let collector = Collector::new();
+        node.receive_data(
+            collector
+                .handle()
+                .data(SlotSample::new(0, Arc::clone(&sample))),
+        );
+        let chord: Vec<NoteEvent> = (0..16)
+            .map(|i| NoteEvent {
+                offset: 0,
+                kind: NoteKind::On,
+                channel: 0,
+                key: 36 + i * 3,
+                velocity: 0.8,
+                note_id: None,
+            })
+            .collect();
+        let seconds = 5;
+        let mut data = vec![0.0f32; common::CHANNELS * 128];
+        let mut out = NoteBuffer::with_capacity(16);
+        let mut heard = 0.0f64;
+        let start = Instant::now();
+        for block in 0..seconds * rate / 128 {
+            data.fill(0.0);
+            let notes: &[NoteEvent] = if block == 0 { &chord } else { &[] };
+            let mut b = Block::new(
+                &mut data,
+                common::CHANNELS,
+                128,
+                128,
+                &[],
+                TransportInfo::default(),
+                common::RATE,
+            )
+            .with_notes(notes, &mut out);
+            bl_rt::rt_test!({ node.process(&mut b) });
+            heard += data.iter().map(|x| f64::from(x.abs())).sum::<f64>();
+        }
+        let elapsed = start.elapsed().as_secs_f64();
+        let realtime = seconds as f64 / elapsed;
+        println!(
+            "{}: {realtime:.0}x real time (debug)",
+            CIRCUITS[usize::from(circuit)]
+        );
+        assert!(heard > 1.0, "{} sounds", CIRCUITS[usize::from(circuit)]);
+        if full_depth() {
+            // A debug build on a loaded machine; 16 voices mustn't eat more
+            // than a quarter of the time they play.
+            assert!(
+                realtime >= 4.0,
+                "{}: {realtime:.1}x real time",
+                CIRCUITS[usize::from(circuit)]
+            );
+        }
+    }
+}

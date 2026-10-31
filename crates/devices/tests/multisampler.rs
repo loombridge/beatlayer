@@ -2447,3 +2447,75 @@ const OLDER_RENDERS: [u64; 10] = [
     0xa5cc_aa87_41ab_fa25,
     0x1b32_23fc_13fa_9625,
 ];
+
+// Spec: multisampler R37, R76; instrument filter R2, R9, R11 (the circuits
+// play, and Res, Morph and Drive act at every frame of each voice)
+#[test]
+fn the_circuits_play_and_res_morph_and_drive_act_per_frame_at_any_block_size() {
+    let render = |extra: &[(bl_model::ParamId, f64)], block: usize| {
+        let mut params = vec![(FILTER_ON, 1.0), (FILTER_FREQ, 1_500.0), (FILTER_RES, 40.0)];
+        params.extend_from_slice(extra);
+        let mut rig = tone_rig(&params, 300.0, block);
+        rig.render(9_600, &[on(0, 60, 1.0), on(3_000, 67, 0.8)])
+    };
+    // Each circuit changes the sound from Clean's, a circuit a type doesn't
+    // offer doesn't, and Drive acts on the circuits alone.
+    let clean = render(&[], 512);
+    for circuit in 1..5 {
+        let with = |ty: f64, drive: f64| {
+            render(
+                &[
+                    (FILTER_TYPE, ty),
+                    (FILTER_CIRCUIT, f64::from(circuit)),
+                    (FILTER_DRIVE, drive),
+                ],
+                512,
+            )
+        };
+        assert_ne!(with(0.0, 0.0), clean, "circuit {circuit}");
+        assert_ne!(with(0.0, 12.0), with(0.0, 0.0), "circuit {circuit}: Drive");
+    }
+    let band = render(&[(FILTER_TYPE, 2.0)], 512);
+    assert_eq!(
+        render(&[(FILTER_TYPE, 2.0), (FILTER_CIRCUIT, 4.0)], 512),
+        band,
+        "PRD on band-pass plays Clean"
+    );
+    assert_eq!(
+        render(&[(FILTER_DRIVE, 20.0)], 512),
+        clean,
+        "Clean ignores Drive"
+    );
+    // LFO 2 moves Res, Morph or Drive at every frame: the output doesn't
+    // depend on where the blocks fall.
+    let ids = LFOS[1];
+    for (target, ty, circuit) in [
+        (dest::FILTER_RES, 0.0, 0.0),
+        (dest::FILTER_RES, 0.0, 4.0),
+        (dest::FILTER_MORPH, 4.0, 0.0),
+        (dest::FILTER_MORPH, 4.0, 1.0),
+        (dest::FILTER_DRIVE, 0.0, 2.0),
+    ] {
+        let routed = [
+            (FILTER_TYPE, ty),
+            (FILTER_CIRCUIT, circuit),
+            (ids.on, 1.0),
+            (ids.rate, 30.0),
+            (ids.extra(LFO_DEST_A), target as f64),
+            (ids.extra(LFO_AMOUNT_A), 100.0),
+        ];
+        let reference = render(&routed, 4096);
+        assert_ne!(
+            reference,
+            render(&routed[..2], 4096),
+            "destination {target} moves nothing"
+        );
+        for block in [1, 100, 512, 4096] {
+            assert_eq!(
+                render(&routed, block),
+                reference,
+                "destination {target}, circuit {circuit}, block {block}"
+            );
+        }
+    }
+}

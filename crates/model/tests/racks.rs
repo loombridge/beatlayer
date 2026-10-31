@@ -987,7 +987,10 @@ fn ungrouping_a_rack_takes_the_mappings_to_it_and_its_chain() {
         .apply(Command::SetRemoteMappings {
             mappings: vec![
                 RemoteMapping::new(
-                    RemoteSource::Note { channel: 1, key: 36 },
+                    RemoteSource::Note {
+                        channel: 1,
+                        key: 36,
+                    },
                     target,
                     kind,
                     None,

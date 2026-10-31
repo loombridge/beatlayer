@@ -159,7 +159,11 @@ pub(crate) fn fit(clip: &Clip, audio: &AudioData, tempo: &TempoMap) -> AudioData
     fitted.fade_in = fitted.fade_in.min(wraps.first.unwrap_or(f64::INFINITY));
     fitted.fade_out = fitted
         .fade_out
-        .min(wraps.before_end.map_or(f64::INFINITY, |wrap| longest - wrap))
+        .min(
+            wraps
+                .before_end
+                .map_or(f64::INFINITY, |wrap| longest - wrap),
+        )
         .max(0.0);
     fitted.fade_out_after = fitted
         .fade_out_after

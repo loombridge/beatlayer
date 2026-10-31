@@ -388,7 +388,13 @@ fn a_value_outside_a_parameters_range_is_stored_at_its_nearest_end() {
         .run("mixer.set_volume", json!({ "track": audio, "volume": 7.0 }))
         .unwrap();
     assert_eq!(
-        shell.editor().document().track(audio).unwrap().mixer().volume,
+        shell
+            .editor()
+            .document()
+            .track(audio)
+            .unwrap()
+            .mixer()
+            .volume,
         bl_model::MAX_CUE_VOLUME
     );
 }

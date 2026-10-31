@@ -127,7 +127,10 @@ impl Document {
                 } else {
                     change.at
                 };
-                Ok(TimeSignatureChange { at: moved, ..change })
+                Ok(TimeSignatureChange {
+                    at: moved,
+                    ..change
+                })
             })
             .collect::<Result<_, ModelError>>()?;
         self.settings.time_signatures = time_signature_map(changes);
@@ -887,9 +890,8 @@ mod tests {
             length: huge,
             clips: Vec::new(),
         };
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            song.doc.apply(&insert)
-        }));
+        let result =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| song.doc.apply(&insert)));
         assert!(matches!(result, Ok(Err(ModelError::PositionOverflow))));
         assert_eq!(song.doc, before);
 

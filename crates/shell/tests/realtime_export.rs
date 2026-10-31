@@ -215,20 +215,6 @@ fn an_export_with_external_hardware_renders_in_real_time() {
         24_000,
         "the file holds exactly the range's frames"
     );
-    // The song is stopped where the range ended: the render's end isn't
-    // followed by a second Stop, which would send the playhead to the start.
-    let state = shell.audio_mut().transport_state();
-    assert!(!state.playing);
-    assert_eq!(
-        state.position,
-        Ticks::QUARTER,
-        "the song stays at the range's end"
-    );
-    assert_eq!(
-        state.insert_marker,
-        Ticks::QUARTER,
-        "and so does the insert marker"
-    );
     // Spec: external-devices R29. The render's blocks touch no heap: the
     // audio thread copies into rings the export made before it started.
     let stats = shell.audio().stats().expect("a stream is open");
@@ -258,16 +244,31 @@ fn the_song_plays_again_after_a_render() {
     assert!(result.real_time, "the export rendered in real time");
     let control = driver.join().unwrap();
 
+    // Spec: external-devices R24. The song is stopped where the range ended: the
+    // render's end isn't followed by a second Stop, which would send the
+    // playhead to the start. The commands reach the audio thread at a later
+    // block, so the test waits for the marker.
+    bl_shell::testing::wait_for(
+        &control,
+        &mut shell,
+        "the insert marker at the range's end",
+        |shell| shell.audio_mut().transport_state().insert_marker == Ticks::QUARTER,
+    );
+    let state = shell.audio_mut().transport_state();
+    assert!(!state.playing);
+    assert_eq!(
+        state.position,
+        Ticks::QUARTER,
+        "the song stays at the range's end"
+    );
+
     // The song plays on from the range's end: the render's plan is gone, so
     // nothing stops it at the range's first frame.
-    let before = shell.audio_mut().transport_state().position;
+    let before = state.position;
     shell.run("transport.play", json!({})).unwrap();
-    bl_shell::testing::run_blocks(&control, &mut shell, 4);
-    let after = shell.audio_mut().transport_state().position;
-    assert!(
-        after > before,
-        "the song plays again: {before:?} to {after:?}"
-    );
+    bl_shell::testing::wait_for(&control, &mut shell, "the song to play again", |shell| {
+        shell.audio_mut().transport_state().position > before
+    });
 }
 
 // Spec: external-devices R26. A real-time render at a rate below the

@@ -529,6 +529,51 @@ fn stop_cancels_a_waiting_start_and_a_second_start_keeps_the_wait() {
     }
 }
 
+/// A rig whose follower starts the song on frame 20,000 and any later start
+/// on frame 60,000, with the song playing and a second Play held.
+fn restart_held(block: usize) -> (Rig, Vec<f32>) {
+    let mut rig = position_rig(4096);
+    rig.follow(testing::stand_in(|ask, answer| {
+        answer.decides_starts();
+        answer.start_at(if ask.clock <= 20_000 { 20_000 } else { 60_000 });
+    }));
+    rig.sender.transport(TransportCommand::Play);
+    let mut out = rig.render(30_000, block);
+    assert!(rig.monitor.state().playing);
+    rig.sender.transport(TransportCommand::Play);
+    out.extend(rig.render(1_000, block));
+    let held = rig.monitor.state();
+    assert!(held.waiting_start && held.playing);
+    (rig, out)
+}
+
+#[test]
+fn a_stop_while_a_restart_waits_stops_the_playing_song() {
+    // Spec: transport R3, R25.
+    for block in BLOCKS {
+        let (mut rig, _) = restart_held(block);
+        rig.sender.transport(TransportCommand::Stop);
+        rig.render(2_000, block);
+        let state = rig.monitor.state();
+        assert!(!state.playing && !state.waiting_start, "block size {block}");
+    }
+}
+
+#[test]
+fn play_stop_while_a_restart_waits_stops_and_stays_stopped() {
+    // Spec: transport R5, R25.
+    for block in BLOCKS {
+        let (mut rig, mut out) = restart_held(block);
+        let stopped_at = out.len();
+        rig.sender.transport(TransportCommand::PlayStop);
+        // Past the frame the held restart would have been released on.
+        out.extend(rig.render(40_000, block));
+        let state = rig.monitor.state();
+        assert!(!state.playing && !state.waiting_start, "block size {block}");
+        stopped_through(&out, stopped_at + block..out.len());
+    }
+}
+
 #[test]
 fn the_followers_own_start_and_stop_act_on_the_frames_it_gives() {
     // Spec: transport R25.

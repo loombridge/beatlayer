@@ -174,10 +174,11 @@ fn mute_silences_a_track_on_ext_out() {
     assert_eq!(settled(&mut rig).1, [0.0, 0.0]);
 }
 
-// Spec: routing R3; metronome R5 (WP-2.13). A count-in plays only the
-// clicks, so it leaves no earlier block on the device's channels.
+// Spec: routing R3; metronome R5 (WP-2.13). The program runs as a stopped
+// transport's does through a count-in, so Ext. Out carries what it carried
+// before Play and no earlier block's leftovers.
 #[test]
-fn a_count_in_leaves_nothing_on_ext_out() {
+fn a_count_in_leaves_ext_out_as_the_stopped_transport_has_it() {
     let (mut rig, a) = rig_with_dc(2, 0.5);
     for command in [
         Command::SetMetronomeEnabled { enabled: true },
@@ -192,5 +193,5 @@ fn a_count_in_leaves_nothing_on_ext_out() {
     assert_eq!(settled(&mut rig).1, [0.5, 0.5]);
     rig.sender.transport(TransportCommand::Play);
     let (_, ext) = settled(&mut rig);
-    assert!(ext.iter().all(|&s| s == 0.0), "{ext:?}");
+    assert_eq!(ext, [0.5, 0.5]);
 }

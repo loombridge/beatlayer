@@ -16,18 +16,14 @@ use serde_json::json;
 use crate::Invocation;
 
 pub use bl_model::fader::{
-    FADER_SCALE, FADER_TRAVEL, LOWEST_DB, SEND_LOWEST_DB, TOP_DB, db_gain, fader_gain,
-    fader_position, gain_db, send_level, send_position, volume_gain,
+    FADER_SCALE, FADER_TRAVEL, LOWEST_DB, PAN_STEPS, SEND_LOWEST_DB, TOP_DB, db_gain, fader_gain,
+    fader_position, gain_db, pan_text, send_level, send_position, volume_gain, volume_text,
 };
 
 /// The fader's travel in points, from −∞ to +6 dB: a drag moves the
 /// handle one point per point of vertical drag along [`FADER_SCALE`]
 /// (observed).
 pub const FADER_TRAVEL_POINTS: f64 = 105.5;
-
-/// How many pan steps there are to each side: pan reads 1L to 50L and 1R to
-/// 50R.
-pub const PAN_STEPS: f64 = 50.0;
 
 /// Points of vertical drag that move pan from the centre to either end
 /// (observed: linear, 0.8 steps of 50 per point, so 62.5 points from C to
@@ -61,20 +57,6 @@ pub const CUE_VOLUME_GESTURE: &str = "Change \"Preview Volume\"";
 /// Points of vertical drag that turn a send from −∞ to 0 dB: the pan
 /// knob's travel, as Live's send knob's isn't observed.
 pub const SEND_DRAG_TRAVEL: f32 = PAN_DRAG_TRAVEL;
-
-/// Volume as the mixer shows it, in dB to one decimal: `0.0`, `-6.0`,
-/// `-inf`.
-#[must_use]
-pub fn volume_text(gain: f64) -> String {
-    if gain <= 0.0 {
-        "-inf".to_owned()
-    } else {
-        let db = gain_db(gain);
-        // -0.0 reads 0.0.
-        let shown = (db * 10.0).round() / 10.0;
-        format!("{:.1}", if shown == 0.0 { 0.0 } else { shown })
-    }
-}
 
 /// Volume as a screen reader reads it: the value as the Status Bar shows it
 /// while the fader moves, `0.0 dB`, `-6.0 dB`, `-inf dB` (the
@@ -123,17 +105,6 @@ pub fn cue_volume_moved(start: f64, delta: f64) -> Invocation {
 #[must_use]
 pub fn cue_volume_stepped(gain: f64, steps: i32, fine: bool) -> Invocation {
     set_cue_volume(step_volume(gain, steps, fine))
-}
-
-/// Pan as the mixer shows it: `C`, or a number from 1 to 50 and `L` or `R`.
-#[must_use]
-pub fn pan_text(pan: f64) -> String {
-    let amount = (pan.abs() * PAN_STEPS).round() as i64;
-    match amount {
-        0 => "C".to_owned(),
-        _ if pan < 0.0 => format!("{amount}L"),
-        _ => format!("{amount}R"),
-    }
 }
 
 /// A gain `steps` dB away (tenths of a dB with `fine`), as Up and Down step

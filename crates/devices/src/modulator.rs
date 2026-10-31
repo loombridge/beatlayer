@@ -92,9 +92,8 @@ pub const DIVISIONS: [(&str, f64); 9] = [
 /// The Shaper's trigger modes.
 pub const TRIGGER_MODES: [&str; 3] = ["Loop", "1-Shot", "Manual"];
 
-/// The LFO's type.
-#[must_use]
-pub fn wave_mod_type() -> DeviceType {
+/// The LFO's own parameters, which CV LFO shares, and the shared ones.
+pub(crate) fn wave_params() -> Vec<ParamDescriptor> {
     let mut params = vec![
         ParamDescriptor::choice(WAVE, "Wave", &WAVES, 0)
             .describe("The waveform: sine, rising or falling ramps, triangle, square, or one of the random waves."),
@@ -107,6 +106,33 @@ pub fn wave_mod_type() -> DeviceType {
             .describe("Freezes the output. Released, it carries on from the held value."),
     ];
     params.extend(shared_params());
+    params
+}
+
+/// The banks of the LFO's controls, which CV LFO shares.
+pub(crate) const WAVE_BANKS: [(&str, &[&str]); 2] = [
+    (
+        "Wave",
+        &["Wave", "Shape", "Steps", "Hold", "Jitter", "Smooth"],
+    ),
+    (
+        "Timing",
+        &[
+            "Time Mode",
+            "Rate",
+            "x10",
+            "Beat Rate",
+            "Offset",
+            "Phase",
+            "R",
+        ],
+    ),
+];
+
+/// The LFO's type.
+#[must_use]
+pub fn wave_mod_type() -> DeviceType {
+    let mut params = wave_params();
     params.extend(mapping_params(
         SLOTS,
         (
@@ -118,22 +144,8 @@ pub fn wave_mod_type() -> DeviceType {
         DeviceDescription::new(params)
             .with_layout(wave_layout())
             .with_banks(&[
-                (
-                    "Wave",
-                    &["Wave", "Shape", "Steps", "Hold", "Jitter", "Smooth"],
-                ),
-                (
-                    "Timing",
-                    &[
-                        "Time Mode",
-                        "Rate",
-                        "x10",
-                        "Beat Rate",
-                        "Offset",
-                        "Phase",
-                        "R",
-                    ],
-                ),
+                WAVE_BANKS[0],
+                WAVE_BANKS[1],
                 ("Mapping", &["Mod", "Polarity", "Depth"]),
                 (
                     "Targets 1-2",
@@ -155,9 +167,8 @@ pub fn wave_mod_type() -> DeviceType {
     )
 }
 
-/// The Shaper's type.
-#[must_use]
-pub fn curve_mod_type() -> DeviceType {
+/// The Shaper's own parameters, which CV Shaper shares, and the shared ones.
+pub(crate) fn curve_params() -> Vec<ParamDescriptor> {
     let mut params = vec![
         ParamDescriptor::choice(TRIGGER_MODE, "Trigger Mode", &TRIGGER_MODES, 0).describe(
             "Loop repeats the shape at the rate, 1-Shot plays it once each time T turns on, and Manual outputs the point of the shape the Manual control picks.",
@@ -178,6 +189,41 @@ pub fn curve_mod_type() -> DeviceType {
             .describe("Snaps breakpoints to the grid as they are placed and dragged."),
     ];
     params.extend(shared_params());
+    params
+}
+
+/// The banks of the Shaper's controls, which CV Shaper shares.
+pub(crate) const CURVE_BANKS: [(&str, &[&str]); 2] = [
+    (
+        "Shape",
+        &[
+            "Trigger Mode",
+            "T",
+            "Manual",
+            "Grid",
+            "Snap",
+            "Jitter",
+            "Smooth",
+        ],
+    ),
+    (
+        "Timing",
+        &[
+            "Time Mode",
+            "Rate",
+            "x10",
+            "Beat Rate",
+            "Offset",
+            "Phase",
+            "R",
+        ],
+    ),
+];
+
+/// The Shaper's type.
+#[must_use]
+pub fn curve_mod_type() -> DeviceType {
+    let mut params = curve_params();
     params.extend(mapping_params(
         SLOTS,
         (
@@ -189,30 +235,8 @@ pub fn curve_mod_type() -> DeviceType {
         DeviceDescription::new(params)
             .with_layout(curve_layout())
             .with_banks(&[
-                (
-                    "Shape",
-                    &[
-                        "Trigger Mode",
-                        "T",
-                        "Manual",
-                        "Grid",
-                        "Snap",
-                        "Jitter",
-                        "Smooth",
-                    ],
-                ),
-                (
-                    "Timing",
-                    &[
-                        "Time Mode",
-                        "Rate",
-                        "x10",
-                        "Beat Rate",
-                        "Offset",
-                        "Phase",
-                        "R",
-                    ],
-                ),
+                CURVE_BANKS[0],
+                CURVE_BANKS[1],
                 ("Mapping", &["Mod", "Polarity", "Depth"]),
                 (
                     "Targets 1-2",
@@ -235,7 +259,7 @@ pub fn curve_mod_type() -> DeviceType {
 }
 
 /// The parameters both modulators share.
-fn shared_params() -> Vec<ParamDescriptor> {
+pub(crate) fn shared_params() -> Vec<ParamDescriptor> {
     vec![
         ParamDescriptor::continuous(JITTER, "Jitter", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .decimals(0)
@@ -339,7 +363,9 @@ pub(crate) fn mapping_cells(slots: u8) -> (LayoutNode, LayoutNode) {
     (cell(0), LayoutNode::Row((1..slots).map(cell).collect()))
 }
 
-fn wave_layout() -> DeviceLayout {
+/// The LFO's controls and display, which CV LFO shares (cv-tools R34): the
+/// waveform's band, its display and the rate's band.
+pub(crate) fn wave_parts() -> [LayoutNode; 3] {
     let wave = ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -363,26 +389,40 @@ fn wave_layout() -> DeviceLayout {
             (RESTART, Widget::Toggle),
         ],
     );
-    let output = ControlBand::stacked(
+    [
+        LayoutNode::Band(wave),
+        LayoutNode::Cell(DisplayCell::new("Wave", 150.0, BODY_HEIGHT, 1.0)),
+        LayoutNode::Band(rate),
+    ]
+}
+
+/// The mapping's output band, which CV devices replace with their own.
+fn mapping_output() -> LayoutNode {
+    LayoutNode::Band(ControlBand::stacked(
         BODY_HEIGHT,
         &[
             (MODE, Widget::Chooser),
             (POLARITY, Widget::Chooser),
             (DEPTH, Widget::Knob),
         ],
-    );
-    let (first, rest) = mapping_cells(SLOTS);
-    DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(wave),
-        LayoutNode::Cell(DisplayCell::new("Wave", 150.0, BODY_HEIGHT, 1.0)),
-        LayoutNode::Band(rate),
-        first,
-        LayoutNode::Band(output),
-    ]))
-    .with_expanded(rest)
+    ))
 }
 
-fn curve_layout() -> DeviceLayout {
+/// A modulator's layout: its `parts`, slot 1's mapping cell and the output
+/// band, with the other slots' cells in the part Show Multimap adds.
+fn mapped_layout(parts: [LayoutNode; 3]) -> DeviceLayout {
+    let (first, rest) = mapping_cells(SLOTS);
+    let [a, b, c] = parts;
+    DeviceLayout::new(LayoutNode::Row(vec![a, b, c, first, mapping_output()])).with_expanded(rest)
+}
+
+fn wave_layout() -> DeviceLayout {
+    mapped_layout(wave_parts())
+}
+
+/// The Shaper's controls and display, which CV Shaper shares (cv-tools
+/// R35): the trigger's band, the shape's display and the rate's band.
+pub(crate) fn curve_parts() -> [LayoutNode; 3] {
     let controls = ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -410,23 +450,15 @@ fn curve_layout() -> DeviceLayout {
             (RESTART, Widget::Toggle),
         ],
     );
-    let output = ControlBand::stacked(
-        BODY_HEIGHT,
-        &[
-            (MODE, Widget::Chooser),
-            (POLARITY, Widget::Chooser),
-            (DEPTH, Widget::Knob),
-        ],
-    );
-    let (first, rest) = mapping_cells(SLOTS);
-    DeviceLayout::new(LayoutNode::Row(vec![
+    [
         LayoutNode::Band(controls),
         LayoutNode::Cell(display),
         LayoutNode::Band(rate),
-        first,
-        LayoutNode::Band(output),
-    ]))
-    .with_expanded(rest)
+    ]
+}
+
+fn curve_layout() -> DeviceLayout {
+    mapped_layout(curve_parts())
 }
 
 /// Adds the two modulators to `registry`.
@@ -445,7 +477,7 @@ pub fn register(registry: &mut Registry) {
 
 /// How fast a cycle runs.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Rate {
+pub(crate) enum Rate {
     /// Cycles per second, running freely.
     Hz(f64),
     /// The length of one cycle in quarter notes, locked to the song.
@@ -453,22 +485,25 @@ enum Rate {
 }
 
 /// What a source needs to know about the instant it works out.
-struct Eval<'a> {
-    rate: SampleRate,
-    tempo: &'a TempoMap,
+pub(crate) struct Eval<'a> {
+    pub(crate) rate: SampleRate,
+    pub(crate) tempo: &'a TempoMap,
     /// The song frame of the instant while the song plays; its position
     /// otherwise.
-    song: i64,
+    pub(crate) song: i64,
     /// Song frames per frame of the stretch (the transport spec, R24).
-    speed: f64,
+    pub(crate) speed: f64,
     /// The frame of the stretch whose parameters the instant is worked out
     /// from.
-    f: usize,
+    pub(crate) f: usize,
+    /// The frames between this instant and the last one worked out: [`GRID`]
+    /// for a modulator, 1 for a CV device (cv-tools R33).
+    pub(crate) step: u64,
 }
 
 impl Eval<'_> {
     /// Parameter `id` at the frame the instant is worked out from.
-    fn param(&self, params: &ParamBank, id: ParamId) -> f64 {
+    pub(crate) fn param(&self, params: &ParamBank, id: ParamId) -> f64 {
         at(params, id, self.f)
     }
 
@@ -482,7 +517,7 @@ impl Eval<'_> {
 
 /// The shared parameters at the instant a source works out.
 #[derive(Clone, Copy)]
-struct Common {
+pub(crate) struct Common {
     rate: Rate,
     /// Phase, as a share of the cycle.
     phase: f64,
@@ -490,7 +525,7 @@ struct Common {
 }
 
 /// A modulator's own part: the shape of its output.
-trait Source: Send + 'static {
+pub(crate) trait Source: Send + 'static {
     /// Starts again: the transport started.
     fn restart(&mut self, seed: u64);
     /// The output at the instant `e`, from 0 to 1, before Jitter, Smooth and
@@ -501,7 +536,7 @@ trait Source: Send + 'static {
 }
 
 /// Reads the value of parameter `id` at frame `f` of the stretch.
-fn at(params: &ParamBank, id: ParamId, f: usize) -> f64 {
+pub(crate) fn at(params: &ParamBank, id: ParamId, f: usize) -> f64 {
     params
         .index(id)
         .map_or(0.0, |index| f64::from(params.ramp(index)[f]))
@@ -559,12 +594,102 @@ impl Mapper {
     }
 }
 
-/// A modulator: a source, with the clock that places its output on the grid
-/// and the post-processing and slot rows every modulator shares.
-struct Modulator<S> {
+/// A source with the output stage the LFO and the Shaper share with CV LFO
+/// and CV Shaper (modulation R21, R22; cv-tools R33): Jitter, Smooth and
+/// Offset on what the source gives. The modulators work it out once every
+/// [`GRID`] frames, the CV devices on every frame, from this one law.
+pub(crate) struct Signal<S> {
     source: S,
-    rate: SampleRate,
     seed: u64,
+    jitter: Random,
+    smoothed: f64,
+    /// A value was worked out since the start.
+    primed: bool,
+    last: f64,
+}
+
+impl<S: Source> Signal<S> {
+    pub(crate) fn new(mut source: S, seed: u64) -> Self {
+        source.restart(seed);
+        Self {
+            source,
+            seed,
+            jitter: Random::seeded(seed),
+            smoothed: 0.0,
+            primed: false,
+            last: 0.0,
+        }
+    }
+
+    /// The transport started: everything begins again (R20, R21).
+    pub(crate) fn restart(&mut self) {
+        self.primed = false;
+        self.smoothed = 0.0;
+        self.last = 0.0;
+        self.jitter = Random::seeded(self.seed ^ 0x5EED);
+        self.source.restart(self.seed);
+    }
+
+    /// Takes new data (the Shaper's shape).
+    pub(crate) fn receive(&mut self, data: &NodeData) {
+        self.source.receive(data);
+    }
+
+    /// The output at the instant `e`, from 0 to 1, worked out from the
+    /// parameters at `e.f`. Jitter adds up to half its share of `noise`'s
+    /// draw, made only while the source isn't held, whether or not Jitter is
+    /// used, so the stream is the same whatever the control says (R21).
+    pub(crate) fn value(
+        &mut self,
+        e: &Eval<'_>,
+        params: &ParamBank,
+        noise: impl FnOnce(&mut Random) -> f64,
+    ) -> f64 {
+        let hz = e.param(params, RATE_HZ)
+            * if e.param(params, TIMES_TEN) >= 0.5 {
+                10.0
+            } else {
+                1.0
+            };
+        let beats = DIVISIONS[(e.param(params, RATE_BEATS) as usize).min(DIVISIONS.len() - 1)].1;
+        let c = Common {
+            rate: if e.param(params, TIME_MODE) >= 0.5 {
+                Rate::Beats(beats)
+            } else {
+                Rate::Hz(hz)
+            },
+            phase: e.param(params, PHASE) / 100.0,
+            restart: e.param(params, RESTART) >= 0.5,
+        };
+        let primed = std::mem::replace(&mut self.primed, true);
+        let Some(w) = self.source.eval(e, c, params) else {
+            return self.last;
+        };
+        let noise = noise(&mut self.jitter);
+        let w = (w + e.param(params, JITTER) / 100.0 * 0.5 * noise).clamp(0.0, 1.0);
+        let smooth = e.param(params, SMOOTH) / 100.0;
+        // Smooth's share is per grid step; a shorter step keeps the same
+        // time constant.
+        let kept = if e.step == GRID {
+            0.98 * smooth
+        } else {
+            (0.98 * smooth).powf(e.step as f64 / GRID as f64)
+        };
+        self.smoothed = if primed {
+            self.smoothed + (w - self.smoothed) * (1.0 - kept)
+        } else {
+            w
+        };
+        self.last = (self.smoothed + e.param(params, OFFSET) / 100.0).clamp(0.0, 1.0);
+        self.last
+    }
+}
+
+/// A modulator: a signal, with the clock that places its output on the grid
+/// and the slot rows every modulator shares.
+struct Modulator<S> {
+    signal: Signal<S>,
+    rate: SampleRate,
     /// Frames since the transport last started, or since the engine's first
     /// frame before it has.
     clock: u64,
@@ -573,38 +698,26 @@ struct Modulator<S> {
     /// The output at the last grid point and the next one.
     from: f64,
     to: f64,
-    smoothed: f64,
-    last: f64,
-    jitter: Random,
 }
 
 impl<S: Source> Modulator<S> {
     fn new(source: S, rate: SampleRate, seed: u64) -> Self {
-        let mut modulator = Self {
-            source,
+        Self {
+            signal: Signal::new(source, seed),
             rate,
-            seed,
             clock: 0,
             was_playing: false,
             primed: false,
             from: 0.0,
             to: 0.0,
-            smoothed: 0.0,
-            last: 0.0,
-            jitter: Random::seeded(seed),
-        };
-        modulator.source.restart(seed);
-        modulator
+        }
     }
 
     /// The transport started: everything begins again (R20, R21).
     fn restart(&mut self) {
         self.clock = 0;
         self.primed = false;
-        self.smoothed = 0.0;
-        self.last = 0.0;
-        self.jitter = Random::seeded(self.seed ^ 0x5EED);
-        self.source.restart(self.seed);
+        self.signal.restart();
     }
 
     /// The output at `lookahead` frames past frame `f` of the stretch:
@@ -629,38 +742,9 @@ impl<S: Source> Modulator<S> {
             },
             speed: modulation.speed(),
             f,
+            step: GRID,
         };
-        let hz = e.param(params, RATE_HZ)
-            * if e.param(params, TIMES_TEN) >= 0.5 {
-                10.0
-            } else {
-                1.0
-            };
-        let beats = DIVISIONS[(e.param(params, RATE_BEATS) as usize).min(DIVISIONS.len() - 1)].1;
-        let c = Common {
-            rate: if e.param(params, TIME_MODE) >= 0.5 {
-                Rate::Beats(beats)
-            } else {
-                Rate::Hz(hz)
-            },
-            phase: e.param(params, PHASE) / 100.0,
-            restart: e.param(params, RESTART) >= 0.5,
-        };
-        let Some(w) = self.source.eval(&e, c, params) else {
-            return self.last;
-        };
-        // Spec: modulation R21. Jitter's draw is made whether or not it is
-        // used, so the stream is the same whatever the control says.
-        let noise = self.jitter.next_bipolar();
-        let w = (w + e.param(params, JITTER) / 100.0 * 0.5 * noise).clamp(0.0, 1.0);
-        let smooth = e.param(params, SMOOTH) / 100.0;
-        self.smoothed = if self.primed {
-            self.smoothed + (w - self.smoothed) * (1.0 - 0.98 * smooth)
-        } else {
-            w
-        };
-        self.last = (self.smoothed + e.param(params, OFFSET) / 100.0).clamp(0.0, 1.0);
-        self.last
+        self.signal.value(&e, params, Random::next_bipolar)
     }
 }
 
@@ -672,7 +756,7 @@ impl<S: Source> NativeDevice for Modulator<S> {
     }
 
     fn receive_data(&mut self, data: NodeData) {
-        self.source.receive(&data);
+        self.signal.receive(&data);
     }
 
     fn control(&mut self, modulation: &mut Modulation<'_, '_>, params: &ParamBank) {
@@ -724,7 +808,7 @@ impl Phasor {
         let (raw, synced) = match c.rate {
             Rate::Hz(hz) => {
                 if self.primed && self.held.is_none() {
-                    self.cycles += hz * GRID as f64 / e.rate.as_f64();
+                    self.cycles += hz * e.step as f64 / e.rate.as_f64();
                 }
                 (self.cycles, false)
             }
@@ -765,7 +849,7 @@ impl Phasor {
 }
 
 /// The LFO's source: nine waveforms.
-struct WaveSource {
+pub(crate) struct WaveSource {
     phasor: Phasor,
     /// The cycle the random draws are for.
     cycle: i64,
@@ -777,7 +861,7 @@ struct WaveSource {
 }
 
 impl WaveSource {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let mut source = Self {
             phasor: Phasor::default(),
             cycle: 0,
@@ -873,7 +957,7 @@ impl Source for WaveSource {
 }
 
 /// The Shaper's source: a breakpoint shape.
-struct CurveSource {
+pub(crate) struct CurveSource {
     points: Vec<ShapePoint>,
     phasor: Phasor,
     /// How far a 1-Shot has played, from 0 to 1, and whether it is playing.
@@ -883,7 +967,7 @@ struct CurveSource {
 }
 
 impl CurveSource {
-    fn new(mut points: Vec<ShapePoint>) -> Self {
+    pub(crate) fn new(mut points: Vec<ShapePoint>) -> Self {
         // Room for the longest shape, so a new one arriving on the audio
         // thread never allocates (R20).
         points.reserve(modulator::MAX_POINTS.saturating_sub(points.len()));
@@ -927,9 +1011,9 @@ impl Source for CurveSource {
                 }
                 self.triggered = on;
                 let step = match c.rate {
-                    Rate::Hz(hz) => hz * GRID as f64 / e.rate.as_f64(),
+                    Rate::Hz(hz) => hz * e.step as f64 / e.rate.as_f64(),
                     Rate::Beats(beats) => {
-                        (e.quarters(e.song + (GRID as f64 * e.speed).round() as i64)
+                        (e.quarters(e.song + (e.step as f64 * e.speed).round() as i64)
                             - e.quarters(e.song))
                             / beats
                     }

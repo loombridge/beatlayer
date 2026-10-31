@@ -211,6 +211,10 @@ fn an_empty_set_or_a_bad_range_is_refused() {
             "MP3 holds",
         ),
         (
+            json!({ "path": ok("a.flac"), "bit_depth": 24, "sample_rate": 192000 }),
+            "FLAC is written up to 96000 Hz",
+        ),
+        (
             json!({ "path": ok("a.wav"), "bit_depth": 8, "sample_rate": 48000 }),
             "8 bits",
         ),

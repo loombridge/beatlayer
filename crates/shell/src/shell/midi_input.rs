@@ -267,7 +267,9 @@ impl Shell {
     /// Returns whether the list changed.
     pub fn refresh_midi(&mut self) -> bool {
         let before = self.midi.ports();
+        let outputs = self.track_outputs();
         self.midi.refresh();
+        self.reopen_track_outputs(&outputs);
         self.midi_listed = std::time::Instant::now();
         let changed = before != self.midi.ports();
         if changed {
@@ -280,6 +282,27 @@ impl Shell {
             self.save_preferences();
         }
         changed
+    }
+
+    /// The output ports that are open with their Track switch on: where a
+    /// MIDI track's notes reach a device.
+    fn track_outputs(&self) -> Vec<bl_core::midi::PortId> {
+        self.midi
+            .ports()
+            .into_iter()
+            .filter(|p| p.direction == midi_io_ids::PortDirection::Output && p.open && p.track)
+            .map(|p| bl_core::midi::PortId::from_name(&p.name))
+            .collect()
+    }
+
+    /// Spec: mpe R17. Tells the engine of each track output that wasn't one
+    /// in `before`, so an MPE MIDI To sends it its configuration again.
+    fn reopen_track_outputs(&self, before: &[bl_core::midi::PortId]) {
+        for port in self.track_outputs() {
+            if !before.contains(&port) {
+                self.audio.midi_output_opened(port);
+            }
+        }
     }
 
     /// Tells the audio engine which output ports have Sync on and their
@@ -474,7 +497,9 @@ impl Shell {
             midi_io_ids::SET_PORT => {
                 let args = Self::args::<midi_io_ids::SetPortArgs>(id, args)?;
                 self.refresh_midi();
+                let outputs = self.track_outputs();
                 let port = self.midi.set_port(&args).map_err(failed)?;
+                self.reopen_track_outputs(&outputs);
                 // Spec: midi-clock R15, R24. With no input on Sync, EXT is
                 // off.
                 if !self.sync_lamps_shown() {

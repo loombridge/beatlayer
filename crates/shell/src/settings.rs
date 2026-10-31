@@ -407,12 +407,19 @@ pub const KEYMAP_FILE: &str = "keymap.toml";
 /// # Errors
 ///
 /// A message if the file exists but can't be read or parsed; the caller
-/// shows it and carries on with Live's keymap.
+/// shows it and carries on with Live's keymap. A file that doesn't parse is
+/// renamed to `keymap.toml.bad` first, so the next write can't erase it.
 pub fn load_keymap(dir: &Path) -> Result<UserKeymap, String> {
     let path = dir.join(KEYMAP_FILE);
     match std::fs::read_to_string(&path) {
-        Ok(text) => UserKeymap::parse(&text)
-            .map_err(|e| format!("couldn't read the keymap in {}: {e}", path.display())),
+        Ok(text) => UserKeymap::parse(&text).map_err(|e| {
+            let bad = dir.join(format!("{KEYMAP_FILE}.bad"));
+            let kept = match std::fs::rename(&path, &bad) {
+                Ok(()) => format!("; it is kept as {}", bad.display()),
+                Err(_) => String::new(),
+            };
+            format!("couldn't read the keymap in {}: {e}{kept}", path.display())
+        }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(UserKeymap::default()),
         Err(e) => Err(format!(
             "couldn't read the keymap in {}: {e}",

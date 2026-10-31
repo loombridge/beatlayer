@@ -378,3 +378,16 @@ fn the_reader_checks_a_whole_pack_without_writing_and_refuses_one_that_is_too_bi
     assert_eq!(plan.manifest.project, "Song Project");
     assert!(pack::verify(Cursor::new(&bytes), 1000).is_err());
 }
+
+// Spec: set-exchange R21.
+#[test]
+fn a_pack_with_two_entries_differing_only_in_case_is_refused_with_nothing_written() {
+    let dir = TestDir::new("pack-case-twice");
+    let bytes = pack_of("P", &[("P/a.wav", b"first"), ("P/A.wav", b"second")]);
+    let (result, left) = install_bytes(&dir, &bytes);
+    refused(result, &left, "twice");
+    assert!(matches!(
+        pack::verify(Cursor::new(&bytes), u64::MAX),
+        Err(Error::Refused(_))
+    ));
+}

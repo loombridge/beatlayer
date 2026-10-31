@@ -446,6 +446,14 @@ pub(crate) fn write_set(
         });
     };
     let folder = ProjectFolder::of_set(path);
+    // The folders this save makes, deepest first: each name must reach its
+    // parent's entry on disk too. If a check fails, the folder counts as
+    // there, as a save did before (best effort, like the root's flush).
+    let created: Vec<&Path> = folder
+        .root()
+        .ancestors()
+        .take_while(|dir| matches!(fs.exists(dir), Ok(false)))
+        .collect();
     fs.create_dir_all(folder.root())
         .map_err(SaveError::io(folder.root()))?;
 
@@ -491,6 +499,16 @@ pub(crate) fn write_set(
         written
             .warnings
             .push(format!("couldn't flush the project folder: {error}"));
+    }
+    for dir in created {
+        if let Some(parent) = dir.parent().filter(|parent| !parent.as_os_str().is_empty())
+            && let Err(error) = fs.sync_dir(parent)
+        {
+            written.warnings.push(format!(
+                "couldn't flush the folder holding {}: {error}",
+                dir.display()
+            ));
+        }
     }
 
     if options.backups > 0 && written.backup.is_some() {
@@ -1366,5 +1384,28 @@ mod tests {
         for (crash_after, (revision, step)) in outcomes.iter().enumerate() {
             println!("crash at change {crash_after} ({step:?}): loads revision {revision}");
         }
+    }
+
+    #[test]
+    fn a_save_into_a_new_folder_flushes_its_parent() {
+        let dir = TestDir::new("new-folder");
+        let path = dir.0.join("My Song Project").join("My Song.blset");
+        let fs = CrashFs::after(usize::MAX);
+        let bytes = encode(&song(1), 1).unwrap();
+        write_set(&fs, &path, &bytes, &SaveOptions::default(), at(NOW)).unwrap();
+        let log = fs.log.borrow();
+        let rename = log
+            .iter()
+            .position(|step| step.starts_with("rename "))
+            .unwrap();
+        let after = &log[rename..];
+        assert!(
+            after.contains(&"flush My Song Project".to_owned()),
+            "{log:?}"
+        );
+        assert!(
+            after.contains(&format!("flush {}", name(&dir.0))),
+            "{log:?}"
+        );
     }
 }

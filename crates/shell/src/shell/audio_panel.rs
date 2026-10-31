@@ -145,6 +145,10 @@ impl Shell {
                 message: format!("couldn't read {}: {error}", path.display()),
             })?;
         self.replace_media(id, clip, media)?;
+        // The set's media table names the new file, so a save lists it.
+        let size = std::fs::metadata(&path).map_or(0, |meta| meta.len());
+        self.store
+            .add_media(bl_model::ContentHash(*media.as_bytes()), &path, size);
         Ok(to_value(&ReplacedSample {
             clip,
             file: path.display().to_string(),
@@ -280,8 +284,19 @@ impl Shell {
                         .map(|data| (clip, data))
                 })
                 .collect();
-            if !replaced.is_empty() {
-                let _ = self.apply_replaced("clip.edit_sample", &replaced);
+            if !replaced.is_empty() && self.apply_replaced("clip.edit_sample", &replaced).is_ok() {
+                // The set's media table names the edited file under its new
+                // hash, and forgets the old one once no clip plays it.
+                let size = std::fs::metadata(&editing.path).map_or(0, |meta| meta.len());
+                self.store.add_media(
+                    bl_model::ContentHash(*media.as_bytes()),
+                    &editing.path,
+                    size,
+                );
+                if self.clips_of_media(editing.hash).is_empty() {
+                    self.store
+                        .forget_media(bl_model::ContentHash(*editing.hash.as_bytes()));
+                }
             }
         }
         self.editing = done;

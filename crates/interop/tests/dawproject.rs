@@ -1405,3 +1405,183 @@ fn entries_past_the_total_limit_are_left_out() {
     assert_eq!(container.paths().collect::<Vec<_>>(), ["a.bin", "b.bin"]);
     assert_eq!(container.report.left_out, ["the entry `c.bin`"]);
 }
+
+/// Runs `work` on a thread and returns its result, or panics when it hasn't
+/// finished within `seconds`.
+fn finishes_within<T: Send + 'static>(
+    seconds: u64,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+    receiver
+        .recv_timeout(std::time::Duration::from_secs(seconds))
+        .expect("the work finishes in time")
+}
+
+/// A project with one notes track "B" whose Arrangement lanes hold `clips`.
+fn notes_track_project(clips: &str) -> String {
+    format!(
+        r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="notes" id="b" name="B"><Channel role="regular" id="cb"/></Track></Structure>
+<Arrangement id="arr"><Lanes id="all"><Lanes track="b" id="lb"><Clips id="cb1">{clips}</Clips></Lanes></Lanes></Arrangement>
+<Scenes/></Project>"#
+    )
+}
+
+/// Loops nested four deep make far more notes than a person plays: the
+/// import cuts them at its budget and says so rather than running on
+/// (R34).
+#[test]
+fn nested_looping_midi_clips_are_cut_at_the_budget() {
+    use bl_model::ClipData;
+
+    // Each level lasts 4096 passes of the level inside it.
+    let xml = notes_track_project(
+        r#"<Clip time="0" duration="68719476736" loopStart="0" loopEnd="16777216" name="D"><Clips id="d">
+<Clip time="0" duration="16777216" loopStart="0" loopEnd="4096" name="A"><Clips id="a">
+<Clip time="0" duration="4096" loopStart="0" loopEnd="1" name="B"><Clips id="c">
+<Clip time="0" duration="1" loopStart="0" loopEnd="1" name="C"><Notes id="n"><Note time="0" duration="0.5" key="60"/></Notes></Clip>
+</Clips></Clip></Clips></Clip></Clips></Clip>"#,
+    );
+    let imported = finishes_within(10, move || {
+        let folder = fixtures().join("nowhere");
+        let container = dawproject::read_container(&container_of(&xml)).unwrap();
+        dawproject::import(&container, &Context::new(&folder, &folder)).unwrap()
+    });
+    let document = &imported.project.document;
+    document.check_invariants().unwrap();
+    let clips = clips_of(document, "B");
+    assert_eq!(clips.len(), 1);
+    let ClipData::Midi(data) = &clips[0].data else {
+        panic!("a MIDI clip");
+    };
+    assert!(data.notes.len() <= 2_000_000);
+    assert!(
+        imported
+            .report
+            .entries
+            .iter()
+            .any(|entry| entry.did == "cut where the limit was reached")
+    );
+}
+
+/// A limiter value that isn't a number, or a level that adds up to one,
+/// leaves that value at its default and keeps the device (R8).
+#[test]
+fn limiter_with_a_nan_threshold_keeps_the_device() {
+    use bl_devices::limiter;
+
+    let default = -0.3;
+    for values in [
+        r#"<Threshold unit="decibel" value="NaN" id="lt"/>"#,
+        r#"<Threshold unit="linear" value="-0.5" id="lt"/>"#,
+        r#"<Threshold unit="decibel" value="inf" id="lt"/><OutputGain unit="decibel" value="-inf" id="lo"/>"#,
+    ] {
+        let xml = format!(
+            r#"<?xml version="1.0"?>
+<Project version="1.0"><Application name="t" version="1"/>
+<Transport><Tempo unit="bpm" value="120" id="tempo"/></Transport>
+<Structure><Track contentType="notes" id="b" name="B"><Channel role="regular" id="cb">
+<Devices><Limiter deviceRole="audioFX" id="lim">{values}</Limiter></Devices></Channel></Track></Structure>
+<Arrangement id="arr"/><Scenes/></Project>"#
+        );
+        let imported = import_xml(&xml);
+        let devices: Vec<_> = track(&imported.project.document, "B").devices().collect();
+        assert_eq!(devices.len(), 1, "{values}");
+        assert_eq!(
+            devices[0].kind,
+            bl_model::DeviceKind::Native {
+                device_type: limiter::LIMITER.to_owned()
+            }
+        );
+        let ceiling = devices[0].params.get(&limiter::CEILING).copied();
+        assert!(
+            ceiling.is_none_or(|ceiling| ceiling.is_finite() && ceiling == default),
+            "{values}: {ceiling:?}"
+        );
+        assert!(
+            !imported
+                .report
+                .entries
+                .iter()
+                .any(|entry| entry.did.contains("left out; ")
+                    && entry.did.contains("parameter value")),
+            "{values}"
+        );
+    }
+}
+
+/// Clip and note times too large for a tick count leave the clip or note
+/// out instead of overflowing (R4).
+#[test]
+fn clip_and_note_times_past_the_timeline_are_left_out() {
+    for far in [
+        r#"<Clip time="1e13" duration="1e13" name="far"><Notes id="n"><Note time="1e13" duration="1" key="60"/></Notes></Clip>"#,
+        r#"<Clip time="1e13" duration="1e13" name="far"><Notes id="n"><Note time="0" duration="1e13" key="60"/></Notes></Clip>"#,
+    ] {
+        let xml = notes_track_project(&format!(
+            r#"{far}<Clip time="0" duration="4" name="near"><Notes id="n2"><Note time="0" duration="1" key="60"/></Notes></Clip>"#
+        ));
+        let imported = import_xml(&xml);
+        let document = &imported.project.document;
+        document.check_invariants().unwrap();
+        let clips = clips_of(document, "B");
+        let near = clips.iter().find(|clip| clip.name == "near").unwrap();
+        assert!(near.start >= bl_core::time::Ticks::ZERO);
+        assert!(
+            imported
+                .report
+                .entries
+                .iter()
+                .any(|entry| { entry.place.contains("far") && entry.did == "left out" }),
+            "{far}: {:?}",
+            imported.report.entries
+        );
+    }
+}
+
+/// Many distinct names the reader doesn't know cost no more than the
+/// same number of repeats (R4).
+#[test]
+fn many_distinct_unknown_attributes_are_read_in_linear_time() {
+    use std::fmt::Write;
+
+    let mut text = String::from("<Project version=\"1.0\"");
+    for i in 0..200_000 {
+        write!(text, " a{i}=\"\"").unwrap();
+    }
+    text.push_str("/>");
+    let (root, report) = finishes_within(10, move || {
+        let mut report = dawproject::ReadReport::default();
+        let root = dawproject::read::read_xml(&text, &mut report);
+        (root, report)
+    });
+    assert!(root.is_some());
+    assert_eq!(report.unknown_attributes.len(), 200_000);
+}
+
+/// The import report lists many distinct names without a scan per entry
+/// (R12).
+#[test]
+fn many_distinct_unknown_attributes_are_reported_in_linear_time() {
+    use std::fmt::Write;
+
+    let mut xml = String::from("<?xml version=\"1.0\"?>\n<Project version=\"1.0\"");
+    for i in 0..200_000 {
+        write!(xml, " a{i}=\"\"").unwrap();
+    }
+    xml.push_str("><Application name=\"t\" version=\"1\"/><Structure/><Scenes/></Project>");
+    let imported = finishes_within(10, move || import_xml(&xml));
+    let listed = imported
+        .report
+        .entries
+        .iter()
+        .filter(|entry| entry.what.starts_with("the attribute `a"))
+        .count();
+    assert_eq!(listed, 200_000);
+}

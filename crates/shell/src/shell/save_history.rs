@@ -2,7 +2,6 @@
 //! whether its panel shows, the rows it lists, and the commands that list
 //! and restore them. The rows and their songs come from `bl_project::history`.
 
-use bl_project::SetFile;
 use bl_project::history::{self, HistoryRow, Restored, Row, SaveHistory as SaveHistoryRows};
 use bl_shell_spec::commands::SaveHistoryState;
 
@@ -18,6 +17,9 @@ pub(super) struct SaveHistory {
     /// What the rows were listed for, so they are listed again only when
     /// one could have changed.
     listed: Option<Listed>,
+    /// How many saves this session has made: each writes a backup, so it
+    /// stands for the backup folder changing without listing it every poll.
+    pub saves: u64,
 }
 
 /// What the rows depend on.
@@ -27,7 +29,7 @@ struct Listed {
     continuous: bool,
     session: Option<String>,
     journalled: u64,
-    backups: Option<(usize, Option<PathBuf>)>,
+    saves: u64,
 }
 
 impl Shell {
@@ -84,7 +86,7 @@ impl Shell {
             journalled: status
                 .filter(|_| continuous)
                 .map_or(0, |status| status.journalled),
-            backups: set.map(backup_files),
+            saves: self.save_history.saves,
         };
         if self.save_history.listed.as_ref() == Some(&listed) {
             return false;
@@ -147,9 +149,7 @@ impl Shell {
         // (R18).
         let (mut project, info) = history::load(&set, &args.id)
             .map_err(|error| failed(format!("couldn't read {}: {error}", args.id)))?;
-        if info.before_relative_modulation() {
-            bl_devices::relative_clip_envelopes(&mut project.document);
-        }
+        crate::files::after_load(&mut project, &info);
         self.store.merge_media(&project.media);
         for (hash, path, size) in self.store.media_files() {
             self.media
@@ -163,18 +163,4 @@ impl Shell {
             undo_step: changed.then(|| step.to_owned()),
         }))
     }
-}
-
-/// How many backups a set has and the newest of them: what a save changes.
-fn backup_files(set: &SetFile) -> (usize, Option<PathBuf>) {
-    let stem = set
-        .path()
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let backups = bl_project::backups(&set.folder().backup(), &stem);
-    (
-        backups.len(),
-        backups.first().map(|backup| backup.path.clone()),
-    )
 }

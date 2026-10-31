@@ -138,16 +138,18 @@ fn source_params(s: u32, label: &str) -> Vec<ParamDescriptor> {
             &format!("{label} Curve A"),
             (0.0, 1.0),
             0.5,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe(&format!("{label}'s curve bend, 0.5 leaving it straight.")),
         ParamDescriptor::continuous(
             source_curve_b(s),
             &format!("{label} Curve B"),
             (0.0, 1.0),
             0.5,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe(&format!(
             "{label}'s second S-shaped segment's bend, when the segments aren't linked."
         )),
@@ -159,32 +161,36 @@ fn source_params(s: u32, label: &str) -> Vec<ParamDescriptor> {
             &format!("{label} Min"),
             (0.0, 1.0),
             0.0,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe(&format!("The lowest value {label} comes out as.")),
         ParamDescriptor::continuous(
             source_max(s),
             &format!("{label} Max"),
             (0.0, 1.0),
             1.0,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe(&format!("The highest value {label} comes out as.")),
         ParamDescriptor::continuous(
             source_x(s),
             &format!("{label} X"),
             (0.0, 1.0),
             0.5,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe(&format!("{label}'s S-shaped breakpoint along the input.")),
         ParamDescriptor::continuous(
             source_y(s),
             &format!("{label} Y"),
             (0.0, 1.0),
             0.5,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe(&format!("{label}'s S-shaped breakpoint's output.")),
         ParamDescriptor::toggle(source_smooth(s), &format!("{label} Smooth"), false)
             .describe(&format!("Whether {label}'s output is smoothed.")),
@@ -221,8 +227,9 @@ pub fn mpe_control_type() -> DeviceType {
             "Press Default Value",
             (0.0, 1.0),
             0.5,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe("The pressure a note without one gets, while Press Default is on."),
         ParamDescriptor::toggle(SWAP_TO_SLIDE, "Swap to Slide", false)
             .describe("Sends what pressure carried as slide instead."),
@@ -235,8 +242,9 @@ pub fn mpe_control_type() -> DeviceType {
             "Slide Default Value",
             (0.0, 1.0),
             0.5,
-            ParamUnit::Percent,
+            ParamUnit::None,
         )
+        .decimals(2)
         .describe("The slide a note without one gets, while Slide Default is on."),
         ParamDescriptor::toggle(SLIDE_CENTERED, "Slide Centered", false).describe(
             "Reads slide as distance from the middle: the centre is zero and the ends are one.",

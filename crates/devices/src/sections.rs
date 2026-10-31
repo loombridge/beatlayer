@@ -124,6 +124,68 @@ impl Biquad {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many coefficient designs this thread has made, for the tests that
+    /// check a refresh keeps what it already has.
+    pub(crate) static DESIGNS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A device of `device_type` with `params` set, as a node at 48 kHz with
+/// 256-frame blocks, in a test build.
+#[cfg(test)]
+pub(crate) fn test_node(
+    register: fn(&mut bl_engine::Registry),
+    device_type: &bl_engine::DeviceType,
+    params: &[(bl_model::ParamId, f64)],
+) -> Box<dyn bl_engine::Node> {
+    let mut registry = bl_engine::Registry::empty();
+    register(&mut registry);
+    let mut device =
+        device_type.device(bl_model::DeviceId(bl_core::id::Id::new(1).expect("an ID")));
+    for (param, value) in params {
+        device.params.insert(*param, *value);
+    }
+    let config = bl_engine::NodeConfig {
+        round_trip_latency: 0,
+        sample_rate: bl_core::time::SampleRate::HZ_48000,
+        max_frames: 256,
+        channels: 2,
+    };
+    registry
+        .create(&device, &config)
+        .expect("the registry makes the device")
+}
+
+/// How many coefficient designs one 256-frame stereo block of a ramp through
+/// `node` makes, after `events`, in a test build.
+#[cfg(test)]
+pub(crate) fn designs_in_block(
+    node: &mut dyn bl_engine::Node,
+    events: &[bl_engine::NodeEvent],
+) -> usize {
+    let mut data: Vec<f32> = (0..512).map(|i| (i % 256) as f32 * 0.01).collect();
+    let mut block = bl_engine::Block::new(
+        &mut data,
+        2,
+        256,
+        256,
+        events,
+        bl_engine::TransportInfo::default(),
+        bl_core::time::SampleRate::HZ_48000,
+    );
+    DESIGNS.with(|n| n.set(0));
+    node.process(&mut block);
+    DESIGNS.with(std::cell::Cell::get)
+}
+
+/// Counts one coefficient design, in a test build.
+#[inline]
+pub(crate) fn count_design() {
+    #[cfg(test)]
+    DESIGNS.with(|n| n.set(n.get() + 1));
+}
+
 /// A value far below the audio's noise floor is left as zero rather than as
 /// a denormal, whose arithmetic is slow.
 pub(crate) fn flush(x: f32) -> f32 {

@@ -53,7 +53,7 @@ Result: [`ChangeSet`](README.md#changeset).
 
 **Edit Shape**. Permission: `edit`. Contexts: `device-view`.
 
-Replaces the breakpoint shape of a Shaper or a Shaper MIDI, as every edit of its display does (adding, moving, bending or deleting a breakpoint, making one the sustain breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in a shape). An empty list outputs 0. One undo step (Edit Shape).
+Replaces the breakpoint shape of a Shaper, a Shaper MIDI or a CV Shaper, as every edit of its display does (adding, moving, bending or deleting a breakpoint, making one the sustain breakpoint, Clear and the six presets). `points` lists up to 64 breakpoints in order along the cycle, each with `x` (its place, 0 to 1), `y` (the output there, 0 to 1), `bend` (of the segment starting there, from -1 to 1, 0 straight) and `sustain` (true on the Shaper MIDI's sustain breakpoint, at most one in a shape). An empty list outputs 0. One undo step (Edit Shape).
 
 Default keys: none.
 

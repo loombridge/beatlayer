@@ -105,7 +105,7 @@ impl Shell {
             self.refresh_device_commands(false);
             changed = true;
         }
-        let changes: Vec<(bl_model::DeviceId, bl_model::ParamId, f64)> = self
+        let mut changes: Vec<(bl_model::DeviceId, bl_model::ParamId, f64)> = self
             .plugins
             .take_param_changes()
             .into_iter()
@@ -135,7 +135,12 @@ impl Shell {
                     .map(|c| (c.device, c.param, c.value)),
             )
             .collect();
-        if crate::plugins::apply_param_changes(changes, &mut self.editor, &mut self.devices) {
+        // Applied inside a drag, they would join its undo step.
+        changes.splice(0..0, std::mem::take(&mut self.pending_param_changes));
+        if self.landings_wait() {
+            self.pending_param_changes = changes;
+        } else if crate::plugins::apply_param_changes(changes, &mut self.editor, &mut self.devices)
+        {
             self.dirty = true;
             self.document_changed();
             changed = true;

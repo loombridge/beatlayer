@@ -319,6 +319,13 @@ impl Shell {
     /// Takes the download's and the separation's news. Returns whether
     /// either is still going, so a window keeps drawing its progress.
     pub(super) fn poll_stems(&mut self) -> bool {
+        self.poll_stems_held(self.landings_wait())
+    }
+
+    /// [`Shell::poll_stems`], with `held` set while a transaction is open:
+    /// the separation's result then stays on its worker, so it doesn't land
+    /// inside a drag's undo step.
+    fn poll_stems_held(&mut self, held: bool) -> bool {
         if let Some(ended) = self.stems.install.as_mut().and_then(Worker::poll) {
             self.stems.install = None;
             let (state, error) = match ended {
@@ -350,6 +357,7 @@ impl Shell {
             .stems
             .separation
             .as_mut()
+            .filter(|_| !held)
             .and_then(|running| running.worker.poll());
         if let Some(ended) = ended {
             let running = self.stems.separation.take().expect("polled above");
@@ -364,6 +372,17 @@ impl Shell {
             }
         }
         self.stems.install.is_some() || self.stems.separation.is_some()
+    }
+
+    /// Cancels the separation under way and forgets the dialog and the
+    /// tracks of the last one, for a set that's been replaced.
+    pub(super) fn drop_separation(&mut self) {
+        if let Some(running) = self.stems.separation.take() {
+            running.worker.progress().cancel();
+        }
+        self.stems.separation_status = JobStatus::default();
+        self.stems.created.clear();
+        self.stems.dialog = None;
     }
 
     fn separation_ended(&mut self, state: JobState, error: Option<String>) {
@@ -560,9 +579,133 @@ impl Shell {
     /// Waits until the download and the separation under way have finished
     /// and the stems' edit has landed, for tests and headless runs.
     pub fn wait_stems(&mut self) {
-        while self.poll_stems() || self.is_processing() {
-            self.poll_processed();
+        while self.poll_stems_held(false) || self.is_processing() {
+            self.land_processed_files();
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::GesturePhase;
+    use bl_analysis::stems::Stems;
+    use serde_json::json;
+
+    /// A shell with a short audio clip on a track, and a separation of it
+    /// under way whose worker finishes once `release` is sent.
+    fn separating(name: &str) -> (Shell, ClipId, std::sync::mpsc::Sender<()>) {
+        let file =
+            std::env::temp_dir().join(format!("bl-stems-unit-{name}-{}.wav", std::process::id()));
+        let mut writer = bl_media::AudioWriter::create(
+            &file,
+            bl_media::EncodeSpec {
+                file_type: bl_media::FileType::Wav,
+                bit_depth: bl_media::BitDepth::Float32,
+                dither: bl_media::Dither::None,
+                sample_rate: 48_000,
+                channels: 2,
+            },
+        )
+        .unwrap();
+        writer.write(&vec![0.25; 2 * 48_000]).unwrap();
+        writer.finish().unwrap();
+        let mut shell = Shell::headless();
+        let placed = shell
+            .run(
+                "browser.add_to_arrangement",
+                json!({ "paths": [file.to_string_lossy()], "at": 0 }),
+            )
+            .unwrap();
+        let _ = std::fs::remove_file(&file);
+        let clip: ClipId = serde_json::from_value(placed["clips"][0]["clip"].clone()).unwrap();
+        let (release, wait) = std::sync::mpsc::channel::<()>();
+        let worker = Worker::start("bl-test-stems", move |_| {
+            let _ = wait.recv();
+            Ended::Done(Separated {
+                from: 0,
+                stems: Stems {
+                    stems: std::array::from_fn(|_| [vec![0.1; 4_800], vec![0.1; 4_800]]),
+                },
+            })
+        })
+        .unwrap();
+        let args = SeparateArgs {
+            clip,
+            stems: StemKind::ALL.to_vec(),
+            quality: StemQuality::default(),
+            merge: false,
+        };
+        shell.stems.separation = Some(Running { worker, args });
+        (shell, clip, release)
+    }
+
+    /// Polls until the separation and the files it wrote have landed.
+    fn poll_until_landed(shell: &mut Shell) {
+        for _ in 0..5_000 {
+            shell.poll();
+            if shell.stems.separation.is_none() && !shell.is_processing() {
+                return;
+            }
+            std::thread::yield_now();
+        }
+        panic!("the separation never landed");
+    }
+
+    // Spec: stem-separation R11. A separation that finishes while the person
+    // drags a clip lands when the drag ends, not inside the drag's
+    // transaction, where the drag's next frame would throw it away.
+    #[test]
+    fn stems_that_finish_during_a_drag_land_after_it() {
+        let (mut shell, clip, release) = separating("drag");
+        shell
+            .run("arrangement.select_clips", json!({ "clips": [clip] }))
+            .unwrap();
+        let frame = |by: i64| crate::Invocation::new("arrangement.move_clips", json!({ "by": by }));
+        shell
+            .gesture(GesturePhase::Update, Some(&frame(960)))
+            .unwrap();
+        release.send(()).unwrap();
+        for _ in 0..2_000 {
+            shell.poll();
+            std::thread::yield_now();
+        }
+        assert!(
+            shell.stems.separation.is_some(),
+            "the result waits for the drag"
+        );
+        shell
+            .gesture(GesturePhase::Update, Some(&frame(1_920)))
+            .unwrap();
+        shell
+            .gesture(GesturePhase::Commit, Some(&frame(1_920)))
+            .unwrap();
+        poll_until_landed(&mut shell);
+
+        let document = shell.editor().document();
+        assert!(!shell.stems.created.is_empty());
+        for track in &shell.stems.created {
+            assert!(document.track(*track).is_some(), "stem track {track:?}");
+        }
+        assert!(document.clip(clip).unwrap().mute, "the source is muted");
+    }
+
+    // Spec: stem-separation R1. A separation under way belongs to the set
+    // it began in: a new set gets neither its tracks nor its muted clip.
+    #[test]
+    fn a_new_set_drops_the_separation_under_way() {
+        let (mut shell, _clip, release) = separating("replaced");
+        shell.run("set.new", json!({})).unwrap();
+        let fresh = shell.editor().document().clone();
+        assert!(shell.stems.separation.is_none());
+        let _ = release.send(());
+        for _ in 0..2_000 {
+            shell.poll();
+            std::thread::yield_now();
+        }
+        assert_eq!(*shell.editor().document(), fresh);
+        assert!(shell.stems.created.is_empty());
+        assert!(!shell.is_processing());
     }
 }

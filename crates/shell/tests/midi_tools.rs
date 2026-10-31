@@ -2202,3 +2202,35 @@ fn r41_lfo_random_draws_from_the_seed_and_reseed_runs_it_again() {
         "the same seed draws the same values"
     );
 }
+
+/// A clip of three notes with a fourth added and all four selected, then the
+/// addition undone: the selection names a place the clip no longer has.
+fn song_with_a_stale_selection() -> Song {
+    let mut song = song(three());
+    song.shell
+        .run(
+            "note.add",
+            json!({ "key": 72, "start": 3 * QUARTER, "length": QUARTER }),
+        )
+        .unwrap();
+    song.select_notes(&[0, 1, 2, 3]);
+    song.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(song.notes().len(), 3);
+    song
+}
+
+#[test]
+fn a_selection_left_stale_by_undo_never_reaches_a_tool() {
+    let mut song = song_with_a_stale_selection();
+    let before = song.keys();
+    song.apply_transpose(1);
+    assert_ne!(song.keys(), before, "the tool took the notes that remain");
+}
+
+#[test]
+fn a_selection_left_stale_by_undo_never_reaches_a_tool_with_auto_on() {
+    let mut song = song_with_a_stale_selection();
+    let before = song.keys();
+    song.transpose(1);
+    assert_ne!(song.keys(), before, "the tool took the notes that remain");
+}

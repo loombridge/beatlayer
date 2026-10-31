@@ -53,6 +53,9 @@ pub struct Context<'a> {
     pub media: &'a MediaStore,
     /// The tracks with a column, left to right.
     pub columns: &'a [TrackId],
+    /// Every track that can hold a clip, in display order, which a folded
+    /// group or Show Only Matches doesn't hide. Scene copies take these.
+    pub doc_tracks: &'a [TrackId],
     /// The scenes, top to bottom.
     pub scenes: &'a [SceneId],
     /// Whether a new clip's edges fade (Settings ▸ Create Fades on Clip
@@ -318,7 +321,7 @@ impl SessionView {
                             "select a scene to duplicate first".to_owned(),
                         )
                     })?;
-                let clips = self.slot_clip_ids(ctx.editor, ctx.columns, scene);
+                let clips = self.slot_clip_ids(ctx.editor, ctx.doc_tracks, scene);
                 let id: SceneId = ctx.editor.new_id();
                 let changes = self.edit(ctx.editor, "Duplicate Scene", |editor| {
                     model(
@@ -346,7 +349,7 @@ impl SessionView {
                 let id: SceneId = ctx.editor.new_id();
                 // A copy of each playing clip, in track order.
                 let mut copies = Vec::new();
-                for &track in ctx.columns {
+                for &track in ctx.doc_tracks {
                     let playing = ctx
                         .capture
                         .playing

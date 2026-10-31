@@ -133,6 +133,7 @@ mod session_automation;
 mod session_clips;
 mod session_launch;
 mod session_recording;
+mod session_scene_hidden_tracks;
 mod session_to_arrangement;
 mod session_view;
 mod set_exchange;

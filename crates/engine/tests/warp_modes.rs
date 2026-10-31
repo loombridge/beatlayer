@@ -761,46 +761,65 @@ fn a_mode_change_crossfades_over_20_ms() {
     );
 }
 
-// Spec: warp-modes R8. Only a change to a playing clip crossfades: a mode
-// changed while the song is stopped plays from the first frame of the next
-// start, as a song saved with that mode does.
+// Spec: warp-modes R8. Only a change to a playing clip crossfades: a mode set
+// while the song is stopped plays from its first frame at the next start, and
+// so does a start after a stop that came inside a crossfade.
 #[test]
-fn a_mode_change_made_while_stopped_plays_from_the_first_frame() {
+fn a_mode_change_that_the_song_didnt_play_through_crossfades_nothing() {
     let length = Ticks::WHOLE * 4;
-    let tempo = 60.0;
-    let block = 512;
-    let frames = 4_096_u64;
+    let (tempo, block, frames) = (60.0, 256_usize, 24_000_u64);
     let want = play(
         &song(tempo, length, beats(), WarpMode::Beats),
         frames,
         block,
     );
-
-    let mut editor = song(tempo, length, beats(), WarpMode::RePitch);
-    let clip = editor
-        .document()
-        .tracks()
-        .flat_map(|track| track.clips())
-        .next()
-        .unwrap()
-        .id;
-    let registry = Registry::new().with_media(Arc::new(media()));
-    let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
-    offline.sync(editor.document());
-    offline.process(block);
-    editor
-        .apply(Command::SetClipWarpMode {
-            clip,
-            mode: WarpMode::Beats,
-        })
-        .unwrap();
-    offline.sync(editor.document());
-    // The list arrives in a block rendered while stopped.
-    offline.process(block);
-    offline.sender().transport(TransportCommand::Play);
-    let mut got = Vec::new();
-    offline.render(frames, |output| got.extend_from_slice(output.channel(0)));
-    assert_eq!(got, want);
+    let start = |stop_inside_the_fade: bool| {
+        let mut editor = song(tempo, length, beats(), WarpMode::RePitch);
+        let clip = editor
+            .document()
+            .tracks()
+            .flat_map(|track| track.clips())
+            .next()
+            .unwrap()
+            .id;
+        let registry = Registry::new().with_media(Arc::new(media()));
+        let mut offline = Offline::new(EngineConfig::new(RATE, block), registry);
+        offline.sync(editor.document());
+        let run_blocks = |offline: &mut Offline, blocks: usize| {
+            for _ in 0..blocks {
+                offline.process(block);
+            }
+        };
+        if stop_inside_the_fade {
+            offline.sender().transport(TransportCommand::Play);
+            run_blocks(&mut offline, 4);
+        } else {
+            run_blocks(&mut offline, 4);
+        }
+        editor
+            .apply(Command::SetClipWarpMode {
+                clip,
+                mode: WarpMode::Beats,
+            })
+            .unwrap();
+        offline.sync(editor.document());
+        if stop_inside_the_fade {
+            // Two blocks of the 20 ms fade (960 frames), then a stop, and a
+            // second stop to return to the song's start.
+            run_blocks(&mut offline, 2);
+            offline.sender().transport(TransportCommand::Stop);
+            run_blocks(&mut offline, 2);
+            offline.sender().transport(TransportCommand::Stop);
+        }
+        run_blocks(&mut offline, 4);
+        offline.sender().transport(TransportCommand::Play);
+        let mut out = Vec::new();
+        offline.render(frames, |output| out.extend_from_slice(output.channel(0)));
+        assert_eq!(offline.heap_operations(), 0);
+        out
+    };
+    assert_eq!(start(false), want, "a mode set while stopped");
+    assert_eq!(start(true), want, "a stop inside the crossfade");
 }
 
 // Spec: warp-modes R10. In Re-Pitch, Transpose and Detune don't act: the

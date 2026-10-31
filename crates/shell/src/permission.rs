@@ -28,6 +28,7 @@ use bl_shell_spec::comping::{self as comping_ids, MoveCompEdgeArgs};
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::groove::{self as groove_ids, GrooveToClipArgs};
+use bl_shell_spec::keymap as keymap_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::pads as pad_ids;
@@ -48,7 +49,10 @@ pub const SET_CLIP_DATA: &str = "clip.set_data";
 /// clip fewer notes than it has, or, for `track.ungroup`, delete a group
 /// track that holds devices, automation or sends; `groove.to_clip`,
 /// `pad.drop` and `chain.create` are external when they read a file.
+/// `keymap.bind` takes the class of the command it binds (spec:
+/// agent-permissions R18).
 pub const RAISED_BY_ARGUMENTS: &[&str] = &[
+    keymap_ids::BIND,
     tool_ids::APPLY,
     tool_ids::SET,
     tool_ids::SET_AUTO,
@@ -203,6 +207,8 @@ pub(crate) fn assess(
         return CallPermission::registered(registered);
     }
     match id {
+        // `Shell::call_permission` has raised `registered` already.
+        keymap_ids::BIND => CallPermission::registered(registered),
         browser_ids::ADD_TO_ARRANGEMENT => {
             let Ok(drop) = serde_json::from_value::<AddToArrangementArgs>(args.clone()) else {
                 return CallPermission::registered(registered);

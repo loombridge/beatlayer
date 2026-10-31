@@ -25,36 +25,6 @@
 #   description = "At its maximum the output rises 30 dB above the default setting."
 
 [[failure]]
-suite = "commands"
-key = "device.set_param"
-property = "value clamped to the parameter's range"
-description = "device.set_param on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and stores 2e9, which the query reads back. The model checks only that the value is finite (crates/model/src/command.rs, Command::SetDeviceParam), never the device's parameter range."
-
-[[failure]]
-suite = "commands"
-key = "automation.set_breakpoint"
-property = "value clamped to the parameter's range"
-description = "automation.set_breakpoint on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and the envelope keeps the point at 2e9. Only clip settings are checked against their range; every other target only for being finite (crates/model/src/command.rs, set_automation_breakpoint)."
-
-[[failure]]
-suite = "commands"
-key = "mixer.set_volume"
-property = "value clamped to the parameter's range"
-description = "mixer.set_volume with a volume of 7.0 (about +16.9 dB) succeeds and stores 7.0, above the fader's top of +6 dB (gain 1.995). The model checks only that the volume is finite and at least 0 (crates/model/src/command.rs, Command::SetVolume)."
-
-[[failure]]
-suite = "commands"
-key = "track.set_bounced"
-property = "invariants hold"
-description = "track.set_bounced naming the Main track (with any bounced contents, such as just a name) succeeds and turns Main into an audio track, so the set no longer has exactly one Main track and fails Document::check_invariants. The apply (crates/model/src/command.rs, Command::BounceTrackInPlace and replace_with_bounced/fill_bounced) never checks the track's kind; a return or group track is replaced the same way."
-
-[[failure]]
-suite = "commands"
-key = "track.set_bounced"
-property = "no panic"
-description = "track.set_bounced naming a return track (the rich set's Verb, which the other tracks send to) succeeds and turns the return into an audio track while the sends to it stay. The engine's compiler then finds a loop in the routing graph and panics (debug assertion at crates/engine/src/compiler.rs:2645, \"the routing graph has no loop\"), so the engine never takes the set. The model's apply (Command::BounceTrackInPlace in crates/model/src/command.rs) never checks the track's kind."
-
-[[failure]]
 suite = "live_offline"
 key = "tempo-synced delay under a tempo ramp"
 property = "live matches offline"
@@ -65,91 +35,6 @@ suite = "live_offline"
 key = "rich set without the arpeggiator"
 property = "live matches offline"
 description = "Reprise, the tempo-synced delay, works out its delay time once per block from the tempo at the block's first frame, so under a tempo ramp its repeats move in block-sized steps and the live device's 256-frame blocks render differently from an export's (device-framework S9, export R14): the rich fixture's tempo rises towards 128 BPM at bar 5, so its Reprise on Echo parts from frame 23,914, at a residual of -119 dB; with Reprise off the set matches to the bit."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/16/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/16/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/24/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/24/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/16/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/16/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/24/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/24/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate"
-property = "finishes without a window"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate_to_scene"
-property = "finishes without a window"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "clip.slice_to_midi_track of a warped clip"
-property = "finishes without a window"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate"
-property = "finishes in the app"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "arrangement.consolidate_to_scene"
-property = "finishes in the app"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band."
-
-[[failure]]
-suite = "background"
-key = "clip.slice_to_midi_track of a warped clip"
-property = "finishes in the app"
-description = "Consolidating an audio track that sits in a group with another track fails with \"no track #N\", N being the other track in the group, and nothing is made. The render's copy of the set takes the track out of its group, then deletes every other track one by one; deleting the group deletes the tracks still inside it, so the next delete names a track that's already gone. The rich set's Loop and Tone are both in Band. Slicing a warped clip renders it as Consolidate does, so it fails the same way."
-
 
 [[failure]]
 suite = "background"

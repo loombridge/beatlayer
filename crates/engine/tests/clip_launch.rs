@@ -632,6 +632,69 @@ fn nudge_forward_moves_the_clip_time_by_a_step_of_the_global_value_at_once() {
     }
 }
 
+// Spec: launch-quantisation R32. An edit of a Session clip's
+// loop, launch mode or follow actions changes what the running program reads,
+// and makes no new program.
+#[test]
+fn an_edit_of_a_session_clips_loop_launch_mode_or_follow_actions_makes_no_program() {
+    for block in BLOCKS {
+        let (mut rig, track, _, b) = legato_pair(false);
+        settings(&mut rig, LaunchQuantization::Quarter, true);
+        let mut now = start(&mut rig);
+        let clip_id = rig
+            .editor
+            .document()
+            .track(track)
+            .unwrap()
+            .slots()
+            .find(|(scene, _)| *scene == b)
+            .unwrap()
+            .1
+            .id;
+        // The loop's end moves from four bars to two.
+        let synced = rig.apply(Command::SetMidiClipLoop {
+            clip: clip_id,
+            start: Ticks::ZERO,
+            end: Some(Ticks::WHOLE * 2),
+        });
+        assert!(!synced.program, "blocks of {block}: a loop edit");
+        let synced = rig.apply(Command::SetClipLaunchMode {
+            clip: clip_id,
+            mode: LaunchMode::Gate,
+        });
+        assert!(!synced.program, "blocks of {block}: a launch mode edit");
+        let synced = rig.apply(Command::SetClipFollowActions {
+            clip: clip_id,
+            patch: FollowPatch {
+                enabled: Some(true),
+                action_a: Some(FollowAction::Stop),
+                ..FollowPatch::default()
+            },
+        });
+        assert!(!synced.program, "blocks of {block}: a follow edit");
+        // The program reads the new loop: a nudge back before the start goes
+        // two bars on, not four.
+        send_at(&mut rig, &mut now, 1, block, press(track, b));
+        send_at(&mut rig, &mut now, 6_001, block, nudge(track, b, -1));
+        play_to(&mut rig, &mut now, 6_002, block);
+        assert!(
+            near(
+                clip_time(&mut rig, b, 6_001).unwrap(),
+                Ticks::QUARTER * 8 - Ticks::QUARTER / 2
+            ),
+            "blocks of {block}: {:?}",
+            clip_time(&mut rig, b, 6_001)
+        );
+        // And the mode it reads is Gate's: the clip stops on its release.
+        send_at(&mut rig, &mut now, 6_002, block, release(track, b));
+        play_to(&mut rig, &mut now, 6_003 + QUARTER_FRAMES, block);
+        assert!(
+            clip_time(&mut rig, b, now).is_none(),
+            "blocks of {block}: the release stopped the clip"
+        );
+    }
+}
+
 // Spec: launch-quantisation R32
 #[test]
 fn nudge_backward_before_the_start_goes_a_loop_on_or_to_the_start() {

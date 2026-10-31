@@ -80,14 +80,17 @@ pub struct Sender {
 
 impl Sender {
     /// Sends a compiler update: its program, then its node data (clip
-    /// players' clips), then its transport commands (the Arrangement loop),
-    /// then its parameter changes.
+    /// players' clips), then the Session View's tables, then its transport
+    /// commands (the Arrangement loop), then its parameter changes.
     pub fn send_update(&mut self, update: Update) {
         if let Some(program) = update.program {
             self.push(Message::Program(program));
         }
         for (key, data) in update.data {
             self.push(Message::Data { key, data });
+        }
+        if let Some(tables) = update.scene_tables {
+            self.push(Message::SceneTables(tables));
         }
         for command in update.transport {
             self.push(Message::Transport(command, When::Now));
@@ -154,6 +157,12 @@ impl Sender {
     /// (`docs/specs/midi-clock.md`, R17).
     pub fn external_sync(&mut self, on: bool) {
         self.push(Message::ExternalSync(on));
+    }
+
+    /// Tells the engine that output `port` opened or its Track switch went
+    /// on, so the MPE routes to it send their configuration again (mpe R17).
+    pub fn midi_output_opened(&mut self, port: bl_core::midi::PortId) {
+        self.push(Message::MidiOutputOpened(port));
     }
 
     /// Sends a parameter change.
@@ -303,6 +312,9 @@ enum Request {
     SyncOutputs(Vec<bl_core::midi::SyncOutput>),
     SyncInputs(Vec<bl_core::midi::SyncInput>),
     ExternalSync(bool),
+    /// An output port opened or its Track switch went on (mpe R17): for the
+    /// processor running now only, as a new one opens its routes anyway.
+    MidiOutputOpened(bl_core::midi::PortId),
     /// A Session View command (WP-3.2).
     Session(SessionCommand),
     /// What the audio thread says a launched scene put in place: compile
@@ -415,6 +427,7 @@ impl std::fmt::Debug for Request {
             Self::SyncOutputs(_) => "SyncOutputs",
             Self::SyncInputs(_) => "SyncInputs",
             Self::ExternalSync(_) => "ExternalSync",
+            Self::MidiOutputOpened(_) => "MidiOutputOpened",
             Self::Session(_) => "Session",
             Self::Override(_) => "Override",
             Self::Flush(_) => "Flush",
@@ -704,6 +717,13 @@ impl Engine {
         self.request(Request::ExternalSync(on));
     }
 
+    /// Tells the processor running now that output `port` opened or its
+    /// Track switch went on, so the MPE routes to it send their
+    /// configuration again (`docs/specs/mpe.md`, R17).
+    pub fn midi_output_opened(&self, port: bl_core::midi::PortId) {
+        self.request(Request::MidiOutputOpened(port));
+    }
+
     /// Schedules a command at a musical position (D17).
     pub fn schedule(&self, command: ScheduledCommand) {
         self.request(Request::Schedule(command));
@@ -964,6 +984,11 @@ fn compile_loop(
                         sender.external_sync(on);
                     }
                     external_sync = on;
+                }
+                Request::MidiOutputOpened(port) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.midi_output_opened(port);
+                    }
                 }
                 Request::Session(command) => match sender.as_mut() {
                     Some(sender) => sender.session(command),

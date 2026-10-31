@@ -410,6 +410,7 @@ impl NativeDevice for AutoPanTremolo {
                 };
 
                 let u0 = shape_tremolo(lfo_out[0]);
+                let u1 = shape_tremolo(lfo_out[1]);
                 self.last_pan = 0.0;
                 self.last_tremolo = u0 as f32;
 
@@ -421,11 +422,13 @@ impl NativeDevice for AutoPanTremolo {
                         (lp_l, hp_l)
                     };
 
-                    let g_low = 1.0 - eff_amount * (1.0 - u0);
-                    let g_high = 1.0 - eff_amount * u0;
+                    let g_low_l = 1.0 - eff_amount * (1.0 - u0);
+                    let g_high_l = 1.0 - eff_amount * u0;
+                    let g_low_r = 1.0 - eff_amount * (1.0 - u1);
+                    let g_high_r = 1.0 - eff_amount * u1;
 
-                    let mut out_l = (f64::from(lp_l) * g_low + f64::from(hp_l) * g_high) as f32;
-                    let mut out_r = (f64::from(lp_r) * g_low + f64::from(hp_r) * g_high) as f32;
+                    let mut out_l = (f64::from(lp_l) * g_low_l + f64::from(hp_l) * g_high_l) as f32;
+                    let mut out_r = (f64::from(lp_r) * g_low_r + f64::from(hp_r) * g_high_r) as f32;
 
                     if vintage {
                         out_l = (1.2 * f64::from(out_l)).tanh() as f32 / 1.2;
@@ -437,9 +440,10 @@ impl NativeDevice for AutoPanTremolo {
                         audio.channel_mut(1)[i] = out_r;
                     }
                 } else {
-                    let g = 1.0 - eff_amount * (1.0 - u0);
-                    let mut out_l = (f64::from(in_l) * g) as f32;
-                    let mut out_r = (f64::from(in_r) * g) as f32;
+                    let g_l = 1.0 - eff_amount * (1.0 - u0);
+                    let g_r = 1.0 - eff_amount * (1.0 - u1);
+                    let mut out_l = (f64::from(in_l) * g_l) as f32;
+                    let mut out_r = (f64::from(in_r) * g_r) as f32;
 
                     if vintage {
                         out_l = (1.2 * f64::from(out_l)).tanh() as f32 / 1.2;

@@ -1330,14 +1330,16 @@ pub(crate) struct WarpScratch {
     rendered: Vec<f32>,
     /// The mode that was playing before a change, crossfaded in (R8).
     previous: Option<Changing>,
-    /// Whether the clips' changes of mode in the current list crossfade: not
-    /// where the list arrived while the song was stopped (R8).
-    crossfades: bool,
     /// How many frames a mode change's crossfade takes: 20 ms at the
     /// engine's rate (R8).
     change_frames: u32,
     /// What the previous mode rendered, blended into [`rendered`](Self::rendered).
     rendered_previous: Vec<f32>,
+    /// Whether the clips' mode changes crossfade: only those of a list that
+    /// arrived while the song played do (R8), and a stop ends them.
+    crossfading: bool,
+    /// A new list has arrived and no block has run since.
+    arrived: bool,
     /// Every mode renders through Re-Pitch until its package builds it; Beats
     /// is WP-4.4's.
     repitch: RePitch,
@@ -1357,9 +1359,10 @@ impl WarpScratch {
             outgoing: vec![0.0; channels * max_frames],
             rendered: vec![0.0; channels * max_frames],
             previous: None,
-            crossfades: true,
             change_frames: (CHANGE_SECONDS * rate.as_f64()).round() as u32,
             rendered_previous: vec![0.0; channels * max_frames],
+            crossfading: false,
+            arrived: false,
             repitch: RePitch,
             beats: Beats,
             tones: Tones::new(channels, rate.as_f64()),
@@ -1376,17 +1379,28 @@ impl WarpScratch {
         self.previous = Some(Changing { clip, fade });
     }
 
-    /// Whether the changes of mode a newly arrived list names crossfade: they
-    /// do while the song plays, and a change made while it was stopped plays
-    /// its new mode from the first frame (R8).
-    pub(crate) fn set_crossfades(&mut self, crossfades: bool) {
-        self.crossfades = crossfades;
-    }
-
     /// Forgets the crossfade a new list brings, so the next clip's change
     /// starts a fresh one.
     pub(crate) fn forget_change(&mut self) {
         self.previous = None;
+    }
+
+    /// A new clip list has arrived: whether its mode changes crossfade is
+    /// settled by the next block ([`begin_block`](Self::begin_block)).
+    pub(crate) fn arrive(&mut self) {
+        self.arrived = true;
+    }
+
+    /// Spec: warp-modes R8. A block begins with the song `playing` or not: a
+    /// list that arrived while it was stopped crossfades nothing, at the next
+    /// start either, and a stop ends the crossfades of the list before it.
+    pub(crate) fn begin_block(&mut self, playing: bool) {
+        if self.arrived {
+            self.crossfading = playing;
+            self.arrived = false;
+        } else if !playing {
+            self.crossfading = false;
+        }
     }
 
     /// Channel `c` of the frames the last [`render`](Self::render) made.
@@ -1416,9 +1430,9 @@ impl WarpScratch {
         stretchers: &mut Stretchers,
         lane: usize,
     ) -> (usize, bool) {
-        let past = past.filter(|_| self.crossfades);
         // Spec: warp-modes R8. A clip the new list says was playing something
         // else crossfades from it, from this block's first frame.
+        let past = past.filter(|_| self.crossfading);
         if past.is_some()
             && self
                 .previous

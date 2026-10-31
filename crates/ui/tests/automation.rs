@@ -455,6 +455,50 @@ fn the_lane_choosers_list_automatable_parameters() {
     Harness::node(&nodes, "Automation Control");
 }
 
+// Spec: automation-editing R2. A lane paints only the breakpoints in view,
+// however many it holds: a recorded touch can hold thousands, and a time
+// selection over them used to cost a search per breakpoint on every frame.
+#[test]
+fn a_lane_paints_only_the_breakpoints_in_view() {
+    const POINTS: i64 = 20_000;
+    const BREAKPOINT: f32 = 5.0;
+    // Far enough apart that a few hundred are in view at the closest zoom.
+    const SPACING: i64 = 2400;
+    let mut s = set();
+    for index in 0..POINTS {
+        let value = if index % 2 == 0 { -0.5 } else { 0.5 };
+        s.h.shell
+            .run(
+                "automation.set_breakpoint",
+                json!({ "track": s.track, "target": pan_json(), "at": index * SPACING, "value": value }),
+            )
+            .unwrap();
+    }
+    s.h.shell
+        .run(
+            "arrangement.select_time",
+            json!({
+                "start": 0,
+                "end": POINTS * SPACING + 1,
+                "lanes": [{ "type": "automation", "track": s.track, "target": pan_json() }],
+            }),
+        )
+        .unwrap();
+    // As close as the view goes.
+    for _ in 0..4 {
+        s.h.shell
+            .run("arrangement.zoom", json!({ "factor": 64.0, "anchor": 0 }))
+            .unwrap();
+    }
+    let output = s.h.settle();
+    let squares = common::painted_rects(&output)
+        .iter()
+        .filter(|(rect, _)| rect.size() == egui::vec2(BREAKPOINT, BREAKPOINT))
+        .count();
+    assert!(squares > 0, "the breakpoints in view are painted");
+    assert!(squares < 500, "{squares} breakpoints painted of {POINTS}");
+}
+
 // Spec: automation R13 (S3)
 #[test]
 fn clicking_a_breakpoint_deletes_it() {

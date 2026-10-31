@@ -166,7 +166,7 @@ const SMP_INPUT_SOFT: f64 = 1.4;
 /// level its stages soften at, the share of its feedback its output makes
 /// up for, and its output bound, just under +12 dBFS (R7).
 const LADDER_K: f64 = 4.2;
-const LADDER_SOFT: f64 = 1.2;
+const LADDER_SOFT: f64 = 6.0;
 const LADDER_COMPENSATION: f64 = 0.5;
 const LADDER_BOUND: f64 = 3.9;
 /// A value this small is left as zero rather than a denormal (R12).

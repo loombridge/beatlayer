@@ -42,36 +42,62 @@ impl Knobs {
 }
 
 /// `input` through one voice of `setup` at `rate`, `block` frames at a time,
-/// every block a real-time section; the left channel out.
-fn render(setup: Setup, rate: f64, knobs: Knobs, input: &[f32], block: usize) -> Vec<f32> {
+/// every block a real-time section; the left channel out. `knobs` gives each
+/// frame's values from its frame number.
+fn render_frames(
+    setup: Setup,
+    rate: f64,
+    knobs: impl Fn(usize) -> Knobs,
+    input: &[f32],
+    block: usize,
+) -> Vec<f32> {
     let mut filter = InstrumentFilter::new(rate as f32, 1, block);
     filter.set_setup(setup);
     filter.reset_voice(0, 0);
+    run_filter(&mut filter, 0, knobs, input, block)
+}
+
+/// Runs `input` through `filter`'s voice 0, from frame `from` of the run.
+fn run_filter(
+    filter: &mut InstrumentFilter,
+    from: usize,
+    knobs: impl Fn(usize) -> Knobs,
+    input: &[f32],
+    block: usize,
+) -> Vec<f32> {
     let stride = filter.stride();
     let mut out = Vec::with_capacity(input.len());
-    for chunk in input.chunks(block) {
-        let n = chunk.len();
-        let mut audio = vec![0.0f32; n * 2 * stride];
+    for (n, chunk) in input.chunks(block).enumerate() {
+        let frames = chunk.len();
+        let first = from + n * block;
+        let mut audio = vec![0.0f32; frames * 2 * stride];
+        let (mut cutoff, mut res, mut morph, mut drive) = (
+            vec![0.0f32; frames * stride],
+            vec![0.0f32; frames],
+            vec![0.0f32; frames],
+            vec![0.0f32; frames],
+        );
         for (i, x) in chunk.iter().enumerate() {
+            let k = knobs(first + i);
             audio[i * 2 * stride] = *x;
             audio[i * 2 * stride + stride] = *x;
+            cutoff[i * stride] = pitch_of(k.hz);
+            (res[i], morph[i], drive[i]) = (k.res, k.morph, k.drive);
         }
-        let cutoff = vec![pitch_of(knobs.hz); n * stride];
-        let (res, morph, drive) = (
-            vec![knobs.res; n],
-            vec![knobs.morph; n],
-            vec![knobs.drive; n],
-        );
         let controls = PerFrame {
             cutoff: &cutoff,
             res: Per::Shared(&res),
             morph: Per::Shared(&morph),
             drive: Per::Shared(&drive),
         };
-        bl_rt::rt_test!({ filter.process(1, n, &controls, &mut audio) });
-        out.extend((0..n).map(|i| audio[i * 2 * stride]));
+        bl_rt::rt_test!({ filter.process(1, frames, &controls, &mut audio) });
+        out.extend((0..frames).map(|i| audio[i * 2 * stride]));
     }
     out
+}
+
+fn render(setup: Setup, rate: f64, knobs: Knobs, input: &[f32], block: usize) -> Vec<f32> {
+    render_frames(setup, rate, |_| knobs, input, block)
 }
 
 fn sine(rate: f64, hz: f64, amplitude: f64, frames: usize) -> Vec<f32> {
@@ -276,59 +302,486 @@ fn thd(signal: &[f32], rate: f64, hz: f64) -> f64 {
     harmonics.sqrt() / fundamental
 }
 
-#[test]
-fn scratch_levels() {
-    let rate = 48_000.0;
-    for circuit in [Circuit::Osr, Circuit::Ms2, Circuit::Smp, Circuit::Prd] {
+/// The gain, as output over input amplitude, of a sine of `hz` at `amplitude`
+/// through `setup`, once it has settled.
+fn gain_at(setup: Setup, rate: f64, knobs: Knobs, hz: f64, amplitude: f64) -> f64 {
+    let frames = rate as usize;
+    let out = render(setup, rate, knobs, &sine(rate, hz, amplitude, frames), 512);
+    amplitude_at(&out[frames / 2..], rate, hz) / amplitude
+}
+
+/// `Setup`s of every circuit on every type that plays it, both slopes.
+fn all_setups(circuits: &[Circuit]) -> Vec<Setup> {
+    let mut all = Vec::new();
+    for kind in 0..5 {
         for slope24 in [false, true] {
-            let s = setup(0, slope24, circuit);
-            // Loud noise at full resonance and drive.
-            let mut k = Knobs::at(1_000.0, 1.0);
-            k.drive = 1.0;
-            let out = render(s, rate, k, &noise(48_000, 1.0), 512);
-            // A sine at the cutoff.
-            let sin = render(
-                s,
-                rate,
-                Knobs {
-                    drive: 0.0,
-                    ..Knobs::at(1_000.0, 1.0)
-                },
-                &sine(rate, 1_000.0, 1.0, 48_000),
-                512,
-            );
-            // A kick, then silence.
-            let mut kick = vec![0.0f32; 96_000];
-            kick[..64].fill(0.5);
-            let ring = render(s, rate, Knobs::at(1_000.0, 1.0), &kick, 512);
-            let tail = &ring[48_000..];
-            let found = (900..1100)
-                .map(|hz| (hz, amplitude_at(&tail[..24_000], rate, f64::from(hz))))
-                .fold((0, 0.0), |m, x| if x.1 > m.1 { x } else { m });
-            println!(
-                "{circuit:?} 24={slope24}: noise peak {:.3} ({:.1} dBFS); sine peak {:.3}; ring peak {:.3}, tail peak {:.4} at {} Hz amp {:.4}",
-                peak(&out),
-                20.0 * peak(&out).log10(),
-                peak(&sin),
-                peak(&ring),
-                peak(tail),
-                found.0,
-                found.1
+            for circuit in circuits {
+                let s = setup(kind, slope24, *circuit);
+                if s.circuit == *circuit {
+                    all.push(s);
+                }
+            }
+        }
+    }
+    all
+}
+
+const ALL_CIRCUITS: [Circuit; 5] = [
+    Circuit::Clean,
+    Circuit::Osr,
+    Circuit::Ms2,
+    Circuit::Smp,
+    Circuit::Prd,
+];
+
+// Spec: instrument filter R1, R2 (the circuits each type offers)
+#[test]
+fn the_chooser_offers_only_the_circuits_a_type_plays() {
+    assert_eq!(CIRCUITS, ["Clean", "OSR", "MS2", "SMP", "PRD"]);
+    for kind in 0..5 {
+        let kind = Kind::of(kind);
+        let list = offered(kind);
+        assert!(list.contains(&Circuit::Clean) && list.contains(&Circuit::Osr));
+        let wide = matches!(kind, Kind::LowPass | Kind::HighPass);
+        assert_eq!(list.len(), if wide { 5 } else { 2 }, "{kind:?}");
+    }
+    // A circuit the type doesn't offer plays Clean, in sound as in name.
+    let rate = 48_000.0;
+    let input = noise(4_800, 0.5);
+    for kind in [2, 3, 4] {
+        for circuit in [Circuit::Ms2, Circuit::Smp, Circuit::Prd] {
+            let asked = setup(kind, false, circuit);
+            assert_eq!(asked.circuit, Circuit::Clean);
+            let knobs = Knobs::at(1_000.0, 0.5);
+            assert_eq!(
+                render(asked, rate, knobs, &input, 512),
+                render(setup(kind, false, Circuit::Clean), rate, knobs, &input, 512)
             );
         }
     }
-    // R8's distortion
-    for circuit in [Circuit::Ms2, Circuit::Smp, Circuit::Prd] {
-        let s = setup(0, false, circuit);
-        let k = Knobs {
-            drive: 0.5,
-            ..Knobs::at(1_000.0, 0.7)
+    assert_eq!(setup(0, true, Circuit::Prd).circuit, Circuit::Prd);
+}
+
+// Spec: instrument filter R3 (Clean is the kit's state-variable filter)
+#[test]
+fn clean_is_the_kits_filter_sample_for_sample() {
+    use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams};
+    let rate = 48_000.0;
+    let input = noise(9_600, 0.8);
+    for (kind, slope24, kit) in [
+        (0, false, FilterType::Lp12),
+        (0, true, FilterType::Lp24),
+        (1, false, FilterType::Hp12),
+        (2, true, FilterType::Bp24),
+        (3, false, FilterType::Notch12),
+    ] {
+        let mut bank = FilterBank::new(rate as f32, 1, 2);
+        bank.set_type(kit);
+        let stride = bank.stride();
+        bank.reset_voice(
+            0,
+            &VoiceParams {
+                resonance: 0.4,
+                ..VoiceParams::default()
+            },
+        );
+        let mut audio = vec![0.0f32; input.len() * 2 * stride];
+        for (i, x) in input.iter().enumerate() {
+            audio[i * 2 * stride] = *x;
+            audio[i * 2 * stride + stride] = *x;
+        }
+        let pitch = vec![pitch_of(900.0); input.len() * stride];
+        bank.process_voices(1, &pitch, &mut audio);
+        let want: Vec<f32> = (0..input.len()).map(|i| audio[i * 2 * stride]).collect();
+        let got = render(
+            setup(kind, slope24, Circuit::Clean),
+            rate,
+            Knobs::at(900.0, 0.4),
+            &input,
+            512,
+        );
+        assert_eq!(got, want, "kind {kind} slope24 {slope24}");
+    }
+}
+
+// Spec: instrument filter R5 (OSR's state is held by a hard clip)
+#[test]
+fn osr_holds_its_peak_and_stays_under_plus_six_dbfs() {
+    for rate in [44_100.0, 48_000.0] {
+        for s in all_setups(&[Circuit::Osr]) {
+            let knobs = Knobs {
+                drive: 1.0,
+                ..Knobs::at(1_000.0, 1.0)
+            };
+            let out = render(s, rate, knobs, &noise(rate as usize, 1.0), 512);
+            assert!(peak(&out) < 2.0, "{s:?}: peak {}", peak(&out));
+        }
+    }
+    // The resonant peak stops growing: a tenfold louder sine at the cutoff
+    // comes out far less than tenfold louder.
+    let s = setup(0, false, Circuit::Osr);
+    let knobs = Knobs::at(1_000.0, 1.0);
+    let quiet = gain_at(s, 48_000.0, knobs, 1_000.0, 0.05);
+    let loud = gain_at(s, 48_000.0, knobs, 1_000.0, 0.5);
+    assert!(loud < quiet / 3.0, "gain {quiet} falls to only {loud}");
+}
+
+// Spec: instrument filter R6 (MS2's feedback softens, and it rings down)
+#[test]
+fn ms2_rounds_its_peak_off_rings_down_and_stays_under_plus_six_dbfs() {
+    let rate = 48_000.0;
+    for s in all_setups(&[Circuit::Ms2]) {
+        let knobs = Knobs {
+            drive: 1.0,
+            ..Knobs::at(1_000.0, 1.0)
         };
-        let out = render(s, rate, k, &sine(rate, 100.0, 0.5, 48_000), 512);
-        println!(
-            "{circuit:?} THD {:.4}  peak {:.3}",
-            thd(&out[24_000..], rate, 100.0),
-            peak(&out)
+        let out = render(s, rate, knobs, &noise(rate as usize, 1.0), 512);
+        assert!(peak(&out) < 2.0, "{s:?}: peak {}", peak(&out));
+        // A kick at 100 %, then silence: it rings down.
+        let mut kick = vec![0.0f32; rate as usize];
+        kick[..64].fill(0.5);
+        let ring = render(s, rate, Knobs::at(1_000.0, 1.0), &kick, 512);
+        assert!(peak(&ring) < 2.0);
+        assert!(peak(&ring[24_000..]) < 1e-4, "{s:?} rings on");
+    }
+    // The peak rounds off gradually: each louder sine at the cutoff gains
+    // less than the one before.
+    let s = setup(0, false, Circuit::Ms2);
+    let gains: Vec<f64> = [0.01, 0.1, 0.3, 1.0]
+        .iter()
+        .map(|a| gain_at(s, rate, Knobs::at(1_000.0, 0.9), 1_000.0, *a))
+        .collect();
+    assert!(gains.windows(2).all(|w| w[1] < w[0]), "{gains:?}");
+}
+
+/// The frequency near `hz` where `signal` rings loudest, within 100 cents,
+/// as cents from `hz`.
+fn cents_off(signal: &[f32], rate: f64, hz: f64) -> f64 {
+    (-50..=50)
+        .map(|step| f64::from(step) * 2.0)
+        .map(|cents| {
+            (
+                cents,
+                amplitude_at(signal, rate, hz * (cents / 1200.0).exp2()),
+            )
+        })
+        .fold((0.0, 0.0), |m, x| if x.1 > m.1 { x } else { m })
+        .0
+}
+
+// Spec: instrument filter R7 (PRD self-oscillates at its cutoff)
+#[test]
+fn prd_self_oscillates_at_its_cutoff_and_stays_under_plus_twelve_dbfs() {
+    for rate in [44_100.0, 48_000.0] {
+        for s in all_setups(&[Circuit::Prd]) {
+            for fc in [100.0, 1_000.0, 10_000.0] {
+                let mut kick = vec![0.0f32; 2 * rate as usize];
+                kick[..64].fill(0.5);
+                let ring = render(s, rate, Knobs::at(fc, 1.0), &kick, 512);
+                let tail = &ring[rate as usize..];
+                assert!(rms(tail) > 0.01, "{s:?} at {fc}: it stops");
+                let off = cents_off(&tail[..rate as usize / 2], rate, fc);
+                assert!(off.abs() <= 50.0, "{s:?} at {fc}: {off} cents off");
+                assert!(peak(&ring) < 3.98, "{s:?} at {fc}: peak {}", peak(&ring));
+            }
+            let knobs = Knobs {
+                drive: 1.0,
+                ..Knobs::at(1_000.0, 1.0)
+            };
+            let out = render(s, rate, knobs, &noise(rate as usize, 1.0), 512);
+            assert!(peak(&out) < 3.98, "{s:?}: peak {}", peak(&out));
+        }
+    }
+    // Loud input pulls the resonance down less than MS2's does.
+    let rate = 48_000.0;
+    let pull = |circuit| {
+        let s = setup(0, false, circuit);
+        let knobs = Knobs::at(1_000.0, 0.9);
+        gain_at(s, rate, knobs, 1_000.0, 0.1) / gain_at(s, rate, knobs, 1_000.0, 0.01)
+    };
+    let (prd, ms2) = (pull(Circuit::Prd), pull(Circuit::Ms2));
+    assert!(prd > ms2, "PRD keeps {prd}, MS2 {ms2}");
+}
+
+// Spec: instrument filter R8 (SMP lies between MS2 and PRD)
+#[test]
+fn smps_distortion_lies_between_ms2s_and_prds() {
+    let rate = 48_000.0;
+    let knobs = Knobs {
+        drive: 0.5,
+        ..Knobs::at(1_000.0, 0.7)
+    };
+    let distortion = |circuit| {
+        let out = render(
+            setup(0, false, circuit),
+            rate,
+            knobs,
+            &sine(rate, 100.0, 0.5, rate as usize),
+            512,
+        );
+        thd(&out[24_000..], rate, 100.0)
+    };
+    let (ms2, smp, prd) = (
+        distortion(Circuit::Ms2),
+        distortion(Circuit::Smp),
+        distortion(Circuit::Prd),
+    );
+    assert!(ms2 < smp && smp < prd, "THD {ms2}, {smp}, {prd}");
+}
+
+// Spec: instrument filter R9 (Drive is a gain into the circuit)
+#[test]
+fn drive_is_a_gain_for_the_circuits_on_low_pass_high_pass_and_band_pass() {
+    let rate = 48_000.0;
+    let level = |s: Setup, drive: f32| {
+        let (fc, hz) = match s.kind {
+            Kind::LowPass => (10_000.0, 100.0),
+            Kind::HighPass => (100.0, 5_000.0),
+            _ => (1_000.0, 1_000.0),
+        };
+        let knobs = Knobs {
+            drive,
+            ..Knobs::at(fc, 0.0)
+        };
+        let out = render(s, rate, knobs, &sine(rate, hz, 0.001, 24_000), 512);
+        amplitude_at(&out[12_000..], rate, hz)
+    };
+    for kind in 0..3 {
+        for circuit in [Circuit::Osr, Circuit::Ms2, Circuit::Smp, Circuit::Prd] {
+            let s = setup(kind, false, circuit);
+            if s.circuit != circuit {
+                continue;
+            }
+            let rise = 20.0 * (level(s, 0.5) / level(s, 0.0)).log10();
+            assert!((rise - 12.0).abs() < 0.3, "{s:?}: {rise} dB for 12 dB");
+        }
+    }
+    // Clean, notch and Morph ignore it.
+    let input = noise(9_600, 0.5);
+    for s in all_setups(&ALL_CIRCUITS) {
+        if s.circuit == Circuit::Clean || matches!(s.kind, Kind::Notch | Kind::Morph) {
+            let with = |drive| {
+                let knobs = Knobs {
+                    drive,
+                    ..Knobs::at(1_000.0, 0.5)
+                };
+                render(s, rate, knobs, &input, 512)
+            };
+            assert_eq!(with(0.0), with(1.0), "{s:?}");
+        }
+    }
+}
+
+// Spec: instrument filter R10 (Morph sweeps low-pass, band-pass, high-pass,
+// notch and back)
+#[test]
+fn morph_passes_through_the_four_types_in_order() {
+    let rate = 48_000.0;
+    let input = noise(9_600, 0.5);
+    for circuit in [Circuit::Clean, Circuit::Osr] {
+        for slope24 in [false, true] {
+            let pure = |kind: usize| {
+                render(
+                    setup(kind, slope24, circuit),
+                    rate,
+                    Knobs::at(1_000.0, 0.5),
+                    &input,
+                    512,
+                )
+            };
+            let at = |morph: f32| {
+                let knobs = Knobs {
+                    morph,
+                    ..Knobs::at(1_000.0, 0.5)
+                };
+                render(setup(4, slope24, circuit), rate, knobs, &input, 512)
+            };
+            // Each stop is the pure type: low-pass, band-pass, high-pass,
+            // notch, and low-pass again.
+            for (morph, kind) in [(0.0, 0), (0.25, 2), (0.5, 1), (0.75, 3), (1.0, 0)] {
+                assert_eq!(
+                    at(morph),
+                    pure(kind),
+                    "{circuit:?} slope24 {slope24} at {morph}"
+                );
+            }
+            // Between two stops it is the crossfade of the two (a 12 dB
+            // section's taps; Clean mixes the finished types).
+            if !(circuit == Circuit::Osr && slope24) {
+                let (a, b, mid) = (pure(0), pure(2), at(0.125));
+                let worst = (0..input.len())
+                    .map(|i| (mid[i] - (a[i] + b[i]) / 2.0).abs())
+                    .fold(0.0f32, f32::max);
+                assert!(worst < 1e-4, "{circuit:?}: off by {worst}");
+            }
+        }
+    }
+}
+
+/// A sweep of the cutoff, resonance, Morph and Drive with the frame.
+fn moving(frame: usize) -> Knobs {
+    let t = frame as f64 / 48_000.0;
+    Knobs {
+        hz: 1_000.0 * (1.5 * (TAU * 3.0 * t).sin()).exp2(),
+        res: (0.5 + 0.5 * (TAU * 5.0 * t).sin()) as f32,
+        morph: (0.5 + 0.5 * (TAU * 2.0 * t).sin()) as f32,
+        drive: (0.5 + 0.5 * (TAU * 7.0 * t).cos()) as f32,
+    }
+}
+
+// Spec: instrument filter R11, R13 (the same output at any block size, with
+// every value moving at every frame)
+#[test]
+fn a_voices_output_is_the_same_at_any_block_size() {
+    let rate = 48_000.0;
+    let input = noise(12_000, 0.7);
+    for s in all_setups(&ALL_CIRCUITS) {
+        let reference = render_frames(s, rate, moving, &input, 12_000);
+        for block in [1, 64, 512, 4_096] {
+            let got = render_frames(s, rate, moving, &input, block);
+            assert_eq!(got, reference, "{s:?} at {block}");
+        }
+    }
+}
+
+// Spec: instrument filter R11 (the cutoff modulates at audio rate)
+#[test]
+fn a_cutoff_modulated_at_audio_rate_is_heard_at_audio_rate() {
+    let rate = 48_000.0;
+    let input = sine(rate, 5_000.0, 0.5, 24_000);
+    for circuit in [Circuit::Clean, Circuit::Osr, Circuit::Ms2, Circuit::Prd] {
+        let s = setup(0, false, circuit);
+        let sidebands = |out: &[f32]| {
+            amplitude_at(&out[12_000..], rate, 3_000.0)
+                + amplitude_at(&out[12_000..], rate, 7_000.0)
+        };
+        let steady = render(s, rate, Knobs::at(4_000.0, 0.3), &input, 512);
+        let modulated = render_frames(
+            s,
+            rate,
+            |frame| {
+                Knobs::at(
+                    4_000.0 * (0.5 * (TAU * 2_000.0 * frame as f64 / rate).sin()).exp2(),
+                    0.3,
+                )
+            },
+            &input,
+            512,
+        );
+        assert!(
+            sidebands(&modulated) > 0.01 && sidebands(&steady) < 0.001,
+            "{circuit:?}: {} against {}",
+            sidebands(&modulated),
+            sidebands(&steady)
         );
     }
 }
+
+// Spec: instrument filter R11 (a change of type, slope or circuit crossfades)
+#[test]
+fn a_change_of_type_slope_or_circuit_makes_no_click() {
+    let rate = 48_000.0;
+    let hz = 440.0;
+    let before = sine(rate, hz, 0.5, 10_000);
+    let after: Vec<f32> = (10_000..14_000)
+        .map(|i| (0.5 * (TAU * hz * f64::from(i as u32) / rate).sin()) as f32)
+        .collect();
+    let steepest = |signal: &[f32]| {
+        signal
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0f32, f32::max)
+    };
+    for (from, to) in [
+        (
+            setup(0, false, Circuit::Clean),
+            setup(0, false, Circuit::Osr),
+        ),
+        (setup(0, false, Circuit::Osr), setup(0, true, Circuit::Prd)),
+        (setup(0, true, Circuit::Ms2), setup(1, true, Circuit::Ms2)),
+        (
+            setup(0, false, Circuit::Clean),
+            setup(2, false, Circuit::Clean),
+        ),
+    ] {
+        let knobs = |_| Knobs::at(2_000.0, 0.2);
+        let mut filter = InstrumentFilter::new(rate as f32, 1, 512);
+        filter.set_setup(from);
+        filter.reset_voice(0, 0);
+        let mut out = run_filter(&mut filter, 0, knobs, &before, 512);
+        filter.set_setup(to);
+        out.extend(run_filter(&mut filter, 10_000, knobs, &after, 512));
+        let steady = steepest(&out[8_000..10_000]);
+        let across = steepest(&out[10_000 - 1..10_000 + 1_000]);
+        assert!(
+            across <= steady * 1.5,
+            "{from:?} to {to:?}: a step of {across} against {steady}"
+        );
+    }
+}
+
+/// A deterministic stream of numbers, 0 to below 1.
+fn lcg(state: &mut u64) -> f64 {
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
+    (*state >> 11) as f64 / (1u64 << 53) as f64
+}
+
+// Spec: instrument filter R12 (stable at every setting from 44.1 to 192 kHz)
+#[test]
+fn nothing_is_unbounded_at_any_setting_or_rate() {
+    let mut state = 7u64;
+    for case in 0..240 {
+        let rate = [44_100.0, 48_000.0, 96_000.0, 192_000.0][case % 4];
+        let s = Setup::new(
+            (lcg(&mut state) * 5.0) as usize,
+            lcg(&mut state) < 0.5,
+            (lcg(&mut state) * 5.0) as usize,
+        );
+        let knobs = Knobs {
+            hz: 20.0 * 1_200f64.powf(lcg(&mut state)),
+            res: lcg(&mut state) as f32,
+            morph: lcg(&mut state) as f32,
+            drive: lcg(&mut state) as f32,
+        };
+        let mut input = noise(8_192, 1.0);
+        input[100] = 1.0;
+        input[101] = -1.0;
+        let out = render(s, rate, knobs, &input, 256);
+        assert!(
+            out.iter().all(|x| x.is_finite() && x.abs() < 100.0),
+            "{s:?} at {rate} with {:?}: peak {}",
+            (knobs.hz, knobs.res, knobs.morph, knobs.drive),
+            peak(&out)
+        );
+    }
+    // A 20 kHz cutoff at 44.1 kHz and full resonance stays stable.
+    for s in all_setups(&ALL_CIRCUITS) {
+        let knobs = Knobs {
+            drive: 1.0,
+            ..Knobs::at(20_000.0, 1.0)
+        };
+        let out = render(s, 44_100.0, knobs, &noise(44_100, 1.0), 512);
+        assert!(
+            out.iter().all(|x| x.is_finite() && x.abs() < 100.0),
+            "{s:?}"
+        );
+    }
+}
+
+// Spec: instrument filter R12 (denormals are flushed)
+#[test]
+fn a_long_silence_after_loud_input_is_exactly_silent() {
+    let rate = 48_000.0;
+    let mut input = noise(4_800, 1.0);
+    input.resize(rate as usize * 3, 0.0);
+    for s in all_setups(&[Circuit::Osr, Circuit::Ms2, Circuit::Smp, Circuit::Prd]) {
+        let out = render(s, rate, Knobs::at(2_000.0, 0.5), &input, 512);
+        assert!(
+            out[rate as usize * 2..].iter().all(|x| *x == 0.0),
+            "{s:?} holds a tail"
+        );
+    }
+}
+

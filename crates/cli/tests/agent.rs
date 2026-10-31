@@ -6769,3 +6769,144 @@ fn an_agent_routes_the_four_cv_devices_maps_cv_in_and_reads_everything_back() {
         Value::Null
     );
 }
+
+// Spec: cv-tools R32 to R36. An agent adds CV Envelope Follower, CV LFO and
+// CV Shaper by their types, routes each by ID with `device.set_external`,
+// sets Min, Max and Depth and the Shaper's shape, and reads back the choosers
+// under `external`, the parameters with `device.parameters`, the shape in the
+// query tool's `device` result and each device's display with `device.display`.
+#[test]
+fn an_agent_routes_the_three_cv_modulators_and_reads_everything_back() {
+    use bl_devices::{cv_curve_type, cv_level_type, cv_wave_type};
+
+    let mut registry = Registry::new();
+    bl_devices::register(&mut registry);
+    let mut host = EngineHost::with_registry(64, registry);
+    host.client
+        .transport()
+        .shell
+        .set_device_types(bl_devices::device_types());
+    host.call(
+        "run",
+        json!({ "commands": [{ "command": "track.create",
+            "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } }] }),
+    );
+    let track = host.call("query", json!({ "path": "tracks" }))["tracks"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "Track")
+        .unwrap()["id"]
+        .as_u64()
+        .unwrap();
+    let add = |host: &mut EngineHost, t: bl_engine::DeviceType| {
+        host.call(
+            "run",
+            json!({ "commands": [
+                { "command": "arrangement.select_tracks", "args": { "tracks": [track] } },
+            ] }),
+        );
+        host.call(
+            "run",
+            json!({ "commands": [
+                { "command": "device.add",
+                  "args": { "device": { "kind": t.kind, "name": t.name, "role": t.role } } },
+            ] }),
+        )["results"][0]["result"]["device"]
+            .clone()
+    };
+    let level = add(&mut host, cv_level_type());
+    let wave = add(&mut host, cv_wave_type());
+    let curve = add(&mut host, cv_curve_type());
+
+    // Route each, set Min, Max and Depth (parameters 20, 21 and 66), and give
+    // the Shaper a shape that holds at its top.
+    host.call(
+        "run",
+        json!({ "label": "Patch", "commands": [
+            { "command": "device.set_external",
+              "args": { "device": level, "cv_outputs": [{ "name": "CV", "channel": 1 }] } },
+            { "command": "device.set_external",
+              "args": { "device": wave, "cv_outputs": [{ "name": "CV", "channel": 2 }] } },
+            { "command": "device.set_external",
+              "args": { "device": curve, "cv_outputs": [{ "name": "CV", "channel": 3 }] } },
+            { "command": "device.set_param", "args": { "device": wave, "param": 20, "value": -2.0 } },
+            { "command": "device.set_param", "args": { "device": wave, "param": 21, "value": 6.0 } },
+            { "command": "device.set_param", "args": { "device": wave, "param": 66, "value": 50.0 } },
+            { "command": "device.set_param", "args": { "device": curve, "param": 20, "value": 1.0 } },
+            { "command": "device.set_param", "args": { "device": curve, "param": 21, "value": 1.0 } },
+            { "command": "modulator.set_shape",
+              "args": { "device": curve, "points": [ { "x": 0.0, "y": 1.0 } ] } },
+        ] }),
+    );
+
+    // The choosers under `external`, the shape in the `device` result.
+    for (device, name, channel) in [(&level, "CV", 1), (&wave, "CV", 2), (&curve, "CV", 3)] {
+        let read = host.call("query", json!({ "id": device }));
+        assert_eq!(
+            read["external"]["cv_outputs"][0],
+            json!({ "name": name, "channel": channel }),
+            "{read}"
+        );
+    }
+    let read = host.call("query", json!({ "id": curve }));
+    assert_eq!(read["shape"], json!([{ "x": 0.0, "y": 1.0 }]), "{read}");
+    let parameter = |host: &mut EngineHost, device: &Value, name: &str| -> Value {
+        let reply = host.call(
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        let params = reply["results"][0]["result"]["params"].clone();
+        params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == name)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {name} in {params}"))
+    };
+    assert_eq!(parameter(&mut host, &wave, "Min")["value"], json!(-2.0));
+    assert_eq!(parameter(&mut host, &wave, "Max")["value"], json!(6.0));
+    assert_eq!(parameter(&mut host, &wave, "Depth")["value"], json!(50.0));
+    assert_eq!(parameter(&mut host, &level, "Max")["value"], json!(5.0));
+    assert!(
+        parameter(&mut host, &wave, "Rate")["text"]
+            .as_str()
+            .unwrap()
+            .contains("Hz")
+    );
+
+    // Play: each device's display gives its output's last voltage in volts.
+    host.call("transport", json!({ "action": "play" }));
+    host.play_to(24_000 + 1_000);
+    host.publish_displays();
+    let display = |host: &mut EngineHost, device: &Value| {
+        host.call(
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    let reading = |display: &Value, name: &str| -> Value {
+        display["readings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == name)
+            .unwrap_or_else(|| panic!("no {name} in {display}"))
+            .clone()
+    };
+    let shown = display(&mut host, &curve);
+    assert_eq!(shown["live"], true);
+    assert_eq!(reading(&shown, "CV")["unit"], "V");
+    assert!((reading(&shown, "CV")["value"].as_f64().unwrap() - 1.0).abs() < 0.01);
+    let shown = display(&mut host, &wave);
+    let volts = reading(&shown, "CV")["value"].as_f64().unwrap();
+    assert!((-2.0..=2.0).contains(&volts), "half of the span from -2 V: {volts}");
+    assert_eq!(shown["series"][0]["name"], "Wave");
+    let shown = display(&mut host, &level);
+    for name in ["Direct", "S.C.", "Level", "CV"] {
+        reading(&shown, name);
+    }
+    assert_eq!(reading(&shown, "CV")["value"], 0.0, "silence is 0 V");
+}

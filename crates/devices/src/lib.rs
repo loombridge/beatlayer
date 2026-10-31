@@ -39,6 +39,7 @@ pub mod cv_clock_in;
 pub mod cv_clock_out;
 pub mod cv_in;
 pub mod cv_instrument;
+pub mod cv_modulators;
 pub mod cv_triggers;
 pub mod cv_utility;
 pub mod degrade;
@@ -109,6 +110,7 @@ pub use cv_clock_in::{CV_CLOCK_IN, cv_clock_in_type};
 pub use cv_clock_out::{CV_CLOCK_OUT, cv_clock_out_type};
 pub use cv_in::cv_in_type;
 pub use cv_instrument::{CV_INSTRUMENT, CvCommand, cv_instrument_type};
+pub use cv_modulators::{cv_curve_type, cv_level_type, cv_wave_type};
 pub use cv_triggers::{CV_TRIGGERS, cv_triggers_type};
 pub use cv_utility::{CV_UTILITY, cv_utility_type};
 pub use degrade::{DEGRADE, degrade_type};
@@ -251,6 +253,13 @@ pub fn display_in(
         CV_CLOCK_IN => Some(cv_clock_in::display(device, data)),
         CV_UTILITY => Some(cv_utility::display(device, data)),
         bl_model::modulator::CV_IN => Some(cv_in::display(device, data)),
+        bl_model::modulator::CV_WAVE => {
+            Some(cv_modulators::wave_display(device, description, values, data))
+        }
+        bl_model::modulator::CV_CURVE => Some(cv_modulators::curve_display(device, data)),
+        bl_model::modulator::CV_LEVEL => {
+            Some(cv_modulators::level_display(device, description, values, data))
+        }
         _ => None,
     }
 }
@@ -300,6 +309,7 @@ pub fn register(registry: &mut Registry) {
     cv_clock_in::register(registry);
     cv_utility::register(registry);
     cv_in::register(registry);
+    cv_modulators::register(registry);
     degrade::register(registry);
     crusher::register(registry);
     wax::register(registry);

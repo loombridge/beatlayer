@@ -48,13 +48,12 @@ const MAX_DELAY_SECONDS: f64 = 5.0;
 /// The floor of the meters, in dB.
 const FLOOR_DB: f32 = -60.0;
 /// The values the node publishes: Direct and S.C. in dB, and the level.
-const DISPLAY_VALUES: usize = 3;
+pub(crate) const DISPLAY_VALUES: usize = 3;
 
-/// The Envelope Follower's type.
-#[must_use]
-pub fn level_mod_type() -> DeviceType {
+/// The detector's parameters, which CV Envelope Follower shares.
+pub(crate) fn level_params() -> Vec<ParamDescriptor> {
     let names: Vec<&str> = DIVISIONS.iter().map(|d| d.0).collect();
-    let mut params = vec![
+    vec![
         ParamDescriptor::gain(GAIN, "Gain", 40.0, 0.0)
             .describe("The gain of the signal the detector hears, down to silence."),
         ParamDescriptor::continuous(RISE, "Rise", (0.0, 1_000.0), 5.0, ParamUnit::Milliseconds)
@@ -76,7 +75,26 @@ pub fn level_mod_type() -> DeviceType {
         .describe("Delays the output by this time."),
         ParamDescriptor::choice(DELAY_BEATS, "Delay Division", &names, 1)
             .describe("Delays the output by this beat division of the song's tempo."),
-    ];
+    ]
+}
+
+/// The bank of the detector's controls, which CV Envelope Follower shares.
+pub(crate) const LEVEL_BANK: (&str, &[&str]) = (
+    "Level",
+    &[
+        "Gain",
+        "Rise",
+        "Fall",
+        "Delay Mode",
+        "Delay",
+        "Delay Division",
+    ],
+);
+
+/// The Envelope Follower's type.
+#[must_use]
+pub fn level_mod_type() -> DeviceType {
+    let mut params = level_params();
     params.extend(mapping_params(
         SLOTS,
         (
@@ -90,17 +108,7 @@ pub fn level_mod_type() -> DeviceType {
             DeviceDescription::new(params)
                 .with_layout(layout())
                 .with_banks(&[
-                    (
-                        "Level",
-                        &[
-                            "Gain",
-                            "Rise",
-                            "Fall",
-                            "Delay Mode",
-                            "Delay",
-                            "Delay Division",
-                        ],
-                    ),
+                    LEVEL_BANK,
                     ("Mapping", &["Mod", "Polarity", "Depth"]),
                     (
                         "Targets 1-2",
@@ -122,7 +130,9 @@ pub fn level_mod_type() -> DeviceType {
         )
 }
 
-fn layout() -> DeviceLayout {
+/// The detector's controls and display, which CV Envelope Follower shares:
+/// the input's band and the level's display.
+pub(crate) fn level_parts() -> [LayoutNode; 2] {
     let input = ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -134,6 +144,13 @@ fn layout() -> DeviceLayout {
             (DELAY_BEATS, Widget::Chooser),
         ],
     );
+    [
+        LayoutNode::Band(input),
+        LayoutNode::Cell(DisplayCell::new("Level", 110.0, BODY_HEIGHT, 1.0)),
+    ]
+}
+
+fn layout() -> DeviceLayout {
     let output = ControlBand::stacked(
         BODY_HEIGHT,
         &[
@@ -143,9 +160,10 @@ fn layout() -> DeviceLayout {
         ],
     );
     let (first, rest) = mapping_cells(SLOTS);
+    let [input, level] = level_parts();
     DeviceLayout::new(LayoutNode::Row(vec![
-        LayoutNode::Band(input),
-        LayoutNode::Cell(DisplayCell::new("Level", 110.0, BODY_HEIGHT, 1.0)),
+        input,
+        level,
         first,
         LayoutNode::Band(output),
     ]))
@@ -159,8 +177,10 @@ pub fn register(registry: &mut Registry) {
     });
 }
 
-struct LevelMod {
-    out: SignalOut,
+/// The detector the Envelope Follower shares with CV Envelope Follower
+/// (modulation R24; cv-tools R36): what it hears, the level it follows and
+/// the delay it holds the output back by, and the meters' peaks.
+pub(crate) struct Follower {
     rate: f64,
     /// The detector's level.
     level: f64,
@@ -175,10 +195,35 @@ struct LevelMod {
     peak_heard: f32,
 }
 
-impl LevelMod {
-    fn new(rate: f64, max_frames: usize) -> Self {
+/// The detector's parameters over a stretch.
+pub(crate) struct Controls<'a> {
+    gain: &'a [f32],
+    rise: &'a [f32],
+    fall: &'a [f32],
+    mode: &'a [f32],
+    time: &'a [f32],
+    beats: &'a [f32],
+    bpm: f64,
+}
+
+impl<'a> Controls<'a> {
+    pub(crate) fn new(params: &'a ParamBank, bpm: f64) -> Self {
+        let ramp = |id: ParamId| params.ramp(params.index(id).expect("the description holds it"));
         Self {
-            out: SignalOut::new(),
+            gain: ramp(GAIN),
+            rise: ramp(RISE),
+            fall: ramp(FALL),
+            mode: ramp(DELAY_MODE),
+            time: ramp(DELAY_TIME),
+            beats: ramp(DELAY_BEATS),
+            bpm,
+        }
+    }
+}
+
+impl Follower {
+    pub(crate) fn new(rate: f64, max_frames: usize) -> Self {
+        Self {
             rate,
             level: 0.0,
             delay: DelayLine::new((MAX_DELAY_SECONDS * rate) as usize + 1),
@@ -189,6 +234,12 @@ impl LevelMod {
         }
     }
 
+    /// Begins again with nothing heard yet.
+    pub(crate) fn restart(&mut self) {
+        self.level = 0.0;
+        self.delay.clear();
+    }
+
     /// The one-pole coefficient of a time constant of `ms` milliseconds.
     fn coefficient(&self, ms: f64) -> f64 {
         if ms <= 0.0 {
@@ -197,34 +248,17 @@ impl LevelMod {
             1.0 - (-1000.0 / (ms * self.rate)).exp()
         }
     }
-}
 
-impl NativeDevice for LevelMod {
-    fn is_signal_modulator(&self) -> bool {
-        true
+    /// The most frames the delay can reach back.
+    fn delay_len(&self) -> usize {
+        (MAX_DELAY_SECONDS * self.rate) as usize
     }
 
-    fn lag(&mut self, modulation: &mut Modulation<'_, '_>) {
-        self.out.lag(modulation);
-    }
-
-    fn release(&mut self, _: &mut bl_engine::NoteBuffer) {
-        self.out.off();
-    }
-
-    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+    /// Takes what the track carries and what the detector hears over the
+    /// stretch, as peaks.
+    pub(crate) fn hear(&mut self, audio: &mut Audio<'_, '_>) {
         let frames = audio.frames();
         let channels = audio.channels();
-        if self.out.begin(audio) {
-            // Spec: modulation R20. It begins as a render from here does.
-            self.level = 0.0;
-            self.delay.clear();
-        }
-        for note in audio.notes() {
-            audio.send(note);
-        }
-
-        // What the track carries and what the detector hears, as peaks.
         self.direct[..frames].fill(0.0);
         for c in 0..channels {
             for (peak, &x) in self.direct.iter_mut().zip(audio.channel_mut(c).iter()) {
@@ -247,48 +281,34 @@ impl NativeDevice for LevelMod {
             self.peak_direct = self.peak_direct.max(self.direct[i]);
             self.peak_heard = self.peak_heard.max(self.heard[i]);
         }
+    }
 
-        let index = |id: ParamId| params.index(id).expect("the description holds it");
-        let (gain, rise, fall) = (
-            params.ramp(index(GAIN)),
-            params.ramp(index(RISE)),
-            params.ramp(index(FALL)),
-        );
-        let bpm = audio.bpm();
-        let (rate, max_delay) = (self.rate, self.delay_len());
-        let delay_frames = |f: usize| -> usize {
-            let seconds = if params.ramp(index(DELAY_MODE))[f] >= 0.5 {
-                let division = params.ramp(index(DELAY_BEATS))[f] as usize;
-                DIVISIONS[division.min(DIVISIONS.len() - 1)].1 * 60.0 / bpm
-            } else {
-                f64::from(params.ramp(index(DELAY_TIME))[f]) / 1000.0
-            };
-            ((seconds * rate) as usize).min(max_delay)
+    /// The output at frame `f` of the stretch: the peak, through Gain, then
+    /// Rise or Fall, held at 1 and delayed by Delay (modulation R24).
+    pub(crate) fn frame(&mut self, c: &Controls<'_>, f: usize) -> f64 {
+        let x = f64::from(self.heard[f]) * f64::from(c.gain[f]);
+        let coefficient =
+            self.coefficient(f64::from(if x > self.level { c.rise[f] } else { c.fall[f] }));
+        self.level += (x - self.level) * coefficient;
+        let level = self.level.min(1.0);
+        self.delay.write(level as f32);
+        let seconds = if c.mode[f] >= 0.5 {
+            let division = c.beats[f] as usize;
+            DIVISIONS[division.min(DIVISIONS.len() - 1)].1 * 60.0 / c.bpm
+        } else {
+            f64::from(c.time[f]) / 1000.0
         };
-        let ix = Indices::new(params, SLOTS);
-        for f in 0..frames {
-            // Spec: modulation R24. Peak, Gain, then Rise or Fall.
-            let x = f64::from(self.heard[f]) * f64::from(gain[f]);
-            let coefficient =
-                self.coefficient(f64::from(if x > self.level { rise[f] } else { fall[f] }));
-            self.level += (x - self.level) * coefficient;
-            let level = self.level.min(1.0);
-            self.delay.write(level as f32);
-            let delay = delay_frames(f);
-            let delayed = if delay == 0 {
-                level
-            } else {
-                f64::from(self.delay.read(delay + 1))
-            };
-            self.out.frame(audio, &ix, params, f, &[delayed]);
+        let delay = ((seconds * self.rate) as usize).min(self.delay_len());
+        if delay == 0 {
+            level
+        } else {
+            f64::from(self.delay.read(delay + 1))
         }
     }
 
-    fn display_len(&self) -> usize {
-        DISPLAY_VALUES
-    }
-
-    fn display(&mut self, out: &mut [f32]) {
+    /// Writes Direct and S.C. in dB and the level into `out`, and starts the
+    /// peaks again.
+    pub(crate) fn meters(&mut self, out: &mut [f32]) {
         let db = |peak: f32| gain_to_db(f64::from(peak)).max(f64::from(FLOOR_DB)) as f32;
         out[0] = db(self.peak_direct);
         out[1] = db(self.peak_heard);
@@ -298,10 +318,56 @@ impl NativeDevice for LevelMod {
     }
 }
 
+struct LevelMod {
+    out: SignalOut,
+    follower: Follower,
+}
+
 impl LevelMod {
-    /// The most frames the delay can reach back.
-    fn delay_len(&self) -> usize {
-        (MAX_DELAY_SECONDS * self.rate) as usize
+    fn new(rate: f64, max_frames: usize) -> Self {
+        Self {
+            out: SignalOut::new(),
+            follower: Follower::new(rate, max_frames),
+        }
+    }
+}
+
+impl NativeDevice for LevelMod {
+    fn is_signal_modulator(&self) -> bool {
+        true
+    }
+
+    fn lag(&mut self, modulation: &mut Modulation<'_, '_>) {
+        self.out.lag(modulation);
+    }
+
+    fn release(&mut self, _: &mut bl_engine::NoteBuffer) {
+        self.out.off();
+    }
+
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        if self.out.begin(audio) {
+            // Spec: modulation R20. It begins as a render from here does.
+            self.follower.restart();
+        }
+        for note in audio.notes() {
+            audio.send(note);
+        }
+        self.follower.hear(audio);
+        let controls = Controls::new(params, audio.bpm());
+        let ix = Indices::new(params, SLOTS);
+        for f in 0..audio.frames() {
+            let level = self.follower.frame(&controls, f);
+            self.out.frame(audio, &ix, params, f, &[level]);
+        }
+    }
+
+    fn display_len(&self) -> usize {
+        DISPLAY_VALUES
+    }
+
+    fn display(&mut self, out: &mut [f32]) {
+        self.follower.meters(out);
     }
 }
 

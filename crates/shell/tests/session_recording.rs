@@ -157,6 +157,33 @@ fn recorded(shell: &mut Shell) -> bool {
     shell.running_recording().is_none() && !shell.editor().in_transaction()
 }
 
+// Spec: session-recording R7. The clip's length follows the take a sixteenth
+// at a time, so a take with no notes changes the document (and syncs the
+// engine) once per sixteenth, not once per poll.
+#[test]
+fn a_growing_session_clip_changes_the_document_once_per_sixteenth() {
+    let (mut shell, control) = rig();
+    let keys = midi_track(&mut shell, "Keys");
+    let scene = first_scene(&shell);
+    shell.run("session.record", json!({})).unwrap();
+    poll_until(&control, &mut shell, "the clip to appear", |shell| {
+        slot_clip(shell, keys, scene).is_some()
+    });
+    let before = shell.document_revision();
+    // 2 s at 120 bpm is 16 sixteenths.
+    for _ in 0..400 {
+        pass_time(&control, &mut shell, 5);
+    }
+    let changes = shell.document_revision() - before;
+    assert!(changes <= 20, "{changes} document changes in 2 s");
+    let length = slot_clip(&shell, keys, scene).unwrap().length;
+    assert_eq!(length.0 % Ticks::SIXTEENTH.0, 0, "{length:?}");
+    assert!(
+        length > Ticks::SIXTEENTH,
+        "the clip still grows: {length:?}"
+    );
+}
+
 // Spec: session-recording R1, R2, R7, R9. Session Record records the armed
 // MIDI track into the selected scene's slot; the clip is in the document
 // while the take runs, loops, and is one undo step.

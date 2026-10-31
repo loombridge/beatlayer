@@ -86,8 +86,10 @@ impl Descriptor {
             return None;
         }
         let values: Vec<f32> = bytes
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|b| f32::from_le_bytes(*b))
             .collect();
         values.iter().all(|v| v.is_finite()).then_some(Self(values))
     }

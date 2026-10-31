@@ -757,7 +757,7 @@ mod tests {
         }
         let mut out = Vec::new();
         for step in 0..n {
-            let volume = f64::from(u32::try_from(step).unwrap()) / 100.0;
+            let volume = f64::from(u32::try_from(step).unwrap()) / 400.0;
             editor.apply(Command::SetVolume { track, volume }).unwrap();
             out.push(Project::from_editor(&editor, Media::new()));
         }

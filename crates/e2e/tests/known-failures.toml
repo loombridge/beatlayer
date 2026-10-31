@@ -25,24 +25,6 @@
 #   description = "At its maximum the output rises 30 dB above the default setting."
 
 [[failure]]
-suite = "commands"
-key = "device.set_param"
-property = "value clamped to the parameter's range"
-description = "device.set_param on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and stores 2e9, which the query reads back. The model checks only that the value is finite (crates/model/src/command.rs, Command::SetDeviceParam), never the device's parameter range."
-
-[[failure]]
-suite = "commands"
-key = "automation.set_breakpoint"
-property = "value clamped to the parameter's range"
-description = "automation.set_breakpoint on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and the envelope keeps the point at 2e9. Only clip settings are checked against their range; every other target only for being finite (crates/model/src/command.rs, set_automation_breakpoint)."
-
-[[failure]]
-suite = "commands"
-key = "mixer.set_volume"
-property = "value clamped to the parameter's range"
-description = "mixer.set_volume with a volume of 7.0 (about +16.9 dB) succeeds and stores 7.0, above the fader's top of +6 dB (gain 1.995). The model checks only that the volume is finite and at least 0 (crates/model/src/command.rs, Command::SetVolume)."
-
-[[failure]]
 suite = "live_offline"
 key = "warp/complex/drum loop 110 to 120 BPM"
 property = "live matches offline"

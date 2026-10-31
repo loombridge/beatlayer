@@ -374,38 +374,6 @@ fn transport(block: &Block<'_>) -> TransportEvent {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bl_core::time::{Frames, SampleRate, TimeSignature, TimeSignatureMap};
-    use bl_engine::TransportInfo;
-
-    #[test]
-    fn the_transport_carries_the_songs_time_signature_and_bar_start() {
-        let signatures = TimeSignatureMap::constant(TimeSignature::new(3, 4).unwrap());
-        let mut data = [0.0f32; 8];
-        // At 120 bpm and 48 kHz four quarters are 96 000 frames: one quarter
-        // into the second bar of 3/4.
-        let transport_info = TransportInfo::at(true, Frames(96_000));
-        let block = Block::new(
-            &mut data,
-            1,
-            8,
-            8,
-            &[],
-            transport_info,
-            SampleRate::HZ_48000,
-        )
-        .with_signatures(&signatures);
-        let event = transport(&block);
-        assert_eq!(event.time_signature_numerator, 3);
-        assert_eq!(event.time_signature_denominator, 4);
-        assert_eq!(event.bar_number, 1);
-        assert_eq!(event.bar_start, BeatTime::from_float(3.0));
-        assert!(event.flags.contains(TransportFlags::HAS_TIME_SIGNATURE));
-    }
-}
-
 impl Node for ClapNode {
     fn process(&mut self, block: &mut Block<'_>) {
         self.receive();
@@ -650,5 +618,37 @@ impl Drop for ClapNode {
         if let Some(processor) = self.processor.take() {
             self.give_back(processor);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bl_core::time::{Frames, SampleRate, TimeSignature, TimeSignatureMap};
+    use bl_engine::TransportInfo;
+
+    #[test]
+    fn the_transport_carries_the_songs_time_signature_and_bar_start() {
+        let signatures = TimeSignatureMap::constant(TimeSignature::new(3, 4).unwrap());
+        let mut data = [0.0f32; 8];
+        // At 120 bpm and 48 kHz four quarters are 96 000 frames: one quarter
+        // into the second bar of 3/4.
+        let transport_info = TransportInfo::at(true, Frames(96_000));
+        let block = Block::new(
+            &mut data,
+            1,
+            8,
+            8,
+            &[],
+            transport_info,
+            SampleRate::HZ_48000,
+        )
+        .with_signatures(&signatures);
+        let event = transport(&block);
+        assert_eq!(event.time_signature_numerator, 3);
+        assert_eq!(event.time_signature_denominator, 4);
+        assert_eq!(event.bar_number, 1);
+        assert_eq!(event.bar_start, BeatTime::from_float(3.0));
+        assert!(event.flags.contains(TransportFlags::HAS_TIME_SIGNATURE));
     }
 }

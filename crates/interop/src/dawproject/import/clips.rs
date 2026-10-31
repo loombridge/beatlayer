@@ -370,7 +370,7 @@ impl Importer<'_, '_> {
     /// names (R35).
     fn resolve_content(&mut self, source: &model::Clip, place: &str) -> Option<Timeline> {
         if let Some(reference) = &source.reference {
-            let Some(timeline) = self.timelines.get(reference) else {
+            let Some(timeline) = self.timelines.get(reference.as_str()) else {
                 // A reference to something that isn't a timeline leaves the
                 // clip out (R7, R35).
                 self.report.add(
@@ -381,7 +381,7 @@ impl Importer<'_, '_> {
                 return None;
             };
             self.report.add("an alias clip", place, "read as a copy");
-            return Some(timeline.clone());
+            return Some(timeline.as_ref().clone());
         }
         source
             .content

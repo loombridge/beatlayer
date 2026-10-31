@@ -880,7 +880,7 @@ fn devices_follow_the_file() {
     let container = container_of_fixture("devices");
     assert_eq!(
         device.plugin.as_ref().unwrap().data,
-        container.files["plugins/state.clap-preset"]
+        container.read("plugins/state.clap-preset").unwrap()
     );
     // An Audio Unit's property list is kept as it is (R49).
     let au = synth.devices().nth(2).unwrap();
@@ -893,7 +893,7 @@ fn devices_follow_the_file() {
     );
     assert_eq!(
         au.plugin.as_ref().unwrap().data,
-        container.files["plugins/state.aupreset"]
+        container.read("plugins/state.aupreset").unwrap()
     );
     // A Beatlayer device preset makes that device (R50).
     let squeeze = synth.devices().nth(3).unwrap();
@@ -1315,4 +1315,93 @@ fn clip_automation_ends_where_the_clip_cuts_it_and_holds() {
             );
         }
     }
+}
+
+/// A container of the minimal fixture's `project.xml`, stored, with one more
+/// entry of `zeros` megabytes of zeros, deflated, at `path`.
+fn container_with_zeros(path: &str, megabytes: usize) -> Vec<u8> {
+    use std::io::{Read, Write};
+    use zip::write::SimpleFileOptions;
+
+    let minimal = std::fs::read(fixtures().join("minimal.dawproject")).unwrap();
+    let mut project = String::new();
+    zip::ZipArchive::new(std::io::Cursor::new(minimal))
+        .unwrap()
+        .by_name("project.xml")
+        .unwrap()
+        .read_to_string(&mut project)
+        .unwrap();
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    writer
+        .start_file("project.xml", SimpleFileOptions::default())
+        .unwrap();
+    writer.write_all(project.as_bytes()).unwrap();
+    writer
+        .start_file(
+            path,
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+        )
+        .unwrap();
+    for _ in 0..megabytes {
+        writer.write_all(&[0u8; 1 << 20]).unwrap();
+    }
+    writer.finish().unwrap().into_inner()
+}
+
+/// Spec: dawproject R5. An entry the project doesn't refer to is never
+/// unpacked, however large it says it is.
+#[test]
+fn an_unreferenced_entry_is_not_unpacked() {
+    let container = dawproject::read_container(&container_with_zeros("junk/0.bin", 64)).unwrap();
+    assert_eq!(container.size_of("junk/0.bin"), Some(64 << 20));
+    assert!(container.unpacked() < 1 << 20, "{}", container.unpacked());
+}
+
+/// Spec: dawproject R5. An entry whose header gives a size over the limit is
+/// left out and listed, and its bytes are not held.
+#[test]
+fn an_entry_over_the_cap_is_left_out() {
+    let limits = dawproject::Limits {
+        entry: 8 << 20,
+        total: 16 << 20,
+    };
+    let container =
+        dawproject::read_container_with_limits(&container_with_zeros("audio/big.wav", 9), limits)
+            .unwrap();
+    assert!(
+        container
+            .report
+            .left_out
+            .contains(&"the entry `audio/big.wav`".to_owned()),
+        "{:?}",
+        container.report.left_out
+    );
+    assert_eq!(container.size_of("audio/big.wav"), None);
+    assert!(container.read("audio/big.wav").is_none());
+    assert_eq!(container.unpacked(), 0);
+}
+
+/// Spec: dawproject R5. Entries that fit one by one are left out once
+/// together they pass the total limit.
+#[test]
+fn entries_past_the_total_limit_are_left_out() {
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let stored = SimpleFileOptions::default();
+    writer.start_file("project.xml", stored).unwrap();
+    writer.write_all(b"<Project version=\"1.0\"/>").unwrap();
+    for name in ["a.bin", "b.bin", "c.bin"] {
+        writer.start_file(name, stored).unwrap();
+        writer.write_all(&[0u8; 100]).unwrap();
+    }
+    let bytes = writer.finish().unwrap().into_inner();
+    let limits = dawproject::Limits {
+        entry: 100,
+        total: 250,
+    };
+    let container = dawproject::read_container_with_limits(&bytes, limits).unwrap();
+    assert_eq!(container.paths().collect::<Vec<_>>(), ["a.bin", "b.bin"]);
+    assert_eq!(container.report.left_out, ["the entry `c.bin`"]);
 }

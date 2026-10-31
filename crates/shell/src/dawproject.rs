@@ -9,7 +9,7 @@
 //! too, and writes a hidden file beside the destination before it renames it
 //! into place (R65).
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -207,10 +207,13 @@ fn build(
     percent: &AtomicU32,
 ) -> Result<Imported, DawProjectError> {
     let failed = |reason: String| DawProjectError::Failed(reason);
-    let bytes =
-        std::fs::read(path).map_err(|error| failed(format!("{}: {error}", path.display())))?;
-    let container =
-        dawproject::read_container(&bytes).map_err(|error| failed(error.to_string()))?;
+    // The file is read from disk as the import asks for it, never all at once.
+    let file = File::open(path).map_err(|error| failed(format!("{}: {error}", path.display())))?;
+    let container = dawproject::read_container_from(
+        std::io::BufReader::new(file),
+        dawproject::Limits::default(),
+    )
+    .map_err(|error| failed(error.to_string()))?;
     let context = dawproject::Context {
         folder: path.parent().unwrap_or(Path::new("")),
         extract_to: folder,
@@ -226,11 +229,13 @@ fn build(
 
     // Spec: dawproject R5. The destination has to have room for every file
     // the project uses, by the sizes the container's headers give, or the
-    // import is refused and nothing is written.
+    // import is refused and nothing is written. The import has only read
+    // the files so far, through the system's temporary folder, one at a time.
     let needed: u64 = imported
         .files
         .iter()
-        .filter_map(|file| file.bytes.as_ref().map(|bytes| bytes.len() as u64))
+        .filter(|file| file.on_disk.is_none())
+        .map(|file| file.size)
         .sum();
     if let Some(free) = free_space(folder)
         && free < needed
@@ -245,27 +250,35 @@ fn build(
     // (R39); a failure takes back what was written.
     let mut media = Vec::new();
     let mut written: Vec<PathBuf> = Vec::new();
+    // Spec: dawproject R73. Two files whose paths a case-insensitive file
+    // system holds as one are written under different names.
+    let mut taken: HashSet<String> = HashSet::new();
     let extracted = (|| {
         for (index, file) in imported.files.iter().enumerate() {
             percent.store(
                 40 + (60 * index / imported.files.len()) as u32,
                 Ordering::Relaxed,
             );
-            let at = match (&file.bytes, &file.on_disk) {
-                (Some(bytes), _) => {
-                    let at = folder.join(&file.path);
-                    if let Some(parent) = at.parent() {
-                        std::fs::create_dir_all(parent).map_err(|error| {
-                            failed(format!("couldn't make {}: {error}", parent.display()))
-                        })?;
-                    }
-                    std::fs::write(&at, bytes)
-                        .map_err(|error| failed(format!("{}: {error}", at.display())))?;
-                    written.push(at.clone());
-                    at
+            let at = if let Some(on_disk) = &file.on_disk {
+                on_disk.clone()
+            } else {
+                let at = folder.join(free_path(&mut taken, &file.path));
+                if let Some(parent) = at.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        failed(format!("couldn't make {}: {error}", parent.display()))
+                    })?;
                 }
-                (None, Some(on_disk)) => on_disk.clone(),
-                _ => continue,
+                let mut out = File::create(&at)
+                    .map_err(|error| failed(format!("{}: {error}", at.display())))?;
+                written.push(at.clone());
+                // A medium is unpacked from the container straight into its
+                // file; only a preset's small sample is in memory.
+                match &file.bytes {
+                    Some(bytes) => out.write_all(bytes),
+                    None => container.copy_to(&file.path, &mut out).map(|_| ()),
+                }
+                .map_err(|error| failed(format!("{}: {error}", at.display())))?;
+                at
             };
             media.push((file.hash, at, file.size));
         }
@@ -295,6 +308,22 @@ fn build(
                 .collect(),
         },
     })
+}
+
+/// `path`, or `path` with " 2", " 3" and so on before its extension when a
+/// file of `taken` has the same name but for its case.
+fn free_path(taken: &mut HashSet<String>, path: &str) -> String {
+    let dot = path
+        .rfind('.')
+        .filter(|dot| *dot > 0 && !path[*dot..].contains('/'));
+    let (stem, extension) = dot.map_or((path, ""), |dot| path.split_at(dot));
+    let mut candidate = path.to_owned();
+    let mut number = 2;
+    while !taken.insert(dawproject::folded(&candidate)) {
+        candidate = format!("{stem} {number}{extension}");
+        number += 1;
+    }
+    candidate
 }
 
 /// What an export takes from the shell besides the file's path (R65, R73).

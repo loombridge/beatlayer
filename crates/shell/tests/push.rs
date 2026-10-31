@@ -747,3 +747,176 @@ fn the_columns_fill_in_as_the_index_does() {
     assert_eq!(names[0], "Reverb", "the indexed preset folder, first");
     std::fs::remove_dir_all(&library).ok();
 }
+
+impl Rig {
+    /// A Push 2 running with a MIDI track, `Keys`, and two return tracks,
+    /// selected, in Track Mix.
+    fn mixing() -> (Self, bl_model::TrackId) {
+        let mut rig = Self::new();
+        rig.shell
+            .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+            .unwrap();
+        let track = rig.shell.editor().document().top_level().last().unwrap();
+        for _ in 0..2 {
+            rig.shell
+                .invoke("track.create", json!({ "kind": "return" }))
+                .unwrap();
+        }
+        rig.sim.plug_in();
+        rig.refresh();
+        rig.step();
+        rig.shell
+            .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+            .unwrap();
+        rig.step();
+        rig.tap("mix");
+        (rig, track)
+    }
+
+    /// One touch of encoder `column`, turned by `steps` in all.
+    fn turn(&mut self, column: u8, steps: &[i32]) {
+        assert!(self.sim.touch(column));
+        for steps in steps {
+            assert!(self.sim.turn(column, *steps));
+            self.pass(10);
+        }
+        assert!(self.sim.release(column));
+        self.pass(10);
+    }
+
+    fn mixer(&self, track: bl_model::TrackId) -> bl_model::Mixer {
+        *self.shell.editor().document().track(track).unwrap().mixer()
+    }
+}
+
+// Spec: push-2-tracks R29, R35, R1, R42. In Track Mix the encoders set the
+// selected track's volume, pan and sends through the mixer's commands, a touch
+// is one undo step however long, Shift is finer, and `push.state` reads what
+// each encoder sets.
+#[test]
+fn mix_mode_sets_the_selected_tracks_volume_pan_and_sends_one_undo_step_a_touch() {
+    let (mut rig, track) = Rig::mixing();
+    let returns: Vec<_> = rig.shell.editor().document().returns().collect();
+    let mix = rig.state()["mix_mode"].clone();
+    assert_eq!(mix["view"], "mix");
+    assert_eq!(mix["encoders"][0]["name"], "Volume");
+    assert_eq!(mix["encoders"][2]["name"], "Send A");
+    // A new set has two returns of its own, and the test adds two more.
+    assert_eq!(returns.len(), 4);
+    assert_eq!(mix["encoders"][5]["name"], "Send D");
+    assert_eq!(mix["encoders"][6], Value::Null);
+    assert!(
+        mix["places"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["name"] == "Keys" && p["selected"] == true)
+    );
+
+    let steps = rig.steps();
+    rig.turn(0, &[-20, -20, -20]);
+    assert_eq!(rig.steps(), steps + 1, "three turns, one undo step");
+    let volume = rig.mixer(track).volume;
+    assert!(volume < 1.0, "{volume}");
+    // What the document has, the encoder's column reads.
+    let shown = rig.state()["mix_mode"]["encoders"][0]["value"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        shown,
+        format!("{} dB", bl_model::fader::volume_text(volume))
+    );
+
+    rig.turn(1, &[20]);
+    assert!((rig.mixer(track).pan - 0.2).abs() < 1e-9);
+    rig.turn(3, &[40]);
+    let level = rig
+        .shell
+        .editor()
+        .document()
+        .track(track)
+        .unwrap()
+        .send(returns[1]);
+    assert!(level > 0.0, "send B moved");
+    assert_eq!(
+        rig.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .send(returns[0]),
+        0.0
+    );
+    rig.run("edit.undo", json!({}));
+    assert_eq!(
+        rig.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .send(returns[1]),
+        0.0
+    );
+}
+
+// Spec: push-2-tracks R37, R38. A selected rack track's second press unfolds
+// its chains as the mixer's strips, which `mixer_view.state` reads, and the
+// chains are mixed by `chain.set_gain`.
+#[test]
+fn a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed() {
+    let (mut rig, track) = Rig::mixing();
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+                "kind": { "rack": { "kind": "instrument" } },
+                "name": "Rack",
+                "role": "instrument",
+            } }),
+    );
+    let rack: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    let mut chains = Vec::new();
+    for (index, name) in ["Keys", "Bass"].into_iter().enumerate() {
+        let id: bl_model::ChainId = rig.shell.new_id();
+        rig.run(
+            "chain.add",
+            json!({ "rack": rack, "index": index, "chain": { "id": id, "name": name, "devices": [] } }),
+        );
+        chains.push(id);
+    }
+    rig.step();
+    // The track is selected: pressing its button unfolds the rack.
+    rig.tap("lower_5");
+    let folds = rig.run("mixer_view.state", json!({}));
+    assert_eq!(folds["chains"].as_array().unwrap().len(), 2);
+    assert_eq!(folds["chains"][0]["track"], json!(track));
+    rig.step();
+    let text = rig.state()["display"]["text"].clone();
+    let lines: Vec<&str> = text
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap())
+        .collect();
+    assert!(
+        lines.contains(&"lower 5: Keys [rack] (selected)"),
+        "{lines:?}"
+    );
+    assert!(lines.contains(&"lower 6: Keys"), "{lines:?}");
+    assert!(lines.contains(&"lower 7: Bass"), "{lines:?}");
+    assert!(lines.contains(&"underline: 5 to 7"), "{lines:?}");
+
+    // Global Mix: the chain's volume.
+    rig.tap("mix");
+    rig.turn(5, &[-20]);
+    let strips = rig.run("mixer_view.state", json!({}));
+    let volume = strips["chains"][0]["volume"].as_f64().unwrap();
+    assert!(volume < 1.0, "{volume}");
+    // Pressing the track again folds them.
+    rig.tap("lower_5");
+    assert!(
+        rig.run("mixer_view.state", json!({}))["chains"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    );
+}

@@ -106,7 +106,10 @@ fn mix_chooser(chooser: &crate::routing::Chooser) -> bl_control::mix::Chooser {
                 chosen,
                 ..
             } if run.id.starts_with("routing.set_")
-                && !matches!(run.id.as_str(), "routing.set_cue_out" | "routing.set_main_out") =>
+                && !matches!(
+                    run.id.as_str(),
+                    "routing.set_cue_out" | "routing.set_main_out"
+                ) =>
             {
                 Some(bl_control::mix::Entry {
                     label: label.clone(),
@@ -528,7 +531,11 @@ impl Shell {
         bl_control::mix::Mix {
             folded_groups,
             open_racks,
-            in_out: self.surface.in_out.as_ref().and_then(|(_, in_out)| in_out.clone()),
+            in_out: self
+                .surface
+                .in_out
+                .as_ref()
+                .and_then(|(_, in_out)| in_out.clone()),
         }
     }
 

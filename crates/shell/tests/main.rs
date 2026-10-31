@@ -28,6 +28,7 @@ mod beats_transients;
 mod bounce;
 mod browser;
 mod browser_collections;
+mod browser_columns;
 mod browser_filters;
 mod browser_tags;
 mod capture_midi;

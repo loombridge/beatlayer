@@ -101,27 +101,25 @@ pub struct Entry {
 }
 
 /// Compares names as the browser orders them: ignoring case, with runs of
-/// digits compared by their value, so "Kick 2" comes before "Kick 10".
+/// digits compared by their value, so "Kick 2" comes before "Kick 10". It
+/// allocates nothing: the sort calls it millions of times.
 #[must_use]
 pub fn natural_cmp(a: &str, b: &str) -> Ordering {
-    let mut a_chars = a.chars().peekable();
-    let mut b_chars = b.chars().peekable();
+    let digits = |s: &str| s.bytes().take_while(u8::is_ascii_digit).count();
+    let (mut i, mut j) = (0, 0);
     loop {
-        match (a_chars.peek().copied(), b_chars.peek().copied()) {
+        match (a[i..].chars().next(), b[j..].chars().next()) {
             (None, None) => return a.cmp(b),
             (None, Some(_)) => return Ordering::Less,
             (Some(_), None) => return Ordering::Greater,
             (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
-                let take = |chars: &mut std::iter::Peekable<std::str::Chars<'_>>| {
-                    let mut digits = String::new();
-                    while let Some(c) = chars.peek().copied().filter(char::is_ascii_digit) {
-                        digits.push(c);
-                        chars.next();
-                    }
-                    digits
-                };
-                let (x, y) = (take(&mut a_chars), take(&mut b_chars));
-                let (x, y) = (x.trim_start_matches('0'), y.trim_start_matches('0'));
+                let (x, y) = (digits(&a[i..]), digits(&b[j..]));
+                let run = (&a[i..i + x], &b[j..j + y]);
+                (i, j) = (i + x, j + y);
+                let (x, y) = (
+                    run.0.trim_start_matches('0'),
+                    run.1.trim_start_matches('0'),
+                );
                 let order = x.len().cmp(&y.len()).then_with(|| x.cmp(y));
                 if order != Ordering::Equal {
                     return order;
@@ -132,8 +130,7 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
                 if order != Ordering::Equal {
                     return order;
                 }
-                a_chars.next();
-                b_chars.next();
+                (i, j) = (i + x.len_utf8(), j + y.len_utf8());
             }
         }
     }

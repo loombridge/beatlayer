@@ -296,7 +296,19 @@ impl Decoder {
 ///
 /// As for [`Decoder::open`].
 pub fn probe(path: impl AsRef<Path>) -> Result<MediaInfo, MediaError> {
+    PROBES.with(|count| count.set(count.get() + 1));
     Ok(*Decoder::open(path)?.info())
+}
+
+/// How many files [`probe`] has read on the calling thread, for tests that
+/// check which thread does the reading.
+#[must_use]
+pub fn probes_on_this_thread() -> usize {
+    PROBES.with(std::cell::Cell::get)
+}
+
+thread_local! {
+    static PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Decodes a whole file into memory at its own sample rate.

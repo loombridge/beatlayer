@@ -367,6 +367,8 @@ pub struct BrowserView {
     available: Mutex<Option<AvailableTags>>,
     /// What was read from disk about files for the columns.
     details: Mutex<DetailsCache>,
+    /// The thread that probes audio files for the sort.
+    prober: columns::Prober,
     /// Whether the browser runs down to the Status Bar.
     full_height: bool,
     /// The browser's width in points at 100%.
@@ -607,6 +609,7 @@ impl BrowserView {
             generation: 0,
             available: Mutex::new(None),
             details: Mutex::new(DetailsCache::default()),
+            prober: columns::Prober::default(),
             full_height: prefs.full_height,
             width: clamp_browser_width(prefs.width),
             sets: HashMap::new(),
@@ -2347,6 +2350,10 @@ impl BrowserView {
         }
         for hashed in self.hasher.poll() {
             self.hash_ready(hashed);
+            polled.changed = true;
+        }
+        if self.take_probed() {
+            self.rebuild();
             polled.changed = true;
         }
         for loaded in self.loader.poll() {

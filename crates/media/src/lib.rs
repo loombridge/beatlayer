@@ -49,7 +49,7 @@ mod sampler_chunk;
 mod store;
 pub mod stream;
 
-pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
+pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe, probes_on_this_thread};
 pub use edits::{Edit, EditKind};
 pub use encode::{
     AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, Quantiser, wav_bytes,

@@ -29,6 +29,7 @@ use bl_shell_spec::comping as comping_ids;
 use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
 use bl_shell_spec::freeze as freeze_ids;
+use bl_shell_spec::keymap as keymap_ids;
 use bl_shell_spec::locator as locator_ids;
 use bl_shell_spec::midi_files as midi_ids;
 use bl_shell_spec::midi_tools as tool_ids;
@@ -135,11 +136,25 @@ impl Shell {
     /// or dropping files on them, does (WP-1.15b). Nothing changes. An
     /// unknown command is external, the most a command can need.
     pub fn call_permission(&mut self, id: &str, args: &Value) -> CallPermission {
-        let registered = self
-            .registry
-            .get(id)
-            .and_then(|spec| spec.permission)
-            .unwrap_or(bl_commands::Permission::External);
+        let class_of = |id: &str| {
+            self.registry
+                .get(id)
+                .and_then(|spec| spec.permission)
+                .unwrap_or(bl_commands::Permission::External)
+        };
+        let mut registered = class_of(id);
+        // Spec: agent-permissions R17. Keys that run a command make the
+        // person run it, so binding them needs what running it needs.
+        if id == keymap_ids::BIND
+            && let Some(bound) = args.get("command").and_then(Value::as_str)
+        {
+            let bound_class = if crate::permission::raised_by_arguments(bound) {
+                bl_commands::Permission::Destructive
+            } else {
+                class_of(bound)
+            };
+            registered = registered.max(bound_class);
+        }
         let shown = self
             .clip_view
             .shown_any_clip(self.editor.document(), &self.arrangement);

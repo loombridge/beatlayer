@@ -26,6 +26,7 @@ use bl_shell_spec::bounce::{self as bounce_ids, PasteBouncedAudioArgs};
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::comping::{self as comping_ids, MoveCompEdgeArgs};
 use bl_shell_spec::editing as edit_ids;
+use bl_shell_spec::keymap as keymap_ids;
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::session_view as session_ids;
@@ -41,8 +42,10 @@ pub const SET_CLIP_DATA: &str = "clip.set_data";
 /// The commands whose class can rise with their arguments: each is
 /// destructive as well as its registered class when it would delete or
 /// shorten clips it doesn't act on, or, for `clip.set_data`, leave a MIDI
-/// clip fewer notes than it has.
+/// clip fewer notes than it has. `keymap.bind` takes the class of the
+/// command it binds (spec: agent-permissions R17).
 pub const RAISED_BY_ARGUMENTS: &[&str] = &[
+    keymap_ids::BIND,
     tool_ids::APPLY,
     tool_ids::SET,
     tool_ids::SET_AUTO,
@@ -186,6 +189,8 @@ pub(crate) fn assess(
         return CallPermission::registered(registered);
     }
     match id {
+        // `Shell::call_permission` has raised `registered` already.
+        keymap_ids::BIND => CallPermission::registered(registered),
         browser_ids::ADD_TO_ARRANGEMENT => {
             let Ok(drop) = serde_json::from_value::<AddToArrangementArgs>(args.clone()) else {
                 return CallPermission::registered(registered);

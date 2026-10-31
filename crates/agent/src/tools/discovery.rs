@@ -81,16 +81,18 @@ fn raised(spec: &CommandSpec) -> Option<&'static str> {
     if !raised_by_arguments(&spec.id) {
         return None;
     }
-    Some(
-        if spec.id == SET_CLIP_DATA || bl_shell::midi_tool_commands::handles(&spec.id) {
-            "destructive as well when it would leave a MIDI clip fewer notes than it has, deleting \
+    Some(if spec.id == bl_shell::commands::KEYMAP_BIND {
+        "takes the class of the command it binds when that is higher, so binding keys to a \
+         destructive or external command asks the person first unless you're autonomous; the \
+         agent server's and the assistant's commands are the person's alone and can't be bound"
+    } else if spec.id == SET_CLIP_DATA || bl_shell::midi_tool_commands::handles(&spec.id) {
+        "destructive as well when it would leave a MIDI clip fewer notes than it has, deleting \
          the rest, so it then asks the person first unless you're autonomous; adding notes or \
          keeping their count doesn't; a dry run says which"
-        } else {
-            "destructive as well when it would place clips over others, deleting or shortening \
+    } else {
+        "destructive as well when it would place clips over others, deleting or shortening \
          them, so it then asks the person first unless you're autonomous; a dry run says which"
-        },
-    )
+    })
 }
 
 /// The first sentence of a description.

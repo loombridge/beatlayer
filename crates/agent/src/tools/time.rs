@@ -773,13 +773,14 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             };
             let classes = call.classes();
             let shell = &*ctx.shell;
-            step!(ctx.permit(&classes, &[command.as_str()], || format!(
+            let judged = super::judged_ids(&command, &args);
+            step!(ctx.permit(&classes, &judged, || format!(
                 "At {position}: {}",
                 question_line(shell, &label, &call, &args)
             )));
             let cleared = [Permission::External, Permission::Destructive]
                 .into_iter()
-                .find(|class| ctx.decide(*class, &[command.as_str()]) == Decision::Run)
+                .find(|class| ctx.decide(*class, &judged) == Decision::Run)
                 .unwrap_or(Permission::Edit)
                 .max(call.class());
             ctx.session.refs = names;

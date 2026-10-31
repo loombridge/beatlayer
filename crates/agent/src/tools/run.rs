@@ -223,7 +223,10 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
         .copied()
         .max()
         .unwrap_or(Permission::External);
-    let ids: Vec<&str> = ready.iter().map(|step| step.id.as_str()).collect();
+    let ids: Vec<&str> = ready
+        .iter()
+        .flat_map(|step| super::judged_ids(&step.id, &step.args))
+        .collect();
     let decision = ctx.decide(class, &ids);
     if !dry_run {
         let shell = &*ctx.shell;

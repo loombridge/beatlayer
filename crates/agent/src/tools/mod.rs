@@ -206,6 +206,19 @@ fn replaced_clips(shell: &Shell, call: &CallPermission) -> String {
     }
 }
 
+/// The command IDs a call is judged by: its own, and for `keymap.bind` the
+/// command it binds too, so the agent server's commands stay the person's
+/// alone (spec: agent-permissions R17).
+pub(crate) fn judged_ids<'a>(command: &'a str, args: &'a Value) -> Vec<&'a str> {
+    let mut ids = vec![command];
+    if command == bl_shell::commands::KEYMAP_BIND
+        && let Some(bound) = args.get("command").and_then(Value::as_str)
+    {
+        ids.push(bound);
+    }
+    ids
+}
+
 impl Ctx<'_> {
     /// Whether the agent may go ahead with commands whose most far-reaching
     /// class is `class`: `Ok` to go ahead, or how the call ends instead.

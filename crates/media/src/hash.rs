@@ -19,6 +19,7 @@
 //! - **32 bytes.** The document's `bl_model::ContentHash` is 32 bytes, so a
 //!   hash moves between the two without conversion beyond the newtype.
 
+use std::cell::Cell;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Read};
@@ -81,8 +82,20 @@ impl ContentHash {
     ///
     /// Returns the error from opening or reading the file.
     pub fn of_file(path: impl AsRef<Path>) -> io::Result<Self> {
+        FILE_HASHES.with(|count| count.set(count.get() + 1));
         Self::of_reader(File::open(path)?)
     }
+
+    /// How many files [`ContentHash::of_file`] has hashed on the calling
+    /// thread, for tests that check which thread does the hashing.
+    #[must_use]
+    pub fn file_hashes_on_this_thread() -> usize {
+        FILE_HASHES.with(Cell::get)
+    }
+}
+
+thread_local! {
+    static FILE_HASHES: Cell<usize> = const { Cell::new(0) };
 }
 
 impl fmt::Display for ContentHash {

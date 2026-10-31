@@ -106,6 +106,26 @@ fn a_change_to_the_shown_clip_s_scale_changes_the_current_scale() {
 
 // Spec: scales R10, R12.
 #[test]
+fn undoing_and_redoing_a_clip_s_scale_change_moves_the_current_scale_with_it() {
+    let (mut shell, _track, clip) = shell_with_a_clip();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    let before = current(&shell);
+    shell
+        .run(
+            "clip.set_scale",
+            json!({ "clips": [clip], "enabled": true, "root": 9, "name": "minor" }),
+        )
+        .unwrap();
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(current(&shell), before);
+    shell.run("edit.redo", json!({})).unwrap();
+    assert_eq!(current(&shell), Scale::new(9, ScaleName::Minor));
+}
+
+// Spec: scales R10, R12.
+#[test]
 fn an_agent_s_scale_change_changes_the_current_scale() {
     let (mut shell, _track, clip) = shell_with_a_clip();
     shell

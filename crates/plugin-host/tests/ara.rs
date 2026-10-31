@@ -645,6 +645,83 @@ fn a_modification_that_left_the_set_comes_back_with_what_the_plugin_kept() {
     );
 }
 
+// Spec: ara-hosting R6
+#[test]
+fn a_cropped_clip_comes_back_with_the_plugins_edits_by_undo() {
+    let _turn = one_at_a_time();
+    let mut world = World::new(test_ara::bundle());
+    world.edit(Command::RenameClip {
+        clip: world.clip,
+        name: "Take 2".to_owned(),
+    });
+    let id = format!("clip-{}", u64::from(world.clip.0));
+    let updates = world.report().modifications[0].updates;
+    assert!(updates >= 1);
+    world.edit(Command::CropClip {
+        clip: world.clip,
+        media: Some(CROPPED),
+        from: 0.25,
+        to: 0.75,
+    });
+    // The old modification is kept, deactivated, beside the new active one.
+    let report = world.report();
+    assert_eq!(report.modifications.len(), 2);
+    assert!(
+        report
+            .modifications
+            .iter()
+            .any(|m| m.id == id && !m.active && m.updates == updates)
+    );
+    world.editor.undo().unwrap();
+    world.changed();
+    let report = world.report();
+    let active: Vec<_> = report.modifications.iter().filter(|m| m.active).collect();
+    assert_eq!(active.len(), 1);
+    assert_eq!(
+        (active[0].id.as_str(), active[0].updates),
+        (id.as_str(), updates)
+    );
+    assert_eq!(report.violations, 0);
+}
+
+// Spec: ara-hosting R6
+#[test]
+fn a_reversed_clip_comes_back_with_the_plugins_edits_by_undo() {
+    let _turn = one_at_a_time();
+    let mut world = World::new(test_ara::bundle());
+    world.edit(Command::RenameClip {
+        clip: world.clip,
+        name: "Take 2".to_owned(),
+    });
+    let id = format!("clip-{}", u64::from(world.clip.0));
+    let updates = world.report().modifications[0].updates;
+    assert!(updates >= 1);
+    world.edit(Command::ReverseClip {
+        clip: world.clip,
+        media: Some(CROPPED),
+        seconds: 1.0,
+    });
+    // The old modification is kept, deactivated, beside the new active one.
+    let report = world.report();
+    assert_eq!(report.modifications.len(), 2);
+    assert!(
+        report
+            .modifications
+            .iter()
+            .any(|m| m.id == id && !m.active && m.updates == updates)
+    );
+    world.editor.undo().unwrap();
+    world.changed();
+    let report = world.report();
+    let active: Vec<_> = report.modifications.iter().filter(|m| m.active).collect();
+    assert_eq!(active.len(), 1);
+    assert_eq!(
+        (active[0].id.as_str(), active[0].updates),
+        (id.as_str(), updates)
+    );
+    assert_eq!(report.violations, 0);
+}
+
 // Spec: ara-hosting R10
 #[test]
 fn what_the_plugin_kept_is_in_its_archive() {

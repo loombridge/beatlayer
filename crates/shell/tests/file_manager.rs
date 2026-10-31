@@ -477,6 +477,108 @@ fn a_projects_collect_and_save_rewrites_its_sets_with_a_backup() {
     );
 }
 
+// Spec: file-management R16.
+#[test]
+fn collecting_the_open_sets_project_survives_the_next_save() {
+    let scratch = Scratch::new("project-collect-open");
+    let elsewhere = scratch.path("elsewhere/Tone.wav");
+    wav(&elsewhere, 480);
+    let (mut shell, song) = set_with_files(&scratch, "Song", std::slice::from_ref(&elsewhere));
+    let project = song.parent().unwrap().to_path_buf();
+
+    let report = shell
+        .run(
+            "set.collect_all_and_save",
+            json!({ "groups": ["elsewhere"], "project": text(&project) }),
+        )
+        .unwrap();
+    assert_eq!(report["files"], 1, "the open set's file was copied in");
+    // A plain save, as Cmd-S or a Save Continuously commit does.
+    shell.run("set.save", json!({})).unwrap();
+
+    let paths: Vec<String> = bl_project::load(&song)
+        .unwrap()
+        .0
+        .media
+        .iter()
+        .map(|file| file.path.to_string())
+        .collect();
+    assert_eq!(
+        paths,
+        ["Samples/Imported/Tone.wav"],
+        "the open set keeps the collected path after the next save"
+    );
+    shell
+        .run(
+            "view.toggle_file_manager",
+            json!({ "view": "project", "open": true }),
+        )
+        .unwrap();
+    let state = shell.run("file_manager.state", json!({})).unwrap();
+    assert!(
+        state["unused"].as_array().unwrap().is_empty(),
+        "the copy is used: {state}"
+    );
+}
+
+// Spec: file-management R16.
+#[test]
+fn a_projects_collect_and_save_refuses_while_the_open_set_has_unsaved_changes() {
+    let scratch = Scratch::new("project-collect-dirty");
+    let elsewhere = scratch.path("elsewhere/Tone.wav");
+    wav(&elsewhere, 480);
+    let (mut shell, song) = set_with_files(&scratch, "Song", std::slice::from_ref(&elsewhere));
+    shell
+        .run(
+            "song.set_tempo",
+            json!({ "tempo": [{ "kind": "constant", "start": 0, "bpm": 99.0 }] }),
+        )
+        .unwrap();
+    let result = shell.run(
+        "set.collect_all_and_save",
+        json!({ "groups": ["elsewhere"], "project": text(song.parent().unwrap()) }),
+    );
+    assert!(result.is_err(), "the unsaved set blocks it");
+    assert!(
+        !scratch.path("Samples/Imported/Tone.wav").exists(),
+        "nothing was copied"
+    );
+}
+
+// Spec: file-management R17.
+#[test]
+fn delete_unused_refuses_a_file_the_section_does_not_list() {
+    let scratch = Scratch::new("unused-refuse");
+    let kick = scratch.path("Kick.wav");
+    wav(&kick, 480);
+    let (mut shell, song) = set_with_files(&scratch, "Song", std::slice::from_ref(&kick));
+    let recording = scratch.path("Samples/Recorded/Take 1.wav");
+    wav(&recording, 480);
+    let outside = scratch.path("outside.wav");
+    shell
+        .run(
+            "view.toggle_file_manager",
+            json!({ "view": "project", "open": true }),
+        )
+        .unwrap();
+
+    // The set, a file it uses, and a file nothing lists are refused, and a
+    // listed file in the same call isn't trashed either.
+    for path in [&song, &kick, &outside] {
+        let result = shell.run(
+            "file_manager.delete_unused",
+            json!({ "paths": [text(&recording), text(path)] }),
+        );
+        assert!(
+            matches!(result, Err(bl_shell::ShellError::InvalidArgs { .. })),
+            "{}: {result:?}",
+            path.display()
+        );
+        assert!(path.exists() || path == &outside);
+        assert!(recording.exists(), "nothing moved");
+    }
+}
+
 // Spec: file-management R17.
 #[test]
 fn an_unused_recording_is_listed_and_deleted_to_the_trash() {

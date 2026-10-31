@@ -139,6 +139,37 @@ fn notices_missing_and_changed_files() {
     ));
 }
 
+#[cfg(unix)]
+#[test]
+fn a_changed_file_is_not_hashed_again_until_it_changes_again() {
+    // Spec: file-management R6. chmod leaves the fingerprint alone, so a
+    // second check that read the file would fail.
+    use std::os::unix::fs::PermissionsExt;
+    let dir = TempDir::new("store-changed-cached");
+    let path = copy_fixture("sine-44k1-s16-2ch.wav", dir.path());
+    let store = MediaStore::new();
+    let hash = store.import(&path).unwrap();
+
+    let mut bytes = fs::read(&path).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0x01;
+    fs::write(&path, &bytes).unwrap();
+    let later = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(later)
+        .unwrap();
+    let now = ContentHash::of_bytes(&bytes);
+    assert_eq!(store.check(hash).unwrap(), MediaStatus::Changed { now });
+
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+    let again = store.check(hash);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+    assert_eq!(again.unwrap(), MediaStatus::Changed { now });
+}
+
 #[test]
 fn relinks_a_moved_file_by_content() {
     // Spec: audio-import R10

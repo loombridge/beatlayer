@@ -165,6 +165,7 @@ pub fn import(container: &Container, context: &Context<'_>) -> Result<Imported, 
         track_expressions: HashMap::new(),
         controller_channels: HashMap::new(),
         crossfades: Vec::new(),
+        unrolled_left: UNROLL_BUDGET,
     };
     importer.run()
 }
@@ -259,6 +260,8 @@ struct Importer<'a, 'c> {
     /// The crossfades the clips ask for: the track, where the later clip
     /// starts and how long they last in seconds (R33).
     crossfades: Vec<(TrackId, Ticks, f64)>,
+    /// How many more notes and clip pieces loops and nested clips may make.
+    unrolled_left: usize,
 }
 
 impl<'a> Importer<'a, '_> {
@@ -1686,6 +1689,13 @@ impl<'a> Importer<'a, '_> {
         tempo.seconds_to_ticks(seconds)
     }
 }
+
+/// The furthest tick from zero a point or a clip is placed at.
+const TICK_LIMIT: i64 = i64::MAX / 4;
+
+/// How many notes and clip pieces an import makes by unrolling loops and
+/// flattening nested clips, over all its clips (R34).
+const UNROLL_BUDGET: usize = 2_000_000;
 
 /// The beat a quarter note is, as ticks.
 fn beats_to_ticks(beats: f64) -> Ticks {

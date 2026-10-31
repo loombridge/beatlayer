@@ -1056,7 +1056,7 @@ fn a_rack_folds_with_the_devices_view_and_holding_it_selects_a_chain() {
     assert_eq!(mode["devices"][0]["unfolded"], true);
     assert_eq!(
         rig.on_buttons(),
-        [rack.clone()],
+        std::slice::from_ref(&rack),
         "the first chain holds nothing"
     );
 
@@ -1109,7 +1109,7 @@ fn a_rack_folds_with_the_devices_view_and_holding_it_selects_a_chain() {
             .clone()
     };
     assert_eq!(views(&mut rig), false);
-    assert_eq!(rig.on_buttons(), [rack.clone()]);
+    assert_eq!(rig.on_buttons(), std::slice::from_ref(&rack));
     assert_eq!(rig.steps(), steps, "folding is no undo step");
     // Showing it in the window shows it on Push 2.
     rig.run(

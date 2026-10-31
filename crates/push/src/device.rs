@@ -366,7 +366,7 @@ impl DeviceMode {
         }
     }
 
-    fn focus<'a>(model: &'a ReadModel, row: usize) -> Option<&'a Focus> {
+    fn focus(model: &ReadModel, row: usize) -> Option<&Focus> {
         model.row(row)?.focus.as_ref()
     }
 

@@ -27,8 +27,9 @@ fn mixing() -> Rig {
     rig
 }
 
+/// Adds `count` return tracks, which end the ring's list as the shell's do.
 fn add_returns(rig: &mut Rig, count: usize) -> Vec<TrackId> {
-    (0..count)
+    let returns: Vec<TrackId> = (0..count)
         .map(|index| {
             let id: TrackId = rig.editor.new_id();
             rig.apply(Command::CreateTrack {
@@ -40,7 +41,9 @@ fn add_returns(rig: &mut Rig, count: usize) -> Vec<TrackId> {
             });
             id
         })
-        .collect()
+        .collect();
+    rig.model.columns.extend(&returns);
+    returns
 }
 
 /// What the display says, line by line.
@@ -220,6 +223,21 @@ fn a_split_pan_track_takes_encoders_2_and_3() {
     let done = turn(&mut rig, 3, &[20]);
     assert_eq!(done[0].0, "mixer.set_send");
     assert_eq!(done[0].1["to"], json!(returns[0]));
+}
+
+// Spec: push-2-tracks R34. The ring's list ends with the returns, so each
+// return is one place.
+#[test]
+fn each_return_is_one_place() {
+    let mut rig = mixing();
+    rig.model.columns.truncate(2);
+    let returns = add_returns(&mut rig, 2);
+    rig.tick();
+    let places: Vec<_> = state(&rig).places.iter().map(|p| p.track).collect();
+    assert_eq!(
+        places,
+        [rig.tracks[0], rig.tracks[1], returns[0], returns[1]]
+    );
 }
 
 fn entry(label: &str, chosen: bool, command: &str, args: Value) -> Entry {

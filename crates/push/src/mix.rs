@@ -253,13 +253,13 @@ fn inside(doc: &Document, group: TrackId, found: &mut Vec<TrackId>) {
     }
 }
 
-/// Every place there is, in order: the tracks of the session ring's list, the
-/// returns after them, never Main (R34), each followed by its rack's chains
-/// when they are unfolded (R37).
+/// Every place there is, in order: the tracks of the ring's list (the
+/// returns end it, Main is never in it, R34), each followed by its rack's
+/// chains when they are unfolded (R37).
 fn places(model: &ReadModel) -> Vec<Place> {
     let doc = &model.document;
     let mut out = Vec::new();
-    for track in model.columns.iter().copied().chain(doc.returns()) {
+    for track in model.columns.iter().copied() {
         out.push(Place::Track(track));
         if let Some(rack) = rack_of(doc, track)
             && model.mix.open_racks.contains(&rack.id)

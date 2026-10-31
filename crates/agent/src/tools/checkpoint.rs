@@ -58,7 +58,8 @@ pub(crate) fn definition() -> Value {
          under `name`; `restore` puts it back as one undo step, which the person can undo; \
          `list` shows them; `delete` forgets one. A restore that would remove tracks, clips, \
          or devices that exist now asks the person first, unless you're autonomous. \
-         Checkpoints last while Beatlayer runs and aren't saved in the set.",
+         Checkpoints last while Beatlayer runs, aren't saved in the set, and restore only in \
+         the set they were saved in.",
         false,
     )
 }
@@ -70,6 +71,9 @@ struct Checkpoint {
     document: Document,
     saved_at: u64,
     set: String,
+    /// The set it was saved in ([`bl_shell::Shell::set_generation`]): a
+    /// restore replaces the song, which is only right in that set.
+    generation: u64,
     by: String,
 }
 
@@ -145,6 +149,7 @@ pub(crate) fn checkpoint(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                     .duration_since(UNIX_EPOCH)
                     .map_or(0, |d| d.as_secs()),
                 set: ctx.shell.set_name(),
+                generation: ctx.shell.set_generation(),
                 by: ctx.session.client.label().to_owned(),
             };
             match replaced {
@@ -170,6 +175,13 @@ pub(crate) fn checkpoint(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                     "no checkpoint is called \u{201c}{name}\u{201d}; `list` shows them"
                 ));
             };
+            if checkpoint.generation != ctx.shell.set_generation() {
+                return failed(format!(
+                    "checkpoint \u{201c}{name}\u{201d} was saved in set {}, not the open set; \
+                     nothing changed",
+                    checkpoint.set
+                ));
+            }
             let current = ctx.shell.editor().document();
             let changes = ChangeSet::between(current, &checkpoint.document);
             if changes.is_empty() {

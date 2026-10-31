@@ -3641,6 +3641,17 @@ impl Document {
                 Ok(())
             }
             Command::BounceTrackInPlace { track, bounced } => {
+                // Only audio, MIDI and group tracks bounce: a Main track would
+                // leave the set without one, and a return that became an audio
+                // track would still take sends from tracks that feed it.
+                let kind = self.track_ref(*track)?.kind;
+                if kind == TrackKind::Main || kind == TrackKind::Return {
+                    return Err(ModelError::WrongTrackKind {
+                        track: *track,
+                        kind,
+                        needs: "an audio, MIDI or group track",
+                    });
+                }
                 // A group's tracks go with it (R23).
                 let children: Vec<TrackId> =
                     self.track_ref(*track)?.children.iter().copied().collect();
@@ -9641,6 +9652,29 @@ mod tests {
             track_input(source, None, None),
             "an audio route to the track stays"
         );
+    }
+
+    #[test]
+    fn main_and_return_tracks_do_not_bounce_in_place() {
+        let mut song = Song::new();
+        let ret = song.track(TrackKind::Return, None);
+        for track in [song.main(), ret] {
+            let bounced = crate::bounce::BouncedTrack {
+                name: "x".to_owned(),
+                ..Default::default()
+            };
+            let kind = song.doc.track(track).unwrap().kind();
+            assert_eq!(
+                song.reject(Command::BounceTrackInPlace { track, bounced }),
+                ModelError::WrongTrackKind {
+                    track,
+                    kind,
+                    needs: "an audio, MIDI or group track",
+                }
+            );
+        }
+        assert_eq!(song.doc.track(ret).unwrap().kind(), TrackKind::Return);
+        song.doc.check_invariants().unwrap();
     }
 
     fn frozen_region(clip: &Clip, scene: Option<SceneId>) -> crate::freeze::FrozenClip {

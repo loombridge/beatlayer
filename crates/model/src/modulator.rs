@@ -447,14 +447,9 @@ impl Document {
     /// Refuses a hand move of `target` while a modulator in Remote Control
     /// holds it (R16).
     pub(crate) fn check_not_held(&self, target: ModTarget) -> Result<(), ModelError> {
-        let held = self
-            .tracks()
-            .flat_map(|t| t.devices_deep())
-            .any(|d| {
-                d.enabled
-                    && self.in_remote_control(d)
-                    && d.mappings.iter().any(|m| m.target == target)
-            });
+        let held = self.tracks().flat_map(|t| t.devices_deep()).any(|d| {
+            d.enabled && self.in_remote_control(d) && d.mappings.iter().any(|m| m.target == target)
+        });
         if held {
             Err(ModelError::InvalidInput(
                 "a modulator in Remote Control holds that parameter",

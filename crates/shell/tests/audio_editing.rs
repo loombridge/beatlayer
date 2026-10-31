@@ -587,11 +587,7 @@ fn fade_volume(shell: &mut Shell, track: TrackId) {
 /// Consolidates the first quarter of a clip of the ramp and checks that the
 /// file, made up by the clip's gain, is the source: nothing of the mixer was
 /// taken.
-fn assert_consolidated_without_the_mixer(
-    shell: &mut Shell,
-    track: TrackId,
-    samples: &[Vec<f32>],
-) {
+fn assert_consolidated_without_the_mixer(shell: &mut Shell, track: TrackId, samples: &[Vec<f32>]) {
     let made = consolidate(shell, track, 0, 705_600);
     let gain = audio(shell, made.created[0]).gain as f32;
     let file_audio = decode_file(PathBuf::from(&made.files[0])).unwrap();

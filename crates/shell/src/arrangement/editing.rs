@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use bl_core::time::Ticks;
 use bl_model::{
     AutomationTarget, Breakpoint, Change, ChangeSet, Clip, ClipData, ClipId, Command, Document,
-    Editor, TakeLaneId, TrackId, TrackKind,
+    Editor, EnvelopeKind, TakeLaneId, TrackId, TrackKind,
 };
 use bl_shell_spec::arrangement::{Lane, TimeRange};
 use bl_shell_spec::editing::{
@@ -150,7 +150,86 @@ pub enum Clipboard {
     Scenes(crate::session_clips::SceneMaterial),
 }
 
+/// Whether an automation target names a device, a chain or a return track
+/// by an ID, which means nothing in another set.
+pub(super) fn names_an_object_of_its_set(target: &AutomationTarget) -> bool {
+    matches!(
+        target,
+        AutomationTarget::Device { .. }
+            | AutomationTarget::Chain { .. }
+            | AutomationTarget::ChainSend { .. }
+            | AutomationTarget::Send { .. }
+    )
+}
+
+/// Takes from a copied clip what names things of its own set: its groove and
+/// the envelopes that drive a device, a chain or a send.
+pub(super) fn leave_set_clip(clip: &mut Clip) {
+    clip.groove = None;
+    clip.envelopes
+        .retain(|envelope| !names_an_object_of_its_set(&envelope.target));
+}
+
 impl Clipboard {
+    /// Takes from the material what means something only in the set it was
+    /// copied in, for a paste into another one: the clips' grooves and their
+    /// envelopes on devices, chains and sends, and the tracks it came from
+    /// (the set exchange spec, R6). Whole tracks do this themselves.
+    pub fn leave_set(&mut self) {
+        match self {
+            Self::Material(material) => {
+                material.source.clear();
+                material
+                    .lanes
+                    .iter_mut()
+                    .flat_map(|lane| lane.clips.iter_mut())
+                    .for_each(leave_set_clip);
+                for held in &mut material.envelopes {
+                    held.shapes
+                        .retain(|(target, _)| !names_an_object_of_its_set(target));
+                }
+            }
+            Self::Time(time) => time.leave_set(),
+            Self::Slots(slots) => slots
+                .clips
+                .iter_mut()
+                .for_each(|held| leave_set_clip(&mut held.clip)),
+            Self::Scenes(scenes) => scenes
+                .scenes
+                .iter_mut()
+                .flat_map(|scene| scene.clips.iter_mut())
+                .for_each(|(_, clip)| leave_set_clip(clip)),
+            Self::Tracks(_) => {}
+        }
+    }
+
+    /// The files of the audio clips it holds.
+    #[must_use]
+    pub fn media(&self) -> BTreeSet<bl_model::ContentHash> {
+        let clips: Vec<&Clip> = match self {
+            Self::Material(material) => material
+                .lanes
+                .iter()
+                .flat_map(|lane| lane.clips.iter())
+                .collect(),
+            Self::Time(time) => time.clips().collect(),
+            Self::Slots(slots) => slots.clips.iter().map(|held| &held.clip).collect(),
+            Self::Scenes(scenes) => scenes
+                .scenes
+                .iter()
+                .flat_map(|scene| scene.clips.iter().map(|(_, clip)| clip))
+                .collect(),
+            Self::Tracks(_) => Vec::new(),
+        };
+        clips
+            .into_iter()
+            .filter_map(|clip| match &clip.data {
+                ClipData::Audio(audio) => Some(audio.media),
+                ClipData::Midi(_) => None,
+            })
+            .collect()
+    }
+
     /// The Arrangement's material, if the clipboard holds it.
     #[must_use]
     pub fn material(&self) -> Option<&Material> {
@@ -440,6 +519,19 @@ fn place_clip(
     clip.groove = clip
         .groove
         .filter(|groove| editor.document().settings().grooves.get(*groove).is_some());
+    // Spec: clip-envelopes R7. An Arrangement clip only modulates, and keeps
+    // only the envelopes naming parameters its new track has.
+    let doc = editor.document();
+    let fitting: Vec<bool> = clip
+        .envelopes
+        .iter()
+        .map(|envelope| {
+            envelope.kind != EnvelopeKind::Automation
+                && doc.check_clip_target(track, &clip, envelope.target).is_ok()
+        })
+        .collect();
+    let mut fitting = fitting.into_iter();
+    clip.envelopes.retain(|_| fitting.next().unwrap_or(false));
     clear_on(editor, track, lane, clip.start, clip.end(), placed)?;
     placed.insert(clip.id);
     // Spec: scales R7. A copy keeps its source's scale, which the clip takes
@@ -453,9 +545,7 @@ fn place_clip(
             None => Command::CreateClip { track, clip },
         },
     )?;
-    if scale != editor.document().settings().scale {
-        apply(editor, scale.command(vec![id]))?;
-    }
+    crate::tracks::keep_scale(editor, id, scale)?;
     Ok(id)
 }
 

@@ -239,6 +239,7 @@ impl Shell {
     /// Runs the Session View's clipboard and the copies between the views.
     fn run_session_clips(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         let before = self.editor.document().clone();
+        self.leave_set_before_paste(id);
         let result = crate::session_clips::run(
             id,
             args,
@@ -253,10 +254,11 @@ impl Shell {
             self.dirty = true;
             self.document_changed();
         }
-        if let Ok(outcome) = &result
-            && let Some(message) = &outcome.message
-        {
-            self.set_message(message.clone(), false);
+        if let Ok(outcome) = &result {
+            self.note_clipboard_after(id);
+            if let Some(message) = &outcome.message {
+                self.set_message(message.clone(), false);
+            }
         }
         self.touch();
         result.map(|outcome| outcome.value)

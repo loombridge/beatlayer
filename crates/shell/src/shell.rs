@@ -810,6 +810,9 @@ pub struct Shell {
     /// The Arrangement's clipboard (WP-1.8b), kept across sets as Live
     /// keeps it, and never part of a set.
     clipboard: Option<Clipboard>,
+    /// Which set the clipboard's clips and scenes were copied in, as
+    /// `editor_generation` counts them.
+    clipboard_set: u64,
     /// The clipboard of copied envelope shapes (WP-6.25), kept across sets
     /// as Live keeps it, and never part of a set.
     envelope_clipboard: Option<EnvelopeClipboard>,
@@ -1402,6 +1405,7 @@ impl Shell {
             document_revision: 0,
             tap: crate::tap_tempo::TapRun::default(),
             clipboard: None,
+            clipboard_set: 0,
             envelope_clipboard: None,
             clip_drag: None,
             edit_gesture: None,
@@ -1516,12 +1520,14 @@ impl Shell {
     /// command will create, and restoring a checkpoint. It runs document
     /// commands with `bl_model::registry::run`, as [`Shell::run`] does.
     ///
-    /// `edit` must leave no transaction open.
+    /// `edit` must leave no transaction open that it didn't find open: a
+    /// command run inside [`Shell::run_labelled`]'s transaction edits within it.
     pub fn edit<T>(&mut self, edit: impl FnOnce(&mut Editor) -> T) -> T {
         let before = self.editor.document().clone();
+        let nested = self.editor.in_transaction();
         let result = edit(&mut self.editor);
         debug_assert!(
-            !self.editor.in_transaction(),
+            nested || !self.editor.in_transaction(),
             "an edit left a transaction open"
         );
         if !ChangeSet::between(&before, self.editor.document()).is_empty() {

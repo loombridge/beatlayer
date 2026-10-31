@@ -1466,6 +1466,19 @@ const ENTRIES: &[Entry] = &[
             parameter's envelope isn't overridden.",
     },
     Entry {
+        id: "automation.set_enabled",
+        action: Action::Apply("set_automation_enabled"),
+        label: "Set Automation Enabled",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Turns one parameter's envelope off or on without touching its \
+            breakpoints. Off is what moving the control by hand does: the control's own value \
+            overrides the envelope until Re-Enable Automation turns it on again. `track` and \
+            `target` name the parameter the same way `automation.set_breakpoint` does. Nothing \
+            changes if the parameter has no envelope.",
+    },
+    Entry {
         id: "routing.set_input",
         action: Action::Apply("set_input"),
         label: "Set Input",

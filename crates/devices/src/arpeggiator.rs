@@ -329,6 +329,59 @@ impl Rng {
     }
 }
 
+/// What one block's parameters make of the step scheduler.
+struct Cfg {
+    style: usize,
+    /// The step length in ticks while Sync is on and the song plays: steps
+    /// sit on the song's grid as the tempo map places it, not on a rounded
+    /// frame count.
+    grid: Option<i64>,
+    step_frames: i64,
+    gate_frames: i64,
+    offset: usize,
+    retrigger_mode: usize,
+    interval_ticks: i64,
+    repeats: i32,
+    distance: i32,
+    steps: i32,
+    use_scale: bool,
+    chosen_scale: Scale,
+    vel_on: bool,
+    decay_frames: f64,
+    target_vel: f32,
+    retrigger_vel: bool,
+    swing: Option<usize>,
+    is_playing: bool,
+    /// The router clock and the song position at the block's first frame.
+    block_start: i64,
+    song_start: i64,
+}
+
+impl Cfg {
+    fn scale_at(&self, audio: &Audio<'_, '_>, offset: u32) -> Scale {
+        if self.use_scale {
+            audio.scale_at(offset)
+        } else {
+            self.chosen_scale
+        }
+    }
+}
+
+/// The largest `k` for which `k * unit` ticks come at or before song frame
+/// `frame`.
+fn grid_index(tempo: &TempoMap, rate: SampleRate, unit: i64, frame: i64) -> i64 {
+    let frame = frame.max(0);
+    let mut k = tempo
+        .frames_to_ticks(Frames(frame), rate)
+        .0
+        .div_euclid(unit)
+        + 1;
+    while tempo.ticks_to_frames(Ticks(k * unit), rate).0 > frame {
+        k -= 1;
+    }
+    k
+}
+
 pub struct Arpeggiator {
     router: Router,
     held: Vec<HeldNote>,
@@ -337,8 +390,14 @@ pub struct Arpeggiator {
     transposition_step: i32,
     repeats_counted: i32,
     pattern_len: usize,
-    /// Next frame on `router.now()` when the next step fires.
+    /// The earliest frame on `router.now()` the next step may fire: on the
+    /// song's grid the step is the first grid frame from here.
     next_step_frame: i64,
+    /// The frame of the last step fired.
+    last_step_frame: i64,
+    was_grid: bool,
+    /// The Interval boundary the last step was in, while Beat retriggers.
+    last_interval: Option<i64>,
     /// Clock frame when velocity decay slope started.
     velocity_start_frame: i64,
     initial_velocity: f32,
@@ -366,6 +425,9 @@ impl Arpeggiator {
             repeats_counted: 0,
             pattern_len: 0,
             next_step_frame: 0,
+            last_step_frame: 0,
+            was_grid: false,
+            last_interval: None,
             velocity_start_frame: 0,
             initial_velocity: 0.8,
             rng: Rng::new(seed(device)),
@@ -507,6 +569,262 @@ impl Arpeggiator {
     }
 }
 
+impl Arpeggiator {
+    /// Ends what sounds, drops what waits and rewinds the pattern, `offset`
+    /// frames into the stretch: nothing is held any more.
+    fn stop(&mut self, audio: &mut Audio<'_, '_>, offset: u32) {
+        self.router.cut(audio, offset, |_| true);
+        // A step still waiting for its grooved frame never sounds.
+        self.router.clear_queue();
+        self.step_in_pattern = 0;
+        self.transposition_step = 0;
+        self.repeats_counted = 0;
+        self.last_interval = None;
+    }
+
+    /// The router-clock frame of the next step. On the song's grid it is the
+    /// first grid frame at or after `next_step_frame`, placed by the tempo
+    /// map, so a step lands on the same frame at any block size and tempo
+    /// (Spec: arpeggiator R6, R20); otherwise it is `next_step_frame`.
+    fn next_step(&self, audio: &Audio<'_, '_>, c: &Cfg) -> i64 {
+        let Some(unit) = c.grid else {
+            return self.next_step_frame;
+        };
+        let (tempo, rate) = (audio.tempo(), audio.sample_rate());
+        let shift = c.song_start - c.block_start;
+        let from = self.next_step_frame + shift;
+        let k = grid_index(tempo, rate, unit, from);
+        let k = if tempo.ticks_to_frames(Ticks(k * unit), rate).0 < from {
+            k + 1
+        } else {
+            k
+        };
+        tempo.ticks_to_frames(Ticks(k * unit), rate).0 - shift
+    }
+
+    /// Fires every step due before router-clock frame `until`, with what is
+    /// held now.
+    fn run_steps(&mut self, audio: &mut Audio<'_, '_>, c: &Cfg, until: i64) {
+        while !self.held.is_empty() {
+            let step_time = self.next_step(audio, c);
+            if step_time >= until {
+                break;
+            }
+            self.fire_step(audio, c, step_time);
+            self.last_step_frame = step_time;
+            self.next_step_frame = if c.grid.is_some() {
+                step_time + 1
+            } else {
+                step_time + c.step_frames
+            };
+        }
+    }
+
+    fn fire_step(&mut self, audio: &mut Audio<'_, '_>, c: &Cfg, step_time: i64) {
+        let offset_in_block = (step_time - c.block_start).max(0) as u32;
+        // Spec: arpeggiator R20. What waits for its frame and is due
+        // before this step goes out first, whatever the block size.
+        self.router.advance(audio, offset_in_block);
+        let song_frame = c.song_start + i64::from(offset_in_block);
+        let delay = c.swing.map_or(0, |n| {
+            groove_delay(
+                &self.grooves[n],
+                audio.tempo(),
+                audio.sample_rate(),
+                song_frame,
+            )
+        });
+
+        // Spec: arpeggiator R6. Beat restarts the pattern when a step is the
+        // first at or after a boundary of the Interval.
+        if c.retrigger_mode == 2 && c.is_playing {
+            let idx = grid_index(
+                audio.tempo(),
+                audio.sample_rate(),
+                c.interval_ticks,
+                song_frame,
+            );
+            if self.last_interval.is_some_and(|last| last != idx) {
+                self.retrigger(step_time, c.retrigger_vel);
+            }
+            self.last_interval = Some(idx);
+        }
+
+        // Check if repeats limit reached
+        if !(c.repeats == 0 || self.repeats_counted < c.repeats) || self.held.is_empty() {
+            return;
+        }
+        // Calculate velocity with decay if enabled
+        let vel = if c.vel_on {
+            let elapsed = (step_time - self.velocity_start_frame).max(0) as f64;
+            let frac = (elapsed / c.decay_frames).clamp(0.0, 1.0) as f32;
+            (self.initial_velocity + (c.target_vel - self.initial_velocity) * frac)
+                .clamp(1.0 / 127.0, 1.0)
+        } else {
+            self.initial_velocity
+        };
+
+        let channel = self.held[0].channel;
+        let scale = c.scale_at(audio, offset_in_block);
+
+        if c.style == 14 {
+            // Chord Trigger: play all held notes simultaneously
+            let trans = self.transposition_step * c.distance;
+            for h in &self.held {
+                let final_key = scale.move_off(h.key, trans).clamp(0, 127) as u8;
+                let src_key = Key {
+                    channel: h.channel,
+                    key: h.key,
+                    id: h.note_id,
+                };
+                let note_id = Some(self.router.fresh_id());
+                let on = NoteEvent {
+                    offset: offset_in_block,
+                    kind: NoteKind::On,
+                    channel,
+                    key: final_key,
+                    velocity: vel,
+                    note_id,
+                };
+                let off = NoteEvent {
+                    offset: offset_in_block,
+                    kind: NoteKind::Off,
+                    channel,
+                    key: final_key,
+                    velocity: 0.5,
+                    note_id,
+                };
+                let dummy_src = NoteEvent {
+                    offset: offset_in_block,
+                    kind: NoteKind::On,
+                    channel: h.channel,
+                    key: h.key,
+                    velocity: h.velocity,
+                    note_id: h.note_id,
+                };
+                self.router.cut(audio, offset_in_block, |k| {
+                    k.key == final_key && k.channel == channel
+                });
+                if self.router.track(&dummy_src, Some(Key::of(&on))) {
+                    self.router
+                        .sound(audio, on, off, src_key, step_time + delay, c.gate_frames);
+                }
+            }
+
+            // Advance transposition and repeats
+            self.transposition_step += 1;
+            if self.transposition_step > c.steps {
+                self.transposition_step = 0;
+                self.repeats_counted += 1;
+            }
+        } else {
+            // Single note per step
+            // Sort notes based on style into scratch_notes
+            self.scratch_notes.clear();
+            self.scratch_notes.extend_from_slice(&self.held);
+            if c.style == 13 {
+                // Play Order
+                self.scratch_notes.sort_by_key(|n| n.order);
+            } else {
+                self.scratch_notes.sort_by_key(|n| n.key);
+            }
+            let k = self.scratch_notes.len();
+
+            let picked_idx = if c.style == 15 {
+                // Random
+                self.rng.gen_range(k)
+            } else if c.style == 16 {
+                // Random Other
+                if self.random_other_pool.is_empty() {
+                    for i in 0..k {
+                        self.random_other_pool.push(i);
+                    }
+                    // Shuffle
+                    for i in (1..self.random_other_pool.len()).rev() {
+                        let j = self.rng.gen_range(i + 1);
+                        self.random_other_pool.swap(i, j);
+                    }
+                    // Avoid repeating previous last
+                    if self.random_other_pool.len() > 1
+                        && self.random_other_pool.last().copied() == self.last_random_other_idx
+                    {
+                        let last_idx = self.random_other_pool.len() - 1;
+                        self.random_other_pool.swap(0, last_idx);
+                    }
+                }
+                let p = self.random_other_pool.pop().unwrap_or(0);
+                self.last_random_other_idx = Some(p);
+                p
+            } else {
+                self.update_pattern(c.style, k);
+                self.pattern_len = self.pattern_buf.len();
+                if self.pattern_buf.is_empty() {
+                    0
+                } else {
+                    let eff = (self.step_in_pattern + c.offset) % self.pattern_buf.len();
+                    self.pattern_buf[eff]
+                }
+            };
+
+            let chosen = self.scratch_notes[picked_idx.min(self.scratch_notes.len() - 1)];
+            let trans = self.transposition_step * c.distance;
+            let final_key = scale.move_off(chosen.key, trans).clamp(0, 127) as u8;
+
+            let src_key = Key {
+                channel: chosen.channel,
+                key: chosen.key,
+                id: chosen.note_id,
+            };
+            let note_id = Some(self.router.fresh_id());
+            let on = NoteEvent {
+                offset: offset_in_block,
+                kind: NoteKind::On,
+                channel,
+                key: final_key,
+                velocity: vel,
+                note_id,
+            };
+            let off = NoteEvent {
+                offset: offset_in_block,
+                kind: NoteKind::Off,
+                channel,
+                key: final_key,
+                velocity: 0.5,
+                note_id,
+            };
+            let dummy_src = NoteEvent {
+                offset: offset_in_block,
+                kind: NoteKind::On,
+                channel: chosen.channel,
+                key: chosen.key,
+                velocity: chosen.velocity,
+                note_id: chosen.note_id,
+            };
+
+            self.router.cut(audio, offset_in_block, |k| {
+                k.key == final_key && k.channel == channel
+            });
+            if self.router.track(&dummy_src, Some(Key::of(&on))) {
+                self.router
+                    .sound(audio, on, off, src_key, step_time + delay, c.gate_frames);
+            }
+
+            // Advance pattern step
+            if c.style != 15 && c.style != 16 {
+                self.step_in_pattern += 1;
+                if self.pattern_len > 0 && self.step_in_pattern >= self.pattern_len {
+                    self.step_in_pattern = 0;
+                    self.transposition_step += 1;
+                    if self.transposition_step > c.steps {
+                        self.transposition_step = 0;
+                        self.repeats_counted += 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl NativeDevice for Arpeggiator {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let sample_rate = audio.sample_rate().as_f64();
@@ -518,119 +836,29 @@ impl NativeDevice for Arpeggiator {
         }
         self.was_held_mode = hold_mode;
 
-        let style = value(params, STYLE) as usize;
         let is_sync = value(params, SYNC) >= 0.5;
-        let step_frames = if is_sync {
+        let is_playing = audio.playing();
+        let (step_frames, step_ticks) = if is_sync {
             let div_idx = (value(params, RATE_SYNC) as usize).min(DIVISIONS.len() - 1);
             let beats = DIVISIONS[div_idx].1;
-            (beats * 60.0 / bpm * sample_rate).round().max(1.0) as i64
+            (
+                (beats * 60.0 / bpm * sample_rate).round().max(1.0) as i64,
+                (beats * TICKS_PER_QUARTER as f64).round() as i64,
+            )
         } else {
-            (value(params, RATE_MS) * sample_rate / 1000.0)
-                .round()
-                .max(1.0) as i64
+            (
+                (value(params, RATE_MS) * sample_rate / 1000.0)
+                    .round()
+                    .max(1.0) as i64,
+                0,
+            )
         };
 
         let gate = (value(params, GATE) / 100.0).clamp(0.01, 2.0);
-        let gate_frames = ((step_frames as f64) * gate).round().max(1.0) as i64;
-        let offset = value(params, OFFSET) as usize;
-        let retrigger_mode = value(params, RETRIGGER) as usize;
         let interval_idx = (value(params, INTERVAL) as usize).min(INTERVALS.len() - 1);
-        let interval_beats = INTERVALS[interval_idx].1;
-        let interval_frames = (interval_beats * 60.0 / bpm * sample_rate).round().max(1.0) as i64;
-
-        let repeats = value(params, REPEATS) as i32;
-        let distance = value(params, DISTANCE) as i32;
-        let steps = value(params, STEPS) as i32;
-        // Spec: arpeggiator R15, R16. Distance counts degrees of the current
-        // scale, or of the Root and Scale chosen here, or semitones for
-        // Chromatic.
-        let use_scale = use_current_scale(audio, params, USE_SCALE);
-        let chosen_scale = scale_named(value(params, SCALE) as usize)
-            .map_or(OFF, |name| Scale::new(value(params, ROOT) as u8, name));
-        let scale_at = |audio: &Audio<'_, '_>, offset: u32| {
-            if use_scale {
-                audio.scale_at(offset)
-            } else {
-                chosen_scale
-            }
-        };
-
-        let vel_on = value(params, VELOCITY_ON) >= 0.5;
         let decay_ms = value(params, DECAY);
-        let decay_frames = (decay_ms * sample_rate / 1000.0).max(1.0);
-        let target_vel = (value(params, TARGET) as f32 / 127.0).clamp(1.0 / 127.0, 1.0);
-        let retrigger_vel = value(params, RETRIGGER_VELOCITY) >= 0.5;
-
         let block_start = self.router.now();
-        let block_len = audio.frames() as i64;
-        let block_end = block_start + block_len;
-
-        // Process incoming notes in order of offsets
-        for note in audio.notes() {
-            let note_frame = block_start + i64::from(note.offset);
-            self.router.advance(audio, note.offset);
-
-            match note.kind {
-                NoteKind::On => {
-                    self.handle_note_on(
-                        &note,
-                        hold_mode,
-                        note_frame,
-                        retrigger_mode,
-                        retrigger_vel,
-                    );
-                }
-                NoteKind::Off | NoteKind::Choke => {
-                    self.handle_note_off(&note, hold_mode);
-                }
-                NoteKind::Expression { .. } => {
-                    // Forward expression to router; a bend stays in the
-                    // scale (R17).
-                    let scale = scale_at(audio, note.offset);
-                    self.router
-                        .expression_by(audio, &note, |from, to, bend| scale.bend(from, to, bend));
-                }
-                _ => {
-                    audio.send(note);
-                }
-            }
-        }
-
-        // Check if transport playing state changed
-        let is_playing = audio.playing();
-        if is_playing && !self.was_playing {
-            // Align next step to song grid
-            let song_pos = audio.song_position().0;
-            let rem = song_pos % step_frames;
-            let frames_to_next = if rem == 0 { 0 } else { step_frames - rem };
-            self.next_step_frame = block_start + frames_to_next;
-        }
-        self.was_playing = is_playing;
-
-        // If no notes are held, cut sounding arpeggiated notes if hold is off
-        if self.held.is_empty() {
-            self.router.cut(audio, 0, |_| true);
-            // A step still waiting for its grooved frame never sounds.
-            self.router.clear_queue();
-            self.next_step_frame = block_start;
-            self.step_in_pattern = 0;
-            self.transposition_step = 0;
-            self.repeats_counted = 0;
-            self.router.finish(audio);
-            return;
-        }
-
-        // Initialize step timing if behind
-        if self.next_step_frame < block_start {
-            if is_playing {
-                let song_pos = audio.song_position().0;
-                let rem = song_pos % step_frames;
-                let frames_to_next = if rem == 0 { 0 } else { step_frames - rem };
-                self.next_step_frame = block_start + frames_to_next;
-            } else {
-                self.next_step_frame = block_start;
-            }
-        }
+        let song_start = audio.song_position().0;
 
         // Spec: arpeggiator R19. A groove moves steps only while the song
         // plays on its grid, with Sync on.
@@ -642,221 +870,103 @@ impl NativeDevice for Arpeggiator {
             self.grooves[n].set_global_amount(f64::from(audio.groove_amount()) * 100.0);
         }
 
-        // Run arpeggio step scheduler across this block
-        while self.next_step_frame < block_end {
-            let step_time = self.next_step_frame;
-            let offset_in_block = (step_time - block_start).max(0) as u32;
-            // Spec: arpeggiator R20. What waits for its frame and is due
-            // before this step goes out first, whatever the block size.
-            self.router.advance(audio, offset_in_block);
-            let delay = swing.map_or(0, |n| {
-                let song_frame = audio.song_position().0 + i64::from(offset_in_block);
-                groove_delay(
-                    &self.grooves[n],
-                    audio.tempo(),
-                    audio.sample_rate(),
-                    song_frame,
-                )
-            });
+        let c = Cfg {
+            style: value(params, STYLE) as usize,
+            grid: (is_sync && is_playing).then_some(step_ticks),
+            step_frames,
+            gate_frames: ((step_frames as f64) * gate).round().max(1.0) as i64,
+            offset: value(params, OFFSET) as usize,
+            retrigger_mode: value(params, RETRIGGER) as usize,
+            interval_ticks: (INTERVALS[interval_idx].1 * TICKS_PER_QUARTER as f64).round() as i64,
+            repeats: value(params, REPEATS) as i32,
+            distance: value(params, DISTANCE) as i32,
+            steps: value(params, STEPS) as i32,
+            // Spec: arpeggiator R15, R16. Distance counts degrees of the
+            // current scale, or of the Root and Scale chosen here, or
+            // semitones for Chromatic.
+            use_scale: use_current_scale(audio, params, USE_SCALE),
+            chosen_scale: scale_named(value(params, SCALE) as usize)
+                .map_or(OFF, |name| Scale::new(value(params, ROOT) as u8, name)),
+            vel_on: value(params, VELOCITY_ON) >= 0.5,
+            decay_frames: (decay_ms * sample_rate / 1000.0).max(1.0),
+            target_vel: (value(params, TARGET) as f32 / 127.0).clamp(1.0 / 127.0, 1.0),
+            retrigger_vel: value(params, RETRIGGER_VELOCITY) >= 0.5,
+            swing,
+            is_playing,
+            block_start,
+            song_start,
+        };
 
-            // Check Beat retriggering
-            if retrigger_mode == 2 && is_playing {
-                let song_pos_at_step = audio.song_position().0 + i64::from(offset_in_block);
-                if song_pos_at_step % interval_frames == 0 {
-                    self.retrigger(step_time, retrigger_vel);
-                }
-            }
-
-            // Check if repeats limit reached
-            let can_play = repeats == 0 || self.repeats_counted < repeats;
-
-            if can_play && !self.held.is_empty() {
-                // Calculate velocity with decay if enabled
-                let vel = if vel_on {
-                    let elapsed = (step_time - self.velocity_start_frame).max(0) as f64;
-                    let frac = (elapsed / decay_frames).clamp(0.0, 1.0) as f32;
-                    (self.initial_velocity + (target_vel - self.initial_velocity) * frac)
-                        .clamp(1.0 / 127.0, 1.0)
-                } else {
-                    self.initial_velocity
-                };
-
-                let channel = self.held[0].channel;
-                let scale = scale_at(audio, offset_in_block);
-
-                if style == 14 {
-                    // Chord Trigger: play all held notes simultaneously
-                    let trans = self.transposition_step * distance;
-                    for h in &self.held {
-                        let final_key = scale.move_off(h.key, trans).clamp(0, 127) as u8;
-                        let src_key = Key {
-                            channel: h.channel,
-                            key: h.key,
-                            id: h.note_id,
-                        };
-                        let note_id = Some(self.router.fresh_id());
-                        let on = NoteEvent {
-                            offset: offset_in_block,
-                            kind: NoteKind::On,
-                            channel,
-                            key: final_key,
-                            velocity: vel,
-                            note_id,
-                        };
-                        let off = NoteEvent {
-                            offset: offset_in_block,
-                            kind: NoteKind::Off,
-                            channel,
-                            key: final_key,
-                            velocity: 0.5,
-                            note_id,
-                        };
-                        let dummy_src = NoteEvent {
-                            offset: offset_in_block,
-                            kind: NoteKind::On,
-                            channel: h.channel,
-                            key: h.key,
-                            velocity: h.velocity,
-                            note_id: h.note_id,
-                        };
-                        self.router.cut(audio, offset_in_block, |k| {
-                            k.key == final_key && k.channel == channel
-                        });
-                        if self.router.track(&dummy_src, Some(Key::of(&on))) {
-                            self.router.sound(
-                                audio,
-                                on,
-                                off,
-                                src_key,
-                                step_time + delay,
-                                gate_frames,
-                            );
-                        }
-                    }
-
-                    // Advance transposition and repeats
-                    self.transposition_step += 1;
-                    if self.transposition_step > steps {
-                        self.transposition_step = 0;
-                        self.repeats_counted += 1;
-                    }
-                } else {
-                    // Single note per step
-                    // Sort notes based on style into scratch_notes
-                    self.scratch_notes.clear();
-                    self.scratch_notes.extend_from_slice(&self.held);
-                    if style == 13 {
-                        // Play Order
-                        self.scratch_notes.sort_by_key(|n| n.order);
-                    } else {
-                        self.scratch_notes.sort_by_key(|n| n.key);
-                    }
-                    let k = self.scratch_notes.len();
-
-                    let picked_idx = if style == 15 {
-                        // Random
-                        self.rng.gen_range(k)
-                    } else if style == 16 {
-                        // Random Other
-                        if self.random_other_pool.is_empty() {
-                            for i in 0..k {
-                                self.random_other_pool.push(i);
-                            }
-                            // Shuffle
-                            for i in (1..self.random_other_pool.len()).rev() {
-                                let j = self.rng.gen_range(i + 1);
-                                self.random_other_pool.swap(i, j);
-                            }
-                            // Avoid repeating previous last
-                            if self.random_other_pool.len() > 1
-                                && self.random_other_pool.last().copied()
-                                    == self.last_random_other_idx
-                            {
-                                let last_idx = self.random_other_pool.len() - 1;
-                                self.random_other_pool.swap(0, last_idx);
-                            }
-                        }
-                        let p = self.random_other_pool.pop().unwrap_or(0);
-                        self.last_random_other_idx = Some(p);
-                        p
-                    } else {
-                        self.update_pattern(style, k);
-                        self.pattern_len = self.pattern_buf.len();
-                        if self.pattern_buf.is_empty() {
-                            0
-                        } else {
-                            let eff = (self.step_in_pattern + offset) % self.pattern_buf.len();
-                            self.pattern_buf[eff]
-                        }
-                    };
-
-                    let chosen = self.scratch_notes[picked_idx.min(self.scratch_notes.len() - 1)];
-                    let trans = self.transposition_step * distance;
-                    let final_key = scale.move_off(chosen.key, trans).clamp(0, 127) as u8;
-
-                    let src_key = Key {
-                        channel: chosen.channel,
-                        key: chosen.key,
-                        id: chosen.note_id,
-                    };
-                    let note_id = Some(self.router.fresh_id());
-                    let on = NoteEvent {
-                        offset: offset_in_block,
-                        kind: NoteKind::On,
-                        channel,
-                        key: final_key,
-                        velocity: vel,
-                        note_id,
-                    };
-                    let off = NoteEvent {
-                        offset: offset_in_block,
-                        kind: NoteKind::Off,
-                        channel,
-                        key: final_key,
-                        velocity: 0.5,
-                        note_id,
-                    };
-                    let dummy_src = NoteEvent {
-                        offset: offset_in_block,
-                        kind: NoteKind::On,
-                        channel: chosen.channel,
-                        key: chosen.key,
-                        velocity: chosen.velocity,
-                        note_id: chosen.note_id,
-                    };
-
-                    self.router.cut(audio, offset_in_block, |k| {
-                        k.key == final_key && k.channel == channel
-                    });
-                    if self.router.track(&dummy_src, Some(Key::of(&on))) {
-                        self.router
-                            .sound(audio, on, off, src_key, step_time + delay, gate_frames);
-                    }
-
-                    // Advance pattern step
-                    if style != 15 && style != 16 {
-                        self.step_in_pattern += 1;
-                        if self.pattern_len > 0 && self.step_in_pattern >= self.pattern_len {
-                            self.step_in_pattern = 0;
-                            self.transposition_step += 1;
-                            if self.transposition_step > steps {
-                                self.transposition_step = 0;
-                                self.repeats_counted += 1;
-                            }
-                        }
-                    }
-                }
-            }
-
-            self.next_step_frame += step_frames;
+        // Steps stay in the phase they had when they leave the song's grid.
+        if self.was_grid && c.grid.is_none() {
+            self.next_step_frame = (self.last_step_frame + step_frames).max(self.next_step_frame);
+        }
+        self.was_grid = c.grid.is_some();
+        // A transport start puts the next step on the song's grid.
+        if is_playing && !self.was_playing {
+            self.next_step_frame = block_start;
+        }
+        self.was_playing = is_playing;
+        if !is_playing {
+            self.last_interval = None;
         }
 
+        // Nothing held (Hold turned off, say): end what still sounds.
+        if self.held.is_empty() {
+            self.stop(audio, 0);
+        }
+
+        // Spec: arpeggiator R20. Each input note is applied on its own frame:
+        // the steps before it play with what was held until then, and the
+        // note ends or starts a pattern there.
+        for note in audio.notes() {
+            let note_frame = block_start + i64::from(note.offset);
+            self.run_steps(audio, &c, note_frame);
+            self.router.advance(audio, note.offset);
+
+            match note.kind {
+                NoteKind::On => {
+                    let was_empty = self.held.is_empty();
+                    self.handle_note_on(
+                        &note,
+                        hold_mode,
+                        note_frame,
+                        c.retrigger_mode,
+                        c.retrigger_vel,
+                    );
+                    if was_empty && !self.held.is_empty() {
+                        self.next_step_frame = note_frame;
+                    }
+                }
+                NoteKind::Off | NoteKind::Choke => {
+                    self.handle_note_off(&note, hold_mode);
+                }
+                NoteKind::Expression { .. } => {
+                    // Forward expression to router; a bend stays in the
+                    // scale (R17).
+                    let scale = c.scale_at(audio, note.offset);
+                    self.router
+                        .expression_by(audio, &note, |from, to, bend| scale.bend(from, to, bend));
+                }
+                _ => {
+                    audio.send(note);
+                }
+            }
+            // If no notes are held, cut sounding arpeggiated notes if hold is
+            // off, at the frame the last key went up.
+            if self.held.is_empty() {
+                self.stop(audio, note.offset);
+            }
+        }
+
+        self.run_steps(audio, &c, block_start + audio.frames() as i64);
         self.router.finish(audio);
     }
 
     fn release(&mut self, out: &mut NoteBuffer) {
         self.router.release(out);
         self.held.clear();
+        self.last_interval = None;
         self.random_once_pattern.clear();
         self.random_other_pool.clear();
         self.scratch_notes.clear();

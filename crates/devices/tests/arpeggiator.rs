@@ -5,16 +5,18 @@
 //! Every block is a real-time section under the allocation trap.
 
 use crate::common;
-use bl_core::time::Bpm;
+use bl_core::time::{Bpm, Ticks};
 use bl_devices::arpeggiator::{
-    ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, GROOVE_CHOICES, HOLD, OFFSET, RATE_MS, RATE_SYNC,
-    REPEATS, RETRIGGER, ROOT, SCALE, STEPS, STYLE, SYNC, TARGET, USE_SCALE, VELOCITY_ON,
+    ARPEGGIATOR, DECAY, DISTANCE, GATE, GROOVE, GROOVE_CHOICES, HOLD, INTERVAL, OFFSET, RATE_MS,
+    RATE_SYNC, REPEATS, RETRIGGER, ROOT, SCALE, STEPS, STYLE, SYNC, TARGET, USE_SCALE, VELOCITY_ON,
 };
 use bl_engine::NoteKind;
 use bl_engine::scales::ScaleRuns;
 use bl_model::{Command, Scale, ScaleName};
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
-use common::{bend, bends, device, keys_on, node, on, registry, scaled_through};
+use common::{
+    bend, bends, device, keys_on, node, notes_through, off, on, registry, scaled_through,
+};
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
@@ -395,6 +397,169 @@ fn a_note_waiting_for_its_frame_when_the_key_goes_up_never_sounds() {
         "the held note never sounds"
     );
     assert!(nothing_hangs(&heard));
+}
+
+// Spec: arpeggiator R12, R20. A grooved step that sounds just before the key
+// goes up in the same block is ended after it sounds, never before.
+#[test]
+fn a_grooved_step_that_sounds_just_before_the_key_goes_up_is_ended_after_it() {
+    let mut chain = Chain::new(4096);
+    chain.effect(
+        ARPEGGIATOR,
+        &[
+            (RATE_SYNC, SIXTEENTHS),
+            (GROOVE, SWING_16THS_60),
+            (STEPS, 0.0),
+        ],
+    );
+    // The key goes up at frame 7,210, ten frames after the grooved second
+    // step (6,000 moved to 7,200) in the same 64-frame block.
+    let mut n = note(60, 0, 1);
+    n.length = Ticks(common::chain::BEAT.get() * 721 / 2400);
+    chain.clip(8, [n]);
+    chain.sync();
+    chain.play();
+    chain.run(BEAT_FRAMES as usize, 64);
+    let heard = chain.heard();
+    assert_eq!(times(&heard, NoteKind::On), [0, 7200]);
+    let mut sounding = 0;
+    for h in &heard {
+        match h.1 {
+            NoteKind::On => sounding += 1,
+            NoteKind::Off | NoteKind::Choke => sounding -= 1,
+            _ => {}
+        }
+        assert!(sounding >= 0, "an off before its on: {heard:?}");
+    }
+    assert_eq!(sounding, 0, "{heard:?}");
+    assert!(times(&heard, NoteKind::Off).last().unwrap() > &7200);
+}
+
+// Spec: arpeggiator R6. Beat restarts the pattern at each Interval boundary
+// at any tempo, though a step is not a whole number of frames.
+#[test]
+fn beat_retrigger_restarts_on_bar_lines_at_140_bpm() {
+    let mut chain = Chain::new(4096);
+    chain.apply(Command::SetTempo {
+        tempo: bl_core::time::TempoMap::constant(Bpm::new(140.0).unwrap()),
+    });
+    // 1/16 steps, Retrigger Beat, Interval 1 bar, Up.
+    chain.effect(
+        ARPEGGIATOR,
+        &[
+            (SYNC, 1.0),
+            (RATE_SYNC, SIXTEENTHS),
+            (RETRIGGER, 2.0),
+            (INTERVAL, 4.0),
+            (STYLE, 0.0),
+            (STEPS, 0.0),
+        ],
+    );
+    chain.clip(16, [note(60, 0, 12), note(64, 0, 12), note(67, 0, 12)]);
+    chain.sync();
+    chain.play();
+    let bar = 4.0 * 60.0 / 140.0 * 48_000.0;
+    chain.run((3.2 * bar) as usize, 512);
+    let heard = chain.heard();
+    let on_t = times(&heard, NoteKind::On);
+    let on_k = keys(&heard, NoteKind::On);
+    // Sixteen steps fit a bar and 16 mod 3 is 1: without the retrigger, the
+    // second bar would start on 64.
+    for b in 1..3 {
+        let line = (f64::from(b) * bar).floor() as i64;
+        let i = on_t.iter().position(|&t| t >= line - 2).unwrap();
+        assert_eq!(on_k[i], 60, "bar {} restarts on 60", b + 1);
+        assert!(
+            on_t[i] <= line + 2,
+            "bar {}: the step is on the line",
+            b + 1
+        );
+    }
+}
+
+// Spec: arpeggiator R20. A step never sounds before its key, whatever the
+// block size, with the transport stopped.
+#[test]
+fn a_step_never_sounds_before_its_key_with_the_transport_stopped() {
+    let device = device(&bl_devices::arpeggiator_type(), &[(STEPS, 0.0)]);
+    let mut arp = node(&registry(), &device, 4096);
+    let sent = notes_through(arp.as_mut(), &[on(300, 60, 1)], 512);
+    let first = sent.iter().find(|n| n.kind == NoteKind::On).unwrap();
+    assert_eq!((first.key, first.offset), (60, 300));
+
+    let mut arp = node(&registry(), &device, 4096);
+    let mut first = None;
+    for block in 0..6u32 {
+        let held: Vec<_> = (block == 4).then(|| on(44, 60, 1)).into_iter().collect();
+        let sent = notes_through(arp.as_mut(), &held, 64);
+        first = first.or(sent
+            .iter()
+            .find(|n| n.kind == NoteKind::On)
+            .map(|n| i64::from(block) * 64 + i64::from(n.offset)));
+    }
+    assert_eq!(first, Some(300));
+}
+
+// Spec: arpeggiator R20. The arpeggiated note ends where the key goes up in
+// the block, not at the block's first frame.
+#[test]
+fn a_release_in_the_middle_of_a_block_ends_the_arpeggiated_note_there() {
+    // 50 ms steps are 2,400 frames: the second sounds 352 frames into the
+    // fifth 512-frame block, and the key goes up at 400.
+    let device = device(
+        &bl_devices::arpeggiator_type(),
+        &[(SYNC, 0.0), (RATE_MS, 50.0)],
+    );
+    let mut arp = node(&registry(), &device, 4096);
+    let mut heard = vec![];
+    for block in 0..5 {
+        let notes = match block {
+            0 => vec![on(0, 60, 1)],
+            4 => vec![off(400, 60, 1)],
+            _ => vec![],
+        };
+        heard.extend(
+            notes_through(arp.as_mut(), &notes, 512)
+                .into_iter()
+                .map(|n| (block, n)),
+        );
+    }
+    let on = heard
+        .iter()
+        .find(|(b, n)| *b == 4 && n.kind == NoteKind::On)
+        .unwrap();
+    assert_eq!(on.1.offset, 352, "the step at frame 2,400 sounds first");
+    let off = heard
+        .iter()
+        .rfind(|(b, n)| *b == 4 && n.kind == NoteKind::Off)
+        .unwrap();
+    assert_eq!(off.1.offset, 400);
+}
+
+// Spec: arpeggiator R20. The same song gives the same notes at any block
+// size, as a live buffer and an export see it.
+#[test]
+fn the_notes_are_the_same_at_any_block_size_when_keys_go_up_between_steps() {
+    let run = |size: usize| {
+        let mut chain = Chain::new(4096);
+        chain.effect(ARPEGGIATOR, &[(RATE_SYNC, SIXTEENTHS), (STEPS, 1.0)]);
+        // Half-beat notes on each beat, so the key goes up between steps.
+        let notes = (0..8).map(|b| {
+            let mut n = note(36, b, 1);
+            n.length = Ticks(n.length.get() / 2 + 5_000);
+            n
+        });
+        chain.clip(8, notes);
+        chain.sync();
+        chain.play();
+        chain.run(8 * BEAT_FRAMES as usize, size);
+        chain.heard()
+    };
+    let reference = run(512);
+    assert!(!reference.is_empty());
+    for size in [1, 64, 100, 256, 4096] {
+        assert_eq!(run(size), reference, "block size {size}");
+    }
 }
 
 // Spec: arpeggiator R11. Random styles are deterministic and repeat identically.

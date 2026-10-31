@@ -11,6 +11,7 @@
 //!      "media": [ { "hash": "…", "path": "Samples/Imported/Kick.wav", "size": 88244 } ],
 //!      "windows": { "12": { "x": 80, "y": 120, "width": 320, "height": 174 } },
 //!      "rack_views": { "14": { "macros": false, "chain_list": true, "devices": true } },
+//!      "pages": { "14": { "Tabs": "Filter" } }, the page each device's pages nodes show
 //!      "folds": [ 12, 15 ],     the clips whose note editors are folded
 //!      "scale_folds": [ 12 ],   the clips whose note editors are folded to their scale
 //!      "midi_tools": { … },     the MIDI Tools' chosen tools and settings
@@ -43,8 +44,8 @@ use std::io::Read;
 
 use bl_core::id::IdAllocator;
 use bl_model::{
-    ClipFolds, ColumnWidths, DeviceWindows, Document, Editor, LaneViews, LaunchSettings, MpeView,
-    MultisamplerViews, RackViewMap, WindowViews,
+    ClipFolds, ColumnWidths, DevicePages, DeviceWindows, Document, Editor, LaneViews,
+    LaunchSettings, MpeView, MultisamplerViews, RackViewMap, WindowViews,
 };
 use ruzstd::decoding::StreamingDecoder;
 use ruzstd::encoding::{CompressionLevel, compress_to_vec};
@@ -85,6 +86,10 @@ pub struct Project {
     /// of the document, so showing and hiding them is no undo step (the
     /// racks spec, R19).
     pub rack_views: RackViewMap,
+    /// The page each device's pages nodes show (WP-8.1): saved with the set,
+    /// but not part of the document, so switching pages is no undo step (the
+    /// device framework spec, R43).
+    pub pages: DevicePages,
     /// Which clips' MIDI Note Editors are folded to the rows that hold notes
     /// (WP-2.3): saved with the set, but not part of the document, so
     /// folding is no undo step.
@@ -140,6 +145,7 @@ impl Project {
             media,
             windows: DeviceWindows::new(),
             rack_views: RackViewMap::new(),
+            pages: DevicePages::new(),
             folds: ClipFolds::new(),
             scale_folds: ClipFolds::new(),
             midi_tools: MidiToolSettings::default(),
@@ -166,6 +172,20 @@ impl Project {
                         .is_some_and(|d| d.rack_kind().is_some())
             })
             .map(|(rack, shown)| (*rack, *shown))
+            .collect();
+        self
+    }
+
+    /// The same project with these pages, keeping only those of devices its
+    /// document has that name a page.
+    #[must_use]
+    pub fn with_pages(mut self, pages: &DevicePages) -> Self {
+        self.pages = pages
+            .iter()
+            .filter(|(device, choice)| {
+                !choice.is_empty() && self.document.device(**device).is_some()
+            })
+            .map(|(device, choice)| (*device, choice.clone()))
             .collect();
         self
     }
@@ -361,6 +381,8 @@ struct Saving<'a> {
     windows: &'a DeviceWindows,
     #[serde(skip_serializing_if = "RackViewMap::is_empty")]
     rack_views: &'a RackViewMap,
+    #[serde(skip_serializing_if = "DevicePages::is_empty")]
+    pages: &'a DevicePages,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
     folds: &'a ClipFolds,
     #[serde(skip_serializing_if = "ClipFolds::is_empty")]
@@ -393,6 +415,7 @@ impl<'a> Saving<'a> {
             media: &project.media,
             windows: &project.windows,
             rack_views: &project.rack_views,
+            pages: &project.pages,
             folds: &project.folds,
             scale_folds: &project.scale_folds,
             midi_tools: &project.midi_tools,
@@ -424,6 +447,10 @@ struct Saved {
     windows: DeviceWindows,
     #[serde(default)]
     rack_views: RackViewMap,
+    /// The page each device's pages nodes show (WP-8.1). Sets saved before
+    /// it open every device on its first pages.
+    #[serde(default)]
+    pages: DevicePages,
     #[serde(default)]
     folds: ClipFolds,
     /// The clips folded to their scale (WP-6.7b). Sets saved before it open
@@ -559,6 +586,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         media,
         windows,
         rack_views,
+        pages,
         folds,
         scale_folds,
         midi_tools,
@@ -592,6 +620,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         media,
         windows: DeviceWindows::new(),
         rack_views: RackViewMap::new(),
+        pages: DevicePages::new(),
         folds: ClipFolds::new(),
         scale_folds: ClipFolds::new(),
         midi_tools: MidiToolSettings::default(),
@@ -604,6 +633,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
     }
     .with_windows(&windows)
     .with_rack_views(&rack_views)
+    .with_pages(&pages)
     .with_folds(&folds)
     .with_scale_folds(&scale_folds)
     .with_mpe_view(&mpe_view)
@@ -836,6 +866,45 @@ mod tests {
         damaged["windows"][device.0.get().to_string()]["width"] = json!(-1.0);
         damaged["windows"]["9999"] = json!({ "x": 0, "y": 0, "width": 10, "height": 10 });
         assert!(load_json(&damaged).unwrap().0.windows.is_empty());
+    }
+
+    // Spec: device-framework R43
+    #[test]
+    fn pages_are_saved_beside_the_document() {
+        let mut editor = song().editor();
+        let track = editor.document().top_level().next().unwrap();
+        let device: bl_model::DeviceId = editor.new_id();
+        editor
+            .apply(Command::InsertDevice {
+                track,
+                index: 0,
+                device: bl_model::Device::new(
+                    device,
+                    "Utility",
+                    bl_model::DeviceKind::Native {
+                        device_type: "beatlayer.utility".to_owned(),
+                    },
+                ),
+            })
+            .unwrap();
+        let gone = bl_model::DeviceId(Id::new(9_999).unwrap());
+        let choice = bl_model::PageChoice::from([("Tabs".to_owned(), "Filter".to_owned())]);
+        let pages = DevicePages::from([(device, choice.clone()), (gone, choice.clone())]);
+        let project = Project::from_editor(&editor, Media::new()).with_pages(&pages);
+        // Only the pages of devices the set has are kept.
+        assert_eq!(project.pages, DevicePages::from([(device, choice)]));
+        let value = json_of(&project, 1);
+        assert_eq!(
+            value["pages"][device.0.get().to_string()],
+            json!({ "Tabs": "Filter" })
+        );
+        let (loaded, _) = load_json(&value).unwrap();
+        assert_eq!(loaded, project);
+        // No pages, no `pages`: older sets read the same, on first pages.
+        assert!(json_of(&song(), 1).get("pages").is_none());
+        let mut older = value;
+        older.as_object_mut().unwrap().remove("pages");
+        assert!(load_json(&older).unwrap().0.pages.is_empty());
     }
 
     // Spec: racks R19

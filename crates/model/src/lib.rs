@@ -147,7 +147,7 @@ pub use device_display::{
     DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
     SpectrogramGrid,
 };
-pub use device_layout::DeviceLayout;
+pub use device_layout::{DeviceLayout, DevicePages, PageChoice};
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};
 pub use error::ModelError;

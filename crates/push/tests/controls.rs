@@ -55,7 +55,10 @@ fn every_control_in_the_table_decodes_and_lights_its_led_with_the_right_message(
             "{}",
             button.name
         );
+        // Stop Clip reaches the content too, but the surface lights it
+        // itself, as it works in every mode (push-2-tracks R68).
         if !is_core(button.name)
+            && button.name != "stop_clip"
             && !button.name.starts_with("upper_")
             && !button.name.starts_with("scene_")
         {

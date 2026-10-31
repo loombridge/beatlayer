@@ -589,6 +589,32 @@ pub enum SamplerTab {
     Midi,
 }
 
+impl SamplerTab {
+    /// The name of the pages node the five tabs are (device framework R41).
+    pub const PAGES: &'static str = "Tabs";
+
+    /// The five tabs, in order.
+    pub const ALL: [Self; 5] = [
+        Self::Sample,
+        Self::PitchOsc,
+        Self::FilterGlobal,
+        Self::Modulation,
+        Self::Midi,
+    ];
+
+    /// The tab's name in the title bar, which is its page's name.
+    #[must_use]
+    pub const fn page_name(self) -> &'static str {
+        match self {
+            Self::Sample => "Sample",
+            Self::PitchOsc => "Pitch/Osc",
+            Self::FilterGlobal => "Filter/Global",
+            Self::Modulation => "Modulation",
+            Self::Midi => "MIDI",
+        }
+    }
+}
+
 /// How tall the zone editor's rows are (R10): a right-click offers Small,
 /// Medium and Large, which change only the view.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

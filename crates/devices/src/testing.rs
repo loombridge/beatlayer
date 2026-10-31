@@ -8,6 +8,7 @@
 //! | [`SCOPE`] | Framework Test Scope | passes audio through; a display cell between control bands, with a row inside its bottom edge | its own |
 //! | [`SPECTROGRAM`] | Framework Test Spectrogram | passes audio through; a display cell that draws a spectrogram of it from `bl_dsp::stft` | its own |
 //! | [`EFFECTS`] | Framework Test Effects | the effects' shared parts: an LFO tremolo, or the LFO's or the envelope follower's value as the output; a menu option and an expanded part | its own |
+//! | [`PAGES`] | Framework Test Pages | passes audio through; tabs of three pages in the body beside a shell of three sections and its display | its own |
 //!
 //! Between them they have a parameter of every kind: gains, continuous
 //! values with linear and logarithmic tapers, toggles, choices, and whole
@@ -16,7 +17,10 @@
 use bl_dsp::stft::{self, Stft, Window};
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, Registry};
-use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
+use bl_model::device_layout::{
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
+    Widget,
+};
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole,
     DisplaySpectrogram, ParamDescriptor, ParamId, ParamUnit, SpectrogramGrid,
@@ -37,6 +41,8 @@ pub const SPECTROGRAM: &str = "test.framework.spectrogram";
 
 /// The test effects' device type.
 pub const EFFECTS: &str = "test.framework.effects";
+/// The test pages' device type.
+pub const PAGES: &str = "test.framework.pages";
 
 /// The utility's gain: −∞ to +12 dB, 0 dB by default.
 pub const UTILITY_GAIN: ParamId = ParamId(0);
@@ -268,6 +274,83 @@ pub fn spectrogram_display(
     }
 }
 
+/// The pages node of the test pages' body, in the tab style.
+pub const PAGES_TABS: &str = "Body";
+/// The pages node of the test pages' shell.
+pub const PAGES_SHELL: &str = "Shell";
+/// The pages node of the test pages' title-bar tabs.
+pub const PAGES_TITLE: &str = "Title";
+
+/// The test pages' type (WP-8.1): three tabs in the body (Osc with
+/// parameters 0 and 1, Filter with 2 and 3, Amp with 4 and a display cell),
+/// beside a shell of three sections (parameters 5 to 7), each with a page
+/// in the display area (parameters 8 to 10), and two pages in tabs in the
+/// title bar (parameters 11 and 12).
+#[must_use]
+pub fn pages_type() -> DeviceType {
+    let params: Vec<ParamDescriptor> = (0..13)
+        .map(|n| {
+            ParamDescriptor::continuous(
+                ParamId(n),
+                &format!("P{n}"),
+                (0.0, 100.0),
+                0.0,
+                ParamUnit::Percent,
+            )
+            .describe("A parameter whose control sits on one page.")
+        })
+        .collect();
+    let band = |height, first: u32, count: u32| {
+        LayoutNode::Band(ControlBand::stacked(
+            height,
+            &(first..first + count)
+                .map(|n| (ParamId(n), Widget::Knob))
+                .collect::<Vec<_>>(),
+        ))
+    };
+    let tab_height = BODY_HEIGHT - TAB_HEIGHT;
+    let page = |name, node| Page::new(name, node);
+    let section = |name, param, display| {
+        page(name, band(BODY_HEIGHT, display, 1)).with_section(band(60.0, param, 1))
+    };
+    let layout = DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Pages(PagesNode::new(
+            PAGES_TABS,
+            PageStyle::Tabs,
+            vec![
+                page("Osc", band(tab_height, 0, 2)),
+                page("Filter", band(tab_height, 2, 2)),
+                page(
+                    "Amp",
+                    LayoutNode::Row(vec![
+                        band(tab_height, 4, 1),
+                        LayoutNode::Cell(DisplayCell::new("Amp Graph", 80.0, tab_height, 1.0)),
+                    ]),
+                ),
+            ],
+        )),
+        LayoutNode::Pages(PagesNode::new(
+            PAGES_SHELL,
+            PageStyle::Shell,
+            vec![
+                section("Env", 5, 8),
+                section("LFO", 6, 9),
+                section("Out", 7, 10),
+            ],
+        )),
+        LayoutNode::Pages(PagesNode::new(
+            PAGES_TITLE,
+            PageStyle::TitleBar,
+            vec![
+                page("Main", band(BODY_HEIGHT, 11, 1)),
+                page("Aux", band(BODY_HEIGHT, 12, 1)),
+            ],
+        )),
+    ]));
+    DeviceType::native(PAGES, "Framework Test Pages", DeviceRole::AudioEffect)
+        .with_description(DeviceDescription::new(params).with_layout(layout))
+}
+
 /// The test effects' type: every shared part of the effects (WP-5.42), a
 /// menu option and an expanded part.
 #[must_use]
@@ -379,6 +462,7 @@ pub fn device_types() -> Vec<DeviceType> {
         scope_type(),
         spectrogram_type(),
         effects_type(),
+        pages_type(),
     ]
 }
 
@@ -391,6 +475,7 @@ pub fn register(registry: &mut Registry) {
         Spectrogram::new(config)
     });
     add(registry, effects_type(), Effects::new);
+    add(registry, pages_type(), |_, _| Scope);
 }
 
 /// The engine's own devices and the test devices.

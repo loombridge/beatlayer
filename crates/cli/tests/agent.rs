@@ -2984,6 +2984,73 @@ fn an_agent_inserts_roar_sets_its_parameters_by_id_and_reads_each_stages_curve()
     );
 }
 
+// Spec: pedal R10 (WP-8.41): an agent inserts Pedal by its type, sets its
+// parameters by ID (the type, Gain, the Mid switch, Output, Hi-Quality) and
+// reads every one back with its descriptor.
+#[test]
+fn an_agent_inserts_pedal_and_sets_and_reads_back_its_parameters() {
+    use bl_devices::pedal::{GAIN, HI_QUALITY, MID_FREQUENCY, OUTPUT, PEDAL, SUB, TYPE};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("pedal-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": "Pedal"}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Pedal", "commands": [
+            { "command": "device.insert",
+              "args": { "track": track, "index": 0,
+                        "device": { "id": {"$new": "Pedal"}, "name": "Pedal",
+                                    "kind": { "native": { "device_type": PEDAL } },
+                                    "enabled": true, "params": [] } } },
+            set(TYPE, 2.0),
+            set(GAIN, 80.0),
+            set(MID_FREQUENCY, 2.0),
+            set(SUB, 9.0),
+            set(OUTPUT, 0.5),
+            set(HI_QUALITY, 1.0),
+        ] }),
+    );
+    let device = reply["ids"]["Pedal"].clone();
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(params.len(), 10, "every parameter is listed");
+    let get = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))
+            .clone()
+    };
+    let values: Vec<_> = [TYPE, GAIN, MID_FREQUENCY, SUB, OUTPUT, HI_QUALITY]
+        .iter()
+        .map(|id| get(*id)["value"].clone())
+        .collect();
+    assert_eq!(
+        values,
+        [
+            json!(2.0),
+            json!(80.0),
+            json!(2.0),
+            json!(9.0),
+            json!(0.5),
+            json!(1.0)
+        ]
+    );
+    assert_eq!(get(HI_QUALITY)["menu_option"], json!(true));
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+}
+
 // Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an
 // agent inserts Shifter by its type with its MIDI sidechain, sets its
 // parameters by ID, points its MIDI source at a MIDI track and reads both

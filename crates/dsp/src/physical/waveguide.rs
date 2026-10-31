@@ -593,8 +593,10 @@ fn tap<S: F32s>(
     for (i, value) in out.iter_mut().enumerate().take(S::LANES) {
         let voice = lane + i;
         let at = delay[voice];
-        let whole = at.floor();
-        let f = at - whole;
+        // Steps can add up to a hair under the one sample a tap stops at.
+        let read = at.max(1.0);
+        let whole = read.floor();
+        let f = read - whole;
         let back = whole as usize;
         let sample = |k: usize| ring[(cursor.wrapping_sub(k) & mask) * stride + voice];
         let (a, b, c, d) = (

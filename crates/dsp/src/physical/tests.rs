@@ -1289,3 +1289,25 @@ fn a_tap_that_has_moved_stays_where_it_was_put() {
     // Heard at the middle, the even harmonics are gone: after a second the tap hasn't drifted off.
     assert!(dft(&left, 48_000.0, 440.0) < dft(&left, 48_000.0, 220.0) * 1e-3);
 }
+
+#[test]
+fn a_tap_moved_to_an_end_never_reads_ahead_of_the_ring() {
+    // The steps of a moving tap can add up to a hair under the one sample it
+    // stops at; the next read must still be at least a sample back.
+    let params = ringing(220.0);
+    let mut bank = guide(RATE, Kind::String, &params);
+    guide_render(&mut bank, &impulse(1000, 0, 1.0));
+    for position in [0.31, 0.0, 0.47, 0.0, 0.123, 0.0] {
+        bank.set_params(
+            0,
+            &WaveguideParams {
+                excite: position,
+                pickup_l: position,
+                pickup_r: position,
+                ..params
+            },
+        );
+        let (left, right) = guide_render(&mut bank, &impulse(4_800, 0, 1.0));
+        assert!(left.iter().chain(&right).all(|v| v.is_finite()));
+    }
+}

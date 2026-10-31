@@ -193,6 +193,131 @@ fn expand_mode_raises_the_output_above_the_threshold() {
     assert!(curve_db(&params, -30.0, None).abs() < 0.1);
 }
 
+// Spec: compressor R4
+#[test]
+fn expand_follows_the_louder_channel() {
+    // A steady level on the left alone, 10 dB over the threshold: a ratio
+    // of 1 to 2 asks for +10 dB, whatever the silent right channel does.
+    let frames = 48_000;
+    let params = [
+        (THRESHOLD, -20.0),
+        (RATIO, 2.0),
+        (KNEE, 0.0),
+        (MODE, 2.0),
+        (ATTACK, 0.1),
+        (RELEASE, 1.0),
+    ];
+    let mut node = squeeze(&params, frames);
+    let mut data = vec![0.0f32; 2 * frames];
+    data[..frames].fill(db_to_gain(-10.0) as f32);
+    let mut block = Block::new(
+        &mut data,
+        2,
+        frames,
+        frames,
+        &[],
+        TransportInfo::default(),
+        RATE,
+    );
+    bl_rt::rt_test!({ node.process(&mut block) });
+    let db = 20.0 * f64::from(data[frames - 1]).log10();
+    assert!(db.abs() < 0.5, "left level {db} dBFS, expected about 0");
+}
+
+// Spec: compressor R5
+#[test]
+fn expand_mode_attack_and_release_are_their_parameters() {
+    const ATTACK_MS: f64 = 5.0;
+    const RELEASE_MS: f64 = 200.0;
+    let quiet = db_to_gain(-40.0) as f32;
+    let mut input = vec![quiet; 2_000];
+    input.extend(vec![db_to_gain(-10.0) as f32; 48_000]);
+    input.extend(vec![quiet; 48_000]);
+    let params = [
+        (THRESHOLD, -20.0),
+        (RATIO, 2.0),
+        (KNEE, 0.0),
+        (MODE, 2.0),
+        (ATTACK, ATTACK_MS),
+        (RELEASE, RELEASE_MS),
+    ];
+    let mut node = squeeze(&params, 256);
+    let out = stream(node.as_mut(), &input, 256, None);
+
+    // The -10 dB input is 10 dB over the threshold: the gain heads for
+    // +10 dB, which brings the output to 0 dBFS, with Attack.
+    let attack: Vec<f64> = out[2_000..].iter().map(|s| 1.0 - f64::from(*s)).collect();
+    let tau = fit_tau(&attack, 0.02, 0.6);
+    let expected = ATTACK_MS * 0.001 * RATE.as_f64();
+    assert!(
+        (tau - expected).abs() / expected < 0.05,
+        "attack {tau} samples, expected {expected}"
+    );
+
+    // On the step down, the gain returns to unity with Release.
+    let release: Vec<f64> = out[50_000..]
+        .iter()
+        .map(|s| f64::from(*s) / f64::from(quiet) - 1.0)
+        .collect();
+    let tau = fit_tau(&release, 0.05, 0.6);
+    let expected = RELEASE_MS * 0.001 * RATE.as_f64();
+    assert!(
+        (tau - expected).abs() / expected < 0.05,
+        "release {tau} samples, expected {expected}"
+    );
+}
+
+// Spec: compressor R6
+#[test]
+fn auto_release_reaches_its_slow_time_in_expand_mode() {
+    // An expansion held for a second recovers more slowly under Auto
+    // Release than under a 50 ms fixed one. The release time is read at
+    // the start of each block, so the blocks are long enough for the
+    // held expansion to set it for the one in which the signal drops.
+    let quiet = db_to_gain(-40.0) as f32;
+    let mut input = vec![db_to_gain(-10.0) as f32; 48_000];
+    input.extend(vec![quiet; 48_000]);
+    let recovered = |extra: (ParamId, f64)| {
+        let params = [
+            (THRESHOLD, -20.0),
+            (RATIO, 2.0),
+            (KNEE, 0.0),
+            (MODE, 2.0),
+            (ATTACK, 1.0),
+            extra,
+        ];
+        let mut node = squeeze(&params, 24_000);
+        let out = stream(node.as_mut(), &input, 24_000, None);
+        (48_000..out.len())
+            .find(|n| f64::from(out[*n]) / f64::from(quiet) < 1.2)
+            .unwrap_or(out.len())
+    };
+    let fixed = recovered((RELEASE, 50.0));
+    let auto = recovered((AUTO_RELEASE, 1.0));
+    assert!(auto > fixed + 1_000, "auto {auto}, fixed {fixed}");
+}
+
+// Spec: compressor R2
+#[test]
+fn a_signal_below_the_knee_passes_unchanged_in_every_mode() {
+    // -30 dBFS of noise under a 0 dB threshold with a 6 dB knee asks for
+    // a gain of exactly 1, in Peak, RMS and Expand alike.
+    let mut seed = 1u32;
+    let input: Vec<f32> = (0..48_000)
+        .map(|_| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            (seed >> 8) as f32 / (1u32 << 23) as f32 * db_to_gain(-30.0) as f32
+                - db_to_gain(-30.0) as f32
+        })
+        .collect();
+    for mode in [0.0, 1.0, 2.0] {
+        let params = [(THRESHOLD, 0.0), (RATIO, 4.0), (KNEE, 6.0), (MODE, mode)];
+        let mut node = squeeze(&params, 512);
+        let out = stream(node.as_mut(), &input, 512, None);
+        assert_eq!(out, input, "mode {mode}");
+    }
+}
+
 // Spec: compressor R5
 #[test]
 fn the_attack_and_release_time_constants_are_their_parameters() {

@@ -418,6 +418,16 @@ impl<'a> Audio<'_, 'a> {
         self.block.row_mut(index).get_mut(range).unwrap_or_default()
     }
 
+    /// One channel's samples in the stretch, for reading.
+    ///
+    /// # Panics
+    ///
+    /// If `channel` isn't less than [`channels`](Self::channels).
+    #[must_use]
+    pub fn channel(&self, channel: usize) -> &[f32] {
+        &self.block.channel(channel)[self.range.clone()]
+    }
+
     /// One channel's samples in the stretch.
     ///
     /// # Panics

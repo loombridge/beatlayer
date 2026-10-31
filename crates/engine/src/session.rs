@@ -355,6 +355,29 @@ pub(crate) struct SlotRow {
     pub(crate) looping: Option<LoopLength>,
 }
 
+/// What the running program reads of the Session View's slots and scenes:
+/// every slot's row and the follow table. A change of their values reaches the
+/// program as a swap of both ([`crate::message::Message::SceneTables`]); a
+/// change of which slots hold a clip, or of the scenes, needs a new program.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct SceneTables {
+    pub(crate) slots: Vec<SlotRow>,
+    pub(crate) follow: FollowTable,
+}
+
+impl SceneTables {
+    /// Whether only a new program can change `self` into `other`.
+    pub(crate) fn same_shape(&self, other: &Self) -> bool {
+        self.slots.len() == other.slots.len()
+            && self
+                .slots
+                .iter()
+                .zip(&other.slots)
+                .all(|(a, b)| (a.scene, a.track) == (b.scene, b.track))
+            && self.follow.same_shape(&other.follow)
+    }
+}
+
 /// One slot the launcher knows about: it plays, or it changes at a frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Slot {

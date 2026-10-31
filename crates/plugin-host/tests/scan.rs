@@ -123,6 +123,139 @@ fn a_plugin_that_prints_a_banner_is_still_scanned() {
     assert_eq!(report.plugins[0].name, PLUGIN_NAME);
 }
 
+// Spec: plugin-scanning R4. A helper process the plug-in starts holds the
+// reply pipe open only if the child lets it, and the scan doesn't wait for it.
+#[cfg(unix)]
+#[test]
+fn a_plugin_that_leaves_a_helper_holding_stdout_is_still_scanned() {
+    let scanner = scanner()
+        .with_env(TEST_SCAN_VAR, "helper")
+        .with_timeout(Duration::from_secs(2));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let b = bundle().to_path_buf();
+    std::thread::spawn(move || {
+        let _ = tx.send(scanner.scan(clap(), &[b]));
+    });
+    let report = rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the scan blocked on a helper holding the reply pipe");
+    assert!(report.blocked.is_empty(), "{:?}", report.blocked);
+    assert_eq!(report.plugins.len(), 1);
+    assert_eq!(report.plugins[0].name, PLUGIN_NAME);
+}
+
+// Spec: plugin-scanning R4, R6. A plain scan leaves a blocklisted plug-in
+// alone until its file changes; Rescan tries it again.
+#[test]
+fn a_plain_scan_skips_a_blocklisted_plugin_that_hasnt_changed() {
+    let scanner = scanner()
+        .with_env(TEST_SCAN_VAR, "hang")
+        .with_timeout(Duration::from_secs(1));
+    let paths = [bundle().to_path_buf()];
+    let first = scanner.scan(clap(), &paths);
+    assert_eq!(first.blocked.len(), 1);
+    let start = std::time::Instant::now();
+    let second = scanner.scan(clap(), &paths);
+    assert!(
+        start.elapsed() < Duration::from_millis(500),
+        "{:?}",
+        start.elapsed()
+    );
+    assert_eq!(second.scanned, 0);
+    assert_eq!(second.blocked.len(), 1);
+    assert!(scanner.is_blocked(bundle()));
+    let again = scanner.rescan(clap(), &paths);
+    assert_eq!(again.scanned, 1);
+}
+
+// Spec: plugin-scanning R4. The blocklist's memory of a file survives a
+// restart, and a changed file is tried again.
+#[test]
+fn a_blocklisted_plugin_stays_skipped_after_a_restart_until_it_changes() {
+    let dir = std::env::temp_dir().join(format!("bl-scan-blocked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = dir.join("scan.json");
+    let copied = dir.join("Test Gain Echo.clap");
+    copy_bundle(bundle(), &copied);
+    let paths = [copied.clone()];
+    let first = Scanner::new()
+        .with_program(SCANNER)
+        .with_env(TEST_SCAN_VAR, "crash")
+        .with_store(&store)
+        .scan(clap(), &paths);
+    assert_eq!(first.blocked.len(), 1);
+    // The app restarts: a new scanner reads the store, and the plug-in
+    // would now load, but it isn't asked to.
+    let restarted = scanner().with_store(&store);
+    let second = restarted.scan(clap(), &paths);
+    assert_eq!(second.scanned, 0);
+    assert_eq!(second.blocked.len(), 1);
+    // Touching the file makes it worth another try.
+    let file = if copied.is_dir() {
+        copied.join("Contents").join("Info.plist")
+    } else {
+        copied.clone()
+    };
+    std::fs::File::options()
+        .write(true)
+        .open(file)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + Duration::from_secs(5))
+        .unwrap();
+    let third = restarted.scan(clap(), &paths);
+    assert_eq!(third.scanned, 1);
+    assert!(third.blocked.is_empty(), "{:?}", third.blocked);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// Spec: plugin-scanning R2, R10. A bundle's files updated in place, which
+// leaves its folder's own size and time as they were, are scanned again.
+#[test]
+fn a_vst3_bundle_updated_in_place_is_scanned_again() {
+    let dir = std::env::temp_dir().join(format!("bl-scan-vst3-inplace-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let copied = dir.join("Test Gain Echo.vst3");
+    copy_all(test_vst3::bundle(), &copied);
+    let scanner = scanner();
+    let paths = [copied.clone()];
+    assert_eq!(scanner.scan(vst3(), &paths).scanned, 1);
+    assert_eq!(scanner.scan(vst3(), &paths).cached, 1);
+
+    let folder = std::fs::metadata(&copied).unwrap();
+    let module = files_below(&copied.join("Contents"))
+        .into_iter()
+        .find(|file| file.extension().is_none_or(|e| e != "plist"))
+        .expect("the module binary");
+    std::fs::File::options()
+        .write(true)
+        .open(module)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() + Duration::from_secs(5))
+        .unwrap();
+    let after = std::fs::metadata(&copied).unwrap();
+    assert_eq!(folder.len(), after.len());
+    assert_eq!(folder.modified().unwrap(), after.modified().unwrap());
+
+    let again = scanner.scan(vst3(), &paths);
+    assert_eq!(again.scanned, 1);
+    assert_eq!(again.cached, 0);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn files_below(folder: &std::path::Path) -> Vec<PathBuf> {
+    let mut files = Vec::new();
+    for entry in std::fs::read_dir(folder).unwrap().flatten() {
+        if entry.path().is_dir() {
+            files.extend(files_below(&entry.path()));
+        } else {
+            files.push(entry.path());
+        }
+    }
+    files
+}
+
 // Spec: plugin-scanning R3.
 #[test]
 fn a_file_that_isnt_a_plugin_is_blocklisted_with_why() {
@@ -134,7 +267,11 @@ fn a_file_that_isnt_a_plugin_is_blocklisted_with_why() {
     let scanner = scanner();
     let report: ScanReport = scanner.scan(clap(), std::slice::from_ref(&path));
     assert_eq!(report.blocked.len(), 1);
-    assert!(!report.blocked[0].reason.is_empty());
+    // The child's own reason, not a guess that it crashed.
+    let reason = &report.blocked[0].reason;
+    assert!(!reason.is_empty());
+    assert!(!reason.contains("crashed"), "{reason}");
+    assert!(!reason.contains("exit status"), "{reason}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -554,7 +691,10 @@ fn a_folder_that_isnt_an_lv2_bundle_is_blocklisted_with_why() {
     std::fs::create_dir_all(&bundle).unwrap();
     let report = scanner().scan(lv2(), std::slice::from_ref(&bundle));
     assert_eq!(report.blocked.len(), 1);
-    assert!(!report.blocked[0].reason.is_empty());
+    let reason = &report.blocked[0].reason;
+    assert!(!reason.is_empty());
+    assert!(!reason.contains("crashed"), "{reason}");
+    assert!(!reason.contains("exit status"), "{reason}");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

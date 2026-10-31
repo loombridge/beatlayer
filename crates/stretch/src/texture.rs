@@ -10,6 +10,7 @@ use bl_dsp::Random;
 use crate::granular::{ActiveGrains, Grain, render_frame};
 use crate::interp::Interpolation;
 use crate::mode::{Request, WarpMode, Window, read};
+use crate::tones::PeriodCache;
 
 /// Default Grain Size for Texture: 65 ms (R2).
 pub const DEFAULT_TEXTURE_GRAIN_MS: f64 = 65.0;
@@ -52,6 +53,7 @@ pub struct Texture {
     next_grain_start: i64,
     last_frame: Option<i64>,
     last_grain: Option<(i64, f64)>,
+    periods: PeriodCache,
 }
 
 impl Default for Texture {
@@ -74,6 +76,7 @@ impl Texture {
             next_grain_start: 0,
             last_frame: None,
             last_grain: None,
+            periods: PeriodCache::default(),
         }
     }
 
@@ -100,8 +103,9 @@ impl Texture {
     /// Computes the next grain's length in frames and its file position jitter,
     /// according to Grain Size and Flux (for tests).
     pub fn grain_length_and_jitter(&mut self) -> (usize, f64) {
-        let g_nominal =
-            ((self.grain_size_ms * self.sample_rate / 1000.0).round() as usize).clamp(16, 48_000);
+        let g_max = (MAX_TEXTURE_GRAIN_MS / 1000.0 * self.sample_rate).ceil() as usize;
+        let g_nominal = ((self.grain_size_ms * self.sample_rate / 1000.0).round() as usize)
+            .clamp(16, g_max.max(16));
         if self.flux <= 0.0 {
             (g_nominal, 0.0)
         } else {
@@ -136,15 +140,9 @@ impl Texture {
         };
         let nominal_pos = base_pos + pos_jitter;
 
-        let floor = nominal_pos.floor() as i64;
-        let at = (floor - window.first).max(0) as usize;
-        let slice = if at < window.frames {
-            let avail = (window.frames - at).min(2048);
-            &window.channel(0)[at..at + avail]
-        } else {
-            &[]
-        };
-        let detected = crate::tones::detect_period_fractional(slice, self.sample_rate);
+        let detected = self
+            .periods
+            .period(window, nominal_pos, self.sample_rate, hop);
 
         let pitch_ratio = request.pitch.max(0.01);
         let out_len = ((len as f64) / pitch_ratio).round() as usize;
@@ -247,6 +245,7 @@ impl WarpMode for Texture {
         self.active_grains.clear();
         self.last_frame = None;
         self.last_grain = None;
+        self.periods = PeriodCache::default();
         self.random = Random::seeded(self.seed);
     }
 }

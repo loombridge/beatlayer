@@ -7,6 +7,8 @@
 //! each grain by the pitch ratio through HiQ's interpolator, taking effect from
 //! the next grain.
 
+use std::cell::Cell;
+
 use crate::granular::{ActiveGrains, Grain, render_frame};
 use crate::interp::Interpolation;
 use crate::mode::{Request, WarpMode, Window, read};
@@ -18,11 +20,44 @@ pub const MIN_TONES_GRAIN_MS: f64 = 10.0;
 /// Maximum Grain Size for Tones: 100 ms (R2).
 pub const MAX_TONES_GRAIN_MS: f64 = 100.0;
 
+thread_local! {
+    static DIFF_OPS: Cell<u64> = const { Cell::new(0) };
+}
+
+/// How many multiply-adds this thread's pitch searches have done, for tests
+/// that bound a block's work (R5).
+#[must_use]
+pub fn diff_ops() -> u64 {
+    DIFF_OPS.with(Cell::get)
+}
+
+fn count_ops(ops: usize) {
+    DIFF_OPS.with(|total| total.set(total.get() + ops as u64));
+}
+
+/// The rate the pitch search runs at, about: the signal is decimated to it, so
+/// the search costs the same and reaches the same 50 Hz floor at every engine
+/// rate.
+const SEARCH_RATE: f64 = 12_000.0;
+/// The longest lag the search weighs, in decimated samples: 50 Hz at the
+/// slowest rate the decimation leaves undivided.
+const MAX_LAG: usize = 360;
+
+/// The squared difference between `signal` and itself `lag` later, over `len` frames.
+fn difference(signal: &[f32], lag: usize, len: usize) -> f64 {
+    (0..len)
+        .map(|j| f64::from(signal[j] - signal[j + lag]).powi(2))
+        .sum()
+}
+
 /// Finds the fundamental pitch period in samples (at `rate`) from the audio in
 /// `signal`. Returns `Some(period)` if a clear pitch is detected, or `None` if
-/// unpitched or silent.
+/// unpitched or silent. Reads at most two periods of 50 Hz of `signal`: it
+/// searches a copy decimated to about 12 kHz, then settles the period at `rate`
+/// among the lags next to the one it found.
 #[must_use]
 pub fn detect_period_fractional(signal: &[f32], rate: f64) -> Option<f64> {
+    let signal = &signal[..signal.len().min(2 * (rate / 50.0).round() as usize + 64)];
     if signal.len() < 256 {
         return None;
     }
@@ -32,31 +67,35 @@ pub fn detect_period_fractional(signal: &[f32], rate: f64) -> Option<f64> {
         return None;
     }
 
-    let min_lag = ((rate / 2000.0).round() as usize).max(8);
-    let max_lag = ((rate / 50.0).round() as usize)
-        .min(signal.len() / 2)
-        .min(1200);
+    // Box-averages `step` frames into one: stack scratch, no allocation.
+    let step = (rate / SEARCH_RATE).round().max(1.0) as usize;
+    let mut decimated = [0.0f32; 2 * MAX_LAG + 80];
+    let n = (signal.len() / step).min(decimated.len());
+    for (out, frames) in decimated.iter_mut().zip(signal.chunks_exact(step)) {
+        *out = frames.iter().sum::<f32>() / step as f32;
+    }
+    let x = &decimated[..n];
+
+    let min_lag = ((rate / 2000.0 / step as f64).round() as usize).max(2);
+    let max_lag = ((rate / 50.0 / step as f64).round() as usize)
+        .min(n / 2)
+        .min(MAX_LAG);
     if min_lag >= max_lag {
         return None;
     }
 
-    let window_len = signal.len() - max_lag;
+    let window_len = n - max_lag;
     if window_len < 64 {
         return None;
     }
 
-    // Stack-allocated scratch buffer for the difference function (zero allocation).
-    let mut d = [0.0f64; 1201];
+    count_ops((max_lag - min_lag + 1) * window_len);
+    let mut d = [0.0f64; MAX_LAG + 1];
     for tau in min_lag..=max_lag {
-        let mut diff_sum = 0.0f64;
-        for j in 0..window_len {
-            let diff = f64::from(signal[j] - signal[j + tau]);
-            diff_sum += diff * diff;
-        }
-        d[tau] = diff_sum;
+        d[tau] = difference(x, tau, window_len);
     }
 
-    let mut d_prime = [1.0f64; 1201];
+    let mut d_prime = [1.0f64; MAX_LAG + 1];
     let mut run_sum = 0.0f64;
     for tau in 1..=max_lag {
         run_sum += d[tau];
@@ -81,20 +120,66 @@ pub fn detect_period_fractional(signal: &[f32], rate: f64) -> Option<f64> {
         tau += 1;
     }
 
-    let tau_int = found_tau?;
-    if tau_int > min_lag && tau_int < max_lag {
-        let alpha = d_prime[tau_int - 1];
-        let beta = d_prime[tau_int];
-        let gamma = d_prime[tau_int + 1];
-        let denom = alpha - 2.0 * beta + gamma;
-        let delta = if denom.abs() > 1e-12 {
-            0.5 * (alpha - gamma) / denom
-        } else {
-            0.0
-        };
-        Some(tau_int as f64 + delta)
+    // The lag the decimated search found is good to a `step`: take the
+    // deepest dip of the undecimated difference within one either side, and
+    // place the period between its neighbours.
+    let centre = found_tau? * step;
+    let (low, high) = (centre - step, centre + step);
+    let len = signal.len().saturating_sub(high + 1);
+    if len < 64 {
+        return Some(centre as f64);
+    }
+    count_ops((2 * step + 3) * len);
+    let (mut lag, mut dip) = (centre, f64::MAX);
+    for candidate in low..=high {
+        let value = difference(signal, candidate, len);
+        if value < dip {
+            (lag, dip) = (candidate, value);
+        }
+    }
+    let alpha = difference(signal, lag - 1, len);
+    let gamma = difference(signal, lag + 1, len);
+    let denom = alpha - 2.0 * dip + gamma;
+    let delta = if denom > 1e-12 {
+        (0.5 * (alpha - gamma) / denom).clamp(-0.5, 0.5)
     } else {
-        Some(tau_int as f64)
+        0.0
+    };
+    Some(lag as f64 + delta)
+}
+
+/// The pitch period a granular mode found lately, so a grain whose read point is
+/// near the last search's takes its period and does not search again. Depends
+/// only on read points, never on how a render was split into blocks (R6).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct PeriodCache {
+    /// The file position of the last search, and the period it found.
+    last: Option<(f64, f64)>,
+}
+
+impl PeriodCache {
+    /// The period of the audio at file position `pos`: the last search's if
+    /// that was within four `hop`s or periods, else a new search.
+    pub(crate) fn period(
+        &mut self,
+        window: &Window<'_>,
+        pos: f64,
+        rate: f64,
+        hop: usize,
+    ) -> Option<f64> {
+        if let Some((at, period)) = self.last
+            && (pos - at).abs() < 4.0 * period.max(hop as f64)
+        {
+            return Some(period);
+        }
+        let at = (pos.floor() as i64 - window.first).max(0) as usize;
+        let slice = if at < window.frames {
+            &window.channel(0)[at..]
+        } else {
+            &[]
+        };
+        self.last = detect_period_fractional(slice, rate).map(|period| (pos, period));
+        self.last.map(|(_, period)| period)
     }
 }
 
@@ -130,6 +215,8 @@ pub struct Tones {
     next_grain_start: i64,
     last_frame: Option<i64>,
     last_phase_pos: Option<f64>,
+    clip: u64,
+    periods: PeriodCache,
 }
 
 impl Default for Tones {
@@ -149,6 +236,8 @@ impl Tones {
             next_grain_start: 0,
             last_frame: None,
             last_phase_pos: None,
+            clip: 0,
+            periods: PeriodCache::default(),
         }
     }
 
@@ -177,15 +266,9 @@ impl Tones {
             pos_at_grain + (grain_t - start) as f64 * request.speed
         };
 
-        let floor = base_pos.floor() as i64;
-        let at = (floor - window.first).max(0) as usize;
-        let slice = if at < window.frames {
-            let avail = (window.frames - at).min(2048);
-            &window.channel(0)[at..at + avail]
-        } else {
-            &[]
-        };
-        let detected_frac = detect_period_fractional(slice, self.sample_rate);
+        let detected_frac = self
+            .periods
+            .period(window, base_pos, self.sample_rate, g_nominal / 2);
         let detected = detected_frac.map(|p| p.round() as usize);
         let (len, hop) = grain_for_period(g_nominal, detected);
 
@@ -234,7 +317,7 @@ impl Tones {
         let end = start + n as i64;
         let interpolation = Interpolation::of(request.high_quality);
 
-        if self.last_frame.is_none_or(|last| last != start) {
+        if self.clip != request.clip || self.last_frame.is_none_or(|last| last != start) {
             self.reset();
             self.prime_at(start, request, window);
         }
@@ -256,6 +339,7 @@ impl Tones {
             );
         }
         self.last_frame = Some(end);
+        self.clip = request.clip;
     }
 }
 
@@ -292,5 +376,6 @@ impl WarpMode for Tones {
         self.active_grains.clear();
         self.last_frame = None;
         self.last_phase_pos = None;
+        self.periods = PeriodCache::default();
     }
 }

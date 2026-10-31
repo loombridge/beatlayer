@@ -1747,3 +1747,109 @@ fn the_settings_dialog_opens_for_a_plugin_and_closes() {
             .is_err()
     );
 }
+
+/// Loads the test plug-in onto an audio track and gives it a state only the
+/// plug-in holds, which no save has put in the set: the track, the device,
+/// and the state the plug-in reports.
+fn running_with_a_state(shell: &mut Shell) -> (bl_model::TrackId, DeviceId, Vec<u8>) {
+    shell.start_audio();
+    assert!(shell.audio().engine_running(), "{:?}", shell.audio());
+    let track = audio_track(shell);
+    let device = load(shell, track);
+    wait(shell, device, |i| i.active);
+    let mut state = shell.plugins().save_state(device).unwrap().data;
+    state[16..24].copy_from_slice(&60.0f64.to_le_bytes());
+    shell.plugins().load_state(device, &state).unwrap();
+    let now = shell.plugins().save_state(device).unwrap().data;
+    assert!(!now.is_empty(), "the plug-in reports a state");
+    (track, device, now)
+}
+
+/// The state the set holds for `device`.
+fn held(shell: &Shell, device: DeviceId) -> Vec<u8> {
+    let doc = shell.editor().document();
+    doc.device(device)
+        .unwrap()
+        .plugin
+        .as_ref()
+        .unwrap()
+        .data
+        .clone()
+}
+
+// Spec: clap-hosting R8; track-context-menu R13. A copy of a track starts
+// from the state its plug-in has now, and a cut and paste keeps it.
+#[test]
+fn a_tracks_copy_keeps_its_plugins_state_now() {
+    let mut shell = Shell::headless();
+    let (track, device, now) = running_with_a_state(&mut shell);
+    assert_ne!(held(&shell, device), now, "no save has put it in the set");
+
+    let duplicated = shell
+        .run("track.duplicate", json!({ "tracks": [track] }))
+        .unwrap();
+    let copy =
+        serde_json::from_value::<Vec<bl_model::TrackId>>(duplicated["tracks"].clone()).unwrap()[0];
+    let copied = shell
+        .editor()
+        .document()
+        .track(copy)
+        .unwrap()
+        .devices()
+        .next()
+        .unwrap()
+        .id;
+    assert_eq!(held(&shell, copied), now, "the duplicate");
+
+    // Cut deletes the running plug-in, so the paste has only what was taken.
+    shell
+        .run("track.cut", json!({ "tracks": [track] }))
+        .unwrap();
+    let after = shell.editor().document().top_level().next().unwrap();
+    let pasted = shell.run("track.paste", json!({ "track": after })).unwrap();
+    let pasted =
+        serde_json::from_value::<Vec<bl_model::TrackId>>(pasted["tracks"].clone()).unwrap()[0];
+    let device = shell
+        .editor()
+        .document()
+        .track(pasted)
+        .unwrap()
+        .devices()
+        .next()
+        .unwrap()
+        .id;
+    assert_eq!(held(&shell, device), now, "the paste");
+    wait(&mut shell, device, |i| i.active);
+    assert_eq!(
+        shell.plugins().save_state(device).unwrap().data,
+        now,
+        "the pasted plug-in runs from it"
+    );
+}
+
+// Spec: clap-hosting R8. A copy of a rack chain starts from the state its
+// plug-ins have now.
+#[test]
+fn a_chains_copy_keeps_its_plugins_state_now() {
+    let mut shell = Shell::headless();
+    let (_, device, now) = running_with_a_state(&mut shell);
+    let grouped = shell
+        .run("device.group", json!({ "devices": [device] }))
+        .unwrap();
+    let chain: bl_model::ChainId = serde_json::from_value(grouped["chain"].clone()).unwrap();
+    let rack: DeviceId = serde_json::from_value(grouped["rack"].clone()).unwrap();
+    assert_ne!(held(&shell, device), now, "no save has put it in the set");
+
+    shell.run("chain.copy", json!({ "chain": chain })).unwrap();
+    shell.run("chain.paste", json!({ "rack": rack })).unwrap();
+    let doc = shell.editor().document();
+    let pasted = doc.device(rack).unwrap().chains.last().unwrap();
+    assert_eq!(held(&shell, pasted.devices[0].id), now, "the paste");
+
+    let added = shell
+        .run("chain.duplicate", json!({ "chain": chain }))
+        .unwrap();
+    let added: bl_model::ChainId = serde_json::from_value(added["chain"].clone()).unwrap();
+    let duplicate = shell.editor().document().chain(added).unwrap().devices[0].id;
+    assert_eq!(held(&shell, duplicate), now, "the duplicate");
+}

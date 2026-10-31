@@ -149,7 +149,12 @@ fn shown(h: &Harness, device: DeviceId) -> String {
         .unwrap()
         .panel
         .unwrap();
-    panel.pages.into_iter().find(|p| p.node == TABS).unwrap().shown
+    panel
+        .pages
+        .into_iter()
+        .find(|p| p.node == TABS)
+        .unwrap()
+        .shown
 }
 
 // Spec: echo R1
@@ -161,12 +166,24 @@ fn the_tabs_switch_the_controls_shown_and_are_no_undo_step() {
     assert_eq!(shown(&h, device), "Echo");
     let drawn = |h: &mut Harness, names: &[&str]| {
         let nodes = Harness::nodes(&h.settle());
-        names.iter().map(|n| nodes.iter().any(|node| node.label == *n)).collect::<Vec<_>>()
+        names
+            .iter()
+            .map(|n| nodes.iter().any(|node| node.label == *n))
+            .collect::<Vec<_>>()
     };
     // The Echo tab holds the filters and the tunnel, the left section and the
     // global controls are always there.
-    assert_eq!(drawn(&mut h, &["HP Freq", "Waveform", "Gate", "Feedback", "Dry/Wet"]), [true, false, false, true, true]);
-    for (tab, controls) in [("Modulation", ["Waveform", "HP Freq"]), ("Character", ["Gate", "Waveform"])] {
+    assert_eq!(
+        drawn(
+            &mut h,
+            &["HP Freq", "Waveform", "Gate", "Feedback", "Dry/Wet"]
+        ),
+        [true, false, false, true, true]
+    );
+    for (tab, controls) in [
+        ("Modulation", ["Waveform", "HP Freq"]),
+        ("Character", ["Gate", "Waveform"]),
+    ] {
         let (_, _, pages) = placed(&mut h, device);
         let node = pages.iter().find(|p| p.name == TABS).unwrap();
         let index = node.names.iter().position(|n| n == tab).unwrap();
@@ -204,7 +221,11 @@ fn dragging_a_tunnel_handle_sideways_sets_that_lines_time_as_one_undo_step() {
         h.shell.editor().undo_history().next().unwrap(),
         "Change \"L Notes\""
     );
-    assert_eq!(value(&h, device, line_param(1, echo::NOTES)), 1.0, "the other line");
+    assert_eq!(
+        value(&h, device, line_param(1, echo::NOTES)),
+        1.0,
+        "the other line"
+    );
     h.shell.invoke("edit.undo", json!({})).unwrap();
     h.settle();
     assert_eq!(value(&h, device, line_param(0, echo::NOTES)), 5.0);
@@ -217,14 +238,20 @@ fn the_filter_views_handles_set_the_cutoff_sideways_and_the_resonance_up() {
     set(&mut h, device, echo::FILTER, 1.0);
     set(&mut h, device, echo::HP_FREQ, 400.0);
     h.shell
-        .invoke("device.set_display_view", json!({ "device": device, "view": "Filter" }))
+        .invoke(
+            "device.set_display_view",
+            json!({ "device": device, "view": "Filter" }),
+        )
         .unwrap();
     h.settle();
     let before = steps(&h);
     let (at, handle, cell) = handle(&mut h, device, "HP");
     assert_eq!((handle.x, handle.y), (echo::HP_FREQ, Some(echo::HP_RES)));
     drag(&mut h, at, vec2(cell.width() * 0.2, -cell.height() * 0.3));
-    assert!(value(&h, device, echo::HP_FREQ) > 800.0, "sideways: the cutoff");
+    assert!(
+        value(&h, device, echo::HP_FREQ) > 800.0,
+        "sideways: the cutoff"
+    );
     assert!(value(&h, device, echo::HP_RES) > 20.0, "up: the resonance");
     assert_eq!(steps(&h), before + 1, "both in one undo step");
 }
@@ -246,4 +273,24 @@ fn a_handle_takes_the_keyboard_and_steps_with_the_arrows() {
     h.key(egui::Key::ArrowLeft, Modifiers::NONE);
     h.settle();
     assert_eq!(value(&h, device, line_param(0, echo::NOTES)), notes);
+}
+
+// Spec: echo R8
+#[test]
+fn with_both_lines_at_the_same_time_each_handle_can_still_be_taken() {
+    let (mut h, device) = harness();
+    let (left, _, cell) = handle(&mut h, device, "Left Time");
+    let (right, _, _) = handle(&mut h, device, "Right Time");
+    assert_eq!(left.x, right.x, "the same time");
+    assert!(right.y < left.y, "the right one a little higher");
+    drag(&mut h, left, vec2(cell.width() * 0.3, 0.0));
+    assert!(
+        value(&h, device, line_param(0, echo::NOTES)) > 3.0,
+        "the left line moved"
+    );
+    assert_eq!(
+        value(&h, device, line_param(1, echo::NOTES)),
+        3.0,
+        "and not the right"
+    );
 }

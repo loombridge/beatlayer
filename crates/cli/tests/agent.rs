@@ -5363,8 +5363,8 @@ fn an_agent_adds_sets_and_reads_echo_by_id_reads_its_displays_and_reopens_it() {
         "set.save_as",
         json!({ "path": dir.0.join("Echo.blset").to_string_lossy() }),
     );
-    let (project, _) = bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] })))
-        .unwrap();
+    let (project, _) =
+        bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] }))).unwrap();
     let reopened = project
         .document
         .tracks()

@@ -28,9 +28,6 @@ const COLLAPSED: &str = "Collapsed";
 const ACTIVITY: &str = "Activity";
 /// The series whose markers draw as rings, an echo each (Echo's tunnel).
 const TUNNEL: &str = "Tunnel";
-/// How far up its cell a handle with no vertical parameter sits, from the
-/// bottom, as a share of the cell.
-const HANDLE_HEIGHT: f32 = 0.12;
 /// A handle's drawn radius, and the half side of what takes a press.
 const HANDLE_RADIUS: f32 = 4.5;
 const HANDLE_HIT: f32 = 8.0;
@@ -233,7 +230,13 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
 /// One echo of the tunnel: a ring about its channel's vanishing point, the
 /// left channel's to the left and the right's to the right, whose size
 /// follows the echo's level.
-fn ring(painter: &Painter, area: Rect, series: &DisplaySeries, marker: &DisplayMarker, ink: Color32) {
+fn ring(
+    painter: &Painter,
+    area: Rect,
+    series: &DisplaySeries,
+    marker: &DisplayMarker,
+    ink: Color32,
+) {
     let right = marker.name.starts_with("Right");
     let centre = pos2(
         area.left() + area.width() * if right { 0.7 } else { 0.3 },
@@ -249,8 +252,7 @@ fn ring(painter: &Painter, area: Rect, series: &DisplaySeries, marker: &DisplayM
 }
 
 /// Where `marker`'s handle sits in `area`: across by its horizontal
-/// parameter's travel and, with a vertical parameter, up by the marker's
-/// place on its series, or else near the bottom.
+/// parameter's travel, and up by the marker's place on its series.
 #[must_use]
 pub fn handle_center(
     area: Rect,
@@ -259,13 +261,14 @@ pub fn handle_center(
     panel: &DevicePanel,
 ) -> Option<Pos2> {
     let handle = marker.handle?;
-    let index = panel.description.params.iter().position(|p| p.id == handle.x)?;
+    let index = panel
+        .description
+        .params
+        .iter()
+        .position(|p| p.id == handle.x)?;
     let travel = panel.description.params[index].normalize(panel.value(index)) as f32;
     let x = area.left() + area.width() * travel;
-    let y = match handle.y {
-        Some(_) => point(area, display.series(&marker.series)?, marker.x, marker.y).y,
-        None => area.bottom() - area.height() * HANDLE_HEIGHT,
-    };
+    let y = point(area, display.series(&marker.series)?, marker.x, marker.y).y;
     Some(pos2(x, y))
 }
 
@@ -397,9 +400,9 @@ fn handles(
             };
             let value = crate::device_panel::step(&params[index], panel.value(index), steps);
             if value != panel.value(index) {
-                events.push(UiEvent::BeginNamedGesture(crate::device_panel::gesture_name(
-                    &params[index],
-                )));
+                events.push(UiEvent::BeginNamedGesture(
+                    crate::device_panel::gesture_name(&params[index]),
+                ));
                 events.push(UiEvent::Invoke(set(index, value)));
                 events.push(UiEvent::EndGesture);
             }

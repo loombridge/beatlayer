@@ -442,16 +442,7 @@ pub fn show(
             _ => None,
         };
         if let Some(display) = shown {
-            crate::device_display::draw(
-                ui,
-                theme,
-                rect,
-                id,
-                frame.enabled,
-                display,
-                panel,
-                events,
-            );
+            crate::device_display::draw(ui, theme, rect, id, frame.enabled, display, panel, events);
         }
         // Spec: articulation-map R15. The Articulation Map's list shows
         // every articulation, the current one lit.

@@ -51,7 +51,11 @@ fn echo_node(params: &[(ParamId, f64)]) -> Box<dyn Node> {
 fn impulse(frames: usize, at: usize, amplitude: f32, both: bool) -> Vec<Vec<f32>> {
     let mut left = vec![0.0f32; frames];
     left[at] = amplitude;
-    let right = if both { left.clone() } else { vec![0.0; frames] };
+    let right = if both {
+        left.clone()
+    } else {
+        vec![0.0; frames]
+    };
     vec![left, right]
 }
 
@@ -108,7 +112,10 @@ fn a_synced_echo_lands_on_its_frame_at_every_block_size() {
 #[test]
 fn a_free_echo_lands_on_its_frame_at_every_block_size() {
     // 100 ms is 4,800 frames, at any tempo.
-    let params = with(&[(line_param(0, echo::SYNC), 0.0), (line_param(0, echo::TIME), 100.0)]);
+    let params = with(&[
+        (line_param(0, echo::SYNC), 0.0),
+        (line_param(0, echo::TIME), 100.0),
+    ]);
     let input = impulse(9_000, 100, 0.5, false);
     for block in BLOCKS {
         let out = render(&params, &input, block, &tempo(77.0));
@@ -175,9 +182,15 @@ fn the_sync_modes_count_their_divisions() {
     };
     let mode = |m| (line_param(0, echo::SYNC_MODE), m);
     assert_eq!(at(&[mode(0.0), (line_param(0, echo::NOTES), 4.0)]), 24_000);
-    assert_eq!(at(&[mode(1.0), (line_param(0, echo::TRIPLET), 4.0)]), 16_000);
+    assert_eq!(
+        at(&[mode(1.0), (line_param(0, echo::TRIPLET), 4.0)]),
+        16_000
+    );
     assert_eq!(at(&[mode(2.0), (line_param(0, echo::DOTTED), 4.0)]), 36_000);
-    assert_eq!(at(&[mode(3.0), (line_param(0, echo::SIXTEENTHS), 5.0)]), 30_000);
+    assert_eq!(
+        at(&[mode(3.0), (line_param(0, echo::SIXTEENTHS), 5.0)]),
+        30_000
+    );
     assert_eq!(at(&[mode(0.0), (line_param(0, echo::NOTES), 6.0)]), 96_000);
 }
 
@@ -187,7 +200,10 @@ fn stereo_link_gives_the_right_line_the_left_time_and_offsets_stay_apart() {
     let right = line_param(1, echo::NOTES);
     let at = |params: &[(ParamId, f64)], channel: usize| {
         let out = render(params, &impulse(30_000, 0, 0.5, true), 4_096, &tempo(120.0));
-        out[channel].iter().position(|s| s.abs() > 0.4).expect("an echo")
+        out[channel]
+            .iter()
+            .position(|s| s.abs() > 0.4)
+            .expect("an echo")
     };
     // Unlinked: the right line's own division, a sixteenth later each.
     let unlinked = with(&[(right, 3.0)]);
@@ -219,7 +235,10 @@ fn ping_pong_alternates_the_echoes_between_the_sides() {
     let peak = |channel: usize, at: usize| out[channel][at];
     assert!((peak(0, 6_000) - 1.0).abs() < 1e-5, "left, first");
     assert!((peak(1, 12_000) - 1.0).abs() < 1e-5, "right, second");
-    assert!((peak(0, 18_000) - 0.5).abs() < 1e-5, "left, third, by Feedback");
+    assert!(
+        (peak(0, 18_000) - 0.5).abs() < 1e-5,
+        "left, third, by Feedback"
+    );
     assert!((peak(1, 24_000) - 0.5).abs() < 1e-5, "right, fourth");
     for (channel, at) in [(1, 6_000), (0, 12_000), (1, 18_000), (0, 24_000)] {
         assert!(peak(channel, at).abs() < 1e-5, "not on {channel} at {at}");
@@ -231,10 +250,7 @@ fn ping_pong_alternates_the_echoes_between_the_sides() {
 fn mid_side_runs_the_mid_and_the_side_through_the_lines_and_round_trips() {
     // The mid line is the left one, the side line the right: an impulse on
     // the left is half mid and half side.
-    let params = with(&[
-        (echo::CHANNEL_MODE, 2.0),
-        (line_param(1, echo::NOTES), 3.0),
-    ]);
+    let params = with(&[(echo::CHANNEL_MODE, 2.0), (line_param(1, echo::NOTES), 3.0)]);
     let out = render(&params, &impulse(20_000, 0, 1.0, false), 512, &tempo(120.0));
     assert!((out[0][6_000] - 0.5).abs() < 1e-5 && (out[1][6_000] - 0.5).abs() < 1e-5);
     assert!((out[0][12_000] - 0.5).abs() < 1e-5 && (out[1][12_000] + 0.5).abs() < 1e-5);
@@ -242,7 +258,12 @@ fn mid_side_runs_the_mid_and_the_side_through_the_lines_and_round_trips() {
     // as Stereo, to rounding.
     let input = vec![noise(20_000), noise(20_000).into_iter().rev().collect()];
     let stereo = render(&clean(), &input, 512, &tempo(120.0));
-    let sides = render(&with(&[(echo::CHANNEL_MODE, 2.0)]), &input, 512, &tempo(120.0));
+    let sides = render(
+        &with(&[(echo::CHANNEL_MODE, 2.0)]),
+        &input,
+        512,
+        &tempo(120.0),
+    );
     for (a, b) in stereo.iter().flatten().zip(sides.iter().flatten()) {
         assert!((a - b).abs() < 1e-6);
     }
@@ -286,7 +307,11 @@ fn d_drives_the_signal_after_input_into_a_clip_on_both_paths() {
     assert!((f64::from(out[0][63]) - 0.5f64.tanh()).abs() < 1e-6);
     assert!((f64::from(out[1][63]) + 0.25f64.tanh()).abs() < 1e-6);
     // Input comes first: +12 dB on 0.5 clips harder.
-    let loud = [(echo::DRIVE, 1.0), (echo::DRY_WET, 0.0), (echo::INPUT, 3.981_071_7)];
+    let loud = [
+        (echo::DRIVE, 1.0),
+        (echo::DRY_WET, 0.0),
+        (echo::INPUT, 3.981_071_7),
+    ];
     let out = run_at(
         echo_node(&loud).as_mut(),
         &input,
@@ -311,14 +336,22 @@ fn d_drives_the_signal_after_input_into_a_clip_on_both_paths() {
 #[test]
 fn feedback_returns_the_echo_and_invert_flips_it() {
     let at = |changes: &[(ParamId, f64)]| {
-        render(&with(changes), &impulse(20_000, 0, 0.5, false), 512, &tempo(120.0))
+        render(
+            &with(changes),
+            &impulse(20_000, 0, 0.5, false),
+            512,
+            &tempo(120.0),
+        )
     };
     let plain = at(&[(echo::FEEDBACK, 50.0)]);
     assert!((plain[0][6_000] - 0.5).abs() < 1e-5);
     assert!((plain[0][12_000] - 0.25).abs() < 1e-5);
     assert!((plain[0][18_000] - 0.125).abs() < 1e-5);
     let inverted = at(&[(echo::FEEDBACK, 50.0), (echo::FEEDBACK_INVERT, 1.0)]);
-    assert!((inverted[0][6_000] - 0.5).abs() < 1e-5, "the first echo isn't returned");
+    assert!(
+        (inverted[0][6_000] - 0.5).abs() < 1e-5,
+        "the first echo isn't returned"
+    );
     assert!((inverted[0][12_000] + 0.25).abs() < 1e-5);
     assert!((inverted[0][18_000] - 0.125).abs() < 1e-5);
 }
@@ -502,7 +535,10 @@ fn env_mix_runs_from_the_lfo_alone_to_the_envelope_alone() {
         render(&params, &input, 512, &tempo(120.0))
     };
     // At 100 % the waveform makes no difference; at 0 % it does.
-    assert!(with_wave(0.0, 100.0) == with_wave(3.0, 100.0), "envelope alone");
+    assert!(
+        with_wave(0.0, 100.0) == with_wave(3.0, 100.0),
+        "envelope alone"
+    );
     assert!(with_wave(0.0, 0.0) != with_wave(3.0, 0.0), "LFO alone");
     // And at 0 % the envelope makes none: the input's level is no matter.
     let quiet = vec![input[0].iter().map(|s| s * 0.1).collect::<Vec<_>>(); 2];
@@ -538,7 +574,12 @@ fn mod_filter_moves_both_cutoffs_with_the_source() {
             .iter()
             .fold(0.0f32, |p, s| p.max(s.abs()))
     };
-    assert!(level(6_000) > 10.0 * level(18_000), "{} and {}", level(6_000), level(18_000));
+    assert!(
+        level(6_000) > 10.0 * level(18_000),
+        "{} and {}",
+        level(6_000),
+        level(18_000)
+    );
 }
 
 /// The peak of `signal` over `range`.
@@ -579,19 +620,29 @@ fn the_gate_follows_a_burst_with_its_threshold_and_release() {
     // A loud burst of 100 ms, then a tone at −40 dBFS, under the threshold.
     let input = burst_then_quiet(0.5, 0.1, 0.01, 0.6);
     let gated = |release: f64| {
-        let params = [short(), vec![(echo::GATE, 1.0), (echo::GATE_RELEASE, release)]].concat();
+        let params = [
+            short(),
+            vec![(echo::GATE, 1.0), (echo::GATE_RELEASE, release)],
+        ]
+        .concat();
         render(&params, &input, 512, &tempo(120.0))
     };
     let open = render(&short(), &input, 512, &tempo(120.0));
     let slow = gated(100.0);
     assert!(peak(&slow[0], 3_000..4_800) > 0.45, "open in the burst");
-    assert!((peak(&open[0], 20_000..21_000) - 0.01).abs() < 1e-4, "the quiet tone passes ungated");
+    assert!(
+        (peak(&open[0], 20_000..21_000) - 0.01).abs() < 1e-4,
+        "the quiet tone passes ungated"
+    );
     // It closes over Release once the level is under the threshold: the
     // tone's amplitude falls to zero a Release later.
     let shut_slow = falls_below(&slow[0], 4_800, 0.0005);
     let shut_fast = falls_below(&gated(50.0)[0], 4_800, 0.0005);
     let difference = (shut_slow - shut_fast) as f64 / 48.0;
-    assert!((difference - 50.0).abs() < 8.0, "Release doubled: {difference} ms apart");
+    assert!(
+        (difference - 50.0).abs() < 8.0,
+        "Release doubled: {difference} ms apart"
+    );
     assert!(peak(&slow[0], 25_000..26_000) < 1e-4, "closed");
     // A loud burst opens it again within a few milliseconds.
     let mut again = input.clone();
@@ -623,7 +674,11 @@ fn ducking_lowers_the_wet_signal_in_proportion_and_comes_back_over_its_release()
     // After a burst a quiet tone comes back: by a time constant of Release
     // the lowering has fallen to 1/e of what it was.
     let input = burst_then_quiet(0.5, 0.2, 0.001, 1.5);
-    let params = [short(), vec![(echo::DUCKING, 1.0), (echo::DUCK_RELEASE, 200.0)]].concat();
+    let params = [
+        short(),
+        vec![(echo::DUCKING, 1.0), (echo::DUCK_RELEASE, 200.0)],
+    ]
+    .concat();
     let out = render(&params, &input, 512, &tempo(120.0));
     let lowered = |at: usize| -db(f64::from(peak(&out[0], at..at + 48) / 0.001));
     let start = lowered(9_700);
@@ -633,7 +688,10 @@ fn ducking_lowers_the_wet_signal_in_proportion_and_comes_back_over_its_release()
         .find(|n| lowered(*n) < target)
         .expect("it comes back");
     let milliseconds = (back - 9_700) as f64 / 48.0;
-    assert!((150.0..250.0).contains(&milliseconds), "{milliseconds} ms from {start} dB");
+    assert!(
+        (150.0..250.0).contains(&milliseconds),
+        "{milliseconds} ms from {start} dB"
+    );
 }
 
 // Spec: echo R12
@@ -653,8 +711,14 @@ fn ducking_reads_the_input_and_never_the_echoes() {
         (echo::DUCK_RELEASE, 10.0),
     ]);
     let out = render(&params, &input, 512, &tempo(120.0));
-    assert!(peak(&out[0], 14_400..19_200) > 0.49, "the first echo at full level");
-    assert!(peak(&out[0], 28_800..33_600) > 0.44, "and the second at its feedback");
+    assert!(
+        peak(&out[0], 14_400..19_200) > 0.49,
+        "the first echo at full level"
+    );
+    assert!(
+        peak(&out[0], 28_800..33_600) > 0.44,
+        "and the second at its feedback"
+    );
 }
 
 // Spec: echo R13
@@ -672,7 +736,10 @@ fn noise_and_wobble_repeat_run_after_run_and_follow_the_device() {
     .concat();
     let silence = vec![vec![0.0f32; 48_000]; 2];
     let first = render(&noisy, &silence, 512, &tempo(120.0));
-    assert!(first == render(&noisy, &silence, 4_096, &tempo(120.0)), "run after run");
+    assert!(
+        first == render(&noisy, &silence, 4_096, &tempo(120.0)),
+        "run after run"
+    );
     let mut other = device(&echo_type(), &noisy);
     other.id = bl_model::DeviceId(bl_core::id::Id::new(2).expect("an ID"));
     let second = run_blocks(
@@ -718,11 +785,18 @@ fn noise_morph_tilts_the_hiss_down_above_a_kilohertz() {
 #[test]
 fn wobble_moves_the_time_by_a_fraction_of_a_per_cent() {
     let input = impulse(9_000, 100, 0.5, false);
-    let wobbling = [hundred_ms(), vec![(echo::WOBBLE, 1.0), (echo::WOBBLE_AMOUNT, 100.0)]].concat();
+    let wobbling = [
+        hundred_ms(),
+        vec![(echo::WOBBLE, 1.0), (echo::WOBBLE_AMOUNT, 100.0)],
+    ]
+    .concat();
     let out = render(&wobbling, &input, 512, &tempo(120.0));
     let at = centroid(&out[0], 4_000..6_000);
     let moved = (at - 4_900.0).abs();
-    assert!(moved > 1.0 && moved <= 4_800.0 * 0.005 + 0.5, "moved {moved} frames");
+    assert!(
+        moved > 1.0 && moved <= 4_800.0 * 0.005 + 0.5,
+        "moved {moved} frames"
+    );
     let still = render(&hundred_ms(), &input, 512, &tempo(120.0));
     assert!((centroid(&still[0], 4_000..6_000) - 4_900.0).abs() < 1e-6);
 }
@@ -758,7 +832,10 @@ fn repitch_glides_the_pitch_with_no_alias_and_off_it_crossfades_at_the_same_pitc
     let free = |changes: &[(ParamId, f64)]| {
         with(
             &[
-                &[(line_param(0, echo::SYNC), 0.0), (line_param(0, echo::TIME), 100.0)][..],
+                &[
+                    (line_param(0, echo::SYNC), 0.0),
+                    (line_param(0, echo::TIME), 100.0),
+                ][..],
                 changes,
             ]
             .concat(),
@@ -766,7 +843,13 @@ fn repitch_glides_the_pitch_with_no_alias_and_off_it_crossfades_at_the_same_pitc
     };
     let events = [set(24_000, line_param(0, echo::TIME), 50.0)];
     let run = |params: &[(ParamId, f64)]| {
-        run_blocks(echo_node(params).as_mut(), &input, 512, &events, &tempo(120.0))
+        run_blocks(
+            echo_node(params).as_mut(),
+            &input,
+            512,
+            &events,
+            &tempo(120.0),
+        )
     };
     let glide = run(&free(&[(echo::REPITCH, 1.0)]));
     let (hz, spur) = strongest(&glide[0][26_000..26_000 + 4_096]);
@@ -800,9 +883,18 @@ fn the_reverb_before_and_after_the_lines_is_the_same_and_in_the_loop_it_diffuses
     }
     // In the loop the first echo is the clean click, and each later one is
     // more diffuse than the last.
-    assert!(peak(&feedback[0], 6_000..6_001) > 0.45, "the first echo is clean");
-    assert!(peak(&feedback[0], 12_000..18_000) < 0.2, "the second is diffuse");
-    assert!(peak(&pre[0], 6_000..12_000) < 0.2, "before, the first already is");
+    assert!(
+        peak(&feedback[0], 6_000..6_001) > 0.45,
+        "the first echo is clean"
+    );
+    assert!(
+        peak(&feedback[0], 12_000..18_000) < 0.2,
+        "the second is diffuse"
+    );
+    assert!(
+        peak(&pre[0], 6_000..12_000) < 0.2,
+        "before, the first already is"
+    );
 }
 
 // Spec: echo R17
@@ -906,9 +998,15 @@ fn a_render_is_the_same_at_four_block_sizes_with_every_stage_on_and_the_tempo_mo
     let whole = render(&params, &input, 4_096, &ramp);
     assert!(whole[0].iter().any(|s| s.abs() > 0.01), "it sounds");
     for block in [1, 64, 512] {
-        assert!(render(&params, &input, block, &ramp) == whole, "blocks of {block}");
+        assert!(
+            render(&params, &input, block, &ramp) == whole,
+            "blocks of {block}"
+        );
     }
-    assert!(render(&params, &input, 4_096, &ramp) == whole, "run after run");
+    assert!(
+        render(&params, &input, 4_096, &ramp) == whole,
+        "run after run"
+    );
 }
 
 // Spec: echo R22
@@ -943,18 +1041,31 @@ fn the_tunnel_shows_each_lines_echoes_as_the_times_and_feedback_give_them() {
     let display = shown(&[], None, None);
     assert_eq!(display.view.as_deref(), Some("Tunnel"));
     assert!(!display.live);
-    let (first, second) = (marker(&display, "Left echo 1"), marker(&display, "Left echo 2"));
+    let (first, second) = (
+        marker(&display, "Left echo 1"),
+        marker(&display, "Left echo 2"),
+    );
     assert_eq!((first.x, first.y), (250.0, 0.0));
     assert_eq!(second.x, 500.0);
     assert!((second.y - 20.0 * 0.4f32.log10()).abs() < 1e-4);
     assert!(first.text.contains("250 ms"), "{}", first.text);
     // Sixteen at most, and none under the floor: 0.4^n falls below −60 dB
     // after eight.
-    let left = display.markers.iter().filter(|m| m.name.starts_with("Left echo")).count();
+    let left = display
+        .markers
+        .iter()
+        .filter(|m| m.name.starts_with("Left echo"))
+        .count();
     assert_eq!(left, 8);
     // No feedback, one echo.
     let none = shown(&[(echo::FEEDBACK, 0.0)], None, None);
-    assert_eq!(none.markers.iter().filter(|m| m.name.starts_with("Right echo")).count(), 1);
+    assert_eq!(
+        none.markers
+            .iter()
+            .filter(|m| m.name.starts_with("Right echo"))
+            .count(),
+        1
+    );
     // The engine's published times replace the default tempo's.
     let live = shown(&[], Some(&[300.0, 450.0]), None);
     assert!(live.live);
@@ -970,7 +1081,10 @@ fn the_tunnel_shows_each_lines_echoes_as_the_times_and_feedback_give_them() {
 #[test]
 fn a_tunnel_handle_drags_the_parameter_that_sets_its_lines_time() {
     let handle = |params: &[(ParamId, f64)], name: &str| {
-        marker(&shown(params, None, None), name).handle.expect("a handle").x
+        marker(&shown(params, None, None), name)
+            .handle
+            .expect("a handle")
+            .x
     };
     assert_eq!(handle(&[], "Left Time"), line_param(0, echo::NOTES));
     assert_eq!(
@@ -981,9 +1095,15 @@ fn a_tunnel_handle_drags_the_parameter_that_sets_its_lines_time() {
         handle(&[(line_param(0, echo::SYNC), 0.0)], "Left Time"),
         line_param(0, echo::TIME)
     );
-    assert_eq!(handle(&[(line_param(0, echo::SYNC_MODE), 3.0)], "Left Time"), line_param(0, echo::SIXTEENTHS));
+    assert_eq!(
+        handle(&[(line_param(0, echo::SYNC_MODE), 3.0)], "Left Time"),
+        line_param(0, echo::SIXTEENTHS)
+    );
     // With Stereo Link the right handle moves the left line's time too.
-    assert_eq!(handle(&[(echo::LINK, 1.0)], "Right Time"), line_param(0, echo::NOTES));
+    assert_eq!(
+        handle(&[(echo::LINK, 1.0)], "Right Time"),
+        line_param(0, echo::NOTES)
+    );
 }
 
 // Spec: echo R8
@@ -1009,9 +1129,63 @@ fn the_filter_view_draws_the_two_filters_response_with_a_handle_on_each_cutoff()
     assert!(at(18_000.0).0 < -15.0, "the low-pass cuts the top");
     let (hp, lp) = (marker(&display, "HP"), marker(&display, "LP"));
     assert_eq!(hp.x, 400.0);
-    assert_eq!(hp.handle, Some(bl_model::DisplayHandle { x: echo::HP_FREQ, y: Some(echo::HP_RES) }));
-    assert_eq!(lp.handle, Some(bl_model::DisplayHandle { x: echo::LP_FREQ, y: Some(echo::LP_RES) }));
+    assert_eq!(
+        hp.handle,
+        Some(bl_model::DisplayHandle {
+            x: echo::HP_FREQ,
+            y: Some(echo::HP_RES)
+        })
+    );
+    assert_eq!(
+        lp.handle,
+        Some(bl_model::DisplayHandle {
+            x: echo::LP_FREQ,
+            y: Some(echo::LP_RES)
+        })
+    );
     // Off, the curve is flat.
     let off = shown(&[(echo::HP_FREQ, 400.0)], None, Some("Filter"));
-    assert!(off.series("Filter").unwrap().values.iter().all(|v| *v == 0.0));
+    assert!(
+        off.series("Filter")
+            .unwrap()
+            .values
+            .iter()
+            .all(|v| *v == 0.0)
+    );
+}
+
+// Spec: echo R1, R21
+#[test]
+fn echo_is_described_with_its_tabs_its_views_and_its_banks() {
+    use bl_model::DeviceKind;
+    let kind = echo_type();
+    assert_eq!(kind.name, "Echo");
+    assert!(
+        matches!(&kind.kind, DeviceKind::Native { device_type } if device_type == "beatlayer.echo")
+    );
+    let description = &kind.description;
+    description
+        .check()
+        .expect("every control is placed once and every bank holds what it names");
+    assert_eq!(description.params.len(), 56);
+    // The three tabs are one pages node, the Echo tab first.
+    let placed = description.layout.place(description.layout.docked_size());
+    let tabs: Vec<_> = placed
+        .pages
+        .iter()
+        .map(|p| (p.name.as_str(), p.names.clone()))
+        .collect();
+    assert_eq!(
+        tabs,
+        [(
+            "Tabs",
+            ["Echo", "Modulation", "Character"]
+                .map(str::to_owned)
+                .to_vec()
+        )]
+    );
+    // Equal-Loudness is a menu option, in the bank of its own after the others.
+    let banks = description.banks();
+    assert_eq!(banks.last().unwrap().params, [echo::EQUAL_LOUDNESS]);
+    assert!(banks.iter().all(|b| b.params.len() <= 8));
 }

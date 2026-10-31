@@ -78,9 +78,10 @@ pub struct DisplayMarker {
     pub handle: Option<DisplayHandle>,
 }
 
-/// What dragging a marker sets: where the marker sits across the cell (and
-/// up it, with a vertical parameter) is the parameters' travel, so a drag is
-/// the parameters' own control at another place.
+/// What dragging a marker sets: where the marker sits across the cell is the
+/// horizontal parameter's travel, and up the cell is the marker's place on
+/// its series (with a vertical parameter, a drag moves that too), so a drag
+/// is the parameters' own control at another place.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct DisplayHandle {
     /// The parameter its horizontal place is.

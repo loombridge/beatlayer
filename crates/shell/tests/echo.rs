@@ -12,11 +12,11 @@ use bl_engine::{Collector, Compiler, DisplayData, EngineConfig, Registry, channe
 use bl_model::{
     Command, Device, DeviceDisplay, DeviceId, DeviceKind, Editor, ParamId, TrackId, TrackKind,
 };
+use bl_shell::Shell;
 use bl_shell::audio::AudioHost;
 use bl_shell::device_commands::DeviceAdded;
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
-use bl_shell::Shell;
 use serde_json::json;
 
 const RATE: SampleRate = SampleRate::HZ_48000;
@@ -123,7 +123,11 @@ fn an_agent_reads_the_tunnel_and_the_filter_view_by_device_id() {
     shell.set_device_display_data(device, &[300.0, 450.0]);
     let live = display(&mut shell, device);
     assert!(live.live);
-    let first = live.markers.iter().find(|m| m.name == "Right echo 1").unwrap();
+    let first = live
+        .markers
+        .iter()
+        .find(|m| m.name == "Right echo 1")
+        .unwrap();
     assert_eq!(first.x, 450.0);
     // The second view is the filters' response, and a view it doesn't have
     // is refused. Choosing a view is no undo step.

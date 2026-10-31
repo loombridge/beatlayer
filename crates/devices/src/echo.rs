@@ -15,7 +15,8 @@ use bl_core::time::TempoMap;
 use bl_dsp::{EnvelopeFollower, Random};
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{
-    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT, Widget,
+    BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Page, PageStyle, PagesNode, TAB_HEIGHT,
+    Widget,
 };
 use bl_model::{
     Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayHandle,
@@ -233,7 +234,9 @@ fn line_descriptors(line: usize) -> Vec<ParamDescriptor> {
         ParamDescriptor::toggle(id(SYNC), &line_name(line, "Sync"), true)
             .describe("Sets the line's time in beat divisions rather than milliseconds."),
         ParamDescriptor::choice(id(SYNC_MODE), &line_name(line, "Sync Mode"), &SYNC_MODES, 0)
-            .describe("Counts the line's synced time in notes, triplets, dotted notes or sixteenths."),
+            .describe(
+                "Counts the line's synced time in notes, triplets, dotted notes or sixteenths.",
+            ),
         ParamDescriptor::choice(id(NOTES), &line_name(line, "Notes"), &names, 3)
             .describe("The line's time in notes while Sync Mode is Notes."),
         ParamDescriptor::choice(id(TRIPLET), &line_name(line, "Triplet"), &names, 3)
@@ -285,8 +288,9 @@ pub fn echo_type() -> DeviceType {
     params.extend([
         ParamDescriptor::gain(INPUT, "Input", 12.0, 0.0)
             .describe("The level of the signal entering the delay lines, down to silence."),
-        ParamDescriptor::toggle(DRIVE, "Input Drive", false)
-            .describe("D: soft-clips the signal after Input, before the lines and on the dry path."),
+        ParamDescriptor::toggle(DRIVE, "Input Drive", false).describe(
+            "D: soft-clips the signal after Input, before the lines and on the dry path.",
+        ),
         ParamDescriptor::continuous(FEEDBACK, "Feedback", (0.0, 100.0), 40.0, ParamUnit::Percent)
             .describe("How much of each line's output returns to its input."),
         ParamDescriptor::toggle(FEEDBACK_INVERT, "Feedback Invert", false)
@@ -298,13 +302,18 @@ pub fn echo_type() -> DeviceType {
             .describe("The high-pass filter's cutoff."),
         ParamDescriptor::continuous(HP_RES, "HP Res", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("The high-pass filter's resonance."),
-        ParamDescriptor::continuous(LP_FREQ, "LP Freq", (20.0, 20_000.0), 20_000.0, ParamUnit::Hertz)
-            .logarithmic()
-            .describe("The low-pass filter's cutoff."),
+        ParamDescriptor::continuous(
+            LP_FREQ,
+            "LP Freq",
+            (20.0, 20_000.0),
+            20_000.0,
+            ParamUnit::Hertz,
+        )
+        .logarithmic()
+        .describe("The low-pass filter's cutoff."),
         ParamDescriptor::continuous(LP_RES, "LP Res", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("The low-pass filter's resonance."),
-        ParamDescriptor::choice(WAVE, "Waveform", &waves, 0)
-            .describe("The LFO's waveform."),
+        ParamDescriptor::choice(WAVE, "Waveform", &waves, 0).describe("The LFO's waveform."),
         ParamDescriptor::toggle(LFO_SYNC, "LFO Sync", false)
             .describe("Sets the LFO's rate in beat divisions rather than hertz."),
         ParamDescriptor::choice(LFO_RATE, "LFO Rate", &rates, 4)
@@ -315,16 +324,31 @@ pub fn echo_type() -> DeviceType {
         ParamDescriptor::continuous(PHASE, "Phase", (0.0, 360.0), 0.0, ParamUnit::None)
             .decimals(0)
             .describe("How far, in degrees, the right line's LFO is ahead of the left's."),
-        ParamDescriptor::continuous(MOD_DELAY, "Mod Delay", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("How far the modulation source moves the delay times."),
+        ParamDescriptor::continuous(
+            MOD_DELAY,
+            "Mod Delay",
+            (0.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("How far the modulation source moves the delay times."),
         ParamDescriptor::toggle(MOD_X4, "Modulation \u{d7}4", false)
             .describe("Multiplies Mod Delay's depth by four."),
-        ParamDescriptor::continuous(MOD_FILTER, "Mod Filter", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("How far the modulation source moves the filters' cutoffs."),
+        ParamDescriptor::continuous(
+            MOD_FILTER,
+            "Mod Filter",
+            (0.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("How far the modulation source moves the filters' cutoffs."),
         ParamDescriptor::continuous(ENV_MIX, "Env Mix", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("Mixes the modulation source from the LFO alone to the input's envelope alone."),
-        ParamDescriptor::toggle(GATE, "Gate", false)
-            .describe("Lets the signal into the lines only while the input is above the threshold."),
+            .describe(
+                "Mixes the modulation source from the LFO alone to the input's envelope alone.",
+            ),
+        ParamDescriptor::toggle(GATE, "Gate", false).describe(
+            "Lets the signal into the lines only while the input is above the threshold.",
+        ),
         ParamDescriptor::continuous(
             GATE_THRESHOLD,
             "Gate Threshold",
@@ -361,18 +385,41 @@ pub fn echo_type() -> DeviceType {
         )
         .logarithmic()
         .describe("How long the wet signal takes to come back."),
-        ParamDescriptor::toggle(NOISE, "Noise", false)
-            .describe("Adds a hiss inside the loop."),
-        ParamDescriptor::continuous(NOISE_AMOUNT, "Noise Amount", (0.0, 100.0), 50.0, ParamUnit::Percent)
-            .describe("The level of the hiss."),
-        ParamDescriptor::continuous(NOISE_MORPH, "Noise Morph", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("The hiss's colour, from white to a fall above 1 kHz."),
+        ParamDescriptor::toggle(NOISE, "Noise", false).describe("Adds a hiss inside the loop."),
+        ParamDescriptor::continuous(
+            NOISE_AMOUNT,
+            "Noise Amount",
+            (0.0, 100.0),
+            50.0,
+            ParamUnit::Percent,
+        )
+        .describe("The level of the hiss."),
+        ParamDescriptor::continuous(
+            NOISE_MORPH,
+            "Noise Morph",
+            (0.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("The hiss's colour, from white to a fall above 1 kHz."),
         ParamDescriptor::toggle(WOBBLE, "Wobble", false)
             .describe("Moves the delay time with a slow irregular motion."),
-        ParamDescriptor::continuous(WOBBLE_AMOUNT, "Wobble Amount", (0.0, 100.0), 50.0, ParamUnit::Percent)
-            .describe("How far the delay time moves."),
-        ParamDescriptor::continuous(WOBBLE_MORPH, "Wobble Morph", (0.0, 100.0), 0.0, ParamUnit::Percent)
-            .describe("The balance from the slow motion to the fast one."),
+        ParamDescriptor::continuous(
+            WOBBLE_AMOUNT,
+            "Wobble Amount",
+            (0.0, 100.0),
+            50.0,
+            ParamUnit::Percent,
+        )
+        .describe("How far the delay time moves."),
+        ParamDescriptor::continuous(
+            WOBBLE_MORPH,
+            "Wobble Morph",
+            (0.0, 100.0),
+            0.0,
+            ParamUnit::Percent,
+        )
+        .describe("The balance from the slow motion to the fast one."),
         ParamDescriptor::toggle(REPITCH, "Repitch", false)
             .describe("Glides the pitch of the echoes when the delay time changes, as tape does."),
         ParamDescriptor::continuous(REVERB, "Reverb", (0.0, 100.0), 0.0, ParamUnit::Percent)
@@ -449,12 +496,7 @@ pub fn echo_type() -> DeviceType {
                 (
                     "Modulation",
                     &[
-                        "Waveform",
-                        "LFO Sync",
-                        "LFO Rate",
-                        "LFO Freq",
-                        "Phase",
-                        "Env Mix",
+                        "Waveform", "LFO Sync", "LFO Rate", "LFO Freq", "Phase", "Env Mix",
                     ],
                 ),
                 (
@@ -484,10 +526,7 @@ pub fn echo_type() -> DeviceType {
                         "Wobble Morph",
                     ],
                 ),
-                (
-                    "Global",
-                    &["Reverb Location", "Decay", "Stereo", "Output"],
-                ),
+                ("Global", &["Reverb Location", "Decay", "Stereo", "Output"]),
             ]),
     )
 }
@@ -858,7 +897,8 @@ impl Line {
         let (a, b, c, d) = (at(0), at(1), at(2), at(3));
         b + 0.5
             * fraction
-            * (c - a + fraction * (2.0 * a - 5.0 * b + 4.0 * c - d + fraction * (3.0 * (b - c) + d - a)))
+            * (c - a
+                + fraction * (2.0 * a - 5.0 * b + 4.0 * c - d + fraction * (3.0 * (b - c) + d - a)))
     }
 
     fn write(&mut self, sample: f32) {
@@ -928,7 +968,11 @@ impl Verb {
         for (channel, out) in out.iter_mut().enumerate() {
             let mut diffused = input[channel] as f32;
             for (stage, base) in ALLPASS_SAMPLES.iter().enumerate() {
-                diffused = self.allpass[channel][stage].process(diffused, (base * self.scale).round(), 0.5);
+                diffused = self.allpass[channel][stage].process(
+                    diffused,
+                    (base * self.scale).round(),
+                    0.5,
+                );
             }
             let mut sum = 0.0;
             for (k, base) in COMB_SAMPLES.iter().enumerate() {
@@ -1066,12 +1110,19 @@ impl Echo {
         tempo: &TempoMap,
     ) {
         let rate = self.rate;
-        let glide = (if s.repitch { REPITCH_SECONDS } else { CROSSFADE_SECONDS } * rate).max(1.0);
+        let glide = (if s.repitch {
+            REPITCH_SECONDS
+        } else {
+            CROSSFADE_SECONDS
+        } * rate)
+            .max(1.0);
         let open_step = 1.0 / (OPEN_SECONDS * rate);
         for i in 0..first.len() {
             let ramp = |id: ParamId| f64::from(s.ramp(params, id)[i]);
             let dry_left = f64::from(first[i]);
-            let dry_right = second.as_deref().map_or(dry_left, |right| f64::from(right[i]));
+            let dry_right = second
+                .as_deref()
+                .map_or(dry_left, |right| f64::from(right[i]));
             let peak = dry_left.abs().max(dry_right.abs()) as f32;
             let level = self.detector.process(peak);
             let envelope = self.envelope.process(peak);
@@ -1151,17 +1202,19 @@ impl Echo {
                 self.design(s, params, i, source);
             }
             self.frames_done += 1;
-            let amount = if s.noise { ramp(NOISE_AMOUNT) / 100.0 * NOISE_PEAK } else { 0.0 };
+            let amount = if s.noise {
+                ramp(NOISE_AMOUNT) / 100.0 * NOISE_PEAK
+            } else {
+                0.0
+            };
             let morph = ramp(NOISE_MORPH) / 100.0;
-            for k in 0..2 {
-                let mut sample = write[k];
+            for (k, mut sample) in write.into_iter().enumerate() {
                 if s.noise {
                     sample += amount * self.hiss[k].next(morph);
                 }
                 if s.filter {
-                    sample = f64::from(
-                        self.lowpass[k].process(self.highpass[k].process(sample as f32)),
-                    );
+                    sample =
+                        f64::from(self.lowpass[k].process(self.highpass[k].process(sample as f32)));
                 }
                 self.lines[k].write(sample as f32);
             }
@@ -1232,10 +1285,8 @@ impl Echo {
     fn design(&mut self, s: &Settings, params: &ParamBank, i: usize, source: [f64; 2]) {
         let ramp = |id: ParamId| f64::from(s.ramp(params, id)[i]);
         let octaves = ramp(MOD_FILTER) / 100.0 * FILTER_OCTAVES;
-        for k in 0..2 {
-            let moved = |id| {
-                (ramp(id) * (octaves * source[k]).exp2()).clamp(20.0, self.rate * 0.45)
-            };
+        for (k, source) in source.into_iter().enumerate() {
+            let moved = |id| (ramp(id) * (octaves * source).exp2()).clamp(20.0, self.rate * 0.45);
             let (hp, lp) = if s.filter {
                 (
                     coefficients(true, moved(HP_FREQ), q_of(ramp(HP_RES)), self.rate),
@@ -1334,7 +1385,11 @@ pub fn display(
 /// handle on the tunnel drags.
 fn time_param(get: &dyn Fn(ParamId) -> f64, line: usize) -> ParamId {
     // With Stereo Link the right line has no time of its own.
-    let line = if line == 1 && get(LINK) >= 0.5 { 0 } else { line };
+    let line = if line == 1 && get(LINK) >= 0.5 {
+        0
+    } else {
+        line
+    };
     if get(line_param(line, SYNC)) < 0.5 {
         return line_param(line, TIME);
     }
@@ -1382,7 +1437,11 @@ fn tunnel_display(
                 series: "Tunnel".to_owned(),
                 x: time as f32,
                 y: level.max(FLOOR_DB) as f32,
-                text: format!("{} echo {} at {time:.0} ms, {level:.1} dB", names[line], n + 1),
+                text: format!(
+                    "{} echo {} at {time:.0} ms, {level:.1} dB",
+                    names[line],
+                    n + 1
+                ),
                 handle: None,
             });
         }
@@ -1392,7 +1451,9 @@ fn tunnel_display(
             name: format!("{} Time", names[line]),
             series: "Tunnel".to_owned(),
             x: ms[line] as f32,
-            y: 0.0,
+            // Low in the cell, the right line's a little above the left's,
+            // so the two don't hide each other.
+            y: -50.0 + 10.0 * line as f32,
             text: format!("{} time {:.0} ms", names[line], ms[line]),
             handle: Some(DisplayHandle {
                 x: time_param(get, line),
@@ -1444,7 +1505,11 @@ fn filter_display(get: &dyn Fn(ParamId) -> f64) -> (DisplaySeries, Vec<DisplayMa
             name: name.to_owned(),
             series: "Filter".to_owned(),
             x: cutoff as f32,
-            y: if on { response_db(coefficients, cutoff) as f32 } else { 0.0 },
+            y: if on {
+                response_db(coefficients, cutoff) as f32
+            } else {
+                0.0
+            },
             text: format!("{name} {cutoff:.0} Hz, Q {q:.2}"),
             handle: Some(DisplayHandle {
                 x: hz,
@@ -1501,6 +1566,28 @@ mod tests {
             // Its output has the energy of its input, so Reverb 100 % in the
             // loop doesn't change the loop's level.
             assert!((0.8..1.25).contains(&energy), "energy {energy}");
+        }
+    }
+
+    // Spec: echo R18
+    #[test]
+    fn the_lines_hold_the_longest_time_at_the_slowest_tempo_with_everything_at_its_deepest() {
+        let kind = echo_type();
+        let device = kind.device(DeviceId(bl_core::id::Id::new(1).expect("an ID")));
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            let config = NodeConfig {
+                round_trip_latency: 0,
+                sample_rate: bl_core::time::SampleRate::new(rate as u32).expect("a rate"),
+                max_frames: 512,
+                channels: 2,
+            };
+            let echo = Echo::new(&device, &config);
+            // 16 bars dotted: 96 quarter notes, a +33 % offset, Mod Delay at
+            // 100 % with ×4 and Wobble at 100 %, at 20 BPM.
+            let longest = 96.0 * 1.33 * (1.0 + 4.0 * MOD_DEPTH + WOBBLE_DEPTH) * 60.0 / 20.0 * rate;
+            for line in &echo.lines {
+                assert!(line.buffer.len() as f64 > longest, "{rate} Hz");
+            }
         }
     }
 

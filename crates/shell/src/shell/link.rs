@@ -4,7 +4,8 @@
 use std::time::Instant;
 
 use super::{Shell, ShellError, to_value};
-use crate::settings::OnByDefault;
+use crate::link_audio::{Wanted, fingerprint};
+use crate::settings::{LatencyMs, OnByDefault};
 use bl_commands::NoArgs;
 use bl_shell_spec::link as ids;
 use serde_json::Value;
@@ -26,6 +27,48 @@ impl Shell {
     #[must_use]
     pub fn link_start_stop_sync(&self) -> bool {
         self.prefs.link.start_stop_sync
+    }
+
+    /// Whether Link Audio is on (the Link Audio spec, R1); it streams only
+    /// while Link is on too.
+    #[must_use]
+    pub fn link_audio_enabled(&self) -> bool {
+        self.prefs.link.audio
+    }
+
+    /// The name other peers see the app by: the one set, or the computer's
+    /// (the Link Audio spec, R3).
+    #[must_use]
+    pub fn link_audio_name(&self) -> String {
+        match self.prefs.link.audio_name.as_str() {
+            "" => computer_name(),
+            name => name.to_owned(),
+        }
+    }
+
+    /// The Latency of incoming audio, in milliseconds (the Link Audio spec,
+    /// R7).
+    #[must_use]
+    pub fn link_audio_latency_ms(&self) -> f64 {
+        self.prefs.link.audio_latency_ms.0
+    }
+
+    /// Whether the app delays its own playback by the Latency (the Link
+    /// Audio spec, R8).
+    #[must_use]
+    pub fn link_sync_to_incoming_audio(&self) -> bool {
+        self.prefs.link.sync_to_incoming_audio
+    }
+
+    /// The peers in the session that have Link Audio on, with their state
+    /// and what is buffered from each (the Link Audio spec, R9).
+    #[must_use]
+    pub fn link_audio_peers(&self) -> Vec<ids::LinkAudioPeer> {
+        if self.link_enabled() && self.prefs.link.audio {
+            self.link.audio.peers()
+        } else {
+            Vec::new()
+        }
     }
 
     /// Whether the Control Bar shows the Link toggle and its menu (the Link
@@ -91,6 +134,17 @@ impl Shell {
         self.link.enable(on, bpm);
         self.link
             .set_start_stop_sync(self.prefs.link.start_stop_sync);
+        self.apply_link_audio();
+    }
+
+    /// Gives Link Audio its switch, name, Latency and Sync to Incoming Audio
+    /// from the preferences (the Link Audio spec, R1, R3, R7, R8).
+    fn apply_link_audio(&mut self) {
+        let settings = &self.link.audio.settings;
+        settings.set_latency_ms(self.prefs.link.audio_latency_ms.0);
+        settings.set_sync(self.prefs.link.sync_to_incoming_audio);
+        self.link
+            .set_audio(self.prefs.link.audio, &self.link_audio_name());
     }
 
     /// Runs the `link.*` commands.
@@ -114,6 +168,42 @@ impl Shell {
                 let ids::SetArgs { on } = Self::args(id, args)?;
                 let on = on.unwrap_or(!self.link_toggle_shown());
                 self.prefs.link.show_toggle = OnByDefault(on);
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&ids::Switched { on }))
+            }
+            ids::SET_AUDIO => {
+                let ids::SetArgs { on } = Self::args(id, args)?;
+                let on = on.unwrap_or(!self.prefs.link.audio);
+                self.prefs.link.audio = on;
+                self.apply_link_audio();
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&ids::Switched { on }))
+            }
+            ids::SET_AUDIO_NAME => {
+                let ids::SetAudioNameArgs { name } = Self::args(id, args)?;
+                self.prefs.link.audio_name = name.trim().to_owned();
+                let name = self.link_audio_name();
+                self.link.set_audio_name(&name);
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&ids::AudioName { name }))
+            }
+            ids::SET_AUDIO_LATENCY => {
+                let ids::SetAudioLatencyArgs { ms } = Self::args(id, args)?;
+                let ms = ms.clamp(0.0, ids::MAX_LATENCY_MS);
+                self.prefs.link.audio_latency_ms = LatencyMs(ms);
+                self.link.audio.settings.set_latency_ms(ms);
+                self.save_preferences();
+                self.touch();
+                Ok(to_value(&ids::AudioLatency { ms }))
+            }
+            ids::SET_SYNC_TO_INCOMING_AUDIO => {
+                let ids::SetArgs { on } = Self::args(id, args)?;
+                let on = on.unwrap_or(!self.prefs.link.sync_to_incoming_audio);
+                self.prefs.link.sync_to_incoming_audio = on;
+                self.link.audio.settings.set_sync(on);
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&ids::Switched { on }))
@@ -153,6 +243,13 @@ impl Shell {
             show_toggle: self.link_toggle_shown(),
             waiting_for_link,
             starts_in,
+            audio: ids::LinkAudioState {
+                enabled: self.prefs.link.audio,
+                name: self.link_audio_name(),
+                latency_ms: self.prefs.link.audio_latency_ms.0,
+                sync_to_incoming_audio: self.prefs.link.sync_to_incoming_audio,
+                peers: self.link_audio_peers(),
+            },
         }
     }
 
@@ -180,7 +277,34 @@ impl Shell {
         if let Some(bpm) = self.link.hear(now) {
             changed |= self.follow_session_tempo(bpm);
         }
-        changed
+        changed | self.track_link_audio()
+    }
+
+    /// Keeps Link Audio's sinks and sources, and the audio thread's plan of
+    /// them, as the set, the switches, the engine and the peers' channels say
+    /// (the Link Audio spec, R4, R5, R10): a track added, renamed or deleted,
+    /// a track's input, a peer coming or going. Returns whether a peer's
+    /// state or the plan changed.
+    fn track_link_audio(&mut self) -> bool {
+        let before = self.link.audio.peers();
+        self.link.audio.poll();
+        let rate = if self.audio.engine_running() {
+            self.audio.sample_rate().unwrap_or(0)
+        } else {
+            0
+        };
+        let on = self.link_enabled() && self.link.audio_enabled();
+        let document = self.editor.document();
+        let mut changed = false;
+        if self.link.audio.stale(document, on, rate) {
+            let print = fingerprint(document, on, rate);
+            let wanted = Wanted::of(document, on, rate);
+            if let Some(plan) = self.link.update_audio(print, &wanted) {
+                self.audio.set_link_audio(Some(plan));
+            }
+            changed = true;
+        }
+        changed | (self.link.audio.peers() != before)
     }
 
     /// Writes a peer's tempo into the set when the set has one constant
@@ -232,5 +356,17 @@ impl Shell {
         {
             self.write_session_tempo(session.tempo);
         }
+    }
+}
+
+/// The computer's name, which Link Audio's name is at first (the Link Audio
+/// spec, R3): the machine's host name without the `.local` of a Mac's.
+fn computer_name() -> String {
+    let name = gethostname::gethostname().to_string_lossy().into_owned();
+    let name = name.strip_suffix(".local").unwrap_or(&name);
+    if name.is_empty() {
+        "Beatlayer".to_owned()
+    } else {
+        name.to_owned()
     }
 }

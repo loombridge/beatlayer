@@ -44,6 +44,19 @@ pub struct Interface {
     /// one of the eight-slot drum sampler's individual outputs (WP-5.45).
     /// A device that offers none is left out.
     pub device_outputs: std::collections::BTreeMap<DeviceId, Vec<String>>,
+    /// The peers in the Link session that have Link Audio on, with the
+    /// channels each offers, in the order Link lists them: Audio From's
+    /// peers and their channels (the Link Audio spec, R5; routing R37).
+    pub link_audio: Vec<LinkPeer>,
+}
+
+/// A Link Audio peer and its channels, as Audio From lists them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LinkPeer {
+    /// The peer's name.
+    pub name: String,
+    /// The channels it offers, in its order.
+    pub channels: Vec<String>,
 }
 
 /// One line of a chooser's list.
@@ -366,7 +379,7 @@ pub fn in_out(doc: &Document, track: TrackId, interface: &Interface) -> Option<I
     let t = doc.track(track)?;
     Some(match t.kind() {
         TrackKind::Audio => InOut::Clips {
-            input: audio_from(doc, track),
+            input: audio_from(doc, track, interface),
             input_channel: input_channel(
                 doc,
                 track,
@@ -490,10 +503,19 @@ fn interface_channels(
         .collect()
 }
 
-/// Audio From (observed): Ext. In · Configure… ─ Resampling ─ the group,
-/// audio, and return tracks, the MIDI tracks that hold an instrument, and
-/// Main, in display order, without the track itself ─ No Input.
-fn audio_from(doc: &Document, track: TrackId) -> Chooser {
+/// A `Link Audio` input as the routing commands' JSON takes it.
+fn link_audio_value(peer: &str, channel: &str) -> Value {
+    json!({ "type": "link_audio", "peer": peer, "channel": channel })
+}
+
+/// Audio From (observed): Ext. In · Configure… ─ the Link Audio peers ─
+/// Resampling ─ the group, audio, and return tracks, the MIDI tracks that
+/// hold an instrument, and Main, in display order, without the track itself
+/// ─ No Input. The peers are a group of their own after Ext. In's and before
+/// Resampling, each choosing its first channel; a peer the track names that
+/// the session doesn't have now is listed too, chosen and dimmed, because the
+/// track keeps the name (the Link Audio spec, R10).
+fn audio_from(doc: &Document, track: TrackId, interface: &Interface) -> Chooser {
     let input = doc.track(track).map(|t| t.routing().input.clone());
     let current_from = match input {
         Some(Input::Track { track, .. }) => Some(track),
@@ -514,13 +536,39 @@ fn audio_from(doc: &Document, track: TrackId) -> Chooser {
         ),
         configure("audio"),
         Entry::Separator,
-        Entry::choice(
-            "Resampling",
-            set_input(track, json!({ "type": "resampling" })),
-            input == Some(Input::Resampling),
-        ),
-        Entry::Separator,
     ];
+    let kept = match &input {
+        Some(Input::LinkAudio { peer, .. }) => Some(peer.as_str()),
+        _ => None,
+    };
+    let absent = kept.filter(|name| !interface.link_audio.iter().any(|p| p.name == *name));
+    for peer in &interface.link_audio {
+        let Some(first) = peer.channels.first() else {
+            continue;
+        };
+        entries.push(Entry::choice(
+            peer.name.clone(),
+            set_input(track, link_audio_value(&peer.name, first)),
+            kept == Some(peer.name.as_str()),
+        ));
+    }
+    if let Some(name) = absent {
+        entries.push(Entry::Choice {
+            label: name.to_owned(),
+            run: None,
+            chosen: true,
+            pending: None,
+        });
+    }
+    if !interface.link_audio.is_empty() || absent.is_some() {
+        entries.push(Entry::Separator);
+    }
+    entries.push(Entry::choice(
+        "Resampling",
+        set_input(track, json!({ "type": "resampling" })),
+        input == Some(Input::Resampling),
+    ));
+    entries.push(Entry::Separator);
     for id in doc.track_order() {
         let Some(source) = doc.track(id) else {
             continue;
@@ -699,6 +747,40 @@ fn input_channel(
             }),
             pending: None,
         },
+        // Spec: link-audio R5, R10. The peer's channels, in its order; the
+        // one the track keeps is listed, chosen and dimmed, while the peer
+        // or the channel isn't there.
+        Input::LinkAudio { peer, channel } => {
+            let offered = interface
+                .link_audio
+                .iter()
+                .find(|p| p.name == peer)
+                .map_or(&[][..], |p| p.channels.as_slice());
+            let mut entries: Vec<Entry> = offered
+                .iter()
+                .map(|name| {
+                    Entry::choice(
+                        name.clone(),
+                        set_input(track, link_audio_value(&peer, name)),
+                        *name == channel,
+                    )
+                })
+                .collect();
+            if !offered.contains(&channel) {
+                entries.push(Entry::Choice {
+                    label: channel.clone(),
+                    run: None,
+                    chosen: true,
+                    pending: None,
+                });
+            }
+            Chooser {
+                name: "Input Channel",
+                text: channel,
+                entries,
+                pending: None,
+            }
+        }
         // Spec: midi-io R28. A port with MPE on is taken on every channel: the
         // chooser reads All Channels and can't be changed; the channel the
         // track had chosen stays in the set for when MPE is off again.

@@ -1384,8 +1384,8 @@ impl MainWindowUi {
     }
 
     /// The Link menu (the Link spec, R19): Link, Start Stop Sync, Link Audio,
-    /// the peers that have Link Audio on, and Configure Link…. Link Audio
-    /// comes with its own package: its item is off and no peer has it on.
+    /// the peers that have Link Audio on (not clickable), and Configure
+    /// Link….
     fn link_menu_content(ui: &mut Ui, shell: &Shell, events: &mut Vec<UiEvent>) {
         let ticked = |on: bool, label: &str| {
             if on {
@@ -1406,7 +1406,13 @@ impl MainWindowUi {
         if ui.button(ticked(sync, "Start Stop Sync")).clicked() {
             run(ui, link_ids::SET_START_STOP_SYNC, json!({ "on": !sync }));
         }
-        ui.add_enabled(false, egui::Button::new("Link Audio"));
+        let audio = shell.link_audio_enabled();
+        if ui.button(ticked(audio, "Link Audio")).clicked() {
+            run(ui, link_ids::SET_AUDIO, json!({ "on": !audio }));
+        }
+        for peer in shell.link_audio_peers() {
+            ui.add_enabled(false, egui::Button::new(peer.name));
+        }
         ui.separator();
         if ui.button("Configure Link…").clicked() {
             run(ui, ids::APP_SETTINGS, json!({ "page": "link" }));

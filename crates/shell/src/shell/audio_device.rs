@@ -71,6 +71,14 @@ impl Shell {
             mpe_inputs: self.midi.mpe_input_names(),
             midi_outputs: self.midi.output_names(),
             device_outputs,
+            link_audio: self
+                .link_audio_peers()
+                .into_iter()
+                .map(|peer| crate::routing::LinkPeer {
+                    name: peer.name,
+                    channels: peer.channels,
+                })
+                .collect(),
         }
     }
 

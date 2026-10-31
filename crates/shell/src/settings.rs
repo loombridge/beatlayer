@@ -211,8 +211,10 @@ pub struct Preferences {
 }
 
 /// What the app keeps of Link between starts (the Link spec, R1, R8 and
-/// R17): Link and Start Stop Sync off in a new install, the toggle shown.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// R17; the Link Audio spec, R1, R3, R7, R8): Link, Start Stop Sync, Link
+/// Audio and Sync to Incoming Audio off in a new install, the toggle shown,
+/// the Latency 20 ms and the name the computer's.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LinkPrefs {
     /// Whether Link is on: the app joins the Link session on its networks.
@@ -222,6 +224,27 @@ pub struct LinkPrefs {
     /// Show Link Toggle (Settings ▸ Link): whether the Control Bar shows the
     /// Link toggle and its menu.
     pub show_toggle: OnByDefault,
+    /// Whether Link Audio is on (the Link Audio spec, R1).
+    pub audio: bool,
+    /// The name other peers see the app by; empty for the computer's name
+    /// (R3).
+    pub audio_name: String,
+    /// The Latency of incoming audio, in milliseconds (R7).
+    pub audio_latency_ms: LatencyMs,
+    /// Whether the app delays its own playback by the Latency (R8).
+    pub sync_to_incoming_audio: bool,
+}
+
+/// Link Audio's Latency in milliseconds, 20 until the preferences say
+/// otherwise, read and written as a plain number.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct LatencyMs(pub f64);
+
+impl Default for LatencyMs {
+    fn default() -> Self {
+        Self(bl_shell_spec::link::DEFAULT_LATENCY_MS)
+    }
 }
 
 /// What the app keeps of MIDI input between starts (the MIDI I/O spec, R3

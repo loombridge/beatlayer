@@ -1948,8 +1948,9 @@ fn library_page(
 }
 
 /// Link (L-SET-013; the Link spec, R20): the Link section's Show Link Toggle
-/// and Start Stop Sync. While no audio engine runs it holds only a message,
-/// and Link stays as it is set. Link Audio's section comes with its package.
+/// and Start Stop Sync, then Link Audio's section (the Link Audio spec, R2):
+/// Audio, Name, Latency, Sync to Incoming Audio and the peers list. While no
+/// audio engine runs it holds only a message, and Link stays as it is set.
 fn link_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -1999,6 +2000,128 @@ fn link_page(
             link_ids::SET_START_STOP_SYNC,
             json!({ "on": on }),
         )));
+    }
+    link_audio_section(ui, shell, theme, rows, events);
+}
+
+/// The width of the Latency slider and the Name field.
+const LINK_AUDIO_FIELD: f32 = 160.0;
+
+/// Link Audio (the Link Audio spec, R2, R3, R7, R8, R9, R13): Audio, Name,
+/// Latency and Sync to Incoming Audio, and the peers list, a table of each
+/// peer's name, state and buffered audio.
+fn link_audio_section(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Link Audio");
+    let rect = rows.row(ui, "Audio", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "link-audio",
+        "Audio",
+        rect,
+        shell.link_audio_enabled(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_AUDIO,
+            json!({ "on": on }),
+        )));
+    }
+    let rect = rows.row(ui, "Name", LINK_AUDIO_FIELD);
+    if let Some(name) = committed_field(
+        ui,
+        rect,
+        "link-audio-name",
+        "Name",
+        &shell.link_audio_name(),
+        |edit| edit,
+        Some("The name other apps in the Link session see this app by."),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_AUDIO_NAME,
+            json!({ "name": name }),
+        )));
+    }
+    let rect = rows.row(ui, "Latency", LINK_AUDIO_FIELD);
+    let mut ms = shell.link_audio_latency_ms();
+    let slider = ui.put(
+        rect,
+        egui::Slider::new(&mut ms, 0.0..=link_ids::MAX_LATENCY_MS)
+            .integer()
+            .suffix(" ms"),
+    );
+    ui.ctx().accesskit_node_builder(slider.id, |node| {
+        node.set_label("Latency".to_owned());
+    });
+    if slider.changed() {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_AUDIO_LATENCY,
+            json!({ "ms": ms }),
+        )));
+    }
+    let rect = rows.row(ui, "Sync to Incoming Audio", SettingsLayout::SWITCH);
+    if let Some(on) = switch(
+        ui,
+        theme,
+        "link-sync-to-incoming-audio",
+        "Sync to Incoming Audio",
+        rect,
+        shell.link_sync_to_incoming_audio(),
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            link_ids::SET_SYNC_TO_INCOMING_AUDIO,
+            json!({ "on": on }),
+        )));
+    }
+    link_audio_peers(ui, shell, theme, rows);
+}
+
+/// The peers list: a table whose rows are the peers with Link Audio on, each
+/// by name, with its state and the audio buffered from it in milliseconds
+/// (the Link Audio spec, R9, R13).
+fn link_audio_peers(ui: &mut Ui, shell: &Shell, theme: &Theme, rows: &mut Rows<'_>) {
+    let widths = [140.0, 90.0, 70.0];
+    let table = |ui: &mut Ui, role: Role, label: &str, text: &str, rect: Rect| {
+        let response = ui.interact(rect, Id::new(("link-peers", label, text)), Sense::hover());
+        ui.painter().text(
+            pos2(rect.left() + 2.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            text,
+            theme.font(),
+            if role == Role::ColumnHeader {
+                theme.colors.text_dim.0
+            } else {
+                theme.colors.text.0
+            },
+        );
+        ui.ctx().accesskit_node_builder(response.id, |node| {
+            node.set_role(role);
+            node.set_label(text.to_owned());
+        });
+    };
+    let cells = rows.table_row(ui, "Peers", &widths);
+    for (rect, heading) in cells.iter().zip(["Name", "State", "Buffered"]) {
+        table(ui, Role::ColumnHeader, "head", heading, *rect);
+    }
+    let peers = shell.link_audio_peers();
+    if peers.is_empty() {
+        rows.note(ui, "No other app in the session has Link Audio on.");
+    }
+    for peer in peers {
+        let cells = rows.table_row(ui, "", &widths);
+        let buffered = format!("{:.0} ms", peer.buffered_ms);
+        for (rect, text) in cells.iter().zip([
+            peer.name.as_str(),
+            peer.state.label(),
+            buffered.as_str(),
+        ]) {
+            table(ui, Role::Cell, &peer.name, text, *rect);
+        }
     }
 }
 

@@ -77,6 +77,7 @@ mod kitbag;
 mod launchkeys;
 mod launchpads;
 mod link;
+mod link_audio;
 mod linked_tracks;
 mod locator;
 mod macros;

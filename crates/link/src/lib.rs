@@ -299,6 +299,13 @@ impl Audio {
         unsafe { ffi::abl_link_num_peers(self.link.raw) }
     }
 
+    /// Whether Link Audio is switched on. Real-time-safe.
+    #[must_use]
+    pub fn audio_enabled(&self) -> bool {
+        // SAFETY: thread-safe and real-time-safe, as `abl_link.h` says.
+        unsafe { ffi::abl_link_audio_is_link_audio_enabled(self.link.raw) }
+    }
+
     /// Link's clock, in microseconds. Real-time-safe.
     #[must_use]
     pub fn clock_micros(&self) -> i64 {

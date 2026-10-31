@@ -12,7 +12,7 @@ use std::sync::Arc;
 use bl_core::time::{Bpm, Frames, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_devices::sampler::{
     ATTACK, DECAY, FADE, FADE_OUT, FILTER, FILTER_ENV_AMOUNT, FILTER_ENV_DECAY, FILTER_ENV_SUSTAIN,
-    FILTER_FREQ, FILTER_KEY, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
+    FILTER_FREQ, FILTER_KEY, FILTER_RES, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
     LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, LOOP_LENGTH, MODE, PAN,
     PITCH_ENV_AMOUNT, PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN,
     PLAYBACK, RELEASE, RETRIG, SAMPLER, SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY,
@@ -2234,3 +2234,67 @@ fn a_long_samples_transient_slices_are_found_over_several_blocks() {
         "the second slice now starts on the quiet click"
     );
 }
+
+/// A hash of every sample's bits, to hold renders to the sample.
+fn hash_of(out: &[Vec<f32>]) -> u64 {
+    out.iter().flatten().fold(0xcbf2_9ce4_8422_2325u64, |h, x| {
+        (h ^ u64::from(x.to_bits())).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+// Spec: sampler R15, instrument filter R3 and R15 (a set saved before the
+// circuits renders as it did on Clean, sample for sample)
+#[test]
+fn an_older_sets_filter_renders_as_it_did() {
+    let noise = sample(24000, |i| {
+        let mut x = (i as u32 + 1).wrapping_mul(0x9E37_79B9);
+        x ^= x >> 15;
+        x = x.wrapping_mul(0x85EB_CA6B);
+        x ^= x >> 13;
+        x as f32 / u32::MAX as f32 * 1.6 - 0.8
+    });
+    let collector = Collector::new();
+    let mut hashes = Vec::new();
+    for kind in 0..8usize {
+        let mut simpler = sampler(
+            &[
+                (LOOP, 1.0),
+                (FILTER, 1.0),
+                (FILTER_TYPE, kind as f64),
+                (FILTER_FREQ, 900.0),
+                (FILTER_RES, 55.0),
+                (FILTER_KEY, 50.0),
+                (FILTER_ENV_AMOUNT, 60.0),
+                (FILTER_ENV_DECAY, 300.0),
+                (FILTER_ENV_SUSTAIN, 20.0),
+                (LFO, 1.0),
+                (LFO_FILTER, 30.0),
+            ],
+            24_000,
+        );
+        give(simpler.as_mut(), &collector, &noise);
+        let out = run_notes(
+            simpler.as_mut(),
+            24_000,
+            &[
+                note(0, NoteKind::On, 60, 1.0),
+                note(6_000, NoteKind::On, 67, 0.7),
+            ],
+        );
+        hashes.push(hash_of(&out));
+    }
+    println!("{hashes:#x?}");
+    assert_eq!(hashes, OLDER_RENDERS);
+}
+
+/// The hashes of the renders above, made before the circuits.
+const OLDER_RENDERS: [u64; 8] = [
+    0x2117_927c_5777_2bb1,
+    0x3190_362a_8798_e5a9,
+    0xd031_8c3a_0b33_bab5,
+    0xbcf4_f254_ccc0_13a5,
+    0xbcad_62f2_8ed0_19e5,
+    0x99e6_5ba0_d932_1245,
+    0x1d2a_04d3_642e_bf85,
+    0xb083_8c87_fd58_b521,
+];

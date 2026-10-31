@@ -2373,3 +2373,71 @@ fn a_click_in_the_sample_tab_auditions_one_layer_from_its_point() {
     assert!(faded[0][0] > 0.0, "it faded rather than cut");
     assert!(silent[0].iter().all(|v| *v == 0.0), "and ended");
 }
+
+/// A hash of every sample's bits, to hold renders to the sample.
+fn hash_of(out: &[Vec<f32>]) -> u64 {
+    out.iter().flatten().fold(0xcbf2_9ce4_8422_2325u64, |h, x| {
+        (h ^ u64::from(x.to_bits())).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+// Spec: multisampler R76, instrument filter R3 and R15 (a set saved before
+// the circuits renders as it did on Clean, sample for sample)
+#[test]
+fn an_older_sets_filters_render_as_they_did() {
+    // Noise as the sample, so every frequency is there to be filtered.
+    let noise = sample(9600, |i| {
+        let mut x = (i as u32 + 1).wrapping_mul(0x9E37_79B9);
+        x ^= x >> 15;
+        x = x.wrapping_mul(0x85EB_CA6B);
+        x ^= x >> 13;
+        x as f32 / u32::MAX as f32 * 1.6 - 0.8
+    });
+    let mut hashes = Vec::new();
+    for (kind, slope, morph) in [
+        (0.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (1.0, 0.0, 0.0),
+        (1.0, 1.0, 0.0),
+        (2.0, 0.0, 0.0),
+        (2.0, 1.0, 0.0),
+        (3.0, 0.0, 0.0),
+        (3.0, 1.0, 0.0),
+        (4.0, 0.0, 0.3),
+        (4.0, 1.0, 0.6),
+    ] {
+        let mut rig = Rig::new(
+            &[
+                (FILTER_ON, 1.0),
+                (FILTER_TYPE, kind),
+                (FILTER_SLOPE, slope),
+                (FILTER_FREQ, 900.0),
+                (FILTER_RES, 55.0),
+                (FILTER_MORPH, morph * 100.0),
+                (FENV_ON, 1.0),
+                (FENV_AMOUNT, 30.0),
+            ],
+            512,
+        );
+        let mut l = layer(1, &noise);
+        l.sustain = SustainMode::Loop;
+        rig.give(vec![(l, Arc::clone(&noise))], false);
+        hashes.push(hash_of(&rig.render(9_600, &[on(0, 60, 1.0), on(2_000, 67, 0.7)])));
+    }
+    println!("{hashes:#x?}");
+    assert_eq!(hashes, OLDER_RENDERS);
+}
+
+/// The hashes of the renders above, made before the circuits.
+const OLDER_RENDERS: [u64; 10] = [
+    0x2a8f_af67_3366_2b85,
+    0x9ac1_fa38_5a50_0799,
+    0x0809_2907_b28f_b451,
+    0xf07c_0615_27f1_eb1d,
+    0x2bb0_d4c3_b9fb_f3e9,
+    0x6d5e_2b8f_8a3c_8921,
+    0xea44_7251_5f36_1991,
+    0x857d_2e56_ce35_f85d,
+    0xa5cc_aa87_41ab_fa25,
+    0x1b32_23fc_13fa_9625,
+];

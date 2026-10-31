@@ -25,12 +25,6 @@
 #   description = "At its maximum the output rises 30 dB above the default setting."
 
 [[failure]]
-suite = "smoke"
-key = "export.audio in the app, allowed by the person"
-property = "the call answers with the export's result"
-description = "With the app's window open and the agent not autonomous, an agent's export.audio asks the person first; once allowed, the call fails with \"the call asked twice\" although the export starts, runs and writes its file. The agent never hears the result. Without a window (bl-cli mcp), or with autonomous mode on, the same call answers."
-
-[[failure]]
 suite = "commands"
 key = "track.set_bounced"
 property = "invariants hold"

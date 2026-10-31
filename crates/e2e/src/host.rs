@@ -120,17 +120,14 @@ impl AppTransport {
         self.agent.sync_export(&mut self.shell);
         while let Some((ticket, outcome)) = self.agent.resume(&mut self.shell) {
             let ticket = self.forwarded.remove(&ticket).unwrap_or(ticket);
-            match outcome {
+            match self.answer_asked(outcome) {
                 Outcome::Reply(reply) => {
-                    self.answered.insert(ticket, reply);
-                }
-                Outcome::Ask(question) => {
-                    let reply = self.ask(&question);
                     self.answered.insert(ticket, reply);
                 }
                 Outcome::Wait(again) => {
                     self.forwarded.insert(again, ticket);
                 }
+                Outcome::Ask(_) => unreachable!("an answered question doesn't ask again"),
             }
         }
         self.agent.sync_engine(&mut self.shell);
@@ -145,10 +142,17 @@ impl AppTransport {
         }
     }
 
-    fn ask(&mut self, question: &Question) -> Option<Value> {
+    /// What `outcome` came to once the person has answered the question it
+    /// asks, if it does.
+    fn answer_asked(&mut self, outcome: Outcome) -> Outcome {
+        let Outcome::Ask(question) = outcome else {
+            return outcome;
+        };
         self.asked.push(question.text());
-        let allow = (self.answer)(question);
-        self.agent.resolve(&mut self.shell, question.id, allow)
+        let allow = (self.answer)(&question);
+        self.agent
+            .resolve(&mut self.shell, question.id, allow)
+            .unwrap_or(Outcome::Reply(None))
     }
 
     fn wait_for(&mut self, ticket: u64) -> Result<Option<Value>, String> {
@@ -168,10 +172,10 @@ impl Transport for AppTransport {
         let outcome = self
             .agent
             .handle(&mut self.shell, &self.session, message.clone());
-        match outcome {
+        match self.answer_asked(outcome) {
             Outcome::Reply(reply) => Ok(reply),
-            Outcome::Ask(question) => Ok(self.ask(&question)),
             Outcome::Wait(ticket) => self.wait_for(ticket),
+            Outcome::Ask(_) => unreachable!("an answered question doesn't ask again"),
         }
     }
 }

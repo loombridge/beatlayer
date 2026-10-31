@@ -230,8 +230,6 @@ pub struct Brickwall {
     targets: [Vec<f32>; 2],
     /// Each channel's limited output.
     out: [Vec<f32>; 2],
-    /// A copy of the input, for the detector to run on.
-    scratch: [Vec<f32>; 2],
     /// A 4-times oversampler per channel for true-peak detection.
     detectors: [Oversampler; 2],
     delay: [DelayLine; 2],
@@ -269,7 +267,6 @@ impl Brickwall {
             peaks: [buffer(), buffer()],
             targets: [buffer(), buffer()],
             out: [buffer(), buffer()],
-            scratch: [buffer(), buffer()],
             detectors: [detector(), detector()],
             delay: [DelayLine::new(max_lookahead), DelayLine::new(max_lookahead)],
             queue: [
@@ -366,12 +363,10 @@ impl NativeDevice for Brickwall {
         // 3. Each channel's peak and the gain it needs.
         for channel in 0..channels {
             if mode == MODE_TRUE_PEAK {
-                self.scratch[channel][..frames].copy_from_slice(&self.work[channel][..frames]);
                 self.peaks[channel][..frames].fill(0.0);
                 let factor = self.detectors[channel].factor();
                 let peaks = &mut self.peaks[channel];
-                let scratch = &mut self.scratch[channel][..frames];
-                self.detectors[channel].process(0, scratch, |high| {
+                self.detectors[channel].upsample(0, &self.work[channel][..frames], |high| {
                     for (i, sample) in high.iter().enumerate() {
                         let magnitude = sample.abs();
                         let at = i / factor;

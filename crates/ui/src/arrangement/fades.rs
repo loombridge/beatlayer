@@ -12,11 +12,12 @@
 //! `clip.set_fades` or `arrangement.set_crossfade`, run as one gesture.
 
 use bl_core::time::Ticks;
-use bl_model::{ClipData, ClipId, FadeLimits, TrackId, crossfades, fade_power};
+use bl_model::{ClipData, ClipId, Crossfade, FadeLimits, Track, TrackId, crossfades, fade_power};
 use bl_shell::arrangement_commands::{FadeHandle, FadeHandleState};
 use bl_shell::editing_commands::Edge;
 use egui::{Painter, Pos2, Rect, Shape, Stroke, pos2};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 
 use super::editing::Lanes;
 use super::scene::{ShownClip, title_height};
@@ -112,7 +113,7 @@ pub(super) fn visible<'a>(
         }));
     }
     if let Some(track) = lanes.doc.track(under.track) {
-        for crossfade in crossfades(track.clips()) {
+        for crossfade in track_crossfades(track) {
             let partner = if crossfade.earlier == under.clip {
                 crossfade.later
             } else if crossfade.later == under.clip {
@@ -124,6 +125,28 @@ pub(super) fn visible<'a>(
         }
     }
     out
+}
+
+/// The crossfades of a track's clips.
+fn track_crossfades(track: &Track) -> Vec<Crossfade> {
+    #[cfg(test)]
+    tests::CALLS.with(|calls| calls.set(calls.get() + 1));
+    crossfades(track.clips())
+}
+
+/// The crossfades of each track the `showing` clips sit on, found once per
+/// track: with F held, every clip on screen shows, and each used to find its
+/// whole track's again.
+fn joined_by_track(lanes: &Lanes<'_>, showing: &[&ShownClip]) -> HashMap<TrackId, Vec<Crossfade>> {
+    let mut joined = HashMap::new();
+    for shown in showing {
+        if let Some(track) = lanes.doc.track(shown.track) {
+            joined
+                .entry(shown.track)
+                .or_insert_with(|| track_crossfades(track));
+        }
+    }
+    joined
 }
 
 /// The handles of one shown clip's two fades.
@@ -194,14 +217,11 @@ pub(super) fn spots(
 /// The handle under `pos`, if one is within reach and showing.
 pub(super) fn spot_at(lanes: &Lanes<'_>, pos: Pos2, held: bool) -> Option<Spot> {
     let showing = visible(lanes, Some(pos), held);
+    let joined = joined_by_track(lanes, &showing);
     let mut best: Option<(f32, Spot)> = None;
     for shown in showing {
-        let joined = lanes
-            .doc
-            .track(shown.track)
-            .map(|t| crossfades(t.clips()))
-            .unwrap_or_default();
-        for spot in spots(lanes, shown, &joined) {
+        let joined = joined.get(&shown.track).map_or(&[][..], Vec::as_slice);
+        for spot in spots(lanes, shown, joined) {
             let distance = spot.pos.distance(pos);
             if distance <= GRAB && best.is_none_or(|(d, _)| distance < d) {
                 best = Some((distance, spot));
@@ -279,7 +299,7 @@ impl FadeDrag {
             };
             Some(Meeting {
                 boundary,
-                crossfade: crossfades(track.clips())
+                crossfade: track_crossfades(track)
                     .iter()
                     .find(|c| c.earlier == earlier.id && c.later == later.id)
                     .map(|c| (c.before, c.after)),
@@ -426,13 +446,10 @@ pub(super) fn paint(
     let colors = &theme.colors;
     let mut drawn = Drawn::default();
     let showing = visible(lanes, pointer, held);
+    let joined = joined_by_track(lanes, &showing);
     for shown in showing {
-        let joined = lanes
-            .doc
-            .track(shown.track)
-            .map(|t| crossfades(t.clips()))
-            .unwrap_or_default();
-        let spots = spots(lanes, shown, &joined);
+        let joined = joined.get(&shown.track).map_or(&[][..], Vec::as_slice);
+        let spots = spots(lanes, shown, joined);
         let (top, bottom) = band(shown, lane_height(lanes, shown));
         // Each fade's outline, from the outer handle through the curve
         // handle, where it has one, to the peak.
@@ -504,4 +521,99 @@ pub(super) fn paint(
         }
     }
     drawn
+}
+
+#[cfg(test)]
+pub(super) mod tests {
+    use std::cell::Cell;
+
+    use bl_model::{AudioData, Clip, Command, Editor, TrackKind};
+    use bl_shell::arrangement::{ArrangementView, Horizontal};
+    use egui::{Context, LayerId};
+
+    use super::super::benchmark::media_hash;
+    use super::*;
+
+    thread_local! {
+        /// How many times `track_crossfades` has run on this thread.
+        pub(in super::super) static CALLS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    const CLIPS: usize = 2000;
+
+    #[test]
+    fn showing_every_fade_handle_finds_each_tracks_crossfades_once() {
+        // Chopped break: one track of abutting clips, every second pair
+        // crossfaded. With F held every clip shows, and each used to find the
+        // whole track's crossfades again.
+        let beat = Ticks::WHOLE.get() / 4;
+        let mut editor = Editor::new();
+        let track: TrackId = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Audio,
+                name: "Break".into(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let mut shown = Vec::new();
+        for index in 0..CLIPS {
+            let id: ClipId = editor.new_id();
+            let mut audio = AudioData::new(media_hash(0));
+            if index % 2 == 0 {
+                audio.fade_out = 0.1;
+                audio.fade_out_after = 0.1;
+            } else {
+                audio.fade_in = 0.1;
+                audio.fade_in_before = 0.1;
+            }
+            editor
+                .apply(Command::CreateClip {
+                    track,
+                    clip: Clip::new(
+                        id,
+                        Ticks(beat * index as i64),
+                        Ticks(beat),
+                        ClipData::Audio(audio),
+                    ),
+                })
+                .unwrap();
+            shown.push(ShownClip {
+                rect: Rect::from_min_size(pos2(index as f32 * 10.0, 0.0), egui::vec2(10.0, 80.0)),
+                clip: id,
+                track,
+                lane: None,
+                lane_height: 80.0,
+            });
+        }
+        let view = ArrangementView::default();
+        let lanes = Lanes {
+            view: &view,
+            doc: editor.document(),
+            rect: Rect::from_min_size(pos2(0.0, 0.0), egui::vec2(10.0 * CLIPS as f32, 80.0)),
+            horizontal: Horizontal {
+                left: 0.0,
+                ticks_per_point: beat as f64 / 10.0,
+            },
+            shown: &shown,
+            rows: &[],
+            scroll_y: 0.0,
+            draw_mode: false,
+        };
+        let theme = Theme::bundled(true);
+        let ctx = Context::default();
+        let painter = ctx.layer_painter(LayerId::background());
+
+        CALLS.with(|calls| calls.set(0));
+        let drawn = paint(&painter, &lanes, &theme, None, true, None);
+        assert_eq!(CALLS.with(Cell::get), 1);
+        assert!(!drawn.spots.is_empty());
+
+        CALLS.with(|calls| calls.set(0));
+        let found = spot_at(&lanes, drawn.spots[0].pos, true);
+        assert!(CALLS.with(Cell::get) <= 2);
+        assert!(found.is_some());
+    }
 }

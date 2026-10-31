@@ -723,13 +723,21 @@ pub(crate) fn number_box_gesture(
     use crate::main_window::UiEvent;
     let id = Id::new(("number-box", id_salt));
     let flag = id.with("drag-gesture");
-    let open = ui.data(|d| d.get_temp::<bool>(flag)).unwrap_or(false);
+    // A drag whose box stopped being drawn before the release was already
+    // ended by `mixer::end_orphaned_drag`: forget it without a second End.
+    let mut open = ui.data(|d| d.get_temp::<bool>(flag)).unwrap_or(false);
+    if open && !crate::mixer::drag_is_open(ui) {
+        ui.data_mut(|d| d.remove::<bool>(flag));
+        open = false;
+    }
     let dragged = ui.ctx().is_being_dragged(id);
     if dragged && !open {
         ui.data_mut(|d| d.insert_temp(flag, true));
+        crate::mixer::open_drag(ui);
         events.push(UiEvent::BeginNamedGesture(label.to_owned()));
     } else if !dragged && open {
         ui.data_mut(|d| d.remove::<bool>(flag));
+        crate::mixer::close_drag(ui);
         events.push(UiEvent::EndGesture);
     }
 }

@@ -511,7 +511,7 @@ fn press(at: Pos2, pressed: bool) -> Event {
     }
 }
 
-// Spec: sample-editor R15. Dragging a number box is one undo step, not one
+// Spec: audio-clips R15. Dragging a number box is one undo step, not one
 // for each step of the drag.
 #[test]
 fn dragging_gain_is_one_undo_step() {
@@ -532,7 +532,7 @@ fn dragging_gain_is_one_undo_step() {
     assert_eq!(steps(&p.h), before + 1, "one undo step for the drag");
 }
 
-// Spec: sample-editor R15. A click on a control with several clips selected
+// Spec: audio-clips R15. A click on a control with several clips selected
 // is one undo step, and one Undo puts every clip back.
 #[test]
 fn warp_on_two_selected_clips_is_one_undo_step() {

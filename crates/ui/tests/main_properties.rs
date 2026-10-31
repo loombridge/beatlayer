@@ -611,3 +611,39 @@ fn dragging_start_and_position_is_one_undo_step() {
         assert_eq!(read(&midi(&h, clip)), first, "{name}: undone");
     }
 }
+
+// Spec: clip-properties R3. A drag whose field stops being drawn before the
+// release still ends its gesture, so later edits aren't folded into it.
+#[test]
+fn a_drag_hidden_before_the_release_ends_its_gesture() {
+    let (mut h, clip) = session_clip();
+    let all = nodes(&mut h);
+    let at = centre(Harness::node(&all, "Start"));
+    let before = steps(&h);
+    let first = midi(&h, clip).start;
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![press(at, true)]);
+    for i in 1..=4 {
+        h.frame(vec![Event::PointerMoved(
+            at - egui::vec2(0.0, 5.0 * i as f32),
+        )]);
+    }
+    assert!(h.shell.gesture_under_way(), "the drag holds a gesture");
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.frame(vec![Event::PointerMoved(at - egui::vec2(0.0, 25.0))]);
+    h.frame(vec![press(at - egui::vec2(0.0, 25.0), false)]);
+    h.settle();
+    assert!(
+        !h.shell.gesture_under_way(),
+        "the release ended the gesture"
+    );
+    assert_ne!(midi(&h, clip).start, first, "the drag moved Start");
+    assert_eq!(steps(&h), before + 1, "one undo step for the drag");
+    h.shell.run("view.toggle_clip_view", json!({})).unwrap();
+    h.settle();
+    assert!(
+        !h.shell.gesture_under_way(),
+        "showing the field again opens nothing"
+    );
+    assert_eq!(steps(&h), before + 1, "and adds no step");
+}

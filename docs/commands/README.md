@@ -363,6 +363,83 @@ Two parameters that share one control, which a switch turns between: while `swit
 
 </details>
 
+### `AnalysisState`
+
+How far sound analysis has got (spec: sound-similarity R6, R7).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `analysed` | integer, at least 0 | yes | The audio files and presets that have a descriptor. |
+| `waiting` | integer, at least 0 | yes | The audio files and presets waiting to be analysed, the one under way included. |
+| `skipped` | integer, at least 0 | yes | The files that couldn't be analysed, and aren't tried again until they change. |
+| `paused` | boolean | yes | Whether analysis is paused: the file under way is finished, and no other is begun until it resumes. |
+| `computed` | integer, at least 0 | yes | The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it. |
+| `current` | string or null | no | The path of the file under way. |
+| `share` | number or null | no | The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far sound analysis has got (spec: sound-similarity R6, R7).",
+  "properties": {
+    "analysed": {
+      "description": "The audio files and presets that have a descriptor.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "computed": {
+      "description": "The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "current": {
+      "description": "The path of the file under way.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paused": {
+      "description": "Whether analysis is paused: the file under way is finished, and no other is begun until it resumes.",
+      "type": "boolean"
+    },
+    "share": {
+      "description": "The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "description": "The files that couldn't be analysed, and aren't tried again until they change.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "waiting": {
+      "description": "The audio files and presets waiting to be analysed, the one under way included.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "analysed",
+    "waiting",
+    "skipped",
+    "paused",
+    "computed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AnalyzeResult`
 
 What `perception.analyze` returns. A measure not asked for is null.

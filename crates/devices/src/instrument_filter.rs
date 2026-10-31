@@ -734,10 +734,10 @@ fn ladder(setup: Setup, c: &Coef, state: &mut [f64; STATES], x: f64) -> f64 {
     };
     let mut u = (x - k * sigma) / (1.0 + k * through);
     let mut out = 0.0;
-    for s in 0..4 {
-        let low = big * u + small * state[s];
+    for (s, held) in state.iter_mut().take(4).enumerate() {
+        let low = big * u + small * *held;
         let stage = if high { u - low } else { low };
-        state[s] = flush(soft(2.0 * low - state[s], LADDER_SOFT));
+        *held = flush(soft(2.0 * low - *held, LADDER_SOFT));
         u = stage;
         if s == if setup.slope24 { 3 } else { 1 } {
             out = stage;

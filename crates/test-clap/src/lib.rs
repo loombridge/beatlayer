@@ -387,6 +387,12 @@ impl DefaultPluginFactory for GainEcho {
                 print!("Loading the test plug-in...");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
             }
+            // A helper that inherits standard output and outlives the scan, as
+            // a licence agent a plug-in starts when it loads would.
+            #[cfg(unix)]
+            Ok("helper") => {
+                let _ = std::process::Command::new("sleep").arg("30").spawn();
+            }
             Ok("big") => name = "x".repeat(200_000),
             _ => {}
         }

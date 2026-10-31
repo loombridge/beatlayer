@@ -725,7 +725,8 @@ fn set_param(shell: &mut Shell, device: DeviceId, param: ParamId, value: f64) {
 }
 
 /// A MIDI track with Simpler on the drum loop in Slice mode, cut by
-/// transient, and a clip playing each slice's key at the slice's start at
+/// Region into eight (a Transient scan would leave the first notes of a
+/// render silent), and a clip playing each slice's key at the slice's start at
 /// 120 BPM: the shell, the track, the Simpler, and the slices' boundaries
 /// in frames.
 fn simpler_track(scratch: &Scratch) -> (Shell, TrackId, DeviceId, Vec<u64>) {
@@ -758,6 +759,8 @@ fn simpler_track(scratch: &Scratch) -> (Shell, TrackId, DeviceId, Vec<u64>) {
         )
         .unwrap();
     set_param(&mut shell, device, MODE, 2.0);
+    set_param(&mut shell, device, bl_devices::sampler::SLICE_BY, 2.0);
+    set_param(&mut shell, device, bl_devices::sampler::SLICE_REGIONS, 8.0);
     let found = shell.editor().document().device(device).unwrap().clone();
     let audio = shell
         .edited_audio(found.media_at(0).unwrap(), &found.sample_edits)

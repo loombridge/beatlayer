@@ -149,7 +149,7 @@ pub fn place_with_pages(
         placed
             .controls
             .iter()
-            .map(|c| (c.param, c.widget, at(c.rect)))
+            .map(|c| (panel.drawn(c.param), c.widget, at(c.rect)))
             .collect(),
         placed
             .cells

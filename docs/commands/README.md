@@ -323,6 +323,46 @@ An allowed agent as the agent server's commands report it: without its token.
 
 </details>
 
+### `Alternate`
+
+Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `switch` | [`ParamId`](#paramid) | yes | The switch. |
+| `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
+| `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
+  "properties": {
+    "off": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is off."
+    },
+    "on": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is on."
+    },
+    "switch": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The switch."
+    }
+  },
+  "required": [
+    "switch",
+    "off",
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AnalyzeResult`
 
 What `perception.analyze` returns. A measure not asked for is null.
@@ -8989,6 +9029,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
@@ -9001,6 +9042,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 {
   "description": "What a kind of device is to the framework: its parameters' descriptors, in the order its generic UI and agents list them, and its layout.",
   "properties": {
+    "alternates": {
+      "description": "The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown.",
+      "items": {
+        "$ref": "#/$defs/Alternate"
+      },
+      "type": "array"
+    },
     "banks": {
       "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
       "items": {
@@ -23321,6 +23369,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `title_switch` | boolean | yes | Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale. |
 | `configured` | boolean | yes | Whether it's one of the parameters the device's panel is configured to show (clap-hosting R5, configure mode). True for every parameter of a device that isn't a plug-in, since its panel shows them all. |
+| `shown` | boolean | yes | Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 | `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
 
@@ -23373,6 +23422,11 @@ One of a device's parameters as `device.parameters` reports it.
         "null"
       ]
     },
+    "shown": {
+      "default": true,
+      "description": "Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays.",
+      "type": "boolean"
+    },
     "text": {
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
       "type": "string"
@@ -23398,7 +23452,8 @@ One of a device's parameters as `device.parameters` reports it.
     "text",
     "menu_option",
     "title_switch",
-    "configured"
+    "configured",
+    "shown"
   ],
   "type": "object"
 }

@@ -138,6 +138,45 @@ fn a_peers_tempo_becomes_the_sets_with_no_undo_step() {
     );
 }
 
+// Spec: link R3. Undoing a step made before a peer's tempo change leaves the
+// peer's tempo as it is, and doesn't send the older one to the session.
+#[test]
+fn undoing_an_earlier_step_keeps_a_peers_tempo_and_leaves_the_session_alone() {
+    let peer = older_peer(100.0);
+    let (mut shell, control) = testing::rig();
+    shell.start_audio();
+    testing::settle(&control, &mut shell);
+    shell
+        .run("link.set_enabled", json!({ "on": true }))
+        .unwrap();
+    wait("the shell's tempo to become the session's", || {
+        testing::advance(&control, &mut shell, 20);
+        shell.poll();
+        (tempo(&mut shell) - 100.0).abs() < 0.01
+    });
+    shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    peer.set_tempo(135.0);
+    wait("the peer's tempo", || {
+        testing::advance(&control, &mut shell, 20);
+        shell.poll();
+        (tempo(&mut shell) - 135.0).abs() < 0.01
+    });
+
+    shell.run("edit.undo", json!({})).unwrap();
+    assert!((tempo(&mut shell) - 135.0).abs() < 0.01);
+    for _ in 0..50 {
+        testing::advance(&control, &mut shell, 20);
+        shell.poll();
+    }
+    assert!((tempo(&mut shell) - 135.0).abs() < 0.01);
+    assert!(
+        (peer.snapshot(4.0).tempo - 135.0).abs() < 0.01,
+        "the session stays at 135"
+    );
+}
+
 fn tempo(shell: &mut Shell) -> f64 {
     shell.run("transport.state", json!({})).unwrap()["tempo"]
         .as_f64()

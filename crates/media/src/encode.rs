@@ -60,6 +60,10 @@ pub const MP3_RATES: [u32; 9] = [
     8_000, 11_025, 12_000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000,
 ];
 
+/// The highest sample rate the FLAC encoder (flacenc) writes: it refuses a
+/// stream whose rate is above this, though the format holds more.
+pub const FLAC_MAX_RATE: u32 = 96_000;
+
 impl FileType {
     /// The usual extension, without the dot.
     #[must_use]
@@ -362,6 +366,15 @@ impl AudioWriter {
                     ),
                 ));
             }
+        }
+        if spec.file_type == FileType::Flac && spec.sample_rate > FLAC_MAX_RATE {
+            return Err(encode_error(
+                path,
+                format!(
+                    "a sample rate of {} Hz; FLAC is written up to {FLAC_MAX_RATE} Hz",
+                    spec.sample_rate
+                ),
+            ));
         }
         if !(1..=8).contains(&spec.channels) {
             return Err(encode_error(
@@ -1294,6 +1307,33 @@ mod tests {
             Err(MediaError::Encode(_))
         ));
         assert!(!temp.0.join("three.mp3").exists());
+    }
+
+    /// Spec: export R5. The FLAC encoder stops at 96,000 Hz, so a higher
+    /// rate is refused when the writer is made, before anything is written.
+    #[test]
+    fn flac_above_96_khz_is_refused_before_any_file_is_made() {
+        let temp = TempDir::new("flac-high");
+        let spec = EncodeSpec {
+            file_type: FileType::Flac,
+            bit_depth: BitDepth::Int24,
+            sample_rate: 96_000,
+            dither: Dither::None,
+            channels: 2,
+        };
+        assert!(AudioWriter::create(&temp.0.join("ok.flac"), spec).is_ok());
+        for sample_rate in [176_400, 192_000] {
+            let path = temp.0.join(format!("x{sample_rate}.flac"));
+            let high = EncodeSpec {
+                sample_rate,
+                ..spec
+            };
+            assert!(matches!(
+                AudioWriter::create(&path, high),
+                Err(MediaError::Encode(_))
+            ));
+            assert!(!path.exists());
+        }
     }
 
     /// Spec: export R23, R33. One channel is encoded as one: the file

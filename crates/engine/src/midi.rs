@@ -517,6 +517,17 @@ impl MidiRoutes {
         }
     }
 
+    /// Spec: mpe R17. Output `port` opened: the MPE routes to it send their
+    /// configuration and bend range again before their next note. Real-time
+    /// safe: it sets flags.
+    pub(crate) fn reopen_port(&mut self, port: PortId) {
+        for route in self.outs.iter_mut().filter(|route| route.port == port) {
+            if let Some(layout) = route.mpe.as_mut() {
+                layout.reopen();
+            }
+        }
+    }
+
     /// Every note the routes have sent and not ended, as a note-off each,
     /// for a stream that stops (R6). Allocates: off the audio thread.
     pub(crate) fn drain_held(&mut self) -> Vec<(PortId, MidiMessage)> {
@@ -573,7 +584,9 @@ impl MidiRoutes {
                 continue;
             };
             std::mem::swap(&mut route.held, &mut was.held);
-            route.release = !route.monitored
+            // A release the last swap set stays pending when no block ran between.
+            route.release = was.release
+                || !route.monitored
                 || route.filter != was.filter
                 || route.channel != was.channel
                 || route.keymap != was.keymap;

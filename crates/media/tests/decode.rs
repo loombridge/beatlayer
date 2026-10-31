@@ -460,3 +460,66 @@ fn an_itunsmpb_tag_that_overflows_decodes_untrimmed_instead_of_panicking() {
         .unwrap();
     assert!(decoded.frames() > 0);
 }
+
+#[test]
+fn an_itunsmpb_priming_past_the_stream_decodes_untrimmed_not_empty() {
+    // Priming 2^31 - 1 doesn't overflow with the valid count, but is far past
+    // the stream: every packet would be dropped while the info says 11,025.
+    let mut bytes =
+        std::fs::read(common::fixtures_dir().join("sine-44k1-s16-2ch.aac.m4a")).unwrap();
+    let tag = b"00000840";
+    let at = bytes.windows(tag.len()).position(|w| w == tag).unwrap();
+    bytes[at..at + tag.len()].copy_from_slice(b"7FFFFFFF");
+    let decoder = Decoder::from_reader(Cursor::new(bytes), Some("m4a")).unwrap();
+    let info_frames = decoder.info().frames;
+    let decoded = decoder.decode_to_end().unwrap();
+    assert!(decoded.frames() > 0);
+    assert!(info_frames.is_none() || info_frames == Some(decoded.frames() as u64));
+}
+
+/// The AAC fixture with every packet's payload junk and its `stts` giving
+/// the first sample a delta of `u32::MAX` at the media `timescale`.
+fn m4a_with_damaged_packets_of_endless_duration(timescale: u32) -> Vec<u8> {
+    let mut bytes =
+        std::fs::read(common::fixtures_dir().join("sine-44k1-s16-2ch.aac.m4a")).unwrap();
+    let find = |kind: &[u8; 4]| bytes.windows(4).position(|w| w == kind).unwrap() - 4;
+    let (mdhd, stts, mdat) = (find(b"mdhd"), find(b"stts"), find(b"mdat"));
+    bytes[mdhd + 20..mdhd + 24].copy_from_slice(&timescale.to_be_bytes());
+    bytes[stts + 16..stts + 20].copy_from_slice(&1u32.to_be_bytes());
+    bytes[stts + 20..stts + 24].copy_from_slice(&u32::MAX.to_be_bytes());
+    // A channel pair element with the invalid mid-side mask 3: the codec
+    // reports it as damage.
+    for packet in bytes[mdat + 8..].chunks_mut(6) {
+        packet.copy_from_slice(&[0x21, 0x00, 0x18, 0, 0, 0][..packet.len()]);
+    }
+    bytes
+}
+
+/// Reads a whole file through [`Decoder::read`], returning its damaged
+/// packets.
+fn damaged_packets_after_reading(bytes: Vec<u8>) -> u64 {
+    let mut decoder = Decoder::from_reader(Cursor::new(bytes), Some("m4a")).unwrap();
+    let mut block = [vec![0.0; 4096], vec![0.0; 4096]];
+    loop {
+        let [l, r] = &mut block;
+        if decoder.read(&mut [l, r]).unwrap() == 0 {
+            return decoder.damaged_packets();
+        }
+    }
+}
+
+#[test]
+fn a_damaged_packet_of_endless_duration_is_not_filled_with_silence_to_match() {
+    // Timescale 1 differs from the 44.1 kHz rate, so the header's frame count
+    // is unknown and the duration scales to about 1.9e14 frames.
+    let damaged = damaged_packets_after_reading(m4a_with_damaged_packets_of_endless_duration(1));
+    assert!(damaged > 0);
+}
+
+#[test]
+fn a_damaged_packet_of_endless_duration_at_the_sample_rate_is_bounded_too() {
+    // The timescale matches, so the header's frame count passes the limit.
+    let damaged =
+        damaged_packets_after_reading(m4a_with_damaged_packets_of_endless_duration(44_100));
+    assert!(damaged > 0);
+}

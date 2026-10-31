@@ -1,7 +1,7 @@
 //! Crash recovery: the journal of the set's edits and the recovery commands.
 
 use super::{Shell, ShellError, to_value};
-use crate::files::new_set_from;
+use crate::files::{after_load, new_set_from};
 use bl_project::autosave::Autosave;
 use bl_project::autosave::Recoverable;
 use bl_project::autosave::Recovered;
@@ -50,7 +50,15 @@ impl Shell {
     /// spec, R3): as it was after its last journalled edit, unsaved, with
     /// an empty undo history.
     fn open_recovered(&mut self, recovered: Recovered) {
-        let Recovered { set, project, .. } = recovered;
+        let Recovered {
+            set,
+            mut project,
+            info,
+            ..
+        } = recovered;
+        // The journal holds the song in the form it was written in, as a set
+        // file does: finish its migrations as `set.open` does.
+        let notice = after_load(&mut project, &info);
         self.set_replaced();
         self.editor = project.editor();
         self.set_path = set.as_ref().map(|set| set.path().to_owned());
@@ -80,6 +88,9 @@ impl Shell {
         self.new_set_transport();
         self.document_changed();
         self.set_file_changed();
+        if let Some(notice) = notice {
+            self.set_message(notice, false);
+        }
         self.touch();
     }
 
@@ -223,13 +234,14 @@ impl Shell {
     /// error, or the reason the session couldn't start.
     fn recovery_problem(&mut self) -> Option<String> {
         let autosave = self.autosave.as_mut()?;
+        let set = self.store.set_file();
         if let Some(error) = autosave.status().error {
             return Some(error);
         }
         if autosave.status().session.is_none() {
             // The session never started: try again, so a folder that is
             // writable now is used (the crash-recovery spec, R27).
-            if let Err(error) = autosave.retry() {
+            if let Err(error) = autosave.retry(set) {
                 return Some(error.to_string());
             }
         }

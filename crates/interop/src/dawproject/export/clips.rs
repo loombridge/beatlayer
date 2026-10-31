@@ -503,7 +503,9 @@ impl Exporter<'_> {
     }
 
     /// A name in `folder` no entry has, with " 2", " 3" and so on before the
-    /// extension where it is taken (R73).
+    /// extension where it is taken, a name that differs only in case being
+    /// taken as well, since a case-insensitive file system holds one file
+    /// under both (R73).
     pub(super) fn free_name(&mut self, folder: &str, name: &str) -> String {
         let (stem, extension) = match name.rfind('.') {
             Some(dot) if dot > 0 => (&name[..dot], &name[dot..]),
@@ -511,7 +513,7 @@ impl Exporter<'_> {
         };
         let mut candidate = format!("{folder}/{name}");
         let mut number = 2;
-        while !self.taken.insert(candidate.clone()) {
+        while !self.taken.insert(crate::dawproject::folded(&candidate)) {
             candidate = format!("{folder}/{stem} {number}{extension}");
             number += 1;
         }

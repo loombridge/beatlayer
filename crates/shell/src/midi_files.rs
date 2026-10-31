@@ -231,7 +231,7 @@ fn round_up(length: Ticks, bar: Ticks) -> Ticks {
     if bar <= Ticks::ZERO {
         return length.max(Ticks(1));
     }
-    let bars = (length.get() + bar.get() - 1).div_euclid(bar.get());
+    let bars = (length.get().saturating_add(bar.get() - 1)).div_euclid(bar.get());
     Ticks(bars.max(1) * bar.get())
 }
 

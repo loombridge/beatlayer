@@ -112,14 +112,39 @@ impl Shell {
             replace,
         } = args;
         let command = command.as_str();
-        let fixed = fixed.clone();
         let keys = keys.as_slice();
         let platform = *platform;
         let context = context.as_deref();
         let replace = *replace;
-        if !self.registry.contains(command) {
+        let Some(spec) = self.registry.get(command) else {
             return Err(ShellError::UnknownCommand(command.to_owned()));
+        };
+        // The file holds the arguments as TOML, which has no null.
+        if fixed.values().any(has_null) {
+            return Err(invalid(id, "the arguments can't hold null"));
         }
+        // Each argument the binding fixes must fit; the ones it leaves out
+        // are the caller's to give when the keys run it.
+        let fits = match &spec.args {
+            Some(schema) => fixed
+                .iter()
+                .try_for_each(|(name, value)| match bl_commands::property(schema, name) {
+                    Some(property) => bl_commands::validate_in(schema, property, value),
+                    None if schema.get("additionalProperties") == Some(&Value::Bool(false)) => {
+                        Err(format!("`{name}` isn't one of its arguments"))
+                    }
+                    None => Ok(()),
+                }),
+            None if fixed.is_empty() => Ok(()),
+            None => Err("the command takes no arguments".to_owned()),
+        };
+        if let Err(message) = fits {
+            return Err(invalid(
+                id,
+                &format!("the arguments don't fit `{command}`: {message}"),
+            ));
+        }
+        let fixed = fixed.clone();
         if keys.is_empty() {
             return Err(invalid(id, "the binding has no keys"));
         }
@@ -215,16 +240,40 @@ impl Shell {
         if !self.registry.contains(command) {
             return Err(ShellError::UnknownCommand(command.to_owned()));
         }
-        let platform = platform.unwrap_or(Platform::current());
-        let chords: Vec<Chord> = keys
-            .iter()
-            .filter_map(|binding| crate::keymap::parse_binding(binding, platform))
-            .flatten()
-            .collect();
-        let Some(context) = self.context_of(command, &chords, platform) else {
-            return Err(invalid(id, "the command has no keys to take away"));
+        if keys.is_empty() {
+            return Err(invalid(id, "name the keys to take away"));
+        }
+        let platforms = match platform {
+            Some(platform) => vec![platform],
+            None => vec![Platform::Mac, Platform::Other],
         };
-        self.take_keys_away(command, &context, &chords, platform);
+        // A key must parse on a platform that is asked for; on the others
+        // it names nothing to take away.
+        if let Some(key) = keys.iter().find(|key| {
+            !platforms
+                .iter()
+                .any(|p| crate::keymap::parse_binding(key, *p).is_some())
+        }) {
+            return Err(invalid(id, &format!("`{key}` isn't a key")));
+        }
+        let mut removed = false;
+        for platform in platforms {
+            let chords: Vec<Chord> = keys
+                .iter()
+                .filter_map(|binding| crate::keymap::parse_binding(binding, platform))
+                .flatten()
+                .collect();
+            if chords.is_empty() {
+                continue;
+            }
+            if let Some(context) = self.context_of(command, &chords, platform) {
+                self.take_keys_away(command, &context, &chords, platform);
+                removed = true;
+            }
+        }
+        if !removed {
+            return Err(invalid(id, "the command has no keys to take away"));
+        }
         self.rebuild_keymap();
         Ok(())
     }
@@ -262,7 +311,7 @@ impl Shell {
         platform: Platform,
         bind_context: &str,
     ) {
-        if self.take_own_binding_away(command, context, platform) {
+        if self.take_own_binding_away(command, context, chords, platform) {
             return;
         }
         if context == bind_context {
@@ -281,27 +330,40 @@ impl Shell {
         chords: &[Chord],
         platform: Platform,
     ) {
-        if self.take_own_binding_away(command, context, platform) {
+        if self.take_own_binding_away(command, context, chords, platform) {
             return;
         }
         self.unbind_shortcut(command, chords, platform);
     }
 
-    /// The person's own binding for a command in a context loses its keys
-    /// on a platform. Whether the person had such a binding is the answer.
-    fn take_own_binding_away(&mut self, command: &str, context: &str, platform: Platform) -> bool {
+    /// The person's own binding for a command in a context loses the keys
+    /// that are `chords` on a platform, and keeps its others. Whether it
+    /// lost any is the answer.
+    fn take_own_binding_away(
+        &mut self,
+        command: &str,
+        context: &str,
+        chords: &[Chord],
+        platform: Platform,
+    ) -> bool {
         let Some(index) = self.user_keymap.bind_index_for(command, context) else {
             return false;
         };
         let bind = &mut self.user_keymap.binds[index];
-        match platform {
-            Platform::Mac => bind.mac.clear(),
-            Platform::Other => bind.win.clear(),
-        }
+        let keys = match platform {
+            Platform::Mac => &mut bind.mac,
+            Platform::Other => &mut bind.win,
+        };
+        let before = keys.len();
+        keys.retain(|binding| {
+            !crate::keymap::parse_binding(binding, platform)
+                .is_some_and(|own| own.iter().any(|c| chords.iter().any(|k| k.same(c))))
+        });
+        let removed = keys.len() < before;
         if bind.mac.is_empty() && bind.win.is_empty() {
             self.user_keymap.binds.remove(index);
         }
-        true
+        removed
     }
 
     /// Unbinds the default shortcut that runs a command with these keys.
@@ -371,6 +433,16 @@ impl Shell {
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
         }
+    }
+}
+
+/// Whether a JSON value holds a null anywhere.
+fn has_null(value: &Value) -> bool {
+    match value {
+        Value::Null => true,
+        Value::Array(items) => items.iter().any(has_null),
+        Value::Object(fields) => fields.values().any(has_null),
+        _ => false,
     }
 }
 

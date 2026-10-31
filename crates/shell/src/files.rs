@@ -425,22 +425,7 @@ impl ProjectFiles {
 impl SetStore for ProjectFiles {
     fn open(&mut self, path: &Path) -> Result<(Editor, PathBuf), String> {
         let (set, mut project) = SetFile::open(path).map_err(|error| error.to_string())?;
-        if set.info().is_some_and(SetInfo::before_relative_modulation) {
-            bl_devices::relative_clip_envelopes(&mut project.document);
-        }
-        // Spec: sampler R24. A set from before the region says which Simplers
-        // the flags can no longer follow.
-        self.notice = set.info().filter(|info| info.schema < 13).and_then(|_| {
-            let named = bl_project::migrate::simplers_whose_start_was_driven(&project.document);
-            (!named.is_empty()).then(|| {
-                format!(
-                    "Simpler {}: automation, envelopes, macros or modulation of Start or \
-                         Length no longer move the played region; One-Shot and Slice play \
-                         between the Start and End flags",
-                    named.join(", ")
-                )
-            })
-        });
+        self.notice = set.info().and_then(|info| after_load(&mut project, info));
         let editor = project.editor();
         let opened = set.path().to_owned();
         self.set = Some(set);
@@ -505,8 +490,8 @@ impl SetStore for ProjectFiles {
 
     fn read(&mut self, path: &Path) -> Result<Editor, String> {
         let (set, mut project) = SetFile::open(path).map_err(|error| error.to_string())?;
-        if set.info().is_some_and(SetInfo::before_relative_modulation) {
-            bl_devices::relative_clip_envelopes(&mut project.document);
+        if let Some(info) = set.info() {
+            after_load(&mut project, info);
         }
         let editor = project.editor();
         // The set's song is the backup's now, so its media table is the
@@ -1324,6 +1309,31 @@ pub fn factory_default_set() -> Editor {
     editor
 }
 
+/// What a loaded song needs from its caller (the migrations that can't run
+/// where the file is decoded): relative modulation's clip envelopes, and the
+/// sampler's notice. Every path that loads a song calls it, so a migration's
+/// caller step can't be skipped by one of them. Returns the notice to show,
+/// if any.
+pub(crate) fn after_load(project: &mut Project, info: &SetInfo) -> Option<String> {
+    if info.before_relative_modulation() {
+        bl_devices::relative_clip_envelopes(&mut project.document);
+    }
+    // Spec: sampler R24. A set from before the region says which Simplers
+    // the flags can no longer follow.
+    if info.schema >= 13 {
+        return None;
+    }
+    let named = bl_project::migrate::simplers_whose_start_was_driven(&project.document);
+    (!named.is_empty()).then(|| {
+        format!(
+            "Simpler {}: automation, envelopes, macros or modulation of Start or \
+                 Length no longer move the played region; One-Shot and Slice play \
+                 between the Start and End flags",
+            named.join(", ")
+        )
+    })
+}
+
 /// The set a new set starts from: the saved default set at `path` when it
 /// can be read, otherwise [`factory_default_set`] (WP-2.25). File ▸ Save
 /// Beatlayer Set As Default Set makes the open set the one a new set starts
@@ -1336,8 +1346,8 @@ pub fn factory_default_set() -> Editor {
 pub fn new_set_from(path: Option<&Path>) -> (Editor, Option<(PathBuf, Project)>) {
     path.and_then(|path| SetFile::open(path).ok())
         .map(|(set, mut project)| {
-            if set.info().is_some_and(SetInfo::before_relative_modulation) {
-                bl_devices::relative_clip_envelopes(&mut project.document);
+            if let Some(info) = set.info() {
+                after_load(&mut project, info);
             }
             let folder = std::path::absolute(set.path())
                 .ok()

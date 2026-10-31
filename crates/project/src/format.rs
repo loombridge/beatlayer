@@ -62,6 +62,9 @@ pub const FORMAT: &str = "beatlayer-set";
 /// What a set file says saved it.
 pub const SAVED_BY: &str = concat!("Beatlayer ", env!("CARGO_PKG_VERSION"));
 
+/// IDs a loaded set must still have room to hand out.
+const ID_HEADROOM: u64 = 1 << 32;
+
 /// The first bytes of a zstd frame.
 const ZSTD_MAGIC: [u8; 4] = [0x28, 0xb5, 0x2f, 0xfd];
 
@@ -568,8 +571,8 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         document,
         ..
     } = saved;
-    // The allocator must be able to hand out at least one more ID, and
-    // never one the document already uses.
+    // The allocator must have head-room to keep handing out IDs, and never
+    // hand out one the document already uses.
     let max_id = document.max_id();
     if max_id.get() == u64::MAX {
         return Err(LoadError::invalid(
@@ -577,7 +580,7 @@ pub fn decode_json(json: &[u8], options: &LoadOptions) -> Result<(Project, SetIn
         ));
     }
     ids.skip_past(max_id);
-    if ids.peek().get() == u64::MAX {
+    if ids.peek().get() > u64::MAX - ID_HEADROOM {
         return Err(LoadError::invalid("the set's object IDs are exhausted"));
     }
     // A frame that's damaged, or for a device that isn't there, is
@@ -1137,12 +1140,26 @@ mod tests {
         last["document"]["main"]["id"] = json!(u64::MAX - 1);
         let error = load_json(&last).unwrap_err();
         assert!(error.to_string().contains("exhausted"), "{error}");
+        // So is one without head-room: a document whose largest ID is
+        // `u64::MAX - 2` would allow one more new object and then panic.
         last["document"]["main"]["id"] = json!(u64::MAX - 2);
+        let error = load_json(&last).unwrap_err();
+        assert!(error.to_string().contains("exhausted"), "{error}");
+        // Just inside the head-room, a set loads and keeps handing out IDs.
+        last["document"]["main"]["id"] = json!(u64::MAX - ID_HEADROOM - 2);
         let (loaded, _) = load_json(&last).unwrap();
-        assert_eq!(loaded.ids.peek(), Id::new(u64::MAX - 1).unwrap());
-        // The editor can still hand out that one.
         let mut editor = loaded.editor();
-        let id: Id = editor.new_id();
-        assert_eq!(id.get(), u64::MAX - 1);
+        let first: Id = editor.new_id();
+        assert_eq!(first.get(), u64::MAX - ID_HEADROOM - 1);
+        let _: Id = editor.new_id();
+    }
+
+    #[test]
+    fn a_set_near_the_last_id_is_refused_not_a_later_panic() {
+        let project = song();
+        let mut value = json_of(&project, 1);
+        value["ids"] = json!(u64::MAX - 1);
+        let error = load_json(&value).unwrap_err();
+        assert!(error.to_string().contains("exhausted"), "{error}");
     }
 }

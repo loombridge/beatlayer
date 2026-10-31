@@ -86,10 +86,21 @@ impl Shell {
     /// Whether the set has changes that aren't saved (the crash-recovery
     /// spec, R25): with Save Continuously on, a set that has a file has
     /// none, because every finished edit of it is committed within a
-    /// second. A set that has never been saved still has some.
+    /// second. A set that has never been saved still has some, and so has
+    /// one whose journal can't hold save points (a project folder that can't
+    /// be written, a set that didn't open at its file).
+    ///
+    /// shortcut: the first edit in a folder that can't be written still
+    /// counts as committed until the journal has tried it, a moment.
     #[must_use]
     pub fn unsaved_changes(&self) -> bool {
-        self.dirty && !(self.prefs.save_continuously && self.set_path.is_some())
+        let committed = self.prefs.save_continuously
+            && self.set_path.is_some()
+            && self.autosave.as_ref().is_some_and(|autosave| {
+                let status = autosave.status();
+                status.committing && status.error.is_none()
+            });
+        self.dirty && !committed
     }
 
     /// Lets go of the plug-ins of the set being replaced (WP-2.6): the new
@@ -677,6 +688,7 @@ impl Shell {
         self.set_path = Some(path);
         self.set_file_changed();
         self.dirty = false;
+        self.save_history.saves = self.save_history.saves.wrapping_add(1);
         // Spec: crash-recovery R6. The save holds every edit, so the
         // journal retires.
         self.journal_saved();

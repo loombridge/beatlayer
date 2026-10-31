@@ -518,3 +518,104 @@ fn an_untitled_sets_imported_audio_survives_a_crash() {
         file.canonicalize().unwrap()
     );
 }
+
+// Windows has no read-only folder to make: its read-only attribute doesn't
+// stop files being made in one.
+#[cfg(unix)]
+#[test]
+fn save_continuously_in_a_read_only_project_still_has_unsaved_changes() {
+    use std::os::unix::fs::PermissionsExt;
+
+    // Spec: crash-recovery R8, R25. The folder can't hold save points, so
+    // the edits are only recovery points, and quitting asks.
+    let scratch = Scratch::new("ro-project");
+    let recovery = scratch.path("Recovery");
+    let set = saved_set(&scratch.path(""));
+    let folder = set.parent().unwrap();
+    let writable = std::fs::metadata(folder).unwrap().permissions();
+    std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+    if std::fs::File::create(folder.join(".probe")).is_ok() {
+        // Running as a user who ignores permissions: nothing to test.
+        let _ = std::fs::remove_file(folder.join(".probe"));
+        return;
+    }
+    let mut app = shell(&recovery);
+    app.run("settings.set_continuous_save", json!({ "on": true }))
+        .unwrap();
+    app.run("set.open", json!({ "path": set.to_string_lossy() }))
+        .unwrap();
+    app.invoke("track.create", json!({ "kind": "midi", "name": "A" }))
+        .unwrap();
+    app.invoke("track.create", json!({ "kind": "midi", "name": "B" }))
+        .unwrap();
+    app.flush_recovery().unwrap();
+    let unsaved = app.unsaved_changes();
+    app.invoke("app.quit", json!({})).unwrap();
+    let asked = app
+        .take_effects()
+        .iter()
+        .any(|effect| matches!(effect, bl_shell::Effect::ConfirmDiscard { .. }));
+    std::fs::set_permissions(folder, writable).unwrap();
+    assert!(unsaved, "edits in a read-only project aren't committed");
+    assert!(asked, "quitting asks");
+}
+
+/// Crashes a session that edited the set `fixture` (a set's JSON) is saved
+/// as, with its journal holding the fixture as an older build wrote it, and
+/// relaunches: the shell with the offer.
+fn crashed_with_an_older_song(scratch: &Scratch, fixture: &str) -> Shell {
+    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../project/tests/fixtures");
+    let json = std::fs::read(fixtures.join(fixture)).unwrap();
+    let recovery = scratch.path("Recovery");
+    let path = scratch.path("Old.blset");
+    std::fs::write(&path, bl_project::format::compress(&json)).unwrap();
+    let mut crashed = shell(&recovery);
+    crashed
+        .run("set.open", json!({ "path": path.to_string_lossy() }))
+        .unwrap();
+    crashed
+        .invoke("track.create", json!({ "kind": "midi", "name": "A" }))
+        .unwrap();
+    crashed.flush_recovery().unwrap();
+    drop(crashed);
+    // The journal's one entry is the older song, as an older build wrote it.
+    let journals = bl_project::journal::journals_beside(&path).unwrap();
+    let name = journals[0]
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let session = name
+        .strip_prefix(".Old.blset.")
+        .and_then(|name| name.strip_suffix(".bljournal"))
+        .unwrap();
+    let entry = json!({
+        "format": "beatlayer-journal",
+        "version": 1,
+        "session": session,
+        "seq": 1,
+        "follows": null,
+        "time": 0,
+        "label": "Create Track",
+        "committed": false,
+        "change": { "snapshot": serde_json::from_slice::<serde_json::Value>(&json).unwrap() },
+    });
+    std::fs::write(
+        &journals[0],
+        bl_project::format::compress(&serde_json::to_vec(&entry).unwrap()),
+    )
+    .unwrap();
+    shell(&recovery)
+}
+
+#[test]
+fn recovering_a_song_from_before_the_region_names_the_simplers_whose_start_was_driven() {
+    // Spec: sampler R24, crash-recovery R3. As `set.open` of the same song.
+    let scratch = Scratch::new("recover-simplers");
+    let mut app = crashed_with_an_older_song(&scratch, "simplers-driven-schema-11.json");
+    assert_eq!(app.recovery_offers().len(), 1);
+    app.run("set.recover", json!({})).unwrap();
+    let text = app.message().map(|message| message.text.clone());
+    let text = text.expect("a message in the Status Bar");
+    assert!(text.starts_with("Simpler One-Shot: "), "{text}");
+}

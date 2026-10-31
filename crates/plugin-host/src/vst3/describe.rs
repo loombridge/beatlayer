@@ -81,11 +81,21 @@ pub(crate) fn parameters(controller: &ComPtr<IEditController>) -> Vec<Parameter>
         } else {
             name
         };
+        // A stepped parameter whose plain range isn't its step count (the
+        // SDK's own stepped parameters map normalized to plain as the
+        // identity) is its step index, 0 to its step count.
+        let indexed = info.stepCount > 0 && ((max - min) - f64::from(info.stepCount)).abs() > 1e-9;
         #[expect(
             clippy::cast_possible_truncation,
             reason = "whole numbers in range, as in the CLAP host"
         )]
-        let kind = if info.stepCount > 0
+        let kind = if indexed {
+            ParamKind::Integer {
+                min: 0,
+                max: i64::from(info.stepCount),
+                unit: ParamUnit::None,
+            }
+        } else if info.stepCount > 0
             && min.fract() == 0.0
             && max.fract() == 0.0
             && min.abs() < 1e15
@@ -105,6 +115,16 @@ pub(crate) fn parameters(controller: &ComPtr<IEditController>) -> Vec<Parameter>
                 decimals: None,
             }
         };
+        let (min, max, default) = if indexed {
+            let steps = f64::from(info.stepCount);
+            (
+                0.0,
+                steps,
+                (info.defaultNormalizedValue.clamp(0.0, 1.0) * steps).round(),
+            )
+        } else {
+            (min, max, default)
+        };
         let default = if matches!(kind, ParamKind::Integer { .. }) {
             default.clamp(min, max).round()
         } else {
@@ -121,13 +141,12 @@ pub(crate) fn parameters(controller: &ComPtr<IEditController>) -> Vec<Parameter>
         if descriptor.check().is_err() {
             continue;
         }
-        out.push(Parameter {
-            descriptor,
-            map: ParamMap::new(info.id, (min, max), default, info.stepCount, |normalized| {
-                // SAFETY: as above.
-                unsafe { controller.normalizedParamToPlain(info.id, normalized) }
-            }),
+        let mut map = ParamMap::new(info.id, (min, max), default, info.stepCount, |normalized| {
+            // SAFETY: as above.
+            unsafe { controller.normalizedParamToPlain(info.id, normalized) }
         });
+        map.step_indexed = indexed;
+        out.push(Parameter { descriptor, map });
     }
     out
 }

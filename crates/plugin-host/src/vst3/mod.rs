@@ -143,6 +143,9 @@ pub(crate) struct ParamMap {
     pub(crate) max: f64,
     pub(crate) default: f64,
     pub(crate) steps: i32,
+    /// Whether the plain value is the step index, `min` 0 to `max` `steps`,
+    /// whatever plain range the controller maps its steps to.
+    pub(crate) step_indexed: bool,
     /// The controller's plain value at `CURVE_SEGMENTS + 1` evenly spaced
     /// normalized values, when its mapping isn't linear over `min..max`
     /// (a log frequency, a skewed gain): the audio thread can't ask the
@@ -178,7 +181,18 @@ impl ParamMap {
             max,
             default,
             steps,
+            step_indexed: false,
             curve,
+        }
+    }
+
+    /// The plain value of `normalized`: the step index of a step-indexed
+    /// parameter, else `controller_plain`, the controller's own.
+    pub(crate) fn plain(&self, normalized: f64, controller_plain: f64) -> f64 {
+        if self.step_indexed {
+            (normalized.clamp(0.0, 1.0) * f64::from(self.steps)).round()
+        } else {
+            controller_plain
         }
     }
 
@@ -393,6 +407,10 @@ struct Instance {
     gestures: Arc<Gestures>,
     /// Its parameters.
     params: Vec<describe::Parameter>,
+    /// Each parameter's value as the set has it, in plain units: what its
+    /// controller last reported or was told, to tell a change the plug-in
+    /// made itself from one the set already has (R6).
+    known: BTreeMap<u32, f64>,
     /// The values to send it at the first frame of its next block,
     /// normalized.
     pending: Vec<(u32, f64)>,
@@ -403,6 +421,10 @@ struct Instance {
     config: Option<NodeConfig>,
     /// The handover a node has, if it has one.
     handed: Option<u64>,
+    /// Whether the component is active: set when an activation succeeds,
+    /// cleared when it is deactivated, so it is never activated twice or
+    /// terminated while active.
+    component_active: bool,
     /// Counts the handovers.
     next_generation: u64,
     /// Activation failed for this node; it isn't tried again until the
@@ -439,6 +461,18 @@ struct Lent {
     /// Why the engine's node had it refused, if it had.
     refused: Option<String>,
 }
+
+/// The restart flags that need the plug-in deactivated and activated again:
+/// it reloads, its buses or its latency changed, or what its node reads once
+/// at activation did. The others ask the host only to read something again.
+const RESTART_FLAGS: u32 = (RestartFlags_::kReloadComponent
+    | RestartFlags_::kIoChanged
+    | RestartFlags_::kLatencyChanged
+    | RestartFlags_::kMidiCCAssignmentChanged
+    | RestartFlags_::kNoteExpressionChanged) as u32;
+
+/// The restart flag that says its parameters' values changed.
+const VALUES_FLAG: u32 = RestartFlags_::kParamValuesChanged as u32;
 
 /// How long a render waits for the engine's node to hand a plug-in back:
 /// a node does at its next block, a few milliseconds away.
@@ -738,9 +772,10 @@ impl Vst3Host {
                 let id = param.map.id;
                 // SAFETY: the controller reports its own parameter's value.
                 let normalized = unsafe { instance.controller.getParamNormalized(id) };
-                // SAFETY: as above.
-                let plain = unsafe { instance.controller.normalizedParamToPlain(id, normalized) };
-                (ParamId(id), plain)
+                (
+                    ParamId(id),
+                    plain_value(&instance.controller, &param.map, normalized),
+                )
             })
             .collect::<Vec<_>>();
         #[cfg(feature = "test-hooks")]
@@ -1296,11 +1331,13 @@ fn new_instance(main: &Main, module: &Module, cid: &TUID) -> Result<Instance, Vs
         restart,
         gestures,
         params,
+        known: BTreeMap::new(),
         pending: Vec::new(),
         ends: None,
         retired: Vec::new(),
         config: None,
         handed: None,
+        component_active: false,
         next_generation: 0,
         refused: None,
         silenced: false,
@@ -1396,6 +1433,9 @@ fn saved_state(instance: &Instance) -> Result<(Vec<u8>, Vec<u8>), Vst3Error> {
 fn load_state(instance: &mut Instance, data: &[u8]) -> Result<(), Vst3Error> {
     let (component, controller) =
         split_state(data).ok_or_else(|| Vst3Error::Refused("the state".to_owned()))?;
+    // What it holds now, to go back to if its controller refuses its part:
+    // a refused state changes nothing (vst3-hosting R9).
+    let before = saved_state(instance).ok();
     let result = stream::load(component, |state| {
         // SAFETY: the component is a live object and reads the host's
         // stream, which lives through the call.
@@ -1419,11 +1459,37 @@ fn load_state(instance: &mut Instance, data: &[u8]) -> Result<(), Vst3Error> {
                 unsafe { instance.controller.setState(state) }
             });
             if result != kResultOk {
+                if let Some((component, controller)) = before {
+                    restore_state(instance, &component, &controller);
+                }
                 return Err(Vst3Error::Refused("the controller's state".to_owned()));
             }
         }
     }
     Ok(())
+}
+
+/// Puts back a state [`saved_state`] took, which its own plug-in accepted
+/// before.
+fn restore_state(instance: &mut Instance, component: &[u8], controller: &[u8]) {
+    stream::load(component, |state| {
+        // SAFETY: the component is a live object and reads the host's
+        // stream, which lives through the call.
+        unsafe { instance.component.setState(state) }
+    });
+    if instance.separate {
+        stream::load(component, |state| {
+            // SAFETY: the controller is a live object and reads the host's
+            // stream, which lives through the call.
+            unsafe { instance.controller.setComponentState(state) }
+        });
+        if !controller.is_empty() {
+            stream::load(controller, |state| {
+                // SAFETY: as above.
+                unsafe { instance.controller.setState(state) }
+            });
+        }
+    }
 }
 
 /// Gives a new node its plug-in, making the plug-in if the device has none.
@@ -1518,6 +1584,8 @@ fn borrow(
         if lent.ends.to_node.push(active).is_ok() {
             lent.ends.handed = Some(generation);
             instance.handed = Some(generation);
+        } else {
+            deactivate(instance);
         }
     }
     instance.lent = Some(lent);
@@ -1568,6 +1636,7 @@ fn end_loan(main: &mut Main, inner: &Inner) {
         if let Some(saved) = &lent.saved {
             let _ = load_state(instance, saved);
         }
+        remember_values(instance);
         instance.gestures.take(|_, _| {});
         instance.refused = lent.refused;
         if failed {
@@ -1653,6 +1722,7 @@ fn ensure_instance(main: &mut Main, device: &Device, inner: &Inner) -> bool {
         instance.failure = Some(format!("{error}; it starts from its defaults"));
     }
     set_values(&mut instance, device);
+    remember_values(&mut instance);
     let bound = instance.ara.is_some();
     main.instances.insert(device.id, instance);
     // Spec: ara-hosting R2. A plug-in made after the last poll, such as one
@@ -1669,11 +1739,15 @@ fn set_values(instance: &mut Instance, device: &Device) {
     instance.pending.clear();
     for (param, value) in &device.params {
         let id = param.0;
-        if !instance.params.iter().any(|p| p.map.id == id) {
+        let Some(param) = instance.params.iter().find(|p| p.map.id == id) else {
             continue;
-        }
-        // SAFETY: the controller maps its own parameter's value, by ID.
-        let normalized = unsafe { instance.controller.plainParamToNormalized(id, *value) };
+        };
+        let normalized = if param.map.step_indexed {
+            param.map.normalized(*value)
+        } else {
+            // SAFETY: the controller maps its own parameter's value, by ID.
+            unsafe { instance.controller.plainParamToNormalized(id, *value) }
+        };
         let normalized = if normalized.is_finite() {
             normalized.clamp(0.0, 1.0)
         } else {
@@ -1797,6 +1871,7 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
     let latency = unsafe { processor.getLatencySamples() };
     let generation = instance.next_generation;
     instance.next_generation += 1;
+    instance.component_active = true;
     Ok(node::Active {
         generation,
         processor: instance.processor.clone(),
@@ -1813,12 +1888,9 @@ fn activate(instance: &mut Instance, config: &NodeConfig) -> Result<node::Active
             // Each control starts where the controller is: the set's values
             // and the plug-in's saved state are on it.
             // SAFETY: the controller maps its own parameter's value, by ID.
-            let plain = unsafe {
-                instance.controller.normalizedParamToPlain(
-                    p.map.id,
-                    instance.controller.getParamNormalized(p.map.id),
-                )
-            };
+            let plain = plain_value(&instance.controller, &p.map, unsafe {
+                instance.controller.getParamNormalized(p.map.id)
+            });
             let control = if plain.is_finite() {
                 plain.clamp(p.map.min, p.map.max)
             } else {
@@ -1894,6 +1966,10 @@ fn midi_map(controller: &ComPtr<IEditController>) -> Vec<Option<u32>> {
 /// Deactivates an instance, as VST3 asks: stop processing, then leave the
 /// active state.
 fn deactivate(instance: &mut Instance) {
+    if !instance.component_active {
+        return;
+    }
+    instance.component_active = false;
     // SAFETY: the processor and component are live objects, and this runs
     // on the main thread.
     unsafe {
@@ -1947,13 +2023,13 @@ fn take_back(instance: &mut Instance) -> bool {
                 .iter()
                 .map(|param| {
                     let id = param.map.id;
-                    // SAFETY: the controller maps its own parameter's value,
-                    // by ID, on the main thread.
-                    let plain = unsafe {
-                        let normalized = instance.controller.getParamNormalized(id);
-                        instance.controller.normalizedParamToPlain(id, normalized)
-                    };
-                    (id, plain)
+                    // SAFETY: the controller reports its own parameter's
+                    // value, by ID, on the main thread.
+                    let normalized = unsafe { instance.controller.getParamNormalized(id) };
+                    (
+                        id,
+                        plain_value(&instance.controller, &param.map, normalized),
+                    )
                 })
                 .collect();
         }
@@ -1981,14 +2057,19 @@ fn pump(
 
     // A restart it asked for — its latency changed, say: ask its node for
     // the component; the next pump activates it again, and the node passes
-    // its input through for the blocks between (R10).
-    if instance.lent.is_none()
-        && instance.restart.swap(0, Relaxed) != 0
-        && instance.handed.is_some()
-        && let Some(ends) = &instance.ends
-    {
-        ends.status.hand_back.store(true, Relaxed);
-        changed = true;
+    // its input through for the blocks between (R10). The flags that only
+    // ask the host to read something again don't restart it.
+    let mut values_changed = false;
+    if instance.lent.is_none() {
+        let flags = instance.restart.swap(0, Relaxed);
+        values_changed = flags & VALUES_FLAG != 0 || instance.gestures.take_overflow();
+        if flags & RESTART_FLAGS != 0
+            && instance.handed.is_some()
+            && let Some(ends) = &instance.ends
+        {
+            ends.status.hand_back.store(true, Relaxed);
+            changed = true;
+        }
     }
 
     // The values its node applied, so the controller's parameters are the
@@ -1997,6 +2078,12 @@ fn pump(
     changed |= sync_controller(instance);
     if instance.lent.is_none() {
         changed |= take_gestures(device, instance, changes);
+        // Spec: vst3-hosting R6. A plug-in that changed its values in bulk,
+        // a preset it loaded itself, is read again, after what its node
+        // applied and its gestures, so only its own changes are found.
+        if values_changed {
+            changed |= rescan_values(device, instance, changes);
+        }
     }
 
     if let Some(ends) = &instance.ends
@@ -2013,7 +2100,12 @@ fn pump(
         && !instance.ara.as_ref().is_some_and(|binding| binding.hold)
         && instance.refused.is_none()
         && !instance.silenced
-        && instance.config.is_some();
+        && instance.config.is_some()
+        // Spec: vst3-hosting R2. A node that is gone isn't given a plug-in.
+        && instance
+            .ends
+            .as_ref()
+            .is_some_and(|ends| !ends.to_node.is_abandoned());
     if ready {
         let config = instance.config.expect("the check above");
         match activate(instance, &config) {
@@ -2043,6 +2135,10 @@ fn pump(
                 if pushed {
                     instance.handed = Some(generation);
                     changed = true;
+                } else {
+                    // The node went between the check and the push: the
+                    // component doesn't stay active with nobody to run it.
+                    deactivate(instance);
                 }
             }
             Err(why) => {
@@ -2052,6 +2148,15 @@ fn pump(
         }
     }
     changed
+}
+
+/// The plain value of a normalized one for the parameter `map` describes
+/// (a step index, if it is one), on the main thread.
+fn plain_value(controller: &ComPtr<IEditController>, map: &ParamMap, normalized: f64) -> f64 {
+    // SAFETY: the controller maps its own parameter's value, by ID.
+    map.plain(normalized, unsafe {
+        controller.normalizedParamToPlain(map.id, normalized)
+    })
 }
 
 /// Tells the controller the values its node applied to the component, so
@@ -2068,6 +2173,10 @@ fn sync_controller(instance: &mut Instance) -> bool {
             // ID, on the main thread.
             if unsafe { instance.controller.setParamNormalized(id, normalized) } == kResultOk {
                 changed = true;
+                if let Some(param) = instance.params.iter().find(|p| p.map.id == id) {
+                    let plain = plain_value(&instance.controller, &param.map, normalized);
+                    instance.known.insert(id, plain);
+                }
             }
         }
     }
@@ -2077,13 +2186,21 @@ fn sync_controller(instance: &mut Instance) -> bool {
 /// Takes the changes the plug-in's controller made itself, such as from its
 /// editor: each gesture once, with its final value, in plain units (R6).
 /// Returns whether there were any.
-fn take_gestures(device: DeviceId, instance: &Instance, changes: &mut Vec<ParamChange>) -> bool {
+fn take_gestures(
+    device: DeviceId,
+    instance: &mut Instance,
+    changes: &mut Vec<ParamChange>,
+) -> bool {
     let gestures = Arc::clone(&instance.gestures);
     let before = changes.len();
     gestures.take(|id, normalized| {
-        // SAFETY: the controller maps its own parameter's value, by ID, on
-        // the main thread.
-        let plain = unsafe { instance.controller.normalizedParamToPlain(id, normalized) };
+        let plain = match instance.params.iter().find(|p| p.map.id == id) {
+            Some(param) => plain_value(&instance.controller, &param.map, normalized),
+            // SAFETY: the controller maps its own parameter's value, by ID,
+            // on the main thread.
+            None => unsafe { instance.controller.normalizedParamToPlain(id, normalized) },
+        };
+        instance.known.insert(id, plain);
         changes.push(ParamChange {
             device,
             param: ParamId(id),
@@ -2091,6 +2208,50 @@ fn take_gestures(device: DeviceId, instance: &Instance, changes: &mut Vec<ParamC
         });
     });
     changes.len() > before
+}
+
+/// Reads every parameter's value from the controller again, and reports
+/// each one that isn't the value the set has (R6). Returns whether there
+/// were any.
+fn rescan_values(
+    device: DeviceId,
+    instance: &mut Instance,
+    changes: &mut Vec<ParamChange>,
+) -> bool {
+    let before = changes.len();
+    for param in &instance.params {
+        let id = param.map.id;
+        // SAFETY: the controller reports its own parameter's value, by ID,
+        // on the main thread.
+        let normalized = unsafe { instance.controller.getParamNormalized(id) };
+        let plain = plain_value(&instance.controller, &param.map, normalized);
+        if instance.known.insert(id, plain) != Some(plain) {
+            changes.push(ParamChange {
+                device,
+                param: ParamId(id),
+                value: plain,
+            });
+        }
+    }
+    changes.len() > before
+}
+
+/// Reads every parameter's value as the set has it, once its state and the
+/// set's values are on the controller.
+fn remember_values(instance: &mut Instance) {
+    instance.known = instance
+        .params
+        .iter()
+        .map(|param| {
+            // SAFETY: the controller reports its own parameter's value, by
+            // ID, on the main thread.
+            let normalized = unsafe { instance.controller.getParamNormalized(param.map.id) };
+            (
+                param.map.id,
+                plain_value(&instance.controller, &param.map, normalized),
+            )
+        })
+        .collect();
 }
 
 /// Lets go of a plug-in: asks its node for the component, keeping the
@@ -2104,6 +2265,7 @@ fn close(main: &mut Main, device: DeviceId, mut instance: Instance) {
     if instance.handed.is_some() {
         main.closing.push((device, instance));
     } else {
+        deactivate(&mut instance);
         teardown(&mut instance);
     }
 }

@@ -63,7 +63,7 @@ use clack_extensions::note_ports::{
     PluginNotePortsImpl,
 };
 use clack_extensions::params::{
-    HostParams, ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter,
+    HostParams, ParamDisplayWriter, ParamInfo, ParamInfoFlags, ParamInfoWriter, ParamRescanFlags,
     PluginAudioProcessorParams, PluginMainThreadParams, PluginParams,
 };
 use clack_extensions::state::{PluginState, PluginStateImpl};
@@ -125,6 +125,11 @@ pub const ASK_RESIZE: &[u8] = b"ASK:RESIZE";
 /// host to flush it (`request_flush`): only a flush while the plug-in is
 /// inactive collects it.
 pub const QUEUE_EDIT: &[u8] = b"QUEUE:EDIT";
+/// What a state starts with that makes the plug-in set its gain, the `f64`
+/// that follows, with no param event, and ask the host to read its values
+/// again (`rescan` with `VALUES`), as it does when a preset is loaded in its
+/// own editor.
+pub const QUIET_GAIN: &[u8] = b"QUIET:GAIN";
 /// A state that makes the plug-in report every parameter value it is given
 /// back to the host as its own change, as some plug-ins do.
 pub const ECHO_PARAMS: &[u8] = b"ECHO:PARAMS";
@@ -334,6 +339,7 @@ impl<'a> PluginShared<'a> for Shared<'a> {}
 
 /// The main thread's side.
 pub struct MainThread<'a> {
+    host: HostMainThreadHandle<'a>,
     shared: &'a Shared<'a>,
 }
 
@@ -411,10 +417,10 @@ impl DefaultPluginFactory for GainEcho {
     }
 
     fn new_main_thread<'a>(
-        _host: HostMainThreadHandle<'a>,
+        host: HostMainThreadHandle<'a>,
         shared: &'a Shared<'a>,
     ) -> Result<MainThread<'a>, PluginError> {
-        Ok(MainThread { shared })
+        Ok(MainThread { host, shared })
     }
 }
 
@@ -898,6 +904,16 @@ impl PluginStateImpl for MainThread<'_> {
             }
             return Ok(());
         }
+        if let Some(gain) = bytes
+            .strip_prefix(QUIET_GAIN)
+            .and_then(|rest| <[u8; 8]>::try_from(rest).ok())
+        {
+            shared.set(GAIN, f64::from_le_bytes(gain));
+            if let Some(params) = self.host.shared().get_extension::<HostParams>() {
+                params.rescan(&self.host, ParamRescanFlags::VALUES);
+            }
+            return Ok(());
+        }
         if bytes == FAIL_GUI {
             shared.failure.store(GUI_FAILS, Relaxed);
             return Ok(());
@@ -937,6 +953,15 @@ impl PluginStateImpl for MainThread<'_> {
         shared.failure.store(NO_FAILURE, Relaxed);
         Ok(())
     }
+}
+
+/// A state that makes the plug-in set its gain quietly and ask the host to
+/// read its values again ([`QUIET_GAIN`]).
+#[must_use]
+pub fn quiet_gain_state(gain: f64) -> Vec<u8> {
+    let mut bytes = QUIET_GAIN.to_vec();
+    bytes.extend_from_slice(&gain.to_le_bytes());
+    bytes
 }
 
 impl PluginLatencyImpl for MainThread<'_> {

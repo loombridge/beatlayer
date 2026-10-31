@@ -818,7 +818,7 @@ fn a_vst3_plugin_loads_runs_and_processes_through_the_commands() {
         serde_json::from_value(shell.run("device_view.state", json!({})).unwrap()).unwrap();
     let frame = view.devices.iter().find(|d| d.id == device).unwrap();
     assert!(frame.selected);
-    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 3);
+    assert_eq!(frame.panel.as_ref().unwrap().description.params.len(), 5);
     let params: DeviceParameters = serde_json::from_value(
         shell
             .run("device.parameters", json!({ "device": device }))

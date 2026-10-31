@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering::Relaxed};
 
 use bl_core::midi::MidiMessage;
-use bl_core::time::TICKS_PER_QUARTER;
+use bl_core::time::{TICKS_PER_QUARTER, Ticks};
 use bl_engine::mpe_layout::{MpeLayout, PlainNotes};
 use bl_engine::{
     AutomationList, Block, Node, NodeData, NodeEvent, NoteEvent, NoteExpression, NoteKind,
@@ -806,31 +806,6 @@ impl Vst3Node {
         }
     }
 
-    /// Fills the process context from the block's transport.
-    fn fill_context(&mut self, block: &Block<'_>) {
-        let info = block.transport();
-        let rate = block.sample_rate();
-        let tempo = block.tempo();
-        let ticks = tempo.frames_to_ticks(info.position, rate);
-        let beats = ticks.0 as f64 / TICKS_PER_QUARTER as f64;
-        use ProcessContext_::StatesAndFlags_ as Flags;
-        let context = &mut self.context;
-        // The bindings' default enum type is signed on Windows and unsigned
-        // elsewhere; the field is always `uint32`.
-        context.state = (Flags::kTempoValid
-            | Flags::kTimeSigValid
-            | Flags::kProjectTimeMusicValid
-            | Flags::kContTimeValid
-            | if info.playing { Flags::kPlaying } else { 0 }) as uint32;
-        context.sampleRate = f64::from(rate.hz());
-        context.projectTimeSamples = info.position.0;
-        context.continousTimeSamples = i64::try_from(self.steady).unwrap_or(i64::MAX);
-        context.projectTimeMusic = beats;
-        context.tempo = tempo.bpm_at(ticks).get();
-        context.timeSigNumerator = 4;
-        context.timeSigDenominator = 4;
-    }
-
     /// Applies the plug-in's own parameter changes to nothing yet: part 1
     /// takes them from the block and drops them (the next part wires them
     /// into the set as undo steps).
@@ -1046,7 +1021,7 @@ impl Node for Vst3Node {
             &in_channels,
             &out_channels,
         );
-        self.fill_context(block);
+        fill_context(&mut self.context, self.steady, block);
 
         let active = self.active.as_ref().expect("the check above");
         let mut data = ProcessData {
@@ -1309,9 +1284,41 @@ impl Drop for Vst3Node {
     }
 }
 
+/// Fills the process context from the block's transport and the song's
+/// time signature at its first frame.
+fn fill_context(context: &mut ProcessContext, steady: u64, block: &Block<'_>) {
+    let info = block.transport();
+    let rate = block.sample_rate();
+    let tempo = block.tempo();
+    let ticks = tempo.frames_to_ticks(info.position, rate);
+    let quarters = |ticks: Ticks| ticks.0 as f64 / TICKS_PER_QUARTER as f64;
+    let signatures = block.signatures();
+    let signature = signatures.signature_at(ticks);
+    let (_, into_bar) = signatures.bar_at(ticks);
+    use ProcessContext_::StatesAndFlags_ as Flags;
+    // The bindings' default enum type is signed on Windows and unsigned
+    // elsewhere; the field is always `uint32`.
+    context.state = (Flags::kTempoValid
+        | Flags::kTimeSigValid
+        | Flags::kProjectTimeMusicValid
+        | Flags::kBarPositionValid
+        | Flags::kContTimeValid
+        | if info.playing { Flags::kPlaying } else { 0 }) as uint32;
+    context.sampleRate = f64::from(rate.hz());
+    context.projectTimeSamples = info.position.0;
+    context.continousTimeSamples = i64::try_from(steady).unwrap_or(i64::MAX);
+    context.projectTimeMusic = quarters(ticks);
+    context.barPositionMusic = quarters(ticks - into_bar);
+    context.tempo = tempo.bpm_at(ticks).get();
+    context.timeSigNumerator = i32::from(signature.numerator());
+    context.timeSigDenominator = i32::from(signature.denominator());
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bl_core::time::{Frames, SampleRate, TimeSignature, TimeSignatureMap};
+    use bl_engine::TransportInfo;
 
     #[test]
     fn a_dropped_change_is_counted_in_its_own_block_only() {
@@ -1322,6 +1329,26 @@ mod tests {
         assert_eq!(params.dropped(), 1);
         params.reset();
         assert_eq!(params.dropped(), 0);
+    }
+
+    #[test]
+    fn the_process_context_carries_the_songs_time_signature_and_bar_start() {
+        let signatures = TimeSignatureMap::constant(TimeSignature::new(3, 4).unwrap());
+        let mut data = [0.0f32; 8];
+        // At 120 bpm and 48 kHz four quarters are 96 000 frames: one quarter
+        // into the second bar of 3/4.
+        let transport = TransportInfo::at(true, Frames(96_000));
+        let block = Block::new(&mut data, 1, 8, 8, &[], transport, SampleRate::HZ_48000)
+            .with_signatures(&signatures);
+        // SAFETY: an all-zero process context is a valid one.
+        let mut context: ProcessContext = unsafe { std::mem::zeroed() };
+        fill_context(&mut context, 0, &block);
+        assert_eq!(context.timeSigNumerator, 3);
+        assert_eq!(context.timeSigDenominator, 4);
+        assert_eq!(context.projectTimeMusic, 4.0);
+        assert_eq!(context.barPositionMusic, 3.0);
+        let valid = ProcessContext_::StatesAndFlags_::kBarPositionValid as uint32;
+        assert_ne!(context.state & valid, 0);
     }
 
     #[test]

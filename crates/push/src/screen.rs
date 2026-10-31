@@ -7,10 +7,18 @@
 //! the same data back as text.
 
 /// A picture beside or in place of a label's text: Beatlayer's own icons for
-/// the four kinds of rack, and the arrows that move a window of devices or
-/// banks (push-2-tracks R15, R17, R22).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// the four kinds of rack, the arrows that move a window of devices or banks
+/// (push-2-tracks R15, R17, R22), and a group's or a rack's beside a track
+/// that unfolds (R37).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Icon {
+    /// Nothing.
+    #[default]
+    None,
+    /// A group track that unfolds.
+    Group,
+    /// A track holding an instrument rack or a drum rack, which unfolds.
+    Rack,
     /// An instrument rack.
     InstrumentRack,
     /// An audio effect rack.
@@ -30,6 +38,9 @@ impl Icon {
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::None => "",
+            Self::Group => "group",
+            Self::Rack => "rack",
             Self::InstrumentRack => "instrument rack",
             Self::AudioEffectRack => "audio effect rack",
             Self::MidiEffectRack => "MIDI effect rack",
@@ -56,8 +67,10 @@ pub struct Label {
     pub colour: [u8; 3],
     /// Whether it stands for the selected one.
     pub selected: bool,
-    /// The picture that goes with it, if there is one.
-    pub icon: Option<Icon>,
+    /// The picture that goes with it: an arrow or a rack's icon in Device
+    /// Mode, a group's or a rack's beside a track that unfolds in Mix Mode
+    /// (push-2-tracks R22, R37).
+    pub icon: Icon,
 }
 
 impl Label {
@@ -68,21 +81,21 @@ impl Label {
             text: text.into(),
             colour,
             selected,
-            icon: None,
+            icon: Icon::None,
         }
     }
 
     /// The same label with `icon` beside its text.
     #[must_use]
     pub const fn with_icon(mut self, icon: Icon) -> Self {
-        self.icon = Some(icon);
+        self.icon = icon;
         self
     }
 
     /// Whether the button under it does anything (R18).
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.text.is_empty() && self.icon.is_none()
+        self.text.is_empty() && matches!(self.icon, Icon::None)
     }
 }
 
@@ -96,6 +109,8 @@ pub enum Graphic {
     Arc(f32),
     /// The chosen entry of a list.
     Choice(String),
+    /// A vertical fader for a volume, its value from 0 (bottom) to 1.
+    Fader(f32),
 }
 
 /// The dot beside a parameter's name (R20).
@@ -190,6 +205,10 @@ pub struct Screen {
     /// Lines under the upper band, each from a rack's column to the column of
     /// the last device it holds, both from 0 (push-2-tracks R22).
     pub folds: Vec<(usize, usize)>,
+    /// Lines under the lower labels from one column to another, inclusive,
+    /// in a colour: the tracks inside an unfolded group or rack (push-2-tracks
+    /// R37).
+    pub underlines: Vec<(u8, u8, [u8; 3])>,
 }
 
 impl Screen {
@@ -204,13 +223,11 @@ impl Screen {
         let band = |name: &str, labels: &[Label; 8], lines: &mut Vec<String>| {
             for (n, label) in labels.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
                 let selected = if label.selected { " (selected)" } else { "" };
-                let icon = label.icon.map_or(String::new(), |i| {
-                    if i.is_arrow() {
-                        format!("<{}>", i.name())
-                    } else {
-                        format!(" [{}]", i.name())
-                    }
-                });
+                let icon = match label.icon {
+                    Icon::None => String::new(),
+                    i if i.is_arrow() => format!("<{}>", i.name()),
+                    i => format!(" [{}]", i.name()),
+                };
                 lines.push(format!("{name} {}: {}{icon}{selected}", n + 1, label.text));
             }
         };
@@ -263,6 +280,9 @@ impl Screen {
             if let Some(progress) = progress {
                 lines.push(format!("progress {}: {:.0}%", n + 1, progress * 100.0));
             }
+        }
+        for (from, to, _) in &self.underlines {
+            lines.push(format!("underline: {} to {}", from + 1, to + 1));
         }
         if let Some(title) = &self.title {
             lines.push(format!("title: {title}"));

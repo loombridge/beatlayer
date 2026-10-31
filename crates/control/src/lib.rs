@@ -26,6 +26,7 @@ pub mod browse;
 pub mod grid;
 mod host;
 pub mod launchkey;
+pub mod mix;
 mod surface;
 pub mod template;
 mod template_surface;

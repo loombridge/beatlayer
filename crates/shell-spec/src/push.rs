@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_model::{ChainId, DeviceId, TrackId};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -257,8 +258,56 @@ pub struct PushDeviceMode {
     pub mute_locked: bool,
 }
 
-/// One connected Push 2.
+/// What one encoder sets in Mix Mode (push-2-tracks R42).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PushMixControl {
+    /// What it sets: `Volume`, `Pan`, `Pan L`, `Pan R`, `Send A`, an In/Out
+    /// chooser's name.
+    pub name: String,
+    /// Its value as the display shows it.
+    pub value: String,
+    /// Where a continuous control sits, from 0 to 1; none for a list.
+    pub position: Option<f64>,
+    /// Whether turning it does nothing: a split-pan track's pan in Global Mix.
+    pub inert: bool,
+}
+
+/// One of the eight places Mix Mode shows: a track, or a chain of an unfolded
+/// rack (push-2-tracks R42).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushMixPlace {
+    /// Its name, as the lower display button shows it.
+    pub name: String,
+    /// The track, or for a chain the track its rack is on.
+    pub track: TrackId,
+    /// The chain, if the place is one.
+    pub chain: Option<ChainId>,
+    /// Whether it is the selected place.
+    pub selected: bool,
+}
+
+/// What Mix Mode shows (push-2-tracks R42).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PushMix {
+    /// Track Mix's chosen view: `mix` or `in_out`.
+    pub view: String,
+    /// What Global Mix sets: `volumes`, `pans` or `send_a`, `send_b` and on.
+    pub global: String,
+    /// How many places the sends are shifted on the page shown.
+    pub sends_shift: usize,
+    /// The eight places, left to right.
+    pub places: Vec<PushMixPlace>,
+    /// What each of the eight encoders sets, left to right; none where it
+    /// sets nothing.
+    pub encoders: Vec<Option<PushMixControl>>,
+    /// The group tracks that are unfolded.
+    pub unfolded_groups: Vec<TrackId>,
+    /// The racks whose chains are unfolded.
+    pub unfolded_racks: Vec<DeviceId>,
+}
+
+/// One connected Push 2.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PushInfo {
     /// The Control Surfaces table's row it runs in, from 1.
     pub row: u8,
@@ -303,10 +352,12 @@ pub struct PushInfo {
     pub browse: Option<PushBrowse>,
     /// What Device Mode shows, while it is the display mode.
     pub device: Option<PushDeviceMode>,
+    /// What Mix Mode shows, while it is the display mode.
+    pub mix_mode: Option<PushMix>,
 }
 
 /// What `push.state` returns.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PushState {
     /// Each Push 2 that runs, by row.
     pub pushes: Vec<PushInfo>,
@@ -408,8 +459,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  entries and selection and the column in use; in Device Mode, the devices on \
                  the upper buttons with their depth and which is selected, whether Edit Mode is \
                  on, the bank and its page of banks, the parameters on the encoders, the chains \
-                 shown while a rack's button is held, and whether Mute is locked. Changes \
-                 nothing.",
+                 shown while a rack's button is held, and whether Mute is locked; and, in Mix \
+                 Mode, Track Mix's view, what Global Mix sets, the sends' shift, the eight \
+                 tracks or chains shown with what each encoder sets and its value, and the \
+                 groups and racks that are unfolded. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

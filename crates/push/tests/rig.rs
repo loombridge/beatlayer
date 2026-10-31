@@ -150,6 +150,7 @@ enum Contents {
     Recorders,
     Browse,
     Devices,
+    Mix,
     Placeholders,
 }
 
@@ -185,6 +186,11 @@ impl Rig {
     /// other modes recording.
     pub fn devices() -> Self {
         Self::build(Contents::Devices)
+    }
+
+    /// A rig whose Mix Mode is the real one, with the other modes recording.
+    pub fn mixing() -> Self {
+        Self::build(Contents::Mix)
     }
 
     /// A rig whose modes have no content of their own yet: the placeholders.
@@ -228,7 +234,11 @@ impl Rig {
                         } else {
                             recorder("Browse")
                         },
-                        recorder("Mix"),
+                        if which == Contents::Mix {
+                            Box::new(bl_push::mix::Mix::new())
+                        } else {
+                            recorder("Mix")
+                        },
                         recorder("Clip"),
                     ],
                 }

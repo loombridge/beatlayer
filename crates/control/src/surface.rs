@@ -101,6 +101,9 @@ pub struct ReadModel {
     pub session_view: bool,
     /// What the Device View shows besides the set (push-2-tracks R22, R24).
     pub devices: DeviceViews,
+    /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
+    /// R37).
+    pub mix: crate::mix::Mix,
 }
 
 /// What the Device View keeps beside the set, for a surface that follows it:
@@ -147,6 +150,7 @@ impl ReadModel {
             selected_device: None,
             session_view: false,
             devices: DeviceViews::default(),
+            mix: crate::mix::Mix::default(),
         }
     }
 

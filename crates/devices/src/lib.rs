@@ -33,6 +33,7 @@ pub mod bus_compressor;
 pub mod channel_eq;
 pub mod chorus_ensemble;
 pub mod compressor;
+pub mod corpus;
 pub mod crusher;
 mod cv;
 pub mod cv_clock_in;
@@ -202,6 +203,7 @@ pub fn display_in(
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
+        corpus::CORPUS => Some(corpus::display(device, data)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),
@@ -273,6 +275,7 @@ pub fn display_in(
 /// Adds every Beatlayer native device to `registry`.
 pub fn register(registry: &mut Registry) {
     compressor::register(registry);
+    corpus::register(registry);
     polysynth::register(registry);
     limiter::register(registry);
     delay::register(registry);

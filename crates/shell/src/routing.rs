@@ -338,7 +338,7 @@ fn configure(page: &str) -> Entry {
     )
 }
 
-const fn tap_label(tap: Tap) -> &'static str {
+pub(crate) const fn tap_label(tap: Tap) -> &'static str {
     match tap {
         Tap::PreFx => "Pre FX",
         Tap::PostFx => "Post FX",
@@ -1335,6 +1335,39 @@ fn set_midi_sidechain_source(device: DeviceId, track: Value) -> Invocation {
         json!({ "device": device, "track": track })
     };
     Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// The same, taking the notes at `tap` (the routing spec, R39).
+fn set_midi_sidechain_tap(device: DeviceId, track: Option<TrackId>, tap: Tap) -> Invocation {
+    let mut args = json!({ "device": device, "tap": tap_name(tap) });
+    if let Some(track) = track {
+        args["track"] = json!(track);
+    }
+    Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// A device's MIDI sidechain tapping point chooser (the routing spec, R39):
+/// Pre FX · Post FX · Post Mixer, under the source's. `None` for a device
+/// whose MIDI sidechain has no tapping point.
+#[must_use]
+pub fn midi_sidechain_tap(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let sidechain = doc.device(device)?.midi_sidechain.as_ref()?;
+    let current = sidechain.tap?;
+    Some(Chooser {
+        name: "MIDI Sidechain Tapping Point",
+        text: tap_label(current).to_owned(),
+        entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+            .into_iter()
+            .map(|tap| {
+                Entry::choice(
+                    tap_label(tap),
+                    set_midi_sidechain_tap(device, sidechain.source, tap),
+                    tap == current,
+                )
+            })
+            .collect(),
+        pending: None,
+    })
 }
 
 /// A device's MIDI sidechain source chooser (WP-5.27; the routing spec,

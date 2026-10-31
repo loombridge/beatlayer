@@ -78,10 +78,17 @@ const CLAMPED_BETA: [f64; 5] = [
 /// shape sampled along the way from the centre to the edge.
 #[derive(Clone, Debug)]
 pub struct ModalTable {
-    ratio: Vec<f64>,
-    ln_ratio: Vec<f64>,
+    pub(super) ratio: Vec<f64>,
+    pub(super) ln_ratio: Vec<f64>,
     /// `partials × POINTS` values, each partial's shape scaled to peak at 1.
-    profile: Vec<f32>,
+    pub(super) profile: Vec<f32>,
+    /// What `profile` was made for, so a change of inharmonicity alone
+    /// leaves it be: the shape, the partial count, and the aspect (of a
+    /// membrane or a plate; 0 for the rest).
+    built: Option<(Shape, usize, u64)>,
+    /// Room the in-place rebuild works in.
+    modes: Vec<Mode>,
+    order: Vec<(f64, u32, u32)>,
 }
 
 impl ModalTable {
@@ -91,34 +98,69 @@ impl ModalTable {
     /// outside those ranges are clamped; NaN takes the default.
     #[must_use]
     pub fn new(shape: Shape, quality: Quality, aspect: f32, inharmonicity: f32) -> Self {
+        let mut table = Self {
+            ratio: Vec::with_capacity(MAX_PARTIALS),
+            ln_ratio: Vec::with_capacity(MAX_PARTIALS),
+            profile: Vec::with_capacity(MAX_PARTIALS * POINTS),
+            built: None,
+            modes: Vec::with_capacity(MAX_PARTIALS),
+            order: Vec::with_capacity(RECTANGLE_MODES),
+        };
+        table.rebuild(shape, quality, aspect, inharmonicity);
+        table
+    }
+
+    /// Makes the table `new` would, in place: a table that holds a bank
+    /// already makes its next one without allocating, so a control that
+    /// changes the shape, the quality, Ratio or inharmonicity can be
+    /// followed on the audio thread. The partials' mode shapes are worked
+    /// out again only when the shape, the quality or a membrane's or
+    /// plate's Ratio changes; a change of inharmonicity alone costs one
+    /// power per partial. The one shape that allocates is
+    /// [`Shape::CircularMembrane`], whose Bessel zeros are searched for:
+    /// make its table with [`new`](Self::new), off the audio thread.
+    pub fn rebuild(&mut self, shape: Shape, quality: Quality, aspect: f32, inharmonicity: f32) {
         let aspect = super::sane(aspect, 0.25, 4.0, 1.0);
         let inharmonicity = super::sane(inharmonicity, -1.0, 1.0, 0.0);
         let count = quality.partials();
-        let modes = match shape {
-            Shape::Beam => free_bar(count, false),
-            Shape::Marimba => free_bar(count, true),
-            Shape::Cantilever => cantilever(count),
-            Shape::Membrane => rectangle(count, aspect, 1.0),
-            Shape::Plate => rectangle(count, aspect, 2.0),
-            Shape::CircularMembrane => circular(count),
-        };
-        let ratio: Vec<f64> = modes
-            .iter()
-            .map(|mode| mode.ratio.powf(1.0 + inharmonicity / 2.0))
-            .collect();
-        let mut profile = Vec::with_capacity(count * POINTS);
-        for mode in &modes {
-            let start = profile.len();
-            profile.extend((0..POINTS).map(|i| (mode.shape)(i as f64 / (POINTS - 1) as f64)));
-            let peak = profile[start..].iter().fold(0.0_f64, |m, v| m.max(v.abs()));
-            for value in &mut profile[start..] {
-                *value /= peak.max(1e-12);
-            }
+        self.modes.clear();
+        match shape {
+            Shape::Beam => free_bar(&mut self.modes, count, false),
+            Shape::Marimba => free_bar(&mut self.modes, count, true),
+            Shape::Cantilever => cantilever(&mut self.modes, count),
+            Shape::Membrane => rectangle(&mut self.modes, &mut self.order, count, aspect, 1.0),
+            Shape::Plate => rectangle(&mut self.modes, &mut self.order, count, aspect, 2.0),
+            Shape::CircularMembrane => circular(&mut self.modes, count),
         }
-        Self {
-            ln_ratio: ratio.iter().map(|r| r.ln()).collect(),
-            ratio,
-            profile: profile.iter().map(|&v| v as f32).collect(),
+        self.ratio.clear();
+        self.ln_ratio.clear();
+        for mode in &self.modes {
+            let ratio = mode.ratio.powf(1.0 + inharmonicity / 2.0);
+            self.ratio.push(ratio);
+            self.ln_ratio.push(ratio.ln());
+        }
+        let key = (
+            shape,
+            count,
+            if matches!(shape, Shape::Membrane | Shape::Plate) {
+                aspect.to_bits()
+            } else {
+                0
+            },
+        );
+        if self.built == Some(key) {
+            return;
+        }
+        self.built = Some(key);
+        self.profile.clear();
+        let mut row = [0.0_f64; POINTS];
+        for mode in &self.modes {
+            for (i, value) in row.iter_mut().enumerate() {
+                *value = mode.form.at(i as f64 / (POINTS - 1) as f64);
+            }
+            let peak = row.iter().fold(0.0_f64, |m, v| m.max(v.abs()));
+            self.profile
+                .extend(row.iter().map(|&v| (v / peak.max(1e-12)) as f32));
         }
     }
 
@@ -154,12 +196,44 @@ impl ModalTable {
     }
 }
 
+/// How a partial's mode shape runs from the centre to the edge.
+#[derive(Clone, Copy, Debug)]
+enum Form {
+    /// A free bar's, for a root.
+    Free(f64),
+    /// A clamped bar's, for a root.
+    Clamped(f64),
+    /// A rectangle's mode (m, n): sin(mπx) sin(nπy) along the diagonal.
+    Rectangle(u32, u32),
+    /// A circular membrane's: J_m of the zero along a radius.
+    Bessel(u32, f64),
+}
+
+impl Form {
+    fn at(self, p: f64) -> f64 {
+        match self {
+            Self::Free(beta) => free_bar_shape(beta, along(p)),
+            Self::Clamped(beta) => clamped_bar_shape(beta, along(p)),
+            Self::Rectangle(m, n) => {
+                let x = along(p);
+                (f64::from(m) * PI * x).sin() * (f64::from(n) * PI * x).sin()
+            }
+            Self::Bessel(m, zero) => bessel(m, zero * p),
+        }
+    }
+}
+
 /// One partial before its table is made: its ratio and its shape along the
 /// centre-to-edge position.
+#[derive(Clone, Copy, Debug)]
 struct Mode {
     ratio: f64,
-    shape: Box<dyn Fn(f64) -> f64>,
+    form: Form,
 }
+
+/// The modes (m, n) of a rectangle that are ordered by frequency: 1 to 16
+/// each.
+const RECTANGLE_MODES: usize = 256;
 
 /// A free bar's mode shape at `xi` along its length, for root `beta`,
 /// written in terms of decaying exponentials so it stays exact at the high
@@ -212,68 +286,63 @@ fn along(p: f64) -> f64 {
     (1.0 + p) / 2.0
 }
 
-fn free_bar(count: usize, marimba: bool) -> Vec<Mode> {
+fn free_bar(out: &mut Vec<Mode>, count: usize, marimba: bool) {
     let free = |n: usize| (free_beta(n) / free_beta(0)).powi(2);
-    (0..count)
-        .map(|n| {
-            let beta = free_beta(n);
-            let ratio = match (marimba, n) {
-                (false, _) => free(n),
-                (true, 0) => 1.0,
-                (true, 1) => 4.0,
-                (true, 2) => 10.0,
-                // The free bar's own ratios, scaled to follow the third.
-                (true, _) => free(n) * 10.0 / free(2),
-            };
-            Mode {
-                ratio,
-                shape: Box::new(move |p| free_bar_shape(beta, along(p))),
-            }
-        })
-        .collect()
+    out.extend((0..count).map(|n| {
+        let ratio = match (marimba, n) {
+            (false, _) => free(n),
+            (true, 0) => 1.0,
+            (true, 1) => 4.0,
+            (true, 2) => 10.0,
+            // The free bar's own ratios, scaled to follow the third.
+            (true, _) => free(n) * 10.0 / free(2),
+        };
+        Mode {
+            ratio,
+            form: Form::Free(free_beta(n)),
+        }
+    }));
 }
 
-fn cantilever(count: usize) -> Vec<Mode> {
-    (0..count)
-        .map(|n| {
-            let beta = clamped_beta(n);
-            Mode {
-                ratio: (beta / clamped_beta(0)).powi(2),
-                shape: Box::new(move |p| clamped_bar_shape(beta, along(p))),
-            }
-        })
-        .collect()
+fn cantilever(out: &mut Vec<Mode>, count: usize) {
+    out.extend((0..count).map(|n| {
+        let beta = clamped_beta(n);
+        Mode {
+            ratio: (beta / clamped_beta(0)).powi(2),
+            form: Form::Clamped(beta),
+        }
+    }));
 }
 
 /// A rectangle's modes (m, n), 1 to 16 each, in order of frequency: the
 /// frequency goes as the square root of `(m/a)² + (n/b)²` for a membrane
 /// (`power` 1) and as `(m/a)² + (n/b)²` for a plate (`power` 2). Each shape
 /// is sin(mπx) sin(nπy) along the diagonal from the centre to a corner.
-fn rectangle(count: usize, aspect: f64, power: f64) -> Vec<Mode> {
+/// `order` is the room for the sort.
+fn rectangle(
+    out: &mut Vec<Mode>,
+    order: &mut Vec<(f64, u32, u32)>,
+    count: usize,
+    aspect: f64,
+    power: f64,
+) {
     // Only the ratio of the sides matters: a = aspect, b = 1.
-    let freq = |m: f64, n: f64| ((m / aspect).powi(2) + n * n).powf(power / 2.0);
-    let first = freq(1.0, 1.0);
-    let mut modes: Vec<(f64, usize, usize)> = (1..=16)
-        .flat_map(|m| (1..=16).map(move |n| (m, n)))
-        .map(|(m, n)| (freq(m as f64, n as f64) / first, m, n))
-        .collect();
-    modes.sort_by(|a, b| a.0.total_cmp(&b.0));
-    modes
-        .into_iter()
-        .take(count)
-        .map(|(ratio, m, n)| Mode {
-            ratio,
-            shape: Box::new(move |p| {
-                let x = along(p);
-                (m as f64 * PI * x).sin() * (n as f64 * PI * x).sin()
-            }),
-        })
-        .collect()
+    let freq =
+        |m: u32, n: u32| ((f64::from(m) / aspect).powi(2) + f64::from(n * n)).powf(power / 2.0);
+    let first = freq(1, 1);
+    order.clear();
+    order.extend((1..=16).flat_map(|m| (1..=16).map(move |n| (freq(m, n) / first, m, n))));
+    // In place, and with ties in the order a stable sort would keep.
+    order.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    out.extend(order.iter().take(count).map(|&(ratio, m, n)| Mode {
+        ratio,
+        form: Form::Rectangle(m, n),
+    }));
 }
 
 /// A circular membrane's modes: each zero of a Bessel function, in order,
 /// over the first zero; the shape is J_m(j ρ) along a radius.
-fn circular(count: usize) -> Vec<Mode> {
+fn circular(out: &mut Vec<Mode>, count: usize) {
     let mut zeros: Vec<(f64, u32)> = Vec::new();
     for m in 0..=22 {
         let mut x = f64::from(m).max(0.1);
@@ -298,14 +367,10 @@ fn circular(count: usize) -> Vec<Mode> {
     }
     zeros.sort_by(|a, b| a.0.total_cmp(&b.0));
     let first = zeros[0].0;
-    zeros
-        .into_iter()
-        .take(count)
-        .map(|(zero, m)| Mode {
-            ratio: zero / first,
-            shape: Box::new(move |p| bessel(m, zero * p)),
-        })
-        .collect()
+    out.extend(zeros.into_iter().take(count).map(|(zero, m)| Mode {
+        ratio: zero / first,
+        form: Form::Bessel(m, zero),
+    }));
 }
 
 /// Bessel's function of the first kind, order `m`, from its integral

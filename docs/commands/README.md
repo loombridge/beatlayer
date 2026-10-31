@@ -19722,17 +19722,18 @@ What `midi.ports` returns.
 
 ### `MidiSidechain`
 
-A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.
+A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input; and, on a device whose type gives its MIDI sidechain a tapping point, `tap`: `pre_fx` for what the track's clips and input played, `post_fx` (a new device's) for what leaves its MIDI effects, or `post_mixer`, the same as `post_fx`.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `source` | [`TrackId`](#trackid) or null | no | The MIDI track it listens to, or `None` (No Input), as on a new device. |
+| `tap` | [`Tap`](#tap) or null | no | Where the device takes the source's notes, for a device type that gives its MIDI sidechain a tapping point; `None` for one that doesn't, which hears them [`Tap::PreFx`]. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input.",
+  "description": "A device's MIDI sidechain input: `source`, the MIDI track whose notes and channel messages the device hears, or absent for No Input; and, on a device whose type gives its MIDI sidechain a tapping point, `tap`: `pre_fx` for what the track's clips and input played, `post_fx` (a new device's) for what leaves its MIDI effects, or `post_mixer`, the same as `post_fx`.",
   "properties": {
     "source": {
       "anyOf": [
@@ -19744,6 +19745,17 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
         }
       ],
       "description": "The MIDI track it listens to, or `None` (No Input), as on a new device."
+    },
+    "tap": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Tap"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Where the device takes the source's notes, for a device type that gives its MIDI sidechain a tapping point; `None` for one that doesn't, which hears them [`Tap::PreFx`]."
     }
   },
   "type": "object"
@@ -19760,6 +19772,7 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
 |---|---|---|---|
 | `shown` | boolean | yes | Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view. |
 | `source` | string | yes | What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`. |
+| `tap` | string or null | no | What the tapping point chooser under it shows (`Pre FX`, `Post FX` or `Post Mixer`), for a device whose MIDI sidechain has one (the routing spec, R39). |
 
 <details><summary>JSON Schema</summary>
 
@@ -19774,6 +19787,13 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
     "source": {
       "description": "What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`) or `No Input`.",
       "type": "string"
+    },
+    "tap": {
+      "description": "What the tapping point chooser under it shows (`Pre FX`, `Post FX` or `Post Mixer`), for a device whose MIDI sidechain has one (the routing spec, R39).",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

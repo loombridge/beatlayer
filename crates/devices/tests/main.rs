@@ -23,6 +23,7 @@ mod chorus_ensemble;
 mod clip_envelopes;
 mod common;
 mod compressor;
+mod corpus;
 mod curve_mod;
 mod cv_instrument;
 mod cv_modulators;

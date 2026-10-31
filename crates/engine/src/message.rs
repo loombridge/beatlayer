@@ -265,6 +265,9 @@ pub(crate) enum Message {
         data: NodeData,
     },
     Transport(TransportCommand, When),
+    /// The Session View's slot rows and follow table after an edit of their
+    /// values: swapped into the running program, which keeps its shape.
+    SceneTables(Owned<crate::session::SceneTables>),
     /// A Session View command (WP-3.2): a launch, a stop, or the global
     /// launch quantisation.
     Session(SessionCommand),
@@ -296,4 +299,7 @@ pub(crate) enum Message {
     },
     /// Whether the song follows the incoming clock: EXT (midi-clock R15).
     ExternalSync(bool),
+    /// The output port opened, or its Track switch went on: the MPE routes to
+    /// it send their configuration again (mpe R17).
+    MidiOutputOpened(bl_core::midi::PortId),
 }

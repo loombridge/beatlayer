@@ -15,7 +15,7 @@ use crate::clips::{ClipList, ClipPlayer, SlotSample};
 use crate::disjoint::Shared;
 use crate::display::Displays;
 use crate::drum::{self, ChainHits, DrumNotes};
-use crate::gc::{GcHandle, Program};
+use crate::gc::{GcHandle, Owned, Program};
 use crate::layers::{DeviceLayers, LayerAudio, LayerSample};
 use crate::message::{LoopRegion, ParamEvent, Punch, TransportCommand};
 use crate::midi_clips::{MidiClipList, MidiClipPlayer};
@@ -32,7 +32,7 @@ use crate::registry::Registry;
 use crate::routing::{Edge, Graph, Via};
 use crate::sched::Sched;
 use crate::session::FollowTable;
-use crate::session::{Button, LoopLength, SceneMaps, SceneOverride, SlotRow};
+use crate::session::{Button, LoopLength, SceneMaps, SceneOverride, SceneTables, SlotRow};
 use crate::sidechain::{self, SidechainKey};
 use crate::sources::{ClipSources, Loaded, Loader};
 use crate::state::{MeterOwner, MeterSite};
@@ -60,6 +60,10 @@ pub struct Update {
     /// each audio track whose clips changed, for its clip player
     /// ([`NodeKey::Player`]), placed under the program's tempo map.
     pub data: Vec<(NodeKey, NodeData)>,
+    /// The Session View's slot rows and follow table, when an edit changed
+    /// their values but not which slots hold a clip, so no program was made.
+    /// The running program swaps them in.
+    pub(crate) scene_tables: Option<Owned<SceneTables>>,
     /// Devices in the new program that no factory makes a node for, so their
     /// tracks' audio passes through where they'd be.
     pub unhosted: Vec<DeviceId>,
@@ -79,6 +83,7 @@ impl Update {
             && self.transport.is_empty()
             && self.params.is_empty()
             && self.data.is_empty()
+            && self.scene_tables.is_none()
     }
 }
 
@@ -280,6 +285,14 @@ fn scene_slots(document: &Document) -> Vec<SlotRow> {
     slots
 }
 
+/// The slot rows and follow table of `document`.
+fn scene_tables(document: &Document) -> SceneTables {
+    SceneTables {
+        slots: scene_slots(document),
+        follow: FollowTable::of(document),
+    }
+}
+
 /// How long one pass of the clip's loop is while its Loop switch is on: what
 /// a nudge back before the clip's start goes round by (the launch
 /// quantisation spec, R32). `shortcut:` an audio clip with no loop end uses
@@ -468,6 +481,7 @@ impl Compiler {
         // Spec: modulation R28. A mapping of a modulator driven by audio,
         // notes or MIDI changes which track waits for which, and which rows
         // its target reads.
+        let (old_tables, tables) = (scene_tables(&old), scene_tables(document));
         let recompile = needs_program(&changes, &old, document, &mut params, &|kind, param| {
             if matches!(kind, bl_model::DeviceKind::Rack { .. }) {
                 bl_model::rack_description().param(param).cloned()
@@ -476,7 +490,8 @@ impl Compiler {
                     .device_type(kind)
                     .and_then(|device_type| device_type.description.param(param).cloned())
             }
-        }) || signal_mappings(&old) != signal_mappings(document);
+        }) || !old_tables.same_shape(&tables)
+            || signal_mappings(&old) != signal_mappings(document);
         route_events(&changes, &old, document, &mut params);
         // Tracks that held or hold a clip that changed: their players get
         // their clips again, and their nodes their envelopes again, since a
@@ -531,6 +546,11 @@ impl Compiler {
         } else {
             self.synced = Some(document.clone());
             let mut update = Update::default();
+            // A slot's launch settings, loop or follow actions change what
+            // the program reads, not its shape.
+            if old_tables != tables {
+                update.scene_tables = Some(self.gc.wrap(tables));
+            }
             if old.settings().arrangement_loop != document.settings().arrangement_loop {
                 update
                     .transport
@@ -1075,6 +1095,7 @@ impl Compiler {
                 output: NO_OUTPUT,
                 before: 0,
                 delay: NO_DELAY,
+                unheld_while_monitoring: false,
             };
             match edge.via.sidechain() {
                 Some(device) => sidechain_inputs.entry(device).or_default().push(input),
@@ -1112,6 +1133,7 @@ impl Compiler {
                     output: NO_OUTPUT,
                     before: 0,
                     delay: NO_DELAY,
+                    unheld_while_monitoring: false,
                 });
                 taps.insert((track.id(), Tap::PostFx));
             }
@@ -1415,13 +1437,17 @@ impl Compiler {
                 .collect(),
             waits: waits.iter().copied().collect(),
         };
-        let program = EngineProgram {
+        let tables = scene_tables(document);
+        let mut program = EngineProgram {
             generation,
             main_latency: self.main_latency,
             base,
             index: build.layout.iter().map(|(&key, p)| (key, p.slot)).collect(),
             slots: Shared::new(build.slots),
             migrations: build.migrations,
+            slot_task: Vec::new(),
+            migrated_to: Vec::new(),
+            migrated_from: Vec::new(),
             order,
             task_dependents: dependents.iter().flatten().copied().collect(),
             sched: Sched::new(tasks, build.racks.len(), build.rack_chains.len()),
@@ -1440,7 +1466,7 @@ impl Compiler {
             midi_sidechains: build.midi_sidechains,
             midi_kept: Shared::new(
                 (0..midi_kept)
-                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .map(|_| NoteBuffer::with_capacity(crate::midi_clips::TRACK_NOTE_CAPACITY))
                     .collect(),
             ),
             pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
@@ -1467,8 +1493,8 @@ impl Compiler {
             override_tempo,
             override_signatures,
             sample_rate: self.config.sample_rate,
-            scene_slots: scene_slots(document),
-            follow: FollowTable::of(document),
+            scene_slots: tables.slots,
+            follow: tables.follow,
             session_tracks: document
                 .track_order()
                 .into_iter()
@@ -1476,7 +1502,7 @@ impl Compiler {
                 .collect(),
             note_buffers: Shared::new(
                 (0..2 * (tasks as u32 + build.chain_buffers))
-                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .map(|_| NoteBuffer::with_capacity(crate::midi_clips::TRACK_NOTE_CAPACITY))
                     .collect(),
             ),
             releases: crate::program::Releases::new(),
@@ -1494,6 +1520,7 @@ impl Compiler {
             ]),
             signals: build.signals,
         };
+        program.index_swap();
         self.modulator_rows = mod_rows;
         self.generation = generation;
         self.layout = build.layout;
@@ -2732,7 +2759,11 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
     // while Reduced Latency When Monitoring is on and it doesn't keep its
     // monitoring latency, is given the lowest possible latency: its own input
     // isn't held back and its path doesn't raise a summing point's target.
-    let low_latency: Vec<bool> = build
+    // A track on Monitor Auto is monitored only while no clip plays, which
+    // the audio thread finds out each block (routing R11): it is compensated
+    // like any track, and its inputs skip the delay line only while it
+    // monitors.
+    let monitored: Vec<bool> = build
         .tasks
         .iter()
         .map(|task| {
@@ -2742,6 +2773,22 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                         && !track.keep_monitoring_latency()
                 })
         })
+        .collect();
+    let auto_low: Vec<bool> = build
+        .tasks
+        .iter()
+        .zip(&monitored)
+        .map(|(task, &monitored)| {
+            monitored
+                && document
+                    .track(task.track)
+                    .is_some_and(|track| track.routing().monitor == bl_model::Monitor::Auto)
+        })
+        .collect();
+    let low_latency: Vec<bool> = monitored
+        .iter()
+        .zip(&auto_low)
+        .map(|(&monitored, &auto)| monitored && !auto)
         .collect();
     // The frames into the song an input's signal has, counting the source
     // track's own delay. Negative counts make the other paths wait.
@@ -2877,6 +2924,7 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                 let key = input_key(build, &input);
                 let index = line(build, delay as u32, key);
                 build.inputs[i].delay = index;
+                build.inputs[i].unheld_while_monitoring = auto_low[input.from as usize];
             }
         }
         for s in task.sidechains.range() {
@@ -2892,6 +2940,8 @@ fn compensate(build: &mut Build, order: &[u32], document: &Document, rate: u32) 
                     let key = input_key(build, &input);
                     let index = line(build, delay as u32, key);
                     build.sidechain_inputs[i].delay = index;
+                    build.sidechain_inputs[i].unheld_while_monitoring =
+                        auto_low[input.from as usize];
                 }
             }
         }
@@ -2988,6 +3038,10 @@ fn node_offsets(build: &Build, steps: Span, rack_at: &mut [(u32, u32)]) -> Vec<(
                     if rack.bypass {
                         continue;
                     }
+                    // The selector's automation gates the rack's chain inputs,
+                    // so it is held back to the rack's input (the delay
+                    // compensation spec, R5).
+                    out.push((rack.selector, before));
                     // A drum rack's return chains start where its slowest
                     // drum chain ends, which is where its sends take them.
                     let sent = rack
@@ -3099,7 +3153,7 @@ fn with_dependents(mut tasks: Vec<Task>, dependents: &[Vec<u32>]) -> Vec<Task> {
 /// The loop the engine plays for `document`: its loop brace if the Loop
 /// switch is on.
 #[must_use]
-pub(crate) fn loop_region(document: &Document) -> Option<LoopRegion> {
+pub fn loop_region(document: &Document) -> Option<LoopRegion> {
     let brace = document.settings().arrangement_loop;
     brace.enabled.then(|| LoopRegion {
         start: brace.start,
@@ -3312,10 +3366,9 @@ fn needs_program(
     // Clip changes never recompile: `Compiler::sync` sends the track's clip
     // player its clips as node data (the audio clips spec, R12). The Session
     // View's slots are the exception: which slots hold a clip travels in the
-    // program's scene table, which a scene launch reads (WP-3.2).
+    // program's scene table, which a scene launch reads (WP-3.2); the rows'
+    // values travel as a swap of the table (`Update::scene_tables`).
     recompile
-        || scene_slots(old) != scene_slots(new)
-        || FollowTable::of(old) != FollowTable::of(new)
 }
 
 /// Every modulator driven by audio, notes or MIDI with its mappings: what

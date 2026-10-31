@@ -86,6 +86,10 @@ pub struct Imported {
 /// arrangement, so a file that size or past it is refused before it's read.
 pub const MAX_FILE_BYTES: u64 = 64 << 20;
 
+/// The latest position, in Beatlayer ticks, a track of a file may reach: a
+/// quarter of the range, so arithmetic on positions and lengths can't overflow.
+pub const MAX_TICKS: i64 = i64::MAX / 4;
+
 /// Why a MIDI file couldn't be read or written.
 #[derive(Debug)]
 #[non_exhaustive]
@@ -199,7 +203,8 @@ pub fn read(path: &Path) -> Result<Imported, MidiFileError> {
 /// # Errors
 ///
 /// [`MidiFileError`] if the bytes aren't a Standard MIDI File with a metrical
-/// time division, or are more than [`MAX_FILE_BYTES`].
+/// time division, are more than [`MAX_FILE_BYTES`], or run a track past
+/// [`MAX_TICKS`].
 pub fn read_bytes(bytes: &[u8]) -> Result<Imported, MidiFileError> {
     if bytes.len() as u64 > MAX_FILE_BYTES {
         return Err(MidiFileError::TooLarge(bytes.len() as u64));
@@ -226,6 +231,15 @@ pub fn read_bytes(bytes: &[u8]) -> Result<Imported, MidiFileError> {
     let mut signatures: Vec<(Ticks, TimeSignature)> = Vec::new();
     let mut tracks = Vec::with_capacity(smf.tracks.len());
     for track in &smf.tracks {
+        // Every position in a track is at most the sum of its deltas.
+        let units = track.iter().fold(0_i64, |sum, event| {
+            sum.saturating_add(i64::from(event.delta.as_int()))
+        });
+        if i128::from(units) * i128::from(TICKS_PER_QUARTER) / i128::from(division)
+            > i128::from(MAX_TICKS)
+        {
+            return Err(MidiFileError::OutOfRange);
+        }
         let (name, notes, length) = read_track(track, division);
         collect_tempo(track, division, &mut tempos);
         collect_signatures(track, division, &mut signatures);

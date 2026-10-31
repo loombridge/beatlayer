@@ -393,6 +393,40 @@ fn a_short_arrangement_keeps_its_parts_inside_its_view() {
     }
 }
 
+// Spec: arrangement-view R1, mixer-view R32; time-editing R29. The
+// time-signature lane, added after the parts were fitted, stays above the
+// mixer too, and no part turns upside down.
+#[test]
+fn a_short_arrangement_with_a_signature_lane_keeps_its_parts_inside_its_view() {
+    let view = Rect::from_min_max(pos2(0.0, 38.0), pos2(900.0, 406.0));
+    for sections in [
+        Sections::DEFAULT,
+        Sections {
+            crossfader: true,
+            ..Sections::DEFAULT
+        },
+    ] {
+        let layout =
+            ArrangementLayout::compute_with_mixer(view, true, 2, sections).with_signature_lane();
+        let mixer = layout.mixer.unwrap();
+        for (name, rect) in [
+            ("beat ruler", layout.beat_ruler),
+            ("scrub", layout.scrub),
+            ("signature lane", layout.signature_lane.unwrap()),
+            ("lanes", layout.lanes),
+            ("headers", layout.headers),
+        ] {
+            assert!(
+                rect.top() >= view.top() && rect.bottom() <= mixer.top(),
+                "{name} {rect:?} is outside the view above the mixer at {}",
+                mixer.top()
+            );
+        }
+        assert!(layout.lanes.min.y <= layout.lanes.max.y);
+        assert!(layout.headers.min.y <= layout.headers.max.y);
+    }
+}
+
 /// The main window's layout with the Link toggle shown or hidden, on a set
 /// whose pool holds the factory default groove (the Global Amount shows).
 fn with_link(size: Vec2, link: bool) -> ShellLayout {

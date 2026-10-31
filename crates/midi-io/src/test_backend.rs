@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Instant;
 
 use crate::backend::{
-    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection,
+    Direction, InputConnection, InputHandler, MidiBackend, MidiError, OutputConnection, PortKey,
 };
 
 /// A MIDI system in the test's own process. Clones share it, so a test keeps
@@ -39,10 +39,14 @@ pub struct TestBackend {
 struct Shared {
     ports: Vec<Port>,
     next_connection: u64,
+    /// Counts the ports plugged in, so a port plugged in again has a new
+    /// key.
+    plugged: u64,
 }
 
 struct Port {
     name: String,
+    key: PortKey,
     direction: Direction,
     /// The connection that has it open, and an input's handler.
     open: Option<(u64, Option<InputHandler>)>,
@@ -66,8 +70,12 @@ impl TestBackend {
 
     /// Plugs in a port.
     pub fn add_port(&self, direction: Direction, name: &str) {
-        self.lock().ports.push(Port {
+        let mut shared = self.lock();
+        shared.plugged += 1;
+        let key = shared.plugged.to_string();
+        shared.ports.push(Port {
             name: name.to_owned(),
+            key,
             direction,
             open: None,
             sent: Vec::new(),
@@ -206,13 +214,13 @@ impl MidiBackend for TestBackend {
         "Test"
     }
 
-    fn ports(&mut self, direction: Direction) -> Result<Vec<String>, MidiError> {
+    fn ports(&mut self, direction: Direction) -> Result<Vec<(String, PortKey)>, MidiError> {
         Ok(self
             .lock()
             .ports
             .iter()
             .filter(|p| p.direction == direction)
-            .map(|p| p.name.clone())
+            .map(|p| (p.name.clone(), p.key.clone()))
             .collect())
     }
 

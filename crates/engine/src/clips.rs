@@ -1855,6 +1855,7 @@ impl Node for ClipPlayer {
     fn process(&mut self, block: &mut Block<'_>) {
         self.work_out_scale(block);
         let transport = block.transport();
+        self.warp.begin_block(transport.playing);
         // Spec: audio-clips R1
         if !transport.playing {
             // Nothing sounds, so the gate lands at once.
@@ -2232,7 +2233,8 @@ impl Node for ClipPlayer {
         let stretchers = list.stretchers.take();
         // Spec: warp-modes R8. The list says which clips changed their mode:
         // each crossfades from what it was playing, from this list's first
-        // frame.
+        // frame, if the song is playing.
+        self.warp.arrive();
         if list.clips.iter().any(|clip| clip.past.is_some()) {
             self.warp.forget_change();
         }

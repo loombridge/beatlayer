@@ -413,6 +413,28 @@ fn changing_the_input_or_its_channel_ends_the_held_notes() {
 
 // Spec: midi-io R26
 #[test]
+fn an_input_change_then_an_edit_before_the_next_block_still_ends_the_held_notes() {
+    for size in SIZES {
+        held_then(
+            size,
+            |_, _| {},
+            |play, id| {
+                play.rig.apply(Command::SetInput {
+                    track: id,
+                    input: Input::None,
+                    channel: None,
+                });
+                // A second program with the same route, swapped in the same
+                // drain.
+                device(&mut play.rig.editor, id, testing::GAIN, &[]);
+                play.rig.sync();
+            },
+        );
+    }
+}
+
+// Spec: midi-io R26
+#[test]
 fn an_edit_that_keeps_the_input_keeps_the_held_notes_sounding() {
     let mut play = Play::new(512);
     let id = play.instrument();

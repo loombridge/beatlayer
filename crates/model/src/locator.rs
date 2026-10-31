@@ -81,6 +81,22 @@ mod tests {
         Document::new(main, scenes)
     }
 
+    // Spec: time-editing R10
+    #[test]
+    fn a_song_start_on_a_missing_locator_is_refused() {
+        let mut doc = song();
+        let id = LocatorId(bl_core::id::Id::new(999_999).unwrap());
+        let before = doc.clone();
+        assert!(matches!(
+            doc.apply(&Command::SetSongStart {
+                start: Some(SongStart::Locator(id))
+            }),
+            Err(crate::error::ModelError::NoSuchLocator(missing)) if missing == id
+        ));
+        assert_eq!(doc, before);
+        assert_eq!(doc.settings.song_start, None);
+    }
+
     #[test]
     fn a_locator_is_part_of_the_set_and_saved_when_there_is_one() {
         let mut doc = song();

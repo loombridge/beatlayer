@@ -485,3 +485,56 @@ fn a_gap_too_long_for_a_delta_time_is_refused() {
     )];
     assert!(midi::write_bytes("Clip", &near, tempo, signature).is_ok());
 }
+
+/// A file whose one track holds 49,000 empty text events 2^28 - 1 file ticks
+/// apart, then a note: past the range at one file tick to the quarter note.
+fn a_file_with_a_note_past_the_range() -> Vec<u8> {
+    let at = |delta: u32, kind| TrackEvent {
+        delta: u28::new(delta),
+        kind,
+    };
+    let mut track: Track<'_> = (0..49_000)
+        .map(|_| {
+            at(
+                u28::max_value().as_int(),
+                TrackEventKind::Meta(MetaMessage::Text(b"")),
+            )
+        })
+        .collect();
+    let message = |message| TrackEventKind::Midi {
+        channel: u4::new(0),
+        message,
+    };
+    track.push(at(
+        0,
+        message(MidiMessage::NoteOn {
+            key: u7::new(60),
+            vel: u7::new(100),
+        }),
+    ));
+    track.push(at(
+        1,
+        message(MidiMessage::NoteOff {
+            key: u7::new(60),
+            vel: u7::new(64),
+        }),
+    ));
+    track.push(at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)));
+    let smf = Smf {
+        header: Header::new(Format::SingleTrack, Timing::Metrical(u15::new(1))),
+        tracks: vec![track],
+    };
+    let mut bytes = Vec::new();
+    smf.write_std(&mut bytes).unwrap();
+    bytes
+}
+
+// Review 30 October 2026 (R154): positions saturated to i64::MAX instead of
+// being refused, and the shell's import then overflowed on them.
+#[test]
+fn positions_past_the_range_are_refused() {
+    assert!(matches!(
+        midi::read_bytes(&a_file_with_a_note_past_the_range()),
+        Err(midi::MidiFileError::OutOfRange)
+    ));
+}

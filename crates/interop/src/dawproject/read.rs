@@ -70,16 +70,33 @@ pub struct ReadReport {
     pub duplicate_ids: Vec<String>,
     /// The `id`s read so far, to find a second use of one (R7).
     ids: std::collections::HashSet<String>,
+    /// Where each counted name sits in its list, so counting stays linear
+    /// in a file with many distinct names.
+    positions: std::collections::HashMap<(Counted, String), usize>,
     /// Elements nested deeper than the limit (R6).
     pub too_deep: Vec<String>,
 }
 
+/// Which of the report's counted lists a name belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Counted {
+    Element,
+    Attribute,
+    Entity,
+}
+
 impl ReadReport {
     /// Counts one more of a name.
-    fn count(list: &mut Vec<(String, usize)>, name: &str) {
-        if let Some(entry) = list.iter_mut().find(|(known, _)| known == name) {
-            entry.1 += 1;
+    fn count(&mut self, kind: Counted, name: &str) {
+        let list = match kind {
+            Counted::Element => &mut self.unknown_elements,
+            Counted::Attribute => &mut self.unknown_attributes,
+            Counted::Entity => &mut self.unknown_entities,
+        };
+        if let Some(&at) = self.positions.get(&(kind, name.to_owned())) {
+            list[at].1 += 1;
         } else {
+            self.positions.insert((kind, name.to_owned()), list.len());
             list.push((name.to_owned(), 1));
         }
     }
@@ -336,7 +353,7 @@ pub fn read_xml(text: &str, report: &mut ReadReport) -> Option<Node> {
                         node.text.push_str(&text);
                     }
                 } else {
-                    ReadReport::count(&mut report.unknown_entities, &name);
+                    report.count(Counted::Entity, &name);
                 }
             }
             Event::Eof => break,
@@ -352,7 +369,7 @@ fn node_of(element: &quick_xml::events::BytesStart<'_>, report: &mut ReadReport)
     let allowed = allowed_attributes(&name);
     if allowed.is_none() {
         // An element Beatlayer doesn't know is skipped and counted (R4).
-        ReadReport::count(&mut report.unknown_elements, &name);
+        report.count(Counted::Element, &name);
     }
     let mut node = Node {
         name: name.clone(),
@@ -363,9 +380,9 @@ fn node_of(element: &quick_xml::events::BytesStart<'_>, report: &mut ReadReport)
         let value = unescape(&String::from_utf8_lossy(attribute.value.as_ref()));
         match allowed {
             Some(allowed) if !allowed.contains(&key.as_str()) => {
-                ReadReport::count(&mut report.unknown_attributes, &key);
+                report.count(Counted::Attribute, &key);
             }
-            None => ReadReport::count(&mut report.unknown_attributes, &key),
+            None => report.count(Counted::Attribute, &key),
             Some(_) => {}
         }
         if allowed.is_some() {
@@ -453,7 +470,8 @@ fn real(text: &str) -> Option<f64> {
         "-inf" | "-Infinity" => return Some(f64::NEG_INFINITY),
         _ => {}
     }
-    text.parse::<f64>().ok()
+    let value = text.parse::<f64>().ok()?;
+    (!value.is_nan()).then_some(value)
 }
 
 /// A boolean the file gives: `true`, `false`, `1` or `0` (R8).
@@ -480,7 +498,7 @@ fn timeline_info(node: &Node, report: &mut ReadReport) -> TimelineInfo {
         time_unit: node.attribute("timeUnit").and_then(|unit| {
             let parsed = TimeUnit::parse(unit);
             if parsed.is_none() {
-                ReadReport::count(&mut report.unknown_attributes, "timeUnit");
+                report.count(Counted::Attribute, "timeUnit");
             }
             parsed
         }),
@@ -689,7 +707,7 @@ fn track(node: &Node, report: &mut ReadReport) -> Track {
                     .split_whitespace()
                     .filter_map(|kind| {
                         ContentKind::parse(kind).or_else(|| {
-                            ReadReport::count(&mut report.unknown_attributes, "contentType");
+                            report.count(Counted::Attribute, "contentType");
                             None
                         })
                     })

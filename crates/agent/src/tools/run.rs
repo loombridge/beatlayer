@@ -252,13 +252,19 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             _ => None,
         };
         let results: Result<Vec<Value>, String> = if ready.iter().all(|r| is_edit(&r.id)) {
-            ctx.shell.edit(|editor| {
-                editor.begin("Dry run");
-                let mut results = Vec::with_capacity(ready.len());
-                let mut failure = None;
-                for (index, step) in ready.iter().enumerate() {
-                    match model::run(editor, &step.id, step.args.clone()) {
-                        Ok(changes) => {
+            // Spec: macros R11. Through the shell, so a parameter a macro
+            // holds fails here as it does when the edits run.
+            let steps: Vec<(String, Value)> = ready
+                .iter()
+                .map(|step| (step.id.clone(), step.args.clone()))
+                .collect();
+            ctx.shell
+                .try_document_edits(&steps)
+                .map(|all| {
+                    ready
+                        .iter()
+                        .zip(all)
+                        .map(|(step, changes)| {
                             let mut checked = json!({ "command": step.id, "changes": changes });
                             // Spec: agent-permissions R11. `clip.set_data`
                             // says whether it would delete notes, and
@@ -280,18 +286,13 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                                     checked["deletes_track"] = json!(track);
                                 }
                             }
-                            results.push(checked);
-                        }
-                        Err(error) => {
-                            failure =
-                                Some(format!("command {} (`{}`): {error}", index + 1, step.id));
-                            break;
-                        }
-                    }
-                }
-                editor.cancel().ok();
-                failure.map_or(Ok(results), Err)
-            })
+                            checked
+                        })
+                        .collect()
+                })
+                .map_err(|(index, error)| {
+                    format!("command {} (`{}`): {error}", index + 1, ready[index].id)
+                })
         } else {
             Ok(ready
                 .iter()

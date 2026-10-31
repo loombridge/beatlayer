@@ -963,6 +963,183 @@ fn learn_sets_stacks_shifts_from_the_chord_played() {
     assert_eq!(shifts(&rig), fixed);
 }
 
+// Spec: midi-chord R13
+#[test]
+fn learn_keeps_the_chord_as_its_keys_are_released() {
+    use bl_devices::stack::{LEARN, STACK, shift};
+
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: STACK.to_owned() },
+            "name": "Chord",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    let device = added["device"].clone();
+    rig.run("midi.toggle_computer_keyboard", json!({ "on": true }));
+    let shifts = |rig: &Rig| -> Vec<f64> {
+        let params = &rig
+            .shell
+            .editor()
+            .document()
+            .device(serde_json::from_value(device.clone()).unwrap())
+            .unwrap()
+            .params;
+        (0..6)
+            .map(|n| params.get(&shift(n)).copied().unwrap_or(-1000.0))
+            .collect()
+    };
+    let key = |rig: &mut Rig, key: &str, pressed: bool| {
+        rig.run(
+            "midi.computer_keyboard_key",
+            json!({ "key": key, "pressed": pressed }),
+        );
+        rig.shell.poll();
+    };
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 1.0 }),
+    );
+    rig.shell.poll();
+    let chord = [7.0, 9.0, 0.0, 0.0, 0.0, 0.0];
+    for k in ["A", "G", "H"] {
+        key(&mut rig, k, true);
+    }
+    assert_eq!(shifts(&rig), chord);
+
+    // Releasing the keys one by one changes nothing and adds no undo step.
+    let steps = rig.shell.editor().undo_history().count();
+    for k in ["G", "H", "A"] {
+        key(&mut rig, k, false);
+        assert_eq!(shifts(&rig), chord, "releasing {k}");
+    }
+    assert_eq!(rig.shell.editor().undo_history().count(), steps);
+
+    // The root released first stays the root: a key added while the others
+    // are held takes the next shift, counted from it.
+    for k in ["A", "G", "H"] {
+        key(&mut rig, k, true);
+    }
+    key(&mut rig, "A", false);
+    assert_eq!(shifts(&rig), chord);
+    key(&mut rig, "J", true);
+    assert_eq!(shifts(&rig)[2], 11.0);
+}
+
+// Spec: midi-chord R13
+#[test]
+fn learn_chord_waits_for_a_gesture_to_end() {
+    use bl_devices::stack::{LEARN, STACK, shift};
+
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: STACK.to_owned() },
+            "name": "Chord",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    let device: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    rig.run("midi.toggle_computer_keyboard", json!({ "on": true }));
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 1.0 }),
+    );
+    rig.shell.poll();
+    let shift_1 = |rig: &Rig| {
+        let params = &rig.shell.editor().document().device(device).unwrap().params;
+        params.get(&shift(0)).copied().unwrap_or(0.0)
+    };
+    let volume = |rig: &Rig| {
+        rig.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .mixer()
+            .volume
+    };
+    let old = volume(&rig);
+    let before = shift_1(&rig);
+
+    rig.shell.begin_gesture("Change volume");
+    rig.run("mixer.set_volume", json!({ "track": track, "volume": 0.5 }));
+    for k in ["A", "G"] {
+        rig.run(
+            "midi.computer_keyboard_key",
+            json!({ "key": k, "pressed": true }),
+        );
+        rig.shell.poll();
+    }
+    assert_eq!(shift_1(&rig), before, "nothing is learned during the drag");
+    rig.shell.end_gesture();
+    rig.shell.poll();
+
+    let steps: Vec<&str> = rig.shell.editor().undo_history().take(2).collect();
+    assert_eq!(steps, ["Learn Chord", "Change volume"]);
+    assert_eq!(shift_1(&rig), 7.0);
+    rig.run("edit.undo", json!({}));
+    assert_eq!(shift_1(&rig), before);
+    assert_eq!(volume(&rig), 0.5);
+    rig.run("edit.undo", json!({}));
+    assert_eq!(volume(&rig), old);
+}
+
+// Spec: midi-cc-sender R7
+#[test]
+fn learn_cc_control_waits_for_a_gesture_to_end() {
+    use bl_devices::midi_cc::{CC_CONTROL, LEARN, dial_cc};
+
+    let mut rig = Rig::new();
+    let track = rig.track;
+    rig.run("arrangement.select_tracks", json!({ "tracks": [track] }));
+    let added = rig.run(
+        "device.add",
+        json!({ "device": {
+            "kind": DeviceKind::Native { device_type: CC_CONTROL.to_owned() },
+            "name": "CC Control",
+            "role": DeviceRole::MidiEffect,
+        } }),
+    );
+    let device: bl_model::DeviceId = serde_json::from_value(added["device"].clone()).unwrap();
+    rig.input(json!({ "type": "port", "name": "Keys A" }));
+    rig.run(
+        "device.set_param",
+        json!({ "device": device, "param": LEARN.0, "value": 1.0 }),
+    );
+    rig.shell.poll();
+    let learned = |rig: &Rig| {
+        rig.shell
+            .editor()
+            .document()
+            .device(device)
+            .unwrap()
+            .params
+            .get(&dial_cc(0))
+            .copied()
+            .filter(|cc| *cc != 0.0)
+    };
+
+    rig.shell.begin_gesture("Change volume");
+    rig.run("mixer.set_volume", json!({ "track": track, "volume": 0.5 }));
+    rig.play("Keys A", [0xB0, 74, 100]);
+    rig.shell.poll();
+    assert_eq!(learned(&rig), None, "nothing is learned during the drag");
+    rig.shell.end_gesture();
+    rig.shell.poll();
+
+    assert!(learned(&rig).is_some());
+    let steps: Vec<&str> = rig.shell.editor().undo_history().take(2).collect();
+    assert_eq!(steps, ["Learn CC Control", "Change volume"]);
+}
+
 // Spec: midi-chord R17
 #[test]
 fn learn_counts_degrees_with_use_current_scale_on() {

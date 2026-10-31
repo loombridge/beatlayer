@@ -1,6 +1,6 @@
 //! Devices, chains, racks, pads, modulators and plug-ins.
 
-use super::Object::{Device, Track};
+use super::Object::{Device, Song, Track};
 use super::{FILE, Readback, nothing, query, read};
 
 /// The readback of this area's commands, one line each, so a command's entry is easy to find.
@@ -80,6 +80,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("device.save_preset", nothing(FILE)),
     ("device.scale_tempo", query(Device, "warp.bpm")),
     ("device.set_sample_region", query(Device, "region")),
+    ("device.slice_to_drum_rack", query(Track, "devices")),
+    ("device.slice_to_midi_track", query(Song, "tracks")),
     ("device.write_sample_region", query(Device, "region")),
     ("device.swap_to_snapshot", query(Track, "devices")),
     ("device.set_enabled", query(Device, "enabled")),

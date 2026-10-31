@@ -1782,3 +1782,143 @@ fn a_scheduled_recording_start_is_refused_because_nothing_would_set_the_files_up
                 "args": { "recording": false } }),
     );
 }
+
+/// An Instrument Rack's worth of macro set-up on the client's shell, as the
+/// shell's macro tests make it: a rack holding a Utility in a chain. Gives
+/// the rack and the Utility.
+fn rack_with_utility(client: &mut Client<InProcess>) -> (u64, u64) {
+    let shell = &mut client.transport().shell;
+    let audio = shell.editor().document().top_level().nth(2).unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [audio] }))
+        .unwrap();
+    shell.set_focused_area(bl_shell::Area::Detail);
+    let rack = shell
+        .invoke(
+            "device.add",
+            json!({ "device": { "kind": { "rack": { "kind": "audio_effect" } },
+                                "name": "Rack", "role": "audio_effect" } }),
+        )
+        .unwrap()["device"]
+        .as_u64()
+        .unwrap();
+    let chain = shell.new_id::<bl_model::ChainId>();
+    shell
+        .invoke(
+            "chain.add",
+            json!({ "rack": rack, "index": 0,
+                    "chain": { "id": chain, "name": "Range", "devices": [] } }),
+        )
+        .unwrap();
+    let utility = shell
+        .invoke(
+            "device.add",
+            json!({ "chain": chain,
+                    "device": { "kind": { "native": { "device_type": "beatlayer.utility" } },
+                                "name": "Utility", "role": "audio_effect" } }),
+        )
+        .unwrap()["device"]
+        .as_u64()
+        .unwrap();
+    (rack, utility)
+}
+
+#[test]
+fn a_scheduled_or_dry_run_set_param_on_a_macro_held_parameter_is_refused_naming_the_macro() {
+    // Spec: macros R11. The shell's rule holds for every way an agent edits.
+    const WIDTH: u32 = 6;
+    let mut client = headless(false);
+    let (rack, utility) = rack_with_utility(&mut client);
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "rack.map_macro", "args": {
+            "rack": rack, "macro_number": 1,
+            "target": { "type": "device", "device": utility, "param": WIDTH } } }] }),
+    );
+    let set = json!({ "device": utility, "param": WIDTH, "value": 10.0 });
+    let run = |dry_run: bool| json!({ "commands": [{ "command": "device.set_param", "args": set }], "dry_run": dry_run });
+    let message = call_err(&mut client, "run", run(false));
+    assert!(message.contains("Width"), "{message}");
+    let dry = call(&mut client, "run", run(true));
+    assert_eq!(dry["valid"], false, "{dry}");
+    assert!(dry["error"].as_str().unwrap().contains("Width"), "{dry}");
+    let message = call_err(
+        &mut client,
+        "schedule",
+        json!({ "action": "add", "at": "5.1.1", "command": "device.set_param", "args": set }),
+    );
+    assert!(
+        message.contains("fails on the song as it is now"),
+        "{message}"
+    );
+    assert!(message.contains("Width"), "{message}");
+}
+
+#[test]
+fn single_shell_edits_are_the_agents_labelled_steps() {
+    // Spec: agent-permissions R6, undo-history R9. Commands that open a
+    // transaction of their own still record the agent as the maker.
+    let mut client = headless(true);
+    let track = client
+        .transport()
+        .shell
+        .editor()
+        .document()
+        .top_level()
+        .nth(2)
+        .unwrap();
+    for (command, args) in [
+        ("locator.add", json!({ "at": "5.1.1" })),
+        (
+            "remote.map",
+            json!({ "source": { "type": "cc", "channel": 1, "controller": 20 },
+                    "target": { "type": "mixer", "track": track, "param": "volume" } }),
+        ),
+    ] {
+        let ran = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }],
+                    "label": "Mark the drop" }),
+        );
+        assert_eq!(
+            ran["undo_step"], "test-agent: Mark the drop",
+            "{command}: {ran}"
+        );
+        assert_eq!(
+            client.transport().shell.editor().undo_history().next(),
+            Some("test-agent: Mark the drop"),
+            "{command}"
+        );
+        let history = call(&mut client, "query", json!({ "path": "history" }));
+        assert_eq!(
+            history["rows"]["items"][0]["made_by"]["name"], "test-agent",
+            "{command}: {history}"
+        );
+    }
+}
+
+#[test]
+fn a_checkpoint_restores_only_in_the_set_it_was_saved_in() {
+    let mut client = headless(true);
+    call(
+        &mut client,
+        "checkpoint",
+        json!({ "action": "save", "name": "a" }),
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.new", "args": {} }] }),
+    );
+    let before = client.transport().shell.editor().document().clone();
+    let message = call_err(
+        &mut client,
+        "checkpoint",
+        json!({ "action": "restore", "name": "a" }),
+    );
+    assert!(message.contains("not the open set"), "{message}");
+    assert!(message.contains("nothing changed"), "{message}");
+    assert_eq!(*client.transport().shell.editor().document(), before);
+}

@@ -36,6 +36,7 @@ use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes as note_ids;
 use bl_shell_spec::plugins as plugin_ids;
+use bl_shell_spec::remote as remote_ids;
 use bl_shell_spec::session_view as session_ids;
 use bl_shell_spec::tracks as track_ids;
 use serde_json::Value;
@@ -115,6 +116,22 @@ impl Shell {
                 // this one holds, so the step carries the label given.
                 || session_ids::handles(id)
                 || id == plugin_ids::LOAD
+                // Each of these opens its own transaction, which records the
+                // person as its maker unless this one holds it.
+                || locator_ids::handles(id)
+                || clip_envelope_ids::handles(id)
+                || bl_shell_spec::envelope_keys::handles(id)
+                || bl_shell_spec::cv::handles(id)
+                || automation_ids::handles(id)
+                || comping_ids::handles(id)
+                || matches!(
+                    id,
+                    remote_ids::MAP
+                        | remote_ids::UNMAP
+                        | remote_ids::SET_RANGE
+                        | remote_ids::INVERT_RANGE
+                        | remote_ids::SET_MODE
+                )
                 || matches!(
                     id,
                     browser_ids::ADD_TO_ARRANGEMENT | browser_ids::LOAD_SELECTED

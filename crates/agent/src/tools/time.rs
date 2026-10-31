@@ -55,6 +55,7 @@ use serde_json::{Map, Value, json};
 
 use super::run::resolve_placeholders;
 use super::{Ctx, ToolOutcome, args, done, failed, question_line, step, tool_definition};
+use crate::permission::{Mode, decide};
 use bl_shell::permission::{CallPermission, raised_by_arguments};
 
 pub(crate) const TRANSPORT: &str = "transport";
@@ -88,33 +89,19 @@ pub(crate) struct Playhead {
     playing: bool,
     position: Ticks,
     insert_marker: Ticks,
-    /// Whether an outside tempo leads, so Phase Nudge is refused (the
-    /// transport spec, R29).
-    following: bool,
 }
 
 impl Playhead {
-    pub(crate) fn new(
-        playing: bool,
-        position: Ticks,
-        insert_marker: Ticks,
-        following: bool,
-    ) -> Self {
+    pub(crate) fn new(playing: bool, position: Ticks, insert_marker: Ticks) -> Self {
         Self {
             playing,
             position,
             insert_marker,
-            following,
         }
     }
 
     pub(crate) fn of(state: &EngineState) -> Self {
-        Self::new(
-            state.playing,
-            state.position_ticks,
-            state.insert_marker,
-            state.following.is_some(),
-        )
+        Self::new(state.playing, state.position_ticks, state.insert_marker)
     }
 }
 
@@ -133,6 +120,32 @@ pub(crate) fn number_session(state: &mut super::State, session: &mut Session) {
         session
             .refs
             .insert(SESSION_NUMBER.to_owned(), state.sessions_numbered);
+    }
+}
+
+/// Where a session keeps the set its `$ref` names were issued in.
+const SESSION_SET: &str = "$set";
+
+/// Drops the scheduled commands, here and in the engine, of a set that was
+/// replaced (a new or opened one): they would act on other objects in the
+/// new set.
+pub(crate) fn follow_set_schedule(state: &mut super::State, generation: u64) {
+    if state.set_generation != Some(generation) {
+        state.set_generation = Some(generation);
+        let cancelled = state.schedule.cancel_waiting(None);
+        state
+            .outbox
+            .extend(cancelled.into_iter().map(EngineMessage::Cancel));
+    }
+}
+
+/// [`follow_set_schedule`], and the session's `$ref` names, which would name
+/// other objects in the new set.
+pub(crate) fn follow_set(state: &mut super::State, session: &mut Session, generation: u64) {
+    follow_set_schedule(state, generation);
+    if session.refs.get(SESSION_SET) != Some(&generation) {
+        session.refs.retain(|name, _| name == SESSION_NUMBER);
+        session.refs.insert(SESSION_SET.to_owned(), generation);
     }
 }
 
@@ -393,20 +406,12 @@ pub(crate) fn send_transport(ctx: &mut Ctx<'_>, id: &str, args: Value) -> Result
         ));
     }
     let command = transport::command_from_args(id, args).map_err(|error| error.to_string())?;
+    // What the shell would refuse when the host sends it, said now rather
+    // than dropped then.
+    if let Some(reason) = ctx.shell.transport_refusal(command) {
+        return Err(format!("`{id}` is refused: {reason}"));
+    }
     if let TransportCommand::PhaseNudge { direction, held } = command {
-        // Spec: transport R29. A release is still accepted, so a held nudge
-        // can end.
-        if held
-            && ctx
-                .state
-                .playhead
-                .is_some_and(|playhead| playhead.following)
-        {
-            return Err(format!(
-                "an incoming clock or Link session leads the tempo and keeps the phase, so \
-                 `{id}` is refused while it does"
-            ));
-        }
         // Spec: transport R28. The session that pressed a button holds it.
         let owner = ctx.session.refs.get(SESSION_NUMBER).copied().unwrap_or(0);
         ctx.state.nudges.retain(|&(_, button)| button != direction);
@@ -448,10 +453,20 @@ struct Entry {
     maker: bl_model::Maker,
     /// What the engine does on the frame.
     action: Action,
-    /// The most far-reaching class the agent was cleared to run when this
-    /// was scheduled: the person said yes to it, or the agent needs no
-    /// answer for it.
-    cleared: Permission,
+    /// The classes the agent was cleared to run when this was scheduled: the
+    /// ones the person said yes to, and those the agent needs no answer for.
+    cleared: Vec<Permission>,
+    /// The classes the call had when it was scheduled, for a command whose
+    /// class its arguments don't change.
+    classes: Vec<Permission>,
+    /// Whether the agent's autonomy cleared it, so it is decided again when
+    /// it fires, against the agent's rights then.
+    by_autonomy: bool,
+    /// The agent whose rights the session had, and where the agent API runs.
+    agent: Option<String>,
+    mode: Mode,
+    /// The set it was scheduled in ([`Shell::set_generation`]).
+    set: u64,
     state: State,
 }
 
@@ -481,6 +496,21 @@ impl Schedule {
                 id: e.id,
                 at: e.at,
                 action: e.action,
+            })
+            .collect()
+    }
+
+    /// Cancels every waiting command, or those of `agent` only, and gives
+    /// their IDs, for the engine to drop.
+    pub(crate) fn cancel_waiting(&mut self, agent: Option<&str>) -> Vec<u64> {
+        self.entries
+            .iter_mut()
+            .filter(|e| {
+                e.state == State::Waiting && agent.is_none_or(|a| e.agent.as_deref() == Some(a))
+            })
+            .map(|e| {
+                e.state = State::Cancelled;
+                e.id
             })
             .collect()
     }
@@ -559,30 +589,64 @@ fn run_now(shell: &mut Shell, entry: &Entry) -> Result<(), String> {
         // document.
         return Ok(());
     }
+    if entry.set != shell.set_generation() {
+        return Err(
+            "not run: the set was replaced since this was scheduled. Nothing changed".to_owned(),
+        );
+    }
     // Spec: agent-permissions R1. What a command acts on can change between
     // scheduling and firing (the clipboard, the selection, the insert
     // marker), so it is judged again, and left alone when it now reaches
     // further than the agent was cleared to.
-    if raised_by_arguments(&entry.command) {
-        let class = shell.call_permission(&entry.command, &entry.args).class();
-        if class > entry.cleared {
-            return Err(format!(
-                "not run: on the song as it is now it needs the person's say ({class:?}), which \
-                 was not asked when it was scheduled. Nothing changed"
-            ));
-        }
+    let now = if raised_by_arguments(&entry.command) {
+        shell.call_permission(&entry.command, &entry.args).classes()
+    } else {
+        entry.classes.clone()
+    };
+    // A clearance that autonomy gave goes with the autonomy, or with the
+    // agent being forgotten.
+    if entry.by_autonomy
+        && now.iter().any(|class| {
+            class.asks_first()
+                && decide(
+                    entry.mode,
+                    shell,
+                    entry.agent.as_deref(),
+                    *class,
+                    &super::judged_ids(&entry.command, &entry.args),
+                ) != Decision::Run
+        })
+    {
+        return Err(
+            "not run: the agent is no longer autonomous (or was forgotten), and it needs \
+                    the person's say. Nothing changed"
+                .to_owned(),
+        );
+    }
+    let missing: Vec<Permission> = now
+        .into_iter()
+        .filter(|class| !entry.cleared.contains(class))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "not run: on the song as it is now it needs the person's say ({missing:?}), which \
+             was not asked when it was scheduled. Nothing changed"
+        ));
     }
     if is_edit(&entry.command) {
-        let label = entry.label.clone();
-        let maker = entry.maker.clone();
-        shell.edit(|editor| {
-            editor
-                .transact_by(maker, label, |editor| {
-                    model::run(editor, &entry.command, entry.args.clone())
-                })
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        })
+        // Spec: macros R11, R13. Through the shell, as `run` goes, so a macro
+        // holds its parameters and moves its mapped ones.
+        shell
+            .prepare_edit(&entry.command, entry.args.clone())
+            .and_then(|prepared| {
+                shell.run_document_edits(
+                    entry.maker.clone(),
+                    &entry.label,
+                    &[(entry.command.clone(), prepared)],
+                )
+            })
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     } else {
         // The Arrangement's edits and the browser's drops are the agent's
         // undo steps too.
@@ -749,15 +813,25 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                      `transport` when the song is there"
                 ));
             }
+            // Spec: transport R28. A held Phase Nudge ends with the session
+            // that pressed it, which a scheduled press has none of.
+            if let Action::Transport(TransportCommand::PhaseNudge { held: true, .. }) = action {
+                return failed(format!(
+                    "a scheduled `{command}` can't hold a Phase Nudge, which ends with the \
+                     session that pressed it; press it with `run` when the song is there"
+                ));
+            }
             // Try it on the song as it is now, so a mistake shows today
             // rather than when the song gets there.
             if is_edit(&command) {
-                let tried = ctx.shell.edit(|editor| {
-                    editor.begin("Try a scheduled command");
-                    let result = model::run(editor, &command, args.clone());
-                    editor.cancel().ok();
-                    result
-                });
+                let tried = ctx
+                    .shell
+                    .prepare_edit(&command, args.clone())
+                    .and_then(|prepared| {
+                        ctx.shell
+                            .try_document_edits(&[(command.clone(), prepared)])
+                            .map_err(|(_, error)| error)
+                    });
                 if let Err(error) = tried {
                     return failed(format!(
                         "`{command}` fails on the song as it is now: {error}"
@@ -778,11 +852,17 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 "At {position}: {}",
                 question_line(shell, &command, &label, &call, &args)
             )));
-            let cleared = [Permission::External, Permission::Destructive]
+            // What the person just said yes to is cleared, and so is what the
+            // agent needs no answer for.
+            let by_autonomy = ctx.decide(Permission::Destructive, &judged) == Decision::Run;
+            let cleared: Vec<Permission> = Permission::ALL
                 .into_iter()
-                .find(|class| ctx.decide(*class, &judged) == Decision::Run)
-                .unwrap_or(Permission::Edit)
-                .max(call.class());
+                .filter(|class| {
+                    !class.asks_first()
+                        || classes.contains(class)
+                        || ctx.decide(*class, &judged) == Decision::Run
+                })
+                .collect();
             ctx.session.refs = names;
             let maker = ctx.maker();
             let schedule = &mut ctx.state.schedule;
@@ -798,6 +878,11 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 maker,
                 action,
                 cleared,
+                classes,
+                by_autonomy,
+                agent: ctx.session.agent.clone(),
+                mode: ctx.mode,
+                set: ctx.shell.set_generation(),
                 state: State::Waiting,
             };
             schedule.entries.push(entry);

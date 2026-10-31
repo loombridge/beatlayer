@@ -235,7 +235,7 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                 .iter()
                 .zip(&labels)
                 .filter(|(step, _)| step.call.class().asks_first())
-                .map(|(step, label)| question_line(shell, label, &step.call, &step.args))
+                .map(|(step, label)| question_line(shell, &step.id, label, &step.call, &step.args))
                 .collect();
             lines.join("\n")
         }));
@@ -275,6 +275,9 @@ pub(crate) fn run(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
                                 }
                                 if let Some(clip) = step.call.cropped {
                                     checked["crop"] = json!({ "clip": clip });
+                                }
+                                if let Some(track) = step.call.deletes_track {
+                                    checked["deletes_track"] = json!(track);
                                 }
                             }
                             results.push(checked);

@@ -776,7 +776,7 @@ pub(crate) fn schedule(ctx: &mut Ctx<'_>, raw: Value) -> ToolOutcome {
             let judged = super::judged_ids(&command, &args);
             step!(ctx.permit(&classes, &judged, || format!(
                 "At {position}: {}",
-                question_line(shell, &label, &call, &args)
+                question_line(shell, &command, &label, &call, &args)
             )));
             let cleared = [Permission::External, Permission::Destructive]
                 .into_iter()

@@ -70,6 +70,16 @@ impl Shell {
             || self.clip_drag.is_some()
     }
 
+    /// Whether work that finishes in the background must wait to edit the
+    /// set: a transaction is open, a drag's or a value's or a selected
+    /// breakpoint's, and an edit made now would join its undo step, and a
+    /// drag's next frame would throw it away. A Session recording's own
+    /// transaction, open from its start to its end, doesn't hold back the
+    /// take that ends it.
+    pub(super) fn landings_wait(&self) -> bool {
+        self.editor.in_transaction() && self.session_run.is_none()
+    }
+
     /// Runs a command as [`Shell::run`] does, recording what it changes in
     /// the set as one undo step named `label`, such as an agent's edit
     /// labelled with the agent's name, and made by `maker`, so the history
@@ -143,7 +153,7 @@ impl Shell {
                 .unwrap_or(bl_commands::Permission::External)
         };
         let mut registered = class_of(id);
-        // Spec: agent-permissions R17. Keys that run a command make the
+        // Spec: agent-permissions R18. Keys that run a command make the
         // person run it, so binding them needs what running it needs.
         if id == keymap_ids::BIND
             && let Some(bound) = args.get("command").and_then(Value::as_str)

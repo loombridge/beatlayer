@@ -512,7 +512,7 @@ fn a_command_only_a_person_runs_is_refused_and_recorded() {
 
 #[test]
 fn the_assistant_cannot_bind_keys_to_a_command_only_a_person_runs() {
-    // Spec: agent-permissions R17.
+    // Spec: agent-permissions R18.
     let mut shell = Shell::headless();
     let provider = Script::new(vec![
         calls(vec![call(

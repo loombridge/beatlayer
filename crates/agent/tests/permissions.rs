@@ -1122,7 +1122,7 @@ fn a_scheduled_paste_is_judged_again_when_it_fires_and_not_run_if_it_would_repla
 
 #[test]
 fn binding_keys_to_a_destructive_command_asks_first() {
-    // Spec: agent-permissions R17.
+    // Spec: agent-permissions R18.
     let mut c = app();
     let bind = json!({ "commands": [{ "command": "keymap.bind", "args": {
         "command": "set.discard_changes", "keys": ["Space"], "platform": "mac",
@@ -1143,7 +1143,7 @@ fn binding_keys_to_a_destructive_command_asks_first() {
 
 #[test]
 fn an_agent_cannot_bind_keys_to_the_agent_servers_commands() {
-    // Spec: agent-permissions R17.
+    // Spec: agent-permissions R18.
     let mut c = app();
     let result = c
         .call(
@@ -1160,4 +1160,242 @@ fn an_agent_cannot_bind_keys_to_the_agent_servers_commands() {
         "{result:?}"
     );
     assert!(c.transport().shell.user_keymap().binds.is_empty());
+}
+
+/// The dry run of one command.
+fn dry_run(client: &mut Client<InProcess>, command: &str, args: &Value) -> Value {
+    call(
+        client,
+        "run",
+        json!({ "commands": [{ "command": command, "args": args }], "dry_run": true }),
+    )
+}
+
+#[test]
+fn an_agent_s_choice_of_sample_editor_asks_first() {
+    // Spec: agent-permissions R17. The sample editor and the folders name a
+    // program or places outside the project.
+    let mut client = app();
+    for (command, args) in [
+        (
+            "settings.set_sample_editor",
+            json!({ "path": "/usr/bin/true" }),
+        ),
+        (
+            "settings.set_temporary_folder",
+            json!({ "path": "/tmp/bl-elsewhere" }),
+        ),
+        (
+            "settings.set_user_library",
+            json!({ "path": "/tmp/bl-elsewhere-library" }),
+        ),
+    ] {
+        let went = attempt(&mut client, command, &args);
+        assert!(went.asked, "{command} ran without asking");
+        assert!(
+            went.permission.contains("external"),
+            "{command}: {}",
+            went.permission
+        );
+    }
+    assert_eq!(
+        client.transport().shell.sample_editor(),
+        None,
+        "a declined call changes nothing"
+    );
+    assert!(!std::path::Path::new("/tmp/bl-elsewhere-library/Defaults").exists());
+
+    // Headless, with no person to ask, it is refused unless autonomous.
+    let mut headless = Client::new(InProcess::new(Agent::headless(false), Shell::headless()));
+    headless.initialize("script").unwrap();
+    let result = headless
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "settings.set_sample_editor",
+                                   "args": { "path": "/usr/bin/true" } }] }),
+        )
+        .unwrap();
+    assert!(result.is_error, "{}", result.text);
+    assert!(result.text.contains("--autonomous"), "{}", result.text);
+    assert_eq!(headless.transport().shell.sample_editor(), None);
+}
+
+#[test]
+fn a_confirmation_to_open_the_sample_editor_names_the_command_it_starts() {
+    // Spec: agent-permissions R4, R17.
+    let mut client = app();
+    client
+        .transport()
+        .shell
+        .run(
+            "settings.set_sample_editor",
+            json!({ "path": "/usr/bin/true --flag" }),
+        )
+        .unwrap();
+    let audio = track(&mut client, "3 Audio");
+    let held = clip(&mut client, audio, "Held", 0, 1);
+    attempt(&mut client, "clip.edit_sample", &json!({ "clip": held }));
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(
+        asked.contains("It starts “/usr/bin/true --flag”."),
+        "{asked}"
+    );
+}
+
+#[test]
+fn groove_to_clip_over_a_clip_is_destructive_and_into_empty_space_is_not() {
+    // Spec: agent-permissions R1, R3; grooves R18.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let held = clip(&mut client, midi, "Held", 0, 4);
+    let pool = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "groove.pool", "args": {} }] }),
+    );
+    let groove = pool["results"][0]["result"]["grooves"][0]["id"].clone();
+    let over = dry_run(
+        &mut client,
+        "groove.to_clip",
+        &json!({ "groove": groove, "track": midi, "at": 0 }),
+    );
+    assert_eq!(over["would"], "ask the person first", "{over}");
+    assert!(
+        over["permission"].as_str().unwrap().contains("destructive"),
+        "{over}"
+    );
+    assert_eq!(over["results"][0]["replaces"], json!([held]), "{over}");
+    let went = attempt(
+        &mut client,
+        "groove.to_clip",
+        &json!({ "groove": groove, "track": midi, "at": 0 }),
+    );
+    assert!(went.asked);
+
+    let empty = dry_run(
+        &mut client,
+        "groove.to_clip",
+        &json!({ "groove": groove, "track": midi, "at": 8 * BAR }),
+    );
+    assert_eq!(empty["would"], "run", "{empty}");
+    assert_eq!(empty["permission"], "edit", "{empty}");
+    assert_eq!(empty["results"][0]["replaces"], json!([]), "{empty}");
+
+    // With a file, it is external as well, and may replace.
+    let file = std::env::temp_dir().join("bl-agent-permissions-never-read.blgroove");
+    let from_file = dry_run(
+        &mut client,
+        "groove.to_clip",
+        &json!({ "path": file.to_string_lossy(), "track": midi, "at": 0 }),
+    );
+    assert_eq!(from_file["would"], "ask the person first", "{from_file}");
+    assert_eq!(
+        from_file["permission"], "destructive and external",
+        "{from_file}"
+    );
+}
+
+#[test]
+fn a_command_that_reads_a_path_outside_the_project_is_external() {
+    // Spec: agent-permissions R3, R17.
+    let mut client = app();
+    let audio = track(&mut client, "3 Audio");
+    let held = clip(&mut client, audio, "Held", 4, 2);
+    let hash = "11".repeat(32);
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.wav");
+    let path = path.to_string_lossy();
+    for (command, args) in [
+        (
+            "file_manager.replace_file",
+            json!({ "hash": hash, "path": path }),
+        ),
+        ("clip.replace_sample", json!({ "clip": held, "path": path })),
+        ("groove.to_clip", json!({ "path": path, "at": 0 })),
+    ] {
+        let dry = dry_run(&mut client, command, &args);
+        assert_eq!(dry["would"], "ask the person first", "{command}: {dry}");
+        assert!(
+            dry["permission"].as_str().unwrap().contains("external"),
+            "{command}: {dry}"
+        );
+        let before = client.transport().asked.len();
+        let went = attempt(&mut client, command, &args);
+        assert!(went.asked, "{command}");
+        assert!(went.permission.contains("external"), "{command}");
+        assert_eq!(client.transport().asked.len(), before + 1, "{command}");
+    }
+}
+
+#[test]
+fn ungrouping_a_group_that_holds_devices_asks_first() {
+    // Spec: agent-permissions R1.
+    let mut client = app();
+    let midi = track(&mut client, "1 MIDI");
+    let grouped = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.group", "args": { "tracks": [midi] } }] }),
+    );
+    let group = grouped["results"][0]["result"]["track"].as_u64().unwrap();
+
+    // An empty group with the mixer as it was made loses nothing.
+    let empty = dry_run(&mut client, "track.ungroup", &json!({ "track": group }));
+    assert_eq!(empty["would"], "run", "{empty}");
+    assert_eq!(empty["permission"], "edit", "{empty}");
+
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.add", "args": {
+            "device": { "kind": { "rack": { "kind": "audio_effect" } },
+                        "name": "Rack", "role": "audio_effect" },
+            "track": group } }] }),
+    );
+    let held = dry_run(&mut client, "track.ungroup", &json!({ "track": group }));
+    assert_eq!(held["would"], "ask the person first", "{held}");
+    assert!(
+        held["permission"].as_str().unwrap().contains("destructive"),
+        "{held}"
+    );
+    let went = attempt(&mut client, "track.ungroup", &json!({ "track": group }));
+    assert!(went.asked);
+    let asked = client.transport().asked.last().unwrap().clone();
+    assert!(asked.contains("It deletes track"), "{asked}");
+}
+
+#[test]
+fn saving_a_default_pad_and_dropping_files_on_a_pad_ask_first() {
+    // Spec: agent-permissions R3, R17. Neither is a document edit, so the
+    // dry run judges them from their arguments alone.
+    let mut client = app();
+    let path = std::env::temp_dir().join("bl-agent-permissions-never-read.wav");
+    for (command, args) in [
+        ("pad.save_default", json!({ "rack": 1, "note": 36 })),
+        (
+            "pad.drop",
+            json!({ "rack": 1, "note": 36, "samples": [path.to_string_lossy()] }),
+        ),
+        (
+            "pad.drop",
+            json!({ "rack": 1, "note": 36, "preset": path.to_string_lossy() }),
+        ),
+        (
+            "chain.create",
+            json!({ "rack": 1, "preset": path.to_string_lossy() }),
+        ),
+    ] {
+        let dry = dry_run(&mut client, command, &args);
+        assert_eq!(dry["would"], "ask the person first", "{command}: {dry}");
+        assert!(
+            dry["permission"].as_str().unwrap().contains("external"),
+            "{command}: {dry}"
+        );
+    }
+    // A drop of a device reads no file, so it stays an edit.
+    let device = dry_run(
+        &mut client,
+        "chain.create",
+        &json!({ "rack": 1, "returns": true }),
+    );
+    assert_eq!(device["permission"], "edit", "{device}");
 }

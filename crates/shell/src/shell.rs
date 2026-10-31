@@ -931,6 +931,12 @@ pub struct Shell {
     recording: Option<crate::recording::Recording>,
     /// What the last recording that ended came to, for `transport.state`.
     last_recording: Option<RecordingReport>,
+    /// A take that ended while a transaction was open, kept until it closes
+    /// so its clips don't land inside a drag's undo step.
+    pending_recording: Option<crate::recording::Outcome>,
+    /// Parameter changes plug-ins made while a transaction was open, kept
+    /// until it closes for the same reason.
+    pending_param_changes: Vec<(bl_model::DeviceId, bl_model::ParamId, f64)>,
     /// How many recordings this session has started: the take number in
     /// their files' names, so two in one second don't share a file.
     recorded_takes: u32,
@@ -1422,6 +1428,8 @@ impl Shell {
             previews: crate::perception::Previews::default(),
             recording: None,
             last_recording: None,
+            pending_recording: None,
+            pending_param_changes: Vec::new(),
             recorded_takes: 0,
             session_run: None,
             capture: bl_engine::capture::Buffer::default(),

@@ -2307,13 +2307,14 @@ fn specs() -> Vec<CommandSpec> {
                  in the background. Nothing is moved from the folder before. Run by a person \
                  from the Browse button without a `path`, it asks for a folder. The setting is \
                  kept for the next start, and isn't part of the set or an undo step. The \
-                 result's `path` is the User Library in use afterwards.",
+                 result's `path` is the User Library in use afterwards. Names folders \
+                 outside the project.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(Settings)
             .args::<UserLibraryArgs>()
             .result::<UserLibraryResult>(),
-        // File & Folder (L-SET-015; WP-4.20): an edit-class preference.
+        // File & Folder (L-SET-015; WP-4.20): an external-class preference.
         CommandSpec::new(SETTINGS_SET_TEMPORARY_FOLDER, "Temporary Folder")
             .description(
                 "Chooses the Temporary Folder on the Settings window's File & Folder page: where \
@@ -2324,9 +2325,10 @@ fn specs() -> Vec<CommandSpec> {
                  application-data folder. Files already written stay where they are. Run by a \
                  person from the Browse button without a `path`, it asks for a folder. The \
                  setting is kept for the next start, and isn't part of the set or an undo step. \
-                 The result's `path` is the folder in use afterwards.",
+                 The result's `path` is the folder in use afterwards. Names a folder outside \
+                 the project.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(Settings)
             .args::<TemporaryFolderArgs>()
             .result::<TemporaryFolderResult>(),
@@ -2340,9 +2342,10 @@ fn specs() -> Vec<CommandSpec> {
                  file as the last one, or `null` for none, when Edit opens the File & Folder \
                  page instead. Run by a person from the Browse button without a `path`, it asks \
                  for a program. The setting is kept for the next start, and isn't part of the \
-                 set or an undo step. The result's `path` is the editor in use afterwards.",
+                 set or an undo step. The result's `path` is the editor in use afterwards. \
+                 Names a program outside the set.",
             )
-            .permission(Permission::Edit)
+            .permission(Permission::External)
             .context(Settings)
             .args::<SampleEditorArgs>()
             .result::<SampleEditorResult>(),

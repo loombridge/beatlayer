@@ -69,6 +69,13 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  menu, opened with the menu key on the control (automation R29)",
             )),
         ),
+        (
+            "automation.set_enabled",
+            Exception(Reason::AgentOnly(
+                "turns an envelope off without a hand move, which a track's copy uses to keep \
+                 an overridden parameter overridden",
+            )),
+        ),
         // The automation lanes (WP-6.57; the automation spec, R24 to R28): the
         // lane and hide buttons and the header's toggle are Tab stops, and a
         // lane header's menu opens with the menu key on its choosers.

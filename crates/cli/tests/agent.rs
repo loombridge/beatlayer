@@ -6613,7 +6613,8 @@ fn an_agent_routes_the_cv_devices_calibrates_and_reads_external_and_cv_back() {
         read["cv"]["octaves_per_volt"]
     );
     let overview = call(&mut client, "query", json!({}));
-    assert_eq!(overview["undo"]["next_undo"], "Calibrate CV Instrument");
+    // Spec: agent-permissions R6. The agent's step, under its label.
+    assert_eq!(overview["undo"]["next_undo"], "cv-agent: Calibrate");
 
     // Clear takes it away.
     call(

@@ -1604,10 +1604,10 @@ fn media_are_embedded_with_free_names_or_referred_to_and_a_missing_one_is_listed
     }
     let exported = export_of(set.editor.document(), &files, &Machine::new(), true);
     let container = read_container_strict(&exported.bytes).unwrap();
-    let mut names: Vec<_> = container.files.keys().cloned().collect();
+    let mut names: Vec<_> = container.paths().map(str::to_owned).collect();
     names.sort();
     assert_eq!(names, ["audio/tone 2.wav", "audio/tone.wav"]);
-    assert_eq!(container.files["audio/tone.wav"], a);
+    assert_eq!(container.read("audio/tone.wav").unwrap(), a);
     assert!(
         exported
             .report
@@ -1622,7 +1622,7 @@ fn media_are_embedded_with_free_names_or_referred_to_and_a_missing_one_is_listed
 
     let referred = export_of(set.editor.document(), &files, &Machine::new(), false);
     let container = read_container_strict(&referred.bytes).unwrap();
-    assert!(container.files.is_empty());
+    assert_eq!(container.paths().count(), 0);
     let text = project_text(&referred.bytes);
     let absolute = std::fs::canonicalize(one.join("tone.wav")).unwrap();
     assert!(
@@ -1631,6 +1631,48 @@ fn media_are_embedded_with_free_names_or_referred_to_and_a_missing_one_is_listed
             absolute.display()
         )),
         "{text}"
+    );
+}
+
+/// Spec: dawproject R73. Two media whose names differ only in case are a
+/// clash, since a case-insensitive file system holds one file for both.
+#[test]
+fn media_whose_names_differ_only_in_case_get_free_names() {
+    let folder = TempDir::new("media-case");
+    let one = folder.0.join("one");
+    let two = folder.0.join("two");
+    std::fs::create_dir_all(&one).unwrap();
+    std::fs::create_dir_all(&two).unwrap();
+    let (a, b) = (wav(1.0, 200.0), wav(1.0, 300.0));
+    std::fs::write(one.join("Kick.wav"), &a).unwrap();
+    std::fs::write(two.join("kick.wav"), &b).unwrap();
+    let hash = |bytes: &[u8]| ContentHash(*bl_media::ContentHash::of_bytes(bytes).as_bytes());
+    let files = Files(HashMap::from([
+        (hash(&a), one.join("Kick.wav")),
+        (hash(&b), two.join("kick.wav")),
+    ]));
+    let mut set = Built {
+        editor: Editor::new(),
+    };
+    let track = set.track(TrackKind::Audio, "Audio", None);
+    for (index, media) in [hash(&a), hash(&b)].into_iter().enumerate() {
+        set.clip(
+            track,
+            Ticks::QUARTER * (index as i64 * 4),
+            Ticks::QUARTER * 2,
+            &format!("Clip {index}"),
+            ClipData::Audio(AudioData::new(media)),
+        );
+    }
+    let exported = export_of(set.editor.document(), &files, &Machine::new(), true);
+    let container = read_container_strict(&exported.bytes).unwrap();
+    let folded: std::collections::BTreeSet<String> =
+        container.paths().map(str::to_lowercase).collect();
+    assert_eq!(
+        folded.len(),
+        2,
+        "{:?}",
+        container.paths().collect::<Vec<_>>()
     );
 }
 
@@ -1750,12 +1792,13 @@ fn plug_ins_and_devices_are_written_as_the_spec_says() {
     let container = read_container_strict(&exported.bytes).unwrap();
     // The CLAP state is the stream unchanged.
     assert_eq!(
-        container.files["plugins/1.clap-preset"],
+        container.read("plugins/1.clap-preset").unwrap(),
         b"clap-state\x00\x01"
     );
     // The VST3 state is a `.vstpreset` with its component and controller.
     let preset =
-        bl_model::vst3_state::VstPreset::read(&container.files["plugins/2.vstpreset"]).unwrap();
+        bl_model::vst3_state::VstPreset::read(&container.read("plugins/2.vstpreset").unwrap())
+            .unwrap();
     // The file holds the canonical class ID; on Windows the scanner's
     // spelling has its first three fields byte-swapped.
     let canonical = if cfg!(windows) {
@@ -1770,7 +1813,12 @@ fn plug_ins_and_devices_are_written_as_the_spec_says() {
     assert_eq!(preset.component, b"component");
     assert_eq!(preset.controller, b"controller");
     // The Audio Unit's state is its property list.
-    assert!(container.files["plugins/3.aupreset"].starts_with(b"<?xml"));
+    assert!(
+        container
+            .read("plugins/3.aupreset")
+            .unwrap()
+            .starts_with(b"<?xml")
+    );
     let text = project_text(&exported.bytes);
     assert!(text.contains("<ClapPlugin"));
     assert!(text.contains("deviceVendor=\"Acme\" pluginVersion=\"1.2\""));

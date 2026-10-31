@@ -355,6 +355,14 @@ impl Shell {
         if stepping {
             self.hear_held(&heard);
         }
+        // Spec: midi-chord R13 and midi-cc-sender R7. Each learn is an undo
+        // step of its own, so what is heard while a gesture holds a
+        // transaction open waits for the gesture to end.
+        self.chord_learn.deferred.append(&mut heard);
+        if self.gesture || self.editor.in_transaction() {
+            return false;
+        }
+        let heard = std::mem::take(&mut self.chord_learn.deferred);
         let mut changed = false;
         if !chords.is_empty()
             && let Some(held) = self.chord_learn.listen_from(&heard)

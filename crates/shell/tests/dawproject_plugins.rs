@@ -165,7 +165,7 @@ fn a_plugin_that_is_not_installed_saves_its_state_back_byte_for_byte() {
     import_fixture(&mut shell, "bitwig-shaped");
     let bytes = std::fs::read(fixtures().join("bitwig-shaped.dawproject")).unwrap();
     let container = bl_interop::dawproject::read_container(&bytes).unwrap();
-    let state = container.files["plugins/state.clap-preset"].clone();
+    let state = container.read("plugins/state.clap-preset").unwrap();
     let device = plugin_device(&shell, PluginFormat::Clap);
     let held = shell
         .editor()

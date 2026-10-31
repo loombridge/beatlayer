@@ -675,6 +675,17 @@ pub enum Command {
         /// The parameter.
         target: AutomationTarget,
     },
+    /// Turns one parameter's track envelope off or on without touching its
+    /// breakpoints: off is what a hand move does, so a copy of a track can
+    /// keep a parameter overridden.
+    SetAutomationEnabled {
+        /// The track the parameter belongs to.
+        track: TrackId,
+        /// The parameter.
+        target: AutomationTarget,
+        /// Whether the envelope drives the parameter.
+        enabled: bool,
+    },
     /// Switches Solo in Place on or off.
     SetSoloInPlace {
         /// Whether soloing a track keeps the return tracks audible.
@@ -2946,6 +2957,7 @@ impl Command {
             Self::ReEnableAutomation { .. } | Self::ReEnableAutomationFor { .. } => {
                 "Re-Enable Automation"
             }
+            Self::SetAutomationEnabled { .. } => "Set Automation Enabled",
             Self::SetCrossfader { .. } => "Change crossfader",
             Self::SetCrossfadeAssign { .. } => "Assign crossfade",
             Self::SetTrackDelay { .. } => "Change track delay",
@@ -3873,6 +3885,17 @@ impl Document {
                     automation.enabled = true;
                 }
                 track.set_clip_envelopes_enabled(|t| t == target, true);
+                Ok(())
+            }
+            Command::SetAutomationEnabled {
+                track,
+                target,
+                enabled,
+            } => {
+                self.check_automation_target(*track, *target)?;
+                if let Some(automation) = self.track_mut(*track)?.automation.get_mut(target) {
+                    automation.enabled = *enabled;
+                }
                 Ok(())
             }
             Command::SetSendTap { track, tap } => {

@@ -19,16 +19,20 @@ use std::collections::BTreeSet;
 
 use bl_commands::Permission;
 use bl_core::time::Ticks;
-use bl_model::{ClipData, ClipId, Document, Editor, TrackId, TrackKind};
+use bl_model::{ClipData, ClipId, Document, Editor, Mixer, TrackId, TrackKind};
 use bl_shell_spec::audio_editing as audio_ids;
 use bl_shell_spec::audio_editing::CropArgs;
 use bl_shell_spec::bounce::{self as bounce_ids, PasteBouncedAudioArgs};
 use bl_shell_spec::browser::{self as browser_ids, AddToArrangementArgs};
 use bl_shell_spec::comping::{self as comping_ids, MoveCompEdgeArgs};
+use bl_shell_spec::devices as device_ids;
 use bl_shell_spec::editing as edit_ids;
+use bl_shell_spec::groove::{self as groove_ids, GrooveToClipArgs};
 use bl_shell_spec::midi_files::{self as midi_ids, MidiImportArgs};
 use bl_shell_spec::midi_tools as tool_ids;
+use bl_shell_spec::pads as pad_ids;
 use bl_shell_spec::session_view as session_ids;
+use bl_shell_spec::tracks::{self as track_ids, UngroupTracksArgs};
 use serde_json::Value;
 
 use crate::arrangement::ArrangementView;
@@ -41,7 +45,9 @@ pub const SET_CLIP_DATA: &str = "clip.set_data";
 /// The commands whose class can rise with their arguments: each is
 /// destructive as well as its registered class when it would delete or
 /// shorten clips it doesn't act on, or, for `clip.set_data`, leave a MIDI
-/// clip fewer notes than it has.
+/// clip fewer notes than it has, or, for `track.ungroup`, delete a group
+/// track that holds devices, automation or sends; `groove.to_clip`,
+/// `pad.drop` and `chain.create` are external when they read a file.
 pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     tool_ids::APPLY,
     tool_ids::SET,
@@ -68,6 +74,10 @@ pub const RAISED_BY_ARGUMENTS: &[&str] = &[
     comping_ids::COPY_TO_MAIN_LANE,
     comping_ids::REPLACE_WITH_TAKE,
     comping_ids::MOVE_COMP_EDGE,
+    groove_ids::TO_CLIP,
+    track_ids::UNGROUP,
+    pad_ids::PAD_DROP,
+    device_ids::CHAIN_CREATE,
 ];
 
 /// Whether `id`'s class can rise with its arguments.
@@ -95,6 +105,9 @@ pub struct CallPermission {
     /// The clip a crop would leave holding less than it does
     /// (`clip.crop`), if it would: audio outside the region it keeps.
     pub cropped: Option<ClipId>,
+    /// The group track a call would delete along with what it holds
+    /// (`track.ungroup`), if it holds devices, automation or sends.
+    pub deletes_track: Option<TrackId>,
 }
 
 /// A MIDI clip a call would leave fewer notes than it has.
@@ -118,14 +131,18 @@ impl CallPermission {
             may: false,
             fewer_notes: None,
             cropped: None,
+            deletes_track: None,
         }
     }
 
     /// Whether its arguments make the call destructive whatever its
     /// registered class: it replaces other clips, leaves a clip fewer
-    /// notes, or crops audio away.
+    /// notes, crops audio away, or deletes a track that holds something.
     fn deletes_material(&self) -> bool {
-        !self.replaces.is_empty() || self.fewer_notes.is_some() || self.cropped.is_some()
+        !self.replaces.is_empty()
+            || self.fewer_notes.is_some()
+            || self.cropped.is_some()
+            || self.deletes_track.is_some()
     }
 
     /// Whether the call deletes or shortens other material, or deletes
@@ -213,6 +230,9 @@ pub(crate) fn assess(
             dropped(scene.editor.document(), import.track, at, registered)
         }
         audio_ids::CROP => cropping(args, registered, scene),
+        groove_ids::TO_CLIP => groove_to_clip(args, registered, scene.editor.document()),
+        track_ids::UNGROUP => ungrouping(args, registered, scene),
+        pad_ids::PAD_DROP | device_ids::CHAIN_CREATE => reads_files(args, registered),
         SET_CLIP_DATA => notes_set(args, registered, scene.editor),
         tool_ids::APPLY
         | tool_ids::SET
@@ -252,7 +272,82 @@ fn dropped(
         may: true,
         fewer_notes: None,
         cropped: None,
+        deletes_track: None,
     }
+}
+
+/// `groove.to_clip`: destructive when the clip it makes would replace or
+/// shorten clips on its track (grooves R18; the agent permissions spec, R1),
+/// and external with `path`, a file that isn't read before the person allows
+/// it (R3).
+fn groove_to_clip(args: &Value, registered: Permission, doc: &Document) -> CallPermission {
+    let unchanged = CallPermission::registered(registered);
+    let Ok(args) = serde_json::from_value::<GrooveToClipArgs>(args.clone()) else {
+        return unchanged;
+    };
+    if args.path.is_some() {
+        return dropped(
+            doc,
+            args.track,
+            args.at,
+            registered.max(Permission::External),
+        );
+    }
+    let (Some(track), Some(groove)) = (
+        args.track.and_then(|track| doc.track(track)),
+        args.groove.and_then(|id| doc.settings().grooves.get(id)),
+    ) else {
+        return unchanged;
+    };
+    let end = args.at.saturating_add(groove.length);
+    CallPermission {
+        replaces: track
+            .clips()
+            .filter(|clip| clip.start < end && clip.end() > args.at)
+            .map(|clip| clip.id)
+            .collect(),
+        ..unchanged
+    }
+}
+
+/// `track.ungroup`: destructive when the group track it deletes holds
+/// devices, automation or sends, or mixer settings other than a new track's
+/// (the agent permissions spec, R1). An empty group loses nothing.
+fn ungrouping(args: &Value, registered: Permission, scene: Scene<'_>) -> CallPermission {
+    let unchanged = CallPermission::registered(registered);
+    let Ok(UngroupTracksArgs { track }) = serde_json::from_value(args.clone()) else {
+        return unchanged;
+    };
+    // The target is resolved as the shell resolves it.
+    let Some(group) = track.or(scene.selected_track) else {
+        return unchanged;
+    };
+    let Some(held) = scene.editor.document().track(group) else {
+        return unchanged;
+    };
+    let holds = held.devices().len() > 0
+        || held.automation().len() > 0
+        || held.sends().len() > 0
+        || *held.mixer() != Mixer::default();
+    CallPermission {
+        deletes_track: (held.kind() == TrackKind::Group && holds).then_some(group),
+        ..unchanged
+    }
+}
+
+/// `pad.drop` with `samples` or a `preset`, and `chain.create` with a
+/// `preset`, read files at paths the agent gives: external (R3).
+fn reads_files(args: &Value, registered: Permission) -> CallPermission {
+    let given = |key: &str| match args.get(key) {
+        Some(Value::Array(files)) => !files.is_empty(),
+        Some(value) => !value.is_null(),
+        None => false,
+    };
+    CallPermission::registered(if given("samples") || given("preset") {
+        registered.max(Permission::External)
+    } else {
+        registered
+    })
 }
 
 /// `clip.crop`, decided from its arguments against the document: destructive
@@ -418,6 +513,7 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
             may: false,
             fewer_notes: None,
             cropped: None,
+            deletes_track: None,
         };
     }
     // A take lane: the audio lands on the lane at its place in each track.
@@ -482,6 +578,7 @@ fn paste_bounced(args: &Value, registered: Permission, scene: Scene<'_>) -> Call
         may: false,
         fewer_notes: None,
         cropped: None,
+        deletes_track: None,
     }
 }
 
@@ -579,6 +676,7 @@ fn tried(id: &str, args: &Value, registered: Permission, scene: Scene<'_>) -> Ca
         may: false,
         fewer_notes: None,
         cropped: None,
+        deletes_track: None,
     }
 }
 
@@ -594,6 +692,7 @@ mod tests {
             may: true,
             fewer_notes: None,
             cropped: None,
+            deletes_track: None,
         };
         assert_eq!(
             call.classes(),
@@ -640,6 +739,9 @@ mod tests {
             "song.set_time_signatures",
         ] {
             assert!(!raised_by_arguments(id), "{id}");
+        }
+        for id in [groove_ids::TO_CLIP, track_ids::UNGROUP] {
+            assert!(raised_by_arguments(id), "{id}");
         }
     }
 }

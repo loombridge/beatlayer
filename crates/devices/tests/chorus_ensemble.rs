@@ -350,3 +350,68 @@ fn renders_are_bit_identical_at_any_block_size() {
         );
     }
 }
+
+/// 8,192 frames of noise through the device in blocks of `block_size`, with
+/// `moves` landing on frame 1,000 of the run.
+fn render_with_moves(
+    params: &[(ParamId, f64)],
+    moves: &[(ParamId, f64)],
+    block_size: usize,
+) -> Vec<Vec<f32>> {
+    let frames = 8192;
+    let input = noise(frames);
+    let mut ce = chorus_ensemble_node(params, block_size);
+    let mut collected = vec![Vec::new(); 2];
+    for chunk_start in (0..frames).step_by(block_size) {
+        let chunk = &input[chunk_start..chunk_start + block_size.min(frames - chunk_start)];
+        let events: Vec<_> = moves
+            .iter()
+            .filter(|_| (chunk_start..chunk_start + chunk.len()).contains(&1000))
+            .map(|&(param, value)| common::set((1000 - chunk_start) as u32, param, value))
+            .collect();
+        for (all, out) in collected.iter_mut().zip(run(&mut *ce, chunk, &events)) {
+            all.extend(out);
+        }
+    }
+    collected
+}
+
+// Spec: chorus-ensemble R8
+#[test]
+fn a_knob_move_renders_bit_identical_at_any_block_size() {
+    let params = [(MODE, 0.0), (RATE, 1.5), (AMOUNT, 50.0), (DRY_WET, 0.0)];
+    let moves = [(DRY_WET, 100.0), (AMOUNT, 90.0)];
+    let reference = render_with_moves(&params, &moves, 1);
+    for block_size in [64, 512, 4096] {
+        assert_eq!(
+            reference,
+            render_with_moves(&params, &moves, block_size),
+            "Block size 1 vs {block_size} renders differ"
+        );
+    }
+}
+
+// Spec: chorus-ensemble R4, R5, R6
+#[test]
+fn mode_switch_does_not_replay_stale_audio() {
+    let mut ce = chorus_ensemble_node(
+        &[
+            (MODE, 1.0),
+            (DRY_WET, 100.0),
+            (WARMTH, 0.0),
+            (FEEDBACK, 0.0),
+            (CHORUS_TAPS, 0.0),
+        ],
+        48_000,
+    );
+    let sine = common::sine(1_000.0, 0.5, 9_600);
+    run(&mut *ce, &sine, &[]);
+    // One tap in Chorus writes only the first line, and the room goes quiet.
+    run(&mut *ce, &[0.0; 48_000], &[common::set(0, MODE, 0.0)]);
+    let out = run(&mut *ce, &[0.0; 2_400], &[common::set(0, MODE, 1.0)]);
+    let peak = out
+        .iter()
+        .flatten()
+        .fold(0.0_f32, |peak, sample| peak.max(sample.abs()));
+    assert!(peak < 1e-4, "Ensemble replays old audio: peak {peak}");
+}

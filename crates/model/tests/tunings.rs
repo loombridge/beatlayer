@@ -383,6 +383,44 @@ fn retuning_moves_each_note_to_the_nearest_key_the_lower_on_a_tie() {
     assert!(editor.document().settings().tuning.is_none());
 }
 
+// Spec: tunings R15. A MIDI clip on a take lane is a clip of the track too.
+#[test]
+fn retuning_moves_the_notes_of_take_lane_clips_as_well() {
+    let mut editor = Editor::new();
+    let track = midi_track(&mut editor);
+    let main = clip_of(&mut editor, track, &[(61, 0, 100)]);
+    let lane: bl_model::TakeLaneId = editor.new_id();
+    let take: ClipId = editor.new_id();
+    editor
+        .apply(Command::AddTakeLane {
+            track,
+            lane: bl_model::NewTakeLane {
+                id: Some(lane),
+                name: "Take 1".to_owned(),
+                clips: vec![bl_model::TakeClip {
+                    id: Some(take),
+                    name: String::new(),
+                    start: Ticks::ZERO,
+                    length: Ticks::WHOLE,
+                    data: bl_model::TakeClipData::Tagged(ClipData::Midi(MidiData::new([
+                        Note::new(61, Ticks::ZERO, Ticks(100), 100),
+                    ]))),
+                }],
+            },
+            index: None,
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetTuning {
+            tuning: equal(5),
+            retune: true,
+        })
+        .unwrap();
+    let moved = notes_of(&editor, main);
+    assert_ne!(moved[0].0, 61);
+    assert_eq!(notes_of(&editor, take), moved);
+}
+
 // Spec: tunings R15. With it off, the notes stay on their keys.
 #[test]
 fn loading_without_retune_leaves_every_note_on_its_key() {

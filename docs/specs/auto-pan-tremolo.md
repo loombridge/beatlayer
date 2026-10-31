@@ -22,7 +22,7 @@ Tremolo mode adds Harmonic (modulating high and low frequencies in antiphase acr
 | S3 | Beatlayer | [The improvements](../05-improvements.md), rules G1 and G2 | Every gain and level reaches −∞ dB; every parameter can be automated and modulated |
 | S4 | Beatlayer | [The device framework spec](device-framework.md), R26, R27, R29; [the mixer spec](mixer.md), R3 | The effects LFO, synced timing, and seeded random source; constant-power pan law |
 | S5 | Beatlayer | [The architecture](../02-architecture.md), "Offline rendering" and "Real-time rules" | A render repeats run after run and is bit-identical at any block size; no allocation, lock or blocking on audio thread |
-| S6 | Beatlayer | Beatlayer's own | Ranges and defaults not given in the manual: Rate (0.01 to 40 Hz, default 1 Hz), Time default 1 s, divisions defaults, Phase default (180° in Panning, 0° in Tremolo), Attack Time range (0 to 1000 ms), Dynamic Frequency Modulation (-100 % to 100 %), Shape (-100 % to 100 %), 600 Hz crossover filter design, and Vintage non-linear curve |
+| S6 | Beatlayer | Beatlayer's own | Ranges and defaults not given in the manual: Rate (0.01 to 40 Hz, default 1 Hz), Time default 1 s, divisions defaults, Phase default (180° in both modes, so Tremolo at its defaults pulses the channels in antiphase), Attack Time range (0 to 1000 ms), Dynamic Frequency Modulation (-100 % to 100 %), Shape (-100 % to 100 %), 600 Hz crossover filter design, and Vintage non-linear curve |
 
 ## Rules
 
@@ -51,7 +51,7 @@ Tremolo mode adds Harmonic (modulating high and low frequencies in antiphase acr
 | R2 | `crates/devices/tests/auto_pan_tremolo.rs`, `panning_at_amount_100_moves_mono_input_by_pan_law_reaching_silence`, `tremolo_at_amount_100_reaches_silence_at_troughs` | unit, real-time trap |
 | R3 | `crates/devices/tests/auto_pan_tremolo.rs`, `every_waveform_plays_and_random_shapes_are_repeatable` | unit, real-time trap |
 | R4 | `crates/devices/tests/auto_pan_tremolo.rs`, `hz_and_time_periods_are_accurate_within_0_1_percent`, `each_synced_mode_starts_cycle_on_beat_across_tempos` | unit, real-time trap |
-| R5 | `crates/devices/tests/auto_pan_tremolo.rs`, `phase_offsets_channels_and_spin_detunes` | unit, real-time trap |
+| R5 | `crates/devices/tests/auto_pan_tremolo.rs`, `phase_offsets_channels_and_spin_detunes`, `tremolo_phase_offsets_channels_and_spin_detunes` | unit, real-time trap |
 | R6 | `crates/devices/tests/auto_pan_tremolo.rs`, `each_synced_mode_starts_cycle_on_beat_across_tempos`, `phase_offset_acts_as_width_on_random_shapes` | unit, real-time trap |
 | R7 | `crates/devices/tests/auto_pan_tremolo.rs`, `invert_flips_the_shape` | unit, real-time trap |
 | R8 | `crates/devices/tests/auto_pan_tremolo.rs`, `harmonic_bands_sum_flat_at_amount_zero_and_move_in_antiphase` | unit, real-time trap |

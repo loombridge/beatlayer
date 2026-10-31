@@ -629,6 +629,37 @@ impl Shell {
             .ok_or_else(|| "the file doesn't hold that plug-in".to_owned())
     }
 
+    /// Starts a new set from the saved default set (file-management R1): its
+    /// files, launch quantisation and saved views, as the set it was saved
+    /// from had them. Without one, the store's empty ones stand.
+    pub(super) fn adopt_default_set(
+        &mut self,
+        default_set: Option<(PathBuf, bl_project::Project)>,
+    ) {
+        if let Some((folder, project)) = default_set {
+            self.store.adopt_untitled(&folder, project);
+        }
+        self.restore_store_views();
+    }
+
+    /// Gives the views and the media store what the store holds: the views a
+    /// set was saved with, and the files its clips play.
+    pub(super) fn restore_store_views(&mut self) {
+        self.apply_window_views(self.store.window_views());
+        self.devices.set_windows(self.store.windows());
+        self.devices.set_rack_views(self.store.rack_views());
+        self.devices
+            .set_multisampler_views(self.store.multisampler_views());
+        self.clip_view.set_folds(self.store.folds());
+        self.clip_view.set_scale_folds(self.store.scale_folds());
+        self.clip_view.restore_mpe(self.store.mpe_view());
+        self.clip_view.restore_midi_tools(&self.store.midi_tools());
+        for (hash, path, size) in self.store.media_files() {
+            self.media
+                .add_reference(bl_media::ContentHash::from_bytes(hash.0), path, size);
+        }
+    }
+
     /// A new or opened set starts stopped at 1.1.1
     /// (the control bar transport spec, R16), with no gesture open
     /// on the editor it replaced.
@@ -684,20 +715,11 @@ impl Shell {
                 self.set_replaced();
                 // Spec: file-management R1. A new set starts from the saved
                 // default set when there is one.
-                let (editor, window_views) = new_set_from(self.prefs.default_set.as_deref());
+                let (editor, default_set) = new_set_from(self.prefs.default_set.as_deref());
                 self.saved = snapshot(&editor);
                 self.editor = editor;
                 self.store.close();
-                self.apply_window_views(window_views);
-                self.devices.set_windows(bl_model::DeviceWindows::new());
-                self.devices.set_rack_views(bl_model::RackViewMap::new());
-                self.devices
-                    .set_multisampler_views(bl_model::MultisamplerViews::new());
-                self.clip_view.set_folds(bl_model::ClipFolds::new());
-                self.clip_view.set_scale_folds(bl_model::ClipFolds::new());
-                self.clip_view.restore_mpe(bl_model::MpeView::default());
-                self.clip_view
-                    .restore_midi_tools(&bl_project::midi_tools::MidiToolSettings::default());
+                self.adopt_default_set(default_set);
                 self.set_path = None;
                 self.dirty = false;
                 self.message = None;
@@ -705,6 +727,8 @@ impl Shell {
                 self.clip_view.forget_selection();
                 self.mixer.reset();
                 self.session.reset();
+                self.arrangement.restore_lanes(self.store.lane_views());
+                self.mixer.restore_widths(self.store.column_widths());
                 self.new_set_transport();
                 self.document_changed();
                 self.set_file_changed();

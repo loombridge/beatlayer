@@ -32,7 +32,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 ## Rules
 
-- **R1.** On start-up and after New Set, the set is the saved default set when one has been saved and can be read, otherwise the factory default set. (S1, S5)
+- **R1.** On start-up and after New Set, the set is the saved default set when one has been saved and can be read, otherwise the factory default set. A new set from a saved default set has its media table, launch quantisation and saved views too, so its clips play, and a save lists its files. (S1, S5)
 - **R2.** `set.save_as_default` saves the open set as the default set, which R1 then uses. It is saved as a copy, so the open set keeps its own file, its name, and its undo history, and stays open. `path` names the default set's file (`.blset` is added if it's missing); left out, it goes in the User Library's `Templates` folder, or beside the application's preferences when there is no User Library. The choice is kept for the next start. (S1)
 - **R3.** `set.save_as_template` saves the open set as a template in the User Library's `Templates` folder, making that folder the first time. `name` names the template, without the `.blset` extension; left out it takes the open set's name. As in R2 the open set is unchanged. A template is an ordinary set file: it can be opened, or set as the default set with R2. (S1)
 - **R4.** `set.collect_all_and_save` copies every media file the set uses that lives outside its project folder into the project's `Samples/Imported` folder, re-points the set's media table at the copies, and saves the set, so the set no longer depends on files elsewhere. A name already taken in `Samples/Imported` gets ` 2`, ` 3`, and so on before its extension, so nothing is overwritten. It fails if the set has never been saved, so it has no project folder to collect into. The result's `files` is how many files were copied. (S2)
@@ -68,7 +68,7 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/shell/tests/file_management.rs`, `a_new_set_opens_from_the_saved_default` | unit, through `Shell::run` on real folders |
+| R1 | `crates/shell/tests/file_management.rs`, `a_new_set_opens_from_the_saved_default`; `crates/shell/tests/file_manager.rs`, `a_new_set_from_a_default_set_keeps_its_files_and_launch_quantisation` | unit, through `Shell::run` on real folders |
 | R2 | `crates/shell/tests/file_management.rs`, `a_new_set_opens_from_the_saved_default`, `the_file_commands_are_registered_and_reach_the_agent_api` | unit |
 | R3 | `crates/shell/tests/file_management.rs`, `templates_are_saved_into_the_user_library_and_listed` | unit, through `Shell::run` on real folders |
 | R4 | `crates/shell/tests/file_management.rs`, `collect_all_and_save_copies_external_files_into_the_project` | unit, through `Shell::run` on real folders |
@@ -93,7 +93,6 @@ You make a set the one a new set starts from, and save templates to reuse a setu
 
 ## Not built yet
 
-- A default set that uses samples: R1 opens the saved default set's document, but its media table isn't loaded into the media store yet, so such a set's clips play silence until relinked.
 - The External Files section's Show button, and the Unused Files section's Show button and preview (R15, R17): the files a group holds aren't listed in the browser yet.
 - The User Library's clip files and presets in Manage User Library (R16): only its sets are listed.
 - The query tool's report of a clip or a device whose file is missing (R12): nothing says so yet.

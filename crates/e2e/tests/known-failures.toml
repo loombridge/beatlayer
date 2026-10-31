@@ -25,24 +25,6 @@
 #   description = "At its maximum the output rises 30 dB above the default setting."
 
 [[failure]]
-suite = "commands"
-key = "device.set_param"
-property = "value clamped to the parameter's range"
-description = "device.set_param on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and stores 2e9, which the query reads back. The model checks only that the value is finite (crates/model/src/command.rs, Command::SetDeviceParam), never the device's parameter range."
-
-[[failure]]
-suite = "commands"
-key = "automation.set_breakpoint"
-property = "value clamped to the parameter's range"
-description = "automation.set_breakpoint on Auto Filter's Frequency (20 Hz to 20 kHz) with a value of about 2e9 succeeds and the envelope keeps the point at 2e9. Only clip settings are checked against their range; every other target only for being finite (crates/model/src/command.rs, set_automation_breakpoint)."
-
-[[failure]]
-suite = "commands"
-key = "mixer.set_volume"
-property = "value clamped to the parameter's range"
-description = "mixer.set_volume with a volume of 7.0 (about +16.9 dB) succeeds and stores 7.0, above the fader's top of +6 dB (gain 1.995). The model checks only that the volume is finite and at least 0 (crates/model/src/command.rs, Command::SetVolume)."
-
-[[failure]]
 suite = "live_offline"
 key = "warp/complex/drum loop 110 to 120 BPM"
 property = "live matches offline"
@@ -125,54 +107,6 @@ suite = "live_offline"
 key = "rich set without the arpeggiator"
 property = "live matches offline"
 description = "Reprise, the tempo-synced delay, works out its delay time once per block from the tempo at the block's first frame, so under a tempo ramp its repeats move in block-sized steps and the live device's 256-frame blocks render differently from an export's (device-framework S9, export R14): the rich fixture's tempo rises towards 128 BPM at bar 5, so its Reprise on Echo parts from frame 23,914, at a residual of -119 dB; with Reprise off the set matches to the bit."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/16/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/16/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/24/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/stereo/24/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/16/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/16/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/24/176400"
-property = "length"
-description = "A FLAC export at 176,400 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
-
-[[failure]]
-suite = "live_offline"
-key = "flac/mono/24/192000"
-property = "length"
-description = "A FLAC export at 192,000 Hz, a rate the export dialog lists (export R35) and the export accepts, renders the whole range and then fails as the file is written: the FLAC encoder refuses rates above 96,000 Hz. The export is neither refused before the render nor written."
 
 [[failure]]
 suite = "background"

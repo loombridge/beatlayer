@@ -221,3 +221,42 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     sync::register(registry)?;
     search::register(registry)
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{browser, groove, midi_tools};
+    use bl_commands::{Permission, Registry};
+
+    #[test]
+    fn every_command_that_takes_a_path_asks_first() {
+        // Spec: agent-permissions R17. A `path` names a file or a program
+        // outside the project, so the call is external (or destructive)
+        // and asks the person first. `groove.to_clip` is external only when
+        // given a `path`: the shell raises its class from its arguments.
+        // `browser.remove_folder` names a Places entry, whose files it never
+        // touches. `midi_tool.load_bank` still reads its file as an edit: classing
+        // it external is not done yet.
+        let exempt = [
+            groove::TO_CLIP,
+            midi_tools::LOAD_BANK,
+            browser::REMOVE_FOLDER,
+        ];
+        let mut registry = Registry::new();
+        super::register(&mut registry).unwrap();
+        let mut wrong = Vec::new();
+        for spec in registry.iter() {
+            let takes_path = spec
+                .args
+                .as_ref()
+                .and_then(|schema| schema.get("properties")?.get("path"))
+                .is_some();
+            if takes_path
+                && !spec.permission.is_some_and(Permission::asks_first)
+                && !exempt.contains(&spec.id.as_ref())
+            {
+                wrong.push(format!("{} is {:?}", spec.id, spec.permission));
+            }
+        }
+        assert!(wrong.is_empty(), "{wrong:#?}");
+    }
+}

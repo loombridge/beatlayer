@@ -133,9 +133,11 @@ pub(crate) type ToolOutcome = lspk_agent::ToolOutcome<Deferred>;
 
 /// A line of the person's question: the command's label, the classes it
 /// asks for, its arguments, and the clips it would replace or shorten, by
-/// name (spec: agent-permissions R4).
+/// name (spec: agent-permissions R4). The commands that open the sample
+/// editor say which command line they start.
 pub(crate) fn question_line(
     shell: &Shell,
+    id: &str,
     label: &str,
     call: &CallPermission,
     args: &Value,
@@ -168,6 +170,30 @@ pub(crate) fn question_line(
             fewer.leaves,
             fewer.has
         ));
+    }
+    if let Some(track) = call.deletes_track {
+        let name = shell
+            .editor()
+            .document()
+            .track(track)
+            .map(|track| track.name().to_owned())
+            .filter(|name| !name.is_empty())
+            .map_or_else(
+                || format!("track {}", track.0),
+                |name| format!("track \u{201c}{name}\u{201d}"),
+            );
+        line.push_str(&format!(
+            ". It deletes {name} with the devices, automation and settings on it."
+        ));
+    }
+    if matches!(
+        id,
+        bl_shell::audio_panel_commands::EDIT_SAMPLE | bl_shell::file_manager_commands::EDIT_FILE
+    ) {
+        match shell.sample_editor() {
+            Some(editor) => line.push_str(&format!(". It starts \u{201c}{editor}\u{201d}.")),
+            None => line.push_str(". It opens the File & Folder page."),
+        }
     }
     if let Some(clip) = call.cropped {
         line.push_str(". ");

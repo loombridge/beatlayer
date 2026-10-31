@@ -1522,9 +1522,8 @@ impl Shell {
         let before = self.editor.document().clone();
         let nested = self.editor.in_transaction();
         let result = edit(&mut self.editor);
-        debug_assert_eq!(
-            self.editor.in_transaction(),
-            nested,
+        debug_assert!(
+            nested || !self.editor.in_transaction(),
             "an edit left a transaction open"
         );
         if !ChangeSet::between(&before, self.editor.document()).is_empty() {

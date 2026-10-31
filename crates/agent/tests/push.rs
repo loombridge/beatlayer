@@ -87,3 +87,91 @@ fn an_agent_reads_and_sets_a_simulated_push_2() {
     assert_eq!(frame["width"], 960);
     assert!(frame["png"].as_str().unwrap().starts_with("iVBOR"));
 }
+
+// Spec: push-2-tracks R27. In Device Mode `push.state` reads the devices on
+// the upper buttons with their depth and selection, whether Edit Mode is on,
+// the bank and its page, the parameters on the encoders with their names and
+// values, the chains shown and whether Mute is locked.
+#[test]
+fn an_agent_reads_device_mode_through_push_state() {
+    let test = TestBackend::new();
+    let clock = TestClock::new();
+    let mut sim = Simulated::new(&test, &clock);
+    let mut shell = Shell::headless();
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell.use_test_clock(clock.clone());
+    shell.use_push_display(sim.frames().claim());
+    shell.start_audio();
+    sim.plug_in();
+    shell.refresh_midi();
+    // A MIDI track, selected as a new track is, with two effects.
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Keys" }))
+        .unwrap();
+    let added: Vec<Value> = (0..2)
+        .map(|_| {
+            shell
+                .invoke(
+                    "device.add",
+                    json!({ "device": {
+                        "kind": { "native": { "device_type": "beatlayer.utility" } },
+                        "name": "Utility",
+                        "role": "audio_effect",
+                    } }),
+                )
+                .unwrap()["device"]
+                .clone()
+        })
+        .collect();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    // The surface ticks with the set as it stands, then the device and the
+    // host talk until both are quiet.
+    let settle = |client: &mut Client<InProcess>, sim: &mut Simulated| {
+        client.transport().shell.poll();
+        client.transport().shell.midi().surfaces().tick();
+        loop {
+            run(client, "control_surface.list", json!({}));
+            if sim.pump() == 0 {
+                break;
+            }
+        }
+        client.transport().shell.poll();
+    };
+    for _ in 0..4 {
+        settle(&mut client, &mut sim);
+    }
+    let state = run(&mut client, "push.state", json!({}));
+    let device = &state["pushes"][0]["device"];
+    assert_eq!(device["empty"], false, "{state}");
+    assert_eq!(device["edit"], false);
+    assert_eq!(device["mute_locked"], false);
+    assert_eq!(device["bank"], 0);
+    assert_eq!(device["banks"], json!(["Utility", "Bass"]));
+    assert_eq!(device["bank_page"], 0);
+    assert_eq!(device["bank_pages"], 1);
+    assert_eq!(device["params"].as_array().unwrap().len(), 8);
+    assert_eq!(device["chains"], json!([]));
+    let on_buttons: Vec<_> = device["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| (d["button"].clone(), d["device"].clone(), d["depth"].clone()))
+        .collect();
+    assert_eq!(
+        on_buttons,
+        [
+            (json!(1), added[0].clone(), json!(0)),
+            (json!(2), added[1].clone(), json!(0))
+        ]
+    );
+    assert_eq!(device["devices"][1]["selected"], true);
+    assert_eq!(device["devices"][1]["kind"], "audio_effect");
+
+    // Another display mode: no device fields.
+    run(&mut client, "push.set_mode", json!({ "display": "mix" }));
+    settle(&mut client, &mut sim);
+    settle(&mut client, &mut sim);
+    let state = run(&mut client, "push.state", json!({}));
+    assert!(state["pushes"][0]["device"].is_null());
+}

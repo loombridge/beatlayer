@@ -149,6 +149,7 @@ impl Content for Recorder {
 enum Contents {
     Recorders,
     Browse,
+    Devices,
     Mix,
     Placeholders,
 }
@@ -179,6 +180,12 @@ impl Rig {
     /// recording.
     pub fn browsing() -> Self {
         Self::build(Contents::Browse)
+    }
+
+    /// A rig whose Device Mode and Browse Mode are the real ones, with the
+    /// other modes recording.
+    pub fn devices() -> Self {
+        Self::build(Contents::Devices)
     }
 
     /// A rig whose Mix Mode is the real one, with the other modes recording.
@@ -217,8 +224,12 @@ impl Rig {
                 bl_push::Contents {
                     pads: [recorder("Note"), recorder("Session")],
                     display: [
-                        recorder("Device"),
-                        if which == Contents::Browse {
+                        if which == Contents::Devices {
+                            Box::new(bl_push::device::DeviceMode::new())
+                        } else {
+                            recorder("Device")
+                        },
+                        if matches!(which, Contents::Browse | Contents::Devices) {
                             Box::new(bl_push::browse::Browse::new())
                         } else {
                             recorder("Browse")

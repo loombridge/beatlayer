@@ -183,6 +183,81 @@ pub struct PushBrowse {
     pub in_use: usize,
 }
 
+/// A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushDevice {
+    /// The upper display button, from 1.
+    pub button: usize,
+    /// The device.
+    pub device: bl_model::DeviceId,
+    /// Its name.
+    pub name: String,
+    /// How deep it is inside racks: 0 on the track's own chain.
+    pub depth: usize,
+    /// What it is: `instrument`, `audio_effect`, `midi_effect`,
+    /// `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or
+    /// `drum_rack`.
+    pub kind: String,
+    /// Whether it is switched on.
+    pub enabled: bool,
+    /// Whether it is the device in focus, which is the window's selected one.
+    pub selected: bool,
+    /// For a rack, whether its devices follow it on the buttons.
+    pub unfolded: bool,
+}
+
+/// A parameter on one of the encoders in Device Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushParam {
+    /// Its name.
+    pub name: String,
+    /// Its value as the device shows it.
+    pub value: String,
+    /// Whether a macro holds it, so the encoder doesn't move it.
+    pub held: bool,
+}
+
+/// A chain on one of the lower buttons while a rack's button is held.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushChain {
+    /// The chain.
+    pub chain: bl_model::ChainId,
+    /// Its name.
+    pub name: String,
+    /// Whether it is the selected chain.
+    pub selected: bool,
+}
+
+/// What Device Mode shows (push-2-tracks R27).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushDeviceMode {
+    /// The devices on the upper buttons, in order.
+    pub devices: Vec<PushDevice>,
+    /// Whether the first upper button is an arrow that moves the devices
+    /// shown back.
+    pub left_arrow: bool,
+    /// Whether the last upper button is an arrow that moves them on.
+    pub right_arrow: bool,
+    /// Whether the track has no devices.
+    pub empty: bool,
+    /// Whether Edit Mode is on.
+    pub edit: bool,
+    /// The bank on the encoders, from 0.
+    pub bank: usize,
+    /// Every bank's name.
+    pub banks: Vec<String>,
+    /// The page of banks the lower buttons show in Edit Mode, from 0.
+    pub bank_page: usize,
+    /// How many pages the banks make.
+    pub bank_pages: usize,
+    /// The parameters on the eight encoders.
+    pub params: Vec<PushParam>,
+    /// The chains the lower buttons show while a rack's button is held.
+    pub chains: Vec<PushChain>,
+    /// Whether Mute is locked, so each device button switches its device.
+    pub mute_locked: bool,
+}
+
 /// What one encoder sets in Mix Mode (push-2-tracks R42).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PushMixControl {
@@ -275,6 +350,8 @@ pub struct PushInfo {
     pub display: PushDisplay,
     /// What Browse Mode shows, while it is the display mode.
     pub browse: Option<PushBrowse>,
+    /// What Device Mode shows, while it is the display mode.
+    pub device: Option<PushDeviceMode>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix_mode: Option<PushMix>,
 }
@@ -379,10 +456,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  strip's configuration and LEDs; the Setup menu's values; and the display's \
                  content as text, by band and column: labels, parameter names and values, \
                  dots, notifications; and, in Browse Mode, what Load does, its columns with their \
-                 entries and selection and the column in use; and, in Mix Mode, Track Mix's \
-                 view, what Global Mix sets, the sends' shift, the eight tracks or chains shown \
-                 with what each encoder sets and its value, and the groups and racks that are \
-                 unfolded. Changes nothing.",
+                 entries and selection and the column in use; in Device Mode, the devices on \
+                 the upper buttons with their depth and which is selected, whether Edit Mode is \
+                 on, the bank and its page of banks, the parameters on the encoders, the chains \
+                 shown while a rack's button is held, and whether Mute is locked; and, in Mix \
+                 Mode, Track Mix's view, what Global Mix sets, the sends' shift, the eight \
+                 tracks or chains shown with what each encoder sets and its value, and the \
+                 groups and racks that are unfolded. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

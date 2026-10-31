@@ -382,7 +382,8 @@ impl Channel {
                    an instrument, a return, or Main, tapped at `tap`; with a `chain` of an \
                    instrument or audio effect rack on that track, that chain's signal at \
                    `tap`; or with an `output`, one of an instrument's extra outputs on that \
-                   track), or `none` (No Input). MIDI tracks: `all_ins` (every \
+                   track), `link_audio` (a Link Audio peer's channel, by the names `peer` and \
+                   `channel`), or `none` (No Input). MIDI tracks: `all_ins` (every \
                    MIDI input; a new MIDI track's), `computer_keyboard`, `port` (one MIDI input, \
                    by its name as the MIDI settings list it), `track` (another MIDI track), or \
                    `none`."
@@ -409,6 +410,16 @@ pub enum Input {
     Port {
         /// The port's name, as the MIDI settings list it.
         name: String,
+    },
+    /// A channel another app in the Link session offers (Link Audio), by the
+    /// names of the peer and the channel. Audio tracks only. The track keeps
+    /// the names while the peer is away, silent, and hears them again when a
+    /// peer and channel of those names return (the Link Audio spec, R10).
+    LinkAudio {
+        /// The peer's name, as the Link page lists it.
+        peer: String,
+        /// The channel's name, as the peer shows it.
+        channel: String,
     },
     /// Resampling: the Main output. Audio tracks only.
     Resampling,

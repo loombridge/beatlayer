@@ -4,6 +4,7 @@ use bl_core::time::{Frames, Ticks};
 use bl_model::ParamId;
 
 use crate::follower::Follower;
+use crate::link_audio::LinkAudio;
 use crate::gc::{Owned, Program};
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::recording::RecordingPlan;
@@ -280,6 +281,9 @@ pub(crate) enum Message {
     /// The outside tempo the song follows from the next block on, or `None`
     /// for none (the transport spec, R24).
     Follower(Option<Owned<Box<dyn Follower>>>),
+    /// The Link Audio the engine reads peers' channels from and offers its
+    /// tracks through, or `None` for none (the Link Audio spec, R4 to R6).
+    LinkAudio(Option<Owned<Box<dyn LinkAudio>>>),
     /// Output `index` of the `count` output ports with Sync on and their
     /// options (midi-clock R3); a `count` of 0 clears the list.
     SyncOutput {

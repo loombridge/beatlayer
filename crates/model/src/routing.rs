@@ -405,8 +405,8 @@ fn wrong_kind(track: &Track, needs: &'static str) -> ModelError {
     }
 }
 
-/// An audio track takes Ext. In (one channel or a stereo pair), Resampling,
-/// another audio or group track, a return, Main, or nothing; a MIDI track
+/// An audio track takes Ext. In (one channel or a stereo pair), a Link Audio
+/// peer's channel, Resampling, another audio or group track, a return, Main, or nothing; a MIDI track
 /// All Ins, the computer keyboard, a port, another MIDI track, or nothing;
 /// other kinds take no input. A port needs a name, and a channel belongs to
 /// a port (the routing spec, R2, R16).
@@ -420,6 +420,13 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
     {
         return Err(ModelError::InvalidInput("a port needs a name"));
     }
+    if let Input::LinkAudio { peer, channel } = input
+        && (peer.is_empty() || channel.is_empty())
+    {
+        return Err(ModelError::InvalidInput(
+            "a Link Audio input needs a peer and a channel",
+        ));
+    }
     if let Some(channel) = track.routing.channel {
         if !matches!(input, Input::Port { .. }) {
             return Err(ModelError::InvalidInput("only a port input has a channel"));
@@ -430,7 +437,10 @@ fn check_input(doc: &Document, track: &Track) -> Result<(), ModelError> {
     }
     match (track.kind, input) {
         (TrackKind::Audio | TrackKind::Midi, Input::None)
-        | (TrackKind::Audio, Input::External { .. } | Input::Resampling)
+        | (
+            TrackKind::Audio,
+            Input::External { .. } | Input::Resampling | Input::LinkAudio { .. },
+        )
         | (TrackKind::Midi, Input::AllIns | Input::ComputerKeyboard | Input::Port { .. }) => Ok(()),
         (
             TrackKind::Audio,
@@ -750,6 +760,37 @@ mod tests {
         assert_eq!(doc.output_of(audio), Some(doc.main_id()));
         assert_eq!(Tap::default(), Tap::PostMixer);
         assert_eq!(doc.track(doc.main_id()).unwrap().mixer().tap, SendTap::Post);
+    }
+
+    // Spec: routing R37; link-audio R10
+    #[test]
+    fn an_audio_track_takes_a_link_audio_channel_by_name_and_no_other_kind_does() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        let m = add(&mut editor, TrackKind::Midi, None);
+        let g = add(&mut editor, TrackKind::Group, None);
+        let channel = |peer: &str, channel: &str| Input::LinkAudio {
+            peer: peer.into(),
+            channel: channel.into(),
+        };
+        input(&mut editor, a, channel("Studio Mac", "Kick")).unwrap();
+        assert_eq!(
+            editor.document().track(a).unwrap().routing().input,
+            channel("Studio Mac", "Kick")
+        );
+        assert!(input(&mut editor, a, channel("", "Kick")).is_err());
+        assert!(input(&mut editor, a, channel("Studio Mac", "")).is_err());
+        assert!(input(&mut editor, m, channel("Studio Mac", "Kick")).is_err());
+        assert!(input(&mut editor, g, channel("Studio Mac", "Kick")).is_err());
+        let json = serde_json::to_string(&channel("Studio Mac", "Kick")).unwrap();
+        assert_eq!(
+            json,
+            r#"{"type":"link_audio","peer":"Studio Mac","channel":"Kick"}"#
+        );
+        assert_eq!(
+            serde_json::from_str::<Input>(&json).unwrap(),
+            channel("Studio Mac", "Kick")
+        );
     }
 
     // Spec: routing R2, R3, R4

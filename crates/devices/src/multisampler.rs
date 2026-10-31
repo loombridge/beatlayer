@@ -24,9 +24,10 @@ use bl_model::{
     DeviceDescription, DeviceLayout, DeviceRole, FadeMode, ParamDescriptor, ParamId, ParamUnit,
     ReleaseMode, SustainMode,
 };
-use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
+use lspk_dsp::filter::pitch_of;
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument_filter::{InstrumentFilter, Per, PerFrame, Setup};
 use crate::sampler::{lfo_shape, random};
 
 pub use crate::multisampler_tabs::*;
@@ -449,12 +450,14 @@ struct FilterSettings {
     /// Low-pass, high-pass, band-pass, notch or Morph, as the chooser.
     kind: usize,
     slope24: bool,
+    /// Clean, OSR, MS2, SMP or PRD, as the chooser.
+    circuit: usize,
     /// The cutoff in the kit filter's semitones.
     pitch: f32,
     res: f32,
     /// Morph, 0 to 1.
     morph: f32,
-    /// Drive, 0 to 1 of the kit's range.
+    /// Drive, 0 to 1 of its 24 dB.
     drive: f32,
     fenv_on: bool,
     fenv_amount: f32,
@@ -1059,9 +1062,9 @@ struct LfoState {
     rng: u32,
 }
 
-/// The values filter, shaper and pan read once a block, from the note's last
-/// frame (a shortcut: the kit filter takes its resonance, drive and
-/// character per block and glides them over a few milliseconds).
+/// The values the shaper reads once a block, from the note's last frame (a
+/// shortcut), and the filter's, which it reads at every frame (the
+/// instrument filter spec, R11).
 #[derive(Clone, Copy, Default)]
 struct BlockMods {
     res: f32,
@@ -1547,18 +1550,6 @@ fn shape(kind: usize, amount: f32, x: f32) -> f32 {
     }
 }
 
-/// The kit's filter types the banks run for a Type and Slope choice (R37):
-/// the one the choice names in every bank, or for Morph the four it sweeps
-/// through, low-pass, band-pass, high-pass and notch.
-fn kit_types(kind: usize, slope24: bool) -> [FilterType; 4] {
-    let at = |kind: usize| crate::sampler::filter_type_of(kind * 2 + usize::from(slope24));
-    if kind == 4 {
-        [at(0), at(2), at(1), at(3)]
-    } else {
-        [at(kind); 4]
-    }
-}
-
 /// The volume envelope's parameters (R24).
 const VOLUME_ENV: EnvIds = EnvIds {
     initial: ENV_INITIAL,
@@ -1577,26 +1568,21 @@ const VOLUME_ENV: EnvIds = EnvIds {
     time_vel: ENV_TIME_VEL,
 };
 
-/// The filter's banks and the buffers of the lanes they run (R37). Morph
-/// sweeps through low-pass, band-pass, high-pass and notch by running all
-/// four and crossfading the neighbouring two, so the four stops are the pure
-/// types.
+/// The filter and the buffers of the lanes it runs (R37, R76).
 struct Lanes {
-    filters: [FilterBank; 4],
-    /// The kit types the banks are set to.
-    types: [FilterType; 4],
-    /// Each lane's filter settings last handed to the banks.
-    params: Vec<VoiceParams>,
-    /// Each lane's weights for the four banks in the last block.
-    weights: Vec<[f32; 4]>,
+    filter: InstrumentFilter,
     /// How many values a frame of the per-lane buffers holds.
     stride: usize,
     /// Each lane's audio for the block: per frame, then per channel, one
-    /// value per lane. The first is what the voices wrote and, after the
-    /// filter, what it made; the others are Morph's work space.
-    audio: [Vec<f32>; 3],
-    /// Each lane's cutoff, level and balance: per frame, one value per lane.
+    /// value per lane. The voices write it; the filter and the shaper
+    /// change it in place.
+    audio: Vec<f32>,
+    /// Each lane's cutoff, Res, Morph and Drive, level and balance: per
+    /// frame, one value per lane.
     cutoff: Vec<f32>,
+    res: Vec<f32>,
+    morph: Vec<f32>,
+    drive: Vec<f32>,
     level: [Vec<f32>; 2],
     pan: Vec<f32>,
 }
@@ -1631,7 +1617,7 @@ pub struct Multisampler {
     free_notes: Vec<u16>,
     ended: Vec<u16>,
     /// The lanes whose filter starts afresh in the next block's filtering.
-    fresh: Vec<u16>,
+    fresh: Vec<(u16, u32)>,
     /// The voices that ended in this frame, whose notes may end with them.
     finished: Vec<u16>,
     lanes: Lanes,
@@ -1659,12 +1645,8 @@ impl Multisampler {
     fn new(config: &NodeConfig, seed: u64) -> Self {
         let hz = config.sample_rate.hz() as f32;
         let frames = config.max_frames.max(1);
-        let mut filters: [FilterBank; 4] =
-            core::array::from_fn(|_| FilterBank::new(hz, NOTE_SLOTS, 2));
-        for bank in &mut filters {
-            bank.set_type(FilterType::Lp12);
-        }
-        let stride = filters[0].stride();
+        let filter = InstrumentFilter::new(hz, NOTE_SLOTS, frames);
+        let stride = filter.stride();
         let description = multisampler_type().description;
         let top = description.params.iter().map(|p| p.id.0).max().unwrap_or(0) as usize;
         let mut index = vec![u16::MAX; top + 1];
@@ -1689,13 +1671,13 @@ impl Multisampler {
             fresh: Vec::with_capacity(NOTE_SLOTS),
             finished: Vec::with_capacity(SLOTS),
             lanes: Lanes {
-                filters,
-                types: [FilterType::Lp12; 4],
-                params: vec![VoiceParams::default(); NOTE_SLOTS],
-                weights: vec![[1.0, 0.0, 0.0, 0.0]; NOTE_SLOTS],
+                filter,
                 stride,
-                audio: core::array::from_fn(|_| vec![0.0; frames * 2 * stride]),
+                audio: vec![0.0; frames * 2 * stride],
                 cutoff: vec![0.0; frames * stride],
+                res: vec![0.0; frames * stride],
+                morph: vec![0.0; frames * stride],
+                drive: vec![0.0; frames * stride],
                 level: [vec![0.0; frames * stride], vec![0.0; frames * stride]],
                 pan: vec![0.0; frames * stride],
             },
@@ -1803,6 +1785,7 @@ impl Multisampler {
             on: on(FILTER_ON),
             kind: (v(FILTER_TYPE) as usize).min(FILTER_TYPES.len() - 1),
             slope24: v(FILTER_SLOPE) as usize == 1,
+            circuit: v(FILTER_CIRCUIT) as usize,
             pitch: pitch_of(v(FILTER_FREQ) as f32, REFERENCE_HZ),
             res: percent(FILTER_RES),
             morph: percent(FILTER_MORPH),
@@ -2286,7 +2269,7 @@ impl Multisampler {
         proto.voices = made;
         self.notes[usize::from(lane)] = proto;
         self.live_notes.push(lane);
-        self.fresh.push(lane);
+        self.fresh.push((lane, frame as u32));
     }
 
     /// A click in the Sample tab (R54): the button going down plays the
@@ -2448,87 +2431,34 @@ impl Multisampler {
             for frame in 0..frames {
                 for channel in 0..2 {
                     let at = (frame * 2 + channel) * stride + lane;
-                    let x = &mut self.lanes.audio[0][at];
+                    let x = &mut self.lanes.audio[at];
                     *x = shape(s.shaper.kind, amount, *x);
                 }
             }
         }
     }
 
-    /// The filter over every lane's audio (R37, R38).
+    /// The filter over every lane's audio (R37, R38, R76).
     fn filter_lanes(&mut self, s: &Settings, frames: usize, hi: usize) {
         let f = &s.filter;
         let lanes = &mut self.lanes;
-        let stride = lanes.stride;
-        let morph = f.kind == 4;
-        let types = kit_types(f.kind, f.slope24);
-        let retyped = lanes.types != types;
-        if retyped {
-            lanes.types = types;
-            for (bank, kind) in lanes.filters.iter_mut().zip(types) {
-                bank.set_type(kind);
-            }
+        lanes
+            .filter
+            .set_setup(Setup::new(f.kind, f.slope24, f.circuit));
+        for &(lane, frame) in &self.fresh {
+            lanes.filter.reset_voice(usize::from(lane), frame as usize);
         }
-        let mut weights = [[0.0f32; 4]; NOTE_SLOTS];
-        for (lane, lane_weights) in weights.iter_mut().enumerate().take(hi) {
-            let block = self.notes[lane].block;
-            let params = VoiceParams {
-                resonance: block.res,
-                drive: if f.kind <= 2 { block.drive } else { 0.0 },
-                saturation: 0.0,
-                character: 0.0,
-                stereo_offset: 0.0,
-                mix: 1.0,
-                level: 1.0,
-                morph_x: 0.0,
-                morph_y: 0.0,
-            };
-            let fresh = self.fresh.contains(&(lane as u16));
-            if fresh || retyped || params != lanes.params[lane] {
-                for bank in lanes.filters.iter_mut().take(if morph { 4 } else { 1 }) {
-                    if fresh {
-                        bank.reset_voice(lane, &params);
-                    } else {
-                        bank.set_params(lane, &params);
-                    }
-                }
-                lanes.params[lane] = params;
-            }
-            // Morph's place round the four types: the two neighbours share
-            // the unit between them.
-            let place = 4.0 * block.morph;
-            let first = (place as usize).min(3);
-            lane_weights[first] = 1.0 - (place - first as f32);
-            lane_weights[(first + 1) % 4] += place - first as f32;
-            if fresh {
-                lanes.weights[lane] = *lane_weights;
-            }
-        }
-        let used = frames * 2 * stride;
-        let cutoff = &lanes.cutoff[..frames * stride];
-        if !morph {
-            lanes.filters[0].process_voices(hi, cutoff, &mut lanes.audio[0][..used]);
-            return;
-        }
-        let [input, work, sum] = &mut lanes.audio;
-        sum[..used].fill(0.0);
-        for (bank, filter) in lanes.filters.iter_mut().enumerate() {
-            work[..used].copy_from_slice(&input[..used]);
-            filter.process_voices(hi, cutoff, &mut work[..used]);
-            for (lane, (before, now)) in lanes.weights.iter().zip(&weights).enumerate().take(hi) {
-                let (from, to) = (before[bank], now[bank]);
-                for frame in 0..frames {
-                    // The weight glides from its place in the last block to
-                    // its place in this one.
-                    let w = from + (to - from) * (frame + 1) as f32 / frames as f32;
-                    let at = frame * 2 * stride + lane;
-                    sum[at] += w * work[at];
-                    sum[at + stride] += w * work[at + stride];
-                }
-            }
-        }
-        lanes.weights[..hi].copy_from_slice(&weights[..hi]);
-        core::mem::swap(input, sum);
+        let at = frames * lanes.stride;
+        let controls = PerFrame {
+            cutoff: &lanes.cutoff[..at],
+            res: Per::Voice(&lanes.res[..at]),
+            morph: Per::Voice(&lanes.morph[..at]),
+            drive: Per::Voice(&lanes.drive[..at]),
+        };
+        let used = frames * 2 * lanes.stride;
+        lanes
+            .filter
+            .process(hi, frames, &controls, &mut lanes.audio[..used]);
     }
 }
 
@@ -2589,7 +2519,7 @@ impl NativeDevice for Multisampler {
             return;
         }
         let stride = self.lanes.stride;
-        self.lanes.audio[0][..frames * 2 * stride].fill(0.0);
+        self.lanes.audio[..frames * 2 * stride].fill(0.0);
         let mut hi = self
             .live_notes
             .iter()
@@ -2604,7 +2534,7 @@ impl NativeDevice for Multisampler {
             {
                 let note = notes.next().expect("peeked");
                 self.play(layers, note, &s, frame);
-                for &lane in &self.fresh {
+                for &(lane, _) in &self.fresh {
                     hi = hi.max(usize::from(lane) + 1);
                 }
             }
@@ -2628,6 +2558,10 @@ impl NativeDevice for Multisampler {
                 self.outs[lane] = out;
                 let at = frame * stride + lane;
                 self.lanes.cutoff[at] = out.cutoff;
+                let block = self.notes[lane].block;
+                self.lanes.res[at] = block.res;
+                self.lanes.morph[at] = block.morph;
+                self.lanes.drive[at] = block.drive;
                 self.lanes.level[0][at] = out.vol[0];
                 self.lanes.level[1][at] = out.vol[1];
                 self.lanes.pan[at] = out.pan;
@@ -2686,8 +2620,8 @@ impl NativeDevice for Multisampler {
                         let balance = ((voice.pan + pan.get(frame).copied().unwrap_or(0.0)) / 50.0)
                             .clamp(-1.0, 1.0);
                         let base = frame * 2 * stride + usize::from(lane);
-                        self.lanes.audio[0][base] += value.0 * amount * (1.0 - balance.max(0.0));
-                        self.lanes.audio[0][base + stride] +=
+                        self.lanes.audio[base] += value.0 * amount * (1.0 - balance.max(0.0));
+                        self.lanes.audio[base + stride] +=
                             value.1 * amount * (1.0 + balance.min(0.0));
                         voice.advance(out.factor);
                     } else {
@@ -2726,8 +2660,8 @@ impl NativeDevice for Multisampler {
                 let at = frame * stride + lane;
                 let base = frame * 2 * stride + lane;
                 let balance = lanes.pan[at];
-                l += lanes.audio[0][base] * lanes.level[0][at] * (1.0 - balance.max(0.0));
-                r += lanes.audio[0][base + stride] * lanes.level[1][at] * (1.0 + balance.min(0.0));
+                l += lanes.audio[base] * lanes.level[0][at] * (1.0 - balance.max(0.0));
+                r += lanes.audio[base + stride] * lanes.level[1][at] * (1.0 + balance.min(0.0));
             }
             let volume = volume.get(frame).copied().unwrap_or(1.0);
             left[frame] = l * volume;

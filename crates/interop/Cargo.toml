@@ -36,5 +36,15 @@ serde_json = "1"
 name = "interop_tests"
 path = "tests/main.rs"
 
+# Each counts heap use with a global allocator of its own, so each stays a
+# binary of its own.
+[[test]]
+name = "dawproject_import_memory"
+path = "tests/dawproject_import_memory.rs"
+
+[[test]]
+name = "dawproject_alloc"
+path = "tests/dawproject_alloc.rs"
+
 [lints]
 workspace = true

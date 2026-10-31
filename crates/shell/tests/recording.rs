@@ -1383,11 +1383,11 @@ fn recording_on_during_a_take_leaves_the_take_alone() {
     );
 }
 
-// Spec: recording R4. Reconfiguring the audio device ends the take, which
-// the closed engine never publishes: the recording is reported as failed,
-// not left running.
+// Spec: recording R2. Reconfiguring the audio device ends the take as a stop
+// does: the closed engine never publishes the take, so the clip is made from
+// the bounds it last showed, and covers the whole file.
 #[test]
-fn reconfiguring_the_device_during_a_take_ends_the_recording() {
+fn reconfiguring_the_device_during_a_take_makes_the_clip_from_the_bounds_it_had() {
     let dir = TestDir::new("reconfigure");
     let (mut shell, control) = duplex_shell();
     save_set(&mut shell, &dir);
@@ -1398,7 +1398,7 @@ fn reconfiguring_the_device_during_a_take_ends_the_recording() {
         .run("transport.set_recording", json!({ "recording": true }))
         .unwrap();
     shell.run("transport.play", json!({})).unwrap();
-    play_for(&control, &mut shell, 100);
+    play_for(&control, &mut shell, 1000);
     assert_eq!(
         transport_state(&mut shell)["recording"]["armed_tracks"],
         json!([track])
@@ -1411,8 +1411,88 @@ fn reconfiguring_the_device_during_a_take_ends_the_recording() {
         transport_state(shell)["recording"] == Value::Null
     });
     let report = &transport_state(&mut shell)["last_recording"];
-    assert_ne!(report["error"], Value::Null, "{report}");
-    assert_eq!(report["clips_made"], false);
+    assert_eq!(report["error"], Value::Null, "{report}");
+    assert_eq!(report["clips_made"], true);
+    let frames = report["files"][0]["frames"].as_u64().unwrap();
+    let clip = wait_for_clip(&control, &mut shell, track);
+    let rate = shell
+        .audio()
+        .sample_rate()
+        .and_then(SampleRate::new)
+        .unwrap();
+    let tempo = shell.editor().document().settings().tempo.clone();
+    let filled = tempo.frames_to_ticks(Frames(frames as i64), rate);
+    assert!(
+        (clip.length - filled).get().abs() <= 1,
+        "the clip is as long as the file: {:?} against {filled:?}",
+        clip.length
+    );
+    assert!(
+        frames > u64::from(rate.hz()) * 9 / 10,
+        "about a second: {frames}"
+    );
+}
+
+// Spec: recording R2. A device change that also changes the sample rate
+// places the clip at the rate the take was recorded at.
+#[test]
+fn a_take_ended_by_a_new_sample_rate_is_placed_at_the_rate_it_was_recorded_at() {
+    let dir = TestDir::new("reconfigure-rate");
+    let (mut shell, control) = duplex_shell();
+    save_set(&mut shell, &dir);
+    let track = armed_track(&mut shell, 3, "Guitar");
+    control.set_input_tone(2, 12_000.0, 0.5);
+    let before = shell.audio().sample_rate().unwrap();
+    let after = if before == 44_100 { 48_000 } else { 44_100 };
+
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    play_for(&control, &mut shell, 1000);
+    shell
+        .run("audio.configure", json!({ "sample_rate": after }))
+        .unwrap();
+    assert_eq!(shell.audio().sample_rate(), Some(after));
+
+    testing::wait_for(&control, &mut shell, "the recording to end", |shell| {
+        transport_state(shell)["recording"] == Value::Null
+    });
+    let report = &transport_state(&mut shell)["last_recording"];
+    assert_eq!(report["error"], Value::Null, "{report}");
+    let frames = report["files"][0]["frames"].as_u64().unwrap();
+    let clip = wait_for_clip(&control, &mut shell, track);
+    let tempo = shell.editor().document().settings().tempo.clone();
+    let recorded = tempo.frames_to_ticks(Frames(frames as i64), SampleRate::new(before).unwrap());
+    assert!(
+        (clip.length - recorded).get().abs() <= 1,
+        "the length is the take's at {before} Hz: {:?} against {recorded:?}",
+        clip.length
+    );
+}
+
+// Spec: recording R2. A MIDI take, which needs no folder, is kept too.
+#[test]
+fn reconfiguring_the_device_during_a_midi_take_keeps_the_notes() {
+    let (mut shell, control) = duplex_shell();
+    let track = armed_midi_track(&mut shell, "Keys");
+    shell
+        .run("transport.set_recording", json!({ "recording": true }))
+        .unwrap();
+    shell.run("transport.play", json!({})).unwrap();
+    tap_a(&control, &mut shell, 100, 200);
+    play_for(&control, &mut shell, 100);
+    shell
+        .run("audio.configure", json!({ "buffer_size": 512 }))
+        .unwrap();
+
+    testing::wait_for(&control, &mut shell, "the recording to end", |shell| {
+        transport_state(shell)["recording"] == Value::Null
+    });
+    let report = &transport_state(&mut shell)["last_recording"];
+    assert_eq!(report["error"], Value::Null, "{report}");
+    let clip = wait_for_clip(&control, &mut shell, track);
+    assert_eq!(notes_of(&clip).len(), 1, "the note played: {clip:?}");
 }
 
 // Spec: recording R4. A recording and an automation take under way belong

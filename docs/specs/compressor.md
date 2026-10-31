@@ -25,9 +25,9 @@ The detector hears what the engine hands the device on its sidechain (WP-2.19b: 
 - **R1.** Beatlayer ships Compressor, an audio-effect device type with a sidechain input, of its own layout: every parameter has a descriptor and a place in the layout. (S3, device-framework)
 - **R2.** Threshold sets the level above which the curve turns the gain down, over the Knee: none below the threshold less half the knee, all of it by the threshold plus half, and gradually between, as the manual's example describes. (S1)
 - **R3.** Ratio is the input's dB per the output's dB above the threshold, from 1 : 1 to ∞ : 1: at the top of the control nothing above the threshold gets through. The framework's ratio values are finite, so Beatlayer's tops at 100, where the gain computer's slope is 1 and the control reads `100 : 1`. (S1, S4)
-- **R4.** Expand mode turns the gain up above the threshold: a ratio of 1 to 2 raises a dB over the threshold to two. The expansion stops at +24 dB (Beatlayer's limit). (S1)
-- **R5.** Attack and Release are the gain's time constants, in milliseconds: after one of them, the gap has closed by 1 − 1/e, whether the gain is falling to a new reduction (Attack) or recovering toward unity (Release). (S1, S4)
-- **R6.** With Auto Release on, the release time is Beatlayer's own: 50 ms just after a peak, moving to 1000 ms while a reduction has been held for 300 ms. (S1)
+- **R4.** Expand mode turns the gain up above the threshold: a ratio of 1 to 2 raises a dB over the threshold to two. The expansion stops at +24 dB (Beatlayer's limit). Both channels share one gain, taken from the louder one. (S1)
+- **R5.** Attack and Release are the gain's time constants, in milliseconds: after one of them, the gap has closed by 1 − 1/e, whether the gain is moving away from unity to a new reduction or expansion (Attack) or recovering toward unity (Release). (S1, S4)
+- **R6.** With Auto Release on, the release time is Beatlayer's own: 50 ms just after a peak, moving to 1000 ms while a reduction or expansion has been held for 300 ms. (S1)
 - **R7.** Env is Lin or Log: Log's release step grows with the depth of the reduction (twice as fast at 6 dB, Beatlayer's own shape), so sharply compressed peaks let go sooner. (S1)
 - **R8.** Mode is Peak or RMS: Peak follows every sample's magnitude, while RMS follows a 10 ms mean square, so a short peak barely moves it. (S1)
 - **R9.** Look offers 0, 1 and 10 ms. The output is delayed by the look-ahead, and the device reports that delay as its latency from the moment it is built, for delay compensation (WP-2.11). (S1)
@@ -45,9 +45,9 @@ The detector hears what the engine hands the device on its sidechain (WP-2.19b: 
 |---|---|---|
 | R1 | `crates/devices/tests/compressor.rs`, `the_compressor_is_described_and_declares_a_sidechain` | unit, real-time trap |
 | R2, R3 | `crates/devices/tests/compressor.rs`, `the_static_curve_matches_at_several_ratios_and_knees` | unit, real-time trap |
-| R4 | `crates/devices/tests/compressor.rs`, `expand_mode_raises_the_output_above_the_threshold` | unit, real-time trap |
-| R5 | `crates/devices/tests/compressor.rs`, `the_attack_and_release_time_constants_are_their_parameters` | unit, real-time trap |
-| R6 | `crates/devices/tests/compressor.rs`, `auto_release_recovers_more_quickly_than_a_long_fixed_release` | unit, real-time trap |
+| R4 | `crates/devices/tests/compressor.rs`, `expand_mode_raises_the_output_above_the_threshold`, `expand_follows_the_louder_channel` | unit, real-time trap |
+| R5 | `crates/devices/tests/compressor.rs`, `the_attack_and_release_time_constants_are_their_parameters`, `expand_mode_attack_and_release_are_their_parameters` | unit, real-time trap |
+| R6 | `crates/devices/tests/compressor.rs`, `auto_release_recovers_more_quickly_than_a_long_fixed_release`, `auto_release_reaches_its_slow_time_in_expand_mode` | unit, real-time trap |
 | R7 | `crates/devices/tests/compressor.rs`, `the_log_envelope_releases_faster_from_a_deeper_reduction` | unit, real-time trap |
 | R8 | `crates/devices/tests/compressor.rs`, `rms_mode_is_less_sensitive_to_a_short_peak` | unit, real-time trap |
 | R9 | `crates/devices/tests/compressor.rs`, `the_look_ahead_delays_the_output_and_is_reported_as_latency` | unit, real-time trap |

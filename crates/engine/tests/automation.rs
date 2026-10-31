@@ -377,3 +377,51 @@ fn a_pan_glides_while_only_the_volume_is_automated() {
     assert!(out[960..].iter().all(|&s| s < 1e-9), "and rests hard right");
     assert!(out[..960].windows(2).all(|w| w[1] < w[0]), "gliding");
 }
+
+// Spec: mixer R18. Solo glides a send closed and open while the send's level
+// follows an envelope.
+#[test]
+fn a_solo_glides_an_automated_send_closed_and_open() {
+    let mut rig = Rig::new(64);
+    let a = track(&mut rig.editor, TrackKind::Audio, None);
+    let b = track(&mut rig.editor, TrackKind::Audio, None);
+    let effects = track(&mut rig.editor, TrackKind::Return, None);
+    dc(&mut rig.editor, a, 1.0);
+    rig.apply(Command::SetOutput {
+        track: a,
+        output: Output::SendsOnly,
+    });
+    rig.apply(Command::SetAutomationBreakpoint {
+        track: a,
+        target: AutomationTarget::Send { to: effects },
+        at: Ticks::ZERO,
+        value: 1.0,
+    });
+    rig.sender.transport(TransportCommand::Play);
+    let out = rig.render(2_048, 64);
+    assert!(out[1_024..].iter().all(|&s| s == 1.0), "the send settles");
+
+    // The widest step between two frames, and the first frame after the move.
+    let steps = |out: &[f32]| {
+        out.windows(2)
+            .map(|w| (w[1] - w[0]).abs())
+            .fold(0.0, f32::max)
+    };
+    rig.apply(Command::SetSolo {
+        track: b,
+        solo: true,
+    });
+    let out = rig.render(2_048, 64);
+    assert!(out[0] > 0.9, "the send doesn't step shut: {}", out[0]);
+    assert!(steps(&out) < 0.01, "and glides: {}", steps(&out));
+    assert!(out[960 + 64..].iter().all(|&s| s == 0.0), "to rest shut");
+
+    rig.apply(Command::SetSolo {
+        track: b,
+        solo: false,
+    });
+    let out = rig.render(2_048, 64);
+    assert!(out[0] < 0.1, "the send doesn't step open: {}", out[0]);
+    assert!(steps(&out) < 0.01, "and glides: {}", steps(&out));
+    assert!(out[960 + 64..].iter().all(|&s| s == 1.0), "to rest open");
+}

@@ -237,6 +237,19 @@ pub struct FileManagerState {
     pub packing: bool,
 }
 
+/// What `view.toggle_file_manager` returns: whether the File Manager shows
+/// and what it is set to list. The listing itself is `file_manager.state`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct FileManagerView {
+    /// Whether the File Manager shows.
+    pub open: bool,
+    /// Which files it shows.
+    pub scope: Scope,
+    /// The project folder it works on, when it has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+}
+
 /// Arguments of `view.toggle_file_manager`.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -387,12 +400,13 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  for the open set's, \"project\" for a project folder's, \"user-library\" for the \
                  User Library's. `project` names the project folder Manage Project works on, \
                  when it isn't the open set's. The File Manager's state is view state: it isn't \
-                 saved in the set and it isn't an undo step.",
+                 saved in the set and it isn't an undo step. It returns whether the File Manager \
+                 shows and what it lists; the listing is `file_manager.state`.",
             )
             .permission(Permission::Read)
             .context(Global)
             .args::<ToggleArgs>()
-            .result::<FileManagerState>(),
+            .result::<FileManagerView>(),
     )?;
     registry.register(
         CommandSpec::new(STATE, "File Manager State")
@@ -455,18 +469,20 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                 "The folder the Automatic Search's Search Folder names, as the Set Folder… \
                  button does: the search covers it and its subfolders. `folder` names the \
                  folder; left out, the app asks the person for one. The folder is view \
-                 state: it isn't saved with the set and it isn't an undo step.",
+                 state: it isn't saved with the set and it isn't an undo step. It returns the \
+                 Automatic Search's settings.",
             )
             .permission(Permission::Read)
             .context(Global)
             .args::<SearchFolderArgs>()
-            .result::<FileManagerState>(),
+            .result::<Search>(),
     )?;
     registry.register(
         CommandSpec::new(DELETE_UNUSED, "Delete Unused Files")
             .description(
                 "Moves the files at `paths`, which the Unused Files section lists, to the \
-                 system's trash. Nothing is erased outright, but a file another project uses \
+                 system's trash; a path the section doesn't list is refused, and then nothing \
+                 moves. Nothing is erased outright, but a file another project uses \
                  breaks that project, so the files are collected first.",
             )
             .permission(Permission::Destructive)

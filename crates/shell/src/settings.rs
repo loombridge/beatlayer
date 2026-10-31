@@ -445,18 +445,53 @@ pub fn save_keymap(dir: &Path, keymap: &UserKeymap) -> Result<(), String> {
         .map_err(|e| format!("couldn't write {}: {e}", path.display()))
 }
 
+/// Renames an unreadable preferences file to `<name>.unreadable-<unix
+/// seconds>` beside it, and returns the new path.
+fn set_aside(path: &Path) -> Result<PathBuf, String> {
+    let mut seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs());
+    let backup = loop {
+        let mut name = path.as_os_str().to_owned();
+        name.push(format!(".unreadable-{seconds}"));
+        let backup = PathBuf::from(name);
+        // Never replace an earlier backup.
+        if !backup.exists() {
+            break backup;
+        }
+        seconds += 1;
+    };
+    std::fs::rename(path, &backup).map_err(|e| {
+        format!(
+            "couldn't move {} aside, so it is kept and not overwritten: {e}",
+            path.display()
+        )
+    })?;
+    Ok(backup)
+}
+
 impl Preferences {
     /// Reads preferences from `dir`, or the defaults if there are none.
     ///
     /// # Errors
     ///
     /// A message if the file exists but can't be read or parsed; the caller
-    /// shows it and carries on with the defaults.
+    /// shows it and carries on with the defaults. A file that doesn't parse
+    /// is first moved aside (see [`set_aside`]), so the next save can't
+    /// replace it.
     pub fn load(dir: &Path) -> Result<Self, String> {
         let path = dir.join(PREFERENCES_FILE);
         match std::fs::read_to_string(&path) {
-            Ok(text) => serde_json::from_str(&text)
-                .map_err(|e| format!("couldn't read the preferences in {}: {e}", path.display())),
+            Ok(text) => serde_json::from_str(&text).map_err(|e| {
+                let kept = match set_aside(&path) {
+                    Ok(backup) => format!("kept as {}", backup.display()),
+                    Err(error) => error,
+                };
+                format!(
+                    "couldn't read the preferences in {}: {e} ({kept})",
+                    path.display()
+                )
+            }),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
             Err(e) => Err(format!(
                 "couldn't read the preferences in {}: {e}",
@@ -478,6 +513,12 @@ impl Preferences {
         let text = serde_json::to_string_pretty(self)
             .map_err(|e| format!("couldn't encode the preferences: {e}"))?;
         let path = dir.join(PREFERENCES_FILE);
+        // A file `load` couldn't move aside must not be replaced unkept.
+        if let Ok(old) = std::fs::read_to_string(&path)
+            && serde_json::from_str::<Self>(&old).is_err()
+        {
+            set_aside(&path)?;
+        }
         let temporary = dir.join(format!(".{PREFERENCES_FILE}.tmp"));
         std::fs::write(&temporary, text)
             .map_err(|e| format!("couldn't write {}: {e}", temporary.display()))?;
@@ -535,6 +576,32 @@ mod tests {
         assert_eq!(Preferences::load(&dir).unwrap(), prefs);
         std::fs::write(dir.join(PREFERENCES_FILE), "not json").unwrap();
         assert!(Preferences::load(&dir).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every file in `dir` whose bytes are exactly `bytes`.
+    fn files_holding(dir: &Path, bytes: &[u8]) -> usize {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter(|entry| std::fs::read(entry.as_ref().unwrap().path()).unwrap() == bytes)
+            .count()
+    }
+
+    #[test]
+    fn unreadable_preferences_are_moved_aside_and_a_save_cannot_replace_them() {
+        let dir = std::env::temp_dir().join(format!("bl-shell-prefs-bad-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(PREFERENCES_FILE), "not json {").unwrap();
+        let error = Preferences::load(&dir).unwrap_err();
+        assert!(error.contains("unreadable-"), "{error}");
+        assert!(!dir.join(PREFERENCES_FILE).exists());
+        Preferences::default().save(&dir).unwrap();
+        assert_eq!(files_holding(&dir, b"not json {"), 1);
+        // A file that arrives unreadable between load and save is kept too.
+        std::fs::write(dir.join(PREFERENCES_FILE), "not json {").unwrap();
+        Preferences::default().save(&dir).unwrap();
+        assert_eq!(files_holding(&dir, b"not json {"), 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

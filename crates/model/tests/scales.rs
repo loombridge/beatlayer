@@ -359,3 +359,16 @@ fn the_current_scale_following_a_selection_is_no_undo_step() {
         Scale::new(2, ScaleName::Dorian)
     );
 }
+
+#[test]
+fn redoing_a_step_leaves_a_scale_followed_since_it_was_undone() {
+    // Spec: scales R12
+    let (mut editor, _, _) = song();
+    editor.undo().unwrap();
+    editor.follow_scale(Scale::new(2, ScaleName::Minor));
+    editor.redo().unwrap();
+    assert_eq!(
+        editor.document().settings().scale,
+        Scale::new(2, ScaleName::Minor)
+    );
+}

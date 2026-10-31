@@ -817,6 +817,56 @@ fn a_quantised_locate_waits_for_the_next_line_and_jumps_there() {
     }
 }
 
+// Spec: transport R22
+#[test]
+fn a_quantised_locate_whose_line_is_the_loop_end_lands_on_the_wrap() {
+    let tempo = TempoMap::constant(bpm(120.0));
+    let bar = frames(&tempo, BAR);
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    set_loop(&mut rig, Ticks::ZERO, BAR * 4);
+    rig.sender.transport(TransportCommand::Play);
+    let mut out: Vec<f32> = Vec::new();
+    while out.len() < (bar * 7 / 2) as usize {
+        rig.block(512);
+        out.extend_from_slice(&rig.last());
+    }
+    // In bar 4 the next line is 5.1.1, the loop's end.
+    rig.sender.transport(TransportCommand::QuantizedLocate(BAR));
+    while out.len() < (bar * 5) as usize {
+        rig.block(512);
+        out.extend_from_slice(&rig.last());
+    }
+    let (at, to) = jump(&out);
+    assert_eq!(at as i64, bar * 4, "the jump lands on the wrap");
+    assert_eq!(to, frames(&tempo, BAR), "and goes to the target");
+}
+
+// Spec: transport R22
+#[test]
+fn a_quantised_locate_keeps_its_line_across_a_tempo_change() {
+    let tempo = TempoMap::constant(bpm(120.0));
+    let slow = TempoMap::constant(bpm(130.0));
+    let mut rig = rig_with_quantization(4096, tempo.clone(), LaunchQuantization::Bar);
+    rig.sender.transport(TransportCommand::Play);
+    rig.render((frames(&tempo, BAR) / 2) as usize, 64);
+    rig.sender
+        .transport(TransportCommand::QuantizedLocate(BAR * 5));
+    rig.block(64);
+    rig.apply(Command::SetTempo {
+        tempo: slow.clone(),
+    });
+    // The swap moves the playhead onto its beat under the new map.
+    rig.block(64);
+    let out = rig.render(2 * frames(&slow, BAR) as usize, 64);
+    let (at, to) = jump(&out);
+    assert_eq!(
+        out[at - 1] as i64 + 1,
+        frames(&slow, BAR),
+        "the next bar line"
+    );
+    assert_eq!(to, frames(&slow, BAR * 5), "the target's beat");
+}
+
 #[test]
 fn a_second_quantised_locate_before_the_line_replaces_the_first() {
     let tempo = TempoMap::constant(bpm(120.0));
@@ -1057,4 +1107,23 @@ fn a_scrub_with_none_held_plays_from_the_point() {
     let (at, to) = jump(&out);
     assert_eq!(to, frames(&tempo, BAR * 8));
     assert_eq!((out[at - 1] as i64 + 1) % bar, 0);
+}
+
+// Spec: transport R7
+#[test]
+fn a_locate_to_an_absurd_position_is_clamped_instead_of_overflowing() {
+    let slow = TempoMap::constant(bpm(1.0));
+    let mut rig = rig(256, Some(slow.clone()));
+    rig.sender
+        .transport(TransportCommand::Locate(Ticks(i64::MAX)));
+    rig.sender.transport(TransportCommand::Play);
+    rig.render(512, 256);
+    let state = rig.monitor.state();
+    assert!(state.playing);
+    let furthest = frames(&slow, Ticks::from_quarters(1_000_000));
+    assert!(
+        (0..=furthest + 512).contains(&state.position.get()),
+        "{:?}",
+        state.position
+    );
 }

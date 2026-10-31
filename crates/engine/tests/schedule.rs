@@ -5,7 +5,7 @@
 use crate::common;
 use bl_core::time::{Bpm, Frames, TICKS_PER_QUARTER, TempoMap, Ticks};
 use bl_engine::{Action, ParamValue, Report, ScheduledCommand, TransportCommand, testing};
-use bl_model::{Command, TrackKind};
+use bl_model::{Command, CountIn, TrackKind};
 use common::{RATE, Rig, dc, device, key, track};
 
 fn notify(id: u64, at: Ticks) -> ScheduledCommand {
@@ -178,4 +178,70 @@ fn cancelled_and_overflowing_commands_never_fire() {
     let counters = rig.monitor.state().counters;
     assert_eq!(counters.scheduled_rejected, 1);
     assert_eq!(counters.scheduled_fired, capacity - 1);
+}
+
+/// A rig with a one-bar count-in (96,000 frames at 120 BPM) and the
+/// metronome on.
+fn count_in_rig(size: usize) -> Rig {
+    let mut rig = Rig::new(size);
+    rig.editor
+        .apply(Command::SetMetronomeEnabled { enabled: true })
+        .unwrap();
+    rig.editor
+        .apply(Command::SetMetronomeCountIn {
+            count_in: CountIn::Bars1,
+        })
+        .unwrap();
+    track(&mut rig.editor, TrackKind::Midi, None);
+    rig.sync();
+    rig
+}
+
+// Spec: metronome R5
+#[test]
+fn a_scheduled_command_at_the_start_waits_for_the_count_in() {
+    for size in [1, 512, 4096] {
+        let mut rig = count_in_rig(size);
+        rig.sender.schedule(notify(1, Ticks::ZERO));
+        rig.sender.transport(TransportCommand::Play);
+        rig.render(144_000, size);
+        assert_eq!(
+            rig.monitor.reports(),
+            vec![Report::Fired {
+                id: 1,
+                position: Frames::ZERO,
+                clock: 96_000,
+            }],
+            "block size {size}"
+        );
+    }
+}
+
+// Spec: metronome R5
+#[test]
+fn a_scheduled_stop_at_the_start_leaves_the_count_in_playing() {
+    for size in [512, 4096] {
+        let mut rig = count_in_rig(size);
+        rig.sender.schedule(ScheduledCommand {
+            id: 1,
+            at: Ticks::ZERO,
+            action: Action::Transport(TransportCommand::Stop),
+        });
+        rig.sender.transport(TransportCommand::Play);
+        rig.render(90_000, size);
+        let state = rig.monitor.state();
+        assert!(state.playing, "still counting in, block size {size}");
+        assert!(rig.monitor.reports().is_empty());
+        // The stop lands on the first frame the song plays.
+        rig.render(54_000, size);
+        assert!(!rig.monitor.state().playing, "block size {size}");
+        assert!(matches!(
+            rig.monitor.reports().as_slice(),
+            [Report::Fired {
+                id: 1,
+                clock: 96_000,
+                ..
+            }]
+        ));
+    }
 }

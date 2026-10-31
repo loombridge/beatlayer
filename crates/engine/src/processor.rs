@@ -135,6 +135,8 @@ struct Exact {
 struct LoopFrames {
     start: Frames,
     end: Frames,
+    /// The same region in ticks, which the Session's lines count in.
+    ticks: LoopRegion,
 }
 
 /// A jump waiting for the next line of the global launch quantisation (the
@@ -284,6 +286,16 @@ fn frames_until(position: i64, phase: f64, speed: f64, target: i64) -> usize {
     let here = position as f64 + phase;
     let nearest = ((target as f64 - here + crate::node::TIE) / speed + 0.5).floor();
     nearest.max(1.0) as usize
+}
+
+/// The furthest position a locate, a scrub or the insert marker can name:
+/// a million quarter notes. An agent's absurd position would otherwise
+/// overflow the song-frame arithmetic at a slow tempo.
+const MAX_POSITION: Ticks = Ticks::from_quarters(1_000_000);
+
+/// `ticks` within the song's range, from the start to [`MAX_POSITION`].
+fn clamp_position(ticks: Ticks) -> Ticks {
+    ticks.clamp(Ticks::ZERO, MAX_POSITION)
 }
 
 /// The frame `frame` of the song under `before` is, under `after`: the
@@ -987,6 +999,12 @@ impl Processor {
         }
         self.session
             .remap(|frame| same_beat(before, after, rate, frame));
+        // Spec: transport R22. A jump waiting for its line keeps the line and
+        // its target on their beats.
+        if let Some(pending) = &mut self.pending_locate {
+            pending.frame = same_beat(before, after, rate, pending.frame);
+            pending.to = same_beat(before, after, rate, pending.to);
+        }
         for entry in &mut self.scheduled {
             entry.frame = after.ticks_to_frames(entry.command.at, rate);
         }
@@ -1232,7 +1250,11 @@ impl Processor {
     /// Runs a transport command now, at the playhead
     /// (the transport spec).
     fn transport(&mut self, command: TransportCommand) {
-        if command == TransportCommand::Stop && !self.releasing && !self.held.is_empty() {
+        if command == TransportCommand::Stop
+            && !self.releasing
+            && !self.playing
+            && !self.held.is_empty()
+        {
             // Spec: transport R25. Stop while a start waits cancels it.
             self.held.clear();
             self.release = None;
@@ -1277,6 +1299,9 @@ impl Processor {
                     // Spec: transport R22. A jump waiting for a line is
                     // abandoned when the transport stops.
                     self.pending_locate = None;
+                    // Spec: transport R25. A stop cancels a held restart.
+                    self.held.clear();
+                    self.release = None;
                     self.playing = false;
                     self.release_midi();
                     self.metronome.stop();
@@ -1290,9 +1315,10 @@ impl Processor {
                 // Spec: transport R22. A jump waiting for a line is
                 // replaced by this one.
                 self.pending_locate = None;
-                self.insert_marker = ticks.max(Ticks::ZERO);
+                self.insert_marker = clamp_position(ticks);
                 if self.playing {
                     self.position = self.frames_at(self.insert_marker);
+                    self.relocate_session();
                     self.metronome.stop();
                     // Playback jumps away from the take; it ends here
                     // (WP-2.13).
@@ -1301,7 +1327,7 @@ impl Processor {
             }
             // Spec: transport R22
             TransportCommand::QuantizedLocate(ticks) => {
-                let target = ticks.max(Ticks::ZERO);
+                let target = clamp_position(ticks);
                 self.insert_marker = target;
                 if self.playing {
                     self.quantized_locate(target);
@@ -1314,11 +1340,11 @@ impl Processor {
                 let ticks = self
                     .tempo()
                     .frames_to_ticks(self.position, self.config.sample_rate);
-                self.insert_marker = ticks.max(Ticks::ZERO);
+                self.insert_marker = clamp_position(ticks);
             }
             // Spec: control-bar-transport R15
             TransportCommand::SetInsertMarker(ticks) => {
-                self.insert_marker = ticks.max(Ticks::ZERO);
+                self.insert_marker = clamp_position(ticks);
             }
             TransportCommand::SetLoop(region) => {
                 self.loop_region = region;
@@ -1480,11 +1506,26 @@ impl Processor {
         let to = self.frames_at(target);
         if frame <= self.reached() {
             self.position = to;
+            self.relocate_session();
             self.metronome.stop();
             self.end_recordings();
         } else {
             self.pending_locate = Some(PendingLocate { frame, to });
         }
+    }
+
+    /// Moves what the Session View waits for to the first line after the
+    /// playhead, which a locate has just moved (launch-quantisation R39).
+    fn relocate_session(&mut self) {
+        let playhead = Self::playhead(
+            self.program.as_ref().map(Program::get),
+            &self.fallback_tempo,
+            &self.fallback_time_signatures,
+            true,
+            self.position,
+            self.config.sample_rate,
+        );
+        self.session.requantise_pending(playhead);
     }
 
     /// A press in the scrub area, or its release (the transport spec, R23).
@@ -1494,7 +1535,7 @@ impl Processor {
     /// playback where it is; with none held, it plays from `point` as a click
     /// does.
     fn scrub(&mut self, point: Ticks, held: bool) {
-        let mut target = point.max(Ticks::ZERO);
+        let mut target = clamp_position(point);
         if held {
             let signatures = match &self.program {
                 Some(program) => &program.get().time_signatures,
@@ -1538,6 +1579,7 @@ impl Processor {
         {
             self.pending_locate = None;
             self.position = pending.to;
+            self.relocate_session();
             self.metronome.stop();
             self.end_recordings();
         }
@@ -1556,7 +1598,11 @@ impl Processor {
         let frames = |region: LoopRegion| {
             let start = self.frames_at(region.start.max(Ticks::ZERO));
             let end = self.frames_at(region.end);
-            (end > start).then_some(LoopFrames { start, end })
+            (end > start).then_some(LoopFrames {
+                start,
+                end,
+                ticks: region,
+            })
         };
         let (loop_frames, held_frames) = (
             self.loop_region.and_then(frames),
@@ -1936,7 +1982,9 @@ impl Processor {
     /// a block part starts. While the song is stopped the playhead stands
     /// still, so a change queued for a frame waits for it (R4).
     fn apply_due_session(&mut self) {
-        if self.playing {
+        // Spec: metronome R5. What is due at the start frame waits for the
+        // count-in to end.
+        if self.playing && !self.metronome.is_counting_in() {
             let reached = self.reached();
             self.session.apply_due(reached);
             // Spec: launch-quantisation R21
@@ -2064,7 +2112,7 @@ impl Processor {
         // (the transport spec, R24).
         let slack = Frames(self.speed_estimate().ceil().max(1.0) as i64);
         let reached = self.reached();
-        while self.playing && i < self.scheduled.len() {
+        while self.playing && !self.metronome.is_counting_in() && i < self.scheduled.len() {
             let due = self.scheduled[i].frame;
             if due <= reached && due + slack > reached {
                 // `remove` keeps the rest in the order they arrived.
@@ -2488,23 +2536,15 @@ impl Processor {
             let to = c * stride + offset;
             self.ext_output[to..to + length].fill(0.0);
         }
-        if self.metronome.is_counting_in() {
-            for c in 0..self.config.channels {
-                let to = c * stride + offset;
-                self.output[to..to + length].fill(0.0);
-            }
-            self.metronome.render_count_in(
-                Block {
-                    output: &mut self.output,
-                    stride,
-                    channels: self.config.channels,
-                    offset,
-                    length,
-                },
-                self.config.sample_rate,
-            );
-            return;
-        }
+        // Spec: metronome R5. The song waits at the insert marker through a
+        // count-in, so the program runs as a stopped transport would: monitored
+        // input, audio inputs and effect tails play on.
+        let counting_in = self.metronome.is_counting_in();
+        let run_transport = if counting_in {
+            TransportInfo::at(false, self.position)
+        } else {
+            transport
+        };
 
         match self.program.as_mut() {
             Some(program) => {
@@ -2517,7 +2557,7 @@ impl Processor {
                         from: offset as u32,
                         until: offset as u32 + length as u32,
                         events: &self.resolved,
-                        transport,
+                        transport: run_transport,
                         session: &self.session_playback,
                         groove_amount: self.groove_amount,
                         set_scale: self.scale,
@@ -2556,6 +2596,19 @@ impl Processor {
                     self.output[to..to + length].fill(0.0);
                 }
             }
+        }
+        if counting_in {
+            self.metronome.render_count_in(
+                Block {
+                    output: &mut self.output,
+                    stride,
+                    channels: self.config.channels,
+                    offset,
+                    length,
+                },
+                self.config.sample_rate,
+            );
+            return;
         }
         if self.playing {
             let (tempo, sigs) = match &self.program {
@@ -2602,6 +2655,15 @@ impl Processor {
                 // the playhead reaches that line round the loop.
                 let back = region.start - region.end;
                 self.session.remap_pending(|frame| frame + back);
+                self.session
+                    .wrap_lines(region.ticks.end, region.ticks.start - region.ticks.end);
+                // Spec: transport R22. A jump waiting for the loop's end
+                // (or a line past it) lands on the wrap, as a launch does.
+                if let Some(pending) = &mut self.pending_locate
+                    && pending.frame >= region.end
+                {
+                    pending.frame += back;
+                }
             }
         }
         // Spec: external-devices R24. A real-time render captures the

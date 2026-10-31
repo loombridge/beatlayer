@@ -1440,7 +1440,7 @@ impl Compiler {
             midi_sidechains: build.midi_sidechains,
             midi_kept: Shared::new(
                 (0..midi_kept)
-                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .map(|_| NoteBuffer::with_capacity(crate::midi_clips::TRACK_NOTE_CAPACITY))
                     .collect(),
             ),
             pool: Shared::new(vec![0.0; (tasks + build.chain_buffers as usize) * size]),
@@ -1476,7 +1476,7 @@ impl Compiler {
                 .collect(),
             note_buffers: Shared::new(
                 (0..2 * (tasks as u32 + build.chain_buffers))
-                    .map(|_| NoteBuffer::with_capacity(1024))
+                    .map(|_| NoteBuffer::with_capacity(crate::midi_clips::TRACK_NOTE_CAPACITY))
                     .collect(),
             ),
             releases: crate::program::Releases::new(),

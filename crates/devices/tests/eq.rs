@@ -5,12 +5,13 @@
 use crate::common;
 use std::f64::consts::TAU;
 
+use bl_core::time::SampleRate;
 use bl_devices::NativeNode;
 use bl_devices::eq::{
     ADAPTIVE_Q, ANALYSER_BANDS, ANALYZE, Contour, FREQ, GAIN, GAIN_SLOT, MODE, ON, OVERSAMPLE, Q,
     TYPE, band_param, eq_type,
 };
-use bl_engine::{Block, DeviceType, Node, Registry, TransportInfo};
+use bl_engine::{Block, DeviceType, Node, NodeConfig, Registry, TransportInfo};
 use bl_model::ParamId;
 
 use common::{RATE, config, device, node};
@@ -108,8 +109,8 @@ fn response_db(node: &mut dyn Node, hz: f64) -> f64 {
 
 /// The type `kind`'s coefficients, the same cookbook the device follows,
 /// written out again so the test leans on the curve and not on the code.
-fn analytic_coeffs(kind: usize, freq: f64, gain_db: f64, q: f64) -> [f64; 5] {
-    let w0 = TAU * freq / RATE.as_f64();
+fn analytic_coeffs(kind: usize, freq: f64, gain_db: f64, q: f64, rate: f64) -> [f64; 5] {
+    let w0 = TAU * freq / rate;
     let (sin, cos) = w0.sin_cos();
     let a = 10f64.powf(gain_db / 40.0);
     let alpha = sin / (2.0 * q);
@@ -176,9 +177,9 @@ fn stages(kind: usize) -> usize {
 }
 
 /// The analytic magnitude response of `kind` at `hz`, its stages in cascade.
-fn analytic_db(kind: usize, freq: f64, gain_db: f64, q: f64, hz: f64) -> f64 {
-    let [b0, b1, b2, a1, a2] = analytic_coeffs(kind, freq, gain_db, q);
-    let w = TAU * hz / RATE.as_f64();
+fn analytic_db(kind: usize, freq: f64, gain_db: f64, q: f64, hz: f64, rate: f64) -> f64 {
+    let [b0, b1, b2, a1, a2] = analytic_coeffs(kind, freq, gain_db, q, rate);
+    let w = TAU * hz / rate;
     let (c1, s1) = (w.cos(), -w.sin());
     let (c2, s2) = ((2.0 * w).cos(), -(2.0 * w).sin());
     let (nr, ni) = (b0 + b1 * c1 + b2 * c2, b1 * s1 + b2 * s2);
@@ -250,7 +251,7 @@ fn every_filter_type_matches_its_analytic_curve() {
             }
             let mut node = contour(&band0(kind, 1_000.0, gain_db, 0.71), MAX_FRAMES);
             for hz in CHECK_HZ {
-                let expected = analytic_db(kind, 1_000.0, gain_db, 0.71, hz);
+                let expected = analytic_db(kind, 1_000.0, gain_db, 0.71, hz, RATE.as_f64());
                 if expected < -80.0 {
                     // Below what f32 arithmetic holds: a stopped band reads
                     // its own rounding floor, not the curve.
@@ -468,6 +469,88 @@ fn the_oversampled_path_passes_its_bands_and_reports_its_latency() {
     let mut plain = contour(&band0(PEAK, 1_000.0, 12.0, 0.71), MAX_FRAMES);
     assert_eq!(plain.latency(), 0, "the plain path delays nothing");
     settle(plain.as_mut());
+}
+
+/// The gain in dB of a unit sine at `hz` through an EQ Eight of `params` at
+/// `rate`, from the last second of two.
+fn sine_gain_db(rate: SampleRate, params: &[(ParamId, f64)], hz: f64) -> f64 {
+    let device_type: DeviceType = eq_type();
+    let values = device(&device_type, params);
+    let config = NodeConfig {
+        round_trip_latency: 0,
+        sample_rate: rate,
+        max_frames: 1024,
+        channels: 2,
+    };
+    let mut node = NativeNode::new(
+        Contour::new(&config),
+        &device_type.description,
+        &values,
+        &config,
+    );
+    let total = 2 * rate.as_f64() as usize;
+    let (mut input, mut output) = (0.0f64, 0.0f64);
+    for start in (0..total).step_by(1024) {
+        let mut data: Vec<f32> = (0..2 * 1024)
+            .map(|i| (TAU * hz * (start + i % 1024) as f64 / rate.as_f64()).sin() as f32)
+            .collect();
+        let sent = data.clone();
+        {
+            let mut block = Block::new(
+                &mut data,
+                2,
+                1024,
+                1024,
+                &[],
+                TransportInfo::default(),
+                rate,
+            );
+            bl_rt::rt_test!({ node.process(&mut block) });
+        }
+        if start >= total / 2 {
+            input += sent[..1024]
+                .iter()
+                .map(|x| f64::from(*x).powi(2))
+                .sum::<f64>();
+            output += data[..1024]
+                .iter()
+                .map(|x| f64::from(*x).powi(2))
+                .sum::<f64>();
+        }
+    }
+    10.0 * (output / input).log10()
+}
+
+// Spec: eq R3
+// Spec: eq R8
+#[test]
+fn low_bands_hold_their_curve_at_high_rates() {
+    // A 192 kHz set, and a 96 kHz set whose Oversample runs the stages at 192 kHz.
+    let cases = [
+        (SampleRate::HZ_192000, 0.0, 192_000.0),
+        (SampleRate::HZ_96000, 1.0, 192_000.0),
+    ];
+    let bands = [
+        (PEAK, 25.0, 12.0, 4.0, [10.0, 25.0, 50.0]),
+        (LOW_SHELF, 20.0, 15.0, 0.71, [5.0, 20.0, 50.0]),
+    ];
+    for (rate, oversample, stage_rate) in cases {
+        for (kind, freq, gain, q, checks) in bands {
+            let params = with_globals(
+                &[(OVERSAMPLE, oversample), (ADAPTIVE_Q, 0.0)],
+                band0(kind, freq, gain, q),
+            );
+            for hz in checks {
+                let measured = sine_gain_db(rate, &params, hz);
+                let expected = analytic_db(kind, freq, gain, q, hz, stage_rate);
+                assert!(
+                    (measured - expected).abs() < 0.1,
+                    "type {kind} at {} Hz, {hz} Hz: {measured} dB, not {expected} dB",
+                    rate.as_f64()
+                );
+            }
+        }
+    }
 }
 
 // Spec: eq R9

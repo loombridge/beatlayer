@@ -4041,3 +4041,116 @@ fn the_menus_run_fold_to_scale_and_highlight_scales() {
         "ticked while on"
     );
 }
+
+#[test]
+fn launching_another_clip_mid_drag_ends_the_drag() {
+    // A clip that shows in place of the one a drag began on ends the drag's
+    // gesture, which keeps the edit made so far and the new selection.
+    let step = n_step();
+    let mut s = set(vec![Note::new(60, Ticks::ZERO, step, 100)]);
+    let track = s.doc().top_level().next().unwrap();
+    let scene = s.doc().scenes().next().unwrap().id;
+    s.h.shell
+        .run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        )
+        .unwrap();
+    s.h.shell
+        .run("arrangement.select_clips", json!({ "clips": [s.clip] }))
+        .unwrap();
+    s.h.settle();
+    let from = s.at(60, step / 2);
+    let to = s.at(62, step / 2);
+    s.drag_frames(from, to, Modifiers::NONE);
+    assert!(s.h.shell.gesture_open());
+    // What Select on Launch runs when a mapped pad launches the slot.
+    s.h.shell
+        .run("session.select", json!({ "track": track, "scene": scene }))
+        .unwrap();
+    s.release(to, Modifiers::NONE);
+    assert!(
+        !s.h.shell.gesture_open(),
+        "the drag's gesture is still open"
+    );
+    assert!(s.h.shell.can_invoke("edit.undo", &json!({})));
+    assert!(s.h.shell.run("edit.undo", json!({})).is_ok());
+}
+
+#[test]
+fn a_folded_drag_lands_on_the_row_it_was_dropped_on() {
+    // Spec: piano-roll R16. The rows stay where they were at the press for
+    // the whole drag, though the moved note empties or fills rows.
+    let step = n_step();
+    let mut n = set(vec![
+        Note::new(72, Ticks::ZERO, step, 100),
+        Note::new(64, 4 * step, step, 100),
+        Note::new(60, 8 * step, step, 100),
+    ]);
+    n.h.shell.set_focused_area(bl_shell::Area::Detail);
+    n.h.key(egui::Key::F, Modifiers::NONE);
+    n.h.settle();
+    assert!(n.h.shell.clip_view().is_folded(n.clip));
+    let from = n.at_folded(72, step / 2);
+    let to = n.at_folded(64, step / 2);
+    n.drag(from, to, Modifiers::NONE);
+    let moved = n
+        .notes()
+        .into_iter()
+        .find(|note| note.start == Ticks::ZERO)
+        .unwrap();
+    assert_eq!(
+        moved.key, 64,
+        "one row down lands on the row it was dropped on"
+    );
+}
+
+#[test]
+fn a_held_ruler_preview_ends_when_the_clip_view_leaves_the_note_editor() {
+    // Spec: step-recording R2. The preview plays until the button is
+    // released, or the editor it was held in gives way.
+    let mut n = set(vec![]);
+    let track = n.doc().clip_track(n.clip).unwrap();
+    let mut queue = n.h.shell.midi().sender().attach(64);
+    let heard = |queue: &mut rtrb::Consumer<bl_core::midi::MidiInputEvent>| {
+        std::iter::from_fn(|| queue.pop().ok())
+            .map(|e| {
+                (
+                    e.source,
+                    e.message.status(),
+                    e.message.data1(),
+                    e.message.data2(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let source = bl_core::midi::MidiSource::Preview(track.0);
+    n.h.shell
+        .run("clip_view.set_preview", json!({ "on": true }))
+        .unwrap();
+    n.h.settle();
+    let key = n.key_at(57);
+    let button = |n: &mut Notes, pressed: bool| {
+        n.h.frame(vec![Event::PointerButton {
+            pos: key,
+            button: PointerButton::Primary,
+            pressed,
+            modifiers: Modifiers::NONE,
+        }]);
+        n.h.settle();
+    };
+    n.h.frame(vec![Event::PointerMoved(key)]);
+    button(&mut n, true);
+    assert_eq!(heard(&mut queue), [(source, 0x90, 57, 100)]);
+    n.h.shell
+        .run("view.clip_tab", json!({ "tab": "envelopes" }))
+        .unwrap();
+    n.h.settle();
+    button(&mut n, false);
+    n.h.frame(vec![]);
+    assert_eq!(
+        heard(&mut queue),
+        [(source, 0x80, 57, 64)],
+        "the held preview ends once the editor gives way"
+    );
+}

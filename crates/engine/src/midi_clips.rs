@@ -479,6 +479,14 @@ pub struct MidiClipPlayer {
     runs: Option<ScaleRuns>,
 }
 
+/// The notes a clip player gathers in a block before it writes them out.
+const SCRATCH_NOTES: usize = 2048;
+
+/// The room of a track's note buffer: all of a clip player's scratch, and
+/// the same again for what else reaches the track in a block, so the
+/// scratch never fills it and the releases at its end are never dropped.
+pub(crate) const TRACK_NOTE_CAPACITY: usize = 2 * SCRATCH_NOTES;
+
 impl MidiClipPlayer {
     /// A new player with preallocated sounding and scratch note buffers.
     #[must_use]
@@ -486,7 +494,7 @@ impl MidiClipPlayer {
         Self {
             clips: None,
             sounding: Vec::with_capacity(256),
-            scratch_notes: Vec::with_capacity(2048),
+            scratch_notes: Vec::with_capacity(SCRATCH_NOTES),
             messages: Vec::with_capacity(512),
             audible: true,
             last_position: None,
@@ -673,6 +681,10 @@ fn group_plays(
             == Some(&(index as u32))
 }
 
+// How many notes a test's segment converted to frames.
+#[cfg(test)]
+thread_local!(static CONVERTED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
+
 #[allow(clippy::too_many_arguments)]
 fn process_clip_segment(
     clip: &PlacedMidiClip,
@@ -716,7 +728,23 @@ fn process_clip_segment(
         controller.play(stretch, from_frame, to_frame, tempo, sample_rate, messages);
     }
 
-    for (index, note) in clip.notes.iter().enumerate() {
+    // The notes are sorted by start, so only those whose start falls in the
+    // block's window (a frame wider each way than the block, for rounding)
+    // are looked at; the checks below stay as the exact filter.
+    let (first_tick, last_tick) = reach.unwrap_or_else(|| {
+        (
+            tempo.frames_to_ticks(Frames(from_frame - 1), sample_rate),
+            tempo.frames_to_ticks(Frames(to_frame + 1), sample_rate),
+        )
+    });
+    let to_content = segment_clip_start - segment_song_start;
+    let first = clip
+        .notes
+        .partition_point(|n| n.start < first_tick + to_content);
+    for (index, note) in clip.notes.iter().enumerate().skip(first) {
+        if note.start >= last_tick + to_content {
+            break;
+        }
         if note.start < segment_clip_start || note.start >= segment_clip_end {
             continue;
         }
@@ -735,6 +763,8 @@ fn process_clip_segment(
             note_song_start = segment_song_start + (Ticks(held) - segment_clip_start);
             grooved_velocity = play.note_velocity(note.start, note.velocity);
         }
+        #[cfg(test)]
+        CONVERTED.with(|n| n.set(n.get() + 1));
         let mut note_on_frame = tempo.ticks_to_frames(note_song_start, sample_rate).get();
         if reach.is_some() {
             note_on_frame = note_on_frame.min(end_frame - 1);
@@ -1157,7 +1187,11 @@ impl Node for MidiClipPlayer {
                 .ticks_to_frames(clip.start + clip.length, sample_rate)
                 .get();
 
-            if clip_start_frame >= to_frame || clip_end_frame <= from_frame {
+            // The clips are sorted by start: none after this one is in it.
+            if clip_start_frame >= to_frame {
+                break;
+            }
+            if clip_end_frame <= from_frame {
                 continue;
             }
             play_unlinked(
@@ -1333,5 +1367,107 @@ impl Node for MidiClipPlayer {
 
     fn track_scale(&self) -> Option<ScaleRuns> {
         self.runs
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bl_model::{Command, Editor, TrackKind};
+
+    const SIXTEENTH: Ticks = Ticks(Ticks::QUARTER.get() / 4);
+    const RATE: SampleRate = SampleRate::HZ_48000;
+
+    /// A track with one clip of `count` sixteenth notes, one on each sixteenth.
+    fn long_take(count: i64) -> MidiClipList {
+        let mut editor = Editor::new();
+        let track = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id: track,
+                kind: TrackKind::Midi,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        let notes: Vec<Note> = (0..count)
+            .map(|i| Note::new(60, SIXTEENTH * i, SIXTEENTH, 100))
+            .collect();
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateClip {
+                track,
+                clip: Clip::new(
+                    id,
+                    Ticks::ZERO,
+                    SIXTEENTH * count,
+                    ClipData::Midi(MidiData::new(notes)),
+                ),
+            })
+            .unwrap();
+        let track = editor.document().track(track).unwrap();
+        MidiClipList::build(track, &TempoMap::default(), RATE, &GroovePool::default())
+    }
+
+    /// The note-ons the clip's whole length plays in the blocks from frame
+    /// `from` to `to`, and how many notes the blocks converted to frames.
+    fn play(clip: &PlacedMidiClip, from: i64, to: i64, block: i64) -> (Vec<NoteEvent>, u64) {
+        CONVERTED.with(|n| n.set(0));
+        let (mut ons, mut next_note_id) = (Vec::new(), 0);
+        let mut rng = Rng::new(1);
+        for from_frame in (from..to).step_by(block as usize) {
+            let mut scratch = Vec::with_capacity(512);
+            process_clip_segment(
+                clip,
+                clip.start_marker,
+                clip.start,
+                clip.start + clip.length,
+                0,
+                from_frame,
+                from_frame + block,
+                &TempoMap::default(),
+                RATE,
+                Roll {
+                    run: 0,
+                    entry: None,
+                },
+                0,
+                &mut rng,
+                &mut next_note_id,
+                &mut scratch,
+                &mut Vec::with_capacity(512),
+                &mut Vec::with_capacity(256),
+            );
+            ons.extend(scratch.into_iter().map(|n| NoteEvent {
+                offset: n.offset + (from_frame - from) as u32,
+                ..n
+            }));
+        }
+        (ons, CONVERTED.with(std::cell::Cell::get))
+    }
+
+    // Spec: midi-clips R218
+    #[test]
+    fn a_block_converts_only_the_notes_near_it() {
+        let list = long_take(20_000);
+        let clip = &list.clips[0];
+        // At 120 BPM a sixteenth is 6,000 frames: ten minutes in is the
+        // 4,800th, and a second plays eight.
+        let from = 48_000 * 600;
+        let (ons, converted) = play(clip, from, from + 128, 128);
+        assert!(converted < 64, "{converted} notes converted");
+        assert_eq!(ons.len(), 1);
+        assert_eq!((ons[0].kind, ons[0].offset), (NoteKind::On, 0));
+        // Blocks of any size, edges included, still play every note.
+        for block in [1, 100, 128, 4096] {
+            let (ons, _) = play(clip, from - 1, from + 47_999, block);
+            let frames: Vec<u32> = ons.iter().map(|n| n.offset).collect();
+            // The last block may reach past the second.
+            assert_eq!(
+                frames[..8],
+                [1, 6001, 12_001, 18_001, 24_001, 30_001, 36_001, 42_001]
+            );
+        }
     }
 }

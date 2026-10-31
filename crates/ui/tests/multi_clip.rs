@@ -24,6 +24,18 @@ struct Multi {
 /// Clips named "A", "B" and so on, each `(track, start, length)` in bars with
 /// a note, selected in the Arrangement and open in the Clip View.
 fn set(clips: &[(usize, i64, i64)]) -> Multi {
+    set_notes(clips, |at| {
+        vec![Note::new(
+            60 + at as u8,
+            Ticks(BAR / 8),
+            Ticks(BAR / 8),
+            100,
+        )]
+    })
+}
+
+/// As [`set`], with the notes `notes` gives for the clip at each position.
+fn set_notes(clips: &[(usize, i64, i64)], notes: impl Fn(usize) -> Vec<Note>) -> Multi {
     let mut editor = factory_default_set();
     let tracks: Vec<TrackId> = editor.document().top_level().collect();
     let mut ids = Vec::new();
@@ -32,12 +44,7 @@ fn set(clips: &[(usize, i64, i64)]) -> Multi {
         let midi = MidiData {
             looping: true,
             loop_end: Some(Ticks(BAR)),
-            ..MidiData::new([Note::new(
-                60 + at as u8,
-                Ticks(BAR / 8),
-                Ticks(BAR / 8),
-                100,
-            )])
+            ..MidiData::new(notes(at))
         };
         let mut clip = Clip::new(
             id,
@@ -507,4 +514,46 @@ fn a_drawn_note_belongs_to_the_clip_its_start_lies_in() {
         "B's loop is on its second pass there, so its start is inside the loop: {drawn:?}"
     );
     assert_eq!(m.steps(), 1);
+}
+
+// Spec: piano-roll R12, R16, multi-clip-editing R9. The wheel scrolls a
+// folded key track the way it scrolls an unfolded one: up shows the higher
+// keys, which are the first rows.
+#[test]
+fn the_wheel_scrolls_folded_keys_the_way_it_scrolls_unfolded_ones() {
+    let mut m = set_notes(&[(0, 0, 4), (1, 0, 4)], |at| {
+        (0..20)
+            .map(|i| Note::new(40 + 20 * at as u8 + i, Ticks::ZERO, Ticks(BAR / 8), 100))
+            .collect()
+    });
+    m.h.key(Key::F, Modifiers::NONE);
+    m.h.settle();
+    assert_eq!(m.h.main.clip_view().first_row(), 0.0);
+    let (grid, _) = m.grid_and_axis();
+    let wheel = |m: &mut Multi, notches: f32| {
+        m.h.frame(vec![
+            Event::PointerMoved(grid.center()),
+            Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, bl_ui::clip_view::KEY_HEIGHT * notches),
+                phase: egui::TouchPhase::Move,
+                modifiers: Modifiers::NONE,
+            },
+        ]);
+        for _ in 0..30 {
+            m.h.frame(Vec::new());
+        }
+    };
+    wheel(&mut m, -3.0);
+    let first = m.h.main.clip_view().first_row();
+    assert!(
+        (first - 3.0).abs() < 0.01,
+        "wheel down shows lower keys, {first}"
+    );
+    wheel(&mut m, 3.0);
+    let first = m.h.main.clip_view().first_row();
+    assert!(
+        first.abs() < 0.01,
+        "wheel up goes back to higher keys, {first}"
+    );
 }

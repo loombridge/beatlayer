@@ -600,3 +600,56 @@ fn an_import_over_a_clip_replaces_what_it_covers() {
     );
     assert!(editor.document().clip(held).is_some());
 }
+
+// Review 30 October 2026 (R154): a note past the range made the import's
+// round-up overflow, which panics in a build with overflow checks.
+#[test]
+fn a_file_with_positions_past_the_range_is_refused_and_changes_nothing() {
+    let dir = TempDir::new("out-of-range");
+    let at = |delta: u32, kind| TrackEvent {
+        delta: u28::new(delta),
+        kind,
+    };
+    let mut track: Track<'_> = (0..49_000)
+        .map(|_| {
+            at(
+                u28::max_value().as_int(),
+                TrackEventKind::Meta(MetaMessage::Text(b"")),
+            )
+        })
+        .collect();
+    let message = |message| TrackEventKind::Midi {
+        channel: u4::new(0),
+        message,
+    };
+    track.push(at(
+        0,
+        message(MidiMessage::NoteOn {
+            key: u7::new(60),
+            vel: u7::new(100),
+        }),
+    ));
+    track.push(at(
+        1,
+        message(MidiMessage::NoteOff {
+            key: u7::new(60),
+            vel: u7::new(64),
+        }),
+    ));
+    track.push(at(0, TrackEventKind::Meta(MetaMessage::EndOfTrack)));
+    let smf = Smf {
+        header: Header::new(Format::SingleTrack, Timing::Metrical(u15::new(1))),
+        tracks: vec![track],
+    };
+    let mut bytes = Vec::new();
+    smf.write_std(&mut bytes).unwrap();
+    let path = dir.file("Late.mid", &bytes);
+    let mut editor = Editor::new();
+    let before = editor.document().top_level().len();
+    let error = midi_files::import(&mut editor, &path, None, Ticks::ZERO, false);
+    assert!(
+        matches!(&error, Err(MidiFileError::Failed(message)) if message.contains("out of range")),
+        "{error:?}"
+    );
+    assert_eq!(editor.document().top_level().len(), before);
+}

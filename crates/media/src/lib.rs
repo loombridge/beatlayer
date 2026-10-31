@@ -52,7 +52,8 @@ pub mod stream;
 pub use decode::{Codec, Container, Decoder, MediaInfo, decode_file, probe};
 pub use edits::{Edit, EditKind};
 pub use encode::{
-    AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, Quantiser, wav_bytes,
+    AudioWriter, BitDepth, Dither, EncodeSpec, FLAC_MAX_RATE, FileType, MP3_RATES, Quantiser,
+    wav_bytes,
 };
 pub use error::MediaError;
 pub use hash::{ContentHash, ParseContentHashError};

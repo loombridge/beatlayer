@@ -352,9 +352,18 @@ impl Commands for AssistantCommands<'_> {
         }
         // The assistant is the person's own, but it never changes what the
         // person allows, any more than an agent may (agent-permissions R9).
-        if bl_shell_spec::agent::handles(command) || handles(command) {
+        // Binding keys to such a command would make the person change it.
+        let bound = args
+            .get("command")
+            .and_then(Value::as_str)
+            .filter(|_| command == bl_shell_spec::keymap::BIND);
+        if let Some(own) = [Some(command), bound]
+            .into_iter()
+            .flatten()
+            .find(|id| bl_shell_spec::agent::handles(id) || handles(id))
+        {
             let message =
-                format!("`{command}` is the person's own setting; the assistant never changes it.");
+                format!("`{own}` is the person's own setting; the assistant never changes it.");
             self.shell.assistant_record_denied(command, message.clone());
             self.shell
                 .assistant_finish_call(command, Err(message.clone()));

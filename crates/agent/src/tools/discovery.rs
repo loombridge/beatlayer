@@ -82,6 +82,11 @@ fn raised(spec: &CommandSpec) -> Option<&'static str> {
         return None;
     }
     Some(match spec.id.as_ref() {
+        bl_shell::commands::KEYMAP_BIND => {
+            "takes the class of the command it binds when that is higher, so binding keys to a \
+         destructive or external command asks the person first unless you're autonomous; the \
+         agent server's and the assistant's commands are the person's alone and can't be bound"
+        }
         bl_shell::groove_commands::TO_CLIP => {
             "destructive as well when its clip would replace or shorten clips on the track, so it \
          then asks the person first unless you're autonomous, and external with `path`, a file \

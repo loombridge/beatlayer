@@ -47,6 +47,7 @@ mod dawproject_app;
 mod dawproject_export;
 mod dawproject_plugins;
 mod detail_views;
+mod device_changes;
 mod device_compare;
 mod device_displays;
 mod device_framework;

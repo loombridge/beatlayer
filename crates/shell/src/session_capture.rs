@@ -201,6 +201,9 @@ pub fn place(
             // Spec: themes R20. A copy keeps its colour.
             clip.colour = source.colour;
             let track = run.slot.0;
+            // Spec: session automation R10. An Arrangement clip holds no
+            // Automation envelope.
+            let clip = crate::session_clips::carried(editor.document(), track, &clip, false);
             crate::arrangement::placing::clear(editor, track, from, to, &placed)?;
             placed.insert(id);
             let entry = first.entry(track).or_insert((from, BTreeSet::new()));
@@ -449,6 +452,55 @@ mod tests {
             played[2 * BAR as usize..3 * BAR as usize]
                 .iter()
                 .all(|&s| s == 0.0)
+        );
+    }
+
+    // Spec: session-automation R10. A Session clip's Automation envelope
+    // stays behind: the copy on the Arrangement takes the take's recording
+    // with it, and keeps the clip's Modulation envelope.
+    #[test]
+    fn a_session_clips_automation_envelope_is_not_copied_into_the_arrangement() {
+        let (mut editor, track, scene, clip) = set();
+        let volume = bl_model::AutomationTarget::Mixer {
+            param: bl_model::MixerParam::Volume,
+        };
+        for kind in [
+            bl_model::EnvelopeKind::Automation,
+            bl_model::EnvelopeKind::Modulation,
+        ] {
+            editor
+                .apply(Command::SetClipEnvelopeBreakpoint {
+                    clip,
+                    target: volume,
+                    kind,
+                    at: Ticks::ZERO,
+                    value: 0.5,
+                })
+                .unwrap();
+        }
+        let runs = [Run {
+            slot: (track, scene),
+            from: Ticks::ZERO,
+            to: ticks(BAR),
+            launched: Ticks::ZERO,
+            offset: Ticks::ZERO,
+        }];
+        editor
+            .transact("Record", |e| {
+                place(e, &Watch::default(), &runs, &[track], ticks(BAR))
+            })
+            .unwrap();
+        let copies: Vec<_> = editor.document().track(track).unwrap().clips().collect();
+        assert_eq!(copies.len(), 1);
+        assert!(
+            copies[0]
+                .envelope_of(&volume, bl_model::EnvelopeKind::Automation)
+                .is_none()
+        );
+        assert!(
+            copies[0]
+                .envelope_of(&volume, bl_model::EnvelopeKind::Modulation)
+                .is_some()
         );
     }
 

@@ -4,7 +4,7 @@ use bl_core::time::Ticks;
 use bl_model::{
     AutomationTarget, Chain, ChainId, ChainZones, Command, ContentHash, Device, DeviceId,
     DeviceKind, DeviceRole, Editor, FadeMode, Layer, LayerId, MixerParam, ModelError, ParamId,
-    RackKind, TrackId, TrackKind, Zone, ZoneKind,
+    RackKind, RemoteMapping, RemoteSource, RemoteTarget, TrackId, TrackKind, Zone, ZoneKind,
 };
 
 fn rejected(editor: &mut Editor, command: Command) -> ModelError {
@@ -946,4 +946,218 @@ fn a_racks_fades_and_a_multisamplers_give_the_same_share_at_every_value() {
             }
         }
     }
+}
+
+// Spec: modulation R19, remote-mapping R6. Taking a rack apart takes the
+// mappings to the rack and its chain with it, in the same undo step.
+#[test]
+fn ungrouping_a_rack_takes_the_mappings_to_it_and_its_chain() {
+    let mut song = Song::new();
+    let rack = song.rack(RackKind::AudioEffect, 1);
+    let (rack_id, chain) = (rack.id, rack.chains[0].id);
+    song.insert(song.midi, 0, rack).unwrap();
+    let fx = song.device(DeviceRole::AudioEffect);
+    song.insert_in(chain, 0, fx).unwrap();
+    let lfo: DeviceId = song.editor.new_id();
+    song.insert(
+        song.midi,
+        1,
+        Device::new(
+            lfo,
+            "Shaper",
+            DeviceKind::Native {
+                device_type: "beatlayer.curve_mod".to_owned(),
+            },
+        ),
+    )
+    .unwrap();
+    song.editor
+        .apply(Command::MapModulator {
+            device: lfo,
+            slot: 0,
+            target: bl_model::modulator::ModTarget::Device {
+                device: rack_id,
+                param: ParamId(1),
+            },
+        })
+        .unwrap();
+    let target = RemoteTarget::DeviceOn { device: rack_id };
+    let kind = target.natural_kind().unwrap();
+    song.editor
+        .apply(Command::SetRemoteMappings {
+            mappings: vec![
+                RemoteMapping::new(
+                    RemoteSource::Note {
+                        channel: 1,
+                        key: 36,
+                    },
+                    target,
+                    kind,
+                    None,
+                    None,
+                )
+                .unwrap(),
+            ],
+        })
+        .unwrap();
+    let before = song.doc().clone();
+
+    song.editor
+        .apply(Command::UngroupDevice { device: rack_id })
+        .unwrap();
+    assert!(song.doc().device(lfo).unwrap().mappings.is_empty());
+    assert!(song.doc().settings().remote.is_empty());
+
+    song.editor.undo().unwrap();
+    assert_eq!(song.doc(), &before);
+    assert_eq!(song.doc().device(lfo).unwrap().mappings.len(), 1);
+    assert_eq!(song.doc().settings().remote.len(), 1);
+}
+
+/// A MIDI track holding a MIDI effect rack, then an instrument rack with one
+/// chain that holds a MIDI effect. Returns the chain and the MIDI effect rack.
+fn midi_chain_beside_a_midi_effect_rack(song: &mut Song) -> (ChainId, DeviceId) {
+    let midi_rack = song.rack(RackKind::MidiEffect, 0);
+    let midi_rack_id = midi_rack.id;
+    song.insert(song.midi, 0, midi_rack).unwrap();
+    let instrument = song.rack(RackKind::Instrument, 1);
+    let chain = instrument.chains[0].id;
+    song.insert(song.midi, 1, instrument).unwrap();
+    let effect = song.device(DeviceRole::MidiEffect);
+    song.insert_in(chain, 0, effect).unwrap();
+    (chain, midi_rack_id)
+}
+
+// Spec: racks R5
+#[test]
+fn a_chain_moved_into_a_midi_effect_rack_leaves_its_volume_and_pan_automation_behind() {
+    let mut song = Song::new();
+    let (chain, midi_rack) = midi_chain_beside_a_midi_effect_rack(&mut song);
+    let target = |param| AutomationTarget::Chain { chain, param };
+    for param in [MixerParam::Volume, MixerParam::Pan, MixerParam::Mute] {
+        song.editor
+            .apply(Command::SetAutomationBreakpoint {
+                track: song.midi,
+                target: target(param),
+                at: Ticks::ZERO,
+                value: 0.5,
+            })
+            .unwrap();
+    }
+    song.editor
+        .apply(Command::MoveChain {
+            chain,
+            rack: midi_rack,
+            index: 0,
+        })
+        .unwrap();
+    song.checked();
+    serde_json::from_value::<bl_model::Document>(serde_json::to_value(song.doc()).unwrap())
+        .unwrap();
+    let track = song.doc().track(song.midi).unwrap();
+    assert!(track.automation_for(&target(MixerParam::Volume)).is_none());
+    assert!(track.automation_for(&target(MixerParam::Pan)).is_none());
+    assert!(track.automation_for(&target(MixerParam::Mute)).is_some());
+}
+
+// Spec: racks R5, R8, R30
+#[test]
+fn a_moved_chain_loses_the_zones_and_mixer_its_new_racks_kind_lacks() {
+    let mut song = Song::new();
+    let zoned = |song: &mut Song, with_effect: bool| {
+        let mut chain = Chain::new(song.editor.new_id(), "Zoned");
+        chain.zones = ChainZones::default()
+            .with(ZoneKind::Key, Zone::new(48, 72))
+            .with(ZoneKind::Velocity, Zone::new(10, 90))
+            .with(ZoneKind::Select, Zone::new(1, 3));
+        chain.mixer.volume = 0.5;
+        if with_effect {
+            chain = chain.with_devices(vec![song.device(DeviceRole::AudioEffect)]);
+        }
+        chain
+    };
+
+    // A drum rack's chains have no zones.
+    let instrument = song.rack(RackKind::Instrument, 0);
+    let instrument_id = instrument.id;
+    song.insert(song.midi, 0, instrument).unwrap();
+    let drum_track: TrackId = song.editor.new_id();
+    song.editor
+        .apply(Command::CreateTrack {
+            id: drum_track,
+            kind: TrackKind::Midi,
+            name: "Drums".to_owned(),
+            parent: None,
+            index: 2,
+        })
+        .unwrap();
+    let drum = song.rack(RackKind::Drum, 0);
+    let drum_id = drum.id;
+    song.insert(drum_track, 0, drum).unwrap();
+    let chain = zoned(&mut song, true);
+    let chain_id = chain.id;
+    song.editor
+        .apply(Command::AddChain {
+            rack: instrument_id,
+            index: 0,
+            chain,
+        })
+        .unwrap();
+    song.editor
+        .apply(Command::MoveChain {
+            chain: chain_id,
+            rack: drum_id,
+            index: 0,
+        })
+        .unwrap();
+    song.checked();
+    let moved = song.doc().chain(chain_id).unwrap();
+    assert_eq!(moved.zones, ChainZones::default());
+    assert_eq!(moved.mixer.volume, 0.5, "a drum rack's chains have a mixer");
+
+    // A MIDI effect rack's chains have no Volume or Pan, but keep their zones.
+    let midi_rack = song.rack(RackKind::MidiEffect, 0);
+    let midi_rack_id = midi_rack.id;
+    song.insert(song.midi, 0, midi_rack).unwrap();
+    let mut chain = zoned(&mut song, false);
+    chain = chain.with_devices(vec![song.device(DeviceRole::MidiEffect)]);
+    let chain_id = chain.id;
+    song.editor
+        .apply(Command::AddChain {
+            rack: instrument_id,
+            index: 0,
+            chain,
+        })
+        .unwrap();
+    song.editor
+        .apply(Command::MoveChain {
+            chain: chain_id,
+            rack: midi_rack_id,
+            index: 0,
+        })
+        .unwrap();
+    song.checked();
+    let moved = song.doc().chain(chain_id).unwrap();
+    assert_eq!((moved.mixer.volume, moved.mixer.pan), (1.0, 0.0));
+    assert_eq!(moved.zones.key, Zone::new(48, 72));
+
+    // A pasted chain fits an audio effect rack the same way: only chain
+    // select is kept.
+    let audio_rack = song.rack(RackKind::AudioEffect, 0);
+    let audio_rack_id = audio_rack.id;
+    song.insert(song.audio, 0, audio_rack).unwrap();
+    let pasted = zoned(&mut song, true);
+    let pasted_id = pasted.id;
+    song.editor
+        .apply(Command::AddChain {
+            rack: audio_rack_id,
+            index: 0,
+            chain: pasted,
+        })
+        .unwrap();
+    song.checked();
+    let zones = song.doc().chain(pasted_id).unwrap().zones;
+    assert_eq!(zones.key, ChainZones::default().key);
+    assert_eq!(zones.velocity, ChainZones::default().velocity);
+    assert_eq!(zones.select, Zone::new(1, 3));
 }

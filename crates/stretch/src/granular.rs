@@ -94,7 +94,7 @@ impl ActiveGrains {
 /// The most channels a grain is summed into.
 const CHANNELS: usize = 8;
 
-/// Writes song frame `t`'s frame to `out` (planar, `stride` apart):
+/// Writes song frame `t`'s frame to the start of `out` (planar, `stride` apart):
 /// every grain sounding on it, overlap-added and divided by the windows'
 /// weights there, so the level stays flat whatever the grains' lengths or
 /// places (R18, R19, R20). A grain is read from `window` at its own pitch
@@ -105,7 +105,6 @@ pub(crate) fn render_frame(
     interpolation: Interpolation,
     taps: &mut Taps,
     t: i64,
-    i: usize,
     out: &mut [f32],
     stride: usize,
 ) {
@@ -131,7 +130,7 @@ pub(crate) fn render_frame(
         }
     }
     for (c, &sum) in sum_ch.iter().enumerate().take(channels) {
-        out[c * stride + i] = if weight_sum > 1e-6 {
+        out[c * stride] = if weight_sum > 1e-6 {
             sum / weight_sum
         } else {
             sum

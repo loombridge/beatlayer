@@ -252,8 +252,7 @@ impl Tones {
                 interpolation,
                 &mut taps,
                 t,
-                i,
-                out,
+                &mut out[i..],
                 stride,
             );
         }

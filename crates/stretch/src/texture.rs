@@ -206,8 +206,7 @@ impl Texture {
                 interpolation,
                 &mut taps,
                 t,
-                i,
-                out,
+                &mut out[i..],
                 stride,
             );
         }

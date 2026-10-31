@@ -5,10 +5,12 @@
 //! The line is Shifter's channel ([`Chan`]): its input history is the line,
 //! and its delay-line pitch shifting reads the echo at the delay time, so
 //! the shifting is the Shifter's, called. A reversed echo reads the same
-//! history backwards instead. Echoes are counted from the first frame the
-//! device plays, one every delay time, so their draws from the device's
-//! seed repeat run after run and at any block size.
+//! history backwards instead. Echoes are counted from the song's start, one
+//! every delay time, and an echo's draws are a function of the seed and its
+//! count, not a stream, so a render repeats run after run, at any block size
+//! and from any start point.
 
+use bl_core::time::{Frames, TICKS_PER_QUARTER, Ticks};
 use bl_dsp::Random;
 use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
@@ -149,10 +151,27 @@ struct Echo {
     interval: Option<f64>,
 }
 
+/// Echo `echo`'s three draws from 0 to 1, from `seed`: whether it is
+/// reversed, whether it takes a random interval, and which.
+#[must_use]
+pub fn draws(seed: u64, echo: i64) -> [f64; 3] {
+    let mut random = Random::seeded(
+        seed.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+            ^ (echo as u64).wrapping_mul(0xBF58_476D_1CE4_E5B9),
+    );
+    core::array::from_fn(|_| (random.next_bipolar() + 1.0) / 2.0)
+}
+
 /// Pitch Hack: a shifting line a channel, and the echoes' draws.
 struct Hack {
     lines: Vec<Chan>,
-    random: Random,
+    seed: u64,
+    /// The echo playing, counted from the song's start.
+    count: i64,
+    /// The song frame the next block should start on if the song plays on.
+    expected: i64,
+    /// Frames played while the song is stopped, which carry the clock on.
+    idle: i64,
     /// The longest the line is read at, in frames.
     longest: f64,
     /// The echo playing, how far into it the device is, and its length.
@@ -172,7 +191,10 @@ impl Hack {
             lines: (0..config.channels)
                 .map(|_| Chan::new(rate, longest as usize, 4))
                 .collect(),
-            random: Random::seeded(device.id.0.get()),
+            seed: device.id.0.get(),
+            count: 0,
+            expected: i64::MIN,
+            idle: 0,
             longest,
             echo: Echo {
                 reversed: false,
@@ -183,16 +205,14 @@ impl Hack {
         }
     }
 
-    /// The next echo's draws: three an echo whatever the settings, so the
-    /// stream doesn't depend on them.
-    fn draw(&mut self, reverse: f64, random: f64) -> Echo {
-        let chance = |draw: f64| (draw + 1.0) / 2.0 * 100.0;
-        let reversed = chance(self.random.next_bipolar()) < reverse;
-        let takes = chance(self.random.next_bipolar()) < random;
-        let pick = (self.random.next_bipolar() + 1.0) / 2.0;
+    /// What the echo counted `self.count` does.
+    fn draw(&self, reverse: f64, random: f64) -> Echo {
+        let [reversed, takes, pick] = draws(self.seed, self.count);
         Echo {
-            reversed,
-            interval: takes.then(|| INTERVALS[(pick * INTERVALS.len() as f64) as usize]),
+            reversed: reversed * 100.0 < reverse,
+            interval: (takes * 100.0 < random).then(|| {
+                INTERVALS[((pick * INTERVALS.len() as f64) as usize).min(INTERVALS.len() - 1)]
+            }),
         }
     }
 }
@@ -218,16 +238,52 @@ impl NativeDevice for Hack {
         let (reverse, random) = (ramp(REVERSE), ramp(RANDOM));
         let (feedback, dry_wet) = (ramp(FEEDBACK), ramp(DRY_WET));
         let fade = 1.0 / (BYPASS_SECONDS * rate);
-        for i in 0..frames {
-            let delay = if synced {
-                beats * 60.0 / audio.bpm_at(i) * rate
+        let longest = self.longest;
+        let delay_at = |i: usize, bpm: f64| {
+            if synced {
+                beats * 60.0 / bpm * rate
             } else {
                 f64::from(time[i]) * rate / 1_000.0
             }
-            .clamp(MIN_FRAMES, self.longest);
-            if self.phase >= self.length {
+            .clamp(MIN_FRAMES, longest)
+        };
+        let playing = audio.playing();
+        let base = audio.song_position().get() + if playing { 0 } else { self.idle };
+        if base != self.expected {
+            // The song started or jumped: find the echo that holds `base`,
+            // on the song's grid while synced.
+            let delay = delay_at(0, audio.bpm_at(0));
+            let start = if synced {
+                let span = (beats * TICKS_PER_QUARTER as f64).round().max(1.0) as i64;
+                let ticks = audio
+                    .tempo()
+                    .frames_to_ticks(Frames(base), audio.sample_rate());
+                self.count = ticks.get().div_euclid(span);
+                let from = Ticks(self.count * span);
+                audio
+                    .tempo()
+                    .ticks_to_frames(from, audio.sample_rate())
+                    .get() as f64
+            } else {
+                self.count = (base as f64 / delay).floor() as i64;
+                self.count as f64 * delay
+            };
+            self.phase = base as f64 - start;
+            self.length = delay;
+            self.echo = self.draw(f64::from(reverse[0]), f64::from(random[0]));
+        }
+        self.expected = base + frames as i64;
+        self.idle = if playing {
+            0
+        } else {
+            self.idle + frames as i64
+        };
+        for i in 0..frames {
+            let delay = delay_at(i, audio.bpm_at(i));
+            while self.phase >= self.length {
                 self.phase -= self.length;
                 self.length = delay;
+                self.count += 1;
                 self.echo = self.draw(f64::from(reverse[i]), f64::from(random[i]));
             }
             let (echo, phase, length) = (self.echo, self.phase, self.length);

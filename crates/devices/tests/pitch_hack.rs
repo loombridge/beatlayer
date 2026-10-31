@@ -5,13 +5,12 @@
 //! runs as a real-time section under the allocation trap.
 
 use crate::common;
-use bl_core::time::{Bpm, TempoMap, TempoSegment, Ticks};
+use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};
 use bl_devices::pitch_hack::{
     CENTS, DIVISION, DRY_WET, FEEDBACK, INPUT, INTERVALS, RANDOM, REVERSE, SYNC, TIME, TRANSPOSE,
-    pitch_hack_type,
+    draws, pitch_hack_type,
 };
-use bl_dsp::Random;
-use bl_engine::Registry;
+use bl_engine::{Registry, TransportInfo};
 use bl_model::ParamId;
 use common::{RATE, device, node};
 
@@ -207,15 +206,10 @@ fn reverse_plays_each_echo_backwards_and_at_nothing_none() {
 }
 
 /// The intervals the first `echoes` echoes take at Random 100 %, from
-/// device 1's seed: three draws an echo.
+/// device 1's seed.
 fn intervals(echoes: usize) -> Vec<f64> {
-    let mut random = Random::seeded(1);
     (0..echoes)
-        .map(|_| {
-            let _ = (random.next_bipolar(), random.next_bipolar());
-            let pick = (random.next_bipolar() + 1.0) / 2.0;
-            INTERVALS[(pick * INTERVALS.len() as f64) as usize]
-        })
+        .map(|n| INTERVALS[(draws(1, n as i64)[2] * INTERVALS.len() as f64) as usize])
         .collect()
 }
 
@@ -242,6 +236,38 @@ fn random_gives_each_echo_an_interval_from_the_set_by_the_seed_run_after_run() {
     assert!(seen.len() >= 3, "more than one interval: {seen:?}");
     let again = render(&params, &input, 512, &constant(120.0));
     assert_eq!(out, again, "the draws repeat run after run");
+    // Played from echo 6's frame, the device draws what it drew there from
+    // the song's start: the draws count from the song, not the device.
+    let mut later = node(&registry(), &device(&pitch_hack_type(), &params), 4096);
+    let from = 72_000;
+    let mut tail = [Vec::new(), Vec::new()];
+    for start in (from..input.len()).step_by(4096) {
+        let end = (start + 4096).min(input.len());
+        let part = vec![input[start..end].to_vec(); 2];
+        let transport = TransportInfo {
+            playing: true,
+            position: Frames(start as i64),
+            ..TransportInfo::default()
+        };
+        for (all, chunk) in tail.iter_mut().zip(common::run_at(
+            later.as_mut(),
+            &part,
+            &[],
+            &constant(120.0),
+            transport,
+        )) {
+            all.extend(chunk);
+        }
+    }
+    for (n, interval) in wanted.iter().enumerate().skip(7) {
+        let at = 12_000 * n + 3_000;
+        let heard = crossing_hz(&tail[0][at - from..at - from + 6_000]);
+        let want = 1_000.0 * (interval / 12.0).exp2();
+        assert!(
+            cents(heard, want).abs() < 5.0,
+            "echo {n} from a later start"
+        );
+    }
     // At 0 % none is drawn: every echo takes Transpose.
     params.push((RANDOM, 0.0));
     let out = render(&params, &input, 4096, &constant(120.0));

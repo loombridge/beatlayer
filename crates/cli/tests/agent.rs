@@ -4910,6 +4910,74 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
+// Spec: color-limiter R8 and R1, re-enveloper R7 and R1 (WP-8.50): an agent
+// inserts Color Limiter and Re-Enveloper by type, sets their parameters by ID,
+// reads every one back, and reads each device's display with no engine.
+#[test]
+fn an_agent_inserts_color_limiter_and_re_enveloper_and_sets_and_reads_them() {
+    use bl_devices::color_limiter::{COLOR, COLOR_LIMITER, SATURATION};
+    use bl_devices::re_enveloper::{HIGH, HIGH_CROSSOVER, RE_ENVELOPER, factor};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("creative-extensions-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let insert = |name: &str, device_type: &str, index: u32| {
+        json!({ "command": "device.insert",
+                "args": { "track": track, "index": index,
+                          "device": { "id": {"$new": name}, "name": name,
+                                      "kind": { "native": { "device_type": device_type } },
+                                      "enabled": true, "params": [] } } })
+    };
+    let set = |name: &str, param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": name}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Creative Extensions", "commands": [
+            insert("Color Limiter", COLOR_LIMITER, 0),
+            insert("Re-Enveloper", RE_ENVELOPER, 1),
+            set("Color Limiter", SATURATION, 40.0),
+            set("Color Limiter", COLOR, -25.0),
+            set("Re-Enveloper", HIGH_CROSSOVER, 5_000.0),
+            set("Re-Enveloper", factor(HIGH), -60.0),
+        ] }),
+    );
+    for (name, count, wanted) in [
+        ("Color Limiter", 6, [(SATURATION, 40.0), (COLOR, -25.0)]),
+        (
+            "Re-Enveloper",
+            9,
+            [(HIGH_CROSSOVER, 5_000.0), (factor(HIGH), -60.0)],
+        ),
+    ] {
+        let device = reply["ids"][name].clone();
+        let read = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        let params = read["results"][0]["result"]["params"].as_array().unwrap();
+        assert_eq!(params.len(), count, "{name}: every parameter is listed");
+        assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+        for (id, value) in wanted {
+            let param = params.iter().find(|p| p["id"] == json!(id.0)).unwrap();
+            assert_eq!(param["value"], json!(value), "{name}");
+        }
+        let shown = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        );
+        let display = &shown["results"][0]["result"];
+        assert_eq!(display["live"], json!(false), "{name}: no engine publishes");
+        assert_eq!(display["readings"], json!([]), "{name}");
+    }
+}
+
 // Spec: auto-pan-tremolo R16. An agent inserts Auto Pan-Tremolo by type and
 // sets and reads its parameters by ID.
 #[test]

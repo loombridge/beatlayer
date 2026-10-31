@@ -32,6 +32,7 @@ pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod chorus_ensemble;
+pub mod color_limiter;
 pub mod compressor;
 pub mod crusher;
 mod cv;
@@ -78,6 +79,7 @@ pub mod overdrive;
 pub mod phaser_flanger;
 pub mod play_mod;
 pub mod polysynth;
+pub mod re_enveloper;
 pub mod remap;
 pub mod reverb;
 pub mod sampler;
@@ -104,6 +106,7 @@ pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use chorus_ensemble::{CHORUS_ENSEMBLE, chorus_ensemble_type};
+pub use color_limiter::{COLOR_LIMITER, ColorLimiter, color_limiter_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
 pub use cv_clock_in::{CV_CLOCK_IN, cv_clock_in_type};
@@ -142,6 +145,7 @@ pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
+pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
@@ -207,6 +211,8 @@ pub fn display_in(
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        COLOR_LIMITER => Some(color_limiter::display(device, data)),
+        RE_ENVELOPER => Some(re_enveloper::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
@@ -327,6 +333,8 @@ pub fn register(registry: &mut Registry) {
     tube::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
+    color_limiter::register(registry);
+    re_enveloper::register(registry);
     shifter::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);

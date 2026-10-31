@@ -2236,6 +2236,9 @@ impl Node for ClipPlayer {
         if list.clips.iter().any(|clip| clip.past.is_some()) {
             self.warp.forget_change();
         }
+        // Spec: warp-modes R8. Only a change to a playing clip crossfades: a
+        // list that arrives while the song is stopped starts on the new mode.
+        self.warp.set_crossfades(self.sounding);
         // Spec: audio-clips R18, warp-modes R8 and R15. The sources and the
         // loop read-back rooms of the clips the new list keeps move across
         // from the old one.

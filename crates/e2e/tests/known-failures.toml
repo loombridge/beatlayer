@@ -134,12 +134,6 @@ description = "Complex Pro on the melody at a speed whose input per block isn't 
 
 [[failure]]
 suite = "live_offline"
-key = "warp mode set while stopped/complex_pro"
-property = "live matches offline"
-description = "A warp mode changed while the song is stopped crossfades in from the old mode over 20 ms at the next start, live only: the clip list built while stopped still names the old mode as playing, so the first frames differ from the export (residual -41 dB from frame 1). Warp-modes R8 crossfades only a change to a playing clip."
-
-[[failure]]
-suite = "live_offline"
 key = "midi effect/Arpeggiator"
 property = "live matches offline"
 description = "The Arpeggiator plays differently live than in an export: when the held notes run out it cuts its sounding notes at the start of the block, not on the note-off's frame, and restarts its step timing from the block's start, so note lengths depend on the block size (arpeggiator R20, export R14). Before Cascade with the two-bar phrase, the renders part from frame 29,697 (residual -28 dB)."

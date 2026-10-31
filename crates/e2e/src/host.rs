@@ -515,8 +515,6 @@ impl Host {
         let started = state.clock - before - u64::try_from(played).unwrap_or_default();
         self.advance_ms(millis);
         let capture = self.recorder.stop();
-        let under = self.shell().audio().disk_stats().map(|s| s.totals.underruns);
-        eprintln!("DIAG started {started} mod256 {} played {played} position {:?} clock {} before {before} underruns {under:?}", started % 256, state.position, state.clock);
         self.stop();
         capture.slice(
             usize::try_from(started).unwrap_or_default(),

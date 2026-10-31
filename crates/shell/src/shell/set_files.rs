@@ -646,6 +646,7 @@ impl Shell {
         self.set_path = Some(path);
         self.set_file_changed();
         self.dirty = false;
+        self.save_history.saves = self.save_history.saves.wrapping_add(1);
         // Spec: crash-recovery R6. The save holds every edit, so the
         // journal retires.
         self.journal_saved();

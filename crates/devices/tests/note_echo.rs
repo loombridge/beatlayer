@@ -8,11 +8,12 @@ use crate::common;
 use bl_core::time::Bpm;
 use bl_devices::note_echo::{
     FEEDBACK, INPUT, MPE, NOTE_ECHO, PITCH, PRESS_FEEDBACK, SYNC, TIME_MS, TIME_SYNC,
-    VELOCITY_DECAY,
+    VELOCITY_DECAY, note_echo_type,
 };
 use bl_engine::{Block, DeviceType, Node, NoteEvent, NoteKind};
 use bl_model::{Command, DeviceRole};
 use common::chain::{BEAT_FRAMES, Chain, note, nothing_hangs};
+use common::{device, node, notes_through_events, off, on, registry, set};
 
 const SIZES: [usize; 4] = [1, 100, 512, 4096];
 
@@ -236,6 +237,54 @@ fn input_notes_without_an_id_keep_their_echoes() {
     let heard = chain.heard();
     assert_eq!(times(&heard, NoteKind::On), [0, 48_000], "{heard:?}");
     assert_eq!(times(&heard, NoteKind::Off), [24_000, 72_000], "{heard:?}");
+}
+
+// Spec: device-framework R31, midi-echo R2. A note-off follows what happened
+// to its note-on: switching Input to Mute while a note is held still ends the
+// dry note, and switching to Thru mid-note starts no dry note-off.
+#[test]
+fn switching_input_to_mute_while_a_note_is_held_still_ends_it() {
+    let seven = |sent: &[NoteEvent], kind| {
+        sent.iter()
+            .filter(|n| n.kind == kind && n.key == 60 && n.note_id == Some(7))
+            .map(|n| n.offset)
+            .collect::<Vec<_>>()
+    };
+    let run = |start: f64, then: f64| {
+        let device = device(&note_echo_type(), &[(INPUT, start), (FEEDBACK, 0.0)]);
+        let mut echo = node(&registry(), &device, 512);
+        notes_through_events(
+            echo.as_mut(),
+            &[on(0, 60, 7), off(200, 60, 7)],
+            &[set(100, INPUT, then)],
+            512,
+        )
+    };
+    let thru_then_mute = run(0.0, 1.0);
+    assert_eq!(seven(&thru_then_mute, NoteKind::On), [0]);
+    assert_eq!(seven(&thru_then_mute, NoteKind::Off), [200]);
+
+    let mute_then_thru = run(1.0, 0.0);
+    assert!(seven(&mute_then_thru, NoteKind::On).is_empty());
+    assert!(seven(&mute_then_thru, NoteKind::Off).is_empty());
+}
+
+// Spec: midi-echo R7. A note with no room in the device makes no echoes, so
+// no echo is left without its note-off.
+#[test]
+fn more_than_64_overlapping_notes_leave_no_echo_hanging() {
+    let mut chain = Chain::new(4096);
+    chain.effect(NOTE_ECHO, &[(SYNC, 1.0), (TIME_SYNC, 4.0), (FEEDBACK, 0.0)]);
+    chain.clip(8, (0u8..70).map(|k| note(k, 0, 1)));
+    chain.sync();
+    chain.play();
+    chain.run(4 * BEAT_FRAMES as usize, 512);
+    let heard = chain.heard();
+    assert!(nothing_hangs(&heard), "{heard:?}");
+    for key in 0..64 {
+        let count = |kind| heard.iter().filter(|h| h.1 == kind && h.2 == key).count();
+        assert_eq!(count(NoteKind::On), count(NoteKind::Off), "key {key}");
+    }
 }
 
 /// A test device that forwards every note without its ID, as the engine's

@@ -3583,36 +3583,47 @@ impl Document {
             }
             Command::UnfreezeTracks { tracks } => {
                 for track in tracks {
-                    let regions: Vec<crate::freeze::FrozenClip> = self
-                        .track_ref(*track)?
-                        .frozen
-                        .as_ref()
-                        .map(|frozen| frozen.clips.clone())
-                        .unwrap_or_default();
+                    let Some(frozen) = self.track_ref(*track)?.frozen.clone() else {
+                        continue;
+                    };
+                    // Each clip gets back the data of the region it plays: by
+                    // its ID, or, for a copy made while frozen, by the
+                    // stretch of the freeze file it starts at (R10).
+                    let original = |clip: &crate::clip::Clip| {
+                        frozen
+                            .clip(clip.id)
+                            .or_else(|| {
+                                let ClipData::Audio(audio) = &clip.data else {
+                                    return None;
+                                };
+                                let first = audio.warp_markers.first()?.time;
+                                frozen
+                                    .clips
+                                    .iter()
+                                    .find(|r| r.media == audio.media && r.start == first)
+                            })
+                            .map(|region| region.original.clone())
+                    };
+                    let back = |clip: &Shared<crate::clip::Clip>| {
+                        original(clip).map(|data| {
+                            let mut back = (**clip).clone();
+                            back.data = data;
+                            Shared::new(back)
+                        })
+                    };
                     let held = self.track_mut(*track)?;
-                    for region in regions {
-                        // A slot clip moved to another scene since the freeze
-                        // is found by its ID.
-                        let scene = region.scene.and_then(|_| {
-                            held.slots
-                                .iter()
-                                .find(|(_, clip)| clip.id == region.clip)
-                                .map(|(scene, _)| *scene)
-                        });
-                        let existing = match (region.scene, scene) {
-                            (None, _) => held.clips.get(&region.clip),
-                            (Some(_), scene) => scene.and_then(|scene| held.slots.get(&scene)),
-                        };
-                        let Some(existing) = existing.cloned() else {
-                            continue;
-                        };
-                        let mut back = (*existing).clone();
-                        back.data = region.original;
-                        match scene {
-                            None => held.clips.insert(region.clip, Shared::new(back)),
-                            Some(scene) => held.slots.insert(scene, Shared::new(back)),
-                        };
-                    }
+                    let lanes: Vec<_> = held
+                        .clips
+                        .iter()
+                        .filter_map(|(id, clip)| Some((*id, back(clip)?)))
+                        .collect();
+                    let slots: Vec<_> = held
+                        .slots
+                        .iter()
+                        .filter_map(|(scene, clip)| Some((*scene, back(clip)?)))
+                        .collect();
+                    held.clips.extend(lanes);
+                    held.slots.extend(slots);
                     held.frozen = None;
                 }
                 Ok(())
@@ -9690,6 +9701,26 @@ mod tests {
         assert!(held.clips().all(|c| !c.data.is_audio()));
         assert!(held.slots().all(|(_, c)| !c.data.is_audio()));
         assert_eq!(held.slots().next().map(|(s, _)| s), Some(other));
+    }
+
+    // Spec: freeze-and-bounce R7, R10. A copy made of a frozen MIDI clip
+    // unfreezes to the MIDI of the clip it was copied from.
+    #[test]
+    fn a_copy_of_a_frozen_midi_clip_unfreezes_to_midi() {
+        let (mut song, track, frozen) = frozen_midi_song();
+        let held = song.doc.track(track).unwrap();
+        let mut copy = held.clips().next().unwrap().clone();
+        copy.id = song.fresh();
+        copy.start = Ticks::WHOLE * 4;
+        let id = copy.id;
+        song.apply(Command::CreateClip { track, clip: copy })
+            .unwrap();
+
+        song.apply(Command::UnfreezeTracks {
+            tracks: vec![track],
+        })
+        .unwrap();
+        assert_eq!(song.doc.clip(id).unwrap().data, frozen.clips[0].original);
     }
 
     #[test]

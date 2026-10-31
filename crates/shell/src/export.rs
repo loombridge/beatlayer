@@ -35,7 +35,9 @@ use std::time::{Duration, Instant};
 
 use bl_core::time::{SampleRate, Ticks, TimeSignatureMap};
 use bl_engine::{EngineConfig, MediaLibrary, Offline, Output, Registry, TransportCommand, When};
-use bl_media::{AudioWriter, BitDepth, Dither, EncodeSpec, FileType, MP3_RATES, RateConverter};
+use bl_media::{
+    AudioWriter, BitDepth, Dither, EncodeSpec, FLAC_MAX_RATE, FileType, MP3_RATES, RateConverter,
+};
 use bl_model::{ContentHash, DeviceId, Document, TrackId};
 pub use bl_plugin_host::Hosts;
 use bl_shell_spec::editing::Position;
@@ -449,6 +451,14 @@ fn check(job: &Job) -> Result<(), ExportError> {
             "a sample rate of {} Hz; MP3 holds {} Hz",
             job.sample_rate,
             rates.join(", ")
+        ));
+    }
+    // The FLAC encoder stops at 96,000 Hz; a higher rate is refused before the
+    // render rather than after it.
+    if job.file_type == FileType::Flac && job.sample_rate > FLAC_MAX_RATE {
+        return invalid(format!(
+            "a sample rate of {} Hz; FLAC is written up to {FLAC_MAX_RATE} Hz",
+            job.sample_rate
         ));
     }
     if job.path.file_name().is_none() || job.path.is_dir() {

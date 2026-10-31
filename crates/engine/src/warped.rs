@@ -1070,6 +1070,17 @@ impl Positions<'_> {
                         }
                         _ => {
                             if linear >= flat.end {
+                                // Past the file from the first frame the run
+                                // is silent, for a run of no frames would
+                                // never let its caller move on.
+                                if i == 0 {
+                                    return Fill {
+                                        frames: out.len(),
+                                        sound: false,
+                                        speed: flat.ratio * step,
+                                        neutral: false,
+                                    };
+                                }
                                 break;
                             }
                             linear

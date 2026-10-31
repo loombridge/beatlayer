@@ -72,6 +72,22 @@ impl Shell {
         closed
     }
 
+    /// Closes the editors of devices the set no longer has. The plug-ins
+    /// stay loaded, so undo brings a deleted device back with its state.
+    pub(super) fn close_missing_plug_in_windows(&mut self) {
+        let doc = self.editor.document();
+        let gone = |device| doc.device(device).is_none();
+        for device in self.plugins.open_editors().into_iter().filter(|d| gone(*d)) {
+            let _ = self.plugins.close_editor(device);
+        }
+        for device in self.au.open_editors().into_iter().filter(|d| gone(*d)) {
+            let _ = self.au.close_editor(device);
+        }
+        for device in self.lv2.open_editors().into_iter().filter(|d| gone(*d)) {
+            let _ = self.lv2.close_editor(device);
+        }
+    }
+
     /// Hides and shows the open plug-in editor windows to follow View ▸
     /// Plug-In Windows and Auto-Hide Plug-In Windows, as their tracks'
     /// floating windows do (R31, R33): a hidden editor stays open.

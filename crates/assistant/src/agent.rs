@@ -1,30 +1,32 @@
 //! The agent loop: one turn of the conversation, run to its end
-//! (WP-2.23, part 2). It sends the conversation and the command tools to a
-//! [`Provider`], runs each tool call as the registry command it names, feeds
-//! every result back, and repeats until the model answers without calling a
-//! tool.
+//! (WP-2.23, part 2). It sends the conversation and the tools
+//! ([`crate::tools`]) to a [`Provider`], answers each tool call (a `run`
+//! call runs the registry command it names), feeds every result back, and
+//! repeats until the model answers without calling a tool.
 //!
 //! Two things the loop owes the person, the same the agent API gives theirs:
 //!
 //! - **One undo step per turn.** Every change a turn makes joins one undo
 //!   step named `label`, so the person undoes a turn at once however many
 //!   commands it ran.
-//! - **The same permission classes.** Each call's registered class goes to
+//! - **The same permission classes.** Each command a call runs goes to
 //!   [`Commands::permit`], whose rules decide run or refuse; a refusal is
 //!   returned to the model as that call's result rather than ending the
 //!   turn. In the app the person is asked; headless and in tests,
 //!   destructive and external calls are refused.
 //!
+//! A call whose arguments weren't JSON isn't run: the model is told why as
+//! that call's result, and the reply's other calls run as usual.
+//!
 //! A turn also ends early when the person cancels it (between calls,
 //! keeping what ran) or when it has run its cap on calls, so a model that
 //! keeps calling tools can't run away.
 
-use bl_commands::{CommandSpec, Permission};
 use serde_json::Value;
 
 use crate::message::{Event, Message, Part, Reply, Request, Role, ToolResult};
 use crate::provider::{Error, Provider};
-use crate::tools::{ToolCall, ToolSet};
+use crate::tools::{self, DESCRIBE_COMMAND, LIST_COMMANDS, QUERY, RUN, ToolCall};
 
 /// The most tool calls one turn runs unless the caller asks for another
 /// count: a runaway model is stopped rather than left calling forever.
@@ -43,12 +45,16 @@ pub trait Commands {
     /// Closes the turn's undo step, keeping what ran, whatever ended the
     /// turn. Called once after the last of the turn's calls.
     fn end_turn(&mut self);
-    /// Whether `command`, called with `args` and carrying the registered
-    /// class `class`, may run now: `Ok` to run it, or why it's refused. A
-    /// refusal is the call's result, which goes back to the model.
-    fn permit(&mut self, command: &str, args: &Value, class: Permission) -> Result<(), String>;
+    /// Whether `command`, called with `args`, may run now: `Ok` to run it,
+    /// or why it's refused. The host decides its permission class from the
+    /// command and its arguments. A refusal is the call's result, which goes
+    /// back to the model.
+    fn permit(&mut self, command: &str, args: &Value) -> Result<(), String>;
     /// Runs `command` with `args`, returning its result, or why it failed.
     fn run(&mut self, command: &str, args: Value) -> Result<Value, String>;
+    /// Answers a read-only tool call (`list_commands`, `describe_command` or
+    /// `query`), which changes nothing and needs no permission.
+    fn read(&mut self, tool: &str, args: Value) -> Result<Value, String>;
 }
 
 /// One tool call the loop ran, and what came back: the command's result, or
@@ -83,21 +89,17 @@ pub struct Turn {
     pub stopped: Option<Stopped>,
 }
 
-/// The agent loop: the tools it may offer, the undo label it groups a turn
-/// under, and the call cap.
+/// The agent loop: the undo label it groups a turn under, and the call cap.
 pub struct Agent {
-    tools: ToolSet,
     max_calls: usize,
     label: String,
 }
 
 impl Agent {
-    /// The loop offering `commands` as the model's tools, with the default
-    /// call cap and undo label.
+    /// The loop with the default call cap and undo label.
     #[must_use]
-    pub fn new<'a>(commands: impl IntoIterator<Item = &'a CommandSpec>) -> Self {
+    pub fn new() -> Self {
         Self {
-            tools: ToolSet::new(commands),
             max_calls: DEFAULT_MAX_CALLS,
             label: DEFAULT_LABEL.to_owned(),
         }
@@ -138,7 +140,7 @@ impl Agent {
         cancel: &dyn Fn() -> bool,
         on_event: &mut dyn FnMut(Event),
     ) -> Result<Turn, Error> {
-        request.tools = self.tools.tools().to_vec();
+        request.tools = tools::tools();
         commands.begin_turn(&self.label);
         let turn = self.turn(provider, request, commands, cancel, on_event);
         commands.end_turn();
@@ -179,7 +181,7 @@ impl Agent {
                     stopped = Some(Stopped::Cap);
                     not_run(Stopped::Cap)
                 } else {
-                    let result = self.call(commands, call);
+                    let result = Self::call(commands, call);
                     let content = match &result {
                         Ok(value) => value.to_string(),
                         Err(message) => message.clone(),
@@ -207,17 +209,34 @@ impl Agent {
         }
     }
 
-    /// Runs one tool call as the command it names, or reports why it didn't.
-    fn call(&self, commands: &mut dyn Commands, call: &ToolCall) -> Result<Value, String> {
-        let command = call
-            .command(&self.tools)
-            .map_err(|error| error.to_string())?;
-        let class = self
-            .tools
-            .get(&call.name)
-            .map_or(Permission::External, |tool| tool.permission);
-        commands.permit(&command.command, &command.args, class)?;
-        commands.run(&command.command, command.args)
+    /// Answers one tool call: runs the command a `run` call names, reads for
+    /// the others, or reports why it didn't.
+    fn call(commands: &mut dyn Commands, call: &ToolCall) -> Result<Value, String> {
+        if let Some(why) = call.unparsed_because() {
+            return Err(format!(
+                "the arguments of `{}` aren't JSON: {why}; send them again as a JSON object",
+                call.name
+            ));
+        }
+        match call.name.as_str() {
+            RUN => {
+                let command = call.command().map_err(|error| error.to_string())?;
+                commands.permit(&command.command, &command.args)?;
+                commands.run(&command.command, command.args)
+            }
+            LIST_COMMANDS | DESCRIBE_COMMAND | QUERY => {
+                commands.read(&call.name, call.arguments.clone())
+            }
+            other => Err(format!(
+                "the model called a tool called `{other}`, which it wasn't offered"
+            )),
+        }
+    }
+}
+
+impl Default for Agent {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -880,3 +880,79 @@ fn paste_bounced_audio_onto_a_take_lane_places_the_audio_on_that_lane() {
     );
     assert_eq!(doc.take_lane(lane).unwrap().clips.len(), 1);
 }
+
+// Spec: freeze-and-bounce R19, R24. A group bounced from a late span renders
+// that span's length, not the span's end, and plays warped as a frozen clip
+// does.
+#[test]
+fn a_group_bounced_from_a_late_span_renders_only_the_span() {
+    let scratch = Scratch::new("group-late");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 1.0, 2);
+    let bar = Ticks::WHOLE.get();
+    place(&mut shell, track, &file, 8 * bar);
+    let grouped = shell
+        .run("track.group", json!({ "tracks": [track] }))
+        .unwrap();
+    let group: TrackId = serde_json::from_value(grouped["track"].clone()).unwrap();
+    saved(&scratch, &mut shell);
+    shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": 8 * bar, "end": 9 * bar }),
+        )
+        .unwrap();
+
+    let result = shell
+        .run(ids::BOUNCE_TO_NEW_TRACK, json!({ "tracks": [group] }))
+        .unwrap();
+    let written = result["files"][0].as_str().unwrap();
+    let decoded = bl_media::decode_file(Path::new(written)).unwrap();
+    // A bar at 120 BPM is two seconds.
+    assert_eq!(
+        decoded.frames(),
+        2 * 48_000,
+        "the file is the span's length"
+    );
+    let made: TrackId = serde_json::from_value(result["tracks"][0].clone()).unwrap();
+    let doc = shell.editor().document();
+    let clip = doc.track(made).unwrap().clips().next().unwrap();
+    let bl_model::ClipData::Audio(audio) = &clip.data else {
+        panic!("an audio clip");
+    };
+    assert!(audio.warp, "R19: the bounced clip plays warped");
+}
+
+// Spec: freeze-and-bounce R19. Under a tempo ramp a bounced clip's markers
+// keep its beats on the seconds they were rendered at.
+#[test]
+fn a_bounced_clip_under_a_tempo_ramp_has_markers_inside() {
+    let scratch = Scratch::new("ramp");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let file = scratch.path("tone.wav");
+    wav(&file, 4.0, 2);
+    place(&mut shell, track, &file, 0);
+    shell
+        .run(
+            "song.set_tempo",
+            json!({ "tempo": [
+                { "kind": "ramp", "start": 0, "from": 100.0, "to": 140.0 },
+                { "kind": "constant", "start": 16 * 705_600, "bpm": 140.0 }
+            ] }),
+        )
+        .unwrap();
+    saved(&scratch, &mut shell);
+
+    shell
+        .run(ids::BOUNCE_IN_PLACE, json!({ "tracks": [track] }))
+        .unwrap();
+    let doc = shell.editor().document();
+    let clip = doc.track(track).unwrap().clips().next().unwrap();
+    let bl_model::ClipData::Audio(audio) = &clip.data else {
+        panic!("an audio clip");
+    };
+    assert!(audio.warp_markers.len() > 2, "{:?}", audio.warp_markers);
+}

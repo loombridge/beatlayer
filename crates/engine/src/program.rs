@@ -67,6 +67,8 @@ use crate::zones::{ChainSelector, ZoneFilter};
 /// goes with it to the drop thread.
 pub struct EngineProgram {
     pub(crate) generation: u64,
+    /// How far Main's output lags song time, in frames.
+    pub(crate) main_latency: u32,
     /// The generation whose nodes this one takes over.
     pub(crate) base: Option<u64>,
     pub(crate) slots: Shared<NodeSlot>,

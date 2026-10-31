@@ -107,7 +107,7 @@ impl Provider for Gemini {
                     on_event(Event::Text(text.to_owned()));
                 }
                 if let Some(function) = part.get("functionCall") {
-                    let call = call(function, reply.tool_calls.len() + 1)?;
+                    let call = call(function, reply.tool_calls.len() + 1);
                     on_event(Event::ToolCall(call.clone()));
                     reply.tool_calls.push(call);
                 }
@@ -122,20 +122,22 @@ impl Provider for Gemini {
 
 /// The call a `functionCall` part makes. Gemini's calls have no ID, so
 /// `count` names this one.
-fn call(function: &Value, count: usize) -> Result<ToolCall, Error> {
+fn call(function: &Value, count: usize) -> ToolCall {
+    let id = format!("call_{count}");
     let name = function["name"].as_str().unwrap_or_default().to_owned();
     let arguments = match &function["args"] {
-        Value::String(arguments) => serde_json::from_str(arguments).map_err(|error| {
-            Error::Protocol(format!("the arguments of `{name}` aren't JSON: {error}"))
-        })?,
+        Value::String(raw) => match serde_json::from_str(raw) {
+            Ok(arguments) => arguments,
+            Err(error) => return ToolCall::unparsed(id, name, raw, &error.to_string()),
+        },
         Value::Null => json!({}),
         arguments => arguments.clone(),
     };
-    Ok(ToolCall {
-        id: format!("call_{count}"),
+    ToolCall {
+        id,
         name,
         arguments,
-    })
+    }
 }
 
 /// Why the model stopped, in Gemini's words.

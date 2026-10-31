@@ -725,6 +725,9 @@ pub struct Shell {
     /// The panel's Stop button, which the turn running looks at between
     /// calls.
     assistant_stop_flag: crate::assistant::StopFlag,
+    /// How the assistant's `query` tool reads the project, once the host
+    /// has given it one.
+    assistant_query: Option<crate::assistant::QueryFn>,
     /// Whether the Undo History panel shows (WP-6.28): view state, never
     /// part of the set, like the browser's.
     undo_history_open: bool,
@@ -1374,6 +1377,7 @@ impl Shell {
             assistant_open: false,
             assistant_conversation: Arc::default(),
             assistant_stop_flag: Arc::default(),
+            assistant_query: None,
             undo_history_open: false,
             save_history: save_history::SaveHistory::default(),
             arrangement: ArrangementView::new(),
@@ -1631,6 +1635,7 @@ impl Shell {
         self.mixer
             .clamp_scroll(self.editor.document(), &self.arrangement);
         self.devices.forget_missing(self.editor.document());
+        self.close_missing_plug_in_windows();
         // Spec: control-surfaces R24, R26, R30. Locks and rings follow the
         // set.
         self.sync_instant();

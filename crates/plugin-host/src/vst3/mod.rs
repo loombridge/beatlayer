@@ -742,7 +742,9 @@ impl Vst3Host {
                 let plain = unsafe { instance.controller.normalizedParamToPlain(id, normalized) };
                 (ParamId(id), plain)
             })
-            .collect();
+            .collect::<Vec<_>>();
+        #[cfg(feature = "test-hooks")]
+        crate::count_value_reads(values.len());
         Some(PluginStatus {
             plugin_id: instance.plugin_id.clone(),
             path: instance.path.clone(),
@@ -762,6 +764,17 @@ impl Vst3Host {
             editor_hidden: false,
             values,
         })
+    }
+
+    /// Whether the device's plug-in has an editor, whether it's open, and
+    /// whether it's hidden, or `None` if the device has no VST3 plug-in. It
+    /// hosts no editors yet.
+    #[must_use]
+    pub fn editor_state(&self, device: DeviceId) -> Option<(bool, bool, bool)> {
+        let mut guard = lock(&self.inner.main);
+        let main = guard.get().ok()?;
+        (main.missing.contains_key(&device) || main.instances.contains_key(&device))
+            .then_some((false, false, false))
     }
 
     /// Lets go of every plug-in whose device isn't in `keep`, as when a set

@@ -44,6 +44,10 @@ pub struct Window {
     /// resize by the person shows up as a difference from it.
     size: Cell<GuiSize>,
     scale: f64,
+    /// What `set_visible` last asked for. A window the person iconified
+    /// stays as it is: mapping it again would ask the window manager to
+    /// restore it.
+    mapped: Cell<bool>,
 }
 
 /// Connects to the display. A busy X server can reset a new connection
@@ -134,6 +138,7 @@ impl Window {
             delete_window,
             size: Cell::new(size),
             scale,
+            mapped: Cell::new(false),
         })
     }
 
@@ -177,6 +182,9 @@ impl Window {
     }
 
     pub fn set_visible(&self, shown: bool) {
+        if self.mapped.replace(shown) == shown {
+            return;
+        }
         let _ = if shown {
             self.conn.map_window(self.window)
         } else {
@@ -292,4 +300,58 @@ fn display_scale(conn: &RustConnection, root: XWindow) -> f64 {
 /// A failed request, as a string for the layer's errors.
 fn why(error: impl std::fmt::Display) -> String {
     error.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use x11rb::connection::Connection as _;
+    use x11rb::protocol::Event;
+    use x11rb::protocol::xproto::{ChangeWindowAttributesAux, ConnectionExt as _, EventMask};
+    use x11rb::rust_connection::RustConnection;
+
+    use super::{GuiSize, Window};
+
+    // Spec: lv2-hosting R13. Showing a window that is already shown asks the
+    // window manager for nothing: it would restore an iconified editor.
+    #[test]
+    fn showing_a_shown_window_again_maps_it_once() {
+        let (manager, screen) = RustConnection::connect(None).expect("a display");
+        let root = manager.setup().roots[screen].root;
+        // This client plays the window manager: a map request from another
+        // client reaches it, and the window stays unmapped.
+        manager
+            .change_window_attributes(
+                root,
+                &ChangeWindowAttributesAux::new().event_mask(EventMask::SUBSTRUCTURE_REDIRECT),
+            )
+            .unwrap();
+        manager.flush().unwrap();
+        let window = Window::open(
+            "t",
+            GuiSize {
+                width: 100,
+                height: 100,
+            },
+            true,
+        )
+        .expect("a window");
+        window.set_visible(true);
+        window.set_visible(true);
+        window.set_visible(true);
+        // A round trip on each connection brings the requests in order.
+        window
+            .conn
+            .get_geometry(window.window)
+            .unwrap()
+            .reply()
+            .unwrap();
+        manager.get_input_focus().unwrap().reply().unwrap();
+        let mut requests = 0;
+        while let Some(event) = manager.poll_for_event().unwrap() {
+            if matches!(event, Event::MapRequest(e) if e.window == window.id()) {
+                requests += 1;
+            }
+        }
+        assert_eq!(requests, 1);
+    }
 }

@@ -9596,6 +9596,7 @@ mod tests {
             start: 0.0,
             end: 1.0,
             tempo: 120.0,
+            markers: Vec::new(),
             length: clip.length,
             original: clip.data.clone(),
             scene,

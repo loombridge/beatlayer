@@ -435,7 +435,7 @@ How perception works, as WP-1.16 built it ([the agent perception spec](specs/age
 
 ### The built-in assistant
 
-`bl-assistant` gives users without an agent client an assistant panel in the app. It runs the agent loop over the same tools, with providers behind one trait:
+`bl-assistant` gives users without an agent client an assistant panel in the app. It runs the agent loop over the agent API's discovery, `run` and `query` tools (`list_commands`, `describe_command`, `run`, `query`: four tools, never one per command, which would pass OpenAI's limit of 128 tools in a request), with providers behind one trait:
 
 - **Cloud:** OpenAI-compatible APIs (including OpenRouter), Anthropic, and Google.
 - **Local:** any OpenAI-compatible server, such as Ollama, LM Studio, llama.cpp, or vLLM.

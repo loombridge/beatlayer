@@ -187,8 +187,11 @@ fn the_activity_log_opens_shows_what_ran_and_closes() {
             text: String::new(),
             tool_calls: vec![ToolCall {
                 id: "c1".to_owned(),
-                name: "track_rename".to_owned(),
-                arguments: json!({ "track": track, "name": "From the Log" }),
+                name: "run".to_owned(),
+                arguments: json!({
+                    "command": "track.rename",
+                    "args": { "track": track, "name": "From the Log" },
+                }),
             }],
             stop: Stop::End,
         },
@@ -200,7 +203,7 @@ fn the_activity_log_opens_shows_what_ran_and_closes() {
     ]);
     let mut prompter = Quiet;
     {
-        let agent = Agent::new(h.shell.registry().iter());
+        let agent = Agent::new();
         let mut request = Request::new("test-model");
         let mut commands = AssistantCommands::new(&mut h.shell, &mut prompter);
         agent

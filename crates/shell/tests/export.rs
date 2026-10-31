@@ -1364,3 +1364,99 @@ fn an_offline_render_sends_nothing_to_midi_ports() {
     assert!(test.sent("Synth").is_empty());
     assert_eq!(shell.midi().output().stats().snapshot().sent, 0);
 }
+
+/// The frame the impulse is on, after the fade-in a clip starts with.
+const IMPULSE: usize = 1000;
+
+/// Writes a 32-bit float stereo WAV at 48 kHz of `frames` frames, silent but
+/// for a 0.25 impulse on frame `IMPULSE`.
+fn impulse_wav(path: &Path, frames: usize) {
+    let mut writer = bl_media::AudioWriter::create(
+        path,
+        bl_media::EncodeSpec {
+            file_type: bl_media::FileType::Wav,
+            bit_depth: bl_media::BitDepth::Float32,
+            dither: bl_media::Dither::None,
+            sample_rate: 48_000,
+            channels: 2,
+        },
+    )
+    .unwrap();
+    for frame in 0..frames {
+        let sample = if frame == IMPULSE { 0.25 } else { 0.0 };
+        writer.write(&[sample, sample]).unwrap();
+    }
+    writer.finish().unwrap();
+}
+
+/// Exports `frames` frames from 1.1.1, as 32-bit float at 48 kHz, and
+/// returns the first channel's samples.
+fn export_frames(shell: &mut Shell, path: &Path, frames: i64) -> Vec<f32> {
+    // 120 BPM: a frame is 2 / 48,000 of a quarter note.
+    let end = frames * Ticks::QUARTER.get() * 2 / 48_000;
+    shell
+        .run("arrangement.select_time", json!({ "start": 0, "end": end }))
+        .unwrap();
+    export(
+        shell,
+        json!({ "path": text(path), "bit_depth": 32, "sample_rate": 48000 }),
+    );
+    let decoded = bl_media::decode_file(path).unwrap();
+    decoded.channel(0).unwrap().to_vec()
+}
+
+/// Spec: delay-compensation R10, export R3.
+#[test]
+fn an_export_starts_on_its_first_frame_through_a_lookahead_on_main() {
+    let scratch = Scratch::new("lead");
+    let mut shell = Shell::headless();
+    let file = scratch.path("Impulse.wav");
+    impulse_wav(&file, 4096);
+    shell
+        .run(
+            browser_commands::ADD_TO_ARRANGEMENT,
+            json!({ "paths": [text(&file)], "at": 0 }),
+        )
+        .unwrap();
+    let main = shell.editor().document().main_id();
+    let device: DeviceId = shell.new_id();
+    // The Limiter's default look-ahead is 3 ms.
+    shell
+        .run(
+            "device.insert",
+            json!({ "track": main, "index": 0, "device": {
+                "id": device, "name": "Limiter", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": "beatlayer.brickwall" } } } }),
+        )
+        .unwrap();
+    let samples = export_frames(&mut shell, &scratch.path("lead.wav"), 4096);
+    assert_eq!(samples.len(), 4096);
+    let first = samples.iter().position(|s| s.abs() > 1e-6);
+    assert_eq!(
+        first,
+        Some(IMPULSE),
+        "the impulse is where the clip puts it"
+    );
+}
+
+/// Spec: export R3. The metronome is for playing along, not for the file.
+#[test]
+fn an_export_has_no_clicks_and_no_count_in() {
+    let scratch = Scratch::new("clicks");
+    let mut shell = shell_with_a_clip(&scratch);
+    let quiet = export_frames(&mut shell, &scratch.path("quiet.wav"), 96_000);
+    shell
+        .run(
+            "transport.set_metronome_enabled",
+            json!({ "enabled": true }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "transport.set_metronome_count_in",
+            json!({ "count_in": "1_bar" }),
+        )
+        .unwrap();
+    let clicked = export_frames(&mut shell, &scratch.path("clicked.wav"), 96_000);
+    assert_eq!(quiet, clicked);
+}

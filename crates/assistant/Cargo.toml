@@ -9,9 +9,6 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-# The commands the model calls: each one's description and argument schema
-# becomes a tool (WP-2.23).
-bl-commands.workspace = true
 # API keys: the OS keychain, never a settings or project file. The default
 # features are its platform stores: Keychain on macOS, Credential Manager on
 # Windows, the Secret Service on Linux.
@@ -29,6 +26,9 @@ serde = { version = "1.0.228", default-features = false, features = ["std", "der
 serde_json = "1"
 
 [dev-dependencies]
+# The agent-loop tests' command registry, which decides each command's
+# permission class.
+bl-commands.workspace = true
 # The tests' command argument types: the schemas, with their `$defs` and
 # `$ref`s, that each provider converts to its own tool format.
 schemars = { version = "=1.2.2", default-features = false, features = ["std", "derive"] }

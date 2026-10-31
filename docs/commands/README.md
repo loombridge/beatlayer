@@ -13629,6 +13629,7 @@ One clip's stretch of a freeze file: the file it plays, the second it starts at,
 | `tempo` | number | yes | The tempo the clip was rendered at, in BPM: its warp map keeps the file on the beats it played then (R6). |
 | `length` | [`Ticks`](#ticks) | yes | The clip's length in ticks, for the warp map. |
 | `cycle` | number or null | no | For a frozen Session clip, the length of one turn of its loop in seconds; `null` for an Arrangement clip, or a clip that doesn't loop. |
+| `markers` | array of [`WarpMarker`](#warpmarker) | no | Warp markers between the first and last, where the tempo map changes inside the clip, so a ramp doesn't stretch the file between two markers (R6). Empty where the tempo is steady. |
 | `original` | [`ClipData`](#clipdata) | no | The clip's own data before the freeze, kept so unfreezing plays it again (R10). |
 | `scene` | [`SceneId`](#sceneid) or null | no | The Session slot it belongs to; `null` for an Arrangement clip. |
 
@@ -13658,6 +13659,13 @@ One clip's stretch of a freeze file: the file it plays, the second it starts at,
     "length": {
       "$ref": "#/$defs/Ticks",
       "description": "The clip's length in ticks, for the warp map."
+    },
+    "markers": {
+      "description": "Warp markers between the first and last, where the tempo map changes inside the clip, so a ramp doesn't stretch the file between two markers (R6). Empty where the tempo is steady.",
+      "items": {
+        "$ref": "#/$defs/WarpMarker"
+      },
+      "type": "array"
     },
     "media": {
       "$ref": "#/$defs/ContentHash",

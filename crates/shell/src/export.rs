@@ -614,6 +614,10 @@ pub fn render(
         )));
     }
     let missing_media = offline.missing_media().to_vec();
+    // Spec: delay-compensation R10. Main's output lags song time by `lead`
+    // frames, which the render discards so that its first frame is the one
+    // the range starts on.
+    let lead = offline.output_latency();
     // Spec: export R3. The range plays straight through from its start,
     // as Play from an insert marker there does, without the loop.
     offline.sender().transport(TransportCommand::SetLoop(None));
@@ -628,7 +632,7 @@ pub fn render(
     if with_tail {
         offline
             .sender()
-            .transport_at(TransportCommand::Stop, When::Frame(frames));
+            .transport_at(TransportCommand::Stop, When::Frame(frames + lead));
     }
 
     let mut converter = (spec.sample_rate < render_hz)
@@ -655,6 +659,15 @@ pub fn render(
             _ => Ok(()),
         }
     };
+    let mut discarded = 0u64;
+    while discarded < lead {
+        if cancel.load(Ordering::Relaxed) {
+            return Err(ExportError::Cancelled);
+        }
+        let block = (spec.block as u64).min(lead - discarded) as usize;
+        offline.process(block);
+        discarded += block as u64;
+    }
     let mut samples = Vec::with_capacity(spec.block * channels);
     let mut done = 0u64;
     while done < frames {

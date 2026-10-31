@@ -22,10 +22,9 @@ use std::sync::Arc;
 use bl_assistant::keychain::{Keychain, OsKeychain};
 use bl_assistant::message::{Event, Message, Request, Usage};
 use bl_assistant::provider::{Error, Provider};
-use bl_assistant::tools::ToolSet;
-use bl_cli::assistant::provider;
-use bl_shell::Shell;
+use bl_assistant::tools::{self, ToolSpec};
 use bl_shell::assistant::AssistantProvider;
+use bl_shell::assistant::provider;
 use serde_json::Value;
 
 use crate::questions::{self, Question, same};
@@ -72,14 +71,14 @@ fn ask(
     api: &dyn Provider,
     model: &str,
     text: &str,
-    tools: Option<&ToolSet>,
+    tools: Option<&[ToolSpec]>,
 ) -> Result<Asked, Error> {
     let mut request = Request::new(model);
     SYSTEM.clone_into(&mut request.system);
     request.messages.push(Message::user(text));
     request.max_tokens = 512;
     if let Some(tools) = tools {
-        request.tools = tools.tools().to_vec();
+        request.tools = tools.to_vec();
     }
     let mut usage = Usage::default();
     let reply = api.stream(&request, &mut |event| {
@@ -150,15 +149,14 @@ pub fn run(
     Ok(results)
 }
 
-/// The tokens the registry's commands cost as tool definitions in a
-/// request: the same request with and without them.
+/// The tokens the assistant's tools cost as tool definitions in a request:
+/// the same request with and without them.
 pub fn tool_definitions(api: &dyn Provider, model: &str) -> Result<(usize, u64), Error> {
-    let shell = Shell::headless();
-    let tools = ToolSet::new(shell.registry().iter());
+    let tools = tools::tools();
     let with = ask(api, model, "Hello.", Some(&tools))?;
     let without = ask(api, model, "Hello.", None)?;
     Ok((
-        tools.tools().len(),
+        tools.len(),
         with.usage.input.saturating_sub(without.usage.input),
     ))
 }
@@ -215,7 +213,7 @@ pub fn report(results: &Results, model: &str, definitions: Option<(usize, u64)>)
     }
     if let Some((count, tokens)) = definitions {
         out.push_str(&format!(
-            "\nThe assistant's tool definitions ({count} tools, one per registry command) cost \
+            "\nThe assistant's tool definitions ({count} tools, which serve every registry command) cost \
              {tokens} input tokens per request.\n"
         ));
     }
@@ -324,7 +322,7 @@ mod tests {
         );
 
         let (count, tokens) = tool_definitions(&model, "stub").unwrap();
-        assert!(count > 100);
+        assert_eq!(count, 4, "the fixed tools, not one per command");
         assert_eq!(tokens, (count * 400 / 4) as u64);
 
         let report = report(&results, "stub", Some((count, tokens)));

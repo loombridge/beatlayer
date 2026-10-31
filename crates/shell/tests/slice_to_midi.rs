@@ -835,3 +835,376 @@ fn the_warped_render_runs_before_the_tracks_devices_and_mixer() {
         "the slices hold the clip's audio, not the track's silence"
     );
 }
+
+// ----- Simpler's own Slice to Drum Rack and Slice to New MIDI Track (R15 to
+// R17) --------------------------------------------------------------------
+
+use bl_core::time::TICKS_PER_QUARTER;
+use bl_devices::sampler::{MODE, PLAYBACK};
+use bl_model::{DeviceId, ParamId};
+use bl_shell::slice_commands::DrumRackSliced;
+
+/// Ticks of `seconds` at `bpm`.
+fn ticks_at(seconds: f64, bpm: f64) -> i64 {
+    (seconds * bpm / 60.0 * TICKS_PER_QUARTER as f64).round() as i64
+}
+
+fn set_param(shell: &mut Shell, device: DeviceId, param: ParamId, value: f64) {
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": device, "param": param, "value": value }),
+        )
+        .unwrap();
+}
+
+/// A MIDI track with Simpler on the drum loop in Slice mode, cut by
+/// Region into eight (a Transient scan would leave the first notes of a
+/// render silent), and a clip playing each slice's key at the slice's start at
+/// 120 BPM: the shell, the track, the Simpler, and the slices' boundaries
+/// in frames.
+fn simpler_track(scratch: &Scratch) -> (Shell, TrackId, DeviceId, Vec<u64>) {
+    let mut shell = new_shell(scratch);
+    shell
+        .invoke("track.create", json!({ "kind": "midi", "name": "Loop" }))
+        .unwrap();
+    let track = track(&shell, TrackKind::Midi);
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let added: bl_shell::device_commands::DeviceAdded = serde_json::from_value(
+        shell
+            .run(
+                "device.add",
+                json!({ "device": {
+                    "kind": DeviceKind::Native { device_type: "beatlayer.snapshot".to_owned() },
+                    "name": "Simpler",
+                    "role": bl_model::DeviceRole::Instrument,
+                } }),
+            )
+            .unwrap(),
+    )
+    .unwrap();
+    let device = added.device;
+    shell
+        .run(
+            "device.load_sample",
+            json!({ "device": device, "path": loop_path(scratch).to_string_lossy() }),
+        )
+        .unwrap();
+    set_param(&mut shell, device, MODE, 2.0);
+    set_param(&mut shell, device, bl_devices::sampler::SLICE_BY, 2.0);
+    set_param(&mut shell, device, bl_devices::sampler::SLICE_REGIONS, 8.0);
+    let found = shell.editor().document().device(device).unwrap().clone();
+    let audio = shell
+        .edited_audio(found.media_at(0).unwrap(), &found.sample_edits)
+        .unwrap();
+    let description = bl_devices::sampler::sampler_type().description;
+    let value = |id| description.value(&found.params, id).unwrap_or_default();
+    let sixteenth = f64::from(audio.sample_rate()) * 60.0 / 120.0 / 4.0;
+    let bounds = bl_devices::sampler::slice_boundaries(
+        &audio,
+        (0, audio.frames() as u64),
+        &value,
+        sixteenth,
+        &[],
+    );
+    assert!(bounds.len() > 3, "the loop has slices: {bounds:?}");
+    let notes: Vec<_> = bounds
+        .windows(2)
+        .enumerate()
+        .map(|(at, pair)| {
+            let start = ticks_at(pair[0] as f64 / 48_000.0, 120.0);
+            let end = ticks_at(pair[1] as f64 / 48_000.0, 120.0);
+            json!({ "key": 60 + at, "velocity": 100, "start": start, "length": end - start })
+        })
+        .collect();
+    let clip: ClipId = shell.edit(|editor| editor.new_id());
+    shell
+        .run(
+            "clip.create",
+            json!({ "track": track, "clip": {
+                "id": clip, "name": "Slices", "start": 0, "length": Ticks::WHOLE.get(),
+                "mute": false, "data": { "midi": { "notes": notes } } } }),
+        )
+        .unwrap();
+    (shell, track, device, bounds)
+}
+
+/// Asserts `got` is `want` within a sample of timing and 1e-3 of level.
+fn assert_same_render(got: &[f32], want: &[f32], what: &str) {
+    assert_eq!(got.len(), want.len());
+    let mut worst = 0.0f64;
+    for (i, &g) in got.iter().enumerate() {
+        let best = [i.saturating_sub(1), i, i + 1]
+            .into_iter()
+            .filter_map(|at| want.get(at).copied())
+            .map(|w| f64::from((g - w).abs()))
+            .fold(f64::INFINITY, f64::min);
+        worst = worst.max(best);
+    }
+    assert!(worst < 1e-3, "{what}: off by {worst}");
+}
+
+fn rack_of(shell: &Shell, device: DeviceId) -> Device {
+    shell.editor().document().device(device).unwrap().clone()
+}
+
+// Spec: slice-to-midi R15. The Simpler becomes a Drum Rack in its place whose
+// chains receive its slices' notes (C3 up) and play C3, each a One-Shot
+// copy with its flags on its slice's frames, all in one choke group under
+// Mono, and the track's clip plays the same slices to the sample.
+#[test]
+fn slice_to_drum_rack_replaces_the_simpler_with_a_rack_that_plays_the_same_slices() {
+    let scratch = Scratch::new("simpler-rack");
+    let (mut shell, track, device, bounds) = simpler_track(&scratch);
+    let length = Ticks::WHOLE.get() * 2;
+    let source = render_track(&mut shell, &scratch, track, "source.wav", length);
+    let before = shell.editor().document().clone();
+    let frames = *bounds.last().unwrap();
+
+    let result: DrumRackSliced = serde_json::from_value(
+        shell
+            .run(ids::SLICE_TO_DRUM_RACK, json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(shell.editor().document().device(device).is_none());
+    let rack = rack_of(&shell, result.device);
+    assert_eq!(rack.rack_kind(), Some(RackKind::Drum));
+    assert_eq!(
+        shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .devices()
+            .count(),
+        1,
+        "in the Simpler's place"
+    );
+    assert_eq!(rack.chains.len(), bounds.len() - 1);
+    assert_eq!(
+        result.chains,
+        rack.chains.iter().map(|chain| chain.id).collect::<Vec<_>>()
+    );
+    for (at, chain) in rack.chains.iter().enumerate() {
+        assert_eq!(chain.receive, Receive::Note(60 + u8::try_from(at).unwrap()));
+        assert_eq!(chain.play, 60);
+        assert_eq!(chain.choke, Some(1), "Mono: one choke group");
+        let copy = sampler(&rack, chain);
+        assert_eq!(copy.params.get(&MODE).copied(), Some(1.0), "One-Shot");
+        assert_eq!(
+            region(copy, frames),
+            (bounds[at], bounds[at + 1]),
+            "slice {at} on its frames"
+        );
+    }
+    let rack_render = render_track(&mut shell, &scratch, track, "rack.wav", length);
+    assert_same_render(&rack_render, &source, "the rack plays the Simpler's slices");
+
+    // One undo step gives the Simpler back.
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(shell.editor().document(), &before);
+}
+
+// Spec: slice-to-midi R15; sampler R23. Under Poly no chain chokes another;
+// under Thru every slice plays on to the region's End flag and the chains
+// choke as under Mono.
+#[test]
+fn slice_to_drum_rack_follows_playback() {
+    for (playback, choke, thru) in [(1.0, None, false), (2.0, Some(1), true)] {
+        let scratch = Scratch::new("simpler-rack-playback");
+        let (mut shell, _track, device, bounds) = simpler_track(&scratch);
+        set_param(&mut shell, device, PLAYBACK, playback);
+        let result: DrumRackSliced = serde_json::from_value(
+            shell
+                .run(ids::SLICE_TO_DRUM_RACK, json!({ "device": device }))
+                .unwrap(),
+        )
+        .unwrap();
+        let rack = rack_of(&shell, result.device);
+        let end = *bounds.last().unwrap();
+        for (at, chain) in rack.chains.iter().enumerate() {
+            assert_eq!(chain.choke, choke, "playback {playback}");
+            let wanted = if thru { end } else { bounds[at + 1] };
+            assert_eq!(
+                region(sampler(&rack, chain), end),
+                (bounds[at], wanted),
+                "playback {playback}, slice {at}"
+            );
+        }
+    }
+}
+
+// Spec: slice-to-midi R16. The Simpler stays; a new track follows its track,
+// named after it and selected, holds the same rack and a looping clip as
+// long as the region with a note per slice at its time, unwarped (at the
+// set's tempo) and warped (at the sample's).
+#[test]
+fn slice_to_new_midi_track_from_simpler_makes_the_track_and_its_looping_clip() {
+    for warp in [None, Some(90.0)] {
+        let scratch = Scratch::new("simpler-track");
+        let (mut shell, track, device, bounds) = simpler_track(&scratch);
+        if let Some(bpm) = warp {
+            shell
+                .run("device.set_warp", json!({ "device": device, "warp": true }))
+                .unwrap();
+            shell
+                .run(
+                    "device.set_sample_bpm",
+                    json!({ "device": device, "bpm": bpm }),
+                )
+                .unwrap();
+        }
+        let bpm = warp.unwrap_or(120.0);
+        let before = shell.editor().document().clone();
+        let result: SliceResult = serde_json::from_value(
+            shell
+                .run(ids::SLICE_TO_MIDI_TRACK, json!({ "device": device }))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(result.slices, bounds.len() - 1);
+        let doc = shell.editor().document();
+        assert_eq!(
+            doc.device(device),
+            before.device(device),
+            "the Simpler stays"
+        );
+        let tracks: Vec<TrackId> = doc.top_level().collect();
+        let after = tracks.iter().position(|&t| t == track).unwrap() + 1;
+        assert_eq!(tracks[after], result.track, "directly after its track");
+        let made = doc.track(result.track).unwrap();
+        assert_eq!(made.name(), "Simpler");
+        assert_eq!(
+            shell.arrangement().selected_tracks(),
+            vec![result.track],
+            "selected"
+        );
+        let rack = device_of(made);
+        assert_eq!(rack.rack_kind(), Some(RackKind::Drum));
+        assert_eq!(rack.chains.len(), result.slices);
+
+        let clip = doc.clip(result.clip).unwrap();
+        let ClipData::Midi(data) = &clip.data else {
+            panic!("a MIDI clip")
+        };
+        assert!(data.looping, "it loops");
+        let region_seconds = (bounds[bounds.len() - 1] - bounds[0]) as f64 / 48_000.0;
+        assert_eq!(
+            clip.length,
+            Ticks(ticks_at(region_seconds, bpm)),
+            "as long as the region"
+        );
+        for (at, note) in data.notes.iter().enumerate() {
+            let start = ticks_at((bounds[at] - bounds[0]) as f64 / 48_000.0, bpm);
+            let end = ticks_at((bounds[at + 1] - bounds[0]) as f64 / 48_000.0, bpm);
+            assert_eq!(note.key, 60 + u8::try_from(at).unwrap());
+            assert_eq!(note.start, Ticks(start), "slice {at}'s time, warp {warp:?}");
+            assert_eq!(note.length, Ticks(end - start));
+            assert_eq!(note.velocity, 127);
+        }
+
+        // One undo step takes the track away.
+        shell.run("edit.undo", json!({})).unwrap();
+        assert_eq!(shell.editor().document(), &before);
+    }
+}
+
+fn device_of(track: &Track) -> Device {
+    track.devices().next().unwrap().clone()
+}
+
+// Spec: slice-to-midi R16. The new track plays the Simpler's slices where the
+// Simpler's own clip played them.
+#[test]
+fn the_new_track_plays_the_simplers_slices_within_a_millisecond() {
+    let scratch = Scratch::new("simpler-track-golden");
+    let (mut shell, track, device, _bounds) = simpler_track(&scratch);
+    let length = Ticks::WHOLE.get() * 2;
+    let source = render_track(&mut shell, &scratch, track, "source.wav", length);
+    let result: SliceResult = serde_json::from_value(
+        shell
+            .run(ids::SLICE_TO_MIDI_TRACK, json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    let sliced = render_track(&mut shell, &scratch, result.track, "sliced.wav", length);
+    assert_same_render(&sliced, &source, "the new track plays the same slices");
+}
+
+// Spec: slice-to-midi R17. Both are refused, with a reason, outside Slice mode
+// and without a slice, and their menu items read the same.
+#[test]
+fn both_are_refused_outside_slice_mode_or_without_slices() {
+    let scratch = Scratch::new("simpler-refused");
+    let (mut shell, _track, device, _bounds) = simpler_track(&scratch);
+    let args = json!({ "device": device });
+    for id in [ids::SLICE_TO_DRUM_RACK, ids::SLICE_TO_MIDI_TRACK] {
+        assert!(
+            shell.can_invoke_in(id, &args, &[bl_commands::Context::DeviceView]),
+            "{id} in Slice mode"
+        );
+    }
+    let before = shell.editor().document().clone();
+    set_param(&mut shell, device, MODE, 0.0);
+    for id in [ids::SLICE_TO_DRUM_RACK, ids::SLICE_TO_MIDI_TRACK] {
+        assert!(
+            !shell.can_invoke_in(id, &args, &[bl_commands::Context::DeviceView]),
+            "{id} in Classic"
+        );
+        let error = shell.run(id, args.clone()).unwrap_err().to_string();
+        assert!(error.contains("Slice mode"), "{id}: {error}");
+    }
+    // Manual with no slices placed has none.
+    set_param(&mut shell, device, MODE, 2.0);
+    set_param(&mut shell, device, bl_devices::sampler::SLICE_BY, 3.0);
+    for id in [ids::SLICE_TO_DRUM_RACK, ids::SLICE_TO_MIDI_TRACK] {
+        assert!(
+            !shell.can_invoke_in(id, &args, &[bl_commands::Context::DeviceView]),
+            "{id} without a slice"
+        );
+        let error = shell.run(id, args.clone()).unwrap_err().to_string();
+        assert!(error.contains("no slice"), "{id}: {error}");
+    }
+    assert_eq!(
+        shell.editor().document().tracks().count(),
+        before.tracks().count()
+    );
+}
+
+// Spec: slice-to-midi R15, R17. What the commands made saves and reopens the
+// same.
+#[test]
+fn a_rack_and_a_track_from_simpler_reopen_as_they_were() {
+    let scratch = Scratch::new("simpler-reopen");
+    let (mut shell, track, device, _bounds) = simpler_track(&scratch);
+    let made: SliceResult = serde_json::from_value(
+        shell
+            .run(ids::SLICE_TO_MIDI_TRACK, json!({ "device": device }))
+            .unwrap(),
+    )
+    .unwrap();
+    shell
+        .run(ids::SLICE_TO_DRUM_RACK, json!({ "device": device }))
+        .unwrap();
+    let doc = shell.editor().document();
+    let (rack_track, new_track, new_clip) = (
+        doc.track(track).unwrap().clone(),
+        doc.track(made.track).unwrap().clone(),
+        doc.clip(made.clip).unwrap().clone(),
+    );
+    let path = scratch.path("Song.blset");
+    let saved = shell
+        .run("set.save_as", json!({ "path": path.display().to_string() }))
+        .unwrap();
+    let path = PathBuf::from(saved["path"].as_str().unwrap());
+    shell
+        .run("set.open", json!({ "path": path.display().to_string() }))
+        .unwrap();
+    let doc = shell.editor().document();
+    assert_eq!(doc.track(track).unwrap(), &rack_track);
+    assert_eq!(doc.track(made.track).unwrap(), &new_track);
+    assert_eq!(doc.clip(made.clip).unwrap(), &new_clip);
+}

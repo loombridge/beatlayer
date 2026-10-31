@@ -1501,6 +1501,88 @@ fn a_devices_menu_edit_info_text_types_the_text_in_the_info_view() {
     assert_eq!(last_step(&h), "Change Info Text");
 }
 
+// Spec: slice-to-midi R15 (C-DEVICE-015). Simpler's title bar menu offers
+// Slice to Drum Rack and Slice to New MIDI Track, enabled only in Slice mode
+// with a slice, and Slice to Drum Rack replaces the Simpler.
+#[test]
+fn simplers_menu_offers_the_slicing_commands_in_slice_mode_only() {
+    let mut h = harness();
+    h.shell.set_device_types(bl_devices::device_types());
+    let simpler = {
+        let t = bl_devices::sampler::sampler_type();
+        add(
+            &mut h,
+            json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+        )
+    };
+    let file =
+        std::env::temp_dir().join(format!("bl-device-view-slice-{}.wav", std::process::id()));
+    let samples: Vec<f32> = (0..48_000).map(|i| i as f32 / 48_000.0 * 0.5).collect();
+    std::fs::write(
+        &file,
+        bl_media::wav_bytes(
+            &samples,
+            1,
+            48_000,
+            bl_media::BitDepth::Int16,
+            bl_media::Dither::None,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    h.shell
+        .run(
+            "device.load_sample",
+            json!({ "device": simpler, "path": file.to_string_lossy() }),
+        )
+        .unwrap();
+    h.settle();
+    let items = |h: &mut Harness| {
+        let frame = frame_of(h, simpler);
+        let out = right_click(h, title_rect(frame, false).center());
+        let nodes = Harness::nodes(&out);
+        let find = |label: &str| {
+            nodes
+                .iter()
+                .find(|node| node.label == label)
+                .unwrap_or_else(|| panic!("no menu item {label:?}"))
+                .clone()
+        };
+        (find("Slice to Drum Rack"), find("Slice to New MIDI Track"))
+    };
+    let (rack, track) = items(&mut h);
+    assert!(
+        rack.disabled && track.disabled,
+        "Classic mode: both disabled"
+    );
+    h.key(Key::Escape, Modifiers::NONE);
+    for (param, value) in [(0, 2.0), (24, 2.0), (27, 4.0)] {
+        h.shell
+            .run(
+                "device.set_param",
+                json!({ "device": simpler, "param": param, "value": value }),
+            )
+            .unwrap();
+    }
+    h.settle();
+    let (rack, track) = items(&mut h);
+    assert!(
+        !rack.disabled && !track.disabled,
+        "Slice mode: both enabled"
+    );
+    let bounds = rack.bounds.expect("the item's bounds");
+    h.click(pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    ));
+    h.settle();
+    assert!(
+        h.shell.editor().document().device(simpler).is_none(),
+        "the Simpler is replaced"
+    );
+    assert_eq!(last_step(&h), "Slice to Drum Rack");
+}
+
 // Spec: cv-tools R3, R9, R14; L-DEV-026. A CV Instrument's section has a
 // chooser per CV output under its name, listing No Output and the interface's
 // single channels, shows a channel the interface lacks dimmed, and its

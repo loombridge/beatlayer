@@ -9,6 +9,7 @@ mod connect;
 mod controls;
 mod display;
 mod leds;
+mod mix;
 mod modes;
 mod realtime;
 mod rig;

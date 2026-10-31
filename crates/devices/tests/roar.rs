@@ -7,15 +7,15 @@
 
 use std::f64::consts::{PI, TAU};
 
-use crate::common::{self, RATE, device, noise, node, run, set};
 use crate::common::response::{Complex, db, mul, response_at};
+use crate::common::{self, RATE, device, node, noise, run, set};
 use bl_core::id::Id;
 use bl_core::time::{Bpm, SampleRate, TempoMap};
 use bl_devices::roar::{
     AMOUNT, BIAS, BLEND, COLOR_COMPENSATION, CURVE_POINTS, DRIVE, DRY_WET, FILTER, FILTERS,
     FREQUENCY, HIGH_CROSSOVER, LEVEL, LOW_CROSSOVER, MODES, MORPH, ON, OUTPUT_GAIN, PEAK_GAIN, PRE,
-    RESONANCE, ROAR, ROUTING_MODE, SHAPER, SHAPERS, STAGES, TONE_AMOUNT, TONE_FREQUENCY,
-    roar_type, stage_param,
+    RESONANCE, ROAR, ROUTING_MODE, SHAPER, SHAPERS, STAGES, TONE_AMOUNT, TONE_FREQUENCY, roar_type,
+    stage_param,
 };
 use bl_engine::{Block, DeviceType, Node, NodeConfig, Registry, TransportInfo};
 use bl_model::{DeviceId, ParamId};
@@ -122,7 +122,10 @@ fn roar_is_described_with_part_ones_parameters_and_defaults() {
     assert_eq!(range(DRY_WET), (0.0, 100.0));
     assert_eq!(value(DRY_WET).default, 100.0);
     assert!(value(OUTPUT_GAIN).is_gain());
-    assert_eq!(value(OUTPUT_GAIN).format(value(OUTPUT_GAIN).default), "0.00 dB");
+    assert_eq!(
+        value(OUTPUT_GAIN).format(value(OUTPUT_GAIN).default),
+        "0.00 dB"
+    );
     assert_eq!(value(OUTPUT_GAIN).max(), 10f64.powf(12.0 / 20.0));
     assert_eq!(MODES.len(), 7);
     assert_eq!(SHAPERS.len(), 12);
@@ -147,7 +150,11 @@ fn roar_is_described_with_part_ones_parameters_and_defaults() {
         assert_eq!(range(p(stage, PEAK_GAIN)), (-24.0, 24.0));
         assert_eq!(value(p(stage, PEAK_GAIN)).default, 0.0);
         assert_eq!(range(p(stage, MORPH)), (0.0, 100.0));
-        assert_eq!(value(p(stage, PRE)).default, 0.0, "the filter after the shaper");
+        assert_eq!(
+            value(p(stage, PRE)).default,
+            0.0,
+            "the filter after the shaper"
+        );
     }
     // Part 1 describes only its own parameters, 10 and 11 for each stage.
     assert_eq!(description.params.len(), 10 + 11 * STAGES);
@@ -166,7 +173,9 @@ fn drive_raises_the_signal_into_the_stage() {
             &input,
             &[],
         );
-        out[0][3_000..4_800].iter().fold(0.0f32, |m, s| m.max(s.abs()))
+        out[0][3_000..4_800]
+            .iter()
+            .fold(0.0f32, |m, s| m.max(s.abs()))
     };
     let flat = f64::from(peak(0.0));
     assert!((flat - 0.05).abs() < 0.001, "{flat}");
@@ -310,7 +319,11 @@ fn bit_crusher_amount_sets_the_bits_and_noise_injection_follows_the_devices_seed
         .zip(&expected)
         .filter(|(m, e)| (*m - *e).abs() < 0.05)
         .count();
-    assert!(near * 100 > measured.len() * 98, "{near} of {}", measured.len());
+    assert!(
+        near * 100 > measured.len() * 98,
+        "{near} of {}",
+        measured.len()
+    );
     // Noise Injection: the same device gives the same noise, another gives
     // another; at Amount 0 it is a plain tanh.
     let input = sine(2_000.0, 0.5, 4_800);
@@ -328,7 +341,10 @@ fn bit_crusher_amount_sets_the_bits_and_noise_injection_follows_the_devices_seed
         run(node.as_mut(), &input, &[])[0].clone()
     };
     assert!(render(1, 50.0) == render(1, 50.0), "run after run");
-    assert!(render(1, 50.0) != render(2, 50.0), "another device, another noise");
+    assert!(
+        render(1, 50.0) != render(2, 50.0),
+        "another device, another noise"
+    );
     let plain = render(1, 0.0);
     let error = (2_400..4_800 - LATENCY)
         .map(|n| (f64::from(plain[n + LATENCY]) - f64::from(input[n]).tanh()).abs())
@@ -370,7 +386,11 @@ fn a_stage_leaves_no_dc_after_a_shaper_that_adds_some() {
             .map(|n| formula(kind, 0.6, bias, f64::from(input[n])))
             .sum::<f64>()
             / 4_800.0;
-        assert!(raw.abs() > 0.02, "{}: the curve itself has DC {raw}", SHAPERS[kind]);
+        assert!(
+            raw.abs() > 0.02,
+            "{}: the curve itself has DC {raw}",
+            SHAPERS[kind]
+        );
     }
 }
 
@@ -494,7 +514,10 @@ fn each_filter_types_response_is_within_half_a_decibel_of_its_design() {
             .collect::<Vec<_>>()
     };
     assert!(at_end(0.0)[0] > at_end(0.0)[1] + 30.0, "low-pass at 0 %");
-    assert!(at_end(100.0)[1] > at_end(100.0)[0] + 30.0, "high-pass at 100 %");
+    assert!(
+        at_end(100.0)[1] > at_end(100.0)[0] + 30.0,
+        "high-pass at 100 %"
+    );
 }
 
 // Spec: roar R6
@@ -515,7 +538,10 @@ fn resampling_holds_the_signal_so_a_high_tone_aliases_and_a_low_one_passes() {
     assert!((low - 0.5).abs() < 0.03, "a low tone passes: {low}");
     let tone = amplitude_at(3_000.0, 3_000.0);
     let alias = amplitude_at(3_000.0, 1_000.0);
-    assert!(alias > 2.0 * tone, "3 kHz held at 2 kHz folds to 1 kHz: {alias} against {tone}");
+    assert!(
+        alias > 2.0 * tone,
+        "3 kHz held at 2 kHz folds to 1 kHz: {alias} against {tone}"
+    );
 }
 
 /// The magnitude of `samples` at `bin` of a DFT of its length.
@@ -548,8 +574,16 @@ fn amount_glides_over_twenty_milliseconds() {
     let peak = envelope(&out[0], LATENCY, 48, 80);
     // The gain rises along a straight line in dB: 0.01 to 0.63 over 960 frames.
     assert!(peak[0] < 0.02, "it starts at the old value: {}", peak[0]);
-    assert!((peak[10] - 0.01 * 10f64.powf(0.5 * 36.0 / 20.0)).abs() < 0.02, "half-way at 480 frames: {}", peak[10]);
-    assert!((peak[30] - 0.631).abs() < 0.01, "and there at 960: {}", peak[30]);
+    assert!(
+        (peak[10] - 0.01 * 10f64.powf(0.5 * 36.0 / 20.0)).abs() < 0.02,
+        "half-way at 480 frames: {}",
+        peak[10]
+    );
+    assert!(
+        (peak[30] - 0.631).abs() < 0.01,
+        "and there at 960: {}",
+        peak[30]
+    );
     assert!(peak.windows(2).all(|w| w[1] >= w[0] - 1e-4), "rising");
 }
 
@@ -564,13 +598,24 @@ fn a_change_of_shaper_or_filter_crossfades_over_ten_milliseconds() {
         .collect();
     let params = with(clean(0), &[(p(0, AMOUNT), 100.0)]);
     let mut node = roar(&params, frames);
-    let out = run(node.as_mut(), &square, &[set(2_400, p(0, SHAPER), BIT_CRUSHER)]);
+    let out = run(
+        node.as_mut(),
+        &square,
+        &[set(2_400, p(0, SHAPER), BIT_CRUSHER)],
+    );
     // The middle of each high half.
     let plateau = |k: usize| f64::from(out[0][LATENCY + k * 48 + 12]);
     assert!((plateau(45) - 1.0).abs() < 0.03, "before: {}", plateau(45));
-    assert!((plateau(55) - 0.75).abs() < 0.08, "half-way: {}", plateau(55));
+    assert!(
+        (plateau(55) - 0.75).abs() < 0.08,
+        "half-way: {}",
+        plateau(55)
+    );
     assert!((plateau(65) - 0.5).abs() < 0.03, "after: {}", plateau(65));
-    assert!((50..61).all(|k| plateau(k + 1) <= plateau(k) + 0.01), "falling steadily");
+    assert!(
+        (50..61).all(|k| plateau(k + 1) <= plateau(k) + 0.01),
+        "falling steadily"
+    );
     // A filter change: from a low-pass at 20 kHz, which passes 1 kHz, to a
     // high-pass at 20 kHz, which doesn't.
     let tone = sine(1_000.0, 0.3, frames);
@@ -600,7 +645,11 @@ fn single_runs_stage_one_alone() {
     let render = |second: f64| {
         let params = with(
             clean(0),
-            &[(p(1, AMOUNT), second), (p(1, SHAPER), 4.0), (p(0, LEVEL), 0.5)],
+            &[
+                (p(1, AMOUNT), second),
+                (p(1, SHAPER), 4.0),
+                (p(0, LEVEL), 0.5),
+            ],
         );
         run(roar(&params, 2_048).as_mut(), &input, &[])
     };
@@ -624,7 +673,11 @@ fn serial_and_parallel_crossfade_their_two_signals_by_equal_power_laws() {
     for (mode, second) in [(1.0, 0.125), (2.0, 0.25)] {
         for (blend, first_gain, second_gain) in [
             (0.0, 1.0, 0.0),
-            (50.0, std::f64::consts::FRAC_1_SQRT_2, std::f64::consts::FRAC_1_SQRT_2),
+            (
+                50.0,
+                std::f64::consts::FRAC_1_SQRT_2,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ),
             (100.0, 0.0, 1.0),
         ] {
             let params = with(
@@ -645,23 +698,36 @@ fn serial_and_parallel_crossfade_their_two_signals_by_equal_power_laws() {
 // Spec: roar R8
 #[test]
 fn multi_band_runs_the_stages_on_three_bands_and_sums_flat_with_them_off() {
-    let hz: Vec<f64> = (0..16).map(|i| 50.0 * 1.6f64.powi(i)).filter(|f| *f < 12_000.0).collect();
+    let hz: Vec<f64> = (0..16)
+        .map(|i| 50.0 * 1.6f64.powi(i))
+        .filter(|f| *f < 12_000.0)
+        .collect();
     let off: Vec<(ParamId, f64)> = (0..STAGES).map(|s| (p(s, ON), 0.0)).collect();
     let flat = with(off, &[(ROUTING_MODE, 3.0)]);
     for (at, response) in hz.iter().zip(responses(&flat, &hz, 8_192)) {
-        assert!(level_db(response).abs() < 0.1, "{at} Hz: {} dB", level_db(response));
+        assert!(
+            level_db(response).abs() < 0.1,
+            "{at} Hz: {} dB",
+            level_db(response)
+        );
     }
     let bands = with(leveled(&[0.5, 0.25, 0.125]), &[(ROUTING_MODE, 3.0)]);
     for (hz, level) in [(80.0, 0.5), (800.0, 0.25), (9_000.0, 0.125)] {
         let got = gain_at(&bands, hz);
-        assert!((got / level - 1.0).abs() < 0.06, "{hz} Hz: {got}, not {level}");
+        assert!(
+            (got / level - 1.0).abs() < 0.06,
+            "{hz} Hz: {got}, not {level}"
+        );
     }
     // The crossovers move with their parameters.
     let moved = with(
         bands,
         &[(LOW_CROSSOVER, 1_000.0), (HIGH_CROSSOVER, 8_000.0)],
     );
-    assert!((gain_at(&moved, 500.0) / 0.5 - 1.0).abs() < 0.1, "500 Hz is low now");
+    assert!(
+        (gain_at(&moved, 500.0) / 0.5 - 1.0).abs() < 0.1,
+        "500 Hz is low now"
+    );
 }
 
 /// Runs stereo `left` and `right` through `node`.
@@ -686,7 +752,10 @@ fn mid_side_round_trips_and_runs_stage_one_on_the_mid_and_stage_two_on_the_side(
     let out = run_stereo(roar(&params, frames).as_mut(), &left, &right);
     for n in 256..frames - LATENCY {
         assert!((out[0][n + LATENCY] - left[n]).abs() < 2e-3, "left at {n}");
-        assert!((out[1][n + LATENCY] - right[n]).abs() < 2e-3, "right at {n}");
+        assert!(
+            (out[1][n + LATENCY] - right[n]).abs() < 2e-3,
+            "right at {n}"
+        );
     }
     // With stage 1 silent only the side is left, with stage 2 silent the mid.
     let silent = |stage: usize| {
@@ -745,14 +814,28 @@ fn the_delay_and_feedback_loops_are_a_fixed_number_of_frames_at_any_block_size()
     for (params, name) in [(delay, "Delay"), (feedback, "Feedback")] {
         let reference = render(&params, &impulse, 4_096);
         for block in [1, 64, 512] {
-            assert!(render(&params, &impulse, block) == reference, "{name} at {block}");
+            assert!(
+                render(&params, &impulse, block) == reference,
+                "{name} at {block}"
+            );
         }
         let (first, size) = peak_after(&reference, LATENCY + loop_frames - 50);
-        assert_eq!(first, LATENCY + loop_frames, "{name}: a loop after the input");
+        assert_eq!(
+            first,
+            LATENCY + loop_frames,
+            "{name}: a loop after the input"
+        );
         if name == "Delay" {
-            assert!((size / through - 1.0).abs() < 0.03, "heard once at its level: {size}");
+            assert!(
+                (size / through - 1.0).abs() < 0.03,
+                "heard once at its level: {size}"
+            );
             let (second, size) = peak_after(&reference, LATENCY + loop_frames + 50);
-            assert_eq!(second, LATENCY + 2 * loop_frames, "then fed back round the loop");
+            assert_eq!(
+                second,
+                LATENCY + 2 * loop_frames,
+                "then fed back round the loop"
+            );
             assert!((size / through - 0.5).abs() < 0.03, "half as loud: {size}");
         } else {
             // An equal-power half each way, and a half returning.
@@ -819,7 +902,10 @@ fn a_5_khz_sine_at_amount_100_leaves_no_alias_through_a_shaper_the_four_times_pa
         "Bit Crusher",
         "Noise Injection",
     ];
-    for (rate, window) in [(SampleRate::HZ_48000, 4_800usize), (SampleRate::HZ_44100, 4_410)] {
+    for (rate, window) in [
+        (SampleRate::HZ_48000, 4_800usize),
+        (SampleRate::HZ_44100, 4_410),
+    ] {
         let hz = rate.as_f64();
         let frames = 9_600 + LATENCY + window;
         let input: Vec<f32> = (0..frames)
@@ -837,7 +923,10 @@ fn a_5_khz_sine_at_amount_100_leaves_no_alias_through_a_shaper_the_four_times_pa
             let out = run_at_rate(&params, rate, &input);
             let from = LATENCY + 9_600;
             let alias = alias_db(&out[from..from + window], hz);
-            assert!(alias < -70.0, "{name} at {hz} Hz: {alias} dB below the harmonics");
+            assert!(
+                alias < -70.0,
+                "{name} at {hz} Hz: {alias} dB below the harmonics"
+            );
         }
     }
 }
@@ -867,13 +956,22 @@ fn output_gain_sets_the_wet_level_into_a_hard_clip_and_dry_wet_balances_it() {
     assert!((peak(&[]) - 0.5).abs() < 0.01);
     assert!((peak(&[(OUTPUT_GAIN, 0.5)]) - 0.25).abs() < 0.01);
     let loud = peak(&[(OUTPUT_GAIN, 10f64.powf(12.0 / 20.0))]);
-    assert_eq!(loud, 1.0, "+12 dB on 0.5 is past full scale, and clips there");
+    assert_eq!(
+        loud, 1.0,
+        "+12 dB on 0.5 is past full scale, and clips there"
+    );
     assert_eq!(peak(&[(OUTPUT_GAIN, 0.0)]), 0.0, "-inf dB is silence");
     // Half dry, half silent wet: the dry signal, delayed, at half.
-    let mut node = roar(&with(clean(0), &[(p(0, LEVEL), 0.0), (DRY_WET, 50.0)]), 4_800);
+    let mut node = roar(
+        &with(clean(0), &[(p(0, LEVEL), 0.0), (DRY_WET, 50.0)]),
+        4_800,
+    );
     let out = run(node.as_mut(), &input, &[]);
     for n in LATENCY..4_800 {
-        assert!((out[0][n] - 0.5 * input[n - LATENCY]).abs() < 1e-6, "at {n}");
+        assert!(
+            (out[0][n] - 0.5 * input[n - LATENCY]).abs() < 1e-6,
+            "at {n}"
+        );
     }
 }
 
@@ -907,11 +1005,18 @@ fn the_display_draws_each_stages_curve_with_its_bias_and_the_level_on_it() {
     assert!(!first.live);
     let second = shown(&two, "Stage 2", None);
     let curve = second.series("Shaper Curve").unwrap();
-    assert!(curve.values.iter().all(|v| *v >= 0.0), "Full Wave Rectifier");
+    assert!(
+        curve.values.iter().all(|v| *v >= 0.0),
+        "Full Wave Rectifier"
+    );
     assert!((curve.values[0] - (10f64.powf(0.5 * 36.0 / 20.0)).tanh() as f32).abs() < 1e-4);
     // A bias shifts the curve and keeps silence silent.
     let biased = shown(
-        &[(p(0, SHAPER), 0.0), (p(0, AMOUNT), 30.0), (p(0, BIAS), 40.0)],
+        &[
+            (p(0, SHAPER), 0.0),
+            (p(0, AMOUNT), 30.0),
+            (p(0, BIAS), 40.0),
+        ],
         "Stage 1",
         None,
     );
@@ -919,7 +1024,10 @@ fn the_display_draws_each_stages_curve_with_its_bias_and_the_level_on_it() {
     assert!(curve.values[63].abs() < 0.2 && curve.values[64].abs() < 0.2);
     let middle = (curve.values[63] + curve.values[64]) / 2.0;
     assert!(middle.abs() < 0.05, "silence in is silence out: {middle}");
-    assert!((curve.values[0] + curve.values[127]).abs() > 0.05, "lopsided");
+    assert!(
+        (curve.values[0] + curve.values[127]).abs() > 0.05,
+        "lopsided"
+    );
     // The node publishes the level that reached each stage.
     let mut node = roar(&clean(0), 256);
     let mut reader = node.display().expect("the device has a display");
@@ -973,15 +1081,27 @@ fn renders_are_bit_identical_at_four_block_sizes_and_run_after_run() {
         let tempo = TempoMap::constant(Bpm::DEFAULT);
         let render = |block: usize| {
             let mut node = roar(&params, block);
-            common::run_blocks(node.as_mut(), &[left.clone(), right.clone()], block, &events, &tempo)
+            common::run_blocks(
+                node.as_mut(),
+                &[left.clone(), right.clone()],
+                block,
+                &events,
+                &tempo,
+            )
         };
         let reference = render(4_096);
         assert!(render(4_096) == reference, "{}: run after run", MODES[mode]);
         for block in [1, 64, 512] {
-            assert!(render(block) == reference, "{} at block size {block}", MODES[mode]);
+            assert!(
+                render(block) == reference,
+                "{} at block size {block}",
+                MODES[mode]
+            );
         }
-        assert!(reference[0].iter().any(|s| *s != 0.0), "{} makes sound", MODES[mode]);
+        assert!(
+            reference[0].iter().any(|s| *s != 0.0),
+            "{} makes sound",
+            MODES[mode]
+        );
     }
 }
-
-

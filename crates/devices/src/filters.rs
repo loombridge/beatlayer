@@ -23,15 +23,12 @@ pub(crate) const COMB_MAX: f64 = 0.95;
 /// Vowel's formants Q at Res 0 %, and how much more Res 100 % adds.
 pub(crate) const FORMANT_Q: f64 = 8.0;
 
-
-
 /// Where the circuits soften the sections' state, in the state's own units:
 /// the state is the signal times about Q, so a resonant section at a high
 /// level reaches them while a −40 dBFS signal stays well inside (the
 /// softening takes a share of the state on every sample).
 pub(crate) const SOFT_LOOSE: f64 = 8.0;
 pub(crate) const SOFT_TIGHT: f64 = 3.0;
-
 
 /// A Vowel's formants: for a, e, i, o and u, each formant's frequency in Hz
 /// and its relative level. Beatlayer's own, from published averages of

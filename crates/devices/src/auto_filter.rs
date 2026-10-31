@@ -220,7 +220,6 @@ const ENV_OCTAVES: f64 = 8.0;
 /// to a peak of 1.
 const CLIP_KNEE: f64 = 0.8;
 
-
 /// The rate Hi-Quality runs the filter at, as a power of two: twice.
 const HI_QUALITY_STAGES: u32 = 1;
 
@@ -521,7 +520,6 @@ pub fn register(registry: &mut Registry) {
     add(registry, auto_filter_type(), AutoFilter::new);
 }
 
-
 /// The small-signal response in dB of the filter `values` set up, at `hz`,
 /// at sample rate `rate`: the curve the display draws and the tests hold
 /// the audio to. Values it lacks are the type's defaults.
@@ -552,7 +550,6 @@ fn plan_of(description: &DeviceDescription, values: &OrdMap<ParamId, f64>) -> Pl
         },
     )
 }
-
 
 /// A biquad, for the SC filter: transposed direct form II.
 #[derive(Clone, Copy, Default)]

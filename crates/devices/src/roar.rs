@@ -17,8 +17,8 @@ use bl_engine::{DeviceType, NodeConfig, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::db_to_gain;
 use bl_model::{
-    Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole, DisplayMarker,
-    DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
+    Bank, Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole,
+    DisplayMarker, DisplayReading, DisplaySeries, OrdMap, ParamDescriptor, ParamId, ParamUnit,
 };
 
 use crate::filters::{Chan, Circuit, Coef, Knobs, Plan, Stage, flush, q_of};
@@ -378,19 +378,13 @@ pub fn roar_type() -> DeviceType {
         ]))
     };
     let shaper_drag: Vec<ParamId> = (0..STAGES).map(|s| stage_param(s, AMOUNT)).collect();
-    let bank = |stage: usize, offsets: &[u32]| -> Vec<String> {
-        offsets
-            .iter()
-            .map(|o| format!("#{}", stage_param(stage, *o).0))
-            .collect()
+    let stage_ids = |stage: usize, offsets: &[u32]| -> Vec<ParamId> {
+        offsets.iter().map(|o| stage_param(stage, *o)).collect()
     };
-    let numbered = |ids: &[ParamId]| -> Vec<String> {
-        ids.iter().map(|id| format!("#{}", id.0)).collect()
-    };
-    let mut banks: Vec<(String, Vec<String>)> = vec![
+    let mut banks = vec![
         (
             "Main".to_owned(),
-            numbered(&[
+            vec![
                 DRIVE,
                 TONE_AMOUNT,
                 ROUTING_MODE,
@@ -399,47 +393,47 @@ pub fn roar_type() -> DeviceType {
                 stage_param(0, FREQUENCY),
                 OUTPUT_GAIN,
                 DRY_WET,
-            ]),
+            ],
         ),
         (
             "Input".to_owned(),
-            numbered(&[DRIVE, TONE_AMOUNT, TONE_FREQUENCY, COLOR_COMPENSATION]),
+            vec![DRIVE, TONE_AMOUNT, TONE_FREQUENCY, COLOR_COMPENSATION],
         ),
     ];
     for stage in 0..STAGES {
         let n = stage + 1;
         banks.push((
             format!("Stage {n}"),
-            bank(stage, &[ON, SHAPER, AMOUNT, BIAS, LEVEL]),
+            stage_ids(stage, &[ON, SHAPER, AMOUNT, BIAS, LEVEL]),
         ));
         banks.push((
             format!("Stage {n} Filter"),
-            bank(stage, &[FILTER, FREQUENCY, RESONANCE, PEAK_GAIN, MORPH, PRE]),
+            stage_ids(
+                stage,
+                &[FILTER, FREQUENCY, RESONANCE, PEAK_GAIN, MORPH, PRE],
+            ),
         ));
     }
     banks.push((
         "Global".to_owned(),
-        numbered(&[
+        vec![
             ROUTING_MODE,
             BLEND,
             LOW_CROSSOVER,
             HIGH_CROSSOVER,
             OUTPUT_GAIN,
             DRY_WET,
-        ]),
+        ],
     ));
-    let banks: Vec<(&str, Vec<&str>)> = banks
-        .iter()
-        .map(|(name, ids)| (name.as_str(), ids.iter().map(String::as_str).collect()))
+    let mut description = DeviceDescription::new(params)
+        .with_layout(layout)
+        .with_views(&VIEWS)
+        .with_display_drag(&shaper_drag);
+    description.banks = banks
+        .into_iter()
+        .map(|(name, params)| Bank { name, params })
         .collect();
-    let banks: Vec<(&str, &[&str])> = banks.iter().map(|(n, ids)| (*n, ids.as_slice())).collect();
-    DeviceType::native(ROAR, "Roar", DeviceRole::AudioEffect).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout)
-            .with_views(&VIEWS)
-            .with_display_drag(&shaper_drag)
-            .with_banks(&banks),
-    )
+    DeviceType::native(ROAR, "Roar", DeviceRole::AudioEffect).with_description(description)
 }
 
 /// Adds Roar to `registry`.
@@ -517,8 +511,8 @@ impl Filter {
     fn new(rate: f64) -> Self {
         Self {
             // The shared comb's rings are sized for twice the rate it is
-            // given, and the high rate is four times the device's.
-            chan: Chan::new(rate * 2.0),
+            // given, and `rate` is the high one.
+            chan: Chan::new(rate / 2.0),
             section: Stage::default(),
             dispersion: [Stage::default(); SECTIONS],
         }
@@ -940,9 +934,13 @@ impl NativeDevice for Roar {
         for channel in 0..channels {
             let net = &mut self.nets[channel];
             let mut frame = 0;
-            self.oversamplers[channel].process(channel, &mut self.work[channel][..frames], |high| {
-                net.run(channel, mode, high, &mut frame, params, &setup);
-            });
+            self.oversamplers[channel].process(
+                channel,
+                &mut self.work[channel][..frames],
+                |high| {
+                    net.run(channel, mode, high, &mut frame, params, &setup);
+                },
+            );
         }
         if mid_side {
             let [mid, side] = &mut self.work;

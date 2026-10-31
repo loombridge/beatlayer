@@ -1722,6 +1722,7 @@ impl Shell {
         let slot = self.selected_slot_clip();
         let slots = self.selected_slot_clips();
         let shown = self.shown_clip();
+        let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
         let revision = self.document_revision;
         let generation = self.editor_generation;
         let result = self.run_command(id, args);
@@ -1740,7 +1741,7 @@ impl Shell {
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
             // with it.
-            self.follow_shown_scale(id, shown);
+            self.follow_shown_scale(id, shown, shown_scale);
             // Spec: find-and-select-notes R12. Every filter is switched off
             // when the editor shows another clip.
             if self.shown_clip() != shown {

@@ -55,6 +55,9 @@ pub const TAPS: [&str; 2] = ["1 Tap", "2 Taps"];
 
 const MAX_DELAY_SECS: f64 = 0.5;
 
+/// Frames between updates of the filters' coefficients.
+const COEFF_GRID: u64 = 32;
+
 /// Chorus-Ensemble's device type.
 #[must_use]
 pub fn chorus_ensemble_type() -> DeviceType {
@@ -202,6 +205,10 @@ pub struct ChorusEnsemble {
     delays: [[ModDelayLine; 3]; 2],
     hp_filter: [Biquad; 2],
     warmth_filter: [Biquad; 2],
+    /// Frames processed so far: the filters' coefficients follow the
+    /// parameters on a grid counted from it, so a render doesn't depend on
+    /// the block size.
+    frames_done: u64,
     feedback_state: [f32; 2],
     input: [Vec<f32>; 2],
     output: [Vec<f32>; 2],
@@ -231,6 +238,7 @@ impl ChorusEnsemble {
             ],
             hp_filter: [Biquad::default(); 2],
             warmth_filter: [Biquad::default(); 2],
+            frames_done: 0,
             feedback_state: [0.0; 2],
             input: [vec![0.0; frames], vec![0.0; frames]],
             output: [vec![0.0; frames], vec![0.0; frames]],
@@ -257,56 +265,64 @@ impl NativeDevice for ChorusEnsemble {
         let rate_f64 = self.sample_rate.as_f64();
 
         let mode_idx = val(MODE).round() as usize;
-        let lfo_rate = val(RATE).clamp(0.01, 20.0);
-        let amount = (val(AMOUNT) / 100.0).clamp(0.0, 1.0);
-        let feedback = (val(FEEDBACK) / 100.0).clamp(0.0, 0.99) as f32;
         let fb_invert = val(FEEDBACK_INVERT) >= 0.5;
-        let fb_coeff = if fb_invert { -feedback } else { feedback };
-
-        let hp_freq_val = val(HP_FREQ).clamp(20.0, 2000.0);
-        let width_val = (val(WIDTH) / 100.0).clamp(0.0, 2.0) as f32;
-        let warmth_val = (val(WARMTH) / 100.0).clamp(0.0, 1.0) as f32;
-        let dry_wet_val = (val(DRY_WET) / 100.0).clamp(0.0, 1.0) as f32;
-
         let chorus_time_idx = val(CHORUS_TIME).round() as usize;
         let chorus_taps_idx = val(CHORUS_TAPS).round() as usize;
 
-        let vibrato_offset_deg = val(VIBRATO_OFFSET).clamp(0.0, 180.0);
-        let vibrato_shape_val = (val(VIBRATO_SHAPE) / 100.0).clamp(0.0, 1.0);
-
+        // The continuous controls are read on each frame, so a move glides
+        // the same at any block size.
+        let rate_ramp = ramp(RATE);
+        let amount_ramp = ramp(AMOUNT);
+        let feedback_ramp = ramp(FEEDBACK);
+        let hp_freq_ramp = ramp(HP_FREQ);
+        let width_ramp = ramp(WIDTH);
+        let warmth_ramp = ramp(WARMTH);
+        let dry_wet_ramp = ramp(DRY_WET);
+        let vibrato_offset_ramp = ramp(VIBRATO_OFFSET);
+        let vibrato_shape_ramp = ramp(VIBRATO_SHAPE);
         let output_ramp = ramp(OUTPUT);
-
-        // High-pass filter coefficients
-        let hp_coeffs = highpass_coeffs(hp_freq_val, core::f64::consts::FRAC_1_SQRT_2, rate_f64);
-        for hp in &mut self.hp_filter {
-            hp.set(hp_coeffs);
-        }
-
-        // Warmth filter coefficients
-        let warmth_cutoff = (20_000.0 - warmth_val as f64 * 12_000.0).clamp(2000.0, 20_000.0);
-        let warmth_coeffs = lowpass_coeffs(warmth_cutoff, 0.707, rate_f64);
-        for wf in &mut self.warmth_filter {
-            wf.set(warmth_coeffs);
-        }
-
-        let lfo_step = lfo_rate / rate_f64;
-
-        // Base delay time for Chorus mode in ms
-        let chorus_base_ms = match chorus_time_idx {
-            1 => 7.0,
-            2 => 10.0,
-            3 => 20.0,
-            4 => 35.0,
-            5 => 50.0,
-            _ => 5.0 + 15.0 * amount, // Auto: scales dynamically with amount
-        };
 
         for ch in 0..channels {
             self.input[ch][..frames].copy_from_slice(audio.channel_mut(ch));
         }
 
         for frame in 0..frames {
-            self.phase = (self.phase + lfo_step).rem_euclid(1.0);
+            let lfo_rate = f64::from(rate_ramp[frame]).clamp(0.01, 20.0);
+            let amount = (f64::from(amount_ramp[frame]) / 100.0).clamp(0.0, 1.0);
+            let feedback = (feedback_ramp[frame] / 100.0).clamp(0.0, 0.99);
+            let fb_coeff = if fb_invert { -feedback } else { feedback };
+            let width_val = (width_ramp[frame] / 100.0).clamp(0.0, 2.0);
+            let warmth_val = (warmth_ramp[frame] / 100.0).clamp(0.0, 1.0);
+            let dry_wet_val = (dry_wet_ramp[frame] / 100.0).clamp(0.0, 1.0);
+            let vibrato_offset_deg = f64::from(vibrato_offset_ramp[frame]).clamp(0.0, 180.0);
+            let vibrato_shape_val = (f64::from(vibrato_shape_ramp[frame]) / 100.0).clamp(0.0, 1.0);
+            // The filters' coefficients follow every 32nd frame of the song's
+            // run, wherever the blocks fall.
+            if self.frames_done % COEFF_GRID == 0 {
+                let hp_freq = f64::from(hp_freq_ramp[frame]).clamp(20.0, 2000.0);
+                let hp_coeffs =
+                    highpass_coeffs(hp_freq, core::f64::consts::FRAC_1_SQRT_2, rate_f64);
+                for hp in &mut self.hp_filter {
+                    hp.set(hp_coeffs);
+                }
+                let warmth_cutoff =
+                    (20_000.0 - f64::from(warmth_val) * 12_000.0).clamp(2000.0, 20_000.0);
+                let warmth_coeffs = lowpass_coeffs(warmth_cutoff, 0.707, rate_f64);
+                for wf in &mut self.warmth_filter {
+                    wf.set(warmth_coeffs);
+                }
+            }
+            self.frames_done += 1;
+            // Base delay time for Chorus mode in ms
+            let chorus_base_ms = match chorus_time_idx {
+                1 => 7.0,
+                2 => 10.0,
+                3 => 20.0,
+                4 => 35.0,
+                5 => 50.0,
+                _ => 5.0 + 15.0 * amount, // Auto: scales dynamically with amount
+            };
+            self.phase = (self.phase + lfo_rate / rate_f64).rem_euclid(1.0);
             let current_phase = self.phase;
 
             let in_l = self.input[0][frame];
@@ -333,9 +349,10 @@ impl NativeDevice for ChorusEnsemble {
                         };
 
                         let fb_in = in_samples[ch] + fb_coeff * self.feedback_state[ch];
-                        self.delays[ch][0].write(fb_in);
-                        if tap_count == 2 {
-                            self.delays[ch][1].write(fb_in);
+                        // Every line stays current, so a switch to 2 taps or
+                        // Ensemble reads no stale audio.
+                        for tap in 0..3 {
+                            self.delays[ch][tap].write(fb_in);
                         }
 
                         let lfo1 = (TAU * ch_phase).sin();
@@ -398,7 +415,9 @@ impl NativeDevice for ChorusEnsemble {
                         let mod_val =
                             (1.0 - vibrato_shape_val) * sine_val + vibrato_shape_val * tri_val;
 
-                        self.delays[ch][0].write(in_samples[ch]);
+                        for tap in 0..3 {
+                            self.delays[ch][tap].write(in_samples[ch]);
+                        }
                         let delay_ms = (base_ms + mod_val * mod_depth_ms).max(0.5);
                         wet_channels[ch] = self.delays[ch][0].read(delay_ms * rate_f64 / 1000.0);
                     }

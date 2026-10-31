@@ -118,6 +118,10 @@ const NETWORK_INPUT: f32 = 0.3;
 const SIZE_SMALL: f64 = 0.3;
 /// Size at its top scales them by this.
 const SIZE_LARGE: f64 = 2.0;
+
+/// Frames between updates of the coefficients that follow the continuous
+/// parameters.
+const COEFF_GRID: u64 = 32;
 /// Scale at its bottom scales the allpass delays by this.
 const SCALE_SMALL: f64 = 0.5;
 /// Scale at its top scales them by this.
@@ -391,28 +395,17 @@ struct Damping {
 /// coefficients, and each parameter's place in the bank.
 struct Settings {
     low_cut: bool,
-    low_a: f32,
     high_cut: bool,
-    high_a: f32,
     spin: bool,
     chorus: bool,
     freeze: bool,
     cut: bool,
     count: usize,
-    /// The early reflection taps' gains, worked out from Shape.
-    early_gains: [f32; 4],
-    /// Shape's delay of the diffused onset, in seconds.
-    shape_shift: f64,
-    spin_rate: f64,
     spin_depth: f64,
-    chorus_rate: f64,
     chorus_depth: f64,
-    /// The diffusion's allpass coefficient.
-    diffusion: f32,
-    /// The damping the combs apply.
+    /// The damping the combs apply, its High and Low gains left for each
+    /// frame to fill from their ramps.
     damping: Damping,
-    /// Each comb's feedback, from Decay and its delay time.
-    feedback: [f32; COMBS],
     /// How fast a Size change moves, as a fraction of the travel per frame.
     size_step: f64,
     rate: f64,
@@ -420,7 +413,7 @@ struct Settings {
 }
 
 impl Settings {
-    fn new(params: &ParamBank, rate: f64, size_now: f64) -> Self {
+    fn new(params: &ParamBank, rate: f64) -> Self {
         let index = core::array::from_fn(|id| {
             params
                 .index(ParamId(id as u32))
@@ -432,19 +425,6 @@ impl Settings {
         let flat = toggle(FLAT);
         let high_on = toggle(HIGH_DAMP) && !(freeze && flat);
         let low_on = toggle(LOW_DAMP) && !(freeze && flat);
-        let shape = value(SHAPE) / 100.0;
-        let early_gains = core::array::from_fn(|k| {
-            let decay = 0.4 + 2.0 * shape;
-            (((-decay * k as f64).exp()) * f64::from(EARLY_GAIN)) as f32
-        });
-        let decay = value(DECAY);
-        let feedback = core::array::from_fn(|k| {
-            if freeze {
-                return 1.0;
-            }
-            let seconds = COMB_SAMPLES[k] * rate / 44_100.0 * size_now / rate;
-            (10f64.powf(-3.0 * seconds / decay)) as f32
-        });
         let smooth = match value(SMOOTH) as usize {
             1 => SMOOTH_FAST_SECONDS,
             2 => SMOOTH_SLOW_SECONDS,
@@ -457,30 +437,22 @@ impl Settings {
         };
         Self {
             low_cut: toggle(LOW_CUT),
-            low_a: one_pole(value(LOW_CUT_HZ), rate),
             high_cut: toggle(HIGH_CUT),
-            high_a: one_pole(value(HIGH_CUT_HZ), rate),
             spin: toggle(SPIN),
             chorus: toggle(CHORUS),
             freeze,
             cut: toggle(CUT),
             count: DENSITY_COMBS[(value(DENSITY) as usize).min(2)],
-            early_gains,
-            shape_shift: shape * SHAPE_MILLISECONDS / 1_000.0,
-            spin_rate: value(SPIN_RATE),
             spin_depth: SPIN_MILLISECONDS * rate / 1_000.0,
-            chorus_rate: value(CHORUS_RATE),
             chorus_depth: CHORUS_MILLISECONDS * rate / 1_000.0,
-            diffusion: (value(DIFFUSION) / 100.0 * DIFFUSION_MAX) as f32,
             damping: Damping {
                 high_on,
-                high: (value(HIGH) / 100.0) as f32,
+                high: 0.0,
                 low_on,
-                low: (value(LOW) / 100.0) as f32,
+                low: 0.0,
                 high_a: one_pole(HIGH_TURNOVER_HZ, rate),
                 low_a: one_pole(LOW_TURNOVER_HZ, rate),
             },
-            feedback,
             size_step,
             rate,
             index,
@@ -496,6 +468,44 @@ impl Settings {
     fn scale_factor(&self, params: &ParamBank, frame: usize) -> f64 {
         let percent = f64::from(self.ramp(params, SCALE)[frame]) / 100.0;
         SCALE_SMALL * (SCALE_LARGE / SCALE_SMALL).powf(percent)
+    }
+}
+
+/// The coefficients that follow the continuous parameters on a grid of the
+/// reverb's run, so a render doesn't depend on the block size.
+#[derive(Clone, Copy, Default)]
+struct Slow {
+    low_a: f32,
+    high_a: f32,
+    /// The early reflection taps' gains, worked out from Shape.
+    early_gains: [f32; 4],
+    /// Each comb's feedback, from Decay and its delay time.
+    feedback: [f32; COMBS],
+}
+
+impl Slow {
+    /// The coefficients at frame `frame` of the stretch, with the delay lines
+    /// at size factor `size_now`.
+    fn at(settings: &Settings, params: &ParamBank, frame: usize, size_now: f64) -> Self {
+        let value = |id: ParamId| f64::from(settings.ramp(params, id)[frame]);
+        let rate = settings.rate;
+        let shape = value(SHAPE) / 100.0;
+        let decay = value(DECAY);
+        Self {
+            low_a: one_pole(value(LOW_CUT_HZ), rate),
+            high_a: one_pole(value(HIGH_CUT_HZ), rate),
+            early_gains: core::array::from_fn(|k| {
+                let decay = 0.4 + 2.0 * shape;
+                (((-decay * k as f64).exp()) * f64::from(EARLY_GAIN)) as f32
+            }),
+            feedback: core::array::from_fn(|k| {
+                if settings.freeze {
+                    return 1.0;
+                }
+                let seconds = COMB_SAMPLES[k] * rate / 44_100.0 * size_now / rate;
+                (10f64.powf(-3.0 * seconds / decay)) as f32
+            }),
+        }
     }
 }
 
@@ -522,6 +532,9 @@ struct Reverb {
     rate: f64,
     /// The delay lines' size factor, moving to the Size setting.
     size_now: f64,
+    /// Frames rendered so far, which the grid of `slow` counts from.
+    frames_done: u64,
+    slow: Slow,
 }
 
 impl Reverb {
@@ -554,6 +567,8 @@ impl Reverb {
             chorus: Lfo::new(0.0),
             rate,
             size_now: SIZE_SMALL + (SIZE_LARGE - SIZE_SMALL) / 2.0,
+            frames_done: 0,
+            slow: Slow::default(),
         }
     }
 }
@@ -563,7 +578,7 @@ impl NativeDevice for Reverb {
         if audio.frames() == 0 {
             return;
         }
-        let settings = Settings::new(params, self.rate, self.size_now);
+        let settings = Settings::new(params, self.rate);
         let mut channels = audio.channels_mut();
         let Some(first) = channels.next() else {
             return;
@@ -592,18 +607,31 @@ impl Reverb {
             let target = SIZE_SMALL + (SIZE_LARGE - SIZE_SMALL) * percent;
             let step = (target - self.size_now).abs().min(settings.size_step);
             self.size_now += step * (target - self.size_now).signum();
+            if self.frames_done % COEFF_GRID == 0 {
+                self.slow = Slow::at(settings, params, i, self.size_now);
+            }
+            self.frames_done += 1;
+            let slow = self.slow;
             let amount = settings.ramp(params, CHORUS_AMOUNT)[i] as f64 / 100.0;
+            let chorus_rate = f64::from(settings.ramp(params, CHORUS_RATE)[i]);
+            let spin_rate = f64::from(settings.ramp(params, SPIN_RATE)[i]);
+            let shape = f64::from(settings.ramp(params, SHAPE)[i]) / 100.0;
+            let damping = Damping {
+                high: settings.ramp(params, HIGH)[i] / 100.0,
+                low: settings.ramp(params, LOW)[i] / 100.0,
+                ..settings.damping
+            };
+            let diffusion =
+                (f64::from(settings.ramp(params, DIFFUSION)[i]) / 100.0 * DIFFUSION_MAX) as f32;
             let chorus = if settings.chorus {
-                self.chorus.step(settings.chorus_rate, settings.rate)
-                    * amount
-                    * settings.chorus_depth
+                self.chorus.step(chorus_rate, settings.rate) * amount * settings.chorus_depth
             } else {
                 0.0
             };
             let spin_amount = settings.ramp(params, SPIN_AMOUNT)[i] as f64 / 100.0;
             let spin: [f64; 2] = if settings.spin {
                 [0, 1].map(|channel| {
-                    self.spin[channel].step(settings.spin_rate, settings.rate)
+                    self.spin[channel].step(spin_rate, settings.rate)
                         * spin_amount
                         * settings.spin_depth
                 })
@@ -617,26 +645,26 @@ impl Reverb {
             let filtered_left = self.input[0].process(
                 dry_left,
                 settings.low_cut,
-                settings.low_a,
+                slow.low_a,
                 settings.high_cut,
-                settings.high_a,
+                slow.high_a,
             );
             let filtered_right = self.input[1].process(
                 dry_right,
                 settings.low_cut,
-                settings.low_a,
+                slow.low_a,
                 settings.high_cut,
-                settings.high_a,
+                slow.high_a,
             );
             self.predelay[0].push(filtered_left);
             self.predelay[1].push(filtered_right);
             // The early reflections, on both channels.
             let early = [
-                self.early(0, settings, spin[0], predelay),
-                self.early(1, settings, spin[1], predelay),
+                self.early(0, &slow, spin[0], predelay),
+                self.early(1, &slow, spin[1], predelay),
             ];
             // The diffusion network's input, delayed by Shape's onset.
-            let net_delay = predelay + settings.shape_shift * self.rate;
+            let net_delay = predelay + shape * SHAPE_MILLISECONDS / 1_000.0 * self.rate;
             let net = if settings.freeze && settings.cut {
                 [0.0f32; 2]
             } else {
@@ -653,7 +681,7 @@ impl Reverb {
                     diffused = self.diffusion[channel][k].process(
                         diffused,
                         base * rate_scale * f64::from(scale),
-                        settings.diffusion,
+                        diffusion,
                     );
                 }
                 let mut sum = 0.0;
@@ -665,12 +693,8 @@ impl Reverb {
                             0.0
                         }
                         + chorus;
-                    sum += self.combs[channel][k].process(
-                        diffused,
-                        delay,
-                        settings.feedback[k],
-                        settings.damping,
-                    );
+                    sum +=
+                        self.combs[channel][k].process(diffused, delay, slow.feedback[k], damping);
                 }
                 tail[channel] = sum / settings.count as f32;
             }
@@ -692,12 +716,12 @@ impl Reverb {
 
     /// One channel's early reflections: four taps off its predelay line,
     /// their times scaled by Size and moved by Spin.
-    fn early(&self, channel: usize, settings: &Settings, spin: f64, predelay: f64) -> f32 {
+    fn early(&self, channel: usize, slow: &Slow, spin: f64, predelay: f64) -> f32 {
         let mut sum = 0.0;
         for (k, tap) in EARLY_TAPS.iter().enumerate() {
             let spread = if channel == 1 { EARLY_SPREAD } else { 0.0 };
             let time = (tap + spread) * self.size_now * self.rate + spin + predelay;
-            sum += self.predelay[channel].read(time) * settings.early_gains[k];
+            sum += self.predelay[channel].read(time) * slow.early_gains[k];
         }
         sum
     }

@@ -382,11 +382,21 @@ pub fn show(
     };
 
     // Every control runs its command on each of the clips the panel acts on.
+    // With several clips the edit is one undo step (audio-clips R15), unless a
+    // drag already holds a gesture open.
+    let ctx = ui.ctx().clone();
     let mut each = |events: &mut Vec<UiEvent>, id: &str, args: Value| {
+        let wrap = clips.len() > 1 && ctx.dragged_id().is_none();
+        if wrap {
+            events.push(UiEvent::BeginNamedGesture("Edit Audio Clips".to_owned()));
+        }
         for target in &clips {
             let mut args = args.clone();
             args["clip"] = json!(target);
             events.push(UiEvent::Invoke(Invocation::new(id, args)));
+        }
+        if wrap {
+            events.push(UiEvent::EndGesture);
         }
     };
 
@@ -518,6 +528,7 @@ pub fn show(
         disabled(ui, theme, "audio-bpm-twice", "×2", twice, "×2", reason);
         disabled(ui, theme, "audio-bpm-half", "÷2", half, "÷2", reason);
     } else {
+        widgets::number_box_gesture(ui, "audio-bpm", "Change \"BPM\"", events);
         if let Some(bpm) = widgets::number_box(
             ui,
             theme,
@@ -697,6 +708,7 @@ pub fn show(
         Area::Detail,
         None,
     );
+    widgets::number_box_gesture(ui, "audio-gain", "Change \"Gain\"", events);
     if let Some(db) = widgets::number_box(
         ui,
         theme,
@@ -765,6 +777,7 @@ pub fn show(
             Area::Detail,
             None,
         );
+        widgets::number_box_gesture(ui, "audio-transpose", "Change \"Transpose\"", events);
         if let Some(value) = widgets::number_box(
             ui,
             theme,
@@ -788,6 +801,7 @@ pub fn show(
             Area::Detail,
             None,
         );
+        widgets::number_box_gesture(ui, "audio-detune", "Change \"Detune\"", events);
         if let Some(value) = widgets::number_box(
             ui,
             theme,
@@ -1119,6 +1133,7 @@ fn number(
         Shared::Range(low, high) => (low, format!("{low:.0} – {high:.0}{unit}")),
     };
     crate::focus::register(ui.ctx(), Id::new(("number-box", salt)), Area::Detail, None);
+    widgets::number_box_gesture(ui, salt, &format!("Change \"{name}\""), events);
     if let Some(value) = widgets::number_box(
         ui,
         theme,

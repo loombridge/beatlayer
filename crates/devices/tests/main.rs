@@ -71,6 +71,7 @@ mod scales_tuning;
 mod session_automation;
 mod shifter;
 mod signal_modulation;
+mod spectrogram;
 mod spectrum_analyser;
 mod stack;
 mod strike_mod;

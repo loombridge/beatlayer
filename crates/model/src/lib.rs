@@ -143,7 +143,10 @@ pub use device::{
     Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
     PluginFormat, PluginState, Sidechain, WindowFrame,
 };
-pub use device_display::{DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries};
+pub use device_display::{
+    DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
+    SpectrogramGrid,
+};
 pub use device_layout::DeviceLayout;
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
 pub use editor::{EditError, Editor, HistoryStep, Maker};

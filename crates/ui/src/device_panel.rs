@@ -219,6 +219,7 @@ pub fn show(
         let shown = match display {
             Some(d) if d.series.iter().any(|s| s.name == name) => {
                 own = DeviceDisplay {
+                    spectrograms: Vec::new(),
                     series: d
                         .series
                         .iter()
@@ -509,7 +510,7 @@ fn slot_cell(
 
 /// Whether a display has anything to draw.
 fn has_drawing(display: &DeviceDisplay) -> bool {
-    !(display.series.is_empty() && display.readings.is_empty())
+    !(display.series.is_empty() && display.readings.is_empty() && display.spectrograms.is_empty())
 }
 
 /// One control being drawn.

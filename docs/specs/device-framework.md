@@ -144,7 +144,7 @@ Many of Live's instruments hold more controls than a device's body can show at o
 | R43 | to be written in WP-8.1 | UI script (a tab click and a shell click); shell test (no undo step; saved and reopened on its page); agent API (`device.set_page`, `device_view.state`) |
 | R44 | to be written in WP-8.1 | UI script (indicators; the accessibility tree) |
 | R45 | to be written in WP-8.1 | unit (`crates/devices/tests/banks.rs` reaching hidden pages); shell test (automation and mapping on a hidden page) |
-| R46 | to be written in WP-8.28 | unit (the grid's size from the description); agent API (`device.display`); UI script |
+| R46 | `crates/model/src/device_display.rs`, `a_spectrogram_has_the_grid_its_description_gives_and_data_of_no_other_size`, `a_grid_must_have_columns_rows_a_frequency_span_and_a_level_span`; `crates/devices/tests/spectrogram.rs`, `the_grids_size_comes_from_the_description_and_not_from_anything_the_ui_draws_in`, `a_tone_lights_its_own_row_in_the_newest_columns_and_the_audio_passes_through`, `the_grid_is_the_same_to_the_bit_at_any_block_size_and_freeze_holds_it`; `crates/cli/tests/agent.rs`, `an_agent_reads_a_spectrograms_grid_and_axes_through_device_display`; `crates/ui/tests/device_panel.rs`, `a_spectrograms_cell_draws_its_grid_as_one_image_whatever_the_size_of_the_cell`; `rtsan/tests/devices.rs`, `the_test_spectrogram_passes_under_rtsan` | unit (the grid's size from the description); real-time trap; RTSan; agent API (`device.display`); UI script |
 | R47 | to be written in WP-8.30 | shell test with the convolution test device; agent API; UI script (a drop on the display cell) |
 | R48, R49 | to be written in WP-9.32 and WP-9.33 | shell test with a test extension device; offscreen render; accessibility tree |
 

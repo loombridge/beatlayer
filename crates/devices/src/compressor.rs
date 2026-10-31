@@ -525,6 +525,7 @@ pub fn display(
         text: format!("{level:.1} dB"),
     };
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

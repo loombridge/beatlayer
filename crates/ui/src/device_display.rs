@@ -1,14 +1,14 @@
 //! What a device's display cell draws from its display data (the device
 //! framework spec, R36): spectra and curves over their axes with markers on
-//! them, a gain reduction meter, and the views a display offers. The data is
+//! them, spectrograms, a gain reduction meter, and the views a display offers. The data is
 //! the device type's own (`bl_model::DeviceDisplay`); what is drawn depends
 //! only on what the data holds, so a later device draws through the same
 //! code.
 
-use bl_model::{DeviceDisplay, DeviceId, DisplaySeries};
+use bl_model::{DeviceDisplay, DeviceId, DisplaySeries, DisplaySpectrogram};
 use bl_shell::Invocation;
 use egui::accesskit::Role;
-use egui::{Align2, Color32, Id, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
+use egui::{Align2, Color32, Id, Mesh, Painter, Pos2, Rect, Sense, Shape, Stroke, Ui, pos2, vec2};
 use serde_json::json;
 
 use crate::main_window::UiEvent;
@@ -177,6 +177,9 @@ fn modulator_readings(
 /// responses faint, and dots where markers sit.
 fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &DeviceDisplay) {
     let c = &theme.colors;
+    for spectrogram in &display.spectrograms {
+        spectrogram_image(painter, theme, area, ink, spectrogram);
+    }
     for series in &display.series {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
         if series.name == SPECTRUM {
@@ -211,6 +214,48 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
         let at = point(area, series, marker.x, marker.y);
         painter.circle(at, 3.0, ink, Stroke::new(1.0, c.text.0));
     }
+}
+
+/// A spectrogram as an image: one mesh of a coloured cell for each column and
+/// row of its grid, so the picture is the grid's however big the cell is,
+/// the newest column at the right and the lowest row at the bottom. The
+/// colour ramp runs from the display's black at the grid's floor through
+/// `ink` (the accent, or grey while the device is off) to the text colour at
+/// its ceiling; cells at the floor are left black.
+fn spectrogram_image(
+    painter: &Painter,
+    theme: &Theme,
+    area: Rect,
+    ink: Color32,
+    spectrogram: &DisplaySpectrogram,
+) {
+    let grid = &spectrogram.grid;
+    let c = &theme.colors;
+    let [floor, ceiling] = grid.levels;
+    let cell = vec2(
+        area.width() / grid.columns as f32,
+        area.height() / grid.rows as f32,
+    );
+    let mut mesh = Mesh::default();
+    for (column, values) in spectrogram.values.chunks_exact(grid.rows).enumerate() {
+        for (row, &level) in values.iter().enumerate() {
+            let t = ((level - floor) / (ceiling - floor)).clamp(0.0, 1.0);
+            if t.is_nan() || t <= 0.0 {
+                continue;
+            }
+            let colour = if t < 0.5 {
+                c.display.0.lerp_to_gamma(ink, t * 2.0)
+            } else {
+                ink.lerp_to_gamma(c.text.0, t * 2.0 - 1.0)
+            };
+            let origin = pos2(
+                area.left() + cell.x * column as f32,
+                area.bottom() - cell.y * (row + 1) as f32,
+            );
+            mesh.add_colored_rect(Rect::from_min_size(origin, cell), colour);
+        }
+    }
+    painter.add(Shape::mesh(mesh));
 }
 
 /// The Activity view: the input's level and the gain reduction, scrolling

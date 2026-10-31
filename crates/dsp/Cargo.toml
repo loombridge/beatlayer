@@ -10,6 +10,11 @@ publish.workspace = true
 [dependencies]
 # Parameter smoothing (`smooth`), re-exported from the plug-in kit.
 lspk-params.workspace = true
+# The transforms of `stft`: the version bl-analysis and bl-stretch use.
+realfft = "3.5.0"
+
+[dev-dependencies]
+proptest = { version = "1.11", default-features = false, features = ["std"] }
 
 [lints]
 workspace = true

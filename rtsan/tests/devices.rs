@@ -1133,6 +1133,13 @@ fn spectrum_passes_under_rtsan() {
     );
 }
 
+// Spec: device-framework R46
+#[test]
+fn the_test_spectrogram_passes_under_rtsan() {
+    use bl_devices::testing::{SPECTROGRAM, SPECTROGRAM_FREEZE};
+    run_lo_fi_device(SPECTROGRAM, &[(SPECTROGRAM_FREEZE, &[0.0, 1.0])]);
+}
+
 // Spec: tuner R8
 #[test]
 fn tuner_passes_under_rtsan() {

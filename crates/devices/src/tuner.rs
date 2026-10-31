@@ -753,6 +753,7 @@ pub fn display_in(
     }
 
     DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: Some(active_view.to_owned()),

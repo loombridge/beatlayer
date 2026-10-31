@@ -859,6 +859,8 @@ name = "bl-dsp"
 version = "0.2.0"
 dependencies = [
  "lspk-params",
+ "proptest",
+ "realfft",
 ]
 
 [[package]]

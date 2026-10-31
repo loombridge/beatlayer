@@ -236,6 +236,7 @@ pub struct Context<'a> {
 /// The display of a device whose type draws none.
 fn empty_display(device: DeviceId) -> bl_model::DeviceDisplay {
     bl_model::DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: false,
         view: None,
@@ -520,6 +521,7 @@ impl DeviceView {
                 menu_options: Vec::new(),
                 title_switch: None,
                 banks: Vec::new(),
+                spectrogram: None,
             },
             plugin: true,
             configured: knob_params,

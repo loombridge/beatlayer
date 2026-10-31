@@ -5255,6 +5255,91 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
     }
 }
 
+/// An agent reads a device's spectrogram through `device.display` as numbers
+/// in dB with its axes, as the engine published it, at any block size (the
+/// device framework spec, R46).
+#[test]
+fn an_agent_reads_a_spectrograms_grid_and_axes_through_device_display() {
+    use bl_devices::testing::{self, SPECTROGRAM, SPECTROGRAM_GRID};
+    for block in [64, 4_096] {
+        let mut registry = testing::registry();
+        bl_devices::register(&mut registry);
+        let mut host = EngineHost::with_registry(block, registry);
+        let mut types = bl_devices::device_types();
+        types.extend(testing::device_types());
+        host.client.transport().shell.set_device_types(types);
+        let device = |index: u32, name: &str, device_type: &str| {
+            json!({ "command": "device.insert",
+                    "args": { "track": {"$ref": "Track"}, "index": index,
+                              "device": { "id": {"$new": name}, "name": name,
+                                          "kind": { "native": { "device_type": device_type } },
+                                          "enabled": true, "params": [] } } })
+        };
+        host.call(
+            "run",
+            json!({ "label": "Add devices", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+                device(0, "Tone", bl_engine::nodes::TEST_TONE),
+                device(1, "Spectrogram", SPECTROGRAM),
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+            ] }),
+        );
+        let spectrogram = {
+            let document = host.client.transport().shell.editor().document();
+            let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+            track.devices().nth(1).unwrap().id
+        };
+        host.play_to(65_536);
+        host.publish_displays();
+        let reply = host.call(
+            "run",
+            json!({ "label": "Read", "commands": [
+                { "command": "device.display", "args": { "device": spectrogram } },
+            ] }),
+        );
+        let shown = &reply["results"][0]["result"];
+        assert_eq!(shown["live"], true);
+        let grid = &shown["spectrograms"][0];
+        assert_eq!(grid["name"], "Spectrogram");
+        assert_eq!(grid["columns"], SPECTROGRAM_GRID.columns);
+        assert_eq!(grid["rows"], SPECTROGRAM_GRID.rows);
+        assert_eq!(grid["frequencies"], json!(SPECTROGRAM_GRID.frequencies));
+        assert_eq!(grid["log_frequency"], true);
+        assert_eq!(grid["levels"], json!(SPECTROGRAM_GRID.levels));
+        let values: Vec<f64> = grid["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        assert_eq!(
+            values.len(),
+            SPECTROGRAM_GRID.columns * SPECTROGRAM_GRID.rows
+        );
+        // The newest column peaks at the row of 1 kHz, near -6 dB.
+        let rows = SPECTROGRAM_GRID.rows;
+        let newest = &values[values.len() - rows..];
+        let (loudest, level) = newest
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        let [low, high] = SPECTROGRAM_GRID.frequencies.map(f64::from);
+        let hz = low * (high / low).powf(loudest as f64 / (rows - 1) as f64);
+        assert!(
+            (hz / 1_000.0).ln().abs() < 0.15,
+            "block {block}: {hz:.0} Hz"
+        );
+        assert!((-9.0..=-5.0).contains(&level), "block {block}: {level} dB");
+        assert_eq!(host.offline.heap_operations(), 0, "block {block}");
+    }
+}
+
 // Spec: spectrum-analyser R9, tuner R8, oscilloscope R8 (WP-5.28): an agent adds
 // Spectrum, Tuner and Oscilloscope, reads their parameters, sets some by ID,
 // reads each display, and finds the devices and values again when the saved set

@@ -331,6 +331,7 @@ pub fn display(
     let offset = operating_point(model, value(BIAS) / 100.0);
     let through = |x: f32| tube(model, offset, gain * x);
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

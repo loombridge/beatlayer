@@ -523,6 +523,79 @@ fn the_spectrums_cell_draws_in_docked_and_floating_windows() {
     assert!(rects > 0, "spectrum bars painted in floating window");
 }
 
+/// The vertices of the meshes painted inside `cell` in a frame.
+fn mesh_vertices(output: &egui::FullOutput, cell: Rect) -> Vec<usize> {
+    fn count(shape: &egui::Shape, cell: Rect, found: &mut Vec<usize>) {
+        match shape {
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| count(s, cell, found)),
+            egui::Shape::Mesh(mesh)
+                if cell.expand(1.0).contains_rect(shape.visual_bounding_rect()) =>
+            {
+                found.push(mesh.vertices.len());
+            }
+            _ => {}
+        }
+    }
+    let mut found = Vec::new();
+    for clipped in &output.shapes {
+        count(&clipped.shape, cell, &mut found);
+    }
+    found
+}
+
+// Spec: device-framework R36, R46
+#[test]
+fn a_spectrograms_cell_draws_its_grid_as_one_image_whatever_the_size_of_the_cell() {
+    let grid = testing::SPECTROGRAM_GRID;
+    let mut h = display_harness();
+    h.shell.set_device_types(testing::device_types());
+    let device = add(&mut h, &testing::spectrogram_type());
+    // Quiet everywhere, and a tone at -6 dB through the newest ten columns.
+    let mut values = vec![grid.levels[0]; grid.columns * grid.rows];
+    let lit = 10 * 3;
+    for column in grid.columns - 10..grid.columns {
+        values[column * grid.rows + 20..column * grid.rows + 23].fill(-6.0);
+    }
+    h.shell.set_device_display_data(device, &values);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = nodes
+        .iter()
+        .find(|n| n.label == "Spectrogram" && n.role == Role::Image)
+        .expect("the Spectrogram cell");
+    assert!(
+        node.value.contains("Spectrogram peak"),
+        "the cell says its loudest row: {}",
+        node.value
+    );
+    let frame = frame_of(&mut h, device);
+    let docked = cell_in(&h, device, frame);
+    assert_eq!(
+        mesh_vertices(&output, docked),
+        [4 * lit],
+        "one image, a quad for each cell above the floor"
+    );
+
+    // Floating, and larger: the same grid, drawn bigger.
+    h.shell
+        .run(
+            "device.set_floating",
+            json!({ "device": device, "floating": true }),
+        )
+        .unwrap();
+    let (min_width, min_height) = {
+        let state = h.shell.device_view_state();
+        bl_shell::device_commands::window_min_size(&state.devices[0])
+    };
+    h.window = Window::Device(device);
+    h.size = vec2(min_width + 200.0, min_height + 150.0);
+    let grown = h.settle();
+    let grown_cell = cell_in(&h, device, Rect::from_min_size(Pos2::ZERO, h.size));
+    assert!(grown_cell.width() > docked.width());
+    assert_eq!(mesh_vertices(&grown, grown_cell), [4 * lit]);
+}
+
 // Spec: tuner R7, device-framework R36
 #[test]
 fn the_tuners_cell_draws_in_docked_and_floating_windows() {

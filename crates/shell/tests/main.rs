@@ -53,6 +53,7 @@ mod device_compare;
 mod device_displays;
 mod device_framework;
 mod device_input;
+mod device_pages;
 mod devices;
 mod drum_racks;
 mod drum_sampler;

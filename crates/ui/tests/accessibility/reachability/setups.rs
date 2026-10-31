@@ -632,6 +632,27 @@ pub(crate) fn an_expandable_device(h: &mut Harness) {
         .unwrap();
 }
 
+/// The framework's test pages device on audio track 3, the selected track,
+/// no device selected: tabs and a shell of section buttons (WP-8.1).
+pub(crate) fn a_paged_device(h: &mut Harness) {
+    h.shell
+        .set_device_types(bl_devices::testing::device_types());
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::testing::pages_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// A multisampler with a layer on a MIDI track, selected, its zone editor
 /// open (WP-5.13).
 pub(crate) fn a_multisampler(h: &mut Harness) {

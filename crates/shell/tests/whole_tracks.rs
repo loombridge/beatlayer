@@ -439,7 +439,7 @@ fn time_pasted_into_another_set_lands_by_place() {
             json!({ "path": scratch.path("Song.blset").display().to_string() }),
         )
         .unwrap();
-    let saved = bl_project::load(&PathBuf::from(saved["path"].as_str().unwrap()))
+    let saved = bl_project::load(PathBuf::from(saved["path"].as_str().unwrap()))
         .unwrap()
         .0;
     assert_eq!(saved.media.len(), 1, "the saved set lists the file");
@@ -473,7 +473,7 @@ fn a_session_paste_into_another_set_brings_its_files() {
             json!({ "path": scratch.path("Song.blset").display().to_string() }),
         )
         .unwrap();
-    let saved = bl_project::load(&PathBuf::from(saved["path"].as_str().unwrap()))
+    let saved = bl_project::load(PathBuf::from(saved["path"].as_str().unwrap()))
         .unwrap()
         .0;
     assert_eq!(saved.media.len(), 1, "the saved set lists the file");

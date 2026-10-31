@@ -71,7 +71,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         (
             "automation.set_enabled",
-            Exception(AgentOnly(
+            Exception(Reason::AgentOnly(
                 "turns an envelope off without a hand move, which a track's copy uses to keep \
                  an overridden parameter overridden",
             )),

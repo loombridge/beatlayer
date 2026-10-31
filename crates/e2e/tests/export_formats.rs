@@ -37,6 +37,10 @@ const DIALOG_RATES: [u32; 8] = [
 /// The rates MP3 holds that the dialog lists (export R23, R35).
 const MP3_DIALOG_RATES: [u32; 4] = [22_050, 32_000, 44_100, 48_000];
 
+/// The rates FLAC is written at that the dialog lists: the encoder stops at
+/// 96,000 Hz, and a higher rate is refused before the render (export R5).
+const FLAC_DIALOG_RATES: [u32; 6] = [22_050, 32_000, 44_100, 48_000, 88_200, 96_000];
+
 /// One export: a file type by its extension, its bit depth (0 for MP3,
 /// which has none), its rate and whether it is mono.
 #[derive(Clone, Copy, Debug)]
@@ -94,6 +98,7 @@ fn formats() -> Vec<Format> {
     for (extension, bits) in TYPES {
         let rates: Vec<u32> = match (full_depth(), extension) {
             (true, "mp3") => MP3_DIALOG_RATES.to_vec(),
+            (true, "flac") => FLAC_DIALOG_RATES.to_vec(),
             (true, _) => DIALOG_RATES.to_vec(),
             (false, "mp3") => vec![RATE, 44_100, 22_050],
             (false, "wav") if bits == 24 => vec![RATE, 44_100, 96_000, 22_050],
@@ -209,7 +214,7 @@ fn every_format_exports_the_whole_range_at_its_level() {
 
 // Spec: export R5. FLAC holds integers only, so a 32-bit FLAC export is
 // refused before anything renders; MP3 at a rate it can't hold is refused
-// too (R23).
+// too (R23), and so is FLAC above 96,000 Hz.
 #[test]
 fn formats_a_file_cannot_hold_are_refused() {
     let mut host = set();
@@ -224,6 +229,12 @@ fn formats_a_file_cannot_hold_are_refused() {
             extension: "mp3",
             bits: 0,
             rate: 96_000,
+            mono: false,
+        },
+        Format {
+            extension: "flac",
+            bits: 24,
+            rate: 192_000,
             mono: false,
         },
     ] {

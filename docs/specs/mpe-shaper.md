@@ -64,7 +64,7 @@ For `docs/evidence/spec-notes/mpe-shaper.md`:
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | `crates/devices/tests/midi_mpe.rs`, `pressure_passes_the_identity_curve_unchanged` | real-time trap |
+| R1 | `crates/devices/tests/midi_mpe.rs`, `pressure_passes_the_identity_curve_unchanged`, `the_zero_to_one_parameters_read_and_parse_as_unitless_fractions` | real-time trap |
 | R2 | `crates/devices/tests/midi_mpe.rs`, `min_and_max_place_the_output_range` | real-time trap |
 | R3 | `crates/devices/tests/midi_mpe.rs`, `curve_a_bends_the_linear_curve` | real-time trap |
 | R4 | `crates/devices/tests/midi_mpe.rs`, `the_s_curve_joins_two_segments` | real-time trap |

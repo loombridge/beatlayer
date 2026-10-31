@@ -539,13 +539,16 @@ impl View<'_> {
             });
         }
         // Spec: modulation R18. A modulator's mappings, which
-        // `modulator.map` and `modulator.unmap` change, and a Shaper's
-        // shape.
+        // `modulator.map` and `modulator.unmap` change.
         if bl_model::modulator::is_modulator_kind(&device.kind) {
             value["mappings"] = json!(device.mappings);
-            if let Some(shape) = &device.shape {
-                value["shape"] = json!(shape);
-            }
+        }
+        // Spec: modulation R23, cv-tools R35. A Shaper's, Shaper MIDI's or
+        // CV Shaper's shape, which `modulator.set_shape` changes.
+        if bl_model::modulator::has_shape_kind(&device.kind)
+            && let Some(shape) = &device.shape
+        {
+            value["shape"] = json!(shape);
         }
         // Spec: articulation-map R18. An Articulation Map's articulations,
         // which `articulation.list` gives too.

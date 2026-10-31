@@ -313,6 +313,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:51194da2bdab6760"
     },
+    "cv-modulators": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 5,
+      "frames": 96000,
+      "bits": 24,
+      "render_hash": "fnv1a64:054aa3906225b377"
+    },
     "cv-utility-track": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

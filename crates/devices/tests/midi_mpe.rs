@@ -342,3 +342,28 @@ fn a_channel_message_passes_through() {
     let out = notes_through(node.as_mut(), &notes, FRAMES);
     assert!(out.contains(&message));
 }
+
+// Spec: mpe-shaper R1
+#[test]
+fn the_zero_to_one_parameters_read_and_parse_as_unitless_fractions() {
+    let description = mpe_control_type().description;
+    let param = |name: &str| {
+        description
+            .params
+            .iter()
+            .find(|d| d.name == name)
+            .unwrap_or_else(|| panic!("{name} is described"))
+    };
+    for name in [
+        "Press Default Value",
+        "Slide Default Value",
+        "Press Max",
+        "Press Curve A",
+    ] {
+        let d = param(name);
+        assert!(!d.format(d.default).ends_with('%'), "{name} has no unit");
+        assert_eq!(d.parse("0.5"), Some(0.5), "{name} parses 0.5 as half");
+    }
+    let d = param("Press Default Value");
+    assert_eq!(d.format(d.default), "0.50");
+}

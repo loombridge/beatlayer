@@ -25,6 +25,7 @@ mod common;
 mod compressor;
 mod curve_mod;
 mod cv_instrument;
+mod cv_modulators;
 mod cv_triggers;
 mod delay;
 mod device_compare;

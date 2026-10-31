@@ -804,23 +804,21 @@ impl TrackMixer {
         let (crossfade, start) = (self.crossfade, self.crossfader);
         let rest = self.controls;
         let fixed = fixed_pan(&rest[1]);
-        for c in 0..channels {
-            let index = gain_index(c, channels);
-            let mut crossfader = start;
-            let [mut volume, mut pan, mut gate] = rest;
-            let meter = c < 2;
-            let samples = &mut block.channel_mut(c)[range.clone()];
-            for (i, sample) in samples.iter_mut().enumerate() {
-                let at = range.start + i;
-                let song = from.map(|t| t.song_frame(at));
-                let fade = crossfade_gain(crossfader.next(), crossfade);
-                let controls = [volume.next(), pan.next(), mute];
-                let gate = if free_mute { gate.next() } else { 1.0 };
-                *sample = (f64::from(*sample)
-                    * gain_at(list, now, song, bus, at, index, controls, fixed)
-                    * gate
-                    * fade) as f32;
-                if meter {
+        // The gains depend on the frame alone, so each is worked out once
+        // for all the channels.
+        let mut crossfader = start;
+        let [mut volume, mut pan, mut gate] = rest;
+        for at in range.clone() {
+            let song = from.map(|t| t.song_frame(at));
+            let fade = crossfade_gain(crossfader.next(), crossfade);
+            let controls = [volume.next(), pan.next(), mute];
+            let gate = if free_mute { gate.next() } else { 1.0 };
+            let gains = frame_gains(list, now, song, bus, at, controls, fixed);
+            for c in 0..channels {
+                let sample = &mut block.channel_mut(c)[at];
+                *sample =
+                    (f64::from(*sample) * gains[gain_index(c, channels)] * gate * fade) as f32;
+                if c < 2 {
                     self.meters.measure_one(c, *sample);
                 }
             }
@@ -843,10 +841,9 @@ impl TrackMixer {
             1.0
         };
         let (last, last_song) = (range.end - 1, from.map(|t| t.song_frame(range.end - 1)));
-        for (index, ramp) in self.gains.iter_mut().enumerate() {
-            *ramp = Ramp::at(
-                gain_at(list, now, last_song, bus, last, index, controls, fixed) * unmuted,
-            );
+        let gains = frame_gains(list, now, last_song, bus, last, controls, fixed);
+        for (ramp, gain) in self.gains.iter_mut().zip(gains) {
+            *ramp = Ramp::at(gain * unmuted);
         }
         for ((entry, param), control) in self
             .modulated
@@ -992,24 +989,23 @@ fn modulation_entry(
         .map(|(base, played, _)| (base, played))
 }
 
-/// The gain of channel `index` at frame `at` of the block, song frame `song`:
-/// an automated parameter from its envelope, a modulator's hold or a control
-/// where it is, with the clips' and the modulators' modulation on top (the
-/// modulation spec, R2 to R4, R14).
-#[allow(clippy::too_many_arguments)]
-fn gain_at(
+/// The gains at frame `at` of the block, song frame `song`, of the left
+/// channel, the right and any other (see [`gain_index`]): an automated
+/// parameter from its envelope, a modulator's hold or a control where it is,
+/// with the clips' and the modulators' modulation on top (the modulation
+/// spec, R2 to R4, R14).
+fn frame_gains(
     list: &AutomationList,
     now: &SessionNow<'_>,
     song: Option<i64>,
     bus: Bus<'_>,
     at: usize,
-    index: usize,
     controls: [f64; 3],
     fixed_pan: Option<[f64; 2]>,
-) -> f64 {
+) -> [f64; 3] {
     let [volume, pan, mute] = controls;
     if played(list, now, song, bus, at, track::MUTE, mute).1 != 0.0 {
-        return 0.0;
+        return [0.0; 3];
     }
     let level = played(list, now, song, bus, at, track::VOLUME, volume)
         .1
@@ -1021,11 +1017,7 @@ fn gain_at(
                 .clamp(-1.0, 1.0),
         )
     });
-    match index {
-        0 => level * left,
-        1 => level * right,
-        _ => level,
-    }
+    [level * left, level * right, level]
 }
 
 /// The base, the played value and whether a modulator holds the mixer
@@ -1041,14 +1033,24 @@ fn played(
     param: ParamId,
     control: f64,
 ) -> (f64, f64, bool) {
+    #[cfg(test)]
+    EVALUATIONS.with(|n| n.set(n.get() + 1));
     let travel = match param {
         track::VOLUME => Travel::Fader,
-        track::PAN => Travel::Pan,
+        track::PAN | track::SPLIT_LEFT | track::SPLIT_RIGHT => Travel::Pan,
         _ => Travel::Switch,
     };
     let held = list.held(param, bus, at).is_some();
     let base = list.base(travel, param, song, now, bus, at, |_| control);
     (base, list.played(travel, param, song, base, bus, at), held)
+}
+
+// How many times a test's thread has worked out a mixer control and a
+// route's gain, for the test that checks each is worked out once per frame.
+#[cfg(test)]
+thread_local! {
+    pub(crate) static EVALUATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    pub(crate) static ENVELOPE_GAINS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// The shape of the planar buffers a route mixes: `channels` channels
@@ -1079,6 +1081,10 @@ pub struct Route {
     /// program before it sums the track's inputs.
     playing_clip: bool,
     gain: Ramp,
+    /// Glides to 0 while solo or a closed route silences it, on top of the
+    /// envelope's level, so a route that follows an envelope still glides
+    /// (the mixer spec, R18).
+    gate: Ramp,
     smoothing: u32,
     /// The envelope driving its level while the song plays (WP-2.12).
     automation: Option<NodeData>,
@@ -1098,12 +1104,14 @@ impl Route {
             auto: false,
             playing_clip: false,
             gain: Ramp::at(0.0),
+            gate: Ramp::at(1.0),
             smoothing: smoothing_frames(config.sample_rate),
             automation: None,
             modulated: None,
         };
         route.set(route::LEVEL, ParamValue::Set(level));
         route.gain = Ramp::at(route.target());
+        route.gate = Ramp::at(route.gate_target());
         route
     }
 
@@ -1113,6 +1121,7 @@ impl Route {
     pub fn closed(mut self, closed: bool) -> Self {
         self.closed = closed;
         self.gain = Ramp::at(self.target());
+        self.gate = Ramp::at(self.gate_target());
         self
     }
 
@@ -1157,6 +1166,14 @@ impl Route {
         }
     }
 
+    fn gate_target(&self) -> f64 {
+        if self.solo_mute || self.closed {
+            0.0
+        } else {
+            1.0
+        }
+    }
+
     fn set(&mut self, param: ParamId, value: ParamValue) {
         match (param, value) {
             (route::LEVEL, ParamValue::Set(level)) if level.is_finite() => {
@@ -1181,6 +1198,7 @@ impl Route {
             self.set(event.param, event.value);
         }
         self.gain = Ramp::at(self.target());
+        self.gate = Ramp::at(self.gate_target());
     }
 
     /// Adds `frames` frames of `from` into `to`, both planar with
@@ -1238,21 +1256,27 @@ impl Route {
                     self.set(event.param, event.value);
                 }
                 self.gain.toward(self.target(), self.smoothing);
+                self.gate.toward(self.gate_target(), self.smoothing);
             }
             if follows {
                 let list = list.expect("a route that follows has a list");
-                for c in 0..channels {
-                    let at = c * stride + segment.range.start..c * stride + segment.range.end;
-                    for (i, sample) in to[at.clone()].iter_mut().enumerate() {
-                        let frame = segment.range.start + i;
-                        let at_song = song.map(|t| t.song_frame(frame));
-                        let gain = self.envelope_gain(list, &now, at_song, bus, frame);
-                        *sample += (f64::from(from[at.start + i]) * gain) as f32;
+                // The gain depends on the frame alone: it is worked out once
+                // for all the channels.
+                let mut gate = self.gate;
+                for frame in segment.range.clone() {
+                    let at_song = song.map(|t| t.song_frame(frame));
+                    let gain = self.envelope_gain(list, &now, at_song, bus, frame) * gate.next();
+                    for c in 0..channels {
+                        let i = c * stride + frame;
+                        to[i] += (f64::from(from[i]) * gain) as f32;
                     }
                 }
+                self.gate = gate;
                 let last = segment.range.end - 1;
                 let at_song = song.map(|t| t.song_frame(last));
-                self.gain = Ramp::at(self.envelope_gain(list, &now, at_song, bus, last));
+                self.gain = Ramp::at(
+                    self.envelope_gain(list, &now, at_song, bus, last) * self.gate.value(),
+                );
                 let (base, played, held) = self.level_at(list, &now, at_song, bus, last);
                 self.modulated = (modulated || list.maps(route::LEVEL))
                     .then_some((base, played))
@@ -1266,6 +1290,7 @@ impl Route {
                     after = ramp;
                 }
                 self.gain = after;
+                self.gate = Ramp::at(self.gate_target());
             }
         }
     }
@@ -1281,8 +1306,8 @@ impl Route {
     /// The route's gain at frame `at` of the block, song frame `song`: its
     /// envelope's level, a modulator's hold, or its control's where the
     /// level isn't automated, with the clips' and the modulators' modulation
-    /// added on top (WP-3.15, WP-5.10) and clamped, unless solo silences it
-    /// or it's closed.
+    /// added on top (WP-3.15, WP-5.10) and clamped; the gate, which solo and
+    /// a closed route glide shut, is applied by the caller.
     fn envelope_gain(
         &self,
         list: &AutomationList,
@@ -1291,9 +1316,8 @@ impl Route {
         bus: Bus<'_>,
         at: usize,
     ) -> f64 {
-        if self.solo_mute || self.closed {
-            return 0.0;
-        }
+        #[cfg(test)]
+        ENVELOPE_GAINS.with(|n| n.set(n.get() + 1));
         self.level_at(list, now, song, bus, at).1.max(0.0)
     }
 

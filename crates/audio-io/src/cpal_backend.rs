@@ -350,6 +350,7 @@ impl Backend for CpalBackend {
             counters,
             workgroup,
             measured: reported.is_none().then_some((input_slot, output_slot)),
+            reported: std::sync::Mutex::new((reported.unwrap_or_default(), 0)),
         }))
     }
 }
@@ -402,7 +403,10 @@ fn duplex_input(
 /// device delivered, drained into planar scratch for the callback runner.
 /// Made when the stream opens: the callback allocates nothing and locks
 /// nothing. Where the ring is short (the input side is behind), it plays
-/// what's there and silence, and counts an xrun.
+/// what's there and silence, and counts an xrun. Where it holds more than
+/// one block past the one being drained (the input side ran ahead), it drops
+/// the oldest frames and counts an xrun, so the bridge delays the input by at
+/// most one block, which `CpalStream::latency` reports.
 struct DuplexInput {
     consumer: rtrb::Consumer<f32>,
     scratch: PlanarScratch,
@@ -416,6 +420,15 @@ impl DuplexInput {
     /// only, silence where it's short. Real-time safe.
     fn drain(&mut self, frames: usize) {
         let channels = self.scratch.channels().max(1);
+        // A catch-up burst leaves a backlog that would delay the input for the
+        // rest of the stream: keep the newest block, as the latency figure says.
+        let fill = self.consumer.slots() / channels;
+        if self.started && fill >= 2 * frames {
+            for _ in 0..(fill - frames) * channels {
+                let _ = self.consumer.pop();
+            }
+            self.counters.record_xrun();
+        }
         let whole = (self.consumer.slots() / channels).min(frames);
         let mut view = self.scratch.view_mut(frames);
         for frame in 0..whole {
@@ -781,6 +794,39 @@ fn duplex_stats(counters: &Counters, duplex_follows_default: bool) -> StreamStat
     stats
 }
 
+/// The latency figures now, for a stream that follows the default device: the
+/// cached ones, or, once the default has changed since they were read
+/// (`now` device changes against `seen`), the new device's, which `reread`
+/// looks up. A failed lookup keeps the old figures. Returns the figures and
+/// the change count they were read at.
+fn latency_now(
+    cached: (u32, u32),
+    seen: u64,
+    now: u64,
+    reread: impl FnOnce() -> Option<(u32, u32)>,
+) -> ((u32, u32), u64) {
+    if now > seen {
+        (reread().unwrap_or(cached), now)
+    } else {
+        (cached, seen)
+    }
+}
+
+/// The input latency of a duplex stream: the device's, plus the bridge's
+/// one block.
+fn duplex_latency(reported_input: u32, bridge_block: u32) -> u32 {
+    reported_input.saturating_add(bridge_block)
+}
+
+/// The latency of the system's default output device on `kind`, where the
+/// platform reports it.
+fn default_output_latency(kind: BackendKind) -> Option<(u32, u32)> {
+    let id = cpal::HostId::from_str(kind.id()).ok()?;
+    let device = cpal::host_from_id(id).ok()?.default_output_device()?;
+    let id = DeviceId::from_str(&device.id().ok()?.to_string()).ok()?;
+    reported_latency(kind, &id)
+}
+
 struct CpalStream {
     stream: cpal::Stream,
     /// The device's input stream, when it runs duplex.
@@ -791,6 +837,9 @@ struct CpalStream {
     /// The measured latency, when the platform reports none: the input's and
     /// the output's, each published once.
     measured: Option<(Slot, Slot)>,
+    /// The reported latency (input, output) and the device change count it was
+    /// read at; a default device change makes `latency` read it again.
+    reported: std::sync::Mutex<((u32, u32), u64)>,
 }
 
 impl Stream for CpalStream {
@@ -799,15 +848,32 @@ impl Stream for CpalStream {
     }
 
     fn latency(&self) -> Latency {
-        match &self.measured {
-            Some((input, output)) => Latency {
-                input: latency::published(input).unwrap_or(0),
-                output: latency::published(output).unwrap_or(0),
-            },
-            None => Latency {
-                input: self.info.input_latency,
-                output: self.info.output_latency,
-            },
+        let (input, output) = match &self.measured {
+            Some((input, output)) => (
+                latency::published(input).unwrap_or(0),
+                latency::published(output).unwrap_or(0),
+            ),
+            None => {
+                // Never contended: this runs on the main thread only.
+                let mut reported = self.reported.lock().unwrap_or_else(|e| e.into_inner());
+                if self.info.follows_default {
+                    let now = self.counters.snapshot().device_changes;
+                    *reported = latency_now(reported.0, reported.1, now, || {
+                        default_output_latency(self.info.backend)
+                    });
+                }
+                reported.0
+            }
+        };
+        let bridge = self.input.as_ref().map_or(0, |_| {
+            self.info
+                .buffer_size
+                .or(self.info.requested_buffer_size)
+                .unwrap_or(ASSUMED_BUFFER)
+        });
+        Latency {
+            input: duplex_latency(input, bridge),
+            output,
         }
     }
 
@@ -945,10 +1011,13 @@ mod tests {
         let long: Vec<f32> = (0..64).map(|i| i as f32).collect();
         inp.push(&long, 2);
         assert_eq!(counters.snapshot().xruns, 2);
+        // The ring is then 16 frames full, far past one block: draining drops
+        // the oldest and plays the newest block, counting one more xrun.
         out.drain(4);
         let view = out.scratch.view(4);
-        assert_eq!(view.channel(0), &[0.0, 2.0, 4.0, 6.0]);
-        assert_eq!(view.channel(1), &[1.0, 3.0, 5.0, 7.0]);
+        assert_eq!(view.channel(0), &[24.0, 26.0, 28.0, 30.0]);
+        assert_eq!(view.channel(1), &[25.0, 27.0, 29.0, 31.0]);
+        assert_eq!(counters.snapshot().xruns, 3);
     }
 
     #[test]
@@ -979,6 +1048,61 @@ mod tests {
         // An output alone, or a stream on a chosen device, carries on.
         assert!(!duplex_stats(&counters, false).invalidated);
         assert!(!duplex_stats(&Counters::new(), true).invalidated);
+    }
+
+    #[test]
+    fn a_default_output_reports_the_new_default_s_latency_after_a_change() {
+        let at_open = (0, 512);
+        // No change yet: the open-time figures, nothing re-read.
+        assert_eq!(
+            latency_now(at_open, 0, 0, || panic!("no re-read")),
+            (at_open, 0)
+        );
+        // After a default change: the new device's figures.
+        assert_eq!(
+            latency_now(at_open, 0, 1, || Some((0, 4096))),
+            ((0, 4096), 1)
+        );
+        // A failed lookup keeps the old figures.
+        assert_eq!(latency_now(at_open, 0, 1, || None), (at_open, 1));
+    }
+
+    #[test]
+    fn the_duplex_bridge_delays_the_input_by_one_block_after_a_shortfall() {
+        let counters = Arc::new(Counters::new());
+        let config = RtThreadConfig {
+            period: frames_to_duration(4, 48_000),
+            promote: false,
+            workgroup: None,
+        };
+        let gauge = Gauge::new(Slot::default(), 48_000);
+        let (mut out, mut inp) = duplex_input(1, 4, Arc::clone(&counters), config, gauge);
+
+        inp.push(&[1.0f32, 2.0, 3.0, 4.0], 1);
+        out.drain(4);
+        assert_eq!(out.scratch.view(4).channel(0), &[1.0, 2.0, 3.0, 4.0]);
+        // The output runs twice: silence, one xrun.
+        out.drain(4);
+        assert_eq!(counters.snapshot().xruns, 1);
+        // The input runs twice: the newest block plays, the older is dropped.
+        inp.push(&[5.0f32, 6.0, 7.0, 8.0], 1);
+        inp.push(&[9.0f32, 10.0, 11.0, 12.0], 1);
+        out.drain(4);
+        assert_eq!(out.scratch.view(4).channel(0), &[9.0, 10.0, 11.0, 12.0]);
+        assert_eq!(counters.snapshot().xruns, 2);
+        inp.push(&[13.0f32, 14.0, 15.0, 16.0], 1);
+        out.drain(4);
+        assert_eq!(
+            out.scratch.view(4).channel(0),
+            &[13.0, 14.0, 15.0, 16.0],
+            "the bridge's delay returns to one block after a shortfall"
+        );
+    }
+
+    #[test]
+    fn a_duplex_stream_reports_the_bridge_block_in_its_input_latency() {
+        assert_eq!(duplex_latency(100, 512), 612);
+        assert_eq!(duplex_latency(u32::MAX, 512), u32::MAX);
     }
 
     #[test]

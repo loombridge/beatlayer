@@ -213,6 +213,9 @@ impl Loader {
                             .as_ref()
                             .map(|data| overview(data, OVERVIEW_POINTS))
                             .unwrap_or_default();
+                        // shortcut: the hash can't be stopped once it starts, so a
+                        // newer request waits behind a long file's hash; upgrade
+                        // to a hash that checks `cancel` if that shows.
                         let media = (request.import
                             && result.is_ok()
                             && !request.cancel.load(Ordering::Relaxed))

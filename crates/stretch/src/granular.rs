@@ -179,17 +179,8 @@ mod tests {
             for t in [10, 60, 150] {
                 let mut out = [0.0; 2];
                 let mut taps = Taps::new();
-                render_frame(
-                    &grains,
-                    &window,
-                    interpolation,
-                    &mut taps,
-                    t,
-                    0,
-                    &mut out,
-                    1,
-                );
-                for c in 0..2 {
+                render_frame(&grains, &window, interpolation, &mut taps, t, &mut out, 1);
+                for (c, &got) in out.iter().enumerate() {
                     let (mut sum, mut weights) = (0.0_f32, 0.0_f32);
                     for grain in grains.iter().filter(|g| t >= g.start) {
                         let m = (t - grain.start) as usize;
@@ -204,7 +195,7 @@ mod tests {
                         );
                         weights += w;
                     }
-                    assert_eq!(out[c].to_bits(), (sum / weights).to_bits());
+                    assert_eq!(got.to_bits(), (sum / weights).to_bits());
                 }
             }
         }
@@ -237,7 +228,6 @@ mod tests {
             Interpolation::Sinc,
             &mut taps,
             10,
-            0,
             &mut out,
             1,
         );

@@ -412,3 +412,152 @@ fn a_bind_keeps_the_arguments_it_fixes() {
     let text = std::fs::read_to_string(dir.join("keymap.toml")).unwrap();
     assert!(text.contains("kind"), "the arguments are gone: {text}");
 }
+
+#[test]
+fn a_bind_refuses_arguments_the_command_doesnt_take() {
+    // Spec: custom-shortcuts R15.
+    let dir = dir("bad-args");
+    let mut shell = shell_with(&dir);
+    let refused = shell.run(
+        "keymap.bind",
+        json!({
+            "command": "transport.play_stop",
+            "args": { "bogus": 1 },
+            "keys": ["Cmd+Option+Shift+F8"],
+            "platform": "mac",
+        }),
+    );
+    assert!(refused.is_err(), "{refused:?}");
+    assert!(!dir.join("keymap.toml").exists(), "nothing was written");
+}
+
+#[test]
+fn a_bound_arrays_arguments_survive_a_restart() {
+    // Spec: custom-shortcuts R11, R6.
+    let dir = dir("array-args");
+    let mut shell = shell_with(&dir);
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.duplicate_without_clips",
+                "keys": ["Cmd+Option+Shift+F8"],
+                "platform": "mac",
+            }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "arrangement.select_tracks",
+                "args": { "tracks": [3] },
+                "keys": ["Cmd+Option+Shift+F9"],
+                "platform": "mac",
+            }),
+        )
+        .unwrap();
+    let shell = shell_with(&dir);
+    let binds = &shell.user_keymap().binds;
+    assert_eq!(binds.len(), 2, "{binds:?}");
+    assert_eq!(binds[1].args["tracks"], json!([3]));
+    assert!(shell.keymap_state().skipped.is_empty());
+}
+
+#[test]
+fn a_keymap_file_that_cant_be_read_is_kept_aside() {
+    // Spec: custom-shortcuts R6: the next write mustn't erase it.
+    let dir = dir("unreadable");
+    let broken = "schema = 1\n[[bind]]\ncommand = \"edit.undo\"\nargs = { a b = 1 }\n";
+    std::fs::write(dir.join("keymap.toml"), broken).unwrap();
+    let mut shell = shell_with(&dir);
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "track.duplicate_without_clips",
+                "keys": ["Cmd+Option+Shift+F8"],
+                "platform": "mac",
+            }),
+        )
+        .unwrap();
+    let kept = std::fs::read_to_string(dir.join("keymap.toml.bad")).unwrap();
+    assert_eq!(kept, broken);
+}
+
+#[test]
+fn an_unbind_of_one_key_keeps_the_bindings_other_keys() {
+    // Spec: custom-shortcuts R15.
+    let dir = dir("unbind-one");
+    let mut shell = shell_with(&dir);
+    shell
+        .run(
+            "keymap.bind",
+            json!({
+                "command": "edit.undo",
+                "keys": ["Cmd+Option+Shift+F6", "Cmd+Option+Shift+F7"],
+                "platform": "mac",
+            }),
+        )
+        .unwrap();
+    shell
+        .run(
+            "keymap.unbind",
+            json!({ "command": "edit.undo", "keys": ["Cmd+Option+Shift+F7"], "platform": "mac" }),
+        )
+        .unwrap();
+    let contexts = [Context::Global];
+    let hit = |key: &str, mods| shell.keymap().resolve(Platform::Mac, key, mods, &contexts);
+    let kept = hit("F6", mods(true, false, true, true)).expect("the other key stays");
+    assert_eq!(kept.command.id, "edit.undo");
+    assert!(hit("F7", mods(true, false, true, true)).is_none());
+}
+
+#[test]
+fn an_unbind_without_a_platform_acts_on_both() {
+    // Spec: custom-shortcuts R15.
+    let dir = dir("unbind-both");
+    let mut shell = shell_with(&dir);
+    for platform in ["mac", "win"] {
+        shell
+            .run(
+                "keymap.bind",
+                json!({ "command": "edit.undo", "keys": ["Ctrl+Shift+F7"], "platform": platform }),
+            )
+            .unwrap();
+    }
+    shell
+        .run(
+            "keymap.unbind",
+            json!({ "command": "edit.undo", "keys": ["Ctrl+Shift+F7"] }),
+        )
+        .unwrap();
+    for platform in [Platform::Mac, Platform::Other] {
+        let hit = shell.keymap().resolve(
+            platform,
+            "F7",
+            mods(false, true, false, true),
+            &[Context::Global],
+        );
+        assert!(hit.is_none(), "{platform:?} keeps F7");
+    }
+}
+
+#[test]
+fn an_unbind_refuses_keys_that_dont_parse() {
+    // Spec: custom-shortcuts R15.
+    let dir = dir("unbind-bad");
+    let mut shell = shell_with(&dir);
+    shell
+        .run(
+            "keymap.bind",
+            json!({ "command": "edit.undo", "keys": ["Ctrl+Shift+F7"], "platform": "win" }),
+        )
+        .unwrap();
+    let refused = shell.run(
+        "keymap.unbind",
+        json!({ "command": "edit.undo", "keys": ["NotAKey+Q"], "platform": "win" }),
+    );
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(shell.user_keymap().binds.len(), 1, "the keys stay");
+}

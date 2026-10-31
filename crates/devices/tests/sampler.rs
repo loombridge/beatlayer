@@ -15,8 +15,8 @@ use bl_devices::sampler::{
     FILTER_FREQ, FILTER_KEY, FILTER_TYPE, GAIN, GLIDE, GLIDE_MODE, GLIDE_TIME, LENGTH, LFO,
     LFO_DIVISION, LFO_FILTER, LFO_RATE, LFO_SYNC, LFO_VOLUME, LOOP, LOOP_LENGTH, MODE, PAN,
     PITCH_ENV_AMOUNT, PITCH_ENV_ATTACK, PITCH_ENV_DECAY, PITCH_ENV_RELEASE, PITCH_ENV_SUSTAIN,
-    RELEASE, SAMPLER, SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY, START, SUSTAIN,
-    TRIGGER, VELOCITY, VOICES, VOLUME, sampler_type,
+    PLAYBACK, RELEASE, RETRIG, SAMPLER, SLICE_BY, SLICE_DIVISION, SLICE_REGIONS, SLICE_SENSITIVITY,
+    START, SUSTAIN, TRIGGER, VELOCITY, VOICES, VOLUME, sampler_type,
 };
 use bl_engine::{
     Block, Collector, DeviceType, EngineConfig, MediaMap, Node, NodeEvent, NoteBuffer, NoteEvent,
@@ -1881,6 +1881,167 @@ fn pitch_envelope_moves_pitch_by_amount_rule_by_rule() {
         (rel_diff - 1.0).abs() < 0.1,
         "released back to 1x: {rel_diff}"
     );
+}
+
+/// Eight Region slices of 1200 frames, slice `k` a constant `(k + 1) / 10`,
+/// so the sum of what sounds names which slices play (R13, R23).
+fn eight_slices() -> Arc<bl_media::SampleData> {
+    sample(9600, |i| (i / 1200 + 1) as f32 / 10.0)
+}
+
+/// A Slice-mode sampler of the eight slices with `params`.
+fn slicer(params: &[(ParamId, f64)], collector: &Collector, max_frames: usize) -> Box<dyn Node> {
+    let mut all = vec![(MODE, 2.0), (SLICE_BY, 2.0), (SLICE_REGIONS, 8.0)];
+    all.extend_from_slice(params);
+    let mut node = sampler(&all, max_frames);
+    give(node.as_mut(), collector, &eight_slices());
+    node
+}
+
+/// The left channel of `frames` frames played in blocks of `size`, `notes`
+/// given as (frame, key) note-ons.
+fn play_in_blocks(
+    node: &mut dyn Node,
+    size: usize,
+    frames: usize,
+    notes: &[(usize, u8)],
+) -> Vec<f32> {
+    let mut left = Vec::with_capacity(frames);
+    for start in (0..frames).step_by(size) {
+        let events: Vec<NoteEvent> = notes
+            .iter()
+            .filter(|(at, _)| (start..start + size).contains(at))
+            .map(|(at, key)| note((at - start) as u32, NoteKind::On, *key, 1.0))
+            .collect();
+        left.extend_from_slice(&run_notes(node, size, &events)[0]);
+    }
+    left
+}
+
+const BLOCK_SIZES: [usize; 3] = [1, 64, 512];
+
+// Spec: sampler R23
+#[test]
+fn mono_cuts_the_first_slice_when_the_second_plays() {
+    let collector = Collector::new();
+    for size in BLOCK_SIZES {
+        let mut node = slicer(&[], &collector, size);
+        let out = play_in_blocks(node.as_mut(), size, 1200, &[(0, 60), (100, 61)]);
+        assert!((out[50] - 0.1).abs() < 1e-6, "slice 0 first, block {size}");
+        assert!(
+            (out[400] - 0.2).abs() < 1e-6,
+            "slice 1 alone after the steal, block {size}"
+        );
+    }
+}
+
+// Spec: sampler R23
+#[test]
+fn poly_sounds_slices_together_up_to_voices_and_drops_the_oldest() {
+    let collector = Collector::new();
+    let notes = [(0, 60), (10, 61), (20, 62)];
+    for size in BLOCK_SIZES {
+        let mut node = slicer(&[(PLAYBACK, 1.0), (VOICES, 3.0)], &collector, size);
+        let out = play_in_blocks(node.as_mut(), size, 600, &notes);
+        assert!(
+            (out[300] - 0.6).abs() < 1e-6,
+            "three slices together, block {size}"
+        );
+
+        let mut node = slicer(&[(PLAYBACK, 1.0), (VOICES, 2.0)], &collector, size);
+        let out = play_in_blocks(node.as_mut(), size, 600, &notes);
+        assert!(
+            (out[300] - 0.5).abs() < 1e-6,
+            "the oldest dropped, block {size}"
+        );
+    }
+}
+
+// Spec: sampler R23
+#[test]
+fn retrig_under_poly_fades_a_slice_played_twice() {
+    let collector = Collector::new();
+    let notes = [(0, 60), (100, 60)];
+    for size in BLOCK_SIZES {
+        for (retrig, want) in [(0.0, 0.2), (1.0, 0.1)] {
+            let mut node = slicer(&[(PLAYBACK, 1.0), (RETRIG, retrig)], &collector, size);
+            let out = play_in_blocks(node.as_mut(), size, 600, &notes);
+            assert!(
+                (out[400] - want).abs() < 1e-6,
+                "retrig {retrig}, block {size}: {}",
+                out[400]
+            );
+        }
+    }
+}
+
+// Spec: sampler R23
+#[test]
+fn thru_plays_a_held_first_slice_on_to_the_end_flag() {
+    let collector = Collector::new();
+    for size in BLOCK_SIZES {
+        let mut mono = slicer(&[], &collector, size);
+        let out = play_in_blocks(mono.as_mut(), size, 9600, &[(0, 60)]);
+        assert!(
+            out[1300..].iter().all(|s| *s == 0.0),
+            "Mono ends with its slice, block {size}"
+        );
+
+        let mut thru = slicer(&[(PLAYBACK, 2.0)], &collector, size);
+        let out = play_in_blocks(thru.as_mut(), size, 9600, &[(0, 60)]);
+        assert!((out[600] - 0.1).abs() < 1e-6, "slice 0, block {size}");
+        assert!(
+            (out[1300] - 0.2).abs() < 1e-6,
+            "on into slice 1, block {size}"
+        );
+        assert!(
+            (out[9500] - 0.8).abs() < 1e-6,
+            "on to the last slice, block {size}"
+        );
+    }
+}
+
+// Spec: sampler R23
+#[test]
+fn fade_out_under_thru_ends_at_the_regions_end() {
+    let collector = Collector::new();
+    for size in BLOCK_SIZES {
+        // 20 ms of Fade Out: 960 frames, linear, ending at the End flag.
+        let mut thru = slicer(&[(PLAYBACK, 2.0), (FADE_OUT, 20.0)], &collector, size);
+        let out = play_in_blocks(thru.as_mut(), size, 9600, &[(0, 60)]);
+        assert!(
+            (out[9600 - 480] - 0.4).abs() < 1e-3,
+            "half-way down at the end, block {size}"
+        );
+        assert!(
+            (out[2000] - 0.2).abs() < 1e-6,
+            "untouched before it, block {size}"
+        );
+
+        // Under Mono the fade ends at the slice's end instead.
+        let mut mono = slicer(&[(FADE_OUT, 20.0)], &collector, size);
+        let out = play_in_blocks(mono.as_mut(), size, 1200, &[(0, 60)]);
+        assert!(
+            (out[1200 - 480] - 0.05).abs() < 1e-3,
+            "half-way down at the slice's end, block {size}"
+        );
+    }
+}
+
+// Spec: sampler R23
+#[test]
+fn a_set_saved_before_playback_plays_mono() {
+    let collector = Collector::new();
+    let device_type = sampler_type();
+    let mut old = device(
+        &device_type,
+        &[(MODE, 2.0), (SLICE_BY, 2.0), (SLICE_REGIONS, 8.0)],
+    );
+    old.params.remove(&PLAYBACK);
+    let mut node = node(&registry(), &old, 1200);
+    give(node.as_mut(), &collector, &eight_slices());
+    let out = play_in_blocks(node.as_mut(), 1200, 1200, &[(0, 60), (100, 61)]);
+    assert!((out[400] - 0.2).abs() < 1e-6, "the first slice was cut");
 }
 
 /// Runs one block of `frames` frames through `node` on `transport`, with

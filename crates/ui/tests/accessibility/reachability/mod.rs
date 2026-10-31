@@ -441,6 +441,8 @@ fn every_m1_command_is_reachable_from_the_keyboard() {
             "device.reverse_sample",
             "device.set_layer_zone",
             "device.set_sample_region",
+            "device.slice_to_drum_rack",
+            "device.slice_to_midi_track",
             "device.snap_layer_markers",
             "device.sort_layers",
             "set.export_clips",

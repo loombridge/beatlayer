@@ -358,6 +358,7 @@ pub fn plan<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<Plan, Error> 
     }
     let mut entries = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    let mut folded = std::collections::HashSet::new();
     let mut bytes = 0u64;
     for index in 1..archive.len() {
         let entry = archive.by_index_raw(index)?;
@@ -372,6 +373,10 @@ pub fn plan<R: Read + Seek>(archive: &mut ZipArchive<R>) -> Result<Plan, Error> 
             inside(&manifest.project, name.trim_end_matches('/')).map_err(|why| refuse(&why))?;
         if !seen.insert(path.clone()) {
             return Err(refuse("is there twice"));
+        }
+        // shortcut: lower-casing only, so NFC and NFD spellings still pass; upgrade with a normalisation crate.
+        if !folded.insert(path.to_string_lossy().to_lowercase()) {
+            return Err(refuse("is there twice, differing only in case"));
         }
         if !dir && path.as_os_str().is_empty() {
             return Err(refuse("is a file named like the project folder"));
@@ -502,7 +507,12 @@ pub fn install(
         if let Some(folder) = path.parent() {
             fs::create_dir_all(folder)?;
         }
-        Ok(Box::new(io::BufWriter::new(File::create(path)?)))
+        // The folder starts empty, so an existing file is a name collision.
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        Ok(Box::new(io::BufWriter::new(file)))
     })
     .and_then(|()| {
         for entry in plan.entries.iter().filter(|entry| entry.dir) {
@@ -586,7 +596,13 @@ fn extract<R: Read + Seek>(
     let mut chunk = vec![0u8; CHUNK];
     for entry in plan.entries.iter().filter(|entry| !entry.dir) {
         let mut source = archive.by_index(entry.index)?.take(entry.size + 1);
-        let mut out = open(entry)?;
+        let mut out = open(entry).map_err(|error| match error.kind() {
+            io::ErrorKind::AlreadyExists => Error::Refused(format!(
+                "{} is there twice, differing only in case",
+                entry.path.display()
+            )),
+            _ => error.into(),
+        })?;
         let mut written = 0u64;
         loop {
             if cancel.load(Ordering::Relaxed) {

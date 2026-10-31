@@ -566,6 +566,122 @@ fn a_consolidated_file_is_taken_before_the_devices_and_normalised() {
     }
 }
 
+/// A fade of `track`'s Volume from unity at the start of the clip to silence
+/// a quarter later, drawn with the fader untouched at unity.
+fn fade_volume(shell: &mut Shell, track: TrackId) {
+    for (at, value) in [(0, 1.0), (705_600, 0.0)] {
+        shell
+            .run(
+                "automation.set_breakpoint",
+                json!({
+                    "track": track,
+                    "target": { "type": "mixer", "param": "volume" },
+                    "at": at,
+                    "value": value,
+                }),
+            )
+            .unwrap();
+    }
+}
+
+/// Consolidates the first quarter of a clip of the ramp and checks that the
+/// file, made up by the clip's gain, is the source: nothing of the mixer was
+/// taken.
+fn assert_consolidated_without_the_mixer(shell: &mut Shell, track: TrackId, samples: &[Vec<f32>]) {
+    let made = consolidate(shell, track, 0, 705_600);
+    let gain = audio(shell, made.created[0]).gain as f32;
+    let file_audio = decode_file(PathBuf::from(&made.files[0])).unwrap();
+    let channel = file_audio.channel(0).unwrap();
+    for frame in [0usize, 12_000, 23_999] {
+        let back = channel[frame] * gain;
+        assert!(
+            (back - samples[0][frame]).abs() < 1e-4,
+            "frame {frame}: {back} against {}",
+            samples[0][frame]
+        );
+    }
+}
+
+// Spec: audio-clip-editing R20.
+#[test]
+fn a_consolidated_file_leaves_out_the_tracks_volume_envelope() {
+    let scratch = Scratch::new("envelope");
+    let mut shell = new_shell(&scratch);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    let samples = wav(&source, 1.0, 1, 0.5);
+    let clip = place(&mut shell, track, &source, 0);
+    shell
+        .run(
+            "clip.set_fades",
+            json!({ "clip": clip, "fade_in": 0.0, "fade_out": 0.0 }),
+        )
+        .unwrap();
+    fade_volume(&mut shell, track);
+    assert_consolidated_without_the_mixer(&mut shell, track, &samples);
+}
+
+// Spec: audio-clip-editing R20.
+#[test]
+fn a_consolidated_file_leaves_out_mains_volume_envelope() {
+    let scratch = Scratch::new("main-envelope");
+    let mut shell = new_shell(&scratch);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    let samples = wav(&source, 1.0, 1, 0.5);
+    let clip = place(&mut shell, track, &source, 0);
+    shell
+        .run(
+            "clip.set_fades",
+            json!({ "clip": clip, "fade_in": 0.0, "fade_out": 0.0 }),
+        )
+        .unwrap();
+    let main = shell.editor().document().main_id();
+    fade_volume(&mut shell, main);
+    assert_consolidated_without_the_mixer(&mut shell, track, &samples);
+}
+
+// Spec: audio-clip-editing R20.
+#[test]
+fn a_modulator_holding_the_tracks_volume_doesnt_stop_a_consolidate() {
+    let scratch = Scratch::new("held");
+    let mut shell = new_shell(&scratch);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("Tone.wav");
+    let samples = wav(&source, 1.0, 1, 0.5);
+    let clip = place(&mut shell, track, &source, 0);
+    shell
+        .run(
+            "clip.set_fades",
+            json!({ "clip": clip, "fade_in": 0.0, "fade_out": 0.0 }),
+        )
+        .unwrap();
+    let wave: bl_model::DeviceId = shell.new_id();
+    shell
+        .run(
+            "device.insert",
+            json!({ "track": track, "index": 0, "device": {
+                "id": wave, "name": "LFO", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": "beatlayer.wave_mod" } } } }),
+        )
+        .unwrap();
+    shell
+        .invoke(
+            "modulator.map",
+            json!({ "device": wave, "slot": 0,
+                "target": { "type": "mixer", "track": track, "param": "volume" } }),
+        )
+        .unwrap();
+    // Remote Control: the modulator sets the fader, and refuses a hand move.
+    shell
+        .run(
+            "device.set_param",
+            json!({ "device": wave, "param": bl_model::modulator::MODE.0, "value": 1.0 }),
+        )
+        .unwrap();
+    assert_consolidated_without_the_mixer(&mut shell, track, &samples);
+}
+
 // Spec: audio-clip-editing R26, R27.
 #[test]
 fn consolidate_time_to_new_scene_fills_a_new_scene_and_leaves_the_arrangement() {
@@ -1027,4 +1143,37 @@ fn reversing_a_selection_across_clips_plays_it_backwards() {
         |shell: &Shell, clip: ClipId| shell.editor().document().clip(clip).unwrap().start;
     assert_eq!(start_of(&shell, one), Ticks(1_411_200));
     assert_eq!(start_of(&shell, two), Ticks::ZERO);
+}
+
+// Spec: audio-clip-editing R11.
+#[test]
+fn a_reverse_that_fails_leaves_nothing_behind() {
+    let scratch = Scratch::new("reverse-missing");
+    let mut shell = new_shell(&scratch);
+    let track = track(&shell, TrackKind::Audio);
+    let source = scratch.path("c.wav");
+    wav(&source, 1.0, 2, 0.1);
+    let c = place(&mut shell, track, &source, 0);
+    // Clip D, later on the track, plays a file the set doesn't have.
+    let mut d = shell.editor().document().clip(c).cloned().unwrap();
+    d.id = shell.new_id();
+    d.start = Ticks::from_quarters(8);
+    d.data = ClipData::Audio(bl_model::AudioData::new(bl_model::ContentHash([7; 32])));
+    shell
+        .edit(|editor| editor.apply(bl_model::Command::CreateClip { track, clip: d }))
+        .unwrap();
+    let before = (
+        shell.editor().document().clip(c).unwrap().start,
+        audio(&shell, c).media,
+        shell.editor().undo_history().count(),
+    );
+
+    let args = json!({ "tracks": [track], "start": 0, "end": 11_289_600 });
+    assert!(shell.run(ids::ARRANGEMENT_REVERSE, args).is_err());
+    shell.wait_processed();
+
+    assert_eq!(shell.editor().document().clip(c).unwrap().start, before.0);
+    assert_eq!(audio(&shell, c).media, before.1);
+    assert_eq!(shell.editor().undo_history().count(), before.2);
+    assert!(!shell.is_processing());
 }

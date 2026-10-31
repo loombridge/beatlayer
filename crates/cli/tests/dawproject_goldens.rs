@@ -13,7 +13,7 @@ use bl_cli::golden::SAMPLE_RATE;
 use bl_cli::render::{self, Cue, Script, Settings};
 use bl_core::time::Ticks;
 use bl_engine::MediaMap;
-use bl_interop::dawproject::{self, Context, Imported};
+use bl_interop::dawproject::{self, Container, Context, Imported};
 use bl_model::{
     AudioData, Clip, ClipData, Command, ContentHash, Document, Editor, Input, Monitor, Output,
     TrackId, TrackKind, WarpMarker, WarpMode,
@@ -25,26 +25,47 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+/// A file imported, with the container its media are read from.
+struct Opened {
+    imported: Imported,
+    container: Container,
+}
+
+impl std::ops::Deref for Opened {
+    type Target = Imported;
+
+    fn deref(&self) -> &Imported {
+        &self.imported
+    }
+}
+
 /// The file, imported with Re-Pitch as the Default Warp Mode.
-fn import() -> Imported {
+fn import() -> Opened {
     import_of("bitwig-shaped")
 }
 
 /// A fixture, imported with Re-Pitch as the Default Warp Mode.
-fn import_of(name: &str) -> Imported {
+fn import_of(name: &str) -> Opened {
     let bytes = std::fs::read(fixture(&format!("{name}.dawproject"))).unwrap();
     let container = dawproject::read_container(&bytes).unwrap();
     let folder = fixture("");
     let mut context = Context::new(&folder, &folder);
     context.default_warp_mode = WarpMode::RePitch;
-    dawproject::import(&container, &context).unwrap()
+    let imported = dawproject::import(&container, &context).unwrap();
+    Opened {
+        imported,
+        container,
+    }
 }
 
 /// The media the container holds, decoded, and the hash of each by its path.
-fn media(imported: &Imported) -> (MediaMap, impl Fn(&str) -> ContentHash + '_) {
+fn media(imported: &Opened) -> (MediaMap, impl Fn(&str) -> ContentHash + '_) {
     let mut map = MediaMap::new();
     for file in &imported.files {
-        let bytes = file.bytes.clone().expect("the container holds it");
+        let bytes = imported
+            .container
+            .read(&file.path)
+            .expect("the container holds it");
         let decoded = bl_media::Decoder::from_reader(Cursor::new(bytes), Some("wav"))
             .and_then(bl_media::Decoder::decode_to_end)
             .expect("the file decodes");
@@ -248,7 +269,7 @@ fn the_imported_set_renders_the_same_samples_as_the_set_built_by_commands() {
 }
 
 /// The hash of the one audio file a small fixture holds.
-fn tone(imported: &Imported) -> ContentHash {
+fn tone(imported: &Opened) -> ContentHash {
     imported.files[0].hash
 }
 
@@ -262,7 +283,7 @@ fn one_track(name: &str) -> (Built, TrackId) {
 }
 
 /// How far two renders of a fixture differ, at two block sizes.
-fn assert_null(imported: &Imported, expected: &Document) {
+fn assert_null(imported: &Opened, expected: &Document) {
     let (media, _) = media(imported);
     for block in [64, 512] {
         let from_file = render(&imported.project.document, &media, block);

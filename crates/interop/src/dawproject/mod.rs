@@ -23,7 +23,10 @@ pub mod read;
 pub mod report;
 pub mod write;
 
-pub use container::{Container, Error, read_container, read_container_strict};
+pub use container::{
+    Container, Error, Limits, MAX_ENTRY_BYTES, MAX_TOTAL_BYTES, folded, read_container,
+    read_container_from, read_container_strict, read_container_with_limits,
+};
 pub use export::{ExportContext, Exported, MediaFiles, export, export_to};
 pub use import::{Context, DefaultColours, Extracted, Imported, NewColours, import};
 pub use model::Project;

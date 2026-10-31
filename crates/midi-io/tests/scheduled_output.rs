@@ -198,7 +198,11 @@ fn system_sends_on_its_stamp() {
     let began = Instant::now();
     let port = loop {
         let ports = backend.ports(Direction::Output).unwrap_or_default();
-        if let Some(port) = ports.into_iter().find(|p| p.contains(&name)) {
+        if let Some(port) = ports
+            .into_iter()
+            .map(|(port, _)| port)
+            .find(|p| p.contains(&name))
+        {
             break port;
         }
         assert!(

@@ -29,8 +29,8 @@ use bl_model::{
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
 pub use crate::sections::{ANALYSER_BANDS, CURVE_POINTS};
 use crate::sections::{
-    Analyser, Biquad, Coeffs, DISPLAY_RATE, REFRESH_FRAMES, curve_freqs, curve_series, response_db,
-    spectrum_series,
+    Analyser, Coeffs, DISPLAY_RATE, REFRESH_FRAMES, count_design, curve_freqs, curve_series,
+    response_db, spectrum_series,
 };
 
 /// EQ Eight's device type.
@@ -412,6 +412,19 @@ pub fn make(config: &NodeConfig) -> Contour {
 /// `S`, and a cut filter's is its resonance; the 48 dB cuts are four
 /// identical stages, so their curve is a plain cascade.
 pub(crate) fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> Coeffs {
+    let [b0, b1, b2, a1, a2] = coeffs_f64(kind, freq, gain_db, q, rate);
+    Coeffs {
+        b0: b0 as f32,
+        b1: b1 as f32,
+        b2: b2 as f32,
+        a1: a1 as f32,
+        a2: a2 as f32,
+    }
+}
+
+/// [`coeffs`] before its rounding to f32, as `[b0, b1, b2, a1, a2]`.
+fn coeffs_f64(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> [f64; 5] {
+    count_design();
     let w0 = TAU * (freq / rate).clamp(1.0e-6, 0.49);
     let (sin, cos) = w0.sin_cos();
     let amplitude = 10f64.powf(gain_db / 40.0);
@@ -459,31 +472,57 @@ pub(crate) fn coeffs(kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) -> 
             (half, 1.0 - cos, half, 1.0 + alpha, -2.0 * cos, 1.0 - alpha)
         }
     };
-    Coeffs {
-        b0: (b0 / a0) as f32,
-        b1: (b1 / a0) as f32,
-        b2: (b2 / a0) as f32,
-        a1: (a1 / a0) as f32,
-        a2: (a2 / a0) as f32,
+    [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0]
+}
+
+/// A second-order section in transposed direct form II, coefficients and
+/// state in f64: below 50 Hz at 96 kHz and up, `1 + a1 + a2` is a difference
+/// of numbers near 2 that f32 can't hold.
+#[derive(Clone, Copy, Default)]
+struct Section {
+    /// `[b0, b1, b2, a1, a2]`.
+    c: [f64; 5],
+    z1: f64,
+    z2: f64,
+}
+
+impl Section {
+    #[inline]
+    fn process(&mut self, x: f32) -> f32 {
+        let [b0, b1, b2, a1, a2] = self.c;
+        let x = f64::from(x);
+        let y = flush(b0 * x + self.z1);
+        self.z1 = flush(b1 * x - a1 * y + self.z2);
+        self.z2 = flush(b2 * x - a2 * y);
+        y as f32
     }
+}
+
+/// A value far below the audio's noise floor is left as zero rather than as
+/// a denormal, whose arithmetic is slow.
+fn flush(x: f64) -> f64 {
+    if x.abs() < 1e-30 { 0.0 } else { x }
 }
 
 /// One band's filters on one channel.
 #[derive(Clone, Copy)]
 struct Band {
-    stages: [Biquad; MAX_STAGES],
+    stages: [Section; MAX_STAGES],
     used: usize,
     on: bool,
     kind: Type,
+    /// The (freq, gain, q, rate) the stages were designed for.
+    last: Option<[f64; 4]>,
 }
 
 impl Band {
     fn new() -> Self {
         Self {
-            stages: [Biquad::default(); MAX_STAGES],
+            stages: [Section::default(); MAX_STAGES],
             used: 1,
             on: false,
             kind: Type::Peak,
+            last: None,
         }
     }
 
@@ -491,15 +530,18 @@ impl Band {
     /// starts it from silence, so no state of another shape rings on.
     fn design(&mut self, on: bool, kind: Type, freq: f64, gain_db: f64, q: f64, rate: f64) {
         if on != self.on || kind != self.kind {
-            self.stages = [Biquad::default(); MAX_STAGES];
+            self.stages = [Section::default(); MAX_STAGES];
             self.on = on;
             self.kind = kind;
+            self.last = None;
         }
-        if !on {
+        let now = Some([freq, gain_db, q, rate]);
+        if !on || self.last == now {
             return;
         }
+        self.last = now;
         self.used = kind.stages();
-        let c = coeffs(kind, freq, gain_db, q, rate);
+        let c = coeffs_f64(kind, freq, gain_db, q, rate);
         for stage in &mut self.stages[..self.used] {
             stage.c = c;
         }
@@ -903,8 +945,36 @@ pub fn display(
 
 #[cfg(test)]
 mod tests {
+    use bl_engine::{NodeEvent, ParamValue};
+
     use super::*;
-    use crate::sections::{ANALYSER_MAX_HZ, ANALYSER_MIN_HZ, ANALYSER_WINDOW};
+    use crate::sections::{
+        ANALYSER_MAX_HZ, ANALYSER_MIN_HZ, ANALYSER_WINDOW, designs_in_block, test_node,
+    };
+
+    // Spec: eq R3
+    #[test]
+    fn a_refresh_with_nothing_moved_designs_nothing() {
+        let mut params = vec![(MODE, 0.0)];
+        for band in 0..BANDS {
+            params.push((band_param(0, band, ON), 1.0));
+            params.push((band_param(0, band, FREQ), 100.0 * (band + 1) as f64));
+        }
+        let mut node = test_node(register, &eq_type(), &params);
+        assert!(designs_in_block(node.as_mut(), &[]) > 0, "the first block");
+        for _ in 0..16 {
+            assert_eq!(designs_in_block(node.as_mut(), &[]), 0, "static parameters");
+        }
+        let moved = NodeEvent {
+            offset: 0,
+            param: band_param(0, 0, FREQ),
+            value: ParamValue::Set(300.0),
+        };
+        assert!(
+            designs_in_block(node.as_mut(), &[moved]) > 0,
+            "a moved band"
+        );
+    }
 
     // Spec: eq R5
     #[test]

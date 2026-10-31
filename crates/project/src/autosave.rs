@@ -75,7 +75,7 @@ use core::fmt;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
@@ -84,7 +84,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::error::LoadError;
-use crate::format::{LoadOptions, Project, decode_value, to_value};
+use crate::format::{LoadOptions, Project, SetInfo, decode_value, to_value};
 use crate::journal::{
     self, Follows, JOURNAL_EXTENSION, JournalWriter, Pending, discard_uncommitted_file, fingerprint,
 };
@@ -178,6 +178,10 @@ pub struct Recovered {
     pub project: Project,
     /// How many journal entries it recovered.
     pub edits: usize,
+    /// What the journal says about the song's form: the schema it was written
+    /// in. Like [`SetFile::info`], it tells the caller which steps of a
+    /// migration are still its own to run.
+    pub info: SetInfo,
 }
 
 /// What the autosave service is doing, for the app's status display.
@@ -193,6 +197,11 @@ pub struct AutosaveStatus {
     pub continuous: bool,
     /// The last problem writing the journal, until a write succeeds.
     pub error: Option<String>,
+    /// Whether the journal's entries are save points the set opens at: Save
+    /// Continuously is on, the set has a file, and its journal is beside it.
+    /// When it isn't, edits are only recovery points, and closing the set
+    /// discards them.
+    pub committing: bool,
 }
 
 /// Why the autosave service couldn't do something.
@@ -287,9 +296,6 @@ pub struct Autosave {
     continuous: bool,
     offers: Vec<Offer>,
     session: Option<Session>,
-    /// The set the last session began with, so a session that couldn't
-    /// start can be started again (the crash-recovery spec, R27).
-    set: Option<SetFile>,
 }
 
 impl Autosave {
@@ -310,7 +316,6 @@ impl Autosave {
             continuous: false,
             offers: Vec::new(),
             session: None,
-            set: None,
         };
         autosave.scan()?;
         Ok(autosave)
@@ -461,10 +466,10 @@ impl Autosave {
                 let value = read.last.as_ref().ok_or(AutosaveError::NoOffer {
                     id: Some(offer.info.id.clone()),
                 })?;
-                let (project, _) = decode_value(value, &options).map_err(AutosaveError::Load)?;
-                Ok((project, read))
+                let (project, info) = decode_value(value, &options).map_err(AutosaveError::Load)?;
+                Ok((project, info, read))
             });
-        let (project, read) = match loaded {
+        let (project, info, read) = match loaded {
             Ok(loaded) => loaded,
             Err(error) => {
                 self.offers.insert(0, offer);
@@ -491,6 +496,7 @@ impl Autosave {
             set,
             project,
             edits: offer.info.edits,
+            info,
         })
     }
 
@@ -555,9 +561,6 @@ impl Autosave {
             session.park();
             self.scan()?;
         }
-        // Kept even when the session can't start, so a later edit can try
-        // again (the crash-recovery spec, R27).
-        self.set = set.cloned();
         let id = new_session_id();
         let target = Target::of(set);
         let shared = Arc::new(Shared::default());
@@ -607,18 +610,18 @@ impl Autosave {
 
     /// Starts the session again when it couldn't start, so that a later
     /// edit tries once more: the recovery folder may be writable now (the
-    /// crash-recovery spec, R27). Does nothing when a session is running.
+    /// crash-recovery spec, R27). `set` is the open set, as for
+    /// [`Autosave::begin`]. Does nothing when a session is running.
     ///
     /// # Errors
     ///
     /// [`AutosaveError::Io`] if the session can't register in the recovery
     /// folder, as [`Autosave::begin`] says.
-    pub fn retry(&mut self) -> Result<(), AutosaveError> {
+    pub fn retry(&mut self, set: Option<&SetFile>) -> Result<(), AutosaveError> {
         if self.session.is_some() {
             return Ok(());
         }
-        let set = self.set.clone();
-        self.begin(set.as_ref())
+        self.begin(set)
     }
 
     /// Journals the open set after a finished edit: a command, a gesture's
@@ -712,6 +715,9 @@ impl Autosave {
             journalled: session.map_or(0, |session| session.shared.durable.load(Ordering::Acquire)),
             continuous: self.continuous,
             error: session.and_then(|session| session.shared.error()),
+            committing: self.continuous
+                && session
+                    .is_some_and(|session| session.shared.committable.load(Ordering::Acquire)),
         }
     }
 }
@@ -771,6 +777,9 @@ struct Shared {
     durable: AtomicU64,
     /// The last write's error, until a write succeeds.
     error: Mutex<Option<String>>,
+    /// Whether the set has a file and the journal is beside it, so that the
+    /// entries are save points once Save Continuously is on.
+    committable: AtomicBool,
 }
 
 impl Shared {
@@ -898,6 +907,7 @@ impl Writer {
             let _ = std::fs::remove_file(&lock_path);
             return Err(error);
         }
+        writer.publish();
         Ok(writer)
     }
 
@@ -944,7 +954,20 @@ impl Writer {
 
     /// Whether entries are save points.
     fn commits(&self) -> bool {
-        self.continuous && self.target.follows.is_some() && self.journal_is_beside_set()
+        self.continuous && self.committable()
+    }
+
+    /// Whether entries would be save points with Save Continuously on.
+    fn committable(&self) -> bool {
+        self.target.follows.is_some() && self.journal_is_beside_set()
+    }
+
+    /// Tells the caller's thread whether the journal can hold save points,
+    /// for [`AutosaveStatus::committing`].
+    fn publish(&self) {
+        self.shared
+            .committable
+            .store(self.committable(), Ordering::Release);
     }
 
     fn journal_is_beside_set(&self) -> bool {
@@ -959,8 +982,11 @@ impl Writer {
         let result = to_value(&edit.project, revision)
             .map_err(|error| error.to_string())
             .and_then(|value| {
+                // Made first: it may fall back to the recovery folder, whose
+                // entries are never save points.
+                self.journal().map_err(|error| error.to_string())?;
                 let committed = self.commits();
-                let journal = self.journal().map_err(|error| error.to_string())?;
+                let journal = self.journal.as_mut().expect("created above");
                 let pending = Pending {
                     value,
                     label: edit.label,
@@ -971,6 +997,7 @@ impl Writer {
                     .append(vec![pending])
                     .map_err(|error| format!("{}: {error}", journal.path().display()))
             });
+        self.publish();
         match result {
             Ok(_) => {
                 self.shared.durable.store(edit.n, Ordering::Release);
@@ -1044,6 +1071,14 @@ impl Writer {
             follows: Some(follows),
         };
         self.journal_path = planned_journal(&self.dir, &self.id, &self.target);
+        // Saving back to a path this session journalled before: the journal
+        // it kept for that name follows an older revision, and the save has
+        // superseded its save points. Left, it would make the next entry
+        // fall back to the recovery folder.
+        if self.journal_is_beside_set() {
+            let _ = std::fs::remove_file(&self.journal_path);
+        }
+        self.publish();
         match self.write_index() {
             Ok(()) => {
                 self.shared.durable.fetch_max(through, Ordering::AcqRel);
@@ -1813,5 +1848,187 @@ mod tests {
         let mut relaunched = Autosave::start(dir.recovery()).unwrap();
         assert_eq!(relaunched.offers().len(), 1);
         assert_eq!(relaunched.recover(None).unwrap().project, kept);
+    }
+
+    /// Makes `folder` read-only, and gives its old permissions back, or
+    /// `None` (leaving it as it was) when running as a user who ignores
+    /// permissions: there is nothing to test then.
+    #[cfg(unix)]
+    fn read_only(folder: &Path) -> Option<std::fs::Permissions> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let writable = std::fs::metadata(folder).unwrap().permissions();
+        std::fs::set_permissions(folder, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = folder.join(".probe");
+        if File::create(&probe).is_ok() {
+            let _ = std::fs::remove_file(probe);
+            std::fs::set_permissions(folder, writable).unwrap();
+            return None;
+        }
+        Some(writable)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_journal_that_fell_back_to_the_recovery_folder_is_not_committing() {
+        // Spec: crash-recovery R8, R25. With Save Continuously on, a project
+        // folder that can't be written holds no save points, and the first
+        // entry in the recovery folder isn't one either.
+        let dir = TestDir::new("fallback-continuous");
+        let folder = dir.0.join("Project");
+        let set_path = folder.join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let Some(writable) = read_only(&folder) else {
+            return;
+        };
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.set_continuous(true);
+        autosave.begin(Some(&set)).unwrap();
+        assert!(autosave.status().committing, "until a write says otherwise");
+        let mut editor = Project::new().editor();
+        let edited = rename(&mut editor, "Kept");
+        autosave.edited(&edited, "Rename Track");
+        autosave.flush().unwrap();
+        assert!(!autosave.status().committing);
+        drop(autosave); // a crash
+
+        let mut relaunched = Autosave::start(dir.recovery()).unwrap();
+        assert_eq!(relaunched.offers().len(), 1);
+        assert_eq!(relaunched.offers()[0].edits, 1);
+        assert_eq!(relaunched.recover(None).unwrap().project, edited);
+        relaunched.close_set().unwrap();
+        let left = dir.files(&dir.recovery());
+        std::fs::set_permissions(&folder, writable).unwrap();
+        assert!(
+            !left.iter().any(|name| name.ends_with(".bljournal")),
+            "{left:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_recovery_keeps_journalling_the_open_set() {
+        let dir = TestDir::new("failed-recovery");
+        let save = |name: &str| {
+            let path = dir.0.join(name).join(format!("{name}.blset"));
+            let mut set = SetFile::new(&path);
+            set.save(&Project::new()).unwrap();
+            set
+        };
+        let (a, b) = (save("a"), save("b"));
+        let mut editor = Project::new().editor();
+        let song_b = rename(&mut editor, "B");
+        let song_a = rename(&mut Project::new().editor(), "A");
+        let mut crashed = Autosave::start(dir.recovery()).unwrap();
+        crashed.begin(Some(&b)).unwrap();
+        crashed.edited(&song_b, "Rename Track");
+        crashed.flush().unwrap();
+        drop(crashed);
+
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&a)).unwrap();
+        let b_id = autosave.offers()[0].id.clone();
+        // The recovery folder can be read but not written: the recovered
+        // set's session can't start, and the open set stays open.
+        let Some(writable) = read_only(&dir.recovery()) else {
+            return;
+        };
+        let failed = autosave.recover(Some(&b_id));
+        std::fs::set_permissions(dir.recovery(), writable).unwrap();
+        assert!(failed.is_err());
+        autosave.retry(Some(&a)).unwrap();
+        autosave.edited(&song_a, "Rename Track");
+        autosave.flush().unwrap();
+        let id = autosave.status().session.unwrap();
+        let held_by = |set: &SetFile| {
+            journal::journals_beside(set.path())
+                .unwrap()
+                .iter()
+                .any(|journal| journal::session_of(journal).as_deref() == Some(id.as_str()))
+        };
+        assert!(held_by(&a), "the open set's edits are journalled beside it");
+        assert!(
+            !held_by(&b),
+            "and not beside the set that failed to recover"
+        );
+    }
+
+    #[test]
+    fn save_as_back_to_an_earlier_path_still_commits() {
+        // Spec: crash-recovery R8.
+        let dir = TestDir::new("save-as-back");
+        let a_path = dir.0.join("Song.blset");
+        let mut a = SetFile::new(&a_path);
+        a.save(&Project::new()).unwrap();
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&a)).unwrap();
+        autosave.set_continuous(true);
+        let mut editor = Project::new().editor();
+        let three = rename(&mut editor, "Three");
+        autosave.edited(&three, "Rename Track");
+        autosave.flush().unwrap();
+
+        let mut copy = SetFile::new(dir.0.join("Song v2.blset"));
+        copy.save(&three).unwrap();
+        autosave.saved(&copy);
+        autosave.flush().unwrap();
+        let mut again = SetFile::new(&a_path);
+        again.save(&three).unwrap();
+        autosave.saved(&again);
+        autosave.flush().unwrap();
+
+        let five = rename(&mut editor, "Five");
+        autosave.edited(&five, "Rename Track");
+        autosave.flush().unwrap();
+        assert!(autosave.status().committing);
+        assert_eq!(SetFile::open(&a_path).unwrap().1, five);
+        let session = autosave.status().session.unwrap();
+        assert!(
+            !dir.recovery()
+                .join(format!("{session}.{JOURNAL_EXTENSION}"))
+                .exists(),
+            "the journal stayed beside the set"
+        );
+        autosave.close_set().unwrap();
+        assert_eq!(SetFile::open(&a_path).unwrap().1, five);
+    }
+
+    #[test]
+    fn recovering_an_older_journal_reports_its_schema() {
+        // Spec: modulation R5. The caller needs the schema the journal's
+        // song was written in to finish migrating it.
+        let dir = TestDir::new("recover-schema");
+        let set_path = dir.0.join("Song.blset");
+        let mut set = SetFile::new(&set_path);
+        set.save(&Project::new()).unwrap();
+        let mut autosave = Autosave::start(dir.recovery()).unwrap();
+        autosave.begin(Some(&set)).unwrap();
+        let mut editor = Project::new().editor();
+        autosave.edited(&rename(&mut editor, "Edited"), "Rename Track");
+        autosave.flush().unwrap();
+        let id = autosave.status().session.unwrap();
+        drop(autosave); // a crash
+        // The journal as an older build wrote it: its one entry is a
+        // schema-4 song.
+        let path = journal::beside(&set_path, &id).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        JournalWriter::create(path, &id, set.follows())
+            .unwrap()
+            .append(vec![Pending {
+                value: serde_json::from_slice(include_bytes!("../tests/fixtures/schema-4.json"))
+                    .unwrap(),
+                label: "Rename Track".to_owned(),
+                time: SystemTime::now(),
+                committed: false,
+            }])
+            .unwrap();
+
+        let recovered = Autosave::start(dir.recovery())
+            .unwrap()
+            .recover(None)
+            .unwrap();
+        assert_eq!(recovered.info.schema, 4);
+        assert!(recovered.info.before_relative_modulation());
     }
 }

@@ -377,8 +377,16 @@ impl<'a> Audio<'_, 'a> {
     /// A tempo-synced device turns beats into frames by this.
     #[must_use]
     pub fn bpm(&self) -> f64 {
+        self.bpm_at(0)
+    }
+
+    /// [`Self::bpm`] at frame `frame` of the stretch: a device whose time
+    /// follows the tempo through a ramp reads it per frame, so the result
+    /// doesn't depend on where the engine cuts the blocks.
+    #[must_use]
+    pub fn bpm_at(&self, frame: usize) -> f64 {
         let tempo = self.block.tempo();
-        let ticks = tempo.frames_to_ticks(self.song_position(), self.block.sample_rate());
+        let ticks = tempo.frames_to_ticks(Frames(self.song_frame(frame)), self.block.sample_rate());
         tempo.bpm_at(ticks).get() * self.block.transport().speed
     }
 

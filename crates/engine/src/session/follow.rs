@@ -118,6 +118,25 @@ impl FollowTable {
         Self { scenes, slots }
     }
 
+    /// Whether `other` has the same scenes, in the same order, and the same
+    /// slots that hold a clip: what only a new program can change. Their
+    /// values may differ, which the running program takes as a swap of the
+    /// table.
+    pub(crate) fn same_shape(&self, other: &Self) -> bool {
+        self.scenes.len() == other.scenes.len()
+            && self
+                .scenes
+                .iter()
+                .zip(&other.scenes)
+                .all(|(a, b)| a.scene == b.scene)
+            && self.slots.len() == other.slots.len()
+            && self
+                .slots
+                .iter()
+                .zip(&other.slots)
+                .all(|(a, b)| (a.track, a.scene) == (b.track, b.scene))
+    }
+
     fn slot(&self, track: TrackId, scene: SceneId) -> Option<&SlotInfo> {
         self.slots
             .binary_search_by_key(&(track, scene), |info| (info.track, info.scene))

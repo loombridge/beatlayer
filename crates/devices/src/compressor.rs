@@ -374,14 +374,17 @@ impl NativeDevice for Squeeze {
 
         // 1. The detector's level per frame, through the SC Filter when
         // it's on: what the sidechain hands the device, or its own input.
-        // Each channel's gain is worked out on its own; the frame takes the
-        // least of them, so both channels share one gain reduction (whether
-        // Live's shares one is to observe).
-        self.targets[..frames].fill(f32::MAX);
+        // The frame takes the louder channel's level, so both channels
+        // share one gain (whether Live's shares one is to observe): the
+        // curve is monotonic, so that is the least reduction when
+        // compressing and the most expansion when expanding.
+        self.targets[..frames].fill(0.0);
         for channel in 0..channels {
-            for (i, target) in self.targets[..frames].iter_mut().enumerate() {
-                let keyed = audio.sidechain(channel).map(|key| key[i]);
-                let sample = keyed.unwrap_or_else(|| audio.channel_mut(channel)[i]);
+            let src = match audio.sidechain(channel) {
+                Some(key) => key,
+                None => audio.channel(channel),
+            };
+            for (target, &sample) in self.targets[..frames].iter_mut().zip(src) {
                 self.peak_in = self.peak_in.max(sample.abs());
                 let filtered = if sc_on {
                     self.filter[channel].process(sample)
@@ -395,21 +398,31 @@ impl NativeDevice for Squeeze {
                 } else {
                     f64::from(filtered.abs())
                 };
-                let db = level_db(level);
-                let gain = db_to_gain(curve_db(db, threshold, slope, knee, expand)) as f32;
-                *target = target.min(gain);
+                *target = target.max(level as f32);
             }
         }
+        // The gain each level asks for. Below the knee it is exactly 1, so
+        // the logarithm and the power are skipped there.
+        let below = db_to_gain(threshold - 0.5 * knee);
+        for target in &mut self.targets[..frames] {
+            let level = f64::from(*target);
+            *target = if level <= below {
+                1.0
+            } else {
+                db_to_gain(curve_db(level_db(level), threshold, slope, knee, expand)) as f32
+            };
+        }
 
-        // 2. The envelope: the gain falls to a new reduction with Attack
-        // and recovers with Release (Log scales the release step with the
-        // depth of the reduction; Auto reads how long one has been held).
+        // 2. The envelope: the gain moves away from unity (a reduction, or
+        // an expansion) with Attack and returns to it with Release (Log
+        // scales the release step with the depth of the reduction; Auto
+        // reads how long a reduction or expansion has been held).
         let mut gain = self.gain;
         // The least gain of the block, for the gain-reduction meter (R40).
         let mut least = gain;
         for i in 0..frames {
             let target = self.targets[i];
-            let step = if target < gain {
+            let step = if (target - 1.0).abs() > (gain - 1.0).abs() {
                 attack_step
             } else if log_envelope {
                 // Beatlayer's own Log shape: deeper reductions release
@@ -423,7 +436,7 @@ impl NativeDevice for Squeeze {
             gain += (target - gain) * step;
             least = least.min(gain);
             self.gains[i] = gain;
-            if target < 1.0 {
+            if target != 1.0 {
                 self.hold_frames += 1.0;
             } else {
                 self.hold_frames = 0.0;
@@ -437,8 +450,9 @@ impl NativeDevice for Squeeze {
         let wet = params.ramp(at(DRY_WET));
         let out = params.ramp(at(OUT));
         for channel in 0..channels {
+            let samples = audio.channel_mut(channel);
             for i in 0..frames {
-                let sample = audio.channel_mut(channel)[i];
+                let sample = samples[i];
                 let delayed = if lookahead == 0 {
                     sample
                 } else {
@@ -449,7 +463,7 @@ impl NativeDevice for Squeeze {
                 let level = self.gains[i] * makeup * out[i];
                 let output = delayed * (mix * level + (1.0 - mix));
                 self.peak_out = self.peak_out.max(output.abs());
-                audio.channel_mut(channel)[i] = output;
+                samples[i] = output;
             }
         }
     }

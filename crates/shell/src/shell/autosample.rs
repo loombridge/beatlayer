@@ -59,6 +59,8 @@ pub struct Job {
     track: TrackId,
     /// The settings.
     settings: Settings,
+    /// The folder this run writes into, free when it started (R69).
+    folder: PathBuf,
     /// The plan.
     plan: Plan,
     /// The sample being made.
@@ -222,11 +224,24 @@ impl Shell {
         if plan.samples.is_empty() {
             return Err(self.failed(id, "the settings make no samples"));
         }
+        // Spec: multisampler R69. A folder that holds files is never reused,
+        // so a run can't overwrite, or on Cancel delete, an earlier run's.
+        let base = self.processed_folder(Kind::Autosample);
+        let stem = bl_project::preset::file_safe(&settings.name);
+        let mut folder = base.join(&stem);
+        let mut n = 2u32;
+        while std::fs::read_dir(&folder)
+            .map_or(folder.exists(), |mut entries| entries.next().is_some())
+        {
+            folder = base.join(format!("{stem} {n}"));
+            n += 1;
+        }
         self.autosample_result_value = None;
         self.autosample = Some(Job {
             device,
             track,
             settings,
+            folder,
             plan,
             index: 0,
             written: Vec::new(),
@@ -239,7 +254,10 @@ impl Shell {
         if args.wait.unwrap_or(true) {
             // The agent waits for the samples, so the result is complete.
             while self.autosample.is_some() {
-                self.step_autosample(id)?;
+                if let Err(error) = self.step_autosample(id) {
+                    self.stop_autosample();
+                    return Err(error);
+                }
             }
             let result = self
                 .autosample_result_value
@@ -348,6 +366,8 @@ impl Shell {
         for path in &job.written {
             let _ = std::fs::remove_file(path);
         }
+        // Only removes the folder when it is empty.
+        let _ = std::fs::remove_dir(&job.folder);
         true
     }
 
@@ -416,11 +436,17 @@ impl Shell {
         frames: &[f32],
     ) -> Result<(PathBuf, ContentHash, u64, u8), ShellError> {
         let name = autosample::file_name(settings, sample);
-        let folder = self.processed_folder(Kind::Autosample).join(&settings.name);
+        let folder = match self.autosample.as_ref() {
+            Some(job) => job.folder.clone(),
+            None => return Err(self.failed(id, "the autosample was stopped")),
+        };
         std::fs::create_dir_all(&folder).map_err(|error| {
             self.failed(id, format!("couldn't make {}: {error}", folder.display()))
         })?;
         let path = folder.join(format!("{name}.wav"));
+        if path.exists() {
+            return Err(self.failed(id, format!("{} already exists", path.display())));
+        }
         let rate = self.engine_rate();
         let channels = 2u16;
         let mut writer = AudioWriter::create(
@@ -474,7 +500,9 @@ impl Shell {
 
     /// The new track and its multisampler, as one undo step (R70).
     fn land_autosample(&mut self, id: &str) -> Result<(), ShellError> {
-        let Some(job) = self.autosample.take() else {
+        // The job stays until the track lands, so a failure here still deletes
+        // the files (R73).
+        let Some(job) = self.autosample.as_ref() else {
             return Ok(());
         };
         let look = &self.prefs.look;
@@ -543,6 +571,9 @@ impl Shell {
                 Ok::<_, bl_model::EditError>((device, track))
             })
             .map_err(|error| self.failed(id, error))?;
+        let Some(job) = self.autosample.take() else {
+            return Ok(());
+        };
         // The samples join the set's media now, with the track that plays
         // them (R69).
         for (hash, path, size) in &job.media {

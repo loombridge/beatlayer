@@ -187,7 +187,7 @@ fn velocity_layer(layers: u8, layer: u8) -> (u8, Zone) {
 pub fn file_name(settings: &Settings, sample: &Planned) -> String {
     let mut name = format!(
         "{} {} v{}",
-        settings.name,
+        bl_project::preset::file_safe(&settings.name),
         bl_model::note_name(sample.note),
         sample.velocity
     );

@@ -1009,6 +1009,43 @@ fn consolidate_on_a_grouped_track_keeps_its_clips() {
     assert!(matches!(created.data, ClipData::Audio(_)));
 }
 
+// Spec: audio-clip-editing R20. A track that shares its group with another
+// track still renders alone: deleting the group takes the other track too.
+#[test]
+fn consolidate_on_a_track_sharing_its_group_with_another_makes_the_clip() {
+    let scratch = Scratch::new("shared-group");
+    let mut shell = new_shell(&scratch);
+    saved(&scratch, &mut shell);
+    let track = track(&shell, TrackKind::Audio);
+    shell
+        .invoke("track.create", json!({ "kind": "audio" }))
+        .unwrap();
+    let other = shell
+        .editor()
+        .document()
+        .tracks()
+        .filter(|track| track.kind() == TrackKind::Audio)
+        .map(Track::id)
+        .last()
+        .unwrap();
+    assert_ne!(other, track);
+    let source = scratch.path("Tone.wav");
+    wav(&source, 1.0, 1, 0.5);
+    place(&mut shell, track, &source, 0);
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [track, other], "title_bars": true }),
+        )
+        .unwrap();
+    shell.run("track.group", json!({})).unwrap();
+    let doc = shell.editor().document();
+    assert!(doc.parent(track).is_some() && doc.parent(track) == doc.parent(other));
+
+    let made = consolidate(&mut shell, track, 0, 705_600);
+    assert_eq!(made.created.len(), 1, "the track's clip became one");
+}
+
 fn reverse(shell: &mut Shell, args: serde_json::Value) -> Result<ReverseResult, String> {
     shell
         .run(ids::REVERSE, args)

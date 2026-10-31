@@ -96,6 +96,9 @@ pub struct ReadModel {
     pub selected_device: Option<DeviceId>,
     /// Whether the Session View is the main view, not the Arrangement.
     pub session_view: bool,
+    /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
+    /// R37).
+    pub mix: crate::mix::Mix,
 }
 
 impl ReadModel {
@@ -128,6 +131,7 @@ impl ReadModel {
             browse: None,
             selected_device: None,
             session_view: false,
+            mix: crate::mix::Mix::default(),
         }
     }
 

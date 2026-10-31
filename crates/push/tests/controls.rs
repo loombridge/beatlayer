@@ -11,7 +11,7 @@ use serde_json::json;
 use crate::rig::Rig;
 
 /// The buttons the surface runs itself: the rest reach the modes' content.
-const CORE: [&str; 15] = [
+const CORE: [&str; 16] = [
     "tap_tempo",
     "metronome",
     "play",
@@ -27,6 +27,7 @@ const CORE: [&str; 15] = [
     "mix",
     "clip",
     "shift",
+    "master",
 ];
 
 fn is_core(name: &str) -> bool {

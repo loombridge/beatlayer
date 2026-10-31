@@ -123,10 +123,10 @@ Every press and turn runs Beatlayer's registered commands, the same ones the win
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | WP-7.20: `bl-push` `browse::add_track_with_a_device_is_one_gesture`, `controls::the_master_encoder_sets_main_volume_and_with_shift_the_cue_volume`; `bl-shell` `push::load_adds_to_an_empty_midi_track_and_the_next_load_replaces`; to be written in WP-7.25, WP-7.26 and WP-7.27; WP-7.28: `bl-push` `session::duplicate_copies_a_clip_to_each_pad_and_delete_deletes_it`; `bl-shell` `push::colouring_duplicating_and_deleting_clips_are_one_undo_step_each` | surface (simulated Push 2), agent |
-| R2 | WP-7.20: `bl-push` `browse::browse_on_an_empty_midi_track_lists_what_it_can_hold`; `bl-shell` `push::load_adds_to_an_empty_midi_track_and_the_next_load_replaces`; to be written in each other package | surface |
-| R3 | WP-7.20: `bl-push` `browse::load_replaces_the_selected_device_and_a_second_load_replaces_that`; to be written in each other package | surface |
-| R4 | `bl-push` `browse::an_encoder_scrolls_its_column_and_fills_the_next`, `encoder::tests::a_list_moves_one_value_for_every_ten_steps` | unit, surface |
+| R1 | WP-7.20: `bl-push` `browse::add_track_with_a_device_is_one_gesture`, `controls::the_master_encoder_sets_main_volume_and_with_shift_the_cue_volume`; `bl-shell` `push::load_adds_to_an_empty_midi_track_and_the_next_load_replaces`; WP-7.26: `bl-push` `mix::track_mix_encoders_set_the_selected_tracks_volume_pan_and_sends`, `delete_and_duplicate_with_a_lower_button`, `bl-shell` `push::mix_mode_sets_the_selected_tracks_volume_pan_and_sends_one_undo_step_a_touch`; to be written in WP-7.25 and WP-7.27; WP-7.28: `bl-push` `session::duplicate_copies_a_clip_to_each_pad_and_delete_deletes_it`; `bl-shell` `push::colouring_duplicating_and_deleting_clips_are_one_undo_step_each` | surface (simulated Push 2), agent |
+| R2 | WP-7.20: `bl-push` `browse::browse_on_an_empty_midi_track_lists_what_it_can_hold`; `bl-shell` `push::load_adds_to_an_empty_midi_track_and_the_next_load_replaces`; WP-7.26: `bl-push` `mix::unfolding_a_group_shows_its_tracks_in_the_window_too`; to be written in each other package | surface |
+| R3 | WP-7.20: `bl-push` `browse::load_replaces_the_selected_device_and_a_second_load_replaces_that`; WP-7.26: `bl-push` `mix::master_selects_main_and_back`, `bl-shell` `push::a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed`; to be written in each other package | surface |
+| R4 | `bl-push` `browse::an_encoder_scrolls_its_column_and_fills_the_next`, `encoder::tests::a_list_moves_one_value_for_every_ten_steps`, `mix::input_and_output_steps_input_type_and_monitor_through_their_choices` | unit, surface |
 | R5 | `bl-push` `browse::browse_on_an_empty_midi_track_lists_what_it_can_hold`, `what_is_listed_follows_the_selected_device_and_track`; `bl-shell` `push::an_audio_track_takes_audio_effects_and_load_replaces_the_selected_one`, `browser::catalogue::tests::labels_follow_the_role` | surface |
 | R6 | `bl-push` `browse::deeper_columns_move_left`, `display::browse_mode_draws_its_columns_and_buttons`; `bl-shell` `browser::catalogue::tests::a_presets_category_is_its_role` | surface, display frame |
 | R7, R8 | `bl-push` `browse::an_encoder_scrolls_its_column_and_fills_the_next`, `the_arrows_and_the_hierarchy_buttons_move_the_columns` | surface |
@@ -137,7 +137,21 @@ Every press and turn runs Beatlayer's registered commands, the same ones the win
 | R13 | `bl-push` `browse::the_columns_fill_as_the_index_does`; `bl-shell` `push::the_columns_fill_in_as_the_index_does` | surface |
 | R14 | `bl-push` `browse::the_state_reads_back_what_browse_mode_shows`; `bl-shell` `push::load_adds_to_an_empty_midi_track_and_the_next_load_replaces`; `bl-agent` `push::an_agent_reads_and_sets_a_simulated_push_2` | surface, agent |
 | R15 to R27 | to be written in WP-7.25 | surface, display frame, agent |
-| R28 to R42 | to be written in WP-7.26 | surface, display frame, agent |
+| R28 | `bl-push` `mix::mix_toggles_track_mix_and_global_mix_and_opens_in_the_last_one`, `modes::tapping_mix_in_mix_switches_between_track_mix_and_global_mix` | surface |
+| R29 | `bl-push` `mix::track_mix_encoders_set_the_selected_tracks_volume_pan_and_sends`, `with_eight_returns_the_arrows_show_sends_g_and_h`; `bl-shell` `push::mix_mode_sets_the_selected_tracks_volume_pan_and_sends_one_undo_step_a_touch` | surface, agent |
+| R30 | `bl-push` `mix::a_split_pan_track_takes_encoders_2_and_3` | surface |
+| R31 | `bl-push` `mix::input_and_output_steps_input_type_and_monitor_through_their_choices` | surface |
+| R32 | `bl-push` `mix::global_mix_sets_pans_on_eight_tracks_and_shifts_them_past_eight`, `global_mix_sends_buttons_shift_and_wrap` | surface |
+| R33 | `bl-push` `mix::global_mix_sets_pans_on_eight_tracks_and_shifts_them_past_eight` | surface |
+| R34 | `bl-push` `mix::global_mix_sets_pans_on_eight_tracks_and_shifts_them_past_eight`, `unfolding_a_group_shows_its_tracks_in_the_window_too` | surface |
+| R35 | `bl-push` `mix::track_mix_encoders_set_the_selected_tracks_volume_pan_and_sends` | surface |
+| R36 | `bl-push` `mix::master_selects_main_and_back` | surface |
+| R37 | `bl-push` `mix::unfolding_a_group_shows_its_tracks_in_the_window_too`, `unfolding_a_drum_rack_mixes_its_chains_and_sends_and_select_with_a_pad_reaches_one`, `mix::shift_and_a_lower_button_open_the_colour_picker_for_a_track_or_a_chain`; `bl-shell` `push::a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed` | surface, agent |
+| R38 | `bl-push` `mix::unfolding_a_drum_rack_mixes_its_chains_and_sends_and_select_with_a_pad_reaches_one`; `bl-shell` `push::a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed` | surface, agent |
+| R39 | `bl-push` `mix::mute_and_solo_act_on_the_selected_track_held_with_a_lower_button_and_locked` | surface |
+| R40 | `bl-push` `mix::delete_and_duplicate_with_a_lower_button` | surface |
+| R41 | `bl-push` `mix::the_display_and_the_state_show_names_values_and_the_underline` (golden `mix.png`) | display frame |
+| R42 | `bl-push` `mix::the_display_and_the_state_show_names_values_and_the_underline`; `bl-shell` `push::mix_mode_sets_the_selected_tracks_volume_pan_and_sends_one_undo_step_a_touch`, `a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed`; `bl-agent` `push::an_agent_reads_and_sets_a_simulated_push_2` | surface, agent |
 | R43 to R58 | to be written in WP-7.27 | surface, display frame, agent |
 | R59 | `bl-push` `session::holding_session_in_note_mode_switches_the_pads_while_it_is_held`, `a_pad_let_go_after_the_momentary_mode_ended_still_sends_its_release` | surface |
 | R60, R61 | `bl-push` `session::a_pad_launches_its_clip_and_its_release_goes_to_the_same_slot`, `an_empty_pad_records_on_an_armed_track_and_stops_an_unarmed_one`; `bl-shell` `push::a_pad_launches_its_clip_on_the_grid_and_a_gate_clip_stops_on_release`, `an_empty_pad_records_and_the_scene_buttons_launch_and_select` | surface |

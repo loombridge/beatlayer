@@ -35,7 +35,7 @@ const DOUBLE_TAP: Duration = Duration::from_millis(300);
 /// How far ahead MIDI clock is stamped.
 const CLOCK_AHEAD: Duration = Duration::from_millis(60);
 /// The gesture key of encoder `n` is this plus `n`.
-const ENCODER_GESTURE: u32 = 0x5000;
+pub(crate) const ENCODER_GESTURE: u32 = 0x5000;
 /// What the aftertouch thresholds are (R30).
 const AFTERTOUCH: (u16, u16) = (1220, 1570);
 
@@ -137,6 +137,11 @@ pub struct Push {
     count_in: Option<Instant>,
     footswitch: Option<Instant>,
     actions: Vec<Action>,
+    /// The track selected before Master selected Main, which a second press
+    /// goes back to (push-2-tracks R36).
+    before_master: Option<TrackId>,
+    /// The surface's row in the Control Surfaces table, from 0.
+    row: usize,
 }
 
 impl Push {
@@ -189,6 +194,8 @@ impl Push {
             count_in: None,
             footswitch: None,
             actions: Vec::new(),
+            before_master: None,
+            row: 0,
         }
     }
 
@@ -368,6 +375,7 @@ impl Push {
                 Action::Strip(how) => self.strip = how,
                 Action::Picker(target) => self.open_picker(target),
                 Action::Aftertouch(poly) => self.aftertouch = poly,
+                Action::Gesture(column) => self.gestures[usize::from(column)] = true,
             }
         }
     }
@@ -382,6 +390,7 @@ impl Push {
     ) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
+        let mix_page = self.mix_page;
         let mut actions = std::mem::take(&mut self.actions);
         {
             let pad = match self.pad_mode {
@@ -401,6 +410,7 @@ impl Push {
                     model: self.model.as_ref(),
                     modifiers: &modifiers,
                     setup,
+                    mix_page,
                     actions: &mut actions,
                 };
                 f(content, &mut ctx);
@@ -483,6 +493,7 @@ impl Push {
                 | cc::MIX
                 | cc::CLIP
                 | cc::SHIFT
+                | cc::MASTER
         ) || (controls::lower_column(button).is_some() && !self.lower_claimed())
     }
 
@@ -677,6 +688,7 @@ impl Push {
                     self.toggle_menu(Menu::Scale);
                 }
             }
+            cc::MASTER if tap => self.master(cx),
             cc::USER if tap => self.set_user_mode(true, cx),
             cc::NOTE if tap => self.pad_mode = PadMode::Note,
             cc::SESSION if tap => self.pad_mode = PadMode::Session,
@@ -744,6 +756,29 @@ impl Push {
         })
     }
 
+    /// Master selects the Main track, and the track selected before it on a
+    /// second press (push-2-tracks R36).
+    fn master(&mut self, cx: &mut Cx) {
+        let Some(model) = &self.model else {
+            return;
+        };
+        let main = model.document.main_id();
+        let selected = model.selection.tracks.first().copied();
+        let target = if selected == Some(main) {
+            self.before_master.take()
+        } else {
+            self.before_master = selected;
+            Some(main)
+        };
+        if let Some(track) = target {
+            Self::run(
+                cx,
+                "arrangement.select_tracks",
+                json!({ "tracks": [track] }),
+            );
+        }
+    }
+
     fn toggle_menu(&mut self, menu: Menu) {
         self.menu = if self.menu == Some(menu) {
             None
@@ -800,6 +835,18 @@ impl Push {
         }
         self.last_pad = Pad { row, column };
         let pad = self.last_pad;
+        // Select with a pad goes to the display mode first (push-2-tracks
+        // R38).
+        if self.buttons.modifiers().has(cc::SELECT) {
+            let mut taken = false;
+            self.with_contents(cx, Who::Display, |content, ctx| {
+                taken = content.pad_select(pad, ctx);
+            });
+            if taken {
+                self.swallowed.insert((row, column));
+                return;
+            }
+        }
         self.with_contents(cx, Who::Pads, |content, ctx| {
             content.pad(pad, PadEvent::On(velocity), ctx)
         });
@@ -1203,8 +1250,9 @@ impl Push {
                     },
                     model,
                     modifiers: &modifiers,
-                    colours: &colours,
+                    mix_page: self.mix_page,
                     row: cx.row(),
+                    colours: &colours,
                 });
             }
         }
@@ -1274,6 +1322,8 @@ impl Push {
         lights.button(cc::SCALE, Led::level(scale, self.menu == Some(Menu::Scale)));
         lights.button(cc::USER, Led::level(true, false));
         lights.button(cc::SHIFT, Led::level(true, false));
+        let main_selected = model.selection.tracks.first() == Some(&model.document.main_id());
+        lights.button(cc::MASTER, Led::level(true, main_selected));
         for mode in [PadMode::Note, PadMode::Session] {
             lights.button(mode.button(), Led::level(true, mode == self.pad_mode));
         }
@@ -1456,6 +1506,12 @@ impl Push {
         if self.pad_mode == PadMode::Session {
             snapshot.session = self.pad_content().session_state();
         }
+        if let Some(model) = self.model.take() {
+            let page = self.mix_page;
+            let row = self.row;
+            snapshot.mix = self.display_content().mix_state(&model, page, row);
+            self.model = Some(model);
+        }
         snapshot.display = self
             .display
             .as_ref()
@@ -1513,6 +1569,7 @@ impl ControlSurface for Push {
 
     fn tick(&mut self, model: &ReadModel, cx: &mut Cx) {
         self.model = Some(model.clone());
+        self.row = cx.row();
         self.wait_timeouts(cx);
         if matches!(self.phase, Phase::Live) {
             self.commands(cx);

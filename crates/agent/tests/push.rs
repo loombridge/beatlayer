@@ -80,6 +80,10 @@ fn an_agent_reads_and_sets_a_simulated_push_2() {
     assert!(push["browse"].is_null());
     assert!(push["session"].is_null(), "Note Mode");
 
+    // Spec: push-2-tracks R42. Mix Mode's fields are part of the state too
+    // (the shell's tests read them while Mix is shown), empty in other modes.
+    assert!(push["mix_mode"].is_null());
+
     let frame = run(&mut client, "push.display_frame", json!({}));
     assert_eq!(frame["width"], 960);
     assert!(frame["png"].as_str().unwrap().starts_with("iVBOR"));

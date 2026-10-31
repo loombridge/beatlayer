@@ -19,6 +19,7 @@ pub mod display;
 pub mod encoder;
 pub mod frame;
 pub mod leds;
+pub mod mix;
 pub mod paint;
 pub mod ports;
 pub mod screen;
@@ -67,14 +68,15 @@ pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
 }
 
-/// The contents of the modes that are built: Browse Mode's and Session
-/// Mode's own, and the placeholders for the others
-/// (`docs/specs/push-2-tracks.md` R5, R59).
+/// The contents of the modes that are built: Browse Mode's, Mix Mode's and
+/// Session Mode's own, and the placeholders for the others
+/// (`docs/specs/push-2-tracks.md` R5, R28, R59).
 #[must_use]
 pub fn contents() -> MakeContents {
     Arc::new(|| {
         let mut contents = Contents::placeholders();
         contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
+        contents.display[content::DisplayMode::Mix.index()] = Box::new(mix::Mix::new());
         contents.pads[1] = Box::new(session::Session::new());
         contents
     })

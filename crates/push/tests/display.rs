@@ -22,7 +22,7 @@ fn golden_path(name: &str) -> PathBuf {
 /// Compares `screen`'s image with the golden frame `name`: within a few
 /// levels on a handful of pixels, since the edges of letters and arcs are
 /// drawn with floating-point maths that systems round differently.
-fn golden(name: &str, screen: &Screen) {
+pub fn golden(name: &str, screen: &Screen) {
     let rgb = paint::render(screen);
     assert_eq!(rgb.len(), RGB_BYTES);
     let path = golden_path(name);

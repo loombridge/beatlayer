@@ -294,6 +294,8 @@ pub struct Ctx<'a> {
     pub modifiers: &'a Modifiers,
     /// The Setup values.
     pub setup: Setup,
+    /// Mix's page, for Mix Mode (R22).
+    pub mix_page: MixPage,
     pub(crate) actions: &'a mut Vec<Action>,
 }
 
@@ -304,6 +306,8 @@ pub(crate) enum Action {
     Strip(StripUse),
     Picker(Target),
     Aftertouch(bool),
+    /// An encoder's turns are a gesture the surface ends at its release.
+    Gesture(u8),
 }
 
 impl Ctx<'_> {
@@ -320,6 +324,27 @@ impl Ctx<'_> {
     /// Opens the colour picker on `target` (R27).
     pub fn open_picker(&mut self, target: Target) {
         self.actions.push(Action::Picker(target));
+    }
+
+    /// Asks for a command that is part of the gesture on encoder `column`:
+    /// its changes, from touch to release, are one undo step (R9).
+    pub fn run_turn(&mut self, column: u8, id: &str, args: Value) {
+        self.actions.push(Action::Gesture(column));
+        self.cx.run_held(
+            crate::surface::ENCODER_GESTURE + u32::from(column),
+            id,
+            args,
+        );
+    }
+
+    /// Selects `track` as a click on its title bar does: the Session View's
+    /// column when it has one, and the selection the surfaces read.
+    pub fn select_track(&mut self, track: bl_model::TrackId) {
+        if self.model.is_some_and(|m| m.columns.contains(&track)) {
+            self.cx.run("session.select", json!({ "track": track }));
+        }
+        self.cx
+            .run("arrangement.select_tracks", json!({ "tracks": [track] }));
     }
 
     /// Chooses channel pressure (false) or polyphonic key pressure for the
@@ -381,10 +406,12 @@ pub struct Paint<'a> {
     pub model: &'a ReadModel,
     /// The modifiers held or locked.
     pub modifiers: &'a Modifiers,
-    /// The theme's 14 track colours the swatches are made from.
-    pub colours: &'a [[u8; 3]],
-    /// The Control Surfaces table's row the surface runs in, from 0.
+    /// Mix's page, for Mix Mode (R22).
+    pub mix_page: MixPage,
+    /// The surface's row in the Control Surfaces table, from 0.
     pub row: usize,
+    /// The 14 track colours the swatches are made from.
+    pub colours: &'a [[u8; 3]],
 }
 
 /// The content of one pad mode or display mode.
@@ -409,6 +436,22 @@ pub trait Content: Send {
     /// The display mode is entered afresh, by its button or by another
     /// control that leads to it.
     fn enter(&mut self, _why: Enter, _ctx: &mut Ctx<'_>) {}
+
+    /// A pad pressed while Select is held, offered to the display mode
+    /// before the pad mode; true when it took it (push-2-tracks R38).
+    fn pad_select(&mut self, _pad: Pad, _ctx: &mut Ctx<'_>) -> bool {
+        false
+    }
+
+    /// What Mix Mode shows, for `push.state` (push-2-tracks R42).
+    fn mix_state(
+        &self,
+        _model: &ReadModel,
+        _page: MixPage,
+        _row: usize,
+    ) -> Option<crate::mix::State> {
+        None
+    }
 
     /// What Browse Mode shows, for `push.state` (push-2-tracks R14).
     fn browse_state(&self) -> Option<crate::browse::State> {

@@ -146,10 +146,10 @@ fn a_click_switches_link_and_the_toggle_reads_the_peers_as_they_come_and_go() {
     assert_eq!(toggle.value, "Link", "reads Link again");
 }
 
-// Spec: link R19, R23. The arrow beside the toggle opens a menu of Link,
-// Start Stop Sync and Link Audio, then Configure Link…: the first two tick
-// while on and run their commands, Link Audio waits for its package, and
-// Configure Link… opens Settings on the Link page.
+// Spec: link R19, R23; link-audio R1. The arrow beside the toggle opens a
+// menu of Link, Start Stop Sync and Link Audio, then Configure Link…: the
+// first three tick while on and run their commands, and Configure Link…
+// opens Settings on the Link page.
 #[test]
 fn the_menu_ticks_its_items_runs_their_commands_and_configures_link() {
     let mut h = main_window();
@@ -162,13 +162,16 @@ fn the_menu_ticks_its_items_runs_their_commands_and_configures_link() {
     );
 
     let nodes = open_menu(&mut h);
-    assert!(
-        menu_item(&nodes, "Link Audio").disabled,
-        "waits for Link Audio"
-    );
-    for label in ["Link", "Start Stop Sync", "Configure Link…"] {
+    for label in ["Link", "Start Stop Sync", "Link Audio", "Configure Link…"] {
         assert!(!menu_item(&nodes, label).disabled, "{label}");
     }
+    h.click(bounds(&menu_item(&nodes, "Link Audio")).center());
+    assert!(h.shell.link_audio_enabled());
+    assert!(!h.shell.link_enabled(), "only the item's own command ran");
+    let nodes = open_menu(&mut h);
+    h.click(bounds(&menu_item(&nodes, "✔ Link Audio")).center());
+    assert!(!h.shell.link_audio_enabled(), "the ticked item switches it off");
+    let nodes = open_menu(&mut h);
     h.click(bounds(&menu_item(&nodes, "Start Stop Sync")).center());
     assert!(h.shell.link_start_stop_sync());
     assert!(!h.shell.link_enabled(), "only the item's own command ran");
@@ -367,4 +370,109 @@ fn the_window_asks_for_a_frame_while_the_bar_shows() {
         .any(|v| v.repaint_delay == Duration::ZERO);
     assert!(wants, "an immediate repaint is asked for");
     peer.enable(false, 120.0);
+}
+
+/// A peer in the session with Link Audio on under `name`, offering `Drums`.
+fn audio_peer(name: &str) -> (Link, bl_link::Sink) {
+    let peer = peer();
+    peer.set_audio_enabled(true);
+    peer.set_audio_name(name);
+    let sink = peer.sink("Drums");
+    (peer, sink)
+}
+
+// Spec: link-audio R19 (link R19), R9. The Link menu lists the connected
+// peers that have Link Audio on, by name, and they can't be clicked.
+#[test]
+fn the_menu_lists_the_peers_with_link_audio_on_and_they_do_nothing() {
+    let (_peer, _sink) = audio_peer("Studio Mac");
+    let mut h = main_window();
+    h.shell.run("link.set_enabled", json!({ "on": true })).unwrap();
+    h.shell.run("link.set_audio", json!({ "on": true })).unwrap();
+    wait_for(&mut h, "the peer's channel", |h| {
+        h.shell
+            .link_audio_peers()
+            .iter()
+            .any(|peer| peer.name == "Studio Mac")
+    });
+    let nodes = open_menu(&mut h);
+    let item = menu_item(&nodes, "Studio Mac");
+    assert!(item.disabled, "a peer isn't clickable");
+    let (audio, configure) = (
+        bounds(&menu_item(&nodes, "✔ Link Audio")),
+        bounds(&menu_item(&nodes, "Configure Link…")),
+    );
+    assert!(
+        audio.top() < bounds(&item).top() && bounds(&item).top() < configure.top(),
+        "after Link Audio and before Configure Link…"
+    );
+}
+
+// Spec: link-audio R2, R3, R7, R8, R9, R13. The Link page's Link Audio
+// section holds Audio, Name, Latency, Sync to Incoming Audio and the peers
+// list, each running its command; the peers are a table of name, state and
+// buffered audio.
+#[test]
+fn the_link_audio_section_sets_each_setting_and_lists_the_peers_in_a_table() {
+    let (_peer, _sink) = audio_peer("Studio Mac");
+    let mut h = link_page(Harness::manual(Window::Settings));
+    h.shell.run("link.set_enabled", json!({ "on": true })).unwrap();
+    let nodes = Harness::nodes(&h.settle());
+    for label in ["Audio", "Name", "Latency", "Sync to Incoming Audio"] {
+        assert!(labelled(&nodes, label), "{label}");
+    }
+    assert_eq!(Harness::node(&nodes, "Audio").toggled, Some(false), "off at first");
+    assert_eq!(Harness::node(&nodes, "Latency").role, Role::Slider);
+    assert_eq!(Harness::node(&nodes, "Latency").numeric, Some(20.0));
+    assert!(
+        labelled(&nodes, "No other app in the session has Link Audio on."),
+        "an empty list says so"
+    );
+
+    click(&mut h, "Audio");
+    assert!(h.shell.link_audio_enabled());
+    assert_eq!(
+        Harness::node(&Harness::nodes(&h.settle()), "Audio").toggled,
+        Some(true)
+    );
+    click(&mut h, "Sync to Incoming Audio");
+    assert!(h.shell.link_sync_to_incoming_audio());
+
+    // The latency slider: a click toward its right end raises it.
+    let slider = bounds(Harness::node(&Harness::nodes(&h.settle()), "Latency"));
+    h.click(pos2(slider.right() - 2.0, slider.center().y));
+    assert!(h.shell.link_audio_latency_ms() > 100.0, "{}", h.shell.link_audio_latency_ms());
+
+    // The name field commits what is typed when it loses the keyboard.
+    let field = bounds(Harness::node(&Harness::nodes(&h.settle()), "Name"));
+    h.click(field.center());
+    h.key(Key::A, Modifiers::COMMAND);
+    h.frame(vec![egui::Event::Text("Booth".into())]);
+    h.key(Key::Enter, Modifiers::NONE);
+    h.settle();
+    assert_eq!(h.shell.link_audio_name(), "Booth");
+
+    // The peers list: a table whose header names its columns and whose row
+    // is the peer.
+    wait_for(&mut h, "the peer", |h| {
+        h.shell
+            .link_audio_peers()
+            .iter()
+            .any(|peer| peer.name == "Studio Mac")
+    });
+    let nodes = Harness::nodes(&h.settle());
+    for heading in ["Name", "State", "Buffered"] {
+        assert!(
+            nodes
+                .iter()
+                .any(|n| n.role == Role::ColumnHeader && n.label == heading),
+            "{heading}"
+        );
+    }
+    for cell in ["Studio Mac", "Connected", "0 ms"] {
+        assert!(
+            nodes.iter().any(|n| n.role == Role::Cell && n.label == cell),
+            "{cell}"
+        );
+    }
 }

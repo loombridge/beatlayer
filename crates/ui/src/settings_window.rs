@@ -2110,7 +2110,7 @@ fn link_audio_peers(ui: &mut Ui, shell: &Shell, theme: &Theme, rows: &mut Rows<'
     }
     let peers = shell.link_audio_peers();
     if peers.is_empty() {
-        rows.note(ui, "No other app in the session has Link Audio on.");
+        rows.read_note(ui, "No other app in the session has Link Audio on.");
     }
     for peer in peers {
         let cells = rows.table_row(ui, "", &widths);

@@ -140,7 +140,7 @@ impl Shell {
     /// Gives Link Audio its switch, name, Latency and Sync to Incoming Audio
     /// from the preferences (the Link Audio spec, R1, R3, R7, R8).
     fn apply_link_audio(&mut self) {
-        let settings = &self.link.audio.settings;
+        let settings = &self.link.audio.settings();
         settings.set_latency_ms(self.prefs.link.audio_latency_ms.0);
         settings.set_sync(self.prefs.link.sync_to_incoming_audio);
         self.link
@@ -194,7 +194,7 @@ impl Shell {
                 let ids::SetAudioLatencyArgs { ms } = Self::args(id, args)?;
                 let ms = ms.clamp(0.0, ids::MAX_LATENCY_MS);
                 self.prefs.link.audio_latency_ms = LatencyMs(ms);
-                self.link.audio.settings.set_latency_ms(ms);
+                self.link.audio.settings().set_latency_ms(ms);
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&ids::AudioLatency { ms }))
@@ -203,7 +203,7 @@ impl Shell {
                 let ids::SetArgs { on } = Self::args(id, args)?;
                 let on = on.unwrap_or(!self.prefs.link.sync_to_incoming_audio);
                 self.prefs.link.sync_to_incoming_audio = on;
-                self.link.audio.settings.set_sync(on);
+                self.link.audio.settings().set_sync(on);
                 self.save_preferences();
                 self.touch();
                 Ok(to_value(&ids::Switched { on }))

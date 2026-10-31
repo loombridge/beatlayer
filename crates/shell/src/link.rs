@@ -188,7 +188,7 @@ impl LinkHost {
         self.link.as_ref().map(|link| LinkHandles {
             link: link.handle(),
             peer: Arc::clone(&self.peer),
-            settings: Arc::clone(&self.audio.settings),
+            settings: Arc::clone(self.audio.settings()),
         })
     }
 

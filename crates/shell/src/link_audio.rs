@@ -315,7 +315,7 @@ pub fn fingerprint(document: &Document, on: bool, rate: u32) -> u64 {
 /// given.
 #[derive(Default)]
 pub struct LinkAudioHost {
-    pub(crate) settings: Arc<AudioSettings>,
+    settings: Arc<AudioSettings>,
     channels: Vec<Channel>,
     sinks: BTreeMap<TrackId, (String, Arc<Sink>)>,
     taken: Vec<Taken>,
@@ -327,6 +327,13 @@ pub struct LinkAudioHost {
 }
 
 impl LinkAudioHost {
+    /// The Latency and Sync to Incoming Audio, which the audio thread and
+    /// Link's thread read.
+    #[must_use]
+    pub fn settings(&self) -> &Arc<AudioSettings> {
+        &self.settings
+    }
+
     /// Link said the channels the peers offer changed.
     pub fn channels_changed(&mut self) {
         self.changed = true;

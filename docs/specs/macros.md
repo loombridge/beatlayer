@@ -92,7 +92,7 @@ This spec covers the macros in the document, in the engine and in the rack's mac
 | R8 | `crates/engine/tests/macros.rs`, `a_macro_change_lands_on_its_frame_in_every_mapped_device`, `a_macro_envelope_drives_its_parameters_frame_by_frame` (blocks of 1, 64 and 512 frames) | engine test under the allocation trap |
 | R9 | `crates/shell/tests/macros.rs`, `each_mapping_edit_is_one_undo_step`; `crates/ui/tests/macros.rs`, `map_mode_and_the_mappings_list_run_their_commands` | unit, UI script |
 | R10 | `crates/shell/tests/macros.rs`, `rack_macros_reads_back_names_values_mappings_and_the_count` | unit |
-| R11 | `crates/shell/tests/macros.rs`, `a_mapped_parameter_refuses_set_param_and_names_its_macro`; `crates/agent/tests/tools.rs`, `a_scheduled_or_dry_run_set_param_on_a_macro_held_parameter_is_refused_naming_the_macro`, `unmapping_hands_the_parameter_back_where_it_is`; `crates/engine/tests/macros.rs`, `a_mapped_parameters_own_envelope_waits_while_its_macro_drives_it` | unit, engine test |
+| R11 | `crates/shell/tests/macros.rs`, `a_mapped_parameter_refuses_set_param_and_names_its_macro`, `unmapping_hands_the_parameter_back_where_it_is`; `crates/agent/tests/tools.rs`, `a_scheduled_or_dry_run_set_param_on_a_macro_held_parameter_is_refused_naming_the_macro`; `crates/engine/tests/macros.rs`, `a_mapped_parameters_own_envelope_waits_while_its_macro_drives_it` | unit, engine test |
 | R12 | `crates/shell/tests/macros.rs`, `set_param_moves_a_macro_like_any_parameter` | unit |
 | R13 | `crates/shell/tests/macros.rs`, `moving_a_macro_is_one_undo_step_named_for_it` | unit |
 | R14 | `crates/shell/tests/macros.rs`, `rename_colour_and_info_text_are_one_undo_step_each_and_save` | unit |

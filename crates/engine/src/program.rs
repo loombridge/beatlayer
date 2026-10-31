@@ -646,11 +646,6 @@ pub(crate) fn delay_storage(lengths: &[u32], channels: usize) -> (Shared<DelayLi
     (Shared::new(lines), Shared::new(vec![0.0; total]))
 }
 
-// How many table entries and steps the swaps of the tests looked at in
-// `EngineProgram::release_departed`.
-#[cfg(test)]
-thread_local!(static DEPARTED_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
-
 /// The most notes a note delay holds back at once; more are dropped.
 const NOTE_DELAY_NOTES: usize = 1024;
 
@@ -1373,8 +1368,7 @@ impl EngineProgram {
         // Where a table has an entry for `at`: the task of an old slot, the
         // slot it moved to, or the slot a new one came from.
         let look = |table: &[u32], at: u32| {
-            #[cfg(test)]
-            DEPARTED_STEPS.with(|steps| steps.set(steps.get() + 1));
+            count_departed_step();
             table.get(at as usize).copied().filter(|&v| v != NO_TASK)
         };
         // Where, in the new chain of `task`, the device that sat in old slot
@@ -3394,6 +3388,18 @@ impl fmt::Debug for EngineProgram {
             .field("tasks", &self.tasks.len())
             .finish_non_exhaustive()
     }
+}
+
+// How many table entries the swaps of a test looked at in
+// `EngineProgram::release_departed`. Below the real-time code, so the test
+// clock check reads this file as it reads any other.
+#[cfg(test)]
+thread_local!(static DEPARTED_STEPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) });
+
+#[inline]
+fn count_departed_step() {
+    #[cfg(test)]
+    DEPARTED_STEPS.with(|steps| steps.set(steps.get() + 1));
 }
 
 #[cfg(test)]

@@ -223,6 +223,7 @@ pub fn pages_type() -> DeviceType {
                 0.0,
                 ParamUnit::Percent,
             )
+            .describe("A parameter whose control sits on one page.")
         })
         .collect();
     let band = |height, first: u32, count: u32| {

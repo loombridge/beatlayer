@@ -442,6 +442,9 @@ pub fn show(
             _ => None,
         };
         if let Some(display) = shown {
+            // The drag goes under the display, so its view buttons stay on
+            // top and take their clicks.
+            display_drag(ui, frame, panel, display, rect, id, events);
             crate::device_display::draw(
                 ui,
                 theme,
@@ -452,9 +455,6 @@ pub fn show(
                 &panel.description.views,
                 events,
             );
-        }
-        if let Some(display) = shown {
-            display_drag(ui, frame, panel, display, rect, id, events);
         }
         // Spec: articulation-map R15. The Articulation Map's list shows
         // every articulation, the current one lit.

@@ -163,3 +163,38 @@ fn a_vertical_drag_on_the_shaper_display_changes_the_shown_stages_amount_in_one_
         "and it undoes"
     );
 }
+
+// Spec: roar R12, device-framework R38
+#[test]
+fn a_click_on_a_view_button_over_the_draggable_display_chooses_its_stage() {
+    let mut h = harness();
+    let roar = add_roar(&mut h);
+    let cell = cell_of(&mut h, roar);
+    // The second of three view buttons along the cell's top-right corner,
+    // left of the 6-point meter.
+    let right = cell.right() - 12.0;
+    let at = pos2(right - 2.0 * 26.0 + 12.0, cell.top() + 9.0);
+    h.frame(vec![Event::PointerMoved(at)]);
+    h.frame(vec![press(at, true)]);
+    h.frame(vec![press(at, false)]);
+    h.settle();
+    let view = h
+        .shell
+        .device_view_state()
+        .devices
+        .iter()
+        .find(|d| d.id == roar)
+        .unwrap()
+        .display_view
+        .clone();
+    assert_eq!(
+        view.as_deref(),
+        Some("Stage 2"),
+        "the button takes the click"
+    );
+    assert_eq!(
+        value(&h, roar, stage_param(0, AMOUNT)),
+        0.0,
+        "and the drag doesn't"
+    );
+}

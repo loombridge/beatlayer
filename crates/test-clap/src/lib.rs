@@ -157,17 +157,20 @@ pub const OUTPUTS_VAR: &str = "BL_TEST_CLAP_OUTPUTS";
 
 /// The environment variable a test sets to the features the plug-in
 /// declares (IMP-24): `note-effect` for a note effect that isn't an audio
-/// effect, `note-and-audio` for one that is both, and unset for the audio
-/// effect every other test sees. A test sets it before it loads the host.
+/// effect, `note-and-audio` for one that is both, `reverb` for an audio
+/// effect that declares the reverb feature (browser-tags R49), and unset
+/// for the delay every other test sees. A test sets it before it loads the
+/// host.
 pub const FEATURES_VAR: &str = "BL_TEST_CLAP_FEATURES";
 
 /// The features the plug-in declares, from [`FEATURES_VAR`].
 fn features() -> Vec<&'static CStr> {
-    use clack_plugin::plugin::features::{AUDIO_EFFECT, NOTE_EFFECT, STEREO};
+    use clack_plugin::plugin::features::{AUDIO_EFFECT, DELAY, NOTE_EFFECT, REVERB, STEREO};
     match std::env::var(FEATURES_VAR).as_deref() {
         Ok("note-effect") => vec![NOTE_EFFECT, STEREO],
         Ok("note-and-audio") => vec![AUDIO_EFFECT, NOTE_EFFECT, STEREO],
-        _ => vec![AUDIO_EFFECT, STEREO],
+        Ok("reverb") => vec![AUDIO_EFFECT, REVERB, STEREO],
+        _ => vec![AUDIO_EFFECT, DELAY, STEREO],
     }
 }
 

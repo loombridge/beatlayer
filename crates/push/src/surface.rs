@@ -428,6 +428,7 @@ impl Push {
                     at: self.at,
                     held_steps: &held_steps,
                     mix_page,
+                    display: self.display_mode,
                     actions: &mut actions,
                 };
                 f(content, &mut ctx);
@@ -449,7 +450,8 @@ impl Push {
     }
 
     fn lower_claimed(&mut self) -> bool {
-        self.display_content().claims_lower()
+        // The Scale menu's keys are on the lower buttons too (notes R35).
+        self.menu == Some(Menu::Scale) || self.display_content().claims_lower()
     }
 
     // ----- the colour picker (R27) -----
@@ -543,6 +545,18 @@ impl Push {
         if self.menu.is_some() && DisplayMode::ALL.iter().any(|m| m.button() == button) {
             self.menu = None;
             self.buttons.mark_used(button);
+            return;
+        }
+        // The Scale menu's keys, scales and switches are on the display
+        // buttons (notes R35).
+        if self.menu == Some(Menu::Scale)
+            && (controls::upper_column(button).is_some()
+                || controls::lower_column(button).is_some())
+        {
+            self.buttons.mark_used(button);
+            self.with_contents(cx, Who::Pads, |content, ctx| {
+                content.scale_button(button, ctx)
+            });
             return;
         }
         if self.stop_clip(button, cx) {
@@ -974,7 +988,7 @@ impl Push {
             // One touch is one undo step (R9).
             cx.end_gesture(ENCODER_GESTURE + u32::from(index));
         }
-        if index < 8 && self.menu != Some(Menu::Setup) {
+        if index < 8 && self.menu.is_none() {
             let turn = if touched { Turn::Touch } else { Turn::Release };
             self.with_contents(cx, Who::Display, |content, ctx| {
                 content.encoder(index, turn, ctx)
@@ -1053,6 +1067,11 @@ impl Push {
                 self.notify(now, format!("Swing {:.0} %", swing * 100.0));
             }
             column if self.menu == Some(Menu::Setup) => self.setup_turn(column, steps, shift),
+            column if self.menu == Some(Menu::Scale) => {
+                self.with_contents(cx, Who::Pads, |content, ctx| {
+                    content.scale_turn(column, steps, ctx)
+                });
+            }
             column => {
                 self.with_contents(cx, Who::Display, |content, ctx| {
                     content.encoder(column, Turn::Steps(steps), ctx)
@@ -1448,7 +1467,22 @@ impl Push {
         // The menus (R23, R31).
         match self.menu {
             Some(Menu::Setup) => self.paint_setup(),
-            Some(Menu::Scale) => self.screen.title = Some("Scale".to_owned()),
+            Some(Menu::Scale) => {
+                let mut paint = Paint {
+                    screen: &mut self.screen,
+                    lights: Lights {
+                        leds: &mut self.leds,
+                        palette: &mut self.palette,
+                    },
+                    model,
+                    modifiers: &modifiers,
+                    held_steps: &held_steps,
+                    mix_page: self.mix_page,
+                    row: cx.row(),
+                    colours: &colours,
+                };
+                self.contents.pads[0].paint_scale(&mut paint);
+            }
             None => {}
         }
 
@@ -1689,6 +1723,10 @@ impl ControlSurface for Push {
                 self.setup_changes(cx);
             }
             self.with_contents(cx, Who::Pads, |content, ctx| content.tick(ctx));
+            // The Scale menu closes where Scale has nothing to open (R23).
+            if self.menu == Some(Menu::Scale) && !self.pad_content().scale_available() {
+                self.menu = None;
+            }
             self.pad_settings(cx);
             self.clock(model, cx);
             self.paint(model, cx);

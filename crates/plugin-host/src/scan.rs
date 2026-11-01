@@ -57,6 +57,9 @@ pub const SCANNED_FORMATS: &[PluginFormat] = &[PluginFormat::Clap, PluginFormat:
 /// blocklisted.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// What a cached scan records: 1 added the plug-ins' categories.
+const CACHE_VERSION: u32 = 1;
+
 /// The child process's name, beside the app's own executable.
 pub const SCANNER_BINARY: &str = "beatlayer-scan";
 
@@ -88,6 +91,12 @@ pub struct ScannedPlugin {
     /// plug-in can sit in the MIDI-effect position of a MIDI track's chain.
     #[serde(default)]
     pub note_output: bool,
+    /// The categories its format declares it in: a CLAP plug-in's
+    /// features, a VST3 class's subcategories, an Audio Unit's type and
+    /// subtype, an LV2 plug-in's classes (spec: browser-tags R49). The
+    /// browser's automatic tags come from them ([`crate::categories`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub categories: Vec<String>,
 }
 
 impl ScannedPlugin {
@@ -248,6 +257,7 @@ impl ScannedPlugin {
             found.device_type,
             found.vendor,
             None,
+            found.categories,
         )
     }
 
@@ -260,6 +270,7 @@ impl ScannedPlugin {
             found.device_type,
             found.vendor,
             found.version,
+            found.categories,
         )
     }
 
@@ -272,17 +283,19 @@ impl ScannedPlugin {
             found.device_type,
             found.vendor,
             found.version,
+            found.categories,
         )
     }
 
     /// A scanned plug-in from a host's loaded type: its format, file, ID,
-    /// name, vendor, version and role.
+    /// name, vendor, version, role and categories.
     fn from_type(
         format: PluginFormat,
         path: PathBuf,
         device_type: DeviceType,
         vendor: Option<String>,
         version: Option<String>,
+        categories: Vec<String>,
     ) -> Self {
         let plugin_id = match device_type.kind {
             DeviceKind::Plugin { plugin_id, .. } => plugin_id,
@@ -299,6 +312,7 @@ impl ScannedPlugin {
             version,
             role: device_type.role,
             note_output: device_type.note_output,
+            categories,
         }
     }
 }
@@ -313,6 +327,10 @@ struct CachedFile {
     modified: u128,
     /// What it held then.
     plugins: Vec<ScannedPlugin>,
+    /// The version of what a scan records, [`CACHE_VERSION`] when it was
+    /// scanned: an entry of an earlier version is scanned again.
+    #[serde(default)]
+    version: u32,
 }
 
 /// What the scanner keeps between runs: its cache and its blocklist.
@@ -466,6 +484,7 @@ impl Scanner {
                 if let Some(cached) = guard.cache.get(&key)
                     && cached.size == size
                     && cached.modified == modified
+                    && cached.version == CACHE_VERSION
                 {
                     report.cached += 1;
                     report.plugins.extend(cached.plugins.iter().cloned());
@@ -494,6 +513,7 @@ impl Scanner {
                             size,
                             modified,
                             plugins: plugins.clone(),
+                            version: CACHE_VERSION,
                         },
                     );
                     report.plugins.extend(plugins);
@@ -958,6 +978,7 @@ mod tests {
             version: None,
             role: DeviceRole::AudioEffect,
             note_output: false,
+            categories: Vec::new(),
         };
         let mut plugins = vec![
             plugin(PluginFormat::Clap, "org.synth.clap", "Synth"),

@@ -964,6 +964,93 @@ fn the_tag_editor_ticks_and_unticks_with_two_items_selected() {
     );
 }
 
+// Spec: browser-tags R51, R57. The Tag Editor and Quick Tags mark an
+// automatic tag, and unticking it takes it off for good, as a command.
+#[test]
+fn the_tag_editor_marks_automatic_tags_and_unticking_one_takes_it_off() {
+    let scratch = Scratch::new("auto-tag-editor");
+    // A shell with a configuration folder, so the browser has a database,
+    // and analysis paced by hand.
+    let root = scratch.0.join("User Library");
+    create_user_library(&root).unwrap();
+    wav(&root.join("Samples").join("Drums").join("Kick.wav"), 4_800);
+    wav(&root.join("Loop.wav"), 96_000);
+    let (mut shell, control) = bl_shell::testing::rig_in(&scratch.0.join("config"));
+    shell.pace_analysis_by_hand();
+    let mut h = Harness::on_rig(Window::Main, shell, control);
+    h.shell.set_user_library(Some(root.clone()));
+    h.shell
+        .run(ids::OPEN_PLACE, json!({ "label": "user_library" }))
+        .unwrap();
+    h.settle();
+    assert!(h.shell.wait_for_browser_index(Duration::from_secs(60)));
+    h.shell.release_analysis(3);
+    let kick = root.join("Samples").join("Drums").join("Kick.wav");
+    h.shell
+        .run(ids::SELECT, json!({ "paths": [kick.to_string_lossy()] }))
+        .unwrap();
+    h.shell
+        .run(ids::SHOW_TAG_EDITOR, json!({ "show": true }))
+        .unwrap();
+    h.settle();
+    // The Function group starts folded; unfolding it lists its tags.
+    let group = h
+        .ctx
+        .read_response(tag_editor_row_id("Function"))
+        .expect("drawn")
+        .rect;
+    h.click(group.center());
+    h.settle();
+    // The list is long: scroll to the end of it.
+    h.frame(vec![
+        Event::PointerMoved(group.center()),
+        Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -2_000.0),
+            phase: egui::TouchPhase::Move,
+            modifiers: Modifiers::NONE,
+        },
+    ]);
+    h.settle();
+    let nodes = Harness::nodes(&h.frame(vec![]));
+    let row = node_with(&nodes, Role::CheckBox, "Function|One-Shot");
+    assert_eq!(row.value, "ticked");
+    assert_eq!(row.description, "automatic tag");
+    // Quick Tags marks it too, and its X takes it off.
+    let quick = quick_tags_of(&h);
+    let tag = quick
+        .iter()
+        .find(|t| t.full_name == "Function|One-Shot")
+        .unwrap();
+    assert!(tag.auto && tag.removable);
+    // Unticking it runs the tag command, and it stays off.
+    let rect = h
+        .ctx
+        .read_response(tag_editor_row_id("Function|One-Shot"))
+        .expect("drawn")
+        .rect;
+    h.click(rect.center());
+    h.settle();
+    let tags: TagsState = serde_json::from_value(
+        h.shell
+            .run(ids::TAGS, json!({ "items": [kick.to_string_lossy()] }))
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(
+        tags.items[0]
+            .tags
+            .iter()
+            .all(|t| t.tag != "Function|One-Shot"),
+        "{:?}",
+        tags.items[0].tags
+    );
+}
+
+fn quick_tags_of(h: &Harness) -> Vec<bl_shell::browser_commands::QuickTag> {
+    h.shell.browser_view().quick_tags()
+}
+
 // Spec: browser-tags R17.
 #[test]
 fn the_tag_editor_reads_the_keyboard() {

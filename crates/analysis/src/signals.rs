@@ -118,6 +118,113 @@ pub fn click_track(bpm: f64, offset: f64, seconds: f64, rate: u32) -> (Vec<f32>,
     (samples, starts)
 }
 
+/// A drum loop to track: a rock beat in 4/4 whose tempo, swing and ramp
+/// [`drum_loop`] plays.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrumLoop {
+    /// The tempo at the start, in BPM.
+    pub bpm: f64,
+    /// How far the off-beat eighths are delayed, from 0 (straight) to 1
+    /// (a triplet feel: the second eighth of a beat falls two thirds in).
+    pub swing: f64,
+    /// How much faster the tempo ends 16 bars in than it starts, as a
+    /// fraction (0.08 for 8%): it rises steadily, then holds. 0 is steady.
+    pub ramp: f64,
+    /// Seconds of silence before the first beat.
+    pub offset: f64,
+    /// Seeds the noise of the snare and hats.
+    pub seed: u64,
+}
+
+impl DrumLoop {
+    /// A steady, straight loop at `bpm`, starting at once.
+    #[must_use]
+    pub fn new(bpm: f64) -> Self {
+        Self {
+            bpm,
+            swing: 0.0,
+            ramp: 0.0,
+            offset: 0.0,
+            seed: 1,
+        }
+    }
+
+    /// Seconds a ramp lasts: 16 bars of four beats at its mean tempo.
+    fn ramp_seconds(&self) -> f64 {
+        64.0 * 60.0 / (self.bpm * (1.0 + self.ramp / 2.0))
+    }
+
+    /// The tempo `seconds` after the first beat, in BPM.
+    #[must_use]
+    pub fn tempo_at(&self, seconds: f64) -> f64 {
+        self.bpm * (1.0 + self.ramp * (seconds / self.ramp_seconds()).clamp(0.0, 1.0))
+    }
+
+    /// Seconds after the first beat of beat `beats` (fractions place the
+    /// eighths between).
+    fn time_of(&self, beats: f64) -> f64 {
+        let per_second = self.bpm / 60.0;
+        if self.ramp == 0.0 {
+            return beats / per_second;
+        }
+        let ramp = self.ramp_seconds();
+        let ramp_beats = per_second * ramp * (1.0 + self.ramp / 2.0);
+        if beats <= ramp_beats {
+            ramp / self.ramp * ((1.0 + 2.0 * self.ramp * beats / (per_second * ramp)).sqrt() - 1.0)
+        } else {
+            ramp + (beats - ramp_beats) / (per_second * (1.0 + self.ramp))
+        }
+    }
+}
+
+/// A drum loop, mono: a kick on beats 1 and 3, a snare on 2 and 4 and a
+/// hat on every eighth, louder on each bar's first, in `seconds` of audio.
+/// Returns the samples and each beat's time in seconds.
+#[must_use]
+pub fn drum_loop(spec: &DrumLoop, seconds: f64, rate: u32) -> (Vec<f32>, Vec<f64>) {
+    let rate = f64::from(rate);
+    let mut samples = vec![0.0f32; (seconds * rate).round() as usize];
+    let mut noise = spec.seed;
+    let mut beats = Vec::new();
+    for eighth in 0.. {
+        let beat = eighth / 2;
+        let off = eighth % 2 == 1;
+        let position = f64::from(beat) + if off { 0.5 + spec.swing / 6.0 } else { 0.0 };
+        let at = spec.offset + spec.time_of(position);
+        if at >= seconds {
+            break;
+        }
+        if !off {
+            beats.push(at);
+        }
+        let start = (at * rate).round() as usize;
+        let first_of_bar = eighth % 8 == 0;
+        // The sounds, as a gain and a decay in seconds: a pitch falling
+        // from 150 to 50 Hz for the kick, a 200 Hz tone and noise for the
+        // snare, noise with its low end taken off for the hat.
+        let mut previous = 0.0;
+        for n in 0..(0.25 * rate) as usize {
+            let t = n as f64 / rate;
+            let white = 2.0 * uniform(&mut noise) - 1.0;
+            let hat = white - std::mem::replace(&mut previous, white);
+            let s = match (off, beat % 2) {
+                (false, 0) => {
+                    let phase = 50.0 * t + 3.0 * (1.0 - (-t / 0.03).exp());
+                    0.9 * (-t / 0.06).exp() * (TAU * phase).sin()
+                }
+                (false, _) => {
+                    0.7 * (-t / 0.05).exp() * (0.6 * white + 0.4 * (TAU * 200.0 * t).sin())
+                }
+                _ => 0.0,
+            } + if first_of_bar { 0.35 } else { 0.2 } * (-t / 0.015).exp() * hat;
+            if let Some(slot) = samples.get_mut(start + n) {
+                *slot += s as f32;
+            }
+        }
+    }
+    (samples, beats)
+}
+
 /// A chord progression, mono: each chord's MIDI notes held for `seconds`,
 /// each note a sine with its second harmonic 6 dB down, with 10 ms fades
 /// at each chord's edges.

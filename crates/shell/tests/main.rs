@@ -42,6 +42,7 @@ mod colours;
 mod comping;
 mod control_surfaces;
 mod controller_templates;
+mod creative_extensions;
 mod cv_tools;
 mod dawproject;
 mod dawproject_app;

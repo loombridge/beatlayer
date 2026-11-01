@@ -121,9 +121,27 @@ pub(crate) fn write_steps(
     target: &AutomationTarget,
     value: f64,
 ) {
+    let old = ctx
+        .model
+        .and_then(edited_clip)
+        .and_then(|clip| {
+            clip.envelopes
+                .iter()
+                .find(|e| e.kind == EnvelopeKind::Automation && e.target == *target)
+        })
+        .map(|e| &e.envelope);
     for step in ctx.held_steps {
         let end: Ticks = step.start + step.length;
-        for at in [step.start, end] {
+        // Breakpoints that hold the earlier values just outside the span, so
+        // the envelope keeps them on either side (R66).
+        let guards = old.into_iter().flat_map(|envelope| {
+            [step.start - Ticks(1), end + Ticks(1)]
+                .into_iter()
+                .filter(|at| *at >= Ticks::ZERO)
+                .filter_map(|at| envelope.value_at(at).map(|v| (at, v)))
+        });
+        let writes = guards.chain([(step.start, value), (end, value)]);
+        for (at, value) in writes {
             ctx.cx.run_held(
                 gesture,
                 "clip.set_envelope_breakpoint",

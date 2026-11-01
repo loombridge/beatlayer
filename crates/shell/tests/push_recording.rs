@@ -851,3 +851,38 @@ fn phrase_sync_starts_the_take_part_way_into_the_clip() {
         "the note is at bar 2 of the clip: {start}"
     );
 }
+
+// Spec: push-2-notes R66. Where the clip's envelope already has values, the
+// held steps' span is flat and the values just outside it stay.
+#[test]
+fn held_steps_keep_the_earlier_values_either_side() {
+    let (mut rig, clip, column) = automated_clip();
+    let step = Ticks::SIXTEENTH.get();
+    rig.run(
+        "clip.set_envelope_breakpoint",
+        json!({
+            "clip": clip,
+            "target": { "type": "mixer", "param": "volume" },
+            "kind": "automation",
+            "at": 8 * step,
+            "value": 0.5,
+        }),
+    );
+    rig.pass(50);
+    assert!(rig.sim.press_pad(4, 2, 100));
+    rig.pass(50);
+    assert!(rig.sim.touch(column));
+    rig.pass(50);
+    assert!(rig.sim.turn(column, -40));
+    rig.pass(50);
+    assert!(rig.sim.release(column));
+    rig.pass(50);
+    assert!(rig.sim.release_pad(4, 2));
+    rig.pass(50);
+    let points = rig.automation(clip).remove(0).1;
+    let at = |t: i64| points.iter().find(|p| p.0 == t).map(|p| p.1);
+    assert_eq!(at(2 * step - 1), Some(0.5), "{points:?}");
+    assert_eq!(at(3 * step + 1), Some(0.5), "{points:?}");
+    assert_eq!(at(2 * step), at(3 * step));
+    assert_ne!(at(2 * step), Some(0.5));
+}

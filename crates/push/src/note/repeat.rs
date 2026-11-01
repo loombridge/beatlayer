@@ -180,9 +180,10 @@ impl Note {
         } else {
             0
         });
-        // A long stall (or a locate) skips to the present, not a burst.
-        if now - due(next) > 2 * step {
-            next = now.div_euclid(step);
+        // A long stall, a locate or the loop wrapping skips to the present,
+        // not a burst or a silence.
+        if (now - due(next)).abs() > 2 * step {
+            next = (now + step - 1).div_euclid(step);
         }
         while due(next) <= now {
             for &(note, velocity) in repeat.pads.values() {

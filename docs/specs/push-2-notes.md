@@ -167,6 +167,6 @@ Every edit here runs the same registered command the app's own editors run, as o
 | R62 | WP-7.23: `bl-shell` `push_recording::delete_and_a_touch_delete_the_envelope_or_reset_the_parameter` | unit (simulated Push 2) |
 | R63 | WP-7.23: `bl-shell` `push_recording::delete_and_automate_clear_the_clips_automation` | unit (simulated Push 2) |
 | R64 | WP-7.23: `bl-shell` `push_recording::the_dot_follows_the_playing_clips_automation` | unit (simulated Push 2) |
-| R66 | WP-7.23: `bl-shell` `push_recording::held_steps_and_a_turn_write_the_value_over_their_spans` | unit (simulated Push 2) |
+| R66 | WP-7.23: `bl-shell` `push_recording::held_steps_and_a_turn_write_the_value_over_their_spans`, `held_steps_keep_the_earlier_values_either_side` | unit (simulated Push 2) |
 | R67 to R69 | to be written in WP-7.24 | golden frame |
 | R70 to R76 | to be written in WP-7.24 | unit (simulated Push 2), agent |

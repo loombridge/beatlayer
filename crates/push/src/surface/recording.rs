@@ -186,7 +186,7 @@ impl Push {
                     let on = !self.shared.fixed_length().phrase_sync;
                     Self::run(cx, "push.set_fixed_length", json!({ "phrase_sync": on }));
                 } else if let Some(column) = controls::lower_column(button) {
-                    let length = bl_shell_length_name(column);
+                    let length = length_name(column);
                     Self::run(cx, "push.set_fixed_length", json!({ "length": length }));
                 }
             }
@@ -348,6 +348,6 @@ impl Push {
 
 /// The name `push.set_fixed_length` takes for the length on lower display
 /// button `column`.
-fn bl_shell_length_name(column: u8) -> String {
+fn length_name(column: u8) -> String {
     LENGTHS[usize::from(column)].label()
 }

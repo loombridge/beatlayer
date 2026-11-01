@@ -307,7 +307,8 @@ fn push_state_reads_back_the_modes_the_leds_the_display_and_the_setup() {
         .iter()
         .map(|l| l.as_str().unwrap())
         .collect();
-    assert!(text.contains(&"title: Device"), "{text:?}");
+    // Device Mode is built: with no track selected it says so.
+    assert!(text.contains(&"title: No track is selected"), "{text:?}");
 
     // push.set_mode, as the buttons do.
     let set = rig.run(
@@ -919,6 +920,435 @@ fn a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed
             .as_array()
             .is_none_or(Vec::is_empty)
     );
+}
+
+const UTILITY: &str = "beatlayer.utility";
+
+impl Rig {
+    /// Adds a Utility to the selected track, which the window selects.
+    fn utility(&mut self) -> Value {
+        let added = self
+            .shell
+            .invoke(
+                "device.add",
+                json!({ "device": {
+                    "kind": { "native": { "device_type": UTILITY } },
+                    "name": "Utility",
+                    "role": "audio_effect",
+                } }),
+            )
+            .unwrap();
+        self.step();
+        added["device"].clone()
+    }
+
+    fn rack(&mut self, kind: &str, chains: usize) -> (Value, Vec<Value>) {
+        let rack = self
+            .shell
+            .invoke(
+                "device.add",
+                json!({ "device": {
+                    "kind": { "rack": { "kind": kind } },
+                    "name": "Rack",
+                    "role": "audio_effect",
+                } }),
+            )
+            .unwrap()["device"]
+            .clone();
+        let ids = (0..chains)
+            .map(|n| {
+                let id: bl_model::ChainId = self.shell.new_id();
+                self.shell
+                    .invoke(
+                        "chain.add",
+                        json!({ "rack": rack, "index": n, "chain": { "id": id, "name": "", "devices": [] } }),
+                    )
+                    .unwrap();
+                json!(id)
+            })
+            .collect();
+        self.step();
+        (rack, ids)
+    }
+
+    /// What Device Mode shows, as `push.state` reads it.
+    fn device_mode(&mut self) -> Value {
+        self.state()["device"].clone()
+    }
+
+    /// The devices on the upper buttons, by ID.
+    fn on_buttons(&mut self) -> Vec<Value> {
+        self.device_mode()["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["device"].clone())
+            .collect()
+    }
+
+    fn selected_device(&mut self) -> Value {
+        self.device_mode()["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["selected"] == true)
+            .map_or(Value::Null, |d| d["device"].clone())
+    }
+
+    /// The devices on the first selected track, in chain order.
+    fn chain(&self) -> Vec<bl_model::DeviceId> {
+        let track = self.shell.arrangement().selected_tracks()[0];
+        self.shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .devices()
+            .map(|d| d.id)
+            .collect()
+    }
+
+    fn hold(&mut self, name: &str) {
+        assert!(self.sim.press(name));
+        self.pass(350);
+    }
+
+    fn release(&mut self, name: &str) {
+        assert!(self.sim.let_go(name));
+        self.pass(10);
+    }
+}
+
+// Spec: push-2-tracks R15, R18, R1, R27. Device Mode puts the selected
+// track's devices on the upper buttons and the selected one's first bank on
+// the encoders; a touch of an encoder, however many turns, is one undo step,
+// and `device.parameters` reads the change.
+#[test]
+fn turning_a_device_encoder_is_one_undo_step_and_reads_back() {
+    let mut rig = Rig::browsing();
+    let (a, b, c) = (rig.utility(), rig.utility(), rig.utility());
+    assert_eq!(rig.on_buttons(), [a, b, c.clone()]);
+    assert_eq!(
+        rig.selected_device(),
+        c,
+        "the window selected the last added"
+    );
+    let mode = rig.device_mode();
+    assert_eq!(mode["banks"], json!(["Utility", "Bass"]));
+    assert_eq!(mode["bank"], 0);
+    assert_eq!(mode["params"].as_array().unwrap().len(), 8);
+    let name = mode["params"][0]["name"].as_str().unwrap().to_owned();
+    let text = rig.state()["display"]["text"].clone();
+    assert!(
+        text.as_array().unwrap().iter().any(|l| l
+            .as_str()
+            .unwrap()
+            .starts_with("upper 3: Utility (selected)")),
+        "{text}"
+    );
+    assert!(
+        text.as_array().unwrap().iter().any(|l| l
+            .as_str()
+            .unwrap()
+            .starts_with(&format!("column 1: {name} = "))),
+        "{text}"
+    );
+
+    // The first parameter of the first bank, as `control_surface.banks` reads it.
+    let first = |rig: &mut Rig| {
+        rig.run("control_surface.banks", json!({ "device": c }))["banks"][0]["params"][0].clone()
+    };
+    let before = first(&mut rig)["value"].as_f64().unwrap();
+    let steps = rig.steps();
+    assert!(rig.sim.touch(0));
+    for _ in 0..3 {
+        assert!(rig.sim.turn(0, 12));
+        rig.pass(10);
+    }
+    assert!(rig.shell.gesture_under_way());
+    assert!(rig.sim.release(0));
+    rig.pass(10);
+    assert!(!rig.shell.gesture_under_way());
+    assert_eq!(rig.steps(), steps + 1, "three turns, one undo step");
+    let after = first(&mut rig)["value"].as_f64().unwrap();
+    assert!(after > before, "{before} to {after}");
+    rig.step();
+    assert_eq!(
+        rig.device_mode()["params"][0]["value"],
+        first(&mut rig)["text"],
+        "the value on the display is the one the device shows"
+    );
+    rig.run("edit.undo", json!({}));
+    rig.step();
+    let undone = first(&mut rig)["value"].as_f64().unwrap();
+    assert!((undone - before).abs() < 1e-9);
+}
+
+// Spec: push-2-tracks R3, R16, R26. Selecting a device on Push 2 selects it
+// in the window and the other way round; the second tap enters Edit Mode, and
+// its lower buttons choose the bank the shell remembers for the device.
+#[test]
+fn push_2_and_the_window_select_the_same_device_and_edit_mode_chooses_the_bank() {
+    let mut rig = Rig::browsing();
+    let (a, b) = (rig.utility(), rig.utility());
+    assert_eq!(rig.selected_device(), b);
+    // The window selects the first: Push 2 follows at the next tick.
+    rig.run("device.select", json!({ "device": a }));
+    rig.step();
+    assert_eq!(rig.selected_device(), a);
+    // Push 2 selects the second: the window follows.
+    rig.tap("upper_2");
+    assert_eq!(rig.run("device_view.state", json!({}))["selected"], b);
+    rig.step();
+    assert_eq!(rig.selected_device(), b);
+
+    let steps = rig.steps();
+    rig.tap("upper_2");
+    let mode = rig.device_mode();
+    assert_eq!(mode["edit"], true);
+    let text = rig.state()["display"]["text"].clone();
+    let has = |start: &str| {
+        text.as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l.as_str().unwrap().starts_with(start))
+    };
+    assert!(has("lower 1: Utility (selected)"), "{text}");
+    assert!(has("lower 2: Bass"), "{text}");
+    rig.tap("lower_2");
+    rig.step();
+    let mode = rig.device_mode();
+    assert_eq!(mode["bank"], 1);
+    assert_ne!(mode["params"][0]["name"], "");
+    assert_eq!(rig.steps(), steps, "banks are no undo step");
+    // The device on the row reads back the same bank.
+    let list = rig.run("control_surface.list", json!({}));
+    let row = list["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["surface"]["id"] == "push-2")
+        .unwrap();
+    assert_eq!(row["surface_state"]["device"]["bank"], 1);
+    rig.tap("upper_1");
+    assert_eq!(rig.device_mode()["edit"], false, "back to the top level");
+}
+
+// Spec: push-2-tracks R19, R20, R21, R1. Delete with a device's button
+// deletes it as one undo step and selects the next; Mute switches it; a held
+// effect turned moves through its chain as one undo step for the hold.
+#[test]
+fn delete_mute_and_moves_run_the_device_commands_as_one_undo_step_each() {
+    let mut rig = Rig::browsing();
+    let (a, b, c) = (rig.utility(), rig.utility(), rig.utility());
+    let ids = |rig: &Rig| {
+        rig.chain()
+            .into_iter()
+            .map(|d| json!(d))
+            .collect::<Vec<_>>()
+    };
+
+    // Mute: held, then pressed with the device's button.
+    let steps = rig.steps();
+    assert!(rig.sim.press("mute"));
+    rig.pass(10);
+    rig.tap("upper_2");
+    assert!(rig.sim.let_go("mute"));
+    rig.pass(10);
+    assert_eq!(rig.steps(), steps + 1);
+    let enabled = |rig: &Rig, device: &Value| {
+        let id: bl_model::DeviceId = serde_json::from_value(device.clone()).unwrap();
+        rig.shell.editor().document().device(id).unwrap().enabled
+    };
+    assert!(!enabled(&rig, &b));
+    assert!(enabled(&rig, &a));
+    assert_eq!(rig.device_mode()["devices"][1]["enabled"], false);
+
+    // A held effect, turned right, goes past its neighbour.
+    let steps = rig.steps();
+    rig.hold("upper_1");
+    assert!(rig.sim.turn(0, 10));
+    rig.pass(10);
+    assert!(rig.sim.turn(1, 10));
+    rig.pass(10);
+    rig.release("upper_1");
+    assert_eq!(ids(&rig), [b.clone(), c.clone(), a.clone()], "two places");
+    assert_eq!(rig.steps(), steps + 1, "two moves, one undo step");
+    rig.run("edit.undo", json!({}));
+    assert_eq!(ids(&rig), [a.clone(), b.clone(), c.clone()]);
+
+    // Delete: the device goes, the one after it is selected.
+    let steps = rig.steps();
+    assert!(rig.sim.press("delete"));
+    rig.pass(10);
+    rig.tap("upper_2");
+    assert!(rig.sim.let_go("delete"));
+    rig.pass(10);
+    assert_eq!(ids(&rig), [a.clone(), c.clone()]);
+    assert_eq!(rig.steps(), steps + 1);
+    assert_eq!(rig.selected_device(), c);
+    // The last: the one before.
+    assert!(rig.sim.press("delete"));
+    rig.pass(10);
+    rig.tap("upper_2");
+    assert!(rig.sim.let_go("delete"));
+    rig.pass(10);
+    assert_eq!(rig.selected_device(), a);
+}
+
+// Spec: push-2-tracks R22, R23, R24. A rack unfolds and folds with the
+// window's own devices view; its macros are on the encoders; a device inside
+// it is selectable; holding it selects a chain the window shows.
+#[test]
+fn a_rack_folds_with_the_devices_view_and_holding_it_selects_a_chain() {
+    let mut rig = Rig::browsing();
+    let (rack, chains) = rig.rack("audio_effect", 2);
+    let inner = rig
+        .shell
+        .invoke(
+            "device.add",
+            json!({
+                "device": {
+                    "kind": { "native": { "device_type": UTILITY } },
+                    "name": "Utility",
+                    "role": "audio_effect",
+                },
+                "chain": chains[1],
+            }),
+        )
+        .unwrap()["device"]
+        .clone();
+    rig.run("device.select", json!({ "device": rack }));
+    rig.step();
+    let mode = rig.device_mode();
+    assert_eq!(
+        mode["banks"][0], "Macros 1–8",
+        "a rack's encoders play its macros"
+    );
+    assert_eq!(mode["devices"][0]["kind"], "audio_effect_rack");
+    assert_eq!(mode["devices"][0]["unfolded"], true);
+    assert_eq!(
+        rig.on_buttons(),
+        std::slice::from_ref(&rack),
+        "the first chain holds nothing"
+    );
+
+    // Holding the rack's button shows its chains; a press selects the second,
+    // which the window's chain list shows, and its device follows the rack.
+    rig.hold("upper_1");
+    let held = rig.device_mode();
+    assert_eq!(held["chains"].as_array().unwrap().len(), 2);
+    assert_eq!(held["chains"][0]["selected"], true);
+    rig.tap("lower_2");
+    rig.release("upper_1");
+    rig.step();
+    assert_eq!(rig.on_buttons(), [rack.clone(), inner.clone()]);
+    let window = rig.run("device_view.state", json!({}));
+    let frame = window["devices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == rack)
+        .unwrap()["rack"]
+        .clone();
+    assert_eq!(frame["selected_chains"], json!([chains[1]]));
+    assert_eq!(rig.device_mode()["devices"][1]["depth"], 1);
+    let text = rig.state()["display"]["text"].clone();
+    assert!(
+        text.as_array().unwrap().iter().any(|l| l == "fold: 1 to 2"),
+        "{text}"
+    );
+
+    // A contained device is selectable, and the encoders play its bank.
+    rig.tap("upper_2");
+    rig.step();
+    assert_eq!(rig.selected_device(), inner);
+    assert_eq!(rig.device_mode()["banks"][0], "Utility");
+
+    // The rack's second tap folds it through `rack.set_view`, one the window
+    // shows too, and not an undo step.
+    rig.tap("upper_1");
+    rig.step();
+    let steps = rig.steps();
+    rig.tap("upper_1");
+    rig.step();
+    let views = |rig: &mut Rig| {
+        rig.run("device_view.state", json!({}))["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["id"] == rack)
+            .unwrap()["rack"]["views"]["devices"]
+            .clone()
+    };
+    assert_eq!(views(&mut rig), false);
+    assert_eq!(rig.on_buttons(), std::slice::from_ref(&rack));
+    assert_eq!(rig.steps(), steps, "folding is no undo step");
+    // Showing it in the window shows it on Push 2.
+    rig.run(
+        "rack.set_view",
+        json!({ "rack": rack, "view": "devices", "shown": true }),
+    );
+    rig.step();
+    assert_eq!(rig.on_buttons(), [rack, inner]);
+}
+
+// Spec: push-2-tracks R25, R1. Add Device lists everything the track takes
+// and Load adds after the selected device; an instrument replaces the
+// track's instrument.
+#[test]
+fn add_device_loads_after_the_selected_device_and_an_instrument_replaces_the_instrument() {
+    let mut rig = Rig::browsing();
+    let a = rig.utility();
+    let b = rig.utility();
+    rig.run("device.select", json!({ "device": a }));
+    rig.step();
+    rig.tap("add_device");
+    assert_eq!(rig.state()["display_mode"], "browse");
+    let labels: Vec<_> = rig.columns()[0]["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        &labels[..6],
+        [
+            "Sounds",
+            "Drums",
+            "Instruments",
+            "Audio Effects",
+            "MIDI Effects",
+            "Plug-Ins"
+        ],
+        "an effect is selected, and Add Device still lists instruments"
+    );
+
+    // An audio effect goes right after the selected device, not at the end.
+    rig.open_label(0, "Audio Effects");
+    let steps = rig.steps();
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.steps(), steps + 1);
+    let chain = rig.chain();
+    assert_eq!(chain.len(), 3);
+    assert_eq!(json!(chain[0]), a);
+    assert_eq!(json!(chain[2]), b, "after the selected one");
+    assert_eq!(rig.state()["browse"]["load"], "add");
+
+    // An instrument goes where instruments go, and a second one replaces it.
+    rig.tap("upper_7");
+    rig.tap("up");
+    assert_eq!(rig.selected_in(0), "Instruments");
+    rig.tap("upper_8");
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.chain().len(), 4);
+    assert_eq!(rig.state()["browse"]["load"], "replace");
+    rig.tap("down");
+    rig.tap("lower_8");
+    rig.step();
+    assert_eq!(rig.chain().len(), 4, "the instrument was replaced");
 }
 
 impl Rig {

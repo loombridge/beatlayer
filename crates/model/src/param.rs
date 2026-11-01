@@ -37,6 +37,20 @@ pub struct Bank {
     pub params: Vec<ParamId>,
 }
 
+/// Two parameters that share one control, which a switch turns between:
+/// while `switch` is on the control is `on`'s, and otherwise `off`'s. The
+/// layout places `off`'s control only (Limiter's Maximize turns Ceiling into
+/// Threshold).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Alternate {
+    /// The switch.
+    pub switch: ParamId,
+    /// The parameter the control is while the switch is off.
+    pub off: ParamId,
+    /// The parameter the control is while the switch is on.
+    pub on: ParamId,
+}
+
 /// What a kind of device is to the framework: its parameters' descriptors,
 /// in the order its generic UI and agents list them, and its layout.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -50,6 +64,11 @@ pub struct DeviceDescription {
     /// is shown is view state (`device.set_display_view`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<String>,
+    /// The parameter a vertical drag on the display changes, one for each of
+    /// `views`, in their order (Roar's shaper display drags the shown
+    /// stage's Shaper Amount); empty for a display that isn't dragged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub display_drag: Vec<ParamId>,
     /// The switches the device lists as its own items in its Show Options
     /// menu, after Save as Default Preset (C-DEVICE-015), in this order.
     /// They are parameters like any other, but the layout places no control
@@ -68,6 +87,10 @@ pub struct DeviceDescription {
     /// switch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub banks: Vec<Bank>,
+    /// The controls that show one of two parameters, as a switch says. Both
+    /// parameters keep their values and their lanes whichever is shown.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub alternates: Vec<Alternate>,
 }
 
 // Every value in a description is a finite number (`check`), so equality is
@@ -84,9 +107,11 @@ impl DeviceDescription {
             params,
             layout,
             views: Vec::new(),
+            display_drag: Vec::new(),
             menu_options: Vec::new(),
             title_switch: None,
             banks: Vec::new(),
+            alternates: Vec::new(),
         }
     }
 
@@ -95,6 +120,14 @@ impl DeviceDescription {
     #[must_use]
     pub fn with_views(mut self, views: &[&str]) -> Self {
         self.views = views.iter().map(|v| (*v).to_owned()).collect();
+        self
+    }
+
+    /// The same, with `params` as the parameters a drag on the display
+    /// changes, one for each view.
+    #[must_use]
+    pub fn with_display_drag(mut self, params: &[ParamId]) -> Self {
+        self.display_drag = params.to_vec();
         self
     }
 
@@ -128,6 +161,38 @@ impl DeviceDescription {
             self.layout = DeviceLayout::generic(&self.placed());
         }
         self
+    }
+
+    /// The same, with `on`'s parameter taking `off`'s control while `switch`
+    /// is on. A device with the generic layout gets it again without `on`.
+    #[must_use]
+    pub fn with_alternate(mut self, switch: ParamId, off: ParamId, on: ParamId) -> Self {
+        let generic = self.layout == DeviceLayout::generic(&self.placed());
+        self.alternates.push(Alternate { switch, off, on });
+        if generic {
+            self.layout = DeviceLayout::generic(&self.placed());
+        }
+        self
+    }
+
+    /// The parameter whose control sits where `id`'s does, given the device's
+    /// set `values`: the alternate while its switch is on, else `id`.
+    #[must_use]
+    pub fn drawn(&self, values: &OrdMap<ParamId, f64>, id: ParamId) -> ParamId {
+        self.alternates
+            .iter()
+            .find(|a| a.off == id && self.value(values, a.switch).is_some_and(|v| v >= 0.5))
+            .map_or(id, |a| a.on)
+    }
+
+    /// Whether `id`'s control is shown, given the device's set `values`: false
+    /// for the half of an alternate its switch has put away.
+    #[must_use]
+    pub fn shown(&self, values: &OrdMap<ParamId, f64>, id: ParamId) -> bool {
+        self.alternates
+            .iter()
+            .filter(|a| a.off == id || a.on == id)
+            .all(|a| self.drawn(values, a.off) == id)
     }
 
     /// The same, with the banks `banks` for control surfaces: each a name
@@ -209,7 +274,11 @@ impl DeviceDescription {
     fn placed(&self) -> Vec<ParamDescriptor> {
         self.params
             .iter()
-            .filter(|p| !self.menu_options.contains(&p.id) && self.title_switch != Some(p.id))
+            .filter(|p| {
+                !self.menu_options.contains(&p.id)
+                    && self.title_switch != Some(p.id)
+                    && !self.alternates.iter().any(|a| a.on == p.id)
+            })
             .cloned()
             .collect()
     }
@@ -276,6 +345,28 @@ impl DeviceDescription {
                 "title switch {} isn't a switch of the device, or is also a menu option",
                 id.0
             ));
+        }
+        for a in &self.alternates {
+            let toggle = self
+                .param(a.switch)
+                .is_some_and(|p| matches!(p.kind, ParamKind::Toggle));
+            if !toggle
+                || a.off == a.on
+                || self.param(a.off).is_none()
+                || self.param(a.on).is_none()
+                || self
+                    .alternates
+                    .iter()
+                    .filter(|b| b.on == a.on || b.off == a.off)
+                    .count()
+                    > 1
+            {
+                return Err(format!(
+                    "alternate {} and {} isn't a pair of parameters of the device, or its \
+                     switch isn't a switch of it",
+                    a.off.0, a.on.0
+                ));
+            }
         }
         let options =
             |id: &ParamId| self.menu_options.contains(id) || self.title_switch == Some(*id);
@@ -413,5 +504,52 @@ mod tests {
         assert!((clean[&id(0)] - db_to_gain(6.0)).abs() < 1e-12);
         assert_eq!(clean[&id(1)], 1.0);
         assert_eq!(description.value(&OrdMap::new(), id(0)), Some(1.0));
+    }
+
+    // Spec: device-framework R50
+    #[test]
+    fn an_alternate_pairs_two_parameters_through_a_switch_and_bad_pairs_are_refused() {
+        let params = || {
+            vec![
+                ParamDescriptor::toggle(id(0), "Switch", false),
+                ParamDescriptor::toggle(id(1), "Off", false),
+                ParamDescriptor::toggle(id(2), "On", false),
+                ParamDescriptor::toggle(id(3), "Other", false),
+            ]
+        };
+        let paired = DeviceDescription::new(params()).with_alternate(id(0), id(1), id(2));
+        paired.check().unwrap();
+        let mut values = OrdMap::new();
+        assert!(paired.shown(&values, id(1)) && !paired.shown(&values, id(2)));
+        assert!(
+            paired.shown(&values, id(3)),
+            "an unpaired parameter is always shown"
+        );
+        values.insert(id(0), 1.0);
+        assert_eq!(paired.drawn(&values, id(1)), id(2));
+        assert!(!paired.shown(&values, id(1)) && paired.shown(&values, id(2)));
+        // The second of a pair has no control of its own in the layout.
+        let placed = paired.layout.place(paired.layout.docked_size());
+        assert!(placed.controls.iter().all(|c| c.param != id(2)));
+        assert!(placed.controls.iter().any(|c| c.param == id(1)));
+        // A pair of one parameter, one that uses a parameter twice, or one
+        // whose switch isn't a switch is refused.
+        let bad = |switch, off, on| {
+            DeviceDescription::new(params())
+                .with_alternate(id(0), id(1), id(2))
+                .with_alternate(switch, off, on)
+                .check()
+        };
+        assert!(bad(id(0), id(3), id(3)).is_err());
+        assert!(bad(id(0), id(3), id(2)).is_err());
+        let mut continuous = params();
+        continuous[0] =
+            ParamDescriptor::continuous(id(0), "Switch", (0.0, 1.0), 0.0, ParamUnit::None);
+        assert!(
+            DeviceDescription::new(continuous)
+                .with_alternate(id(0), id(1), id(2))
+                .check()
+                .is_err()
+        );
     }
 }

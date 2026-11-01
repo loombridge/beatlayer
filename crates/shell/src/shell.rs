@@ -1254,6 +1254,7 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        browser_view.set_analysis_media(Arc::clone(&media));
         let analysis_slot = crate::analysed_media::AnalysisSlot::default();
         audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
@@ -1722,6 +1723,7 @@ impl Shell {
         let slot = self.selected_slot_clip();
         let slots = self.selected_slot_clips();
         let shown = self.shown_clip();
+        let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
         let revision = self.document_revision;
         let generation = self.editor_generation;
         let result = self.run_command(id, args);
@@ -1740,7 +1742,7 @@ impl Shell {
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
             // with it.
-            self.follow_shown_scale(id, shown);
+            self.follow_shown_scale(id, shown, shown_scale);
             // Spec: find-and-select-notes R12. Every filter is switched off
             // when the editor shows another clip.
             if self.shown_clip() != shown {

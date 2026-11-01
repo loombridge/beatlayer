@@ -58,6 +58,7 @@ crates/shell/src/recording.rs # a timeout on a recording's thread
 crates/shell/tests/au_editor.rs # waits for a real Audio Unit's window
 crates/shell/tests/audio_settings.rs # a device's status changes on the system's clock
 crates/shell/tests/browser.rs # waits for the browser's index thread to read the disk
+crates/shell/tests/browser_columns.rs # waits for the browser's probe thread to read the files
 crates/shell/tests/browser_tags.rs # waits for the browser's index thread to read the disk
 crates/shell/tests/clip_streaming.rs # a timeout on a disk read
 crates/shell/tests/dawproject_plugins.rs # waits for a real CLAP plug-in and a real VST3 plug-in

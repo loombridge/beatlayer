@@ -107,6 +107,10 @@ pub const SET_COLUMNS: &str = "browser.set_columns";
 pub const SET_COLLECTION: &str = "browser.set_collection";
 /// `browser.clear_collections`: take items out of every collection.
 pub const CLEAR_COLLECTIONS: &str = "browser.clear_collections";
+/// `browser.analysis_state`: how far sound analysis has got.
+pub const ANALYSIS_STATE: &str = "browser.analysis_state";
+/// `browser.set_analysis_paused`: pause or resume sound analysis.
+pub const SET_ANALYSIS_PAUSED: &str = "browser.set_analysis_paused";
 /// `browser.reveal`: show items in the system's file manager.
 pub const REVEAL: &str = "browser.reveal";
 /// `browser.back`: go back one step in the browser's history.
@@ -161,6 +165,8 @@ pub const IDS: &[&str] = &[
     SET_COLUMNS,
     SET_COLLECTION,
     CLEAR_COLLECTIONS,
+    ANALYSIS_STATE,
+    SET_ANALYSIS_PAUSED,
     REVEAL,
     BACK,
     FORWARD,
@@ -729,6 +735,41 @@ pub struct FilterGroupChoice {
     pub name: String,
     /// Whether the label shows it.
     pub shown: bool,
+}
+
+/// How far sound analysis has got (spec: sound-similarity R6, R7).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct AnalysisState {
+    /// The audio files and presets that have a descriptor.
+    pub analysed: usize,
+    /// The audio files and presets waiting to be analysed, the one under
+    /// way included.
+    pub waiting: usize,
+    /// The files that couldn't be analysed, and aren't tried again until
+    /// they change.
+    pub skipped: usize,
+    /// Whether analysis is paused: the file under way is finished, and no
+    /// other is begun until it resumes.
+    pub paused: bool,
+    /// The path of the file under way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    /// The share of the files that were waiting when this run began that
+    /// are done, from 0 to 1; left out when nothing waits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share: Option<f64>,
+    /// The descriptors computed since Beatlayer started: a file whose
+    /// content already had one, such as a moved copy, doesn't add to it.
+    pub computed: usize,
+}
+
+/// Arguments of `browser.set_analysis_paused`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetAnalysisPausedArgs {
+    /// Whether analysis is paused. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paused: Option<bool>,
 }
 
 /// The Filter View (spec: browser-tags R18 to R22).
@@ -1959,6 +2000,29 @@ fn specs() -> Vec<CommandSpec> {
             .contexts([Global, Browser])
             .args::<ClearCollectionsArgs>()
             .result::<BrowserState>(),
+        CommandSpec::new(ANALYSIS_STATE, "Sound Analysis State")
+            .description(
+                "Reports how far the browser's sound analysis has got: the audio files and \
+                 presets analysed, waiting and skipped, whether analysis is paused, the file \
+                 under way and the share done. Beatlayer describes every audio file of 60 \
+                 seconds or less and every instrument and drum preset in the background, for \
+                 finding similar sounds. Changes nothing.",
+            )
+            .permission(Permission::Read)
+            .contexts([Global, Browser])
+            .args::<NoArgs>()
+            .result::<AnalysisState>(),
+        CommandSpec::new(SET_ANALYSIS_PAUSED, "Pause Sound Analysis")
+            .description(
+                "Pauses sound analysis, as the Status Bar's Pause button does, or resumes it: \
+                 `paused` true or false; left out, it toggles. Pausing stops analysis once the \
+                 file under way is finished. The pause lasts until it is resumed or Beatlayer \
+                 quits. Read the result in `browser.analysis_state`.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetAnalysisPausedArgs>()
+            .result::<AnalysisState>(),
         CommandSpec::new(REVEAL, "Show in Finder")
             .description(
                 "Shows files and folders in the system's file manager (Finder on macOS, File \
@@ -2125,6 +2189,8 @@ mod tests {
         }
         assert_eq!(class(TAGS), Permission::External);
         assert_eq!(class(SHOW_TAG_EDITOR), Permission::Read);
+        assert_eq!(class(ANALYSIS_STATE), Permission::Read);
+        assert_eq!(class(SET_ANALYSIS_PAUSED), Permission::Edit);
         for id in [FOCUS_SEARCH, STOP_PREVIEW, FOCUS_BROWSER] {
             assert_eq!(class(id), Permission::Read, "{id}");
         }

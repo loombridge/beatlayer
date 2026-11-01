@@ -692,6 +692,13 @@ impl DeviceViewUi {
         ui.scope_builder(
             UiBuilder::new().max_rect(rect).accessibility_parent(id),
             |ui| {
+                let track = shell.editor().document().device_track(frame.id);
+                let played = |param| {
+                    let device = frame.id;
+                    track.and_then(|track| {
+                        shell.played(track, &AutomationTarget::Device { device, param })
+                    })
+                };
                 // Spec: device-framework R15. A described device's body is
                 // its generic panel, at its layout's docked size.
                 if let Some(rack) = &frame.rack {
@@ -703,13 +710,6 @@ impl DeviceViewUi {
                     let mut body = crate::device_panel::body_rect(rect, TITLE_BAR_HEIGHT);
                     body.min.x += ids::sidechain_width(frame);
                     let display = shell.device_display(frame.id);
-                    let track = shell.editor().document().device_track(frame.id);
-                    let played = |param| {
-                        let device = frame.id;
-                        track.and_then(|track| {
-                            shell.played(track, &AutomationTarget::Device { device, param })
-                        })
-                    };
                     // Spec: automation R29. The parameters' context menus.
                     let menu = |param| {
                         let device = frame.id;
@@ -776,6 +776,17 @@ impl DeviceViewUi {
                 if let (Some(state), false) = (&frame.multisampler, strip) {
                     self.multisampler
                         .tabs(ui, theme, frame, state, controls.title, events);
+                }
+                if !strip {
+                    // Spec: device-framework R41. Title-bar tabs.
+                    crate::device_panel::title_tabs(
+                        ui,
+                        theme,
+                        frame,
+                        controls.title,
+                        &played,
+                        events,
+                    );
                 }
                 self.activator(ui, theme, frame, controls.activator, events);
                 if let Some(expand) = controls.expand {

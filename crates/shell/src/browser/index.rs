@@ -54,12 +54,68 @@ pub enum Scope {
     Place(u16),
 }
 
+/// How many items fill a chunk.
+const CHUNK: usize = 4096;
+
+/// A growing list in chunks, so a snapshot of it shares every full chunk
+/// with the ones before instead of copying them: a publish copies only the
+/// last, part-full chunk.
+#[derive(Clone, Debug)]
+struct Chunks<T> {
+    full: Vec<Arc<Vec<T>>>,
+    tail: Vec<T>,
+}
+
+impl<T> Default for Chunks<T> {
+    fn default() -> Self {
+        Self {
+            full: Vec::new(),
+            tail: Vec::new(),
+        }
+    }
+}
+
+impl<T> Chunks<T> {
+    fn push(&mut self, item: T) {
+        self.tail.push(item);
+        if self.tail.len() == CHUNK {
+            self.full.push(Arc::new(std::mem::take(&mut self.tail)));
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.full.len() * CHUNK + self.tail.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &T> {
+        self.full
+            .iter()
+            .flat_map(|chunk| chunk.iter())
+            .chain(&self.tail)
+    }
+}
+
+impl<T> std::ops::Index<usize> for Chunks<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &T {
+        match self.full.get(index / CHUNK) {
+            Some(chunk) => &chunk[index % CHUNK],
+            None => &self.tail[index % CHUNK],
+        }
+    }
+}
+
 /// The index at one moment: what's been found so far.
 #[derive(Debug, Default)]
 pub struct Snapshot {
     roots: Vec<PathBuf>,
-    folders: Vec<PathBuf>,
-    entries: Vec<IndexEntry>,
+    folders: Chunks<PathBuf>,
+    entries: Chunks<IndexEntry>,
     /// Entry indices in name order.
     order: Vec<u32>,
     /// Files found.
@@ -133,7 +189,6 @@ impl Snapshot {
                     .into_owned(),
                 size: entry.size,
                 modified: entry.modified,
-                hash: None,
             })
             .collect()
     }
@@ -257,10 +312,13 @@ impl Snapshot {
 /// Builds a snapshot.
 struct Builder {
     roots: Vec<PathBuf>,
-    folders: Vec<PathBuf>,
+    folders: Chunks<PathBuf>,
     /// Folders by path, for [`Builder::folder`].
     folder_ids: HashMap<PathBuf, u32>,
-    entries: Vec<IndexEntry>,
+    entries: Chunks<IndexEntry>,
+    /// Entry indices in name order, for the first `sorted` entries.
+    order: Vec<u32>,
+    sorted: usize,
     files: usize,
     folder_count: usize,
 }
@@ -269,9 +327,11 @@ impl Builder {
     fn new(roots: Vec<PathBuf>) -> Self {
         Self {
             roots,
-            folders: Vec::new(),
+            folders: Chunks::default(),
             folder_ids: HashMap::new(),
-            entries: Vec::new(),
+            entries: Chunks::default(),
+            order: Vec::new(),
+            sorted: 0,
             files: 0,
             folder_count: 0,
         }
@@ -318,21 +378,50 @@ impl Builder {
         });
     }
 
-    fn snapshot(&self) -> Snapshot {
-        let mut order: Vec<u32> = (0..self.entries.len() as u32).collect();
-        order.sort_by(|&a, &b| {
-            let (a, b) = (&self.entries[a as usize], &self.entries[b as usize]);
-            natural_cmp(&a.lower, &b.lower).then_with(|| a.name.cmp(&b.name))
-        });
+    /// How entry `a` sorts against entry `b`: by name.
+    fn cmp(&self, a: u32, b: u32) -> std::cmp::Ordering {
+        #[cfg(test)]
+        COMPARES.with(|count| count.set(count.get() + 1));
+        let (a, b) = (&self.entries[a as usize], &self.entries[b as usize]);
+        natural_cmp(&a.lower, &b.lower).then_with(|| a.name.cmp(&b.name))
+    }
+
+    /// Sorts the entries added since the last snapshot and merges them into
+    /// the order, so a snapshot doesn't sort what it already sorted.
+    fn snapshot(&mut self) -> Snapshot {
+        let mut added: Vec<u32> = (self.sorted as u32..self.entries.len() as u32).collect();
+        added.sort_by(|&a, &b| self.cmp(a, b));
+        let mut merged = Vec::with_capacity(self.entries.len());
+        let (mut old, mut new) = (self.order.iter().peekable(), added.iter().peekable());
+        while let (Some(&&a), Some(&&b)) = (old.peek(), new.peek()) {
+            // Ties keep the older entry first, as a stable sort would.
+            if self.cmp(b, a).is_lt() {
+                merged.push(b);
+                new.next();
+            } else {
+                merged.push(a);
+                old.next();
+            }
+        }
+        merged.extend(old);
+        merged.extend(new);
+        self.order = merged;
+        self.sorted = self.entries.len();
         Snapshot {
             roots: self.roots.clone(),
             folders: self.folders.clone(),
             entries: self.entries.clone(),
-            order,
+            order: self.order.clone(),
             files: self.files,
             folder_count: self.folder_count,
         }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How many times the builder compared two entries on this thread.
+    static COMPARES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// What the index thread shares with the browser.
@@ -520,7 +609,7 @@ enum Walk {
     Stop,
 }
 
-fn publish(builder: &Builder, shared: &Shared, waker: &Waker) {
+fn publish(builder: &mut Builder, shared: &Shared, waker: &Waker) {
     let snapshot = Arc::new(builder.snapshot());
     if let Ok(mut latest) = shared.latest.lock() {
         *latest = Some(snapshot);
@@ -534,6 +623,9 @@ fn publish(builder: &Builder, shared: &Shared, waker: &Waker) {
 fn walk(roots: &[PathBuf], requests: &Receiver<Request>, shared: &Shared, waker: &Waker) -> Walk {
     let mut builder = Builder::new(roots.to_vec());
     let mut published_at = Instant::now();
+    // Publishing waits at least twice as long as the last one took, so it
+    // never takes more than a third of the walk.
+    let mut every = PUBLISH_EVERY;
     let mut published_items = 0;
     let mut checked = 0usize;
     for (place, root) in roots.iter().enumerate() {
@@ -586,15 +678,17 @@ fn walk(roots: &[PathBuf], requests: &Receiver<Request>, shared: &Shared, waker:
                 }
             }
             if builder.entries.len() - published_items >= PUBLISH_ITEMS
-                || published_at.elapsed() >= PUBLISH_EVERY
+                || published_at.elapsed() >= every
             {
-                publish(&builder, shared, waker);
+                let started = Instant::now();
+                publish(&mut builder, shared, waker);
+                every = PUBLISH_EVERY.max(started.elapsed() * 2);
                 published_at = Instant::now();
                 published_items = builder.entries.len();
             }
         }
     }
-    publish(&builder, shared, waker);
+    publish(&mut builder, shared, waker);
     Walk::Done
 }
 
@@ -606,6 +700,41 @@ mod tests {
         hits.iter()
             .map(|&i| snapshot.entry(i).name.to_string())
             .collect()
+    }
+
+    // Spec: browser R10. A publish sorts what the walk found since the last
+    // one and merges it, and shares the chunks it already holds.
+    #[test]
+    fn publishing_sorts_only_what_is_new_and_shares_what_is_old() {
+        const N: usize = 100_000;
+        let mut builder = Builder::new(vec![PathBuf::from("/lib")]);
+        let folder = builder.folder(PathBuf::from("/lib"));
+        COMPARES.with(|count| count.set(0));
+        let mut snapshots = Vec::new();
+        for batch in 0..4 {
+            for i in batch * N / 4..(batch + 1) * N / 4 {
+                // Reversed, so every batch sorts before the ones already held.
+                let name = format!("Sample {:05}.wav", N - i);
+                builder.push(folder, name, ItemKind::Audio, 0, 0, 0);
+            }
+            snapshots.push(builder.snapshot());
+        }
+        let compares = COMPARES.with(std::cell::Cell::get);
+        let bound = 2.0 * N as f64 * (N as f64).log2();
+        assert!(
+            (compares as f64) < bound,
+            "{compares} comparisons, over {bound}"
+        );
+
+        let last = &snapshots[3];
+        let sorted: Vec<&str> = last.order.iter().map(|&i| &*last.entry(i).name).collect();
+        let mut expected: Vec<String> = (1..=N).map(|i| format!("Sample {i:05}.wav")).collect();
+        expected.sort_by(|a, b| natural_cmp(&a.to_lowercase(), &b.to_lowercase()));
+        assert_eq!(sorted, expected);
+        assert!(Arc::ptr_eq(
+            &snapshots[2].entries.full[0],
+            &snapshots[3].entries.full[0]
+        ));
     }
 
     // Spec: browser R9.
@@ -662,7 +791,6 @@ mod tests {
                     place: "/lib".to_owned(),
                     size: 100,
                     modified: 0,
-                    hash: None,
                 }
             })
             .collect();
@@ -742,5 +870,62 @@ mod tests {
             snapshot.search("kick bass", Scope::All, None).len(),
             expected
         );
+    }
+
+    // Spec: sound-similarity R5, browser-tags R2. Search keeps up while a
+    // file is being analysed: the worker shares nothing with the index.
+    #[test]
+    fn a_search_of_100_000_names_keeps_up_while_a_sound_is_analysed() {
+        let folder = std::env::temp_dir().join(format!("bl-index-analysis-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("Long.wav");
+        let rate = 22_050u32;
+        let data: Vec<u8> = (0..rate * 30)
+            .flat_map(|i| (((f64::from(i) * 0.05).sin() * 12_000.0) as i16).to_le_bytes())
+            .collect();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        for word in [1u16, 1] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * 2).to_le_bytes());
+        for word in [2u16, 16] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&data);
+        std::fs::write(&path, bytes).unwrap();
+        let mut analysis = super::super::analysis::Analysis::new(Waker::default());
+        analysis.enqueue(vec![super::super::analysis::Item {
+            path: path.clone(),
+            size: 1,
+            modified: 0,
+            preset: false,
+        }]);
+        analysis.poll(None);
+        assert!(analysis.state().current.is_some(), "the worker is at it");
+
+        let snapshot = Snapshot::from_paths(
+            Path::new("/lib"),
+            (0..100_000).map(|i| (PathBuf::from(format!("/lib/kick {i}.wav")), ItemKind::Audio)),
+        );
+        let started = Instant::now();
+        for query in ["k", "ki", "kic", "kick", "kick 9", "kick 99"] {
+            assert!(
+                !snapshot.search(query, Scope::All, None).is_empty(),
+                "{query}"
+            );
+        }
+        let each = started.elapsed() / 6;
+        if std::env::var("BL_TEST_DEPTH").as_deref() == Ok("full") {
+            assert!(each < Duration::from_millis(250), "{each:?} a keystroke");
+        }
+        analysis.wait_for_current(None);
+        assert_eq!(analysis.state().analysed, 1);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

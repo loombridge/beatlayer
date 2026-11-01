@@ -390,6 +390,141 @@ fn a_tagged_file_moved_outside_beatlayer_keeps_its_tags_by_content() {
     });
 }
 
+/// The tags of group "Mine" that `path` carries, by full name.
+fn tags_of(shell: &mut Shell, path: &Path) -> Vec<String> {
+    let tags: TagsState = run(shell, ids::TAGS, json!({ "items": [text(path)] }));
+    tags.items
+        .first()
+        .map(|item| {
+            item.tags
+                .iter()
+                .filter(|t| t.tag.starts_with("Mine|"))
+                .map(|t| t.tag.clone())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Makes the group "Mine" with the tags `names`, and tags `path` with each.
+fn tag_file(shell: &mut Shell, path: &Path, names: &[&str]) {
+    let _ = shell.run(ids::ADD_TAG_GROUP, json!({ "name": "Mine" }));
+    for name in names {
+        let _ = shell.run(ids::ADD_TAG, json!({ "name": name, "group": "Mine" }));
+    }
+    let full: Vec<String> = names.iter().map(|name| format!("Mine|{name}")).collect();
+    run::<TagsState>(
+        shell,
+        ids::TAG_ITEMS,
+        json!({ "items": [text(path)], "tags": full, "attach": true }),
+    );
+    wait_until(shell, "the file's hash", |shell| {
+        shell.browser_view().tagged_file_hash(&text(path)).is_some()
+    });
+}
+
+/// Takes `folder` out of the places, and waits until the browser has
+/// indexed again and hashed what that asked for.
+fn remove_place(shell: &mut Shell, folder: &Path) {
+    run::<Value>(shell, ids::REMOVE_FOLDER, json!({ "path": text(folder) }));
+    wait_for_index(shell);
+    wait_until(shell, "the hasher", |shell| !shell.browser_view().hashing());
+}
+
+// Spec: browser-tags R5. A file that is still on disk keeps its tags when its
+// place leaves the index, whatever copies of it the other places hold.
+#[test]
+fn a_project_switch_keeps_tags_on_files_still_on_disk() {
+    let scratch = Scratch::new("switch");
+    let config = scratch.path("config");
+    let library = scratch.path("Library");
+    let project = scratch.path("ProjA");
+    let library_kick = library.join("Samples/kick.wav");
+    let project_kick = project.join("Samples/Imported/kick.wav");
+    wav(&library_kick, 100);
+    wav(&project_kick, 100);
+    let mut shell = shell_on(&config);
+    shell.set_user_library(Some(library));
+    run::<Value>(
+        &mut shell,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&project) }),
+    );
+    wait_for_index(&mut shell);
+    tag_file(&mut shell, &library_kick, &["Lo-fi"]);
+    tag_file(&mut shell, &project_kick, &["Punchy"]);
+
+    remove_place(&mut shell, &project);
+    assert_eq!(tags_of(&mut shell, &project_kick), ["Mine|Punchy"]);
+    assert_eq!(tags_of(&mut shell, &library_kick), ["Mine|Lo-fi"]);
+
+    // With the library's copy untagged, the project's tags stay where they
+    // are, and are there when the place comes back.
+    run::<Value>(
+        &mut shell,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&project) }),
+    );
+    wait_for_index(&mut shell);
+    run::<TagsState>(
+        &mut shell,
+        ids::TAG_ITEMS,
+        json!({ "items": [text(&library_kick)], "tags": ["Mine|Lo-fi"], "attach": false }),
+    );
+    remove_place(&mut shell, &project);
+    assert_eq!(tags_of(&mut shell, &project_kick), ["Mine|Punchy"]);
+    run::<Value>(
+        &mut shell,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&project) }),
+    );
+    wait_for_index(&mut shell);
+    assert_eq!(tags_of(&mut shell, &project_kick), ["Mine|Punchy"]);
+    assert!(tags_of(&mut shell, &library_kick).is_empty());
+}
+
+// Spec: browser-tags R5. The hash of a tagged file outlasts its row in the
+// index, so its tags follow it after more than one start.
+#[test]
+fn a_tagged_files_hash_survives_a_restart_after_it_leaves_the_index() {
+    let scratch = Scratch::new("hash-survives");
+    let config = scratch.path("config");
+    let root = scratch.path("Root");
+    let library = root.join("Library");
+    let elsewhere = root.join("Elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let kick = library.join("Kick.wav");
+    wav(&kick, 100);
+    let moved = elsewhere.join("Moved.wav");
+
+    let mut first = shell_on(&config);
+    first.set_user_library(Some(library.clone()));
+    wait_for_index(&mut first);
+    tag_file(&mut first, &kick, &["Favourite"]);
+    first.browser_view().flush_database();
+    drop(first);
+    std::fs::rename(&kick, &moved).unwrap();
+
+    // The start that drops the file's row from the index.
+    let mut second = shell_on(&config);
+    second.set_user_library(Some(library.clone()));
+    wait_for_index(&mut second);
+    second.browser_view().flush_database();
+    drop(second);
+
+    let mut third = shell_on(&config);
+    third.set_user_library(Some(library));
+    wait_for_index(&mut third);
+    run::<Value>(
+        &mut third,
+        ids::ADD_FOLDER,
+        json!({ "path": text(&elsewhere) }),
+    );
+    wait_for_index(&mut third);
+    wait_until(&mut third, "the tags to follow the file", |shell| {
+        tags_of(shell, &moved) == ["Mine|Favourite"]
+    });
+}
+
 // Spec: browser-tags R5. A collected file that moves outside Beatlayer keeps
 // its collections too.
 #[test]

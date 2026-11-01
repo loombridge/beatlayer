@@ -25,7 +25,7 @@ use super::tags::{Tag, TagGroup};
 
 /// The schema version this build writes. A file with a higher version is
 /// left alone.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 5;
 
 /// The file's schema, as SQLite statements.
 const SCHEMA: &str = "
@@ -36,8 +36,12 @@ CREATE TABLE IF NOT EXISTS files (
     kind TEXT NOT NULL,
     place TEXT NOT NULL,
     size INTEGER NOT NULL DEFAULT 0,
-    modified INTEGER NOT NULL DEFAULT 0,
-    hash TEXT
+    modified INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS tagged_files (
+    path TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    hash TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS tag_groups (
     id INTEGER PRIMARY KEY,
@@ -75,6 +79,18 @@ CREATE TABLE IF NOT EXISTS saved_label_tags (
     tag_id INTEGER NOT NULL,
     PRIMARY KEY (label_id, tag_id)
 );
+CREATE TABLE IF NOT EXISTS analysed_files (
+    path TEXT PRIMARY KEY,
+    size INTEGER NOT NULL,
+    modified INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    key TEXT
+);
+CREATE TABLE IF NOT EXISTS descriptors (
+    key TEXT PRIMARY KEY,
+    version INTEGER NOT NULL,
+    vector BLOB NOT NULL
+);
 ";
 
 /// A file in the index, as the database holds it.
@@ -94,8 +110,47 @@ pub struct FileRow {
     pub size: u64,
     /// When it changed, in seconds since the epoch.
     pub modified: i64,
-    /// Its content hash, for a file that carries a tag.
-    pub hash: Option<String>,
+}
+
+/// The size and content hash of a file that carries a tag. They live apart
+/// from the index, so they outlast the file's row (spec: browser-tags R5).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TaggedRow {
+    /// Its path on disk.
+    pub path: String,
+    /// Its length in bytes.
+    pub size: u64,
+    /// Its content hash.
+    pub hash: String,
+}
+
+/// What sound analysis made of a file, as the database holds it (spec:
+/// sound-similarity R4, R8).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AnalysedRow {
+    /// Its path on disk.
+    pub path: String,
+    /// Its length in bytes when it was looked at.
+    pub size: u64,
+    /// When it changed, in seconds since the epoch, when it was looked at.
+    pub modified: i64,
+    /// What came of it: `done` (it has a descriptor, under `key`),
+    /// `skipped` (it couldn't be analysed) or `ignored` (it isn't a sound
+    /// that is analysed).
+    pub status: String,
+    /// The content the descriptor is kept under, for a `done` file.
+    pub key: Option<String>,
+}
+
+/// A change to the analysis.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AnalysisOp {
+    /// A file looked at, and its descriptor if it has one that isn't kept
+    /// yet.
+    Row {
+        row: AnalysedRow,
+        descriptor: Option<(u32, Vec<u8>)>,
+    },
 }
 
 /// A change to the index.
@@ -105,8 +160,16 @@ pub enum FileOp {
     Upsert(FileRow),
     /// A file that isn't there any more.
     Delete(String),
-    /// The content hash of a file that carries a tag.
-    Hash { path: String, hash: String },
+    /// The size and content hash of a file that carries a tag.
+    Hash {
+        path: String,
+        size: u64,
+        hash: String,
+    },
+    /// A tagged file's hash passes to the path its tags moved to.
+    Rehome { old: String, new: String },
+    /// A file no longer carries a tag or a collection.
+    Untag(String),
 }
 
 /// A change to the tags.
@@ -167,6 +230,8 @@ pub enum LabelOp {
 pub struct Loaded {
     /// The index of the places' files.
     pub files: Vec<FileRow>,
+    /// The hashes of the files that carry a tag.
+    pub tagged_files: Vec<TaggedRow>,
     /// The tag groups.
     pub groups: Vec<TagGroup>,
     /// The tags.
@@ -177,7 +242,14 @@ pub struct Loaded {
     pub saved_labels: Vec<SavedLabel>,
     /// The collections each item is in, by its key.
     pub item_collections: Vec<(String, Vec<u8>)>,
+    /// What sound analysis made of each file it looked at.
+    pub analysed: Vec<AnalysedRow>,
+    /// The content keys that have a descriptor, with its version.
+    pub descriptor_keys: Vec<(String, u32)>,
 }
+
+/// A stored descriptor: its content key, version and bytes.
+pub type StoredDescriptor = (String, u32, Vec<u8>);
 
 /// The tags the database holds: the groups, the tags, and the items that
 /// carry them.
@@ -197,6 +269,10 @@ enum Request {
     Labels(Vec<LabelOp>),
     /// Write the changes to the collections.
     Collections(Vec<CollectionOp>),
+    /// Write the changes to the analysis.
+    Analysis(Vec<AnalysisOp>),
+    /// Read every descriptor, and answer.
+    Descriptors(Sender<Vec<StoredDescriptor>>),
     /// Write everything that's waiting, and answer when it's done.
     Flush(Sender<()>),
 }
@@ -380,6 +456,26 @@ impl Db {
         }
     }
 
+    /// Writes the changes to the analysis.
+    pub fn save_analysis(&self, ops: Vec<AnalysisOp>) {
+        if let Some(sender) = &self.requests {
+            let _ = sender.send(Request::Analysis(ops));
+        }
+    }
+
+    /// Reads every descriptor the file holds.
+    #[must_use]
+    pub fn descriptors(&self) -> Vec<StoredDescriptor> {
+        let Some(sender) = &self.requests else {
+            return Vec::new();
+        };
+        let (reply, answers) = mpsc::channel();
+        if sender.send(Request::Descriptors(reply)).is_err() {
+            return Vec::new();
+        }
+        answers.recv().unwrap_or_default()
+    }
+
     /// Writes everything that's waiting, and waits for it, for tests.
     pub fn flush(&self) {
         let Some(sender) = &self.requests else {
@@ -442,6 +538,15 @@ fn migrate(connection: &rusqlite::Connection, from: i64) -> Result<(), String> {
     connection
         .execute_batch(SCHEMA)
         .map_err(|error| format!("couldn't make the tables: {error}"))?;
+    if (1..4).contains(&from) {
+        // Version 4 keeps the hashes of tagged files in a table of their own.
+        // A file that has no `hash` column has none to carry over.
+        let _ = connection.execute(
+            "INSERT OR IGNORE INTO tagged_files SELECT path, size, hash FROM files \
+             WHERE hash IS NOT NULL",
+            [],
+        );
+    }
     connection
         .pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|error| format!("couldn't record the schema version: {error}"))?;
@@ -464,6 +569,20 @@ fn write_loop(connection: rusqlite::Connection, requests: Receiver<Request>) {
             Request::Tags(ops) => write_tags(&connection, &ops),
             Request::Labels(ops) => write_labels(&connection, &ops),
             Request::Collections(ops) => write_collections(&connection, &ops),
+            Request::Analysis(ops) => write_analysis(&connection, &ops),
+            Request::Descriptors(reply) => {
+                let _ = reply.send(rows(
+                    &connection,
+                    "SELECT key, version, vector FROM descriptors",
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get::<_, i64>(1)?.max(0) as u32,
+                            row.get(2)?,
+                        ))
+                    },
+                ));
+            }
             Request::Flush(reply) => {
                 let _ = reply.send(());
             }
@@ -475,7 +594,7 @@ fn write_loop(connection: rusqlite::Connection, requests: Receiver<Request>) {
 fn read_all(connection: &rusqlite::Connection) -> Loaded {
     let files = rows(
         connection,
-        "SELECT path, name, lower_name, kind, place, size, modified, hash FROM files",
+        "SELECT path, name, lower_name, kind, place, size, modified FROM files",
         |row| {
             Ok(FileRow {
                 path: row.get(0)?,
@@ -485,19 +604,70 @@ fn read_all(connection: &rusqlite::Connection) -> Loaded {
                 place: row.get(4)?,
                 size: row.get::<_, i64>(5)?.max(0) as u64,
                 modified: row.get(6)?,
-                hash: row.get(7)?,
+            })
+        },
+    );
+    let tagged_files = rows(
+        connection,
+        "SELECT path, size, hash FROM tagged_files",
+        |row| {
+            Ok(TaggedRow {
+                path: row.get(0)?,
+                size: row.get::<_, i64>(1)?.max(0) as u64,
+                hash: row.get(2)?,
             })
         },
     );
     let (groups, tags, item_tags) = read_tags(connection);
     Loaded {
         files,
+        tagged_files,
         groups,
         tags,
         item_tags,
         saved_labels: read_labels(connection),
         item_collections: read_collections(connection),
+        analysed: rows(
+            connection,
+            "SELECT path, size, modified, status, key FROM analysed_files",
+            |row| {
+                Ok(AnalysedRow {
+                    path: row.get(0)?,
+                    size: row.get::<_, i64>(1)?.max(0) as u64,
+                    modified: row.get(2)?,
+                    status: row.get(3)?,
+                    key: row.get(4)?,
+                })
+            },
+        ),
+        descriptor_keys: rows(connection, "SELECT key, version FROM descriptors", |row| {
+            Ok((row.get(0)?, row.get::<_, i64>(1)?.max(0) as u32))
+        }),
     }
+}
+
+/// Writes the changes to the analysis, in one transaction.
+fn write_analysis(connection: &rusqlite::Connection, ops: &[AnalysisOp]) {
+    if ops.is_empty() {
+        return;
+    }
+    let Ok(transaction) = connection.unchecked_transaction() else {
+        return;
+    };
+    for AnalysisOp::Row { row, descriptor } in ops {
+        if let Some((version, vector)) = descriptor {
+            let _ = transaction.execute(
+                "INSERT OR REPLACE INTO descriptors (key, version, vector) VALUES (?1, ?2, ?3)",
+                rusqlite::params![row.key, version, vector],
+            );
+        }
+        let _ = transaction.execute(
+            "INSERT OR REPLACE INTO analysed_files (path, size, modified, status, key) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![row.path, row.size as i64, row.modified, row.status, row.key],
+        );
+    }
+    let _ = transaction.commit();
 }
 
 /// Reads the collections each item is in.
@@ -665,8 +835,8 @@ fn write_files(connection: &rusqlite::Connection, ops: &[FileOp]) {
         match op {
             FileOp::Upsert(row) => {
                 let _ = transaction.execute(
-                    "INSERT INTO files (path, name, lower_name, kind, place, size, modified, hash) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(path) DO UPDATE SET \
+                    "INSERT INTO files (path, name, lower_name, kind, place, size, modified) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT(path) DO UPDATE SET \
                      name = excluded.name, lower_name = excluded.lower_name, \
                      kind = excluded.kind, place = excluded.place, size = excluded.size, \
                      modified = excluded.modified",
@@ -678,18 +848,30 @@ fn write_files(connection: &rusqlite::Connection, ops: &[FileOp]) {
                         row.place,
                         row.size as i64,
                         row.modified,
-                        row.hash,
                     ],
                 );
             }
             FileOp::Delete(path) => {
                 let _ = transaction.execute("DELETE FROM files WHERE path = ?1", [path]);
+                let _ = transaction.execute("DELETE FROM analysed_files WHERE path = ?1", [path]);
             }
-            FileOp::Hash { path, hash } => {
+            FileOp::Hash { path, size, hash } => {
                 let _ = transaction.execute(
-                    "UPDATE files SET hash = ?2 WHERE path = ?1",
-                    rusqlite::params![path, hash],
+                    "INSERT INTO tagged_files (path, size, hash) VALUES (?1, ?2, ?3) \
+                     ON CONFLICT(path) DO UPDATE SET size = excluded.size, hash = excluded.hash",
+                    rusqlite::params![path, *size as i64, hash],
                 );
+            }
+            FileOp::Rehome { old, new } => {
+                let _ = transaction.execute(
+                    "INSERT OR REPLACE INTO tagged_files SELECT ?2, size, hash FROM tagged_files \
+                     WHERE path = ?1",
+                    rusqlite::params![old, new],
+                );
+                let _ = transaction.execute("DELETE FROM tagged_files WHERE path = ?1", [old]);
+            }
+            FileOp::Untag(path) => {
+                let _ = transaction.execute("DELETE FROM tagged_files WHERE path = ?1", [path]);
             }
         }
     }
@@ -873,7 +1055,6 @@ mod tests {
             place: "/lib".to_owned(),
             size: 10,
             modified: 5,
-            hash: None,
         })]);
         db.flush();
         drop(db);
@@ -912,6 +1093,90 @@ mod tests {
             db.load().item_collections,
             [("/lib/Kick.wav".to_owned(), vec![2, 5])]
         );
+    }
+
+    #[test]
+    fn a_database_of_version_three_keeps_its_tagged_hashes() {
+        // Spec: browser-tags R4, R5.
+        let dir = scratch("migrate-hashes");
+        let path = dir.join("browser.db");
+        let connection = rusqlite::Connection::open(&path).expect("the file");
+        connection
+            .execute_batch(
+                "CREATE TABLE files (path TEXT PRIMARY KEY, name TEXT NOT NULL, \
+                 lower_name TEXT NOT NULL, kind TEXT NOT NULL, place TEXT NOT NULL, \
+                 size INTEGER NOT NULL DEFAULT 0, modified INTEGER NOT NULL DEFAULT 0, \
+                 hash TEXT);
+                 INSERT INTO files VALUES ('/lib/Kick.wav', 'Kick.wav', 'kick.wav', 'Audio', \
+                 '/lib', 10, 5, 'abc');
+                 INSERT INTO files VALUES ('/lib/Snare.wav', 'Snare.wav', 'snare.wav', 'Audio', \
+                 '/lib', 11, 5, NULL);
+                 PRAGMA user_version = 3;",
+            )
+            .expect("the old file");
+        drop(connection);
+        let db = Db::open(path);
+        assert!(db.damaged().is_none() && !db.is_newer());
+        assert_eq!(
+            db.load().tagged_files,
+            [TaggedRow {
+                path: "/lib/Kick.wav".to_owned(),
+                size: 10,
+                hash: "abc".to_owned(),
+            }]
+        );
+    }
+
+    #[test]
+    fn descriptors_and_analysed_files_survive_a_restart_and_a_database_of_version_four_gains_them()
+    {
+        // Spec: sound-similarity R4, R8.
+        let dir = scratch("analysis");
+        let path = dir.join("browser.db");
+        {
+            let db = Db::open(path.clone());
+            db.flush();
+        }
+        let connection = rusqlite::Connection::open(&path).expect("the file");
+        connection
+            .execute_batch(
+                "DROP TABLE analysed_files; DROP TABLE descriptors; PRAGMA user_version = 4;",
+            )
+            .expect("the old file");
+        drop(connection);
+        let db = Db::open(path.clone());
+        assert!(db.damaged().is_none() && !db.is_newer());
+        let row = |path: &str, status: &str, key: Option<&str>| AnalysedRow {
+            path: path.to_owned(),
+            size: 10,
+            modified: 5,
+            status: status.to_owned(),
+            key: key.map(str::to_owned),
+        };
+        db.save_analysis(vec![
+            AnalysisOp::Row {
+                row: row("/lib/Kick.wav", "done", Some("abc")),
+                descriptor: Some((1, vec![1, 2, 3, 4])),
+            },
+            AnalysisOp::Row {
+                row: row("/lib/Copy.wav", "done", Some("abc")),
+                descriptor: None,
+            },
+            AnalysisOp::Row {
+                row: row("/lib/Bad.wav", "skipped", None),
+                descriptor: None,
+            },
+        ]);
+        db.save_files(vec![FileOp::Delete("/lib/Copy.wav".to_owned())]);
+        db.flush();
+        drop(db);
+        let db = Db::open(path);
+        let loaded = db.load();
+        let mut paths: Vec<_> = loaded.analysed.iter().map(|r| r.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, ["/lib/Bad.wav", "/lib/Kick.wav"]);
+        assert_eq!(loaded.descriptor_keys, [("abc".to_owned(), 1)]);
+        assert_eq!(db.descriptors(), [("abc".to_owned(), 1, vec![1, 2, 3, 4])]);
     }
 
     #[test]

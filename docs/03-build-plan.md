@@ -989,7 +989,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.5 | done | 31 October 2026 | [#644](https://github.com/loombridge/beatlayer/pull/644): `bl_dsp::physical` has modal banks for Beam, Marimba, Cantilever, Membrane, Circular Membrane and Plate and waveguides for String, Tube and Pipe on the kit's SIMD lanes, tuned within 1 cent from 40 Hz to 4 kHz at 44.1 to 96 kHz and stable to 192 kHz; the R11 damper and finger and fret positions wait on Tension |
 | 8.6 | todo |  |  |
 | 8.7 | todo |  |  |
-| 8.8 | todo |  |  |
+| 8.8 | done | 1 November 2026 | [#645](https://github.com/loombridge/beatlayer/pull/645): a generator in the repository makes 26 factory wavetables in 7 categories bit-identically, built on first use into the kit's shared cache; user wavetables load from WAV (with or without a frame-size chunk), AIFF or raw files as media the set references and Collect All and Save collects; `device.load_wavetable` and `device.set_wavetable` are one undo step each and read back; the device itself comes with WP-8.9 |
 | 8.9 | todo |  |  |
 | 8.10 | todo |  |  |
 | 8.11 | todo |  |  |

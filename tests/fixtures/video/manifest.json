@@ -13,6 +13,20 @@
       "frames": 16,
       "audio": "mjpeg-24f.wav"
     },
+    "mjpeg-chapters.mov": {
+      "frames": 24,
+      "audio": "mjpeg-24f.wav",
+      "chapters": [
+        [
+          0,
+          "Intro"
+        ],
+        [
+          15000,
+          "Drop"
+        ]
+      ]
+    },
     "mjpeg-reordered.mov": {
       "frames": 12,
       "decode_order": [

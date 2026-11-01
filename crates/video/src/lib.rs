@@ -31,6 +31,7 @@ mod error;
 pub mod ffmpeg;
 #[cfg(windows)]
 mod mediafoundation;
+mod markers;
 mod mjpeg;
 mod movie;
 mod player;
@@ -42,6 +43,7 @@ pub use audio::MovieAudio;
 pub use decoder::{CodedSample, Frame, VideoDecoder, open_decoder};
 pub use edits::{Edit, EditList};
 pub use error::VideoError;
+pub use markers::Marker;
 pub use movie::{AudioTrack, MAX_DIMENSION, MAX_PIXELS, Movie, ReadSeek, Sample, VideoTrack};
 pub use player::{FrameSource, Picture, VideoThread};
 pub use rational::Rational;

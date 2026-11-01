@@ -64,3 +64,14 @@ fn every_truncation_and_byte_flip_of_a_movie_parses_or_refuses() {
 fn at_time(n: i128) -> bl_video::Rational {
     at(n)
 }
+
+#[test]
+fn a_chapter_track_that_isnt_there_costs_the_movie_its_markers_only() {
+    // R12, R28: the video's chapter reference names track 9.
+    let mut bad = bytes("mjpeg-chapters.mov");
+    let chap = bad.windows(4).position(|w| w == b"chap").expect("chap");
+    bad[chap + 4..chap + 8].copy_from_slice(&9u32.to_be_bytes());
+    let movie = Movie::from_bytes(bad).expect("a movie");
+    assert!(movie.markers().is_empty());
+    assert_eq!(movie.video().expect("video").frame_count(), 24);
+}

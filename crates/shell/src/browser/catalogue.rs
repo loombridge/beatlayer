@@ -293,6 +293,26 @@ impl Lists for Catalogue {
         };
         Self::fit(entries, role)
     }
+
+    fn samples(&self) -> Vec<Entry> {
+        let snapshot = &self.snapshot;
+        let mut entries: Vec<Entry> = (0..u32::try_from(snapshot.len()).unwrap_or(u32::MAX))
+            .filter(|&index| snapshot.entry(index).kind == ItemKind::Audio)
+            .filter_map(|index| {
+                let path = snapshot.path(index);
+                Some(Entry {
+                    key: path.to_string_lossy().into_owned(),
+                    name: path.file_stem()?.to_string_lossy().into_owned(),
+                    load: Some(Load::Sample {
+                        path: path.to_string_lossy().into_owned(),
+                    }),
+                    folder: false,
+                })
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.name.to_lowercase());
+        entries
+    }
 }
 
 #[cfg(test)]

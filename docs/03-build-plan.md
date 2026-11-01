@@ -993,7 +993,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.9 | todo |  |  |
 | 8.10 | todo |  |  |
 | 8.11 | todo |  |  |
-| 8.12 | todo |  |  |
+| 8.12 | done | 1 November 2026 | [#733](https://github.com/loombridge/beatlayer/pull/733): Operator (`beatlayer.operator`) plays four oscillators on the FM core with their envelopes and the pitch envelope, loop modes and slopes, Time, Tone, voices and transpose, with the Global, Osc A to D, LFO, Filter and Pitch pages; the LFO and filter themselves wait on part 2 (8.13) |
 | 8.13 | todo |  |  |
 | 8.14 | done | 1 November 2026 | [#731](https://github.com/loombridge/beatlayer/pull/731): Analog has two band-limited oscillators (sine, saw, rectangle with pulse width, noise) with sub, sync and a pitch envelope, the noise generator with Color, two filters with ten modes, Drive, key tracking and serial or parallel routing, two amplifiers with pan, and four envelopes with their loop modes, on the shell-and-display pages; the LFO amounts act on nothing until part 2, and factory presets wait on a preset mechanism |
 | 8.15 | todo |  |  |
@@ -1029,7 +1029,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.45 | done | 1 November 2026 | [#715](https://github.com/loombridge/beatlayer/pull/715): Vocoder is a native device with its filter bank of 4 to 40 bands, the Noise, External, Modulator and Pitch Tracking carriers, Enhance, Unvoiced, Gate, Level, Depth, Attack, Release, Formant, the channel modes and its band display |
 | 8.46 | todo |  |  |
 | 8.47 | done | 1 November 2026 | [#699](https://github.com/loombridge/beatlayer/pull/699): Spectral Time, an STFT effect with the Freezer (Manual and Retrigger on onsets or synced divisions, crossfade and envelope fades), the spectral delay (time in milliseconds, notes or sixteenths, Feedback, Tilt, Spray, Mask, Stereo), the order switch, Resolution with a crossfade, the global controls and a headless spectrogram, its banks covering every parameter |
-| 8.48 | todo |  |  |
+| 8.48 | done | 1 November 2026 | [#704](https://github.com/loombridge/beatlayer/pull/704): Spectral Resonator, an STFT effect whose partials ring on an internal frequency or on notes through a MIDI sidechain (Mono or Poly up to 16 voices, glide and bend), with Decay, Shift, Stretch, Harmonics and Quantize in a scale or tuning, the Chorus, Wander and Granular modes, Unison, Input Send, Dry/Wet, a headless spectrogram and its banks; the frequency readout buttons are a follow-up |
 | 8.49 | done | 1 November 2026 | [#701](https://github.com/loombridge/beatlayer/pull/701): Spectral Blur is a native device: a chosen frequency range smeared into a cloud over Halo's time, with Residual, Freeze, Wet Gain, Dry/Wet, a display with draggable range edges, and its bank |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
 | 8.51 | done | 1 November 2026 | [#653](https://github.com/loombridge/beatlayer/pull/653): Gated Delay (a delay fed through a 16-step gate sequencer on the tempo map, with random steps and feedback) and Pitch Hack (a pitch-shifting delay line on the Shifter's line, with reverse, random intervals and feedback) are native devices with their pages |

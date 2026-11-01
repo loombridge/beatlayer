@@ -105,6 +105,7 @@ mod note_filters;
 mod note_view;
 mod offline_plugins;
 mod offline_vst3_au;
+mod operator;
 mod packages;
 mod packs;
 mod pedal;

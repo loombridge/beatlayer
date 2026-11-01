@@ -138,6 +138,7 @@ pub mod modulation;
 pub mod multisampler;
 pub mod note_filters;
 pub mod notes;
+pub mod packages;
 pub mod pads;
 pub mod perception;
 pub mod plugins;
@@ -208,6 +209,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     modulation::register(registry)?;
     perception::register(registry)?;
     stems::register(registry)?;
+    packages::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;

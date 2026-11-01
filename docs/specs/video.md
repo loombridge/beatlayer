@@ -77,7 +77,10 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 to R4, R26 to R28 | to be written in WP-9.24: `crates/video/tests/decode.rs` on generated Motion JPEG movies whose frames encode their index; `fuzz/fuzz_targets/movie.rs` | unit, fuzz |
+| R1, R2, R4, R26 | `crates/video/tests/decode.rs` (frame times, the frame at a time, seeks, stored order, gaps, refusals) and `crates/video/tests/platform.rs` (H.264, HEVC and ProRes through the platform's decoders and FFmpeg's libraries), on movies `tests/fixtures/gen/gen_video.py` generates whose frames encode their index | unit |
+| R3, R4 | `crates/video/tests/audio.rs`: a movie's audio against the same samples as a WAV file, silence in the gaps, blocks read anywhere | unit |
+| R27 | `crates/video/tests/thread.rs`: decoding ahead, dropping what's done with, seeks, gaps | unit |
+| R28 | `crates/video/tests/damaged.rs` and `fuzz/fuzz_targets/movie.rs` | unit, fuzz |
 | R5 to R15 | to be written in WP-9.25: model, shell and UI tests per rule; a save and load round trip | unit, shell test, UI script |
 | R16 to R23 | to be written in WP-9.26: `crates/ui/tests/video_window.rs` on the test clock; `crates/ui/tests/keymap/resolve.rs` for S-VIEW-009 | UI script |
 | R24, R25 | to be written in WP-9.27: a Motion JPEG export checked frame by frame | shell test |

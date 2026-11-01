@@ -9,21 +9,18 @@ use std::rc::Rc;
 use bl_analysis::stems::{Quality, Stem};
 use bl_model::{Clip, ClipData, ClipId, Command, ContentHash, TrackId, TrackKind};
 use bl_shell_spec::stems::{
-    self as stems_ids, DialogStatus, DialogStep, JobState, JobStatus, OpenArgs, PackageStatus,
-    SeparateArgs, StemKind, StemQuality, StemsStatus,
+    self as stems_ids, DialogStatus, DialogStep, JobState, JobStatus, OpenArgs, SeparateArgs,
+    StemKind, StemQuality, StemsStatus,
 };
 
 use super::*;
+use crate::packages::Package;
 use crate::processed::{Kind, Request};
 use crate::stems::{Ended, Separated, Worker};
 
 /// Stem separation's state in the shell.
 #[derive(Default)]
 pub(super) struct StemsState {
-    /// The packages' download, while it runs.
-    install: Option<Worker<()>>,
-    /// How the last download went, or how this one is going.
-    install_status: JobStatus,
     /// The separation, while it runs.
     separation: Option<Running>,
     /// How the last separation went.
@@ -75,35 +72,30 @@ fn parts_name(parts: &[StemKind]) -> String {
 }
 
 impl Shell {
-    /// The folder the stem separation packages install into: `Packages` in
-    /// Beatlayer's application-data folder.
-    #[must_use]
-    pub fn packages_folder(&self) -> PathBuf {
-        self.config_dir
-            .clone()
-            .unwrap_or_else(|| std::env::temp_dir().join("Beatlayer"))
-            .join("Packages")
-    }
-
     /// Separate Stems' dialog, if it's open.
     #[must_use]
     pub fn stems_dialog(&self) -> Option<DialogStatus> {
         self.stems.dialog
     }
 
+    /// The packages stem separation needs (R15).
+    fn stems_packages(&self) -> Vec<Package> {
+        self.feature_packages(crate::stems::FEATURE)
+    }
+
     /// Whether every stem separation package is installed.
     #[must_use]
     pub fn stem_packages_installed(&self) -> bool {
         let folder = self.packages_folder();
-        let packages = crate::stems::packages();
+        let packages = self.stems_packages();
         !packages.is_empty() && packages.iter().all(|p| p.installed(&folder))
     }
 
     /// Stem separation's state, as `stems.status` reads it.
     #[must_use]
     pub fn stems_status(&self) -> StemsStatus {
-        let folder = self.packages_folder();
         let state = &self.stems;
+        let packages = self.stems_packages();
         let running = |worker: &crate::stems::Progress| JobStatus {
             state: JobState::Running,
             progress: worker.fraction(),
@@ -112,22 +104,9 @@ impl Shell {
         };
         StemsStatus {
             installed: self.stem_packages_installed(),
-            folder: folder.to_string_lossy().into_owned(),
-            packages: crate::stems::packages()
-                .iter()
-                .map(|p| PackageStatus {
-                    name: p.name.to_owned(),
-                    purpose: p.purpose.to_owned(),
-                    version: p.version.to_owned(),
-                    url: p.project.to_owned(),
-                    size: p.size,
-                    installed: p.installed(&folder),
-                })
-                .collect(),
-            install: state
-                .install
-                .as_ref()
-                .map_or_else(|| state.install_status.clone(), |w| running(w.progress())),
+            folder: self.packages_folder().to_string_lossy().into_owned(),
+            packages: packages.iter().map(|p| self.package_status(p)).collect(),
+            install: self.packages_job(&packages),
             separation: state.separation.as_ref().map_or_else(
                 || state.separation_status.clone(),
                 |r| running(r.worker.progress()),
@@ -162,10 +141,12 @@ impl Shell {
                 let clip = serde_json::from_value::<OpenArgs>(Self::object(args.clone()))
                     .ok()
                     .and_then(|a| a.clip);
-                !crate::stems::packages().is_empty() && self.stems_clip(clip).is_ok()
+                !self.stems_packages().is_empty() && self.stems_clip(clip).is_ok()
             }
             stems_ids::CLOSE => self.stems.dialog.is_some(),
-            stems_ids::CANCEL => self.stems.install.is_some() || self.stems.separation.is_some(),
+            stems_ids::CANCEL => {
+                self.packages_active(&self.stems_packages()) || self.stems.separation.is_some()
+            }
             _ => true,
         }
     }
@@ -179,7 +160,7 @@ impl Shell {
             stems_ids::STATUS => {}
             stems_ids::OPEN => {
                 let OpenArgs { clip } = Self::args(id, args)?;
-                if crate::stems::packages().is_empty() {
+                if self.stems_packages().is_empty() {
                     return Err(unavailable(
                         "stem separation isn't available on this platform".to_owned(),
                     ));
@@ -187,7 +168,7 @@ impl Shell {
                 let clip = self.stems_clip(clip).map_err(unavailable)?;
                 let step = if self.stems.separation.is_some() {
                     DialogStep::Separating
-                } else if self.stems.install.is_some() {
+                } else if self.packages_active(&self.stems_packages()) {
                     DialogStep::Installing
                 } else if self.stem_packages_installed() {
                     DialogStep::Options
@@ -207,9 +188,8 @@ impl Shell {
                 self.start_separation(id, args)?;
             }
             stems_ids::CANCEL => {
-                if let Some(install) = &self.stems.install {
-                    install.progress().cancel();
-                }
+                let packages = self.stems_packages();
+                self.cancel_packages(&packages);
                 if let Some(running) = &self.stems.separation {
                     running.worker.progress().cancel();
                 }
@@ -219,20 +199,20 @@ impl Shell {
         Ok(to_value(&self.stems_status()))
     }
 
+    /// Runs `packages.install` for stem separation's packages (R20).
     fn install_stem_packages(&mut self, id: &str) -> Result<(), ShellError> {
-        if crate::stems::packages().is_empty() {
+        let packages = self.stems_packages();
+        if packages.is_empty() {
             return Err(ShellError::Unavailable {
                 command: id.to_owned(),
                 reason: "stem separation isn't available on this platform".to_owned(),
             });
         }
-        if self.stems.install.is_some() || self.stem_packages_installed() {
+        if self.packages_active(&packages) || self.stem_packages_installed() {
             return Ok(());
         }
-        let worker =
-            crate::stems::install(self.packages_folder()).map_err(|e| self.failed(id, e))?;
-        self.stems.install = Some(worker);
-        self.stems.install_status = JobStatus::default();
+        self.request_packages(packages)
+            .map_err(|e| self.failed(id, e))?;
         if let Some(dialog) = &mut self.stems.dialog {
             dialog.step = DialogStep::Installing;
         }
@@ -295,8 +275,16 @@ impl Shell {
         if self.audio.transport_state().playing {
             let _ = self.audio.send_transport(bl_engine::TransportCommand::Stop);
         }
+        let folder = self.packages_folder();
+        let packages = self.stems_packages();
+        let [runtime, model] = packages.as_slice() else {
+            return Err(unavailable(
+                "stem separation isn't available on this platform",
+            ));
+        };
         let worker = crate::stems::separate(crate::stems::Job {
-            packages: self.packages_folder(),
+            runtime: runtime.path(&folder),
+            model: model.path(&folder),
             media: Arc::clone(&self.media),
             source,
             region,
@@ -326,26 +314,18 @@ impl Shell {
     /// the separation's result then stays on its worker, so it doesn't land
     /// inside a drag's undo step.
     fn poll_stems_held(&mut self, held: bool) -> bool {
-        if let Some(ended) = self.stems.install.as_mut().and_then(Worker::poll) {
-            self.stems.install = None;
-            let (state, error) = match ended {
-                Ended::Done(()) => (JobState::Done, None),
-                Ended::Cancelled => (JobState::Cancelled, None),
-                Ended::Failed(error) => (JobState::Failed, Some(error)),
-            };
-            if let Some(error) = &error {
-                self.set_message(error.clone(), true);
-            }
-            self.stems.install_status = JobStatus {
-                state,
-                progress: if state == JobState::Done { 1.0 } else { 0.0 },
-                stage: String::new(),
-                error,
-            };
+        // Spec: stem-separation R4. Once the download ends, the dialog
+        // offers the stems, or goes back to the package list with the
+        // reason it failed.
+        if self
+            .stems
+            .dialog
+            .is_some_and(|d| d.step == DialogStep::Installing)
+            && !self.packages_active(&self.stems_packages())
+        {
+            let installed = self.stem_packages_installed();
             if let Some(dialog) = &mut self.stems.dialog {
-                // Spec: stem-separation R4. Once installed, the dialog
-                // offers the stems.
-                dialog.step = if state == JobState::Done {
+                dialog.step = if installed {
                     DialogStep::Options
                 } else {
                     DialogStep::Packages
@@ -371,7 +351,7 @@ impl Shell {
                 Ended::Failed(error) => self.separation_ended(JobState::Failed, Some(error)),
             }
         }
-        self.stems.install.is_some() || self.stems.separation.is_some()
+        self.packages_busy() || self.stems.separation.is_some()
     }
 
     /// Cancels the separation under way and forgets the dialog and the
@@ -579,7 +559,11 @@ impl Shell {
     /// Waits until the download and the separation under way have finished
     /// and the stems' edit has landed, for tests and headless runs.
     pub fn wait_stems(&mut self) {
-        while self.poll_stems_held(false) || self.is_processing() {
+        loop {
+            let downloading = self.poll_packages();
+            if !(self.poll_stems_held(false) || downloading || self.is_processing()) {
+                break;
+            }
             self.land_processed_files();
             std::thread::sleep(std::time::Duration::from_millis(5));
         }

@@ -201,7 +201,7 @@ pub const LFO_MODES: [&str; 4] = ["Rate", "Ratio", "Time", "Sync"];
 /// The Sync time mode's divisions; Beatlayer's own list, to observe.
 pub const LFO_DIVISIONS: [&str; 7] = ["1/16", "1/8", "1/4", "1/2", "1 Bar", "2 Bars", "4 Bars"];
 /// How many sixteenths each division holds: the Sync time mode's rates.
-const DIVISION_SIXTEENTHS: [f64; 7] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0];
+pub(crate) const DIVISION_SIXTEENTHS: [f64; 7] = [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0];
 /// The modulation sources every route chooser offers, in the manual's
 /// order, after Off.
 pub const MOD_SOURCES: [&str; 9] = [

@@ -87,7 +87,7 @@ IMP-11's first package built the command for Arrangement clips, the dialog, the 
 |---|---|---|
 | R1 | `crates/shell-spec/src/context_menus.rs`, `an_audio_clips_menu_adds_the_convert_and_stems_rows_after_reverse`; `crates/shell/tests/stems.rs`, `the_dialog_opens_on_one_audio_clip`; `crates/ui/tests/stems_dialog.rs`, `an_audio_clips_menu_opens_the_packages_dialog_the_first_time` | unit, UI script |
 | R2 | `crates/shell/tests/stems.rs`, `the_first_time_the_dialog_lists_the_packages_to_download`; `crates/ui/tests/stems_dialog.rs`, `an_audio_clips_menu_opens_the_packages_dialog_the_first_time` | unit, UI script |
-| R3 | `crates/shell/src/stems.rs`, `only_the_library_and_its_notices_are_kept_from_the_archive`; `crates/shell/tests/stems.rs`, `the_packages_download_check_and_install` (where `BL_STEMS_DOWNLOAD` is set) | unit |
+| R3 | `crates/shell/src/packages.rs`, `only_the_kept_files_come_from_the_archive`; `crates/shell/tests/stems.rs`, `the_packages_download_check_and_install` (where `BL_STEMS_DOWNLOAD` is set) | unit |
 | R4 | `crates/shell/tests/stems.rs`, `the_packages_download_check_and_install` | unit |
 | R5 | `crates/ui/tests/stems_dialog.rs`, `an_audio_clips_menu_opens_the_packages_dialog_the_first_time`; `crates/shell/tests/stems.rs`, `merge_needs_two_or_three_parts` | UI script, unit |
 | R6 | `crates/shell/tests/stems.rs`, `separating_makes_a_group_of_stem_tracks_and_deactivates_the_clip` | unit |
@@ -99,7 +99,13 @@ IMP-11's first package built the command for Arrangement clips, the dialog, the 
 | R12 | `crates/analysis/src/stems.rs`, `overlapping_windows_blend_back_into_the_whole_mix`, `progress_rises_to_one_and_can_cancel`; `crates/analysis/tests/stems_model.rs`, `a_bass_line_and_a_hi_hat_separate_into_bass_and_drums` (where the packages are named) | unit |
 | R13 | `crates/analysis/src/stems.rs`, `high_quality_averages_a_shifted_second_pass` | unit |
 | R14 | `crates/agent/tests/stdio.rs`, `a_file_lands_while_an_agent_keeps_asking`, `a_file_lands_while_no_one_asks_anything` (a processed file stands in for the separation's, which lands by the same poll) | unit |
-| R15 to R21 | to be written in WP-9.1: `crates/shell/tests/packages.rs` (a test manifest from a `file://` URL, a tampered checksum, Cancel mid-download, two features sharing a runtime); the stems tests unchanged | unit, shell test |
+| R15 | `crates/shell/src/packages.rs`, `the_built_in_manifest_gives_stem_separation_its_packages`, `a_role_is_filled_by_the_installed_package_first`; `crates/shell/tests/packages.rs`, `two_features_sharing_a_runtime_download_it_once` | unit, shell test |
+| R16 | `crates/ui/tests/stems_dialog.rs`, `an_audio_clips_menu_opens_the_packages_dialog_the_first_time` (the shared page, as stem separation uses it; each later feature's dialog adds its own test) | UI script |
+| R17 | `crates/shell/tests/packages.rs`, `cancel_mid_download_leaves_no_file`, `a_tampered_checksum_installs_nothing`, `two_features_sharing_a_runtime_download_it_once`; `crates/shell/src/packages.rs`, `a_failed_install_leaves_nothing_in_packages`, `an_oversized_download_stops_at_the_expected_size`, `a_download_offered_at_the_wrong_length_is_refused_before_it_is_written` | shell test, unit |
+| R18 | `crates/shell/src/packages.rs`, `an_archive_installs_its_kept_files_and_a_record`; `crates/shell/tests/packages.rs`, `a_manifest_served_from_files_installs_a_features_packages` | unit, shell test |
+| R19 | `crates/analysis/src/stems/onnx.rs`, `the_library_loads_once_for_every_feature`; `crates/shell/src/packages.rs`, `a_loaded_package_is_removed_at_the_next_launch`; `crates/shell/src/shell/packages.rs`, `a_package_whose_library_is_loaded_shows_removed_at_the_next_launch` | unit |
+| R20 | `crates/shell/tests/packages.rs`, `a_manifest_served_from_files_installs_a_features_packages`; the readback rows in `crates/commands/src/readback/song.rs`, checked by `cargo xtask commands` | shell test |
+| R21 | `crates/shell/tests/packages.rs`, `a_headless_run_keeps_its_packages_in_the_temporary_folder`; `crates/shell/src/packages.rs`, `a_manifest_file_replaces_the_built_in_one` | shell test, unit |
 | R22 to R31 | to be written in WP-9.2: `crates/shell/tests/stems.rs` for each source, with the generated stem fixture standing in for the network's output; `crates/ui/tests/stems_dialog.rs` from each menu; `crates/agent/tests/stems.rs` | shell test, UI script, agent API |
 | R32 to R38 | to be written in WP-9.3: `crates/analysis/tests/stems_model.rs` against generated sources on both providers; the fallback by refusing the provider; `bl-cli bench stems` | unit, benchmark |
 | R39 to R41 | to be written in WP-9.4: the fallback and the manifest on Windows and Linux CI | unit |

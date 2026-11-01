@@ -858,7 +858,9 @@ dependencies = [
 name = "bl-dsp"
 version = "0.2.0"
 dependencies = [
+ "lspk-dsp",
  "lspk-params",
+ "lspk-rt",
  "proptest",
  "realfft",
 ]

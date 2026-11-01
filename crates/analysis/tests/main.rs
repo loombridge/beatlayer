@@ -6,6 +6,7 @@
 mod autotag;
 mod cache;
 mod common;
+mod drums;
 mod similarity;
 mod stems_model;
 mod tempo;

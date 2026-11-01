@@ -101,6 +101,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "push.set_setup",
             Exception(Equivalent("Push 2's Setup menu, set with its own encoders")),
         ),
+        // Push 2's Convert (WP-7.24): the button acts on what is selected,
+        // and the app's own menus make each of its results.
+        (
+            "push.convert",
+            Exception(Equivalent("Push 2's Convert button")),
+        ),
         // Push 2's Note Mode (WP-7.21): the pad colour shows only on Push 2,
         // and Duplicate with two pads is its own gesture.
         (

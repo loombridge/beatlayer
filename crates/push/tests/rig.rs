@@ -155,6 +155,7 @@ enum Contents {
     Placeholders,
     Note,
     Clip,
+    Simpler,
 }
 
 pub struct Rig {
@@ -219,6 +220,14 @@ impl Rig {
         rig
     }
 
+    /// A rig whose Note Mode, Device Mode and Browse Mode are the real ones,
+    /// for a Simpler on both.
+    pub fn simplers() -> Self {
+        let mut rig = Self::build(Contents::Simpler);
+        rig.ring_at(0, 0);
+        rig
+    }
+
     /// A rig whose modes have no content of their own yet: the placeholders.
     pub fn placeholders() -> Self {
         Self::build(Contents::Placeholders)
@@ -249,7 +258,7 @@ impl Rig {
                 };
                 bl_push::Contents {
                     pads: [
-                        if matches!(which, Contents::Note | Contents::Clip) {
+                        if matches!(which, Contents::Note | Contents::Clip | Contents::Simpler) {
                             Box::new(bl_push::note::Note::new())
                         } else {
                             recorder("Note")
@@ -261,12 +270,15 @@ impl Rig {
                         },
                     ],
                     display: [
-                        if which == Contents::Devices {
+                        if matches!(which, Contents::Devices | Contents::Simpler) {
                             Box::new(bl_push::device::DeviceMode::new())
                         } else {
                             recorder("Device")
                         },
-                        if matches!(which, Contents::Browse | Contents::Devices) {
+                        if matches!(
+                            which,
+                            Contents::Browse | Contents::Devices | Contents::Simpler
+                        ) {
                             Box::new(bl_push::browse::Browse::new())
                         } else {
                             recorder("Browse")

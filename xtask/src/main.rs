@@ -55,12 +55,13 @@ Tasks:
                  in tests/golden/ (`cargo test` does too). With --update, remake the
                  references whose renders changed; say why in the pull request. Fixture
                  names after the options pick some; the default is all.
-  transcribe-bench  Measure how accurately Convert Melody and Convert Harmony find notes, on
-                 seeded phrases through Drift and Simpler, clean, with a room and with
-                 noise, and fail below the targets. Needs --runtime and --model (or
-                 BL_ONNX_RUNTIME and BL_PITCH_MODEL): the Packages manager's ONNX Runtime
-                 library and basic-pitch model. BL_TRANSCRIBE_CORPUS names an open labelled
-                 set to report on as well.
+  transcribe-bench  Measure how accurately Convert Melody, Convert Harmony and Convert Drums
+                 find notes, on seeded phrases through Drift and Simpler, and breaks through
+                 Drum Samplers, clean, with a room and with noise, and fail below the
+                 targets. The pitch kinds need --runtime and --model (or BL_ONNX_RUNTIME and
+                 BL_PITCH_MODEL): the Packages manager's ONNX Runtime library and
+                 basic-pitch model. With --drums only Drums run, and neither is needed.
+                 BL_TRANSCRIBE_CORPUS names an open labelled set to report on as well.
   progress       Print the progress of the roadmap, the parity matrix and Reagent's plan
                  as JSON, read from origin/main (with --worktree, from the files on disk)
   dashboard      Serve the progress page on http://localhost:4106 (or PORT, or --port N),

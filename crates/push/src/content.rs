@@ -329,6 +329,10 @@ pub struct Ctx<'a> {
     /// What Note Mode showed at the last tick, for the display modes that
     /// follow its layout (push-2-tracks R50 to R57).
     pub note: Option<&'a crate::note::State>,
+    /// The key of the slice picked on a slicing Simpler's pads (notes R73).
+    pub slice: Option<u8>,
+    /// Whether Simpler's Pad Slicing is on (notes R74).
+    pub pad_slicing: bool,
     pub(crate) actions: &'a mut Vec<Action>,
 }
 
@@ -469,6 +473,8 @@ pub struct Paint<'a> {
     pub note: Option<&'a crate::note::State>,
     /// Whether the pads are in Session Mode (push-2-tracks R71).
     pub session: bool,
+    /// The key of the slice picked on a slicing Simpler's pads (notes R73).
+    pub slice: Option<u8>,
 }
 
 /// The content of one pad mode or display mode.
@@ -571,6 +577,17 @@ pub trait Content: Send {
     /// if it has a use for it (R11).
     fn strip_use(&self) -> Option<StripUse> {
         None
+    }
+
+    /// The key of the slice picked on the pads, if they play a slicing
+    /// Simpler's slices (notes R73).
+    fn picked_slice(&self, _model: &ReadModel) -> Option<u8> {
+        None
+    }
+
+    /// Whether Simpler's Pad Slicing is on, which the pads read (notes R74).
+    fn pad_slicing(&self) -> bool {
+        false
     }
 
     /// What Note Mode shows, for `push.state` (notes R5 to R31).

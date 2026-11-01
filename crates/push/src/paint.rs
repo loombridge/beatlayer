@@ -10,7 +10,9 @@ use skrifa::{FontRef, MetadataProvider};
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::frame::{HEIGHT, RGB_BYTES, WIDTH};
-use crate::screen::{ClipBody, ClipScreen, Column, Dot, Graphic, Icon, Label, List, Screen, Shade};
+use crate::screen::{
+    ClipBody, ClipScreen, Column, Dot, Graphic, Icon, Label, List, Screen, Shade, Waveform,
+};
 
 /// The columns' width.
 const COLUMN: f32 = 120.0;
@@ -244,6 +246,9 @@ impl Painter<'_> {
         }
         if let Some(clip) = &screen.clip {
             self.clip(clip);
+        }
+        if let Some(wave) = &screen.waveform {
+            self.waveform(wave);
         }
         for (n, column) in screen.columns.iter().enumerate() {
             if screen.clip.is_some() {
@@ -615,6 +620,54 @@ impl Painter<'_> {
             );
             self.crisp(1.0, y_high, 9.0, (y_low - y_high).max(2.0), TEXT, 90);
         }
+    }
+
+    /// A Simpler's sample under the columns' names and values: the region
+    /// bright, the rest dimmed, the played part brighter still, the loop,
+    /// the slices and the selected slice marked (push-2-notes R67).
+    fn waveform(&mut self, wave: &Waveform) {
+        const TOP: f32 = BAND + 46.0;
+        const BOTTOM: f32 = HEIGHT as f32 - BAND - 2.0;
+        let (middle, half) = ((TOP + BOTTOM) / 2.0, (BOTTOM - TOP) / 2.0);
+        let inside = |x: f32, (from, to): (f32, f32)| x + 0.5 >= from && x + 0.5 < to;
+        if let Some(selected) = wave.selected {
+            self.rect(
+                selected.0.max(0.0),
+                BAND,
+                (selected.1.min(WIDTH as f32) - selected.0.max(0.0)).max(0.0),
+                HEIGHT as f32 - 2.0 * BAND,
+                [40, 40, 40],
+                255,
+            );
+        }
+        for (x, (low, high)) in wave.peaks.iter().enumerate() {
+            let x = x as f32;
+            let colour = if wave.played.is_some_and(|played| inside(x, played)) {
+                [255, 255, 255]
+            } else if inside(x, wave.region) {
+                [150, 150, 150]
+            } else {
+                [55, 55, 55]
+            };
+            let (top, bottom) = (
+                middle - f32::from(*high) / 127.0 * half,
+                middle - f32::from(*low) / 127.0 * half,
+            );
+            self.rect(x, top, 1.0, (bottom - top).max(1.0), colour, 255);
+        }
+        let line = |painter: &mut Self, x: f32, colour: [u8; 3]| {
+            if (0.0..WIDTH as f32).contains(&x) {
+                painter.rect(x, BAND, 1.0, HEIGHT as f32 - 2.0 * BAND, colour, 255);
+            }
+        };
+        for x in &wave.slices {
+            line(self, *x, [255, 170, 0]);
+        }
+        if let Some(x) = wave.looped {
+            line(self, x, [0, 200, 255]);
+        }
+        line(self, wave.region.0, [255, 255, 255]);
+        line(self, wave.region.1, [255, 255, 255]);
     }
 
     /// A browser column: eight rows, scrolled to keep the selected one in

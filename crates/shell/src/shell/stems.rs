@@ -25,6 +25,8 @@ pub(super) struct StemsState {
     separation: Option<Running>,
     /// How the last separation went.
     separation_status: JobStatus,
+    /// What the last separation ran on.
+    provider: String,
     /// The tracks the last separation made.
     created: Vec<TrackId>,
     /// The dialog, while it's open.
@@ -110,6 +112,10 @@ impl Shell {
             separation: state.separation.as_ref().map_or_else(
                 || state.separation_status.clone(),
                 |r| running(r.worker.progress()),
+            ),
+            provider: state.separation.as_ref().map_or_else(
+                || state.provider.clone(),
+                |r| r.worker.progress().provider(),
             ),
             created_tracks: state.created.clone(),
             dialog: state.dialog,
@@ -285,6 +291,7 @@ impl Shell {
         let worker = crate::stems::separate(crate::stems::Job {
             runtime: runtime.path(&folder),
             model: model.path(&folder),
+            cache: self.cache_folder(),
             media: Arc::clone(&self.media),
             source,
             region,
@@ -341,6 +348,7 @@ impl Shell {
             .and_then(|running| running.worker.poll());
         if let Some(ended) = ended {
             let running = self.stems.separation.take().expect("polled above");
+            self.stems.provider = running.worker.progress().provider();
             match ended {
                 Ended::Done(separated) => {
                     if let Err(error) = self.write_stems(running.args, &separated) {
@@ -361,6 +369,7 @@ impl Shell {
             running.worker.progress().cancel();
         }
         self.stems.separation_status = JobStatus::default();
+        self.stems.provider.clear();
         self.stems.created.clear();
         self.stems.dialog = None;
     }

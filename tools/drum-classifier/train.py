@@ -120,7 +120,8 @@ def main() -> None:
         *[row("hidden", w) for w in w1],
         *[row(name, w) for name, w in zip(CLASSES, w2)],
     ]
-    args.out.write_text("\n".join(lines) + "\n")
+    # LF on every platform, as the committed file is checked out.
+    args.out.write_text("\n".join(lines) + "\n", newline="\n")
 
 
 if __name__ == "__main__":

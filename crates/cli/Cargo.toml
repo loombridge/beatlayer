@@ -16,8 +16,6 @@ asio = ["bl-audio-io/asio"]
 # `bl-cli mcp`: the agent API over stdio, on a headless shell (WP-1.15).
 bl-agent.workspace = true
 bl-shell.workspace = true
-# `bl-cli bench stems`: the stem separation network and its generated mixes.
-bl-analysis = { workspace = true, features = ["stems"] }
 # `bl-cli assistant`: one assistant turn, headless, with its key from the
 # OS keychain (WP-2.23, T107).
 bl-assistant.workspace = true
@@ -33,7 +31,8 @@ bl-model.workspace = true
 # fixtures decode the files they make (WP-1.4).
 bl-media.workspace = true
 bl-rt.workspace = true
-# `transcribe-bench` runs the pitch network (WP-9.5), and the sweeps' spectral
+# `transcribe-bench` runs the pitch network (WP-9.5), `bench stems` the stem
+# separation network and its generated mixes, and the sweeps' spectral
 # centroids come from the octave bands.
 bl-analysis = { workspace = true, features = ["stems"] }
 # The golden fixtures' audio files are sine chirps from libm's pure-Rust

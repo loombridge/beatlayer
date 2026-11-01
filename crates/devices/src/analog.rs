@@ -1019,9 +1019,11 @@ impl Envelope {
                     self.enter(voice, next);
                 }
             }
-            Stage::Sustain => {
+            // A held note follows the Sustain knob; with S.Time it falls.
+            Stage::Sustain if set.fall > 0.0 => {
                 self.level[voice] = (self.level[voice] - set.fall).max(0.0);
             }
+            Stage::Sustain => self.level[voice] = set.sustain,
             Stage::Release => {
                 if self.advance(voice, 0.0, set.release, set.exponential) {
                     if set.looping == ADR_R && self.held[voice] && !set.free {
@@ -1875,6 +1877,18 @@ mod tests {
             (peak(&SET, 0.2) - 1.0).abs() < 1e-6,
             "no amount, no scaling"
         );
+    }
+
+    // Spec: analog R13, R17
+    #[test]
+    fn a_held_note_follows_the_sustain_level() {
+        let mut env = started(&SET, 1.0);
+        run(&mut env, &SET, 300);
+        let lower = EnvSettings {
+            sustain: 0.2,
+            ..SET
+        };
+        assert_eq!(env.step(0, &lower), 0.2);
     }
 
     // Spec: analog R13

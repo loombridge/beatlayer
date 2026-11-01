@@ -1057,7 +1057,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.21 | todo |  |  |
 | 9.22 | todo |  |  |
 | 9.23 | todo |  |  |
-| 9.24 | todo |  |  |
+| 9.24 | done | 1 November 2026 | [#665](https://github.com/loombridge/beatlayer/pull/665): a new `bl-video` crate reads QuickTime movies with exact frame times and edit lists, decodes frames ahead of the playhead on a video thread through VideoToolbox, Media Foundation, FFmpeg or its own MJPEG decoder, decodes the movie's audio through `bl-media`, and gives black and silence in gaps |
 | 9.25 | todo |  |  |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |

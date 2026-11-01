@@ -535,6 +535,7 @@ impl Shell {
                     copy.mute = false;
                     if let ClipData::Audio(audio) = &mut copy.data {
                         audio.media = *hash;
+                        audio.video = false;
                     }
                     editor.apply(Command::CreateClip {
                         track: id,

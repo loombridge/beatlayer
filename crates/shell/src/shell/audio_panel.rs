@@ -189,6 +189,8 @@ impl Shell {
         let audio = audio.clone();
         let mut next = audio.clone();
         next.media = bl_model::ContentHash(*media.as_bytes());
+        // Spec: video R8. A replaced file is a sound, not a movie.
+        next.video = false;
         if !self.same_length(audio.media, next.media) {
             next = AudioData {
                 warp: false,

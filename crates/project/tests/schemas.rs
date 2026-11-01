@@ -472,6 +472,43 @@ fn this_build_writes_the_current_fixture() {
     assert_eq!(written_now(), fixture);
 }
 
+/// Spec: video R5. A video clip saves as one and opens as one, and a set
+/// of the version before it, which holds none, opens as it did.
+#[test]
+fn a_video_clip_saves_and_reopens_as_a_video_clip() {
+    let mut project = fixture_project();
+    let mut editor = Editor::from_document(project.document.clone(), project.ids);
+    let track = editor
+        .document()
+        .track_order()
+        .into_iter()
+        .find(|id| editor.document().track(*id).is_some_and(|t| t.name() == "Kick"))
+        .unwrap();
+    let id = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track,
+            clip: Clip::new(
+                id,
+                Ticks::WHOLE * 8,
+                Ticks::WHOLE * 4,
+                ClipData::Audio(AudioData::new_video(ContentHash([0x77; 32]), 120.0).unwrap()),
+            ),
+        })
+        .unwrap();
+    project.document = editor.document().clone();
+    project.ids = editor.ids();
+    let saved = encode_json(&project, REVISION).unwrap();
+    assert!(String::from_utf8(saved.clone()).unwrap().contains("\"video\":true"));
+    let (loaded, info) = decode_json(&saved, &LoadOptions::default()).unwrap();
+    assert_eq!(info.schema, SCHEMA_VERSION);
+    let ClipData::Audio(audio) = &loaded.document.clip(id).unwrap().data else {
+        unreachable!("an audio clip")
+    };
+    assert!(audio.video && audio.warp && audio.tempo_leader);
+    assert_eq!(loaded, project);
+}
+
 /// An invented version 0, which differed from version 1 in three ways: the
 /// ID allocator was called `next_id`, there was no `revision` or `saved_by`,
 /// and track volumes were in decibels (`gain_db`, with `null` for silence)
@@ -548,6 +585,7 @@ static FAKE_MIGRATIONS: &[Migration] = &[
     MIGRATIONS[9],
     MIGRATIONS[10],
     MIGRATIONS[11],
+    MIGRATIONS[12],
 ];
 
 /// The scaffold migrates an old file: the invented version 0 fixture loads

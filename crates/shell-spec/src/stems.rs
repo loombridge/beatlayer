@@ -188,6 +188,10 @@ pub struct StemsStatus {
     pub install: JobStatus,
     /// The separation.
     pub separation: JobStatus,
+    /// What the current or last separation ran on, such as `Core ML`, or
+    /// `CPU (not the GPU: ...)` with the reason a GPU wasn't used.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider: String,
     /// The tracks the last separation made, the group first if it made
     /// one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

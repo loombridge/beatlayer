@@ -70,7 +70,7 @@ fn every_document_command_is_registered() {
         .collect();
     assert_eq!(
         ops.len(),
-        279,
+        280,
         "WP-0.6 defined 25 commands, WP-1.5 the two for the Arrangement loop, WP-1.6 five for \
              the mixer, WP-1.4 five for audio clips, WP-1.8b trim_clip_start, WP-2.19 four for \
              routing, WP-2.4 two for devices, WP-2.19b five for sidechains, WP-2.5b \
@@ -110,7 +110,7 @@ fn every_document_command_is_registered() {
              set_global_groove_amount, set_auto_load_groove and set_clip_groove, WP-6.9 \
              five for tunings: set_tuning, remove_tuning, set_tuning_reference, \
              set_tuning_range and set_tuning_bypass, WP-6.9b the two for tunings on plug-ins and controllers: set_plugin_tuning and set_tuning_layout, WP-6.22 move_clip_to_lane, and WP-6.24b \
-             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route"
+             the two for time: insert_time and delete_time, and WP-6.23 set_track_links, and WP-6.30b the five for colours: set_track_colour, assign_colour_to_clips, assign_colour_to_grouped, set_clip_colour and set_scene_colour, and WP-6.57 the two for clearing envelopes: clear_track_automation and clear_device_automation, and WP-6.58 the four for info text: set_track_info_text, set_clip_info_text, set_scene_info_text and set_device_info_text, and WP-7.1 set_remote_mappings, and WP-7.32 set_record_quantization, and WP-7.33 set_device_region, and WP-7.17 set_cv_calibration, and WP-8.8 set_device_wavetable, and the copy fixes set_automation_enabled, and WP-7.21 set_chain_push_colour, and WP-7.22 set_pad_layout, and WP-8.4 the two for modulation routes: set_mod_route and clear_mod_route, and WP-9.10 set_similarity_reference"
     );
 
     for op in &ops {
@@ -1390,6 +1390,10 @@ fn every_command_runs_by_id() {
     );
     agent.run(
         "device.set_sample",
+        json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
+    );
+    agent.run(
+        "device.set_similarity_reference",
         json!({ "device": eq, "media": "0303030303030303030303030303030303030303030303030303030303030303" }),
     );
     // Spec: wavetable R8.
@@ -3734,6 +3738,7 @@ fn schemas_match_what_commands_serialise() {
                 name: "Warm Pad".to_owned(),
                 shape: None,
                 mpe: None,
+                similarity_reference: None,
             },
         ),
         (
@@ -3764,6 +3769,13 @@ fn schemas_match_what_commands_serialise() {
                 device,
                 media: Some(ContentHash([3u8; 32])),
                 slot: 0,
+            },
+        ),
+        (
+            "device.set_similarity_reference",
+            Command::SetSimilarityReference {
+                device,
+                media: Some(ContentHash([3u8; 32])),
             },
         ),
         (
@@ -4991,10 +5003,14 @@ fn bindings_follow_the_spec() {
         // WP-4.11: the two Arrangement mouse gestures (S-ARR-005, S-ARR-006).
         "clip.stretch",
         "clip.slide_contents",
+        // Spec: sound-similarity R24, S-SWAP-003.
+        "device.set_similarity_reference",
     ]
     .into_iter()
     .collect();
     assert_eq!(bound, expected, "only these commands have Live shortcuts");
+    // Spec: sound-similarity R24
+    assert_eq!(bindings("device.set_similarity_reference"), ["S-SWAP-003"]);
     // Spec: sample-editor R10
     assert_eq!(bindings("clip.insert_warp_marker"), ["S-SAMPLE-009"]);
     assert_eq!(bindings("clip.delete_warp_markers"), ["S-SAMPLE-010"]);

@@ -2387,3 +2387,44 @@ fn simplers_circuits_drive_and_morph_play() {
         );
     }
 }
+
+// Spec: sound-similarity R29. A sample that arrives while a voice sounds
+// leaves the voice playing the old sample, faded out over 5 ms, and the
+// next note plays the new one.
+#[test]
+fn a_sample_that_arrives_while_a_voice_sounds_fades_the_voice_out_over_five_milliseconds() {
+    let (old, new) = (sample(48_000, |_| 1.0), sample(48_000, |_| 0.5));
+    let collector = Collector::new();
+    let mut node = sampler(&[], 4096);
+    give(node.as_mut(), &collector, &old);
+    let before = run_notes(node.as_mut(), 1000, &[note(0, NoteKind::On, 60, 1.0)]);
+    let level = before[0][999];
+    assert!(level > 0.1, "the voice sounds: {level}");
+    give(node.as_mut(), &collector, &new);
+    let fade = run_notes(node.as_mut(), 1000, &[]);
+    assert!(
+        fade[0][0] > 0.9 * level,
+        "the old sample carries on at once: {} for {level}",
+        fade[0][0]
+    );
+    assert!(
+        fade[0][..240].windows(2).all(|w| w[1] <= w[0] + 1e-6),
+        "it only falls"
+    );
+    assert!(
+        (0.3 * level..0.8 * level).contains(&fade[0][120]),
+        "about half way through: {} for {level}",
+        fade[0][120]
+    );
+    assert!(
+        fade[0][260..].iter().all(|s| s.abs() < 1e-4),
+        "silent after 5 ms"
+    );
+    // The next note plays the new sample.
+    let after = run_notes(node.as_mut(), 1000, &[note(0, NoteKind::On, 60, 1.0)]);
+    assert!(
+        (after[0][999] - 0.5 * level).abs() < 0.05 * level,
+        "{} for half of {level}",
+        after[0][999]
+    );
+}

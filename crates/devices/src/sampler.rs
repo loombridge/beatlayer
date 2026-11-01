@@ -800,6 +800,7 @@ fn layout() -> DeviceLayout {
 /// Adds the sampler to `registry`.
 pub fn register(registry: &mut Registry) {
     add(registry, sampler_type(), |_, config| Sampler::new(config));
+    registry.swap_samples_in_place(SAMPLER);
 }
 
 /// Which playback mode a device is in.
@@ -886,6 +887,13 @@ pub struct Sampler {
     filter_controls: [Vec<f32>; 3],
     /// Per-slot random state, for the LFO's Random waveform.
     rng: [u32; SLOTS],
+    /// The sample the voices that were sounding when another arrived go on
+    /// reading while they fade out (sound similarity R29), until the last of
+    /// them has gone.
+    retiring: Option<NodeData>,
+    /// Whether those voices are yet to be told to fade out, which the next
+    /// block does, when it knows the steal fade.
+    retire: bool,
 }
 
 impl Sampler {
@@ -912,6 +920,8 @@ impl Sampler {
             free_phase: 0.0,
             filter_controls: core::array::from_fn(|_| vec![0.0; frames]),
             rng: core::array::from_fn(|slot| 0x9E37_79B9u32.wrapping_mul(slot as u32 + 1) | 1),
+            retiring: None,
+            retire: false,
         }
     }
 
@@ -1335,7 +1345,7 @@ impl Sampler {
     fn voices_frame(
         &mut self,
         s: &Settings,
-        sample: &SampleData,
+        (sample, old): (&SampleData, Option<&SampleData>),
         frame: usize,
         gain: f32,
         tempo: &TempoMap,
@@ -1398,6 +1408,11 @@ impl Sampler {
                 lfo_value = shape * attack;
             }
             let ratio = voice.ratio;
+            let sample = if voice.old {
+                old.unwrap_or(sample)
+            } else {
+                sample
+            };
             let sample_value = read(sample, voice.position);
             let mut value = sample_value;
             // The loop's wrap: a constant-power crossfade from the loop's
@@ -1573,6 +1588,20 @@ impl NativeDevice for Sampler {
         let song_position = audio.song_position();
         let tempo = audio.tempo();
         let settings = self.settings(params, rate, tempo, song_position, audio.speed());
+        // The voices of the sample that was replaced fade out over the steal
+        // fade, reading it still (sound similarity R29).
+        if mem::take(&mut self.retire) {
+            for voice in &mut self.voices {
+                if voice.active && voice.old {
+                    voice.fade(&settings);
+                }
+            }
+        }
+        let old = self
+            .retiring
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<SlotSample>())
+            .map(|slot| Arc::clone(&slot.sample));
         if let Some(audition) = self.audition.take() {
             self.audition(audition, &settings, sample.frames());
         }
@@ -1610,7 +1639,22 @@ impl NativeDevice for Sampler {
                 self.play(note, &settings);
             }
             let gain = gain.get(frame).copied().unwrap_or(1.0);
-            self.voices_frame(&settings, &sample, frame, gain, tempo, rate, song_position);
+            self.voices_frame(
+                &settings,
+                (&sample, old.as_deref()),
+                frame,
+                gain,
+                tempo,
+                rate,
+                song_position,
+            );
+        }
+        // Let go of the old sample before the node data that holds it: once
+        // that is dropped, the drop thread may free it, and this clone
+        // must not be the last reference on the audio thread.
+        drop(old);
+        if self.retiring.is_some() && !self.voices.iter().any(|v| v.active && v.old) {
+            self.retiring = None;
         }
         // 2. The filter, per voice.
         if settings.filter_on {
@@ -1642,6 +1686,21 @@ impl NativeDevice for Sampler {
             .downcast_ref::<SlotSample>()
             .is_some_and(|slot| slot.slot == 0)
         {
+            // Voices sounding now go on with the sample they started on and
+            // fade out (sound similarity R29); a second sample arriving
+            // within the fade cuts the first one's.
+            if self.voices.iter().any(|voice| voice.active) {
+                if self.retiring.is_some() {
+                    for voice in self.voices.iter_mut().filter(|voice| voice.old) {
+                        voice.active = false;
+                    }
+                }
+                for voice in self.voices.iter_mut().filter(|voice| voice.active) {
+                    voice.old = true;
+                }
+                self.retiring = self.data.take();
+                self.retire = true;
+            }
             self.data = Some(data);
         }
     }
@@ -2305,6 +2364,9 @@ struct Voice {
     lfo_age: u32,
     /// The value the Random waveform holds for this cycle.
     lfo_random: f32,
+    /// Whether it plays the sample that was replaced while it sounded,
+    /// fading out (sound similarity R29).
+    old: bool,
 }
 
 impl Voice {
@@ -2331,6 +2393,7 @@ impl Voice {
             lfo_phase: 0.0,
             lfo_age: 0,
             lfo_random: 0.0,
+            old: false,
         }
     }
 

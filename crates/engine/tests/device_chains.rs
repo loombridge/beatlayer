@@ -116,6 +116,7 @@ fn a_chain_edit_makes_only_the_nodes_it_adds() {
             name: "Quiet".to_owned(),
             shape: None,
             mpe: None,
+            similarity_reference: None,
         },
     ] {
         let synced = rig.apply(command.clone());

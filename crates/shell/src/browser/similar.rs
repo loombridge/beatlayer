@@ -54,7 +54,7 @@ impl BrowserView {
     }
 
     /// What kind of reference `path` is, or why it can't be one (R1, R11).
-    fn reference_kind(&self, path: &Path) -> Result<ItemKind, String> {
+    pub(super) fn reference_kind(&self, path: &Path) -> Result<ItemKind, String> {
         let kind = self
             .saved_files
             .get(path.to_string_lossy().as_ref())
@@ -91,8 +91,8 @@ impl BrowserView {
 
     /// The reference and its nearest items of its own kind, as indices of
     /// `snapshot` with their distances: the reference first (R12, R13).
-    fn neighbours(
-        &mut self,
+    pub(super) fn neighbours(
+        &self,
         snapshot: &Snapshot,
         reference: &Path,
     ) -> Result<Vec<(u32, f32)>, BrowserError> {

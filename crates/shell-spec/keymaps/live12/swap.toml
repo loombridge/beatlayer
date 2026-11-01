@@ -9,7 +9,10 @@ trigger = "press"
 milestone = "M9"
 mac = ["Cmd+Right"]
 win = ["Ctrl+Right"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.swap_similar", contexts = ["sample-swap"], args = { direction = "next" } },
+]
 
 [[shortcut]]
 id = "S-SWAP-002"
@@ -20,7 +23,10 @@ trigger = "press"
 milestone = "M9"
 mac = ["Cmd+Left"]
 win = ["Ctrl+Left"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.swap_similar", contexts = ["sample-swap"], args = { direction = "previous" } },
+]
 
 [[shortcut]]
 id = "S-SWAP-003"
@@ -31,7 +37,10 @@ trigger = "press"
 milestone = "M9"
 mac = ["Cmd+Up"]
 win = ["Ctrl+Up"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.set_similarity_reference", contexts = ["sample-swap"] },
+]
 
 [[shortcut]]
 id = "S-SWAP-004"
@@ -42,7 +51,10 @@ trigger = "press"
 milestone = "M9"
 mac = ["Cmd+Down"]
 win = ["Ctrl+Down"]
-status = "pending"
+status = "bound"
+commands = [
+  { id = "device.return_to_reference", contexts = ["sample-swap"] },
+]
 
 [[shortcut]]
 id = "S-SWAP-005"
@@ -53,4 +65,5 @@ trigger = "held"
 milestone = "M9"
 mac = ["Option"]
 win = ["Alt"]
-status = "pending"
+status = "widget"
+handler = "the Drum Rack's pad view: Option (Alt) held over the pads shows each swappable pad's Previous Similar and Next Similar arrows, which run `device.swap_similar` (sound similarity R26)"

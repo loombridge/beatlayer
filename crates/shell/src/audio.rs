@@ -502,6 +502,11 @@ pub struct AudioHost {
     /// leaves a peer's tempo (the Link spec, R12): each engine that starts
     /// gets a session of its own over it.
     link: Option<crate::link::LinkHandles>,
+    /// The input channel Tempo Follower listens to and the set's tempo it
+    /// starts from, while Follow is on (the Tempo Follower spec, R3), and the
+    /// tracker the open stream's engine has.
+    tempo_follow: Option<(bl_model::Channel, f64)>,
+    tracking: Option<crate::tempo_follower::Tracking>,
     /// Link Audio's sinks and rings, which every engine reads and offers
     /// through (the Link Audio spec, R4 to R6), and the frames its blocks
     /// have at most.
@@ -604,6 +609,8 @@ impl AudioHost {
             sync_inputs: Vec::new(),
             external_sync: false,
             link: None,
+            tempo_follow: None,
+            tracking: None,
             link_audio: None,
             link_frames: 0,
             latency_sent: (0, 0),
@@ -701,6 +708,46 @@ impl AudioHost {
             Box::new(bl_engine::LinkFollower::new(session)) as Box<dyn bl_engine::Follower>
         });
         engine.set_follower(follower);
+    }
+
+    /// Has the engine follow the tempo a tracker hears in `channel` of the
+    /// device's input, for a set at `bpm`, now and for every engine that
+    /// starts (the Tempo Follower spec, R3, R6); with `None` it follows none
+    /// and the tracker stops.
+    pub fn set_tempo_follower(&mut self, follow: Option<(bl_model::Channel, f64)>) {
+        self.tempo_follow = follow;
+        let rate = self.sample_rate();
+        self.tracking = match (self.engine.as_ref(), rate) {
+            (Some(engine), Some(rate)) => Self::lead(engine, follow, rate),
+            _ => None,
+        };
+    }
+
+    /// Gives `engine` Tempo Follower over a new tracker of audio at `rate`
+    /// Hz, made here before the audio thread reads it, or takes it away.
+    fn lead(
+        engine: &Engine,
+        follow: Option<(bl_model::Channel, f64)>,
+        rate: u32,
+    ) -> Option<crate::tempo_follower::Tracking> {
+        let Some((channel, bpm)) = follow else {
+            engine.set_leader(None);
+            return None;
+        };
+        let (tracking, tracker) = crate::tempo_follower::Tracking::start(rate, bpm, channel);
+        engine.set_leader(Some(Box::new(bl_engine::TempoFollower::new(tracker))));
+        Some(tracking)
+    }
+
+    /// The tracker the engine has while Follow is on.
+    #[must_use]
+    pub fn tempo_tracking(&self) -> Option<&crate::tempo_follower::Tracking> {
+        self.tracking.as_ref()
+    }
+
+    /// The same, to take the tempo it gave.
+    pub fn tempo_tracking_mut(&mut self) -> Option<&mut crate::tempo_follower::Tracking> {
+        self.tracking.as_mut()
     }
 
     /// Has the engine read and offer through `plan`, now and for every engine
@@ -894,6 +941,7 @@ impl AudioHost {
         // threads stop, and its drop thread frees the last program.
         self.stream = None;
         self.preview = None;
+        self.tracking = None;
         self.engines_closed += u64::from(self.engine.take().is_some());
     }
 
@@ -1678,6 +1726,7 @@ impl AudioHost {
         engine.sync_inputs(&self.sync_inputs);
         engine.set_external_sync(self.external_sync);
         Self::follow_link(&engine, self.link.as_ref());
+        self.tracking = Self::lead(&engine, self.tempo_follow, info.sample_rate);
         self.link_frames = max_frames;
         Self::bank_link_audio(
             &engine,

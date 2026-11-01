@@ -70,19 +70,33 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
         invoke(events, ids::REVEAL, json!({}));
         ui.close();
     }
-    // C-BROWSER-003. Similarity search is milestone M9.
+    // C-BROWSER-003 (spec: sound-similarity R11). Disabled for an item that
+    // can't be a reference, with the reason in its description.
     let similar = if cfg!(target_os = "macos") {
         "\u{21e7}\u{2318}F"
     } else {
         "Ctrl+Shift+F"
     };
-    add(
+    let reference = view.selected_reference();
+    let response = add(
         ui,
         Button::new("Show Similar Files").shortcut_text(similar),
-        false,
+        reference.is_ok(),
     );
+    match reference {
+        Ok(_) if response.clicked() => {
+            invoke(events, ids::SHOW_SIMILAR, json!({}));
+            ui.close();
+        }
+        Ok(_) => {}
+        Err(reason) => {
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(format!("Not available: {reason}"));
+            });
+        }
+    }
     // Spec: stem-separation R22. Separate Stems to New Audio Tracks, after
-    // Show Similar Files: Beatlayer's own place (C-BROWSER-003a).
+    // Show Similar Files: Beatlayer's own place (C-BROWSER-013).
     let stems = json!({ "source": { "kind": "file", "path": item.path } });
     let stems_ok = view.selected().len() <= 1
         && item.kind == ItemKind::Audio

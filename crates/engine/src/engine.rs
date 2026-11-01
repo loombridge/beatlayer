@@ -28,6 +28,7 @@ use crate::registry::Registry;
 use crate::session::{SceneOverride, SessionCommand};
 use crate::sources::Loaded;
 use crate::state::{EngineState, Monitor};
+use crate::tempo_follower::Leader;
 
 /// Makes the three ends of an engine: the [`Sender`] that feeds the audio
 /// thread, the [`Processor`] that runs on it, and the [`Monitor`] that reads
@@ -110,6 +111,12 @@ impl Sender {
     /// `None` to follow none (the transport spec, R24).
     pub fn follower(&mut self, follower: Option<Owned<Box<dyn Follower>>>) {
         self.push(Message::Follower(follower));
+    }
+
+    /// Sends Tempo Follower, which leads the song's tempo from the next block
+    /// on, or `None` for none (the Tempo Follower spec, R6).
+    pub fn leader(&mut self, leader: Option<Owned<Box<dyn Leader>>>) {
+        self.push(Message::Leader(leader));
     }
 
     /// Sends the Link Audio to read and offer through from the next block
@@ -334,6 +341,7 @@ enum Request {
     Render(Box<Owned<crate::render::RenderPlan>>),
     /// The outside tempo the song follows (the transport spec, R24).
     Follower(Box<Option<Owned<Box<dyn Follower>>>>),
+    Leader(Box<Option<Owned<Box<dyn Leader>>>>),
     /// The Link Audio the engine reads and offers through.
     LinkAudio(Box<Option<Owned<Box<dyn LinkAudio>>>>),
     /// No processor runs any more: stop sending to it.
@@ -443,6 +451,7 @@ impl std::fmt::Debug for Request {
             Self::Record(_) => "Record",
             Self::Render(_) => "Render",
             Self::Follower(_) => "Follower",
+            Self::Leader(_) => "Leader",
             Self::LinkAudio(_) => "LinkAudio",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
@@ -643,6 +652,16 @@ impl Engine {
     pub fn set_follower(&self, follower: Option<Box<dyn Follower>>) {
         let follower = follower.map(|follower| self.gc.wrap(follower));
         self.request(Request::Follower(Box::new(follower)));
+    }
+
+    /// Sets Tempo Follower (the Tempo Follower spec, R6): it listens to the
+    /// device's input and leads the song's tempo, or with `None` stops. The
+    /// audio thread asks it once per block, before any Link session, and
+    /// hands the one it replaces to the drop thread. An engine restarted on
+    /// another device starts with none.
+    pub fn set_leader(&self, leader: Option<Box<dyn Leader>>) {
+        let leader = leader.map(|leader| self.gc.wrap(leader));
+        self.request(Request::Leader(Box::new(leader)));
     }
 
     /// Sets the Link Audio the engine reads peers' channels from and offers
@@ -1050,6 +1069,11 @@ fn compile_loop(
                     // takes over starts with none.
                     if let Some(sender) = sender.as_mut() {
                         sender.follower(*follower);
+                    }
+                }
+                Request::Leader(leader) => {
+                    if let Some(sender) = sender.as_mut() {
+                        sender.leader(*leader);
                     }
                 }
                 Request::LinkAudio(link_audio) => {

@@ -33,6 +33,7 @@ use crate::session::{
 };
 use crate::state::{EngineCounters, EngineState, TrackMeter};
 use crate::sync_out::{Beats, Part as SyncPart, SyncOut};
+use crate::tempo_follower::Leader;
 
 /// A parameter change waiting for its frame.
 #[derive(Clone, Copy, Debug)]
@@ -412,6 +413,10 @@ pub struct Processor {
     /// The outside tempo the song follows, if one is set (the transport
     /// spec, R24).
     follower: Option<Owned<Box<dyn Follower>>>,
+    /// Tempo Follower: the tempo the tracker hears in the device's input
+    /// leads the song, ahead of any Link session (the Tempo Follower spec,
+    /// R6).
+    leader: Option<Owned<Box<dyn Leader>>>,
     /// The Link Audio the song reads peers' channels from and offers its
     /// tracks through (the Link Audio spec, R4 to R6).
     link_audio: Option<Owned<Box<dyn LinkAudio>>>,
@@ -524,6 +529,7 @@ impl Processor {
             last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
             follower: None,
+            leader: None,
             link_audio: None,
             moment: None,
             ext: false,
@@ -734,6 +740,11 @@ impl Processor {
         let routes = self.program.as_mut().map(|p| &mut p.get_mut().midi);
         self.midi.take(now, self.clock, frames, routes);
         self.resolve_due(frames);
+        // Spec: tempo-follower R10, R11. Tempo Follower hears every block,
+        // stopped or playing, before it is asked.
+        if let Some(leader) = self.leader.as_mut() {
+            leader.get_mut().listen(input, frames);
+        }
         self.ask_follower(frames);
         self.read_link_audio(frames);
         let mut done = 0;
@@ -925,6 +936,11 @@ impl Processor {
                     // for it (the transport spec, R25).
                     self.asked = None;
                     self.ask_follower(frames);
+                }
+                Message::Leader(leader) => {
+                    // Dropping the old one only lets go of it: the drop
+                    // thread frees it.
+                    drop(std::mem::replace(&mut self.leader, leader));
                 }
                 Message::LinkAudio(link_audio) => {
                     // As the follower: dropping the old one only lets go of it.
@@ -2252,6 +2268,12 @@ impl Processor {
                 .follow_cv_clocks(&ask, looped, others, &mut self.follow)
         });
         ask.leader = self.follow.followed();
+        // Spec: tempo-follower R5, R20. Tempo Follower leads ahead of a Link
+        // session, which then shares the tempo it leads with (link R26).
+        if let Some(leader) = self.leader.as_mut() {
+            leader.get_mut().block(&ask, &mut self.follow);
+            ask.leader = self.follow.followed();
+        }
         if let Some(follower) = self.follower.as_mut() {
             follower.get_mut().block(&ask, &mut self.follow);
         }

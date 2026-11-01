@@ -25,7 +25,7 @@ use super::tags::{Tag, TagGroup};
 
 /// The schema version this build writes. A file with a higher version is
 /// left alone.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// The file's schema, as SQLite statements.
 const SCHEMA: &str = "
@@ -72,7 +72,8 @@ CREATE TABLE IF NOT EXISTS saved_labels (
     name TEXT NOT NULL,
     base TEXT NOT NULL,
     search TEXT NOT NULL,
-    icon TEXT
+    icon TEXT,
+    reference TEXT
 );
 CREATE TABLE IF NOT EXISTS saved_label_tags (
     label_id INTEGER NOT NULL,
@@ -547,6 +548,11 @@ fn migrate(connection: &rusqlite::Connection, from: i64) -> Result<(), String> {
             [],
         );
     }
+    if (1..6).contains(&from) {
+        // Version 6 gives a saved label the file it lists the neighbours of.
+        // A file that has the column already makes this fail, which is fine.
+        let _ = connection.execute("ALTER TABLE saved_labels ADD COLUMN reference TEXT", []);
+    }
     connection
         .pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|error| format!("couldn't record the schema version: {error}"))?;
@@ -693,7 +699,7 @@ fn read_collections(connection: &rusqlite::Connection) -> Vec<(String, Vec<u8>)>
 fn read_labels(connection: &rusqlite::Connection) -> Vec<SavedLabel> {
     let mut labels: Vec<SavedLabel> = rows(
         connection,
-        "SELECT id, name, base, search, icon FROM saved_labels ORDER BY id",
+        "SELECT id, name, base, search, icon, reference FROM saved_labels ORDER BY id",
         |row| {
             let base: String = row.get(2)?;
             Ok(SavedLabel {
@@ -702,6 +708,7 @@ fn read_labels(connection: &rusqlite::Connection) -> Vec<SavedLabel> {
                 base: serde_json::from_str(&base).unwrap_or(bl_shell_spec::browser::Label::All),
                 search: row.get(3)?,
                 icon: row.get(4)?,
+                reference: row.get(5)?,
                 tags: Vec::new(),
             })
         },
@@ -731,11 +738,18 @@ fn write_labels(connection: &rusqlite::Connection, ops: &[LabelOp]) {
             LabelOp::Save(label) => {
                 let base = serde_json::to_string(&label.base).unwrap_or_default();
                 let _ = transaction.execute(
-                    "INSERT INTO saved_labels (id, name, base, search, icon) \
-                     VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(id) DO UPDATE SET \
+                    "INSERT INTO saved_labels (id, name, base, search, icon, reference) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(id) DO UPDATE SET \
                      name = excluded.name, base = excluded.base, search = excluded.search, \
-                     icon = excluded.icon",
-                    rusqlite::params![label.id, label.name, base, label.search, label.icon],
+                     icon = excluded.icon, reference = excluded.reference",
+                    rusqlite::params![
+                        label.id,
+                        label.name,
+                        base,
+                        label.search,
+                        label.icon,
+                        label.reference
+                    ],
                 );
                 let _ = transaction.execute(
                     "DELETE FROM saved_label_tags WHERE label_id = ?1",
@@ -1092,6 +1106,38 @@ mod tests {
         assert_eq!(
             db.load().item_collections,
             [("/lib/Kick.wav".to_owned(), vec![2, 5])]
+        );
+    }
+
+    #[test]
+    fn a_database_of_version_five_gains_the_saved_labels_reference() {
+        // Spec: sound-similarity R15.
+        let dir = scratch("migrate-reference");
+        let path = dir.join("browser.db");
+        let connection = rusqlite::Connection::open(&path).expect("the file");
+        connection
+            .execute_batch(
+                "CREATE TABLE saved_labels (id INTEGER PRIMARY KEY, name TEXT NOT NULL, \
+                 base TEXT NOT NULL, search TEXT NOT NULL, icon TEXT);
+                 INSERT INTO saved_labels VALUES (1, 'Kicks', '\"all\"', 'kick', NULL);
+                 PRAGMA user_version = 5;",
+            )
+            .expect("the old file");
+        drop(connection);
+        let db = Db::open(path);
+        assert!(db.damaged().is_none() && !db.is_newer());
+        let labels = db.load().saved_labels;
+        assert_eq!(
+            (labels[0].name.as_str(), labels[0].reference.clone()),
+            ("Kicks", None)
+        );
+        let mut saved = labels[0].clone();
+        saved.reference = Some("/lib/Kick.wav".to_owned());
+        db.save_labels(vec![LabelOp::Save(saved)]);
+        db.flush();
+        assert_eq!(
+            db.load().saved_labels[0].reference.as_deref(),
+            Some("/lib/Kick.wav")
         );
     }
 

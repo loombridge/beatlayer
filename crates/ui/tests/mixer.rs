@@ -25,7 +25,7 @@ use bl_ui::menus::item_state;
 use bl_ui::mixer::{Place, column_id, fader_id, volume_field_id};
 use common::{Harness, Node, Window, command};
 use egui::accesskit::{Action, Role};
-use egui::{Event, Key, Modifiers, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
+use egui::{Color32, Event, Key, Modifiers, PointerButton, Pos2, Rect, Vec2, pos2, vec2};
 use serde_json::json;
 
 /// A main window that draws Live's title bar, so every position is in
@@ -3964,4 +3964,36 @@ fn heights_and_widths_scale_with_the_zoom() {
             "{percent}%"
         );
     }
+}
+
+// Spec: push-2-notes R3, UI parity L-MIX-012. An Arm switch armed by a control
+// surface's selection is drawn in the theme's pink; an arm by hand stays red.
+#[test]
+fn an_arm_by_selection_is_drawn_in_the_themes_pink() {
+    let mut h = session();
+    let t = tracks(&h.shell);
+    let arm = control(&mut h, "1 MIDI", "Arm Recording");
+    click(&mut h, arm.center(), Modifiers::NONE);
+    assert!(mixer(&h.shell, t[0]).arm);
+    let colours = h.theme.colors.clone();
+    let faces = |h: &mut Harness, colour: Color32| {
+        let output = h.settle();
+        output
+            .shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                egui::Shape::Rect(rect) => rect.fill == colour && arm.contains(rect.rect.center()),
+                _ => false,
+            })
+            .count()
+    };
+    assert_eq!(faces(&mut h, colours.record.0), 1, "red by hand");
+    assert_eq!(faces(&mut h, colours.arm_selection.0), 0);
+    bl_shell::testing::arm_by_selection(&mut h.shell, t[0]);
+    assert_eq!(faces(&mut h, colours.record.0), 0);
+    assert_eq!(
+        faces(&mut h, colours.arm_selection.0),
+        1,
+        "pink by selection"
+    );
 }

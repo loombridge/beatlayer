@@ -10,6 +10,7 @@ use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::recording::RecordingPlan;
 use crate::render::RenderPlan;
 use crate::session::SessionCommand;
+use crate::tempo_follower::Leader;
 
 /// When a parameter change or a transport command takes effect.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -284,6 +285,9 @@ pub(crate) enum Message {
     /// The outside tempo the song follows from the next block on, or `None`
     /// for none (the transport spec, R24).
     Follower(Option<Owned<Box<dyn Follower>>>),
+    /// Tempo Follower, which listens to the device's input and leads the
+    /// song's tempo (the Tempo Follower spec, R6), or `None` for none.
+    Leader(Option<Owned<Box<dyn Leader>>>),
     /// The Link Audio the engine reads peers' channels from and offers its
     /// tracks through, or `None` for none (the Link Audio spec, R4 to R6).
     LinkAudio(Option<Owned<Box<dyn LinkAudio>>>),

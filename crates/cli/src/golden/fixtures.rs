@@ -558,6 +558,12 @@ pub(super) const FIXTURES: &[Fixture] = &[
         about: "The first two beats of the drum loop warped at 120 BPM in Re-Pitch, in a 240 BPM song: it plays at 2 times its speed (warp-modes R34, R37).",
         build: warp_re_pitch_240,
     },
+    Fixture {
+        name: "electric",
+        about: "A chord and a line played on Electric: the hammer, the tine and tone bar, the \
+                pickup at four times the rate, the damper and the release.",
+        build: electric,
+    },
 ];
 
 /// A song under construction.
@@ -940,6 +946,63 @@ fn beat_repeat() -> Scene {
         device,
     });
     song.finish(4.25)
+}
+
+/// Spec: electric R2 to R10, R13. A chord and a line on Electric, with the
+/// hammer's velocity moving its force and stiffness.
+fn electric() -> Scene {
+    use bl_devices::electric::{
+        DISTANCE, ELECTRIC, FORCE_VEL, RELEASE, STIFFNESS_VEL, SYMMETRY, TINE_COLOR,
+    };
+    let mut song = Song::new();
+    let track = song.track(TrackKind::Midi, "Keys", None);
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Electric",
+        DeviceKind::Native {
+            device_type: ELECTRIC.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (FORCE_VEL, 60.0),
+        (STIFFNESS_VEL, 40.0),
+        (TINE_COLOR, 20.0),
+        (SYMMETRY, 35.0),
+        (DISTANCE, 30.0),
+        (RELEASE, 600.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    let beat = Ticks::QUARTER.0;
+    let notes = [
+        (48, 0, 8, 100),
+        (55, 0, 8, 80),
+        (64, 0, 8, 60),
+        (72, 8, 2, 120),
+        (67, 10, 2, 40),
+        (60, 12, 4, 90),
+    ]
+    .iter()
+    .map(|&(key, start, length, velocity)| {
+        bl_model::Note::new(key, Ticks(start * beat / 2), Ticks(length * beat / 2), velocity)
+    })
+    .collect::<Vec<_>>();
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(notes)),
+        ),
+    });
+    song.finish(6.0)
 }
 
 /// Spec: echo R19. A drum loop through Echo with every stage on.

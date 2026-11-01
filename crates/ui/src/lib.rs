@@ -95,6 +95,7 @@ pub mod realtime_dialog;
 pub mod recovery_dialog;
 pub mod sample_display;
 pub mod sample_editor;
+mod sample_swap;
 pub mod save_history_panel;
 pub mod scene_fields;
 pub mod scene_view;

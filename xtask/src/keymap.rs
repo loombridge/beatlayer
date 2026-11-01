@@ -371,6 +371,14 @@ const WIDGET: &[(&str, &str)] = &[
         "the Arrangement View: as S-ARR-010, F held shows every clip's fade handles, over an \
          automation lane in Automation Mode too (audio clips R27)",
     ),
+    // WP-9.10: Option held over a Drum Rack's pads shows their swap arrows,
+    // which the pad view reads as it goes.
+    (
+        "S-SWAP-005",
+        "the Drum Rack's pad view: Option (Alt) held over the pads shows each swappable pad's \
+         Previous Similar and Next Similar arrows, which run `device.swap_similar` (sound \
+         similarity R26)",
+    ),
     // The value fields (WP-1.18): the Control Bar's transport section today,
     // each change running the field's registered command
     // (the control bar transport spec).

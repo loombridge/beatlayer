@@ -8876,6 +8876,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
+| `similarity_reference` | [`ContentHash`](#contenthash) or null | no | The sample similar-sample swapping goes by (sound similarity R23): the one Save as Similarity Reference kept, or the one a swap started from. `None` while it is the sample the device was loaded with, slot 0's own; loading another sample clears it. Left out of the saved set while it is `None`. |
 | `slices` | array of integer, at least 0 | no | Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty. |
 | `warp` | [`DeviceWarp`](#devicewarp) | no | Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default. |
 
@@ -9099,6 +9100,17 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
         }
       ],
       "description": "The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one."
+    },
+    "similarity_reference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sample similar-sample swapping goes by (sound similarity R23): the one Save as Similarity Reference kept, or the one a swap started from. `None` while it is the sample the device was loaded with, slot 0's own; loading another sample clears it. Left out of the saved set while it is `None`."
     },
     "slices": {
       "description": "Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty.",
@@ -33336,6 +33348,116 @@ What `browser.similar` gives (spec: sound-similarity R16).
 
 </details>
 
+### `SimilarState`
+
+What `device.similar` returns: where a sampler's sample stands in the similar list of its reference (sound similarity R27, R28).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The sampler. |
+| `sample` | [`ContentHash`](#contenthash) or null | yes | The sample it holds, by content hash. |
+| `reference` | [`ContentHash`](#contenthash) or null | yes | Its similarity reference, by content hash: the sample it was loaded with unless one was saved or a swap began from another. |
+| `position` | integer or null | yes | The sample's place in the reference's list, counted from 0 (the reference is 0); `null` if the list can't be made or doesn't hold it. |
+| `count` | integer or null | yes | How many samples the list holds, the reference first; `null` if the list can't be made. |
+| `can_previous` | boolean | yes | Whether the previous similar sample can be loaded. |
+| `can_next` | boolean | yes | Whether the next similar sample can be loaded. |
+| `can_return` | boolean | yes | Whether Return to Reference can load the reference: the device holds another sample. |
+| `reason` | string or null | no | Why the list can't be made or the swap controls are disabled, if so (R27); `null` when the list exists. |
+| `reference_path` | string or null | no | The file of the reference in the browser's places, which Show Similar Files lists the neighbours of; `null` if the list can't be made. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.similar` returns: where a sampler's sample stands in the similar list of its reference (sound similarity R27, R28).",
+  "properties": {
+    "can_next": {
+      "description": "Whether the next similar sample can be loaded.",
+      "type": "boolean"
+    },
+    "can_previous": {
+      "description": "Whether the previous similar sample can be loaded.",
+      "type": "boolean"
+    },
+    "can_return": {
+      "description": "Whether Return to Reference can load the reference: the device holds another sample.",
+      "type": "boolean"
+    },
+    "count": {
+      "description": "How many samples the list holds, the reference first; `null` if the list can't be made.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The sampler."
+    },
+    "position": {
+      "description": "The sample's place in the reference's list, counted from 0 (the reference is 0); `null` if the list can't be made or doesn't hold it.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "reason": {
+      "description": "Why the list can't be made or the swap controls are disabled, if so (R27); `null` when the list exists.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Its similarity reference, by content hash: the sample it was loaded with unless one was saved or a swap began from another."
+    },
+    "reference_path": {
+      "description": "The file of the reference in the browser's places, which Show Similar Files lists the neighbours of; `null` if the list can't be made.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sample": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ContentHash"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sample it holds, by content hash."
+    }
+  },
+  "required": [
+    "device",
+    "sample",
+    "reference",
+    "position",
+    "count",
+    "can_previous",
+    "can_next",
+    "can_return"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SkewEdge`
 
 Which edge of the box `automation.skew` tilts.
@@ -34480,6 +34602,93 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `SwapDirection`
+
+Which way `device.swap_similar` goes in the similar list.
+
+One of:
+
+- `"next"`: The next sample after the one the device holds.
+- `"previous"`: The sample before the one the device holds.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Which way `device.swap_similar` goes in the similar list.",
+  "oneOf": [
+    {
+      "const": "next",
+      "description": "The next sample after the one the device holds.",
+      "type": "string"
+    },
+    {
+      "const": "previous",
+      "description": "The sample before the one the device holds.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `Swapped`
+
+What `device.swap_similar` and `device.return_to_reference` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device that took the sample. |
+| `media` | [`ContentHash`](#contenthash) | yes | The sample it holds now, by content hash. |
+| `name` | string | yes | The sample's file name, without its extension. |
+| `position` | integer, at least 0 | yes | The sample's place in the reference's similar list, counted from 0. |
+| `count` | integer, at least 0 | yes | How many samples the list holds, the reference first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.swap_similar` and `device.return_to_reference` return.",
+  "properties": {
+    "count": {
+      "description": "How many samples the list holds, the reference first.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device that took the sample."
+    },
+    "media": {
+      "$ref": "#/$defs/ContentHash",
+      "description": "The sample it holds now, by content hash."
+    },
+    "name": {
+      "description": "The sample's file name, without its extension.",
+      "type": "string"
+    },
+    "position": {
+      "description": "The sample's place in the reference's similar list, counted from 0.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "media",
+    "name",
+    "position",
+    "count"
+  ],
+  "type": "object"
 }
 ```
 

@@ -1586,6 +1586,9 @@ impl DeviceViewUi {
                 ui.close();
             }
             crate::menus::take_focus_first(ui, &response);
+            // Spec: one-shot-drum-sampler R27. Drum Sampler's display isn't
+            // drawn, so its similar sample items are here.
+            crate::sample_swap::menu_items(ui, shell, frame.id, events);
             let text = "Not built yet: arrives with the Drum Rack's pads (T145).";
             let pad = ui.add_enabled(false, egui::Button::new("Save as Default Pad"));
             ui.ctx().accesskit_node_builder(pad.id, |node| {

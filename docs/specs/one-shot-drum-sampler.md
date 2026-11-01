@@ -1,6 +1,6 @@
 # The one-shot drum sampler
 
-- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet"; similar-sample swapping, R26 to R28, is WP-9.10's)
+- **Status:** partial (the sample display and the effects' X-Y pad are not drawn; Save as Default Pad and a double-click in the browser wait on other work, see "Not built yet")
 - **Work packages:** WP-5.18; WP-6.9 (tuning systems: R25); WP-9.10 (similar sample swapping: R26 to R28, with [sound similarity](sound-similarity.md) R20 to R30)
 - **Parity-matrix row:** Instruments: Impulse, Drum Sampler
 - **Checked against:** Live 12's reference manual, chapter 31 "Live Instrument Reference", section 31.4 "Drum Sampler" (31.4.1 to 31.4.5), read 17 October 2026
@@ -97,7 +97,7 @@ This spec covers Drum Sampler's parameters, voices, effects, filter, modulation 
 | R23 | `crates/shell/tests/drum_sampler.rs`, `swapping_to_snapshot_keeps_the_sample_start_and_length_in_one_undo_step`, `a_strike_inside_a_rack_chain_swaps_in_place`; `crates/ui/tests/drum_sampler.rs`, `the_menu_ends_with_strikes_own_items_and_they_run_their_commands`; `crates/cli/tests/agent.rs`, `an_agent_switches_strikes_menu_options_and_swaps_it_to_snapshot_by_command_id` | unit, UI script, MCP script |
 | R24 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_is_modulatable_to_the_frame` | real-time trap |
 | R25 | `crates/devices/tests/tuning.rs`, `keys_play_at_the_tunings_frequencies_at_any_block_size`, `a_per_note_bend_moves_by_steps_of_the_tuning`; `crates/devices/tests/tuning_engine.rs`, `a_drum_racks_track_renders_as_without_a_tuning` | unit |
-| R26 to R28 | to be written in WP-9.10: `crates/shell/tests/sample_swap.rs` | shell test, UI script |
+| R26 to R28 | `crates/shell/tests/sample_swap.rs`, `swaps_step_through_the_similar_list_in_one_undo_step_each`, `the_reference_is_kept_and_returned_to`, `the_reference_survives_a_save_and_a_reload` (each over Drum Sampler too); `crates/ui/tests/sample_swap.rs`, `the_swap_keys_act_on_simpler_and_drum_sampler`, `drum_samplers_menu_holds_the_similar_sample_items` | shell test, UI script |
 
 ## Not built yet
 

@@ -430,6 +430,7 @@ pub fn register(registry: &mut Registry) {
     add(registry, drum_sampler_type(), |_, config| {
         DrumSampler::new(config)
     });
+    registry.swap_samples_in_place(DRUM_SAMPLER);
 }
 
 /// The playback effects, by their chooser index.
@@ -719,6 +720,9 @@ struct Voice {
     noise_low_pass: f32,
     filter: [[Biquad; 2]; 2],
     filter_kind: usize,
+    /// Whether it plays the sample that was replaced while it sounded,
+    /// fading out (sound similarity R29).
+    old: bool,
 }
 
 impl Voice {
@@ -762,6 +766,7 @@ impl Voice {
             noise_low_pass: 0.0,
             filter: [[Biquad::default(); 2]; 2],
             filter_kind: usize::MAX,
+            old: false,
         }
     }
 
@@ -823,6 +828,13 @@ pub struct DrumSampler {
     voices: [Voice; SLOTS],
     /// How many notes have been played.
     counter: u64,
+    /// The sample the voices that were sounding when another arrived go on
+    /// reading while they fade out (sound similarity R29), until the last of
+    /// them has gone.
+    retiring: Option<NodeData>,
+    /// Whether those voices are yet to be told to fade out, which the next
+    /// block does, when it knows the rate.
+    retire: bool,
 }
 
 impl DrumSampler {
@@ -833,6 +845,8 @@ impl DrumSampler {
             keys: KeyPitches::twelve(),
             voices: [Voice::idle(); SLOTS],
             counter: 0,
+            retiring: None,
+            retire: false,
         }
     }
 
@@ -950,12 +964,22 @@ impl DrumSampler {
 
     /// One frame of every voice, mixed to a pair, before the volume and
     /// pan.
-    fn frame(&mut self, s: &Settings, live: &Live, sample: &SampleData) -> (f32, f32) {
+    fn frame(
+        &mut self,
+        s: &Settings,
+        live: &Live,
+        (sample, old): (&SampleData, Option<&SampleData>),
+    ) -> (f32, f32) {
         let (mut left, mut right) = (0.0f32, 0.0f32);
         for voice in &mut self.voices {
             if !voice.active {
                 continue;
             }
+            let sample = if voice.old {
+                old.unwrap_or(sample)
+            } else {
+                sample
+            };
             let (l, r) = voice_frame(voice, s, live, sample);
             left += l;
             right += r;
@@ -1292,6 +1316,21 @@ impl NativeDevice for DrumSampler {
         };
         let mut settings = Settings::read(params, audio.sample_rate().as_f64());
         settings.keys = self.keys;
+        // The voices of the sample that was replaced fade out over the steal
+        // fade, reading it still (sound similarity R29).
+        if core::mem::take(&mut self.retire) {
+            let fade = frames_of(STEAL_FADE_MS, settings.rate).max(1);
+            for voice in &mut self.voices {
+                if voice.active && voice.old {
+                    voice.fade(fade);
+                }
+            }
+        }
+        let old = self
+            .retiring
+            .as_ref()
+            .and_then(|data| data.downcast_ref::<SlotSample>())
+            .map(|slot| Arc::clone(&slot.sample));
         let ramps = Ramps::new(params);
         let mut notes = audio.notes().peekable();
         let mut channels = audio.channels_mut();
@@ -1308,7 +1347,7 @@ impl NativeDevice for DrumSampler {
                 let note = notes.next().expect("peeked");
                 self.play(note, &settings, &live, &sample);
             }
-            let (l, r) = self.frame(&settings, &live, &sample);
+            let (l, r) = self.frame(&settings, &live, (&sample, old.as_deref()));
             let volume = ramps.volume[frame];
             let b = (ramps.pan[frame] / 50.0).clamp(-1.0, 1.0);
             let (left_pan, right_pan) = (1.0 - b.max(0.0), 1.0 + b.min(0.0));
@@ -1316,6 +1355,9 @@ impl NativeDevice for DrumSampler {
             if let Some(right) = &mut right {
                 right[frame] = r * volume * right_pan;
             }
+        }
+        if self.retiring.is_some() && !self.voices.iter().any(|v| v.active && v.old) {
+            self.retiring = None;
         }
     }
 
@@ -1329,6 +1371,21 @@ impl NativeDevice for DrumSampler {
             .downcast_ref::<SlotSample>()
             .is_some_and(|slot| slot.slot == 0)
         {
+            // Voices sounding now go on with the sample they started on and
+            // fade out (sound similarity R29); a second sample arriving
+            // within the fade cuts the first one's.
+            if self.voices.iter().any(|voice| voice.active) {
+                if self.retiring.is_some() {
+                    for voice in self.voices.iter_mut().filter(|voice| voice.old) {
+                        voice.active = false;
+                    }
+                }
+                for voice in self.voices.iter_mut().filter(|voice| voice.active) {
+                    voice.old = true;
+                }
+                self.retiring = self.data.take();
+                self.retire = true;
+            }
             self.data = Some(data);
         }
     }

@@ -1820,6 +1820,10 @@ pub enum Command {
         /// preset of one holds; `null` to keep the ones the device has.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mpe: Option<crate::PluginMpe>,
+        /// A sampler's similarity reference (sound similarity R23), which
+        /// its preset holds; `null` to keep the one the device has.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        similarity_reference: Option<ContentHash>,
     },
     /// Switches a plug-in device's MPE Mode (the MPE spec, R14): on, the
     /// plug-in gets each note's pitch, slide and pressure as its format takes
@@ -2003,6 +2007,16 @@ pub enum Command {
         /// given; the eight-slot drum sampler's are 0 to 7 (WP-5.17).
         #[serde(default)]
         slot: u8,
+    },
+    /// Sets the sample similar-sample swapping goes by (sound similarity
+    /// R23): the one the device holds, or `media`.
+    SetSimilarityReference {
+        /// The device.
+        device: DeviceId,
+        /// The reference, by content hash; the sample the device holds if
+        /// left out.
+        #[serde(default)]
+        media: Option<ContentHash>,
     },
     /// Switches a device's Warp on or off (WP-5.15b).
     SetDeviceWarp {
@@ -3116,6 +3130,8 @@ impl Command {
             Self::SetArticulation { .. } => "Change Articulation",
             Self::SetDeviceSample { media: Some(_), .. } => "Load Sample",
             Self::SetDeviceSample { media: None, .. } => "Clear Sample",
+            // Spec: sound-similarity R23.
+            Self::SetSimilarityReference { .. } => "Save as Similarity Reference",
             // WP-5.15b: Warp controls and slices.
             Self::SetDeviceWarp { .. } => "Switch Warp",
             Self::SetDeviceWarpMode { .. } => "Change Warp Mode",
@@ -4807,8 +4823,12 @@ impl Document {
                 shape,
                 articulations,
                 mpe,
+                similarity_reference,
             } => {
                 let mut loaded = self.device_ref(*device)?.clone();
+                if similarity_reference.is_some() {
+                    loaded.similarity_reference = *similarity_reference;
+                }
                 loaded.set_both(params.clone());
                 loaded.shape.clone_from(shape);
                 if let Some(articulations) = articulations {
@@ -4964,6 +4984,11 @@ impl Document {
                     self.device_mut(*device)?
                         .set_media(usize::from(*slot), *media);
                 }
+                Ok(())
+            }
+            Command::SetSimilarityReference { device, media } => {
+                let device = self.device_mut(*device)?;
+                device.similarity_reference = media.or_else(|| device.media_at(0));
                 Ok(())
             }
             Command::SetDeviceWarp { device, warp } => {
@@ -12156,6 +12181,7 @@ mod tests {
             shape: None,
             articulations: None,
             mpe: None,
+            similarity_reference: None,
         })
         .unwrap();
         let loaded = song.doc.device(device).unwrap();
@@ -12170,6 +12196,7 @@ mod tests {
                 shape: None,
                 articulations: None,
                 mpe: None,
+                similarity_reference: None,
             }),
             ModelError::InvalidValue { .. }
         ));
@@ -14455,6 +14482,7 @@ mod tests {
             shape: None,
             articulations: None,
             mpe: None,
+            similarity_reference: None,
         })
         .unwrap();
         let d = song.doc.device(device).unwrap();

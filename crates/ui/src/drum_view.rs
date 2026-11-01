@@ -250,8 +250,23 @@ impl DeviceViewUi {
         let released = ui.input(|i| i.pointer.any_released());
         let pointer = ui.input(|i| i.pointer.interact_pos());
         let mut hint = None;
+        // Spec: sound-similarity R26; I-HOLD-004. While Option (Alt) is held
+        // over the pads, each pad that plays a Simpler or a Drum Sampler
+        // shows its swap arrows.
+        let swapping =
+            ui.input(|i| i.modifiers.alt) && pointer.is_some_and(|p| layout.area.contains(p));
         for (pad, rects) in pads.pads.iter().zip(&layout.pads) {
             self.pad(ui, theme, frame, pads, pad, rects, drag.as_deref(), events);
+            if swapping && pad.kind != PadKind::Empty {
+                crate::sample_swap::pad_arrows(
+                    ui,
+                    shell,
+                    theme,
+                    (frame.id, pad.note),
+                    rects.pad,
+                    events,
+                );
+            }
             if pointer.is_some_and(|p| rects.pad.contains(p)) {
                 hint = Some(pad.hover.clone());
                 self.pad_drop(ui, frame, pad, drag.as_deref(), released, events);

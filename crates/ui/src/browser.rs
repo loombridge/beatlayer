@@ -3643,7 +3643,7 @@ fn scrolled(ui: &Ui, area: Rect, offset: f32, content: f32) -> f32 {
 
 /// Beatlayer's own small marks for the browser.
 #[derive(Clone, Copy)]
-enum Glyph {
+pub(crate) enum Glyph {
     Left,
     Right,
     Down,
@@ -3660,7 +3660,7 @@ enum Glyph {
     Similar,
 }
 
-fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
+pub(crate) fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
     let c = rect.center();
     let s = rect.width().min(rect.height()) * 0.3;
     let triangle = |points: [Pos2; 3]| {

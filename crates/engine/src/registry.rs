@@ -291,6 +291,10 @@ where
 pub struct Registry {
     factories: Vec<Box<dyn NodeFactory>>,
     media: Option<Arc<dyn MediaLibrary>>,
+    /// The native device types whose node takes another sample as node
+    /// data, fading out the voices of the one before, so a sample change
+    /// doesn't make a new node.
+    swaps_samples: Vec<String>,
 }
 
 impl Registry {
@@ -312,7 +316,22 @@ impl Registry {
         Self {
             factories: Vec::new(),
             media: None,
+            swaps_samples: Vec::new(),
         }
+    }
+
+    /// Says that the node of the native device type `device_type` takes a
+    /// changed sample as node data and fades the voices of the sample before
+    /// it out (sound similarity R29), so a change of sample keeps the node.
+    pub fn swap_samples_in_place(&mut self, device_type: &str) {
+        self.swaps_samples.push(device_type.to_owned());
+    }
+
+    /// Whether the node of a device of `kind` keeps running when its sample
+    /// changes ([`Registry::swap_samples_in_place`]).
+    #[must_use]
+    pub fn swaps_samples_in_place(&self, kind: &DeviceKind) -> bool {
+        matches!(kind, DeviceKind::Native { device_type } if self.swaps_samples.contains(device_type))
     }
 
     /// Adds a factory, asked after the ones already here.

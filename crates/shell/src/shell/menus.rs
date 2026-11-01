@@ -155,6 +155,11 @@ impl Shell {
                         if self.devices.chain_list_focus() {
                             contexts.push(Context::RackChains);
                         }
+                        // Spec: sound-similarity R24. A Simpler, a Drum
+                        // Sampler or a pad that plays one is selected.
+                        if self.can_swap(&json!({})) {
+                            contexts.push(Context::SampleSwap);
+                        }
                         contexts.push(Context::DeviceView);
                     }
                     Area::ControlBar | Area::StatusBar | Area::Assistant | Area::UndoHistory => {}
@@ -517,6 +522,16 @@ impl Shell {
             && self.record_quantization_locked().is_some()
         {
             return false;
+        }
+        // Spec: sound-similarity R24. The swap keys act on a Simpler, a Drum
+        // Sampler or a pad that plays one.
+        if matches!(
+            id,
+            device_ids::SWAP_SIMILAR
+                | device_ids::RETURN_TO_REFERENCE
+                | "device.set_similarity_reference"
+        ) {
+            return self.can_swap(args);
         }
         if info_text::is_info_command(id) && !Self::has_info_text(id, args) {
             return self.info_target_of(id, args).is_some();

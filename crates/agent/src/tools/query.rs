@@ -559,6 +559,12 @@ impl View<'_> {
         if device.is_articulation_map() {
             value["articulations"] = json!(device.articulations);
         }
+        // Spec: sound-similarity R28. A Simpler's or Drum Sampler's sample,
+        // its similarity reference and where the sample stands in the
+        // reference's list, which `device.swap_similar` and its kin change.
+        if let Some(state) = self.shell.sampler_similar_state(device.id) {
+            value["similar"] = json!(state);
+        }
         if device.can_compare() {
             // Spec: device-compare R11.
             let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {

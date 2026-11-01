@@ -3,7 +3,7 @@
 use super::info_text;
 use super::{
     DELAY_COMPENSATION, Effect, Invocation, LOCK_ENVELOPES, REDUCED_LATENCY_MONITORING,
-    SOLO_IN_PLACE, Shell, ShellError,
+    SOLO_IN_PLACE, Shell, ShellError, device_error,
 };
 use crate::commands as ids;
 use crate::mixer_controls;
@@ -122,6 +122,15 @@ impl Shell {
                     command: id.to_owned(),
                     reason: "select a device first".to_owned(),
                 })?;
+            // Spec: sound-similarity R24. With a drum rack selected, Cmd-Up
+            // keeps the selected pad's sampler.
+            let device = if id == "device.set_similarity_reference" {
+                self.devices
+                    .swap_device(self.editor.document(), Default::default())
+                    .map_err(|error| device_error(id, error))?
+            } else {
+                device
+            };
             let current = self.editor.document().device(device);
             fields.insert("device".to_owned(), json!(device));
             if id == "device.set_show_preset_name" && !fields.contains_key("shown") {

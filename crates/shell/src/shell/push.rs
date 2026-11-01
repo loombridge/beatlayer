@@ -110,6 +110,51 @@ fn mix_info(mix: &bl_push::mix::State) -> ids::PushMix {
     }
 }
 
+fn clip_info(clip: &bl_push::clip::State) -> ids::PushClipMode {
+    ids::PushClipMode {
+        clip: clip.clip,
+        shows: clip.shows.to_owned(),
+        name: clip.name.clone(),
+        looping: clip.looping,
+        controls: clip
+            .controls
+            .iter()
+            .map(|c| ids::PushClipControl {
+                encoder: c.column + 1,
+                name: c.name.clone(),
+                value: c.value.clone(),
+            })
+            .collect(),
+        zoom: clip.zoom,
+        view: [clip.view.0, clip.view.1],
+        folded: clip.folded,
+        area: clip.area.map(|area| ids::PushClipArea {
+            fit: match area.fit {
+                bl_push::note::Fit::Folded => "folded",
+                bl_push::note::Fit::Sequencer => "sequencer",
+                bl_push::note::Fit::SequencerNotes => "sequencer_notes",
+                bl_push::note::Fit::Pad => "pad",
+            }
+            .to_owned(),
+            from: area.from,
+            to: area.to,
+            low: area.low,
+            high: area.high,
+        }),
+        held_steps: clip
+            .held_steps
+            .iter()
+            .map(|step| ids::PushHeldStep {
+                clip: step.clip,
+                pad: step.key,
+                start: step.start,
+                length: step.length,
+            })
+            .collect(),
+        select_pad: clip.select_pad,
+    }
+}
+
 fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::PushInfo {
     let mix = (snapshot.display_mode == DisplayMode::Mix).then_some(match snapshot.mix_page {
         MixPage::Track => ids::PushMixPage::Track,
@@ -161,6 +206,7 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 bl_push::browse::LoadKind::Add => "add",
                 bl_push::browse::LoadKind::Replace(_) => "replace",
                 bl_push::browse::LoadKind::AddTrack => "add_track",
+                bl_push::browse::LoadKind::Sample => "sample",
             }
             .to_owned(),
             replaces: match browse.load {
@@ -220,6 +266,7 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 .collect(),
             mute_locked: snapshot.locked.contains(&"mute"),
         }),
+        clip: snapshot.clip.as_ref().map(clip_info),
         session: snapshot.session.as_ref().map(|session| {
             let look = |look: &bl_push::session::Look| ids::PushSessionLook {
                 shows: look.what.to_owned(),

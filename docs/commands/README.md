@@ -25666,6 +25666,231 @@ A chain on one of the lower buttons while a rack's button is held.
 
 </details>
 
+### `PushClipArea`
+
+The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fit` | string | yes | How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`. |
+| `from` | [`Ticks`](#ticks) | yes | Where the page of steps starts, in ticks. |
+| `to` | [`Ticks`](#ticks) | yes | Where it ends. |
+| `low` | integer from 0 to 255 | yes | The lowest pitch the pads edit. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).",
+  "properties": {
+    "fit": {
+      "description": "How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`.",
+      "type": "string"
+    },
+    "from": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the page of steps starts, in ticks."
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "low": {
+      "description": "The lowest pitch the pads edit.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends."
+    }
+  },
+  "required": [
+    "fit",
+    "from",
+    "to",
+    "low",
+    "high"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipControl`
+
+One control on an encoder in Clip Mode (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `encoder` | integer from 0 to 255 | yes | The encoder, from 1. |
+| `name` | string | yes | The control's name. |
+| `value` | string | yes | Its value as the display shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One control on an encoder in Clip Mode (push-2-tracks R58).",
+  "properties": {
+    "encoder": {
+      "description": "The encoder, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the display shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "encoder",
+    "name",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipMode`
+
+What Clip Mode shows (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip shown. |
+| `shows` | string | yes | What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`. |
+| `name` | string | yes | The clip's name. |
+| `looping` | boolean or null | yes | Whether the clip's Loop is on. |
+| `controls` | array of [`PushClipControl`](#pushclipcontrol) | yes | The controls on the encoders, left to right. |
+| `zoom` | number | yes | The zoom: 1 shows the whole clip. |
+| `view` | array of number, at least 2 | yes | The span of beats of the clip's contents the display shows. |
+| `folded` | boolean | yes | Whether the display is folded to the pitches that hold notes. |
+| `area` | [`PushClipArea`](#pushcliparea) or null | yes | The sequenceable area the pads edit. |
+| `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held, whose notes the encoders set. |
+| `select_pad` | integer or null | yes | The drum pad whose every note the encoders set while Select holds it, as a MIDI note. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Mode shows (push-2-tracks R58).",
+  "properties": {
+    "area": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipArea"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sequenceable area the pads edit."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip shown."
+    },
+    "controls": {
+      "description": "The controls on the encoders, left to right.",
+      "items": {
+        "$ref": "#/$defs/PushClipControl"
+      },
+      "type": "array"
+    },
+    "folded": {
+      "description": "Whether the display is folded to the pitches that hold notes.",
+      "type": "boolean"
+    },
+    "held_steps": {
+      "description": "The steps held, whose notes the encoders set.",
+      "items": {
+        "$ref": "#/$defs/PushHeldStep"
+      },
+      "type": "array"
+    },
+    "looping": {
+      "description": "Whether the clip's Loop is on.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The clip's name.",
+      "type": "string"
+    },
+    "select_pad": {
+      "description": "The drum pad whose every note the encoders set while Select holds it, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shows": {
+      "description": "What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`.",
+      "type": "string"
+    },
+    "view": {
+      "description": "The span of beats of the clip's contents the display shows.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "zoom": {
+      "description": "The zoom: 1 shows the whole clip.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "shows",
+    "name",
+    "looping",
+    "controls",
+    "zoom",
+    "view",
+    "folded",
+    "area",
+    "held_steps",
+    "select_pad"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDevice`
 
 A device on one of the upper buttons in Device Mode (push-2-tracks R27).
@@ -26084,6 +26309,7 @@ One connected Push 2.
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
 | `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
+| `clip` | [`PushClipMode`](#pushclipmode) or null | yes | What Clip Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 | `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
@@ -26104,6 +26330,17 @@ One connected Push 2.
         }
       ],
       "description": "What Browse Mode shows, while it is the display mode."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Clip Mode shows, while it is the display mode."
     },
     "colour_picker": {
       "description": "Whether the colour picker is open.",
@@ -26278,6 +26515,7 @@ One connected Push 2.
     "display",
     "browse",
     "device",
+    "clip",
     "session",
     "mix_mode",
     "note"

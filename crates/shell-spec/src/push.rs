@@ -258,6 +258,63 @@ pub struct PushDeviceMode {
     pub mute_locked: bool,
 }
 
+/// One control on an encoder in Clip Mode (push-2-tracks R58).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipControl {
+    /// The encoder, from 1.
+    pub encoder: u8,
+    /// The control's name.
+    pub name: String,
+    /// Its value as the display shows it.
+    pub value: String,
+}
+
+/// The sequenceable area the pads edit in a step sequencing layout
+/// (push-2-tracks R51).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipArea {
+    /// How the display fits the clip: `folded`, `sequencer`,
+    /// `sequencer_notes` or `pad`.
+    pub fit: String,
+    /// Where the page of steps starts, in ticks.
+    pub from: bl_core::time::Ticks,
+    /// Where it ends.
+    pub to: bl_core::time::Ticks,
+    /// The lowest pitch the pads edit.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+}
+
+/// What Clip Mode shows (push-2-tracks R58).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipMode {
+    /// The clip shown.
+    pub clip: Option<bl_model::ClipId>,
+    /// What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or
+    /// `nothing`.
+    pub shows: String,
+    /// The clip's name.
+    pub name: String,
+    /// Whether the clip's Loop is on.
+    pub looping: Option<bool>,
+    /// The controls on the encoders, left to right.
+    pub controls: Vec<PushClipControl>,
+    /// The zoom: 1 shows the whole clip.
+    pub zoom: f64,
+    /// The span of beats of the clip's contents the display shows.
+    pub view: [f64; 2],
+    /// Whether the display is folded to the pitches that hold notes.
+    pub folded: bool,
+    /// The sequenceable area the pads edit.
+    pub area: Option<PushClipArea>,
+    /// The steps held, whose notes the encoders set.
+    pub held_steps: Vec<PushHeldStep>,
+    /// The drum pad whose every note the encoders set while Select holds it,
+    /// as a MIDI note.
+    pub select_pad: Option<u8>,
+}
+
 /// What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks
 /// R73).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -393,6 +450,8 @@ pub struct PushInfo {
     pub browse: Option<PushBrowse>,
     /// What Device Mode shows, while it is the display mode.
     pub device: Option<PushDeviceMode>,
+    /// What Clip Mode shows, while it is the display mode.
+    pub clip: Option<PushClipMode>,
     /// What Session Mode shows, while it is the pad mode.
     pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.

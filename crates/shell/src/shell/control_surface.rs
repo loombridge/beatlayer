@@ -58,6 +58,9 @@ pub(super) struct SurfaceHost {
     /// The browser's lists a surface that browses reads, what they were made
     /// from and their revision (push-2-tracks R13).
     catalogue: Option<CatalogueCopy>,
+    /// The waveform a surface that shows the selected audio clip reads, and
+    /// what it was made from (push-2-tracks R44).
+    waveform: Option<(u64, Arc<bl_control::Waveform>)>,
     /// The first selected track's In/Out section as a surface reads it, and
     /// the document revision and track it was made for (push-2-tracks R31).
     in_out: Option<((u64, TrackId), Option<bl_control::mix::InOut>)>,
@@ -472,7 +475,8 @@ impl Shell {
         let shown = crate::devices::shown_track(&self.arrangement, doc);
         let drum = shown.and_then(|track| self.devices.drum_view(doc, track));
         let devices = self.devices.surface_views(doc, shown);
-        ReadModel {
+        let clip_view = self.clip_view.shown_any_clip(doc, &self.arrangement);
+        let mut model = ReadModel {
             document,
             slots: self.session_states().to_vec(),
             transport: Transport {
@@ -508,7 +512,73 @@ impl Shell {
             selection_armed: self.surface.selection_armed.iter().copied().collect(),
             devices,
             mix,
+            clip_view,
+            waveform: None,
+        };
+        model.waveform = self.surface_waveform(&model);
+        model
+    }
+
+    /// The waveform of the audio clip Push 2's Clip Mode shows, along the
+    /// beats of its contents; made again only when the clip, its warping or
+    /// the tempo change, and absent until the peaks are built (push-2-tracks
+    /// R44).
+    fn surface_waveform(&mut self, model: &ReadModel) -> Option<Arc<bl_control::Waveform>> {
+        let id = bl_push::clip::shown(model)?;
+        let clip = model.document.clip(id)?;
+        let bl_model::ClipData::Audio(audio) = &clip.data else {
+            return None;
+        };
+        let tempo = model.tempo.get();
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (id, audio.media, audio.warp, audio.tempo.map(f64::to_bits)).hash(&mut hasher);
+            tempo.to_bits().hash(&mut hasher);
+            for marker in &audio.warp_markers {
+                (marker.time.to_bits(), marker.beat.get()).hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        if let Some((made, waveform)) = &self.surface.waveform
+            && *made == key
+        {
+            return Some(Arc::clone(waveform));
         }
+        let hash = bl_media::ContentHash::from_bytes(audio.media.0);
+        let cache = self.peak_cache()?;
+        cache.request(hash);
+        let peaks = cache.get(hash)?;
+        let beats = |seconds: f64| match audio.warp_map() {
+            Ok(map) if audio.warp => {
+                map.time_to_beat(seconds) / bl_core::time::TICKS_PER_QUARTER as f64
+            }
+            _ => seconds * tempo / 60.0,
+        };
+        let rate = f64::from(peaks.sample_rate().max(1));
+        let level = (0..peaks.level_count())
+            .find(|&level| peaks.run(level, 0).is_some_and(|run| run.len <= 4096))
+            .unwrap_or(0);
+        let points: Vec<[f32; 2]> = (0..peaks.run(level, 0)?.len as usize)
+            .map(|at| {
+                let mut range = [0.0f32, 0.0f32];
+                for channel in 0..usize::from(peaks.channels()) {
+                    if let Some([low, high]) = peaks.peak(level, channel, at) {
+                        range[0] = range[0].min(f32::from(low) / 127.0);
+                        range[1] = range[1].max(f32::from(high) / 127.0);
+                    }
+                }
+                range
+            })
+            .collect();
+        let waveform = Arc::new(bl_control::Waveform {
+            clip: id,
+            from: beats(0.0),
+            to: beats(peaks.frames() as f64 / rate),
+            peaks: points,
+        });
+        self.surface.waveform = Some((key, Arc::clone(&waveform)));
+        Some(waveform)
     }
 
     /// The folds Mix Mode acts on, and the In/Out section of the first

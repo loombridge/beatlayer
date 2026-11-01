@@ -144,6 +144,9 @@ pub struct Push {
     /// The track selected before Master selected Main, which a second press
     /// goes back to (push-2-tracks R36).
     before_master: Option<TrackId>,
+    /// Browse Mode's entry a content asked for, made once the content's call
+    /// is over.
+    enter_pending: Option<Enter>,
     /// The surface's row in the Control Surfaces table, from 0.
     row: usize,
 }
@@ -201,6 +204,7 @@ impl Push {
             reduced: 0,
             actions: Vec::new(),
             before_master: None,
+            enter_pending: None,
             row: 0,
         }
     }
@@ -390,6 +394,11 @@ impl Push {
                 Action::Picker(target) => self.open_picker(target),
                 Action::Aftertouch(poly) => self.aftertouch = poly,
                 Action::Gesture(column) => self.gestures[usize::from(column)] = true,
+                Action::KeepSteps => self.contents.pads[0].keep_steps(),
+                Action::Browse(why) => {
+                    self.display_mode = DisplayMode::Browse;
+                    self.enter_pending = Some(why);
+                }
             }
         }
     }
@@ -405,6 +414,7 @@ impl Push {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
         let held_steps = self.held_steps();
+        let note = self.contents.pads[0].note_state();
         let mix_page = self.mix_page;
         let mut actions = std::mem::take(&mut self.actions);
         {
@@ -429,6 +439,7 @@ impl Push {
                     held_steps: &held_steps,
                     mix_page,
                     display: self.display_mode,
+                    note: note.as_ref(),
                     actions: &mut actions,
                 };
                 f(content, &mut ctx);
@@ -436,6 +447,9 @@ impl Push {
         }
         self.actions = actions;
         self.apply(cx.now());
+        if let Some(why) = self.enter_pending.take() {
+            self.enter(why, cx);
+        }
     }
 
     // ----- the ring's tracks (R26) -----
@@ -1345,9 +1359,11 @@ impl Push {
                 (PadMode::Note, mode) => (0, mode.index()),
                 (PadMode::Session, mode) => (1, mode.index()),
             };
-            for content in [
-                self.contents.pads[pad].as_mut(),
-                self.contents.display[display].as_mut(),
+            let session = self.pad_mode == PadMode::Session;
+            let mut note = None;
+            for (which, content) in [
+                (0, self.contents.pads[pad].as_mut()),
+                (1, self.contents.display[display].as_mut()),
             ] {
                 content.paint(&mut Paint {
                     screen: &mut self.screen,
@@ -1358,10 +1374,16 @@ impl Push {
                     model,
                     modifiers: &modifiers,
                     held_steps: &held_steps,
+                    note: note.as_ref(),
+                    session,
                     mix_page: self.mix_page,
                     row: cx.row(),
                     colours: &colours,
                 });
+                // The display follows the layout the pads just drew.
+                if which == 0 {
+                    note = content.note_state();
+                }
             }
         }
 
@@ -1477,6 +1499,8 @@ impl Push {
                     model,
                     modifiers: &modifiers,
                     held_steps: &held_steps,
+                    note: None,
+                    session: false,
                     mix_page: self.mix_page,
                     row: cx.row(),
                     colours: &colours,
@@ -1631,6 +1655,7 @@ impl Push {
         snapshot.screen = self.screen.clone();
         snapshot.browse = self.display_content().browse_state();
         snapshot.device = self.display_content().device_state();
+        snapshot.clip = self.display_content().clip_state();
         if self.pad_mode == PadMode::Session {
             snapshot.session = self.pad_content().session_state();
         }
@@ -1722,7 +1747,7 @@ impl ControlSurface for Push {
                 }
                 self.setup_changes(cx);
             }
-            self.with_contents(cx, Who::Pads, |content, ctx| content.tick(ctx));
+            self.with_contents(cx, Who::Both, |content, ctx| content.tick(ctx));
             // The Scale menu closes where Scale has nothing to open (R23).
             if self.menu == Some(Menu::Scale) && !self.pad_content().scale_available() {
                 self.menu = None;

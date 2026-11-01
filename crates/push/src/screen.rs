@@ -188,6 +188,111 @@ pub struct List {
 /// name uses (R19).
 pub type Message = String;
 
+/// One note of a MIDI clip as Clip Mode draws it (push-2-tracks R44).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bar {
+    /// The row it sits on, from the top of the clip's rows.
+    pub row: usize,
+    /// Where it starts, in beats of the clip's contents.
+    pub from: f64,
+    /// Where it ends.
+    pub to: f64,
+    /// How opaque it is, from 0 to 1: its velocity.
+    pub opacity: f32,
+    /// Its colour: its pad's on a drum rack, else the clip's.
+    pub colour: [u8; 3],
+}
+
+/// What Clip Mode shows of a clip (push-2-tracks R43, R44).
+#[derive(Clone, Debug, PartialEq)]
+pub enum ClipBody {
+    /// A message instead of a clip: an empty slot, or no clip at all.
+    Prompt(String),
+    /// A MIDI clip's notes: the pitches of its rows, highest first, and the
+    /// notes in view.
+    Notes {
+        /// The pitch of each row, from the top.
+        rows: Vec<u8>,
+        /// The notes that overlap the span shown.
+        bars: Vec<Bar>,
+    },
+    /// An audio clip's waveform across the span shown: the lowest and
+    /// highest sample of each of equal stretches of it.
+    Waveform(Vec<[f32; 2]>),
+}
+
+/// The sequenceable area a step sequencing layout marks (push-2-tracks R51).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AreaBox {
+    /// Where the page of steps starts, in beats.
+    pub from: f64,
+    /// Where it ends.
+    pub to: f64,
+    /// The rows the pads edit, first and last from the top, or every row.
+    pub rows: Option<(usize, usize)>,
+}
+
+/// What Clip Mode draws over the content band: the clip, its markers and
+/// the sequencers' boxes (push-2-tracks R44, R50 to R55).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClipScreen {
+    /// The clip's name, highlighted at the top left.
+    pub name: String,
+    /// The clip's colour.
+    pub colour: [u8; 3],
+    /// What the clip shows.
+    pub body: ClipBody,
+    /// The span of beats from the display's left edge to its right.
+    pub view: (f64, f64),
+    /// Where the clip plays now, in beats of its contents.
+    pub playhead: Option<f64>,
+    /// The clip's markers by name, at their beats.
+    pub markers: Vec<(&'static str, f64)>,
+    /// The sequenceable area.
+    pub area: Option<AreaBox>,
+    /// The box at the left edge: the pitches the pads edit as a share of
+    /// the 128 pitches, from the bottom, low to high.
+    pub range: Option<(f32, f32)>,
+    /// The lines at the left edge: where pitches hold notes as a share of
+    /// the 128 from the bottom, and how thick, from 1 to 4.
+    pub lines: Vec<(f32, u8)>,
+    /// The spans of the steps held, in beats.
+    pub held: Vec<(f64, f64)>,
+}
+
+impl ClipScreen {
+    /// A clip's text lines, for `push.state`.
+    fn text(&self, lines: &mut Vec<String>) {
+        lines.push(format!("clip: {}", self.name));
+        lines.push(match &self.body {
+            ClipBody::Prompt(message) => format!("clip shows: {message}"),
+            ClipBody::Notes { rows, bars } => {
+                format!("clip shows: {} notes on {} rows", bars.len(), rows.len())
+            }
+            ClipBody::Waveform(peaks) => format!("clip shows: waveform of {}", peaks.len()),
+        });
+        lines.push(format!(
+            "clip view: {:.2} to {:.2}",
+            self.view.0, self.view.1
+        ));
+        if let Some(at) = self.playhead {
+            lines.push(format!("clip playhead: {at:.2}"));
+        }
+        for (name, at) in &self.markers {
+            lines.push(format!("clip marker {name}: {at:.2}"));
+        }
+        if let Some(area) = &self.area {
+            lines.push(format!("clip area: {:.2} to {:.2}", area.from, area.to));
+        }
+        if let Some((low, high)) = self.range {
+            lines.push(format!("clip range: {:.2} to {:.2}", low, high));
+        }
+        for (from, to) in &self.held {
+            lines.push(format!("clip held: {from:.2} to {to:.2}"));
+        }
+    }
+}
+
 /// The display's content.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Screen {
@@ -220,6 +325,9 @@ pub struct Screen {
     /// in a colour: the tracks inside an unfolded group or rack (push-2-tracks
     /// R37).
     pub underlines: Vec<(u8, u8, [u8; 3])>,
+    /// A clip drawn over the content band's upper part, with the columns
+    /// beneath it (push-2-tracks R44).
+    pub clip: Option<ClipScreen>,
 }
 
 impl Screen {
@@ -299,6 +407,9 @@ impl Screen {
         }
         for (from, to, _) in &self.underlines {
             lines.push(format!("underline: {} to {}", from + 1, to + 1));
+        }
+        if let Some(clip) = &self.clip {
+            clip.text(&mut lines);
         }
         if let Some(title) = &self.title {
             lines.push(format!("title: {title}"));

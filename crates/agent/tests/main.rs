@@ -27,6 +27,7 @@ mod plugin_vst3;
 mod polysynth;
 mod push;
 mod push_beats;
+mod push_clips;
 mod readback;
 mod readback_runtime;
 mod recording;

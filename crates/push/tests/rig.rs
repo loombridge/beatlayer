@@ -154,6 +154,7 @@ enum Contents {
     Mix,
     Placeholders,
     Note,
+    Clip,
 }
 
 pub struct Rig {
@@ -210,6 +211,14 @@ impl Rig {
         rig
     }
 
+    /// A rig whose Note Mode and Clip Mode are the real ones, with the other
+    /// modes recording.
+    pub fn clipping() -> Self {
+        let mut rig = Self::build(Contents::Clip);
+        rig.ring_at(0, 0);
+        rig
+    }
+
     /// A rig whose modes have no content of their own yet: the placeholders.
     pub fn placeholders() -> Self {
         Self::build(Contents::Placeholders)
@@ -240,7 +249,7 @@ impl Rig {
                 };
                 bl_push::Contents {
                     pads: [
-                        if which == Contents::Note {
+                        if matches!(which, Contents::Note | Contents::Clip) {
                             Box::new(bl_push::note::Note::new())
                         } else {
                             recorder("Note")
@@ -267,7 +276,11 @@ impl Rig {
                         } else {
                             recorder("Mix")
                         },
-                        recorder("Clip"),
+                        if which == Contents::Clip {
+                            Box::new(bl_push::clip::ClipMode::new())
+                        } else {
+                            recorder("Clip")
+                        },
                     ],
                 }
             })

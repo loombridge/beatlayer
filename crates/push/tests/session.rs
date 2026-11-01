@@ -556,7 +556,10 @@ fn a_locked_stop_clip_makes_the_lower_buttons_stop_their_tracks() {
     rig.tap("lower_5");
     assert_eq!(
         rig.commands(),
-        [command("session.select", json!({ "track": t[4] }))]
+        [
+            command("session.select", json!({ "track": t[4] })),
+            command("arrangement.select_tracks", json!({ "tracks": [t[4]] })),
+        ]
     );
 }
 

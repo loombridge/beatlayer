@@ -136,6 +136,10 @@ pub struct Push {
     playing: bool,
     count_in: Option<Instant>,
     footswitch: Option<Instant>,
+    /// When the message or tick being handled came, for the contents.
+    at: Instant,
+    /// The pads Push 2 has been told have reduced sensitivity.
+    reduced: u64,
     actions: Vec<Action>,
     /// The track selected before Master selected Main, which a second press
     /// goes back to (push-2-tracks R36).
@@ -193,6 +197,8 @@ impl Push {
             playing: false,
             count_in: None,
             footswitch: None,
+            at: Instant::now(),
+            reduced: 0,
             actions: Vec::new(),
             before_master: None,
             row: 0,
@@ -211,6 +217,14 @@ impl Push {
         match self.pad_mode {
             PadMode::Note => self.contents.pads[0].as_mut(),
             PadMode::Session => self.contents.pads[1].as_mut(),
+        }
+    }
+
+    /// The steps held in Note Mode, which the display modes see.
+    fn held_steps(&self) -> Vec<crate::content::HeldStep> {
+        match self.pad_mode {
+            PadMode::Note => self.contents.pads[0].held_steps(),
+            PadMode::Session => Vec::new(),
         }
     }
 
@@ -390,6 +404,7 @@ impl Push {
     ) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
+        let held_steps = self.held_steps();
         let mix_page = self.mix_page;
         let mut actions = std::mem::take(&mut self.actions);
         {
@@ -410,6 +425,8 @@ impl Push {
                     model: self.model.as_ref(),
                     modifiers: &modifiers,
                     setup,
+                    at: self.at,
+                    held_steps: &held_steps,
                     mix_page,
                     actions: &mut actions,
                 };
@@ -549,6 +566,14 @@ impl Push {
     /// What a core button does with a modifier held: the combination the
     /// specs give it, and nothing else (R25).
     fn combination(&mut self, button: u8, modifiers: &Modifiers, cx: &mut Cx) {
+        // Record and a lower display button arm the track by hand (notes R4).
+        if modifiers.has(cc::RECORD)
+            && self.pad_mode == PadMode::Note
+            && let Some(column) = controls::lower_column(button)
+        {
+            self.arm_by_hand(column, cx);
+            return;
+        }
         if !modifiers.shift() {
             return;
         }
@@ -607,6 +632,15 @@ impl Push {
                 self.momentary_display = Some((self.display_mode, self.mix_page));
                 self.display_mode = mode;
             }
+        }
+        // Holding a lower display button arms its track by hand in Note
+        // Mode, and its release then selects nothing (notes R4).
+        if self.pad_mode == PadMode::Note
+            && !self.lower_claimed()
+            && let Some(column) = controls::lower_column(button)
+        {
+            self.arm_by_hand(column, cx);
+            self.buttons.mark_used(button);
         }
         if !self.is_core(button) {
             self.with_contents(cx, Who::Both, |content, ctx| {
@@ -710,7 +744,7 @@ impl Push {
                 } else if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
-                    Self::run(cx, "session.select", json!({ "track": track }));
+                    Self::select_track(cx, track);
                 }
             }
             number => {
@@ -718,10 +752,39 @@ impl Push {
                 if let Some(column) = controls::lower_column(number)
                     && let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column))
                 {
-                    Self::run(cx, "session.select", json!({ "track": track }));
+                    Self::select_track(cx, track);
                 }
             }
         }
+    }
+
+    /// Arms the ring's track at `column` by hand, as its Arm switch does, or
+    /// disarms it if it was armed by hand; a track armed by selection
+    /// becomes a manual arm (notes R4).
+    fn arm_by_hand(&mut self, column: u8, cx: &mut Cx) {
+        let Some(&track) = self.ring_tracks(cx.row()).get(usize::from(column)) else {
+            return;
+        };
+        let Some(model) = &self.model else {
+            return;
+        };
+        let Some(t) = model.document.track(track).filter(|t| t.kind().has_arm()) else {
+            return;
+        };
+        let arm = !t.mixer().arm || model.selection_armed.contains(&track);
+        Self::run(cx, "mixer.set_arm", json!({ "track": track, "arm": arm }));
+    }
+
+    /// Selects a track as a click on its title bar does, and as the
+    /// Arrangement's selection too, which the devices and the drum layout
+    /// follow (R26).
+    fn select_track(cx: &mut Cx, track: TrackId) {
+        Self::run(cx, "session.select", json!({ "track": track }));
+        Self::run(
+            cx,
+            "arrangement.select_tracks",
+            json!({ "tracks": [track] }),
+        );
     }
 
     // ----- Stop Clip, in every mode (push-2-tracks R68) -----
@@ -1147,6 +1210,22 @@ impl Push {
         }
     }
 
+    /// Selects Pad Settings for the pads whose sensitivity the pad mode
+    /// changed (notes R31).
+    fn pad_settings(&mut self, cx: &mut Cx) {
+        let want = if self.user_mode {
+            0
+        } else {
+            self.pad_content().reduced_pads()
+        };
+        let changed = want ^ self.reduced;
+        for n in (0..64u8).filter(|n| changed >> n & 1 == 1) {
+            let settings = u8::from(want >> n & 1 == 1);
+            Self::send(cx, sysex::select_pad_settings(n / 8, n % 8, settings));
+        }
+        self.reduced = want;
+    }
+
     /// Makes `mode` the display mode, which its content enters afresh when
     /// it is Browse (push-2-tracks R5).
     fn show_display(&mut self, mode: DisplayMode, cx: &mut Cx) {
@@ -1225,11 +1304,13 @@ impl Push {
         if !claimed {
             for (column, &track) in tracks.iter().take(8).enumerate() {
                 if let Some(t) = model.document.track(track) {
+                    let by_hand = t.mixer().arm && !model.selection_armed.contains(&track);
                     self.screen.lower[column] = Label::new(
                         t.name(),
                         swatch(t.colour()),
                         model.selection.tracks.contains(&track),
-                    );
+                    )
+                    .with_armed(by_hand);
                     if let Some((_, fraction)) = model.progress.iter().find(|(id, _)| *id == track)
                     {
                         self.screen.progress[column] = Some(*fraction);
@@ -1239,6 +1320,7 @@ impl Push {
         }
 
         // The modes draw the pads, the buttons they own and the display.
+        let held_steps = self.held_steps();
         {
             let (pad, display) = match (self.pad_mode, self.display_mode) {
                 (PadMode::Note, mode) => (0, mode.index()),
@@ -1256,6 +1338,7 @@ impl Push {
                     },
                     model,
                     modifiers: &modifiers,
+                    held_steps: &held_steps,
                     mix_page: self.mix_page,
                     row: cx.row(),
                     colours: &colours,
@@ -1486,6 +1569,10 @@ impl Push {
         snapshot.display_mode = self.display_mode;
         snapshot.mix_page = self.mix_page;
         snapshot.menu = self.menu;
+        snapshot.note = match self.pad_mode {
+            PadMode::Note => self.contents.pads[0].note_state(),
+            PadMode::Session => None,
+        };
         snapshot.held = self
             .buttons
             .held()
@@ -1562,11 +1649,16 @@ impl ControlSurface for Push {
             cx.send(bytes);
         }
         Self::send(cx, sysex::display_brightness(0));
+        for n in (0..64u8).filter(|n| self.reduced >> n & 1 == 1) {
+            Self::send(cx, sysex::select_pad_settings(n / 8, n % 8, 0));
+        }
+        self.reduced = 0;
         Self::send(cx, sysex::midi_mode(MidiMode::Live));
         self.display = None;
     }
 
     fn message(&mut self, at: Instant, bytes: &[u8], cx: &mut Cx) {
+        self.at = at;
         if sysex::is_sysex(bytes) {
             self.reply(bytes, cx);
         } else if matches!(self.phase, Phase::Live) {
@@ -1575,6 +1667,7 @@ impl ControlSurface for Push {
     }
 
     fn tick(&mut self, model: &ReadModel, cx: &mut Cx) {
+        self.at = cx.now();
         self.model = Some(model.clone());
         self.row = cx.row();
         self.wait_timeouts(cx);
@@ -1590,8 +1683,13 @@ impl ControlSurface for Push {
                     self.footswitch = None;
                     self.synthetic(cc::RECORD, cx);
                 }
+                if let Some(strip) = self.pad_content().strip_use() {
+                    self.strip = strip;
+                }
                 self.setup_changes(cx);
             }
+            self.with_contents(cx, Who::Pads, |content, ctx| content.tick(ctx));
+            self.pad_settings(cx);
             self.clock(model, cx);
             self.paint(model, cx);
             self.flush_leds(cx);

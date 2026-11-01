@@ -191,3 +191,24 @@ fn platform_items_and_corrected_keys_follow_the_reference() {
     assert_eq!(video.win, ["Ctrl+Alt+Shift+V"]);
     assert!(matches!(video.status, Status::Pending { .. }));
 }
+
+#[test]
+fn cmd_shift_f_shows_similar_files_in_the_browser() {
+    // Spec: sound-similarity R11; S-BRW-010.
+    let keymap = Keymap::live12();
+    let entry = keymap.entry_for("S-BRW-010").expect("the shortcut");
+    assert_eq!(entry.status, Status::Bound);
+    for (platform, m) in [
+        (Platform::Mac, mods(true, false, false, true)),
+        (Platform::Other, mods(false, true, false, true)),
+    ] {
+        assert_eq!(
+            keymap
+                .resolve(platform, Key::F, m, &[Context::Browser, Context::Global])
+                .map(|hit| hit.command.id.clone())
+                .as_deref(),
+            Some("browser.show_similar"),
+            "{platform:?}"
+        );
+    }
+}

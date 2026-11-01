@@ -79,6 +79,9 @@ pub struct ReadModel {
     pub selection: Selection,
     /// Where each track's playing Session clip is in its loop, from 0 to 1.
     pub progress: Vec<(TrackId, f32)>,
+    /// How long each track's playing Session clip has played, in ticks of
+    /// its own time, counted from where it started.
+    pub clip_time: Vec<(TrackId, Ticks)>,
     /// What each row of the Control Surfaces table holds: its ring, the
     /// device its device controls reach and its bank (R17 to R35).
     pub rows: Vec<RowView>,
@@ -99,6 +102,9 @@ pub struct ReadModel {
     pub selected_device: Option<DeviceId>,
     /// Whether the Session View is the main view, not the Arrangement.
     pub session_view: bool,
+    /// The tracks armed by selection, not by hand, while a surface that arms
+    /// by selection runs (Push 2 R3).
+    pub selection_armed: Vec<TrackId>,
     /// What the Device View shows besides the set (push-2-tracks R22, R24).
     pub devices: DeviceViews,
     /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
@@ -141,6 +147,7 @@ impl ReadModel {
             meters: Vec::new(),
             selection: Selection::default(),
             progress: Vec::new(),
+            clip_time: Vec::new(),
             rows: Vec::new(),
             columns: Vec::new(),
             session_record: false,
@@ -149,6 +156,7 @@ impl ReadModel {
             browse: None,
             selected_device: None,
             session_view: false,
+            selection_armed: Vec::new(),
             devices: DeviceViews::default(),
             mix: crate::mix::Mix::default(),
         }
@@ -437,7 +445,7 @@ pub struct Cx {
     pub(crate) out: Vec<Out>,
     pub(crate) requests: Vec<Ask>,
     pub(crate) handed: Vec<(Instant, MidiMessage)>,
-    pub(crate) played: Vec<MidiMessage>,
+    pub(crate) played: Vec<(Option<Instant>, MidiMessage)>,
 }
 
 impl Cx {
@@ -581,7 +589,13 @@ impl Cx {
     /// Plays a message into the tracks as the surface's input port's own,
     /// whatever the port's Track switch says (R5).
     pub fn play(&mut self, message: MidiMessage) {
-        self.played.push(message);
+        self.played.push((None, message));
+    }
+
+    /// [`Cx::play`], stamped with `at`, the moment the controller sent it
+    /// (R5).
+    pub fn play_at(&mut self, at: Instant, message: MidiMessage) {
+        self.played.push((Some(at), message));
     }
 }
 

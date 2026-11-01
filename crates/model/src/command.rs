@@ -2445,6 +2445,14 @@ pub enum Command {
         /// The swatch, or `null` for none.
         colour: Option<u8>,
     },
+    /// Gives a drum rack's chain the swatch Push 2 shows for its pad, from
+    /// 0 to 69, or `null` to show the track's colour again.
+    SetChainPushColour {
+        /// The chain.
+        chain: ChainId,
+        /// The swatch, or `null` for none.
+        colour: Option<u8>,
+    },
     /// Sets a chain's info text (Edit Info Text). Empty clears it.
     SetChainInfo {
         /// The chain.
@@ -3181,6 +3189,7 @@ impl Command {
             Self::MoveChain { .. } => "Move Chain",
             Self::RenameChain { .. } => "Change \"Chain Name\"",
             Self::SetChainColour { .. } => "Change Chain Color",
+            Self::SetChainPushColour { .. } => "Change Pad Color on Push",
             Self::SetChainInfo { .. } => "Change Chain Info Text",
             Self::SetChainVolume { .. } => "Change chain volume",
             Self::SetChainPan { .. } => "Change chain pan",
@@ -5338,6 +5347,12 @@ impl Document {
                     self.chain_mut(*chain)?.colour = *colour;
                 }
                 Ok(())
+            }
+            Command::SetChainPushColour { chain, colour } => {
+                if let Some(colour) = colour {
+                    check_value("pad colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                }
+                self.edit_drum_chain(*chain, false, |c| c.push_colour = *colour)
             }
             Command::SetChainInfo { chain, info } => {
                 if self.chain_ref(*chain)?.info != *info {
@@ -8717,6 +8732,16 @@ impl Document {
     ) -> Result<(), ModelError> {
         if self.device_ref(id)?.plugin != state {
             self.device_mut(id)?.plugin = state;
+        }
+        Ok(())
+    }
+
+    /// Arms or disarms a track outside the command system:
+    /// [`Editor::follow_arm`](crate::Editor::follow_arm) calls it.
+    pub(crate) fn follow_arm(&mut self, track: TrackId, arm: bool) -> Result<(), ModelError> {
+        check_kind(self.track_ref(track)?, TrackKind::has_arm, AUDIO_OR_MIDI)?;
+        if self.track_ref(track)?.mixer.arm != arm {
+            self.track_mut(track)?.mixer.arm = arm;
         }
         Ok(())
     }

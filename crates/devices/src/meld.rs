@@ -989,7 +989,9 @@ impl Instrument for Voices {
                         Start::Join { leader } => envelope.join(voice, leader),
                     }
                 }
-                if !matches!(start, Start::Legato) {
+                if matches!(start, Start::Legato) {
+                    self.retune_slots(voices, state, voice);
+                } else {
                     self.start_slots(voices, state, voice);
                 }
             }
@@ -1036,20 +1038,7 @@ impl Voices {
     fn start_slots(&mut self, voices: &VoiceBlock, state: &State, voice: usize) {
         self.free_slots(voice);
         let copies = state.config().copies.clamp(1, MAX_STACK);
-        let key = voices.info(voice).key;
-        let scale = *state.scale();
-        let semitones = self.snap.semitones;
-        let offset = if scale.enabled {
-            (scale.move_off(key, semitones) - i32::from(key)) as f32
-        } else {
-            semitones as f32
-        };
-        let fixed = 60.0
-            + if scale.enabled {
-                f32::from(scale.root)
-            } else {
-                0.0
-            };
+        let (key, offset, fixed) = self.tuning(voices, state, voice);
         let spread = self.snap.spread;
         let random = state.random(voice) as f32;
         self.notes = self.notes.wrapping_add(1);
@@ -1083,6 +1072,36 @@ impl Voices {
             let reset = self.snap.phase_reset;
             if let Some(bank) = self.bank() {
                 bank.start(slot, f32::from(key), Onset::Fresh, reset, phase);
+            }
+        }
+    }
+
+    /// `voice`'s key, the pitch offset Semitones gives it, and the key an
+    /// engine without key tracking plays (R3, R16).
+    fn tuning(&self, voices: &VoiceBlock, state: &State, voice: usize) -> (u8, f32, f32) {
+        let key = voices.info(voice).key;
+        let scale = *state.scale();
+        let semitones = self.snap.semitones;
+        let offset = if scale.enabled {
+            (scale.move_off(key, semitones) - i32::from(key)) as f32
+        } else {
+            semitones as f32
+        };
+        let fixed = 60.0
+            + if scale.enabled {
+                f32::from(scale.root)
+            } else {
+                0.0
+            };
+        (key, offset, fixed)
+    }
+
+    /// A legato note keeps `voice`'s slots sounding and gives them its key.
+    fn retune_slots(&mut self, voices: &VoiceBlock, state: &State, voice: usize) {
+        let (key, offset, fixed) = self.tuning(voices, state, voice);
+        for s in &mut self.slots {
+            if s.voice == voice as i8 {
+                (s.key, s.offset, s.fixed) = (key, offset, fixed);
             }
         }
     }

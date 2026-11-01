@@ -1052,6 +1052,16 @@ fn key_tracking_off_plays_c3_or_the_scales_root() {
         let c3 = hz(60.0);
         assert!(amp(&signal, c3) > 0.9, "key {key} plays C3");
     }
+    // A legato note in Mono holds C3 too.
+    let signal = play(
+        &[(a(KEY_TRACKING), 0.0), (MODE, 1.0), (LEGATO, 1.0)],
+        48_000,
+        &[on(0, 48), on(12_000, 64)],
+    );
+    assert!(
+        amp(&signal[0][24_000..], hz(60.0)) > 0.9,
+        "a legato note plays C3"
+    );
     // With C# major as the scale, the root in C3's octave.
     let signal = play_with(
         &[(a(KEY_TRACKING), 0.0), (USE_SCALE, 1.0)],

@@ -611,9 +611,10 @@ mod tests {
         let text = format!(
             r#"{{"features":[{{"id":"test","name":"Test","roles":["test-model"]}}],
                 "packages":[{{"id":"test","name":"Test","version":"1","project":"","purpose":"",
-                "platform":"any","role":"test-model","url":"{}","size":1,"sha256":"{}",
+                "platform":"any","role":"test-model","url":{},"size":1,"sha256":"{}",
                 "unpack":"file","folder":"test-1","files":[{{"name":"model.bin"}}]}}]}}"#,
-            package.url, package.sha256
+            serde_json::to_string(&package.url).unwrap(),
+            package.sha256
         );
         std::fs::write(&file, text).unwrap();
         let manifest = load(Some(file.as_os_str()));

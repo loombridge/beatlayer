@@ -439,6 +439,16 @@ fn retrigger_sync_in_milliseconds_follows_the_song_not_the_blocks() {
     assert!(start.abs_diff(24_000 + LATENCY + HOP) <= 2 * HOP, "{start}");
 }
 
+// Spec: spectral-time R6
+#[test]
+fn retrigger_with_freeze_off_passes_the_live_sound() {
+    let input = sine(1_000.0, 0.5, 0, SECOND);
+    let params = base(&[(FREEZER_ON, 1.0), (FREEZER_MODE, 1.0), (TRIGGER, 0.0)]);
+    let out = render(&params, &input, 512);
+    let level = rms(&out[0][seconds(0.5)..seconds(0.9)]);
+    assert!((level - 0.5 / 2f64.sqrt()).abs() < 0.02, "{level}");
+}
+
 // Spec: spectral-time R7
 #[test]
 fn crossfade_trades_one_frozen_spectrum_for_the_next_at_equal_power() {

@@ -973,9 +973,9 @@ impl Frame<'_> {
                 layer.phase[b] = wrap_phase(layer.phase[b] + layer.step[b]);
             }
         }
-        // By hand the sound passes in the measure the freeze isn't in yet;
-        // a retriggered freezer plays only what it has frozen.
-        let live = if freezer.retrigger {
+        // The sound passes in the measure the freeze isn't in yet; a
+        // retriggered freezer with Freeze on plays only what it has frozen.
+        let live = if freezer.retrigger && freezer.held {
             0.0
         } else {
             (1.0f32 - level).clamp(0.0, 1.0)

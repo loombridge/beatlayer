@@ -1010,7 +1010,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |
 | 8.28 | done | 1 November 2026 | [#648](https://github.com/loombridge/beatlayer/pull/648): `bl_dsp::stft` gives a streaming STFT with exact overlap-add resynthesis, phase-vocoder helpers and a cepstral envelope, reporting `size - 1` frames of latency, and devices get a spectrogram display kind that reads back through `device.display`; Spectrum keeps its own FFT for now |
-| 8.29 | todo |  |  |
+| 8.29 | done | 1 November 2026 | [#695](https://github.com/loombridge/beatlayer/pull/695): `bl_dsp::convolution` gives zero-latency partitioned convolution (a 64-tap direct head and FFT stages of 64, 512 and 2,048 with their work sliced evenly per block) for mono, stereo and true-stereo responses up to 30 seconds, prepared off the audio thread and swapped with a crossfade, the old response freed off the audio thread |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
 | 8.32 | done | 1 November 2026 | [#697](https://github.com/loombridge/beatlayer/pull/697): `bl_dsp::pitch` has a streaming tracker (the Tuner's detector moved out, with confidence, voiced and onset every hop) and a PSOLA voice shifter that keeps or moves formants; a quiet reading in the shifter dated one interval early is a follow-up |

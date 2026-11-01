@@ -114,6 +114,7 @@ pub mod tube;
 pub mod tuner;
 pub mod utility;
 pub mod vector_delay;
+pub mod vocoder;
 pub mod wavetables;
 pub mod wax;
 
@@ -187,6 +188,7 @@ pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
 pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
+pub use vocoder::{VOCODER, vocoder_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -290,6 +292,7 @@ pub fn display_in(
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
+        VOCODER => Some(vocoder::display(device, description, values, data)),
         SPECTRAL_BLUR => Some(spectral_blur::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
@@ -392,6 +395,7 @@ pub fn register(registry: &mut Registry) {
     looper::register(registry);
     pitchloop89::register(registry);
     vector_delay::register(registry);
+    vocoder::register(registry);
     spectral_blur::register(registry);
 }
 

@@ -968,7 +968,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.18b | done | 31 October 2026 | [#632](https://github.com/loombridge/beatlayer/pull/632): CV Envelope Follower, CV LFO and CV Shaper share the modulators' laws, worked out every frame and equal to the modulators on their 32-frame grid points, with Min, Max and Depth in volts |
 | 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
-| 7.21 | todo |  |  |
+| 7.21 | done | 1 November 2026 | [#563](https://github.com/loombridge/beatlayer/pull/563): Note Mode on Push 2 arms the selected track and plays its drum rack through the Loop Selector, 16 Velocities and 64 Pads layouts tied to the pad view, with pad options, step sequencing with loop pads and pages, and `push.state` reading it back |
 | 7.22 | todo |  |  |
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
@@ -1009,7 +1009,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.25 | todo |  |  |
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |
-| 8.28 | todo |  |  |
+| 8.28 | done | 1 November 2026 | [#648](https://github.com/loombridge/beatlayer/pull/648): `bl_dsp::stft` gives a streaming STFT with exact overlap-add resynthesis, phase-vocoder helpers and a cepstral envelope, reporting `size - 1` frames of latency, and devices get a spectrogram display kind that reads back through `device.display`; Spectrum keeps its own FFT for now |
 | 8.29 | todo |  |  |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
@@ -1025,7 +1025,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.41 | todo |  |  |
 | 8.42 | todo |  |  |
 | 8.43 | done | 1 November 2026 | [#670](https://github.com/loombridge/beatlayer/pull/670): Resonators is a native device with its input filter, five tuned comb resonators (I by note and fine, II to V by interval), Decay, Const, Color, Mode A and B, Width, Gain and Dry/Wet, following the current scale and the set's tuning |
-| 8.44 | todo |  |  |
+| 8.44 | done | 1 November 2026 | [#659](https://github.com/loombridge/beatlayer/pull/659): Corpus is a native device with its seven resonator types on the shared physical models, the LFO, the input filter, the global controls and Bleed, and its frequency set by notes from a MIDI sidechain (routing R39) |
 | 8.45 | todo |  |  |
 | 8.46 | todo |  |  |
 | 8.47 | todo |  |  |
@@ -1046,7 +1046,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |
 | 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
-| 9.13 | todo |  |  |
+| 9.13 | done | 1 November 2026 | [#672](https://github.com/loombridge/beatlayer/pull/672): Tempo Follower follows the tracker in the engine before Link, with Settings ▸ Tempo & MIDI's section, the Control Bar's Follow toggle, EXT and Tap off while it follows, Link peers taking the followed tempo, and the `tempo_follower.*` commands |
 | 9.14 | todo |  |  |
 | 9.15 | todo |  |  |
 | 9.16 | todo |  |  |

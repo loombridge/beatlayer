@@ -485,5 +485,6 @@ pub fn display(
         series: all,
         markers: Vec::new(),
         readings,
+        spectrograms: Vec::new(),
     }
 }

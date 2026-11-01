@@ -1378,6 +1378,7 @@ pub fn display(
         series: vec![series],
         readings: Vec::new(),
         markers,
+        spectrograms: Vec::new(),
     }
 }
 

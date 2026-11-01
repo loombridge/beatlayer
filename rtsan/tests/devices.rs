@@ -342,6 +342,152 @@ fn veer_passes_under_rtsan() {
     );
 }
 
+#[test]
+fn corpus_passes_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_devices::corpus::{
+        CORPUS, DECAY, FILTER_ON, FREQUENCY, INHARM, LFO_AMOUNT, LFO_WAVE, OFF_DECAY, OPENING,
+        PB_RANGE, PRIORITY, QUALITY, RATIO, SPREAD, TYPE,
+    };
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let new_track = |editor: &mut Editor, kind| {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id,
+                kind,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        id
+    };
+    let (audio, keys) = (
+        new_track(&mut editor, TrackKind::Audio),
+        new_track(&mut editor, TrackKind::Midi),
+    );
+    // A note every beat for the length of the run: ten seconds at 120 BPM.
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let notes = (0..20).map(|n| Note::new(48 + (n % 24) as u8, beat * n, beat, 100));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track: keys,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 20,
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut corpus = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: CORPUS.to_owned(),
+        },
+    )
+    .with_midi_sidechain_tap();
+    for (param, value) in [
+        (FREQUENCY, 1.0),
+        (OFF_DECAY, 1.0),
+        (SPREAD, 50.0),
+        (LFO_AMOUNT, 40.0),
+        (DECAY, 60.0),
+    ] {
+        corpus.params.insert(param, value);
+    }
+    let corpus_id = corpus.id;
+    for (index, device) in [tone, corpus].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track: audio,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    editor
+        .apply(Command::SetMidiSidechainSource {
+            device: corpus_id,
+            track: Some(keys),
+            tap: None,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: corpus_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // type (a waveguide and a modal body in turn), Ratio, Inharm and
+        // Quality, which make a new table, Opening, the LFO, the filter and
+        // the sidechain's choices.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(TYPE, (step % 7) as f64)),
+            1 => Some(set(RATIO, (step % 11) as f64 * 10.0)),
+            2 => Some(set(INHARM, (step % 9) as f64 * 25.0 - 100.0)),
+            3 => Some(set(QUALITY, (step % 2) as f64)),
+            4 => Some(set(OPENING, (step % 5) as f64 * 25.0)),
+            5 => Some(set(LFO_WAVE, (step % 7) as f64)),
+            6 => Some(set(FILTER_ON, (step % 2) as f64)),
+            7 => Some(set(OFF_DECAY, (step % 3 != 0) as u8 as f64)),
+            8 => Some(set(PRIORITY, (step % 2) as f64)),
+            9 => Some(set(PB_RANGE, (step % 25) as f64)),
+            10 => Some(set(DECAY, (step % 11) as f64 * 10.0)),
+            11 => Some(set(FREQUENCY, (step % 4 != 0) as u8 as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Corpus under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
 /// The channel EQ, the three-band EQ, the gate and the bus compressor on a
 /// track of a test tone, with the gate's and the compressor's sidechain
 /// keyed from a second track, while their parameters move between two
@@ -1307,6 +1453,13 @@ fn spectrum_passes_under_rtsan() {
             (SCALE_X, &[0.0, 1.0, 2.0]),
         ],
     );
+}
+
+// Spec: device-framework R46
+#[test]
+fn the_test_spectrogram_passes_under_rtsan() {
+    use bl_devices::testing::{SPECTROGRAM, SPECTROGRAM_FREEZE};
+    run_lo_fi_device(SPECTROGRAM, &[(SPECTROGRAM_FREEZE, &[0.0, 1.0])]);
 }
 
 // Spec: tuner R8

@@ -4040,6 +4040,7 @@ fn schemas_match_what_commands_serialise() {
             Command::SetMidiSidechainSource {
                 device,
                 track: None,
+                tap: None,
             },
         ),
         (

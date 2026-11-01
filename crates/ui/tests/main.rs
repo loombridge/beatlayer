@@ -93,6 +93,7 @@ mod slice_to_midi;
 mod sound_analysis;
 mod stems_dialog;
 mod take_lanes;
+mod tempo_follower;
 mod theme_page;
 mod track_colours;
 mod track_menu;

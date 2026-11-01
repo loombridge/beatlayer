@@ -3683,8 +3683,17 @@ fn a_click_on_the_peak_readout_sets_it_back_to_the_current_peak() {
 #[test]
 fn an_engine_fed_peak_line_holds_two_seconds_of_the_test_clock_at_every_height() {
     use std::time::Duration;
-    let mut h = session();
+    // The engine paced by hand, and running the set: until its first block
+    // it publishes no meters, and a frame would take the test's away.
+    let mut h = Harness::manual_with_title_bar(Window::Main);
+    h.shell
+        .run("view.toggle_session_arrangement", json!({}))
+        .unwrap();
+    h.settle();
     let t = tracks(&h.shell);
+    h.wait("the engine's meters", |h| {
+        h.shell.meters().iter().any(|m| m.track == t[2])
+    });
     let clock = bl_core::clock::TestClock::new();
     h.shell.use_test_clock(clock.clone());
     let meter = |amplitude: f32| TrackMeter {

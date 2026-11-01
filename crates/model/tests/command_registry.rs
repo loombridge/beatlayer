@@ -1677,6 +1677,24 @@ fn every_command_runs_by_id() {
     let list = &agent.editor.document().device(map).unwrap().articulations;
     assert_eq!(list.len(), 1, "the list keeps one articulation");
 
+    // A route written into a slot of an instrument's modulation matrix, and
+    // emptied again (instrument modulation R8 to R10).
+    agent.run(
+        "device.write_route",
+        json!({ "device": map, "slot": 2, "source": "Velocity", "destination": "Note Level" }),
+    );
+    assert_eq!(agent.editor.document().device(map).unwrap().routes.len(), 1);
+    agent.run("device.erase_route", json!({ "device": map, "slot": 2 }));
+    assert!(
+        agent
+            .editor
+            .document()
+            .device(map)
+            .unwrap()
+            .routes
+            .is_empty()
+    );
+
     // A device with a sidechain input (WP-2.19b), listening to another
     // track.
     let duck: DeviceId = agent.new_id();

@@ -467,10 +467,15 @@ impl Editor {
             outer.keep |= open.keep;
             return Ok(false);
         }
-        if open.start == self.document && !open.keep {
+        // Cue mode and the pad layout are no undo step, so a transaction
+        // that changed only those records none: an agent's call runs in one.
+        let mut start = open.start;
+        start.settings.cue_mode = self.document.settings.cue_mode;
+        start.settings.pad_layout = self.document.settings.pad_layout;
+        if start == self.document && !open.keep {
             return Ok(false);
         }
-        self.record(open.label, open.maker, open.start);
+        self.record(open.label, open.maker, start);
         Ok(true)
     }
 
@@ -1448,6 +1453,33 @@ mod tests {
             .unwrap();
         let saved = serde_json::to_value(editor.document().settings()).unwrap();
         assert!(saved.get("pad_layout").is_none());
+    }
+
+    // Spec: push-2-notes R37. A transaction, such as an agent's call, that
+    // sets only the pad layout or cue mode records no step either.
+    #[test]
+    fn a_transaction_that_sets_only_the_pad_layout_records_no_step() {
+        use crate::PadDirection;
+        let mut editor = Editor::new();
+        editor
+            .transact_by(
+                Maker::Agent("a".to_owned()),
+                "a: Set Pad Layout",
+                |editor| {
+                    editor.apply(Command::SetPadLayout {
+                        in_key: None,
+                        fixed: None,
+                        spacing: None,
+                        direction: Some(PadDirection::Horizontal),
+                    })
+                },
+            )
+            .unwrap();
+        assert_eq!(editor.undo_history().len(), 0);
+        assert_eq!(
+            editor.document().settings().pad_layout.direction,
+            PadDirection::Horizontal
+        );
     }
 
     #[test]

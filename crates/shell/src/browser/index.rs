@@ -871,4 +871,61 @@ mod tests {
             expected
         );
     }
+
+    // Spec: sound-similarity R5, browser-tags R2. Search keeps up while a
+    // file is being analysed: the worker shares nothing with the index.
+    #[test]
+    fn a_search_of_100_000_names_keeps_up_while_a_sound_is_analysed() {
+        let folder = std::env::temp_dir().join(format!("bl-index-analysis-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join("Long.wav");
+        let rate = 22_050u32;
+        let data: Vec<u8> = (0..rate * 30)
+            .flat_map(|i| (((f64::from(i) * 0.05).sin() * 12_000.0) as i16).to_le_bytes())
+            .collect();
+        let mut bytes = b"RIFF".to_vec();
+        bytes.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        for word in [1u16, 1] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * 2).to_le_bytes());
+        for word in [2u16, 16] {
+            bytes.extend_from_slice(&word.to_le_bytes());
+        }
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&data);
+        std::fs::write(&path, bytes).unwrap();
+        let mut analysis = super::super::analysis::Analysis::new(Waker::default());
+        analysis.enqueue(vec![super::super::analysis::Item {
+            path: path.clone(),
+            size: 1,
+            modified: 0,
+            preset: false,
+        }]);
+        analysis.poll(None);
+        assert!(analysis.state().current.is_some(), "the worker is at it");
+
+        let snapshot = Snapshot::from_paths(
+            Path::new("/lib"),
+            (0..100_000).map(|i| (PathBuf::from(format!("/lib/kick {i}.wav")), ItemKind::Audio)),
+        );
+        let started = Instant::now();
+        for query in ["k", "ki", "kic", "kick", "kick 9", "kick 99"] {
+            assert!(
+                !snapshot.search(query, Scope::All, None).is_empty(),
+                "{query}"
+            );
+        }
+        let each = started.elapsed() / 6;
+        if std::env::var("BL_TEST_DEPTH").as_deref() == Ok("full") {
+            assert!(each < Duration::from_millis(250), "{each:?} a keystroke");
+        }
+        analysis.wait_for_current(None);
+        assert_eq!(analysis.state().analysed, 1);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

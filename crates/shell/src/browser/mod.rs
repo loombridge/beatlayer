@@ -22,6 +22,7 @@
 //!
 //! The behaviour is in the browser spec.
 
+pub mod analysis;
 pub mod arrange;
 pub mod catalogue;
 pub mod collections;
@@ -56,10 +57,10 @@ use bl_shell_spec::browser::{
     MAX_PREVIEW_VOLUME, MoveLabelArgs, MoveTagArgs, OpenFolderArgs, OpenPlaceArgs, PreviewArgs,
     PreviewState, QuickTag, RemoveLabelArgs, RenameFileArgs, RenameLabelArgs, RenameTagArgs,
     RevealArgs, SaveClipFileArgs, SaveClipFileResult, ScrubPreviewArgs, SearchArgs, Section,
-    SelectArgs, SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs, SetFilterViewArgs,
-    SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs, ShowFileArgs,
-    ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind, TagGroupInfo,
-    TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
+    SelectArgs, SetAnalysisPausedArgs, SetCollectionArgs, SetColumnsArgs, SetFilterGroupsArgs,
+    SetFilterViewArgs, SetLabelIconArgs, SetLabelShownArgs, SetPreviewArgs, SetRawArgs,
+    ShowFileArgs, ShowQuickTagsArgs, ShowTagEditorArgs, StateArgs, TagEditorRow, TagEditorRowKind,
+    TagGroupInfo, TagInfo, TagItemsArgs, TagSource, TagState, TaggedItem, TagsArgs, TagsState,
 };
 use bl_shell_spec::commands::{BROWSER_WIDTH, clamp_browser_width};
 use bl_shell_spec::settings::CollectFiles;
@@ -333,6 +334,8 @@ pub struct BrowserView {
     pending_hashes: HashSet<String>,
     /// The thread that hashes files.
     hasher: Hasher,
+    /// Sound analysis in the background (spec: sound-similarity R5).
+    analysis: analysis::Analysis,
     /// Whether the Tag Editor is open.
     tag_editor: bool,
     /// Whether Quick Tags shows.
@@ -566,6 +569,7 @@ impl BrowserView {
             selected: Vec::new(),
             cursor: None,
             index: Index::new(waker.clone()),
+            analysis: analysis::Analysis::new(waker.clone()),
             indexing: false,
             loader: Loader::new(waker.clone()),
             preview_on: prefs.preview,
@@ -696,6 +700,8 @@ impl BrowserView {
             .iter()
             .map(|row| (row.path.clone(), row.clone()))
             .collect();
+        self.analysis
+            .load(loaded.analysed.clone(), loaded.descriptor_keys.clone());
         self.adopt_index();
         self.save_tags(ops);
     }
@@ -2207,12 +2213,43 @@ impl BrowserView {
         }
     }
 
+    /// How far sound analysis has got (spec: sound-similarity R6, R7).
+    #[must_use]
+    pub fn analysis_state(&self) -> bl_shell_spec::browser::AnalysisState {
+        self.analysis.state()
+    }
+
+    /// The media store whose decoded audio sound analysis reuses.
+    pub fn set_analysis_media(&mut self, media: Arc<bl_media::MediaStore>) {
+        self.analysis.set_media(media);
+    }
+
+    /// Paces sound analysis by hand, for tests: it analyses a file only
+    /// when [`BrowserView::release_analysis`] allows it.
+    pub fn pace_analysis_by_hand(&mut self) {
+        self.analysis.pace_by_hand();
+    }
+
+    /// Lets sound analysis begin `files` more files, and waits for each to
+    /// be done unless it's paused, for tests that pace it by hand.
+    pub fn release_analysis(&mut self, files: usize) {
+        for _ in 0..files {
+            self.analysis.release(1);
+            self.analysis.poll(self.db.as_ref());
+            self.analysis.wait_for_current(self.db.as_ref());
+        }
+    }
+
     /// Waits for indexing to finish, up to `timeout`, for tests and tools.
     /// Returns whether it finished.
     pub fn wait_for_index(&mut self, timeout: Duration) -> bool {
         let done = self.index.wait(timeout);
         self.indexing = self.index.indexing();
         self.rebuild();
+        if done {
+            // As `poll` does when indexing finishes.
+            self.save_index();
+        }
         done
     }
 
@@ -2352,6 +2389,7 @@ impl BrowserView {
             self.hash_ready(hashed);
             polled.changed = true;
         }
+        polled.changed |= self.analysis.poll(self.db.as_ref());
         if self.take_probed() {
             self.rebuild();
             polled.changed = true;
@@ -3727,6 +3765,17 @@ impl BrowserView {
                 self.clear_collections(args)?;
                 outcome.value = state(self, ctx.audio);
             }
+            ids::ANALYSIS_STATE => {
+                parse::<bl_commands::NoArgs>(args)?;
+                outcome.value = to_value(&self.analysis.state());
+            }
+            ids::SET_ANALYSIS_PAUSED => {
+                let SetAnalysisPausedArgs { paused } = parse(args)?;
+                self.analysis
+                    .set_paused(paused.unwrap_or(!self.analysis.paused()));
+                self.analysis.poll(self.db.as_ref());
+                outcome.value = to_value(&self.analysis.state());
+            }
             ids::REVEAL => {
                 let args: RevealArgs = parse(args)?;
                 outcome.file_manager = self.reveal_targets(args)?;
@@ -3961,6 +4010,24 @@ impl BrowserView {
         }
         self.saved_files = saved;
         db.save_files(ops);
+        // Sound analysis starts once indexing has finished with the places
+        // (spec: sound-similarity R5).
+        if !db.is_newer() {
+            self.analysis.enqueue(
+                self.saved_files
+                    .values()
+                    .filter_map(|row| {
+                        let preset = analysis::analysed_kind(db::kind_from_name(&row.kind)?)?;
+                        Some(analysis::Item {
+                            path: PathBuf::from(&row.path),
+                            size: row.size,
+                            modified: row.modified,
+                            preset,
+                        })
+                    })
+                    .collect(),
+            );
+        }
         // A tagged file that isn't there any more: its tags pass to the
         // same content, if it turns up (spec: browser-tags R5).
         let orphans: Vec<(String, u64)> = self

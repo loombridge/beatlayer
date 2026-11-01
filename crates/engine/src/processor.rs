@@ -14,6 +14,7 @@ use crate::EngineConfig;
 use crate::capture::CapturedMidi;
 use crate::follower::{Ask, Follow, Follower};
 use crate::gc::{Owned, Program};
+use crate::link_audio::LinkAudio;
 use crate::message::{
     Action, LoopRegion, Message, NudgeDirection, ParamEvent, Punch, Report, ScheduledCommand,
     TransportCommand, When,
@@ -411,6 +412,12 @@ pub struct Processor {
     /// The outside tempo the song follows, if one is set (the transport
     /// spec, R24).
     follower: Option<Owned<Box<dyn Follower>>>,
+    /// The Link Audio the song reads peers' channels from and offers its
+    /// tracks through (the Link Audio spec, R4 to R6).
+    link_audio: Option<Owned<Box<dyn LinkAudio>>>,
+    /// Where Link's clock has this block's first frame heard, in
+    /// microseconds, if a Link session follows (R6).
+    moment: Option<i64>,
     /// What the follower answered for this block.
     follow: Follow,
     /// The tempo this block plays at, if the follower gave one.
@@ -517,6 +524,8 @@ impl Processor {
             last_take: None,
             timed: Vec::with_capacity(config.max_scheduled),
             follower: None,
+            link_audio: None,
+            moment: None,
             ext: false,
             follow: Follow::with_capacity(config.max_scheduled),
             followed: None,
@@ -726,6 +735,7 @@ impl Processor {
         self.midi.take(now, self.clock, frames, routes);
         self.resolve_due(frames);
         self.ask_follower(frames);
+        self.read_link_audio(frames);
         let mut done = 0;
         while done < frames {
             self.apply_due_transport(done);
@@ -744,6 +754,7 @@ impl Processor {
             self.render(done, length, part);
             done += length;
         }
+        self.send_link_audio(frames);
         self.clock += frames as u64;
         self.last = frames;
         self.finish(began, frames);
@@ -914,6 +925,10 @@ impl Processor {
                     // for it (the transport spec, R25).
                     self.asked = None;
                     self.ask_follower(frames);
+                }
+                Message::LinkAudio(link_audio) => {
+                    // As the follower: dropping the old one only lets go of it.
+                    drop(std::mem::replace(&mut self.link_audio, link_audio));
                 }
                 Message::Schedule(command) => self.schedule(command),
                 Message::Session(command) => self.session_command(command),
@@ -2241,6 +2256,7 @@ impl Processor {
             follower.get_mut().block(&ask, &mut self.follow);
         }
         self.no_count_in = self.follow.counts_in_off();
+        self.moment = self.follow.heard();
         if self.follow.overrides_tempo() && !self.tempo_overridden {
             self.tempo_overridden = true;
         }
@@ -2256,6 +2272,36 @@ impl Processor {
         // A follower that stops deciding, or goes, lets what waited start.
         if !self.deciding && !self.held.is_empty() {
             self.release_held();
+        }
+    }
+
+    /// Fills the block's Link Audio inputs with what the peers' channels
+    /// hold for the frames it plays on (the Link Audio spec, R5, R6): silence
+    /// while Link Audio is off or no channel is there. Real-time safe.
+    fn read_link_audio(&mut self, frames: usize) {
+        let Some(program) = self.program.as_mut() else {
+            return;
+        };
+        let link = match (self.link_audio.as_mut(), self.moment) {
+            (Some(link), Some(moment)) => {
+                let link: &dyn LinkAudio = &**link.get_mut();
+                link.active().then_some((link, moment))
+            }
+            _ => None,
+        };
+        program
+            .get_mut()
+            .read_link_audio(link, frames, self.config.sample_rate.hz());
+    }
+
+    /// Sends the block's offered tracks to the peers (the Link Audio spec,
+    /// R4). Real-time safe.
+    fn send_link_audio(&mut self, frames: usize) {
+        if let (Some(link), Some(moment)) = (self.link_audio.as_mut(), self.moment)
+            && link.get_mut().active()
+        {
+            link.get_mut()
+                .send(moment, frames, self.config.sample_rate.hz());
         }
     }
 
@@ -2579,6 +2625,14 @@ impl Processor {
                         scale: ScaleRuns::of(self.scale),
                     },
                 );
+                // Spec: link-audio R4. The tracks offered to the peers, as
+                // they leave their mixers.
+                if self.moment.is_some()
+                    && let Some(link) = self.link_audio.as_mut()
+                    && link.get_mut().active()
+                {
+                    program.stage_link_audio(&mut **link.get_mut(), offset, length);
+                }
                 // Spec: external-devices R4, R5
                 self.midi.emit(&mut program.midi, self.output_latency);
                 for c in 0..self.config.channels {

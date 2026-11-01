@@ -381,6 +381,7 @@ pub fn display(
         response,
     ));
     out.markers.push(DisplayMarker {
+        handle: None,
         name: "Mid".to_owned(),
         series: "Response".to_owned(),
         x: mid_hz as f32,

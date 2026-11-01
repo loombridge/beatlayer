@@ -3364,6 +3364,140 @@ fn an_agent_inserts_sets_and_reads_the_three_delays_by_command_id() {
     assert_eq!(reopened("scatter", grain_delay::X_AXIS), Some(4.0));
 }
 
+// Spec: pitchloop89 R11, R13, vector-delay R8, R9, R11 (WP-8.52): an agent
+// inserts PitchLoop89 and Vector Delay by command ID, sets parameters by ID,
+// reads them back with their descriptors, reads Vector Delay's particles
+// with `device.display` (and a starting place set puts its marker there),
+// and finds every value after the set is saved and reopened.
+#[test]
+fn an_agent_sets_pitchloop89_and_vector_delay_by_id_and_finds_them_after_a_reopen() {
+    use bl_devices::pitchloop89::{self, PITCHLOOP89};
+    use bl_devices::vector_delay::{self, VECTOR_DELAY};
+    use bl_model::{DeviceId, ParamId};
+
+    let dir = TempDir::new("loops");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("loops").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let inserts: Vec<Value> = [("loop", PITCHLOOP89), ("field", VECTOR_DELAY)]
+        .iter()
+        .enumerate()
+        .map(|(index, (name, kind))| {
+            json!({ "command": "device.insert", "args": { "track": track, "index": index, "device": {
+                "id": {"$new": name}, "name": name, "enabled": true, "params": [],
+                "kind": { "native": { "device_type": kind } },
+            } } })
+        })
+        .collect();
+    let inserted = call(&mut client, "run", json!({ "commands": inserts }));
+    let id = |name: &str| inserted["ids"][name].as_u64().unwrap();
+
+    let sets = [
+        ("loop", pitchloop89::SPEED_A, -150.0),
+        ("loop", pitchloop89::BANDWIDTH_B, 4.0),
+        ("loop", pitchloop89::ROUTING, 2.0),
+        ("loop", pitchloop89::VIBRATO_DEPTH, 40.0),
+        ("loop", pitchloop89::HOLD_B, 1.0),
+        ("loop", pitchloop89::LEVEL_A, 0.0),
+        ("field", vector_delay::TAPS, 6.0),
+        ("field", vector_delay::GRAVITY, -35.0),
+        ("field", vector_delay::MAX_TIME, 2_500.0),
+    ];
+    let places = [
+        ("field", vector_delay::tap_x(2), 0.6),
+        ("field", vector_delay::tap_y(2), 0.35),
+    ];
+    let set = |client: &mut Client<InProcess>, sets: &[(&str, ParamId, f64)]| {
+        let commands: Vec<Value> = sets
+            .iter()
+            .map(|(name, param, value)| {
+                json!({ "command": "device.set_param",
+                        "args": { "device": id(name), "param": param.0, "value": value } })
+            })
+            .collect();
+        call(client, "run", json!({ "commands": commands }));
+    };
+    set(&mut client, &sets);
+    set(&mut client, &places);
+    let sets: Vec<_> = sets.into_iter().chain(places).collect();
+
+    let read = |client: &mut Client<InProcess>, name: &str| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": id(name) } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    for (name, param, value) in &sets {
+        let params = read(&mut client, name);
+        let found = params
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["id"] == param.0)
+            .unwrap_or_else(|| panic!("parameter {}", param.0));
+        assert_eq!(found["value"], json!(value), "{name} {}", param.0);
+    }
+    assert_eq!(read(&mut client, "loop").as_array().unwrap().len(), 26);
+    assert_eq!(read(&mut client, "field").as_array().unwrap().len(), 30);
+    assert!(
+        read(&mut client, "field")
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|p| p["automatable"] == json!(true))
+    );
+
+    // The particles read back with `device.display`: six taps, the third where
+    // its starting place says, with a time and a level.
+    let display = |client: &mut Client<InProcess>| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": id("field") } }] }),
+        );
+        read["results"][0]["result"].clone()
+    };
+    let shown = display(&mut client);
+    let taps = shown["markers"].as_array().unwrap();
+    assert_eq!(taps.len(), 6);
+    let third = &taps[2];
+    assert_eq!(third["name"], json!("Tap 3"));
+    assert!((third["x"].as_f64().unwrap() - 0.6).abs() < 1e-6);
+    assert!((third["y"].as_f64().unwrap() - 0.35).abs() < 1e-6);
+    assert!(
+        third["text"].as_str().unwrap().contains("1500 ms"),
+        "{third}"
+    );
+    // One undo step puts the starting place back.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "edit.undo", "args": {} }] }),
+    );
+    let after = display(&mut client);
+    assert_ne!(after["markers"][2]["y"], shown["markers"][2]["y"], "undone");
+    set(&mut client, &places);
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Loops.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let reopened = |name: &str, param: ParamId| {
+        let device = project
+            .document
+            .device(DeviceId(bl_core::id::Id::new(id(name)).unwrap()))
+            .unwrap_or_else(|| panic!("{name} is in the set"));
+        device.params.get(&param).copied()
+    };
+    for (name, param, value) in &sets {
+        assert_eq!(reopened(name, *param), Some(*value), "{name} {}", param.0);
+    }
+}
+
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
 // (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved
@@ -5021,6 +5155,74 @@ fn an_agent_inserts_triband_by_its_type_and_sets_and_reads_its_parameters_by_id(
     assert!(params.iter().all(|p| p["automatable"] == json!(true)));
 }
 
+// Spec: color-limiter R8 and R1, re-enveloper R7 and R1 (WP-8.50): an agent
+// inserts Color Limiter and Re-Enveloper by type, sets their parameters by ID,
+// reads every one back, and reads each device's display with no engine.
+#[test]
+fn an_agent_inserts_color_limiter_and_re_enveloper_and_sets_and_reads_them() {
+    use bl_devices::color_limiter::{COLOR, COLOR_LIMITER, SATURATION};
+    use bl_devices::re_enveloper::{HIGH, HIGH_CROSSOVER, RE_ENVELOPER, factor};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("creative-extensions-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let insert = |name: &str, device_type: &str, index: u32| {
+        json!({ "command": "device.insert",
+                "args": { "track": track, "index": index,
+                          "device": { "id": {"$new": name}, "name": name,
+                                      "kind": { "native": { "device_type": device_type } },
+                                      "enabled": true, "params": [] } } })
+    };
+    let set = |name: &str, param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": name}, "param": param, "value": value } })
+    };
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Creative Extensions", "commands": [
+            insert("Color Limiter", COLOR_LIMITER, 0),
+            insert("Re-Enveloper", RE_ENVELOPER, 1),
+            set("Color Limiter", SATURATION, 40.0),
+            set("Color Limiter", COLOR, -25.0),
+            set("Re-Enveloper", HIGH_CROSSOVER, 5_000.0),
+            set("Re-Enveloper", factor(HIGH), -60.0),
+        ] }),
+    );
+    for (name, count, wanted) in [
+        ("Color Limiter", 6, [(SATURATION, 40.0), (COLOR, -25.0)]),
+        (
+            "Re-Enveloper",
+            9,
+            [(HIGH_CROSSOVER, 5_000.0), (factor(HIGH), -60.0)],
+        ),
+    ] {
+        let device = reply["ids"][name].clone();
+        let read = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        let params = read["results"][0]["result"]["params"].as_array().unwrap();
+        assert_eq!(params.len(), count, "{name}: every parameter is listed");
+        assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+        for (id, value) in wanted {
+            let param = params.iter().find(|p| p["id"] == json!(id.0)).unwrap();
+            assert_eq!(param["value"], json!(value), "{name}");
+        }
+        let shown = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+        );
+        let display = &shown["results"][0]["result"];
+        assert_eq!(display["live"], json!(false), "{name}: no engine publishes");
+        assert_eq!(display["readings"], json!([]), "{name}");
+    }
+}
+
 // Spec: auto-pan-tremolo R16. An agent inserts Auto Pan-Tremolo by type and
 // sets and reads its parameters by ID.
 #[test]
@@ -5500,6 +5702,129 @@ fn an_agent_adds_sets_and_reads_gated_delay_and_pitch_hack_and_reopens_them() {
                 "{kind}: parameter {param:?} reopened"
             );
         }
+    }
+}
+
+// Spec: echo R8, R20, R23
+#[test]
+fn an_agent_adds_sets_and_reads_echo_by_id_reads_its_displays_and_reopens_it() {
+    use bl_devices::echo::{self, echo_type};
+
+    let dir = TempDir::new("echo");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("echo-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        reply["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    let kind = echo_type();
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "track": track,
+            "device": { "kind": kind.kind, "name": kind.name, "role": kind.role },
+        }),
+    );
+    let device = added["device"].clone();
+    let parameters = |client: &mut Client<InProcess>| {
+        run(client, "device.parameters", json!({ "device": device }))["params"].clone()
+    };
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 56);
+
+    // Every parameter moved to the other end of its range, and read back.
+    let mut wanted = Vec::new();
+    for param in &kind.description.params {
+        let to = if param.default == param.max() {
+            param.min()
+        } else {
+            param.max()
+        };
+        run(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": param.id.0, "value": to }),
+        );
+        wanted.push((param.id, param.name.clone(), to));
+    }
+    let read = parameters(&mut client);
+    for (_, name, to) in &wanted {
+        let found = read
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == *name)
+            .unwrap_or_else(|| panic!("no {name}"));
+        assert_eq!(found["value"].as_f64().unwrap(), *to, "{name}");
+    }
+
+    // The tunnel is the first view and the filters' response the second.
+    let tunnel = run(&mut client, "device.display", json!({ "device": device }));
+    assert_eq!(tunnel["view"], json!("Tunnel"));
+    assert_eq!(tunnel["live"], json!(false));
+    let names: Vec<_> = tunnel["markers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(names.contains(&"Left Time".to_owned()), "{names:?}");
+    let steps = call(&mut client, "query", json!({ "path": "history" }))["undo"]["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    run(
+        &mut client,
+        "device.set_display_view",
+        json!({ "device": device, "view": "Filter" }),
+    );
+    let filter = run(&mut client, "device.display", json!({ "device": device }));
+    assert_eq!(filter["view"], json!("Filter"));
+    assert_eq!(filter["series"][0]["name"], json!("Filter"));
+    assert_eq!(
+        filter["markers"][0]["handle"]["x"],
+        json!(echo::HP_FREQ.0),
+        "a handle names the parameter it drags"
+    );
+    let after = call(&mut client, "query", json!({ "path": "history" }))["undo"]["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(after, steps, "a view is no undo step");
+
+    // A tab by name, then save and reopen.
+    run(
+        &mut client,
+        "device.set_page",
+        json!({ "device": device, "node": echo::TABS, "page": "Character" }),
+    );
+    let saved = run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": dir.0.join("Echo.blset").to_string_lossy() }),
+    );
+    let (project, _) =
+        bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] }))).unwrap();
+    let reopened = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .find(|d| {
+            matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == echo::ECHO)
+        })
+        .expect("Echo in the reopened set");
+    for (param, name, to) in &wanted {
+        assert_eq!(reopened.params[param], *to, "{name} reopened");
     }
 }
 

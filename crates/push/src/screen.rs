@@ -184,6 +184,25 @@ pub struct List {
     pub in_use: bool,
 }
 
+/// A Simpler's sample drawn across the content band, under its parameters'
+/// columns (push-2-notes R67). Every position is in pixels across the
+/// display: one past either edge when the view is zoomed.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Waveform {
+    /// The lowest and highest level in each pixel column, -127 to 127.
+    pub peaks: Vec<(i8, i8)>,
+    /// The region's Start and End flags: the rest is drawn dimmed.
+    pub region: (f32, f32),
+    /// The part Classic plays, inside the region.
+    pub played: Option<(f32, f32)>,
+    /// Where the loop repeats from, to the end of the played part.
+    pub looped: Option<f32>,
+    /// Where the slices after the first start.
+    pub slices: Vec<f32>,
+    /// The selected slice's start and end.
+    pub selected: Option<(f32, f32)>,
+}
+
 /// A box of text over the content band, which a notification or a mode's
 /// name uses (R19).
 pub type Message = String;
@@ -220,6 +239,8 @@ pub struct Screen {
     /// in a colour: the tracks inside an unfolded group or rack (push-2-tracks
     /// R37).
     pub underlines: Vec<(u8, u8, [u8; 3])>,
+    /// A Simpler's sample, drawn behind the columns (push-2-notes R67).
+    pub waveform: Option<Waveform>,
 }
 
 impl Screen {
@@ -299,6 +320,14 @@ impl Screen {
         }
         for (from, to, _) in &self.underlines {
             lines.push(format!("underline: {} to {}", from + 1, to + 1));
+        }
+        if let Some(wave) = &self.waveform {
+            lines.push(format!(
+                "waveform: region {:.0} to {:.0}, {} slices",
+                wave.region.0,
+                wave.region.1,
+                wave.slices.len() + 1
+            ));
         }
         if let Some(title) = &self.title {
             lines.push(format!("title: {title}"));

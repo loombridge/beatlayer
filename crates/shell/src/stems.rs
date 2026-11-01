@@ -54,6 +54,8 @@ pub struct Progress {
     pub(crate) done: Arc<AtomicU64>,
     pub(crate) total: Arc<AtomicU64>,
     stage: Arc<Mutex<String>>,
+    /// What a separation runs on, once its model is loaded.
+    provider: Arc<Mutex<String>>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -74,6 +76,13 @@ impl Progress {
         self.stage.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// The hardware a separation runs on, and why it isn't the GPU when it
+    /// should have been (R33); empty until the model is loaded.
+    #[must_use]
+    pub fn provider(&self) -> String {
+        self.provider.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
     /// Asks the thread to stop.
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -81,6 +90,12 @@ impl Progress {
 
     pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    fn set_provider(&self, provider: String) {
+        if let Ok(mut p) = self.provider.lock() {
+            *p = provider;
+        }
     }
 
     pub(crate) fn set_stage(&self, stage: impl Into<String>) {
@@ -148,6 +163,8 @@ pub struct Job {
     pub runtime: PathBuf,
     /// The model.
     pub model: PathBuf,
+    /// Where Core ML keeps its compiled model (R34).
+    pub cache: PathBuf,
     /// The set's media, which decodes the clip's file.
     pub media: Arc<MediaStore>,
     /// The clip's file.
@@ -213,9 +230,19 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Separated, separatio
     let right = audio.channel(1).unwrap_or(left);
     progress.set_stage("Loading the model");
     let threads = thread::available_parallelism().map_or(4, std::num::NonZero::get);
+    let options = separation::onnx::Options {
+        threads,
+        accelerate: true,
+        cache: Some(job.cache.clone()),
+    };
     let mut network =
-        separation::onnx::Demucs::load(&job.runtime, &job.model, threads).map_err(failed)?;
-    progress.set_stage("Separating");
+        separation::onnx::Demucs::load(&job.runtime, &job.model, &options, &mut |stage| {
+            progress.set_stage(stage);
+        })
+        .map_err(failed)?;
+    let report = network.report().describe();
+    progress.set_stage(format!("Separating on {report}"));
+    progress.set_provider(report);
     let stems = separation::separate(
         &left[from..to],
         &right[from..to],
@@ -227,7 +254,10 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Separated, separatio
                 .store((f64::from(fraction) * 1000.0) as u64, Ordering::Relaxed);
             !progress.cancelled()
         },
-    )?;
+    );
+    // A GPU run that failed part way finished on the CPU (R33).
+    progress.set_provider(network.report().describe());
+    let stems = stems?;
     Ok(Separated { from, stems })
 }
 

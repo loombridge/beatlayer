@@ -94,6 +94,8 @@ pub enum Menu {
     Setup,
     /// Scale.
     Scale,
+    /// The choices Convert offers for an audio clip (push-2-notes R76).
+    Convert,
 }
 
 impl Menu {
@@ -103,6 +105,7 @@ impl Menu {
         match self {
             Self::Setup => "Setup",
             Self::Scale => "Scale",
+            Self::Convert => "Convert",
         }
     }
 }

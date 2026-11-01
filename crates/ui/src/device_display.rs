@@ -5,6 +5,8 @@
 //! only on what the data holds, so a later device draws through the same
 //! code.
 
+use bl_devices::gated_delay::{PLAYING_STEP, ROW_COLUMNS, STEPS_SERIES, TURNED_SERIES};
+use bl_model::device_layout::{PADDING, Widget};
 use bl_model::{
     DeviceDisplay, DeviceId, DisplayMarker, DisplaySeries, DisplaySpectrogram, ParamDescriptor,
     ParamId,
@@ -122,6 +124,8 @@ pub fn draw(
     };
     if view == Some(ACTIVITY) {
         activity(ui, &painter, area, id, ink, display);
+    } else if display.series(STEPS_SERIES).is_some() {
+        step_row(&painter, area, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
         crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
@@ -140,6 +144,38 @@ pub fn draw(
     modulator_readings(&painter, theme, cell, ink, display);
     if views.len() > 1 {
         view_buttons(ui, theme, cell, display, views, enabled, events);
+    }
+}
+
+/// Gated Delay's step row (the gated-delay spec, R9): the switches are the
+/// cell's own controls, in two rows of [`ROW_COLUMNS`]; this marks the step
+/// playing with a bar under its switch, and with a dot above it each step
+/// Random turned over this pass.
+fn step_row(painter: &Painter, cell: Rect, ink: Color32, display: &DeviceDisplay) {
+    let size = Widget::Toggle.size();
+    let switch = |n: usize| {
+        let (column, row) = ((n % ROW_COLUMNS) as f32, (n / ROW_COLUMNS) as f32);
+        Rect::from_min_size(
+            pos2(
+                cell.left() + PADDING + column * (size.width + PADDING),
+                cell.top() + PADDING + row * (size.height + PADDING),
+            ),
+            vec2(size.width, size.height),
+        )
+    };
+    if let Some(playing) = display.reading(PLAYING_STEP).filter(|r| r.value >= 1.0) {
+        let at = switch(playing.value as usize - 1);
+        painter.rect_filled(
+            Rect::from_min_size(pos2(at.left(), at.bottom() + 1.0), vec2(at.width(), 2.0)),
+            0.0,
+            ink,
+        );
+    }
+    if let Some(turned) = display.series(TURNED_SERIES) {
+        for (n, _) in turned.values.iter().enumerate().filter(|(_, v)| **v > 0.5) {
+            let at = switch(n);
+            painter.circle_filled(pos2(at.left() + 4.0, at.top() - 2.0), 1.5, ink);
+        }
     }
 }
 

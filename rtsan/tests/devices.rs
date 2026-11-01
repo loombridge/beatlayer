@@ -1351,6 +1351,42 @@ fn the_modulation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: gated-delay R8, pitch-hack R8
+#[test]
+fn gated_delay_and_pitch_hack_pass_under_rtsan() {
+    use bl_devices::{gated_delay as gated, pitch_hack as hack};
+    run_lo_fi_device(
+        gated::GATED_DELAY,
+        &[
+            (gated::step(1), &[0.0, 1.0]),
+            (gated::step(7), &[1.0, 0.0]),
+            (gated::STEPS, &[3.0, 16.0, 11.0]),
+            (gated::RATE, &[0.0, 4.0, 11.0]),
+            (gated::DELAY_STEPS, &[1.0, 16.0]),
+            (gated::FEEDBACK, &[0.0, 90.0]),
+            (gated::RANDOM, &[0.0, 50.0, 100.0]),
+            (gated::DRY_ON_RESTS, &[0.0, 1.0]),
+            (gated::INPUT, &[0.0, 1.0, 3.98]),
+            (gated::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        hack::PITCH_HACK,
+        &[
+            (hack::SYNC, &[0.0, 1.0]),
+            (hack::DIVISION, &[0.0, 5.0, 13.0]),
+            (hack::TIME, &[10.0, 250.0, 2_000.0]),
+            (hack::TRANSPOSE, &[-24.0, 7.0, 24.0]),
+            (hack::CENTS, &[-50.0, 50.0]),
+            (hack::REVERSE, &[0.0, 50.0, 100.0]),
+            (hack::RANDOM, &[0.0, 50.0, 100.0]),
+            (hack::FEEDBACK, &[0.0, 100.0]),
+            (hack::INPUT, &[0.0, 1.0]),
+            (hack::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+}
+
 // Spec: echo R18
 #[test]
 fn echo_passes_under_rtsan() {
@@ -1473,6 +1509,33 @@ fn spectrum_passes_under_rtsan() {
 fn the_test_spectrogram_passes_under_rtsan() {
     use bl_devices::testing::{SPECTROGRAM, SPECTROGRAM_FREEZE};
     run_lo_fi_device(SPECTROGRAM, &[(SPECTROGRAM_FREEZE, &[0.0, 1.0])]);
+}
+
+// Spec: spectral-time R17
+#[test]
+fn spectral_time_passes_under_rtsan() {
+    use bl_devices::spectral_time::*;
+    run_lo_fi_device(
+        SPECTRAL_TIME,
+        &[
+            (RESOLUTION, &[3.0, 0.0, 4.0, 1.0, 2.0]),
+            (FREEZE, &[1.0, 0.0, 1.0]),
+            (FREEZER_MODE, &[0.0, 1.0]),
+            (TRIGGER, &[0.0, 1.0]),
+            (FADE_SHAPE, &[0.0, 1.0]),
+            (INTERVAL_MODE, &[1.0, 0.0]),
+            (DELAY_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (TIME, &[10.0, 250.0, 5_000.0]),
+            (TILT, &[-100.0, 0.0, 100.0]),
+            (SPRAY, &[0.0, 50.0, 100.0]),
+            (MASK, &[-50.0, 0.0, 50.0]),
+            (FEEDBACK, &[0.0, 50.0, 100.0]),
+            (SHIFT, &[-12.0, 0.0, 12.0]),
+            (STEREO, &[0.0, 100.0]),
+            (ORDER, &[0.0, 1.0]),
+            (ZERO_DRY_LATENCY, &[0.0, 1.0]),
+        ],
+    );
 }
 
 // Spec: tuner R8

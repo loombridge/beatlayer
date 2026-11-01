@@ -1770,3 +1770,21 @@ fn vector_delay_passes_under_rtsan() {
         ],
     );
 }
+
+// Spec: spectral-blur R8
+#[test]
+fn spectral_blur_passes_under_rtsan() {
+    use bl_devices::spectral_blur::*;
+    run_lo_fi_device(
+        SPECTRAL_BLUR,
+        &[
+            (LOW, &[20.0, 200.0, 4_000.0]),
+            (HIGH, &[20.0, 5_000.0, 20_000.0]),
+            (HALO, &[20.0, 1_000.0, 10_000.0]),
+            (RESIDUAL, &[0.0, 50.0, 100.0]),
+            (FREEZE, &[1.0, 0.0]),
+            (WET_GAIN, &[0.0, 1.0, 3.98]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+        ],
+    );
+}

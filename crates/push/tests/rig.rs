@@ -154,6 +154,7 @@ enum Contents {
     Mix,
     Placeholders,
     Note,
+    Clip,
     Simpler,
 }
 
@@ -211,6 +212,14 @@ impl Rig {
         rig
     }
 
+    /// A rig whose Note Mode and Clip Mode are the real ones, with the other
+    /// modes recording.
+    pub fn clipping() -> Self {
+        let mut rig = Self::build(Contents::Clip);
+        rig.ring_at(0, 0);
+        rig
+    }
+
     /// A rig whose Note Mode, Device Mode and Browse Mode are the real ones,
     /// for a Simpler on both.
     pub fn simplers() -> Self {
@@ -249,7 +258,7 @@ impl Rig {
                 };
                 bl_push::Contents {
                     pads: [
-                        if matches!(which, Contents::Note | Contents::Simpler) {
+                        if matches!(which, Contents::Note | Contents::Clip | Contents::Simpler) {
                             Box::new(bl_push::note::Note::new())
                         } else {
                             recorder("Note")
@@ -279,7 +288,11 @@ impl Rig {
                         } else {
                             recorder("Mix")
                         },
-                        recorder("Clip"),
+                        if which == Contents::Clip {
+                            Box::new(bl_push::clip::ClipMode::new())
+                        } else {
+                            recorder("Clip")
+                        },
                     ],
                 }
             })

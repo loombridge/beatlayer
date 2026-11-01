@@ -5,7 +5,7 @@ use bl_control::ReadModel;
 use bl_model::ClipId;
 use serde_json::json;
 
-use super::{DOUBLE_TAP, Down, Frame, GESTURE, Note, Pending, Source, WAIT, clip, grid};
+use super::{DOUBLE_TAP, Down, Frame, GESTURE, Note, Pending, Source, TAP, Tap, WAIT, clip, grid};
 use crate::content::{Ctx, HeldStep};
 use crate::controls::cc;
 
@@ -13,6 +13,24 @@ use crate::controls::cc;
 pub(super) const VELOCITY: u8 = 100;
 
 impl Note {
+    /// A step pad let go: a tap toggles its note as pressing it did before,
+    /// and a pad held longer, or while the display's encoders changed its
+    /// notes, leaves them as they are (push-2-tracks R55).
+    pub(super) fn tap_step(&mut self, step: HeldStep, tap: Tap, ctx: &mut Ctx<'_>) {
+        let Some(model) = ctx.model else {
+            return;
+        };
+        if ctx.at.saturating_duration_since(tap.at) >= TAP {
+            return;
+        }
+        let Some(frame) = self.frame(model) else {
+            return;
+        };
+        self.tapping = true;
+        self.toggle_note(&frame, tap.key, step.start, tap.velocity, ctx, model);
+        self.tapping = false;
+    }
+
     /// A step pad: adds a note at the step, or deletes the one there, or with
     /// Mute held deactivates it (R20, R22).
     pub(super) fn step_pad(
@@ -48,6 +66,18 @@ impl Note {
             start,
             length,
         };
+        // With no modifier the pad toggles the note when it is let go in
+        // time, so holding it edits the step's notes (push-2-tracks R55).
+        if !self.tapping && !ctx.modifiers.has(cc::MUTE) {
+            return Down::Tap(
+                step,
+                Tap {
+                    key,
+                    velocity,
+                    at: ctx.at,
+                },
+            );
+        }
         match frame
             .clip
             .and_then(|id| clip::midi(model, id).map(|(_, midi)| (id, midi)))

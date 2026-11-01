@@ -3988,6 +3988,100 @@ fn an_agent_sets_pitchloop89_and_vector_delay_by_id_and_finds_them_after_a_reope
     }
 }
 
+// Spec: spectral-blur R9, R11, R12 (WP-8.49): an agent inserts Spectral Blur
+// by command ID, sets every parameter by ID, reads them back with their
+// descriptors, reads the range's edges with `device.display`, and finds every
+// value after the set is saved and reopened.
+#[test]
+fn an_agent_sets_spectral_blur_by_id_and_finds_it_after_a_reopen() {
+    use bl_devices::spectral_blur::{self, SPECTRAL_BLUR};
+    use bl_model::{DeviceId, ParamId};
+
+    let dir = TempDir::new("blur");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("blur").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let inserted = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.insert", "args": { "track": track, "index": 0, "device": {
+            "id": {"$new": "blur"}, "name": "blur", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": SPECTRAL_BLUR } },
+        } } }] }),
+    );
+    let id = inserted["ids"]["blur"].as_u64().unwrap();
+    let sets: [(ParamId, f64); 7] = [
+        (spectral_blur::LOW, 300.0),
+        (spectral_blur::HIGH, 2_500.0),
+        (spectral_blur::HALO, 750.0),
+        (spectral_blur::RESIDUAL, 25.0),
+        (spectral_blur::FREEZE, 1.0),
+        (spectral_blur::WET_GAIN, 0.0),
+        (spectral_blur::DRY_WET, 60.0),
+    ];
+    let commands: Vec<Value> = sets
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": id, "param": param.0, "value": value } })
+        })
+        .collect();
+    call(&mut client, "run", json!({ "commands": commands }));
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": id } }] }),
+    );
+    let params = read["results"][0]["result"]["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(params.len(), 7);
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    for (param, value) in &sets {
+        let found = params.iter().find(|p| p["id"] == param.0).unwrap();
+        assert_eq!(found["value"], json!(value), "{}", param.0);
+    }
+    // The range's edges are handles on the display, where Low and High say.
+    let shown = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.display", "args": { "device": id } }] }),
+    );
+    let markers = shown["results"][0]["result"]["markers"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(markers.len(), 2);
+    assert_eq!(
+        (markers[0]["name"].as_str(), markers[0]["x"].as_f64()),
+        (Some("Low"), Some(300.0))
+    );
+    assert_eq!(
+        (markers[1]["name"].as_str(), markers[1]["x"].as_f64()),
+        (Some("High"), Some(2_500.0))
+    );
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Blur.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let device = project
+        .document
+        .device(DeviceId(bl_core::id::Id::new(id).unwrap()))
+        .expect("the device is in the set");
+    for (param, value) in &sets {
+        assert_eq!(
+            device.params.get(param).copied(),
+            Some(*value),
+            "{}",
+            param.0
+        );
+    }
+}
+
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
 // (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved

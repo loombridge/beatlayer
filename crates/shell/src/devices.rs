@@ -3803,12 +3803,13 @@ fn follow_current_scale(
     scale: bl_model::Scale,
     scales_hidden: bool,
 ) -> DevicePanel {
-    use bl_devices::{arpeggiator, dice, lift, remap, stack};
+    use bl_devices::{arpeggiator, dice, lift, remap, resonators, stack};
     let DeviceKind::Native { device_type } = &device.kind else {
         return panel;
     };
     if scales_hidden {
         let switch = match device_type.as_str() {
+            resonators::RESONATORS => resonators::USE_SCALE,
             remap::REMAP => remap::USE_SCALE,
             arpeggiator::ARPEGGIATOR => arpeggiator::USE_SCALE,
             lift::LIFT => lift::USE_SCALE,

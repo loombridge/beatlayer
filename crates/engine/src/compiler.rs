@@ -1610,9 +1610,6 @@ impl Compiler {
         for &device in &build.layered {
             self.send_layers(document, device, &mut update);
         }
-        for &device in &build.dataful {
-            self.send_device_data(document, device, &mut update);
-        }
         // Players that went hold no sources now, nor do new ones yet; open
         // sources of clips that went are closed.
         self.sources.retain(
@@ -1674,6 +1671,11 @@ impl Compiler {
                     self.gc.data(crate::node::PluginMpeData(device.mpe)),
                 ));
             }
+        }
+        // New nodes whose factories build data from their device (WP-8.9),
+        // after their automation.
+        for &device in &build.dataful {
+            self.send_device_data(document, device, &mut update);
         }
         update
     }

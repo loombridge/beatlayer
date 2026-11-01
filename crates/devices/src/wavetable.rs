@@ -34,7 +34,7 @@ use crate::framework::{Audio, NativeDevice, ParamBank, add_with_data};
 use crate::instrument::{self, Instrument, Parts, Section, State};
 use crate::instrument_filter::{CIRCUITS, InstrumentFilter, Per, PerFrame, Setup};
 use crate::sampler::FILTER_TYPE_CHOICES;
-use crate::wavetables::{OscTable, Source};
+use crate::wavetables::OscTable;
 
 /// Wavetable's device type.
 pub const WAVETABLE: &str = "beatlayer.wavetable";
@@ -841,12 +841,9 @@ impl Osc {
 
 /// The default tables: Beatlayer's own, in the first category.
 fn default_table() -> SharedTable {
-    Source::Factory {
-        category: "Shape Morphs".into(),
-        name: "Sine to Saw".into(),
-    }
-    .build()
-    .expect("the default tables are factory tables")
+    crate::wavetables::default_source()
+        .build()
+        .expect("the default tables are factory tables")
 }
 
 /// Everything but the voice section: the [`Instrument`] the voices play.

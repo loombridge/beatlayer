@@ -927,28 +927,24 @@ fn the_compiler_sends_the_tables_the_model_names() {
             amplitude_at(steady(&signal), f0),
         )
     };
-    // A device with no choice sends nothing and plays its default.
-    let first = compiler.sync(editor.document());
-    assert!(
-        first
+    let sent = |update: bl_engine::Update| -> Vec<_> {
+        update
             .data
-            .iter()
-            .all(|(key, _)| *key != NodeKey::Device(id))
-    );
+            .into_iter()
+            .filter(|(key, _)| *key == NodeKey::Device(id))
+            .collect()
+    };
+    // A device with no choice is sent the default on both oscillators.
+    assert_eq!(sent(compiler.sync(editor.document())).len(), 2);
     assert!(
         second(node.as_mut()) < -50.0,
         "the default is a sine at Position 0"
     );
     // A choice made later is built and sent as data to the node that is there.
     choose(&mut editor, "Saw to Square");
-    let update = compiler.sync(editor.document());
-    let sent: Vec<_> = update
-        .data
-        .into_iter()
-        .filter(|(key, _)| *key == NodeKey::Device(id))
-        .collect();
-    assert_eq!(sent.len(), 1, "one table, for Oscillator 1");
-    for (_, data) in sent {
+    let update = sent(compiler.sync(editor.document()));
+    assert_eq!(update.len(), 2, "Oscillator 1's table and 2's default");
+    for (_, data) in update {
         node.receive_data(data);
     }
     assert!(
@@ -959,13 +955,14 @@ fn the_compiler_sends_the_tables_the_model_names() {
     // A node made after the choice is sent the table with its first compile.
     let mut fresh = Compiler::new(EngineConfig::new(RATE, 512), registry(), collector.handle());
     let first = fresh.sync(editor.document());
-    assert_eq!(
-        first
-            .data
-            .iter()
-            .filter(|(key, _)| *key == NodeKey::Device(id))
-            .count(),
-        1,
-        "a new node is sent its table"
+    assert_eq!(sent(first).len(), 2, "a new node is sent its tables");
+    // Undoing the first choice sends the default back.
+    editor.undo().unwrap();
+    for (_, data) in sent(compiler.sync(editor.document())) {
+        node.receive_data(data);
+    }
+    assert!(
+        second(node.as_mut()) < -50.0,
+        "undone, the node plays the default again"
     );
 }

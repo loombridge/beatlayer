@@ -303,10 +303,20 @@ pub struct OscTable {
     pub table: SharedTable,
 }
 
+/// The table an oscillator with no choice plays: Beatlayer's own default.
+#[must_use]
+pub fn default_source() -> Source {
+    Source::Factory {
+        category: "Shape Morphs".into(),
+        name: "Sine to Saw".into(),
+    }
+}
+
 /// The tables `device`'s oscillators have been given, built for the
 /// compiler to send (R3, R10), and the media of user tables whose file
-/// `file` can't name. A table that can't be built leaves its oscillator with
-/// the table it had. Not for the audio thread.
+/// `file` can't name. An oscillator with no choice is sent the default, so
+/// undoing its first choice is heard. A table that can't be built leaves its
+/// oscillator with the table it had. Not for the audio thread.
 #[must_use]
 pub fn device_data(
     device: &bl_model::Device,
@@ -315,7 +325,7 @@ pub fn device_data(
     let mut data = bl_engine::DeviceData::default();
     for at in 0..bl_model::MAX_WAVETABLES {
         let source = match device.wavetable_at(at) {
-            None => continue,
+            None => default_source(),
             Some(bl_model::WavetableChoice::Factory { category, name }) => Source::Factory {
                 category: category.clone(),
                 name: name.clone(),

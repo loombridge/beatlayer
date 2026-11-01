@@ -879,12 +879,10 @@ fn sixteen_voices_render_faster_than_the_device_budget_with_no_allocation() {
         );
         assert!(heard > 1.0, "{} sounds", CIRCUITS[usize::from(circuit)]);
         if full_depth() {
-            // A debug build on a loaded machine (the Linux CI runner, which
-            // runs the SMP circuit at about 4x while the Mac runs it at
-            // about 30x); 16 voices mustn't eat more than half the time
-            // they play.
+            // A debug build on a loaded machine; 16 voices mustn't eat more
+            // than a quarter of the time they play.
             assert!(
-                realtime >= 2.0,
+                realtime >= 4.0,
                 "{}: {realtime:.1}x real time",
                 CIRCUITS[usize::from(circuit)]
             );

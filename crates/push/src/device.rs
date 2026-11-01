@@ -15,7 +15,7 @@ use bl_model::{
 };
 use serde_json::json;
 
-use crate::content::{Content, Ctx, Gesture, Paint, Turn};
+use crate::content::{Content, Ctx, Gesture, HeldStep, Paint, Turn};
 use crate::controls::{self, cc};
 use crate::encoder::{Counting, LIST_STEPS, Moving};
 use crate::screen::{Column, Dot, Graphic, Icon, Label, Shade};
@@ -597,6 +597,17 @@ impl DeviceMode {
         let descriptor = &param.descriptor;
         let n = usize::from(column);
         let now = ctx.cx.now();
+        // Spec: push-2-notes R66. With steps held, the turn is the value at
+        // the first held step.
+        let target = AutomationTarget::Device {
+            device,
+            param: param.param,
+        };
+        let steps_value = ctx
+            .model
+            .filter(|_| !ctx.held_steps.is_empty())
+            .and_then(|m| crate::automation::value_at_first_step(m, ctx.held_steps, &target));
+        let current = steps_value.unwrap_or(param.value);
         let value = if descriptor.is_stepped() {
             let by = self.counts[n].take(steps, LIST_STEPS);
             if by == 0 {
@@ -604,21 +615,68 @@ impl DeviceMode {
             }
             let base = match self.sent[n] {
                 Some((value, at)) if now.saturating_duration_since(at) < REST => value,
-                _ => param.value,
+                _ => current,
             };
             let value = descriptor.clamp(base + f64::from(by));
             self.sent[n] = Some((value, now));
             value
         } else {
-            let position = descriptor.normalize(param.value);
+            let position = descriptor.normalize(current);
             let to = self.moving[n].turn(now, position, steps, ctx.modifiers.shift());
             descriptor.denormalize(to)
         };
+        if !ctx.held_steps.is_empty() {
+            if let Some(clip) = ctx
+                .model
+                .and_then(crate::automation::edited_clip)
+                .map(|c| c.id)
+            {
+                crate::automation::write_steps(
+                    ctx,
+                    PARAM_GESTURE + u32::from(column),
+                    clip,
+                    &target,
+                    value,
+                );
+            }
+            return;
+        }
         ctx.cx.run_held(
             PARAM_GESTURE + u32::from(column),
             "device.set_param",
             json!({ "device": device, "param": param.param, "value": value }),
         );
+    }
+
+    /// Delete and a touch: the parameter's automation goes, or the parameter
+    /// goes back to its default where it has none (R62).
+    fn delete_automation(&mut self, column: u8, ctx: &mut Ctx<'_>) {
+        let Some(model) = ctx.model else {
+            return;
+        };
+        let Some(focus) = Self::focus(model, ctx.cx.row()) else {
+            return;
+        };
+        let Some(param) = focus.params.get(usize::from(column)) else {
+            return;
+        };
+        let Some(track) = model.document.device_track(focus.device) else {
+            return;
+        };
+        let target = AutomationTarget::Device {
+            device: focus.device,
+            param: param.param,
+        };
+        if !crate::automation::delete(ctx, model, track, &target) && !param.held {
+            ctx.cx.run(
+                "device.set_param",
+                json!({
+                    "device": focus.device,
+                    "param": param.param,
+                    "value": param.descriptor.default,
+                }),
+            );
+        }
     }
 
     /// Moves the held effect one place for each list step, only to places
@@ -681,30 +739,27 @@ impl DeviceMode {
     }
 
     /// A parameter as its column shows it (R20).
-    fn column(doc: &Document, focus: &Focus, param: &ParamView) -> Column {
+    fn column(model: &ReadModel, focus: &Focus, param: &ParamView, held: &[HeldStep]) -> Column {
+        let doc = &model.document;
         let descriptor = &param.descriptor;
         let graphic = match descriptor.kind {
             ParamKind::Toggle | ParamKind::Choice { .. } => Graphic::Choice(param.text.clone()),
             _ => Graphic::Arc(descriptor.normalize(param.value) as f32),
         };
-        let dot = doc
-            .device_track(focus.device)
-            .and_then(|track| doc.track(track))
-            .and_then(|track| {
-                track.automation_for(&AutomationTarget::Device {
-                    device: focus.device,
-                    param: param.param,
-                })
-            })
-            .map_or(Dot::None, |automation| {
-                if !automation.enabled {
-                    Dot::Overridden
-                } else if automation.envelope.is_empty() {
-                    Dot::None
-                } else {
-                    Dot::Automated
-                }
-            });
+        let target = AutomationTarget::Device {
+            device: focus.device,
+            param: param.param,
+        };
+        let dot = doc.device_track(focus.device).map_or(Dot::None, |track| {
+            crate::automation::dot(model, track, &target)
+        });
+        // Spec: push-2-notes R66. Holding steps shows the value at the first.
+        let graphic = match crate::automation::value_at_first_step(model, held, &target) {
+            Some(value) if !matches!(graphic, Graphic::Choice(_)) => {
+                Graphic::Arc(descriptor.normalize(value) as f32)
+            }
+            _ => graphic,
+        };
         Column {
             name: param.name.clone(),
             value: param.text.clone(),
@@ -738,6 +793,9 @@ impl Content for DeviceMode {
                 self.counts[n].reset();
                 self.moving[n].touch();
                 self.sent[n] = None;
+                if ctx.modifiers.has(cc::DELETE) {
+                    self.delete_automation(column, ctx);
+                }
                 self.touch_simpler(column, ctx);
             }
             // From touch to release is one undo step (R1).
@@ -874,7 +932,8 @@ impl Content for DeviceMode {
                 state.simpler = Some(drawn);
             } else {
                 for (column, param) in focus.params.iter().take(8).enumerate() {
-                    paint.screen.columns[column] = Self::column(doc, focus, param);
+                    paint.screen.columns[column] =
+                        Self::column(model, focus, param, paint.held_steps);
                     paint.screen.shades[column] = match (shade, param.held) {
                         (Shade::Normal, true) => Shade::Dimmed,
                         (shade, _) => shade,

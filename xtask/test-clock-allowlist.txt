@@ -19,6 +19,7 @@ crates/cli/tests/capacity.rs # measures a real-time streaming load
 crates/cli/tests/m2_song.rs # a timeout on the playhead
 crates/devices/tests/instrument_filter.rs # measures the instruments' filter's real-time load
 crates/devices/tests/multisampler.rs # a timeout on a sample's disk read
+crates/devices/tests/operator.rs # measures Operator's real-time load
 crates/devices/tests/polysynth.rs # measures a synth's real-time load
 crates/engine/src/gc.rs # a timeout on the drop thread
 crates/engine/src/sched.rs # a timeout on the compiler thread

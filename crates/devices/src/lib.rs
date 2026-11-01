@@ -87,6 +87,8 @@ pub mod multiband_dynamics;
 pub mod multisampler;
 mod multisampler_tabs;
 pub mod note_echo;
+pub mod operator;
+pub mod operator_envelope;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod pedal;
@@ -108,6 +110,7 @@ mod sections;
 pub mod shifter;
 mod signal_mod;
 pub mod spectral_blur;
+pub mod spectral_resonator;
 pub mod spectral_time;
 pub mod spectrum_analyser;
 pub mod stack;
@@ -169,6 +172,7 @@ pub use midi_mpe::{MPE_CONTROL, mpe_control_type};
 pub use multiband_dynamics::{MULTIBAND_DYNAMICS, Triband, multiband_dynamics_type};
 pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use note_echo::{NOTE_ECHO, note_echo_type};
+pub use operator::{OPERATOR, Operator, operator_type};
 pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use pedal::{PEDAL, pedal_type};
@@ -185,6 +189,7 @@ pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
 pub use spectral_blur::{SPECTRAL_BLUR, spectral_blur_type};
+pub use spectral_resonator::{SPECTRAL_RESONATOR, spectral_resonator_type};
 pub use spectral_time::{SPECTRAL_TIME, spectral_time_type};
 pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
@@ -264,6 +269,7 @@ pub fn display_in(
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
         ROAR => Some(roar::display(device, description, values, data, view)),
+        SPECTRAL_RESONATOR => Some(spectral_resonator::display(device, description, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
         bl_model::modulator::STRIKE_MOD => {
@@ -331,6 +337,7 @@ pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     corpus::register(registry);
     polysynth::register(registry);
+    operator::register(registry);
     analog::register(registry);
     limiter::register(registry);
     delay::register(registry);
@@ -391,6 +398,7 @@ pub fn register(registry: &mut Registry) {
     roar::register(registry);
     pedal::register(registry);
     resonators::register(registry);
+    spectral_resonator::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     color_limiter::register(registry);

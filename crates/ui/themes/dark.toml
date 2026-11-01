@@ -21,6 +21,8 @@ accent = "#35c2b0"
 accent_text = "#08201d"
 # The record button when armed, and errors.
 record = "#e5534b"
+# The Arm switch of a track a control surface armed by selection.
+arm_selection = "#f08cc4"
 error_text = "#ff8a80"
 # Text.
 text = "#e4e8ee"

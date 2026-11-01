@@ -1541,6 +1541,9 @@ fn an_empty_pad_records_and_the_scene_buttons_launch_and_select() {
         json!({ "quantization": "none" }),
     );
     rig.clip(1, 0);
+    // T1, the selected track, is armed by selection (push-2-notes R3).
+    let tracks = rig.tracks();
+    rig.run("mixer.set_arm", json!({ "track": tracks[1], "arm": false }));
     rig.run("transport.play", json!({}));
     rig.step();
     rig.pad(0, 1);
@@ -1549,7 +1552,6 @@ fn an_empty_pad_records_and_the_scene_buttons_launch_and_select() {
     rig.pad(1, 1);
     rig.wait_stopped();
     // An armed track's empty slot records.
-    let tracks = rig.tracks();
     rig.run("mixer.set_arm", json!({ "track": tracks[0], "arm": true }));
     rig.step();
     rig.pad(2, 0);

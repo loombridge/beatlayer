@@ -1028,7 +1028,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.44 | done | 1 November 2026 | [#659](https://github.com/loombridge/beatlayer/pull/659): Corpus is a native device with its seven resonator types on the shared physical models, the LFO, the input filter, the global controls and Bleed, and its frequency set by notes from a MIDI sidechain (routing R39) |
 | 8.45 | todo |  |  |
 | 8.46 | todo |  |  |
-| 8.47 | todo |  |  |
+| 8.47 | done | 1 November 2026 | [#699](https://github.com/loombridge/beatlayer/pull/699): Spectral Time, an STFT effect with the Freezer (Manual and Retrigger on onsets or synced divisions, crossfade and envelope fades), the spectral delay (time in milliseconds, notes or sixteenths, Feedback, Tilt, Spray, Mask, Stereo), the order switch, Resolution with a crossfade, the global controls and a headless spectrogram, its banks covering every parameter |
 | 8.48 | todo |  |  |
 | 8.49 | todo |  |  |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |

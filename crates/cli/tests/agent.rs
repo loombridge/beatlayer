@@ -2916,7 +2916,12 @@ fn an_agent_inserts_roar_sets_its_parameters_by_id_and_reads_each_stages_curve()
         json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
     );
     let params = read["results"][0]["result"]["params"].as_array().unwrap();
-    assert_eq!(params.len(), 43, "every parameter of part 1 is listed");
+    assert_eq!(
+        params.len(),
+        bl_devices::roar::roar_type().description.params.len(),
+        "every parameter is listed"
+    );
+    assert!(params.len() > 43, "part 2's follow part 1's");
     let get = |id: bl_model::ParamId| {
         params
             .iter()
@@ -2982,6 +2987,130 @@ fn an_agent_inserts_roar_sets_its_parameters_by_id_and_reads_each_stages_curve()
             .all(|v| v.as_f64().unwrap() >= 0.0),
         "stage 2's Full Wave Rectifier"
     );
+}
+
+// Spec: roar R30, routing R39 (WP-8.39): an agent adds Roar, sets matrix
+// amounts, Global Modulation Amount and the feedback section by ID, points
+// its MIDI sidechain at a MIDI track with a tapping point, and reads all of
+// it back; a device without a tapping point refuses one.
+#[test]
+fn an_agent_sets_roars_matrix_and_midi_source_with_its_tap_and_reads_them_back() {
+    use bl_devices::roar::{
+        DRIVE, FB_AMOUNT, FB_MODE, GLOBAL_MODULATION, ROAR, SOURCES, TARGET_IDS, matrix_param,
+    };
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("roar-matrix-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Roar", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": ROAR } },
+                                    "name": "Roar", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    let drive = TARGET_IDS.iter().position(|id| *id == DRIVE).unwrap();
+    let lfo_1_drive = matrix_param(0, drive);
+    let noise_drive = matrix_param(SOURCES.len() - 1, drive);
+    let set = |param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": device, "param": param, "value": value } })
+    };
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Roar", "commands": [
+            set(lfo_1_drive, 40.0),
+            set(noise_drive, -25.0),
+            set(GLOBAL_MODULATION, 60.0),
+            set(FB_MODE, 4.0),
+            set(FB_AMOUNT, 75.0),
+            { "command": "device.set_midi_sidechain_source",
+              "args": { "device": device, "track": keys, "tap": "pre_fx" } },
+        ] }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    let value = |id: bl_model::ParamId| {
+        params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"))["value"]
+            .clone()
+    };
+    assert_eq!(
+        [
+            lfo_1_drive,
+            noise_drive,
+            GLOBAL_MODULATION,
+            FB_MODE,
+            FB_AMOUNT
+        ]
+        .map(value),
+        [
+            json!(40.0),
+            json!(-25.0),
+            json!(60.0),
+            json!(4.0),
+            json!(75.0)
+        ]
+    );
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+
+    // A new Roar takes its notes Post FX; the set above moved it to Pre FX,
+    // and the source and the tap read back from the device.
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("pre_fx"));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                "args": { "device": device, "track": keys, "tap": "post_mixer" } }] }),
+    );
+    let found = call(
+        &mut client,
+        "query",
+        json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" }),
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("post_mixer"));
+    // A device whose MIDI sidechain has no tapping point refuses one.
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": bl_devices::shifter::SHIFTER } },
+                                    "name": "Shifter", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let shifter = reply["results"][0]["result"]["device"].clone();
+    let refused = client
+        .call(
+            "run",
+            json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                    "args": { "device": shifter, "track": keys, "tap": "pre_fx" } }] }),
+        )
+        .unwrap();
+    assert!(refused.ok().is_err());
 }
 
 // Spec: pitch-and-frequency-shifter R13, routing R33 and R35 (WP-5.27): an

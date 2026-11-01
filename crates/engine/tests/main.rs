@@ -61,6 +61,7 @@ mod probability_groups;
 mod racks;
 mod recording;
 mod restart;
+mod roar_sidechains;
 mod routing;
 mod scales;
 mod scene_tempo;

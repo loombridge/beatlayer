@@ -185,3 +185,298 @@ fn fixed_length_switched_on_mid_recording_loops_the_last_stretch() {
     assert_eq!(midi.loop_end, Some(clip.length));
     assert_eq!(midi.loop_end.unwrap() - midi.loop_start, Ticks(BAR).min(clip.length));
 }
+
+impl Rig {
+    fn scenes(&self) -> Vec<bl_model::SceneId> {
+        self.shell.editor().document().scenes().map(|s| s.id).collect()
+    }
+
+    /// An empty one-bar MIDI clip in `scene`'s slot of the track, which is
+    /// selected there.
+    fn clip_in(&mut self, scene: bl_model::SceneId) -> bl_model::ClipId {
+        let track = self.track;
+        self.run(
+            "session.insert_empty_midi_clip",
+            json!({ "track": track, "scene": scene }),
+        );
+        self.run("session.select", json!({ "track": track, "scene": scene }));
+        self.pass(50);
+        self.shell.editor().document().slot(track, scene).unwrap().id
+    }
+
+    /// The slot the Session View has selected.
+    fn selected_slot(&mut self) -> Option<(bl_model::TrackId, bl_model::SceneId)> {
+        let state = self.run("session.state", json!({}));
+        let slot = state["slots"].as_array()?.first()?.clone();
+        Some((
+            serde_json::from_value(slot["track"].clone()).ok()?,
+            serde_json::from_value(slot["scene"].clone()).ok()?,
+        ))
+    }
+
+    fn playing(&self, track: bl_model::TrackId, scene: bl_model::SceneId) -> bool {
+        self.shell.session_states().iter().any(|s| {
+            s.track == track && s.scene == scene && s.state == bl_engine::SlotState::Playing
+        })
+    }
+}
+
+// Spec: push-2-notes R52. With Workflow on Clip, New selects the next empty
+// slot below on the selected track, inserting a scene when there is none;
+// each is one undo step.
+#[test]
+fn new_with_workflow_clip_selects_the_next_empty_slot_or_inserts_a_scene() {
+    let mut rig = session_rig();
+    rig.run("push.set_setup", json!({ "workflow": "clip" }));
+    let scenes = rig.scenes();
+    rig.clip_in(scenes[0]);
+    let steps = rig.steps();
+    rig.tap("new");
+    assert_eq!(rig.selected_slot(), Some((rig.track, scenes[1])));
+    assert_eq!(rig.scenes(), scenes, "the slot below was empty");
+    let last = *scenes.last().unwrap();
+    rig.clip_in(last);
+    let steps = rig.steps().max(steps);
+    rig.tap("new");
+    let after = rig.scenes();
+    assert_eq!(after.len(), scenes.len() + 1);
+    assert_eq!(rig.selected_slot(), Some((rig.track, *after.last().unwrap())));
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+}
+
+// Spec: push-2-notes R52. With Workflow on Scene, New stops the selected
+// track's clip and inserts a scene holding copies of the clips playing on
+// the other tracks, and selects the selected track's empty slot in it.
+#[test]
+fn new_with_workflow_scene_captures_the_other_tracks_and_selects_an_empty_slot() {
+    let mut rig = session_rig();
+    let other = crate::push_beats::new_track(&mut rig, "Other");
+    rig.run(
+        "arrangement.select_tracks",
+        json!({ "tracks": [rig.track] }),
+    );
+    let first = rig.scenes()[0];
+    rig.clip_in(first);
+    rig.run(
+        "session.insert_empty_midi_clip",
+        json!({ "track": other, "scene": first }),
+    );
+    for track in [rig.track, other] {
+        rig.run("session.launch", json!({ "track": track, "scene": first }));
+    }
+    rig.pass(100);
+    let steps = rig.steps();
+    rig.tap("new");
+    let scenes = rig.scenes();
+    let doc = rig.shell.editor().document();
+    assert_eq!(scenes.len(), 9, "a scene was inserted");
+    assert_eq!(scenes[1..].iter().filter(|s| doc.slot(other, **s).is_some()).count(), 1);
+    assert!(doc.slot(rig.track, scenes[1]).is_none(), "the selected track's slot is empty");
+    assert_eq!(rig.selected_slot(), Some((rig.track, scenes[1])));
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+}
+
+// Spec: push-2-notes R53. Duplicate alone with Workflow on Scene captures
+// and inserts a scene; with Workflow on Clip it copies the selected clip into
+// the slot below and launches the copy; each is one undo step.
+#[test]
+fn duplicate_in_both_workflows_makes_the_scene_or_the_copy() {
+    let mut rig = session_rig();
+    let scenes = rig.scenes();
+    rig.clip_in(scenes[0]);
+    rig.run("session.launch", json!({ "track": rig.track, "scene": scenes[0] }));
+    rig.pass(100);
+    let steps = rig.steps();
+    rig.tap("duplicate");
+    assert_eq!(rig.scenes().len(), scenes.len() + 1, "Capture and Insert Scene");
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+
+    let mut rig = session_rig();
+    rig.run("push.set_setup", json!({ "workflow": "clip" }));
+    let scenes = rig.scenes();
+    rig.clip_in(scenes[0]);
+    rig.run("session.launch", json!({ "track": rig.track, "scene": scenes[0] }));
+    rig.pass(100);
+    let steps = rig.steps();
+    rig.tap("duplicate");
+    rig.pass(100);
+    let doc = rig.shell.editor().document();
+    assert!(doc.slot(rig.track, scenes[1]).is_some(), "the copy is in the slot below");
+    assert_eq!(rig.scenes().len(), scenes.len());
+    assert!(rig.playing(rig.track, scenes[1]), "the copy plays");
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+}
+
+fn velocities(rig: &Rig) -> Vec<u8> {
+    let (_, midi) = rig.clip().expect("a clip");
+    let mut notes: Vec<_> = midi.notes.iter().map(|n| (n.start.get(), n.velocity)).collect();
+    notes.sort_unstable();
+    notes.into_iter().map(|n| n.1).collect()
+}
+
+// Spec: push-2-notes R54. Accent gives 127 over the 16 velocities, switched
+// on by a tap and, held longer than a tap, on until released.
+#[test]
+fn accent_gives_127_tapped_and_held() {
+    let mut rig = Rig::new();
+    rig.tap("layout");
+    rig.tap_pad(0, 4);
+    assert_eq!(rig.note()["velocity"], 8);
+    rig.tap("accent");
+    assert_eq!(rig.note()["accent"], true);
+    rig.tap_pad(4, 0);
+    rig.tap("accent");
+    assert_eq!(rig.note()["accent"], false);
+    rig.tap_pad(4, 1);
+    rig.hold("accent");
+    assert_eq!(rig.note()["accent"], true);
+    rig.tap_pad(4, 2);
+    rig.release("accent");
+    assert_eq!(rig.note()["accent"], false);
+    rig.tap_pad(4, 3);
+    assert_eq!(velocities(&rig), [127, 8, 127, 8]);
+}
+
+fn starts(rig: &Rig) -> Vec<i64> {
+    let doc = rig.shell.editor().document();
+    let mut starts: Vec<i64> = doc
+        .track(rig.track)
+        .unwrap()
+        .clips()
+        .flat_map(|clip| match &clip.data {
+            ClipData::Midi(midi) => midi.notes.iter().map(|n| clip.start.get() + n.start.get()).collect(),
+            ClipData::Audio(_) => Vec::new(),
+        })
+        .collect();
+    starts.sort_unstable();
+    starts
+}
+
+/// Holds drum pad 36 for a beat with Repeat on and returns the gaps between
+/// the notes it recorded.
+fn repeated_gaps(rig: &mut Rig) -> Vec<i64> {
+    rig.run("transport.set_record_quantization", json!({ "quantization": "none" }));
+    rig.tap("repeat");
+    assert_eq!(rig.note()["repeat"], true);
+    rig.run("transport.set_recording", json!({ "recording": true }));
+    rig.run("transport.play", json!({}));
+    rig.pass(100);
+    assert!(rig.sim.press_pad(0, 0, 100));
+    for _ in 0..100 {
+        rig.pass(5);
+    }
+    assert!(rig.sim.release_pad(0, 0));
+    rig.pass(50);
+    rig.run("transport.stop", json!({}));
+    let track = rig.track;
+    testing::wait_for(&rig.control, &mut rig.shell, "the clip", |shell| {
+        shell.running_recording().is_none()
+            && shell.editor().document().track(track).is_some_and(|t| t.clips().count() > 0)
+    });
+    let starts = starts(rig);
+    starts.windows(2).map(|pair| pair[1] - pair[0]).collect()
+}
+
+use bl_shell::testing;
+
+// Spec: push-2-notes R55. Repeat at 1/16 plays a held pad's note on the
+// grid, a step apart.
+#[test]
+fn repeat_plays_a_held_pad_on_the_grid() {
+    let mut rig = Rig::new();
+    let gaps = repeated_gaps(&mut rig);
+    let step = Ticks::SIXTEENTH.get();
+    assert!(gaps.len() >= 3, "{gaps:?}");
+    assert!(gaps.iter().all(|gap| (gap - step).abs() < step / 8), "{gaps:?} vs {step}");
+}
+
+// Spec: push-2-notes R55, R56. The swing amount delays every second note by
+// that share of half a step.
+#[test]
+fn repeat_delays_every_second_note_by_the_swing_amount() {
+    let mut rig = Rig::new();
+    rig.run("push.set_swing", json!({ "amount": 100 }));
+    let gaps = repeated_gaps(&mut rig);
+    let step = Ticks::SIXTEENTH.get();
+    assert!(gaps.len() >= 3, "{gaps:?}");
+    let (long, short) = (gaps.iter().max().unwrap(), gaps.iter().min().unwrap());
+    assert!((long - short - step).abs() < step / 4, "{gaps:?} vs {step}");
+}
+
+/// A clip with a note on each of pads 36 and 37, a little off the 1/16 grid.
+fn off_grid() -> (Rig, i64) {
+    let mut rig = session_rig();
+    let scene = rig.scenes()[0];
+    let clip = rig.clip_in(scene);
+    let step = Ticks::SIXTEENTH.get();
+    rig.run("clip_view.quantize_settings", json!({ "grid": step }));
+    for (key, start) in [(36, step + 5000), (37, 2 * step - 3000)] {
+        rig.run(
+            "note.add",
+            json!({ "clip": clip, "key": key, "start": start, "length": step, "velocity": 100 }),
+        );
+    }
+    rig.run("clip_view.select_notes", json!({ "clip": clip, "notes": [] }));
+    (rig, step)
+}
+
+fn note_starts(rig: &Rig) -> Vec<(u8, i64)> {
+    let (_, midi) = rig.clip().unwrap();
+    let mut notes: Vec<_> = midi.notes.iter().map(|n| (n.key, n.start.get())).collect();
+    notes.sort_unstable();
+    notes
+}
+
+// Spec: push-2-notes R57. Quantize quantises all the notes when none is
+// selected, as one undo step.
+#[test]
+fn quantize_quantises_all_notes_when_none_is_selected() {
+    let (mut rig, step) = off_grid();
+    let steps = rig.steps();
+    rig.tap("quantize");
+    rig.pass(50);
+    assert_eq!(note_starts(&rig), [(36, step), (37, 2 * step)]);
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+}
+
+// Spec: push-2-notes R57. With Quantize held, tapping a drum pad quantises
+// only that pad's notes.
+#[test]
+fn quantize_and_a_drum_pad_quantise_only_its_notes() {
+    let (mut rig, step) = off_grid();
+    assert!(rig.sim.press("quantize"));
+    rig.pass(50);
+    rig.tap_pad(0, 0);
+    assert!(rig.sim.let_go("quantize"));
+    rig.pass(50);
+    assert_eq!(note_starts(&rig), [(36, step), (37, 2 * step - 3000)]);
+}
+
+// Spec: push-2-notes R58. Holding Quantize shows its menu, which stays after
+// a value changed and the button is released; the next tap closes it without
+// quantising.
+#[test]
+fn the_quantize_menu_stays_after_a_change_until_the_next_tap() {
+    let mut rig = session_rig();
+    let scene = rig.scenes()[0];
+    let clip = rig.clip_in(scene);
+    let step = Ticks::SIXTEENTH.get();
+    rig.run(
+        "note.add",
+        json!({ "clip": clip, "key": 36, "start": step + 5000, "length": step, "velocity": 100 }),
+    );
+    rig.hold("quantize");
+    assert_eq!(rig.state()["menu"], "quantize");
+    assert_eq!(rig.state()["recording"]["quantize_menu"]["amount"], 100);
+    assert!(rig.sim.turn(2, -20));
+    rig.pass(50);
+    rig.release("quantize");
+    rig.pass(50);
+    let state = rig.state();
+    assert_eq!(state["menu"], "quantize", "a value changed, so the menu stays");
+    assert_eq!(state["recording"]["quantize_menu"]["amount"], 90);
+    rig.tap("quantize");
+    assert_eq!(rig.state()["menu"], Value::Null);
+    let (_, midi) = rig.clip().unwrap();
+    assert_eq!(midi.notes.iter().next().unwrap().start.get(), step + 5000, "nothing quantised");
+}

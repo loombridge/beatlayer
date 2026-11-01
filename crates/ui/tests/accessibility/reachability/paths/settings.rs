@@ -101,6 +101,21 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "push.set_setup",
             Exception(Equivalent("Push 2's Setup menu, set with its own encoders")),
         ),
+        // Push 2's recording buttons (WP-7.23): each is the button's own
+        // action, which the app reaches by its own commands.
+        (
+            "push.set_fixed_length",
+            Exception(Equivalent("Push 2's Fixed Length button and its menu")),
+        ),
+        (
+            "push.set_swing",
+            Exception(Equivalent("Push 2's swing encoder and its Quantize menu")),
+        ),
+        ("push.new", Exception(Equivalent("Push 2's New button"))),
+        (
+            "push.duplicate",
+            Exception(Equivalent("Push 2's Duplicate button pressed alone")),
+        ),
         // Push 2's Note Mode (WP-7.21): the pad colour shows only on Push 2,
         // and Duplicate with two pads is its own gesture.
         (

@@ -45,7 +45,11 @@ impl Shell {
     }
 
     /// `push.new` (R52).
-    pub(super) fn push_new(&mut self, id: &str, args: ids::PushSessionArgs) -> Result<Value, ShellError> {
+    pub(super) fn push_new(
+        &mut self,
+        id: &str,
+        args: ids::PushSessionArgs,
+    ) -> Result<Value, ShellError> {
         let unavailable = |reason: &str| ShellError::Unavailable {
             command: id.to_owned(),
             reason: reason.to_owned(),

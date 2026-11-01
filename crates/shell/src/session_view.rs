@@ -21,9 +21,9 @@ use bl_model::{
     TrackId,
 };
 use bl_shell_spec::session_view::{
-    self as ids, CaptureArgs, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
-    ScrollArgs, SelectArgs, SelectEdge, SelectEdgeArgs, SessionSelectMode, SessionViewState,
-    SlotRef,
+    self as ids, CaptureArgs, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs,
+    InsertSceneArgs, ScrollArgs, SelectArgs, SelectEdge, SelectEdgeArgs, SessionSelectMode,
+    SessionViewState, SlotRef,
 };
 use bl_shell_spec::settings::ThemeLook;
 use serde_json::Value;

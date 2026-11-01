@@ -84,8 +84,10 @@ pub(crate) fn delete(
         .track(track)
         .is_some_and(|t| t.automation_for(target).is_some())
     {
-        ctx.cx
-            .run("automation.delete", json!({ "track": track, "target": target }));
+        ctx.cx.run(
+            "automation.delete",
+            json!({ "track": track, "target": target }),
+        );
         true
     } else {
         false

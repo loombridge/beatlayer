@@ -67,10 +67,9 @@ fn four_presses_of_record_record_a_slot_end_it_overdub_it_and_stop() {
     assert_eq!(rig.lengths().len(), 1, "a clip was recorded");
     let scene = rig.shell.editor().document().scenes().next().unwrap().id;
     rig.wait("the clip to play", |rig| {
-        rig.shell
-            .session_states()
-            .iter()
-            .any(|s| s.track == rig.track && s.scene == scene && s.state == bl_engine::SlotState::Playing)
+        rig.shell.session_states().iter().any(|s| {
+            s.track == rig.track && s.scene == scene && s.state == bl_engine::SlotState::Playing
+        })
     });
     rig.tap("record");
     rig.wait("the overdub", |rig| rig.record() == "session");
@@ -91,7 +90,9 @@ fn with_the_arrangement_in_focus_record_and_shift_record_switch_arrangement_and_
     assert_eq!(rig.record(), "arrangement");
     rig.tap("record");
     assert_eq!(rig.record(), "off");
-    rig.wait("the recording to finish", |rig| rig.shell.running_recording().is_none());
+    rig.wait("the recording to finish", |rig| {
+        rig.shell.running_recording().is_none()
+    });
     assert!(rig.sim.press("shift"));
     rig.pass(50);
     assert!(rig.sim.press("record"));
@@ -128,7 +129,10 @@ fn a_two_bar_fixed_length_recording_makes_a_two_bar_clip_and_ends_by_itself() {
     );
     rig.pass(50);
     let fixed = rig.state()["recording"]["fixed_length"].clone();
-    assert_eq!(fixed, json!({ "on": true, "length": "2 bars", "phrase_sync": false }));
+    assert_eq!(
+        fixed,
+        json!({ "on": true, "length": "2 bars", "phrase_sync": false })
+    );
     rig.tap("record");
     rig.wait("the recording", |rig| rig.record() == "session");
     assert_eq!(rig.lengths(), [2 * BAR], "the clip has its length at once");
@@ -143,7 +147,10 @@ fn a_two_bar_fixed_length_recording_makes_a_two_bar_clip_and_ends_by_itself() {
 fn fixed_lengths_button_and_menu_set_its_preferences() {
     let mut rig = Rig::new();
     let fixed = rig.state()["recording"]["fixed_length"].clone();
-    assert_eq!(fixed, json!({ "on": false, "length": "1 bar", "phrase_sync": false }));
+    assert_eq!(
+        fixed,
+        json!({ "on": false, "length": "1 bar", "phrase_sync": false })
+    );
     rig.tap("fixed_length");
     assert_eq!(rig.state()["recording"]["fixed_length"]["on"], true);
     rig.hold("fixed_length");
@@ -183,12 +190,20 @@ fn fixed_length_switched_on_mid_recording_loops_the_last_stretch() {
     };
     assert!(midi.looping);
     assert_eq!(midi.loop_end, Some(clip.length));
-    assert_eq!(midi.loop_end.unwrap() - midi.loop_start, Ticks(BAR).min(clip.length));
+    assert_eq!(
+        midi.loop_end.unwrap() - midi.loop_start,
+        Ticks(BAR).min(clip.length)
+    );
 }
 
 impl Rig {
     fn scenes(&self) -> Vec<bl_model::SceneId> {
-        self.shell.editor().document().scenes().map(|s| s.id).collect()
+        self.shell
+            .editor()
+            .document()
+            .scenes()
+            .map(|s| s.id)
+            .collect()
     }
 
     /// An empty one-bar MIDI clip in `scene`'s slot of the track, which is
@@ -201,7 +216,12 @@ impl Rig {
         );
         self.run("session.select", json!({ "track": track, "scene": scene }));
         self.pass(50);
-        self.shell.editor().document().slot(track, scene).unwrap().id
+        self.shell
+            .editor()
+            .document()
+            .slot(track, scene)
+            .unwrap()
+            .id
     }
 
     /// The slot the Session View has selected.
@@ -240,7 +260,10 @@ fn new_with_workflow_clip_selects_the_next_empty_slot_or_inserts_a_scene() {
     rig.tap("new");
     let after = rig.scenes();
     assert_eq!(after.len(), scenes.len() + 1);
-    assert_eq!(rig.selected_slot(), Some((rig.track, *after.last().unwrap())));
+    assert_eq!(
+        rig.selected_slot(),
+        Some((rig.track, *after.last().unwrap()))
+    );
     assert_eq!(rig.steps(), steps + 1, "one undo step");
 }
 
@@ -270,8 +293,17 @@ fn new_with_workflow_scene_captures_the_other_tracks_and_selects_an_empty_slot()
     let scenes = rig.scenes();
     let doc = rig.shell.editor().document();
     assert_eq!(scenes.len(), 9, "a scene was inserted");
-    assert_eq!(scenes[1..].iter().filter(|s| doc.slot(other, **s).is_some()).count(), 1);
-    assert!(doc.slot(rig.track, scenes[1]).is_none(), "the selected track's slot is empty");
+    assert_eq!(
+        scenes[1..]
+            .iter()
+            .filter(|s| doc.slot(other, **s).is_some())
+            .count(),
+        1
+    );
+    assert!(
+        doc.slot(rig.track, scenes[1]).is_none(),
+        "the selected track's slot is empty"
+    );
     assert_eq!(rig.selected_slot(), Some((rig.track, scenes[1])));
     assert_eq!(rig.steps(), steps + 1, "one undo step");
 }
@@ -284,24 +316,37 @@ fn duplicate_in_both_workflows_makes_the_scene_or_the_copy() {
     let mut rig = session_rig();
     let scenes = rig.scenes();
     rig.clip_in(scenes[0]);
-    rig.run("session.launch", json!({ "track": rig.track, "scene": scenes[0] }));
+    rig.run(
+        "session.launch",
+        json!({ "track": rig.track, "scene": scenes[0] }),
+    );
     rig.pass(100);
     let steps = rig.steps();
     rig.tap("duplicate");
-    assert_eq!(rig.scenes().len(), scenes.len() + 1, "Capture and Insert Scene");
+    assert_eq!(
+        rig.scenes().len(),
+        scenes.len() + 1,
+        "Capture and Insert Scene"
+    );
     assert_eq!(rig.steps(), steps + 1, "one undo step");
 
     let mut rig = session_rig();
     rig.run("push.set_setup", json!({ "workflow": "clip" }));
     let scenes = rig.scenes();
     rig.clip_in(scenes[0]);
-    rig.run("session.launch", json!({ "track": rig.track, "scene": scenes[0] }));
+    rig.run(
+        "session.launch",
+        json!({ "track": rig.track, "scene": scenes[0] }),
+    );
     rig.pass(100);
     let steps = rig.steps();
     rig.tap("duplicate");
     rig.pass(100);
     let doc = rig.shell.editor().document();
-    assert!(doc.slot(rig.track, scenes[1]).is_some(), "the copy is in the slot below");
+    assert!(
+        doc.slot(rig.track, scenes[1]).is_some(),
+        "the copy is in the slot below"
+    );
     assert_eq!(rig.scenes().len(), scenes.len());
     assert!(rig.playing(rig.track, scenes[1]), "the copy plays");
     assert_eq!(rig.steps(), steps + 1, "one undo step");
@@ -309,7 +354,11 @@ fn duplicate_in_both_workflows_makes_the_scene_or_the_copy() {
 
 fn velocities(rig: &Rig) -> Vec<u8> {
     let (_, midi) = rig.clip().expect("a clip");
-    let mut notes: Vec<_> = midi.notes.iter().map(|n| (n.start.get(), n.velocity)).collect();
+    let mut notes: Vec<_> = midi
+        .notes
+        .iter()
+        .map(|n| (n.start.get(), n.velocity))
+        .collect();
     notes.sort_unstable();
     notes.into_iter().map(|n| n.1).collect()
 }
@@ -344,7 +393,11 @@ fn starts(rig: &Rig) -> Vec<i64> {
         .unwrap()
         .clips()
         .flat_map(|clip| match &clip.data {
-            ClipData::Midi(midi) => midi.notes.iter().map(|n| clip.start.get() + n.start.get()).collect(),
+            ClipData::Midi(midi) => midi
+                .notes
+                .iter()
+                .map(|n| clip.start.get() + n.start.get())
+                .collect(),
             ClipData::Audio(_) => Vec::new(),
         })
         .collect();
@@ -355,7 +408,10 @@ fn starts(rig: &Rig) -> Vec<i64> {
 /// Holds drum pad 36 for a beat with Repeat on and returns the gaps between
 /// the notes it recorded.
 fn repeated_gaps(rig: &mut Rig) -> Vec<i64> {
-    rig.run("transport.set_record_quantization", json!({ "quantization": "none" }));
+    rig.run(
+        "transport.set_record_quantization",
+        json!({ "quantization": "none" }),
+    );
     rig.tap("repeat");
     assert_eq!(rig.note()["repeat"], true);
     rig.run("transport.set_recording", json!({ "recording": true }));
@@ -371,7 +427,11 @@ fn repeated_gaps(rig: &mut Rig) -> Vec<i64> {
     let track = rig.track;
     testing::wait_for(&rig.control, &mut rig.shell, "the clip", |shell| {
         shell.running_recording().is_none()
-            && shell.editor().document().track(track).is_some_and(|t| t.clips().count() > 0)
+            && shell
+                .editor()
+                .document()
+                .track(track)
+                .is_some_and(|t| t.clips().count() > 0)
     });
     let starts = starts(rig);
     starts.windows(2).map(|pair| pair[1] - pair[0]).collect()
@@ -387,7 +447,10 @@ fn repeat_plays_a_held_pad_on_the_grid() {
     let gaps = repeated_gaps(&mut rig);
     let step = Ticks::SIXTEENTH.get();
     assert!(gaps.len() >= 3, "{gaps:?}");
-    assert!(gaps.iter().all(|gap| (gap - step).abs() < step / 8), "{gaps:?} vs {step}");
+    assert!(
+        gaps.iter().all(|gap| (gap - step).abs() < step / 8),
+        "{gaps:?} vs {step}"
+    );
 }
 
 // Spec: push-2-notes R55, R56. The swing amount delays every second note by
@@ -416,7 +479,10 @@ fn off_grid() -> (Rig, i64) {
             json!({ "clip": clip, "key": key, "start": start, "length": step, "velocity": 100 }),
         );
     }
-    rig.run("clip_view.select_notes", json!({ "clip": clip, "notes": [] }));
+    rig.run(
+        "clip_view.select_notes",
+        json!({ "clip": clip, "notes": [] }),
+    );
     (rig, step)
 }
 
@@ -473,12 +539,19 @@ fn the_quantize_menu_stays_after_a_change_until_the_next_tap() {
     rig.release("quantize");
     rig.pass(50);
     let state = rig.state();
-    assert_eq!(state["menu"], "quantize", "a value changed, so the menu stays");
+    assert_eq!(
+        state["menu"], "quantize",
+        "a value changed, so the menu stays"
+    );
     assert_eq!(state["recording"]["quantize_menu"]["amount"], 90);
     rig.tap("quantize");
     assert_eq!(rig.state()["menu"], Value::Null);
     let (_, midi) = rig.clip().unwrap();
-    assert_eq!(midi.notes.iter().next().unwrap().start.get(), step + 5000, "nothing quantised");
+    assert_eq!(
+        midi.notes.iter().next().unwrap().start.get(),
+        step + 5000,
+        "nothing quantised"
+    );
 }
 
 impl Rig {
@@ -496,7 +569,10 @@ impl Rig {
     }
 
     /// The clip's Automation envelopes' targets and breakpoints.
-    fn automation(&self, clip: bl_model::ClipId) -> Vec<(bl_model::AutomationTarget, Vec<(i64, f64)>)> {
+    fn automation(
+        &self,
+        clip: bl_model::ClipId,
+    ) -> Vec<(bl_model::AutomationTarget, Vec<(i64, f64)>)> {
         let doc = self.shell.editor().document();
         doc.clip(clip)
             .unwrap()
@@ -511,7 +587,13 @@ impl Rig {
     }
 
     fn volume(&self) -> f64 {
-        self.shell.editor().document().track(self.track).unwrap().mixer().volume
+        self.shell
+            .editor()
+            .document()
+            .track(self.track)
+            .unwrap()
+            .mixer()
+            .volume
     }
 
     fn text_has(&mut self, needle: &str) -> bool {
@@ -540,12 +622,20 @@ fn automate_arms_and_an_encoders_turns_are_recorded_into_the_clip() {
     rig.tap("record");
     rig.wait("it to end", |rig| rig.record() == "off");
     let scene = rig.scenes()[0];
-    let clip = rig.shell.editor().document().slot(rig.track, scene).unwrap().id;
+    let clip = rig
+        .shell
+        .editor()
+        .document()
+        .slot(rig.track, scene)
+        .unwrap()
+        .id;
     let automation = rig.automation(clip);
     assert_eq!(automation.len(), 1, "{automation:?}");
     assert!(matches!(
         automation[0].0,
-        bl_model::AutomationTarget::Mixer { param: bl_model::MixerParam::Volume }
+        bl_model::AutomationTarget::Mixer {
+            param: bl_model::MixerParam::Volume
+        }
     ));
     rig.tap("automate");
     assert_eq!(rig.state()["recording"]["automation_arm"], false);
@@ -579,7 +669,10 @@ fn the_dot_follows_the_playing_clips_automation() {
     let (mut rig, _clip, _) = automated_clip();
     assert!(!rig.text_has("white dot"));
     let scene = rig.scenes()[0];
-    rig.run("session.launch", json!({ "track": rig.track, "scene": scene }));
+    rig.run(
+        "session.launch",
+        json!({ "track": rig.track, "scene": scene }),
+    );
     rig.pass(200);
     assert!(rig.text_has("white dot"), "{:?}", rig.sim_text());
 }
@@ -601,7 +694,10 @@ fn delete_and_a_touch_delete_the_envelope_or_reset_the_parameter() {
     assert!(rig.automation(clip).is_empty());
     assert_eq!(rig.steps(), steps + 1, "one undo step");
     // Nothing to delete now: the volume goes back to its default.
-    rig.run("mixer.set_volume", json!({ "track": rig.track, "volume": 0.25 }));
+    rig.run(
+        "mixer.set_volume",
+        json!({ "track": rig.track, "volume": 0.25 }),
+    );
     rig.pass(50);
     assert!(rig.sim.touch(column));
     rig.pass(50);
@@ -609,7 +705,10 @@ fn delete_and_a_touch_delete_the_envelope_or_reset_the_parameter() {
     assert!(rig.sim.let_go("delete"));
     rig.pass(50);
     assert!((rig.volume() - 1.0).abs() < 1e-6, "{}", rig.volume());
-    assert!(rig.clip().is_some(), "Delete used with an encoder doesn't delete the clip");
+    assert!(
+        rig.clip().is_some(),
+        "Delete used with an encoder doesn't delete the clip"
+    );
 }
 
 // Spec: push-2-notes R63. Delete with Automate deletes every Automation
@@ -638,7 +737,11 @@ fn delete_and_automate_clear_the_clips_automation() {
     rig.pass(50);
     assert!(rig.automation(clip).is_empty());
     assert_eq!(rig.steps(), steps + 1, "one undo step");
-    assert_eq!(rig.state()["recording"]["automation_arm"], false, "no arm toggle");
+    assert_eq!(
+        rig.state()["recording"]["automation_arm"],
+        false,
+        "no arm toggle"
+    );
 }
 
 // Spec: push-2-notes R66. Two held steps and a turn write flat values over
@@ -671,10 +774,22 @@ fn held_steps_and_a_turn_write_the_value_over_their_spans() {
     assert_eq!(automation.len(), 1, "{automation:?}");
     let points = &automation[0].1;
     let ats: Vec<i64> = points.iter().map(|p| p.0).collect();
-    assert_eq!(ats, [step, 2 * step, 3 * step], "breakpoints at the steps' edges");
-    assert!(points.iter().all(|p| (p.1 - points[0].1).abs() < 1e-9), "flat over the spans");
+    assert_eq!(
+        ats,
+        [step, 2 * step, 3 * step],
+        "breakpoints at the steps' edges"
+    );
+    assert!(
+        points.iter().all(|p| (p.1 - points[0].1).abs() < 1e-9),
+        "flat over the spans"
+    );
     assert!(points[0].1 < 1.0, "the turn lowered it: {points:?}");
-    assert_eq!(rig.steps() - steps, 1 + 2, "the clip's notes aside, one undo step for the touch: {}", rig.steps());
+    assert_eq!(
+        rig.steps() - steps,
+        1 + 2,
+        "the clip's notes aside, one undo step for the touch: {}",
+        rig.steps()
+    );
 }
 
 // Spec: push-2-notes R59. The count-in's bar shows while it runs, and a
@@ -684,12 +799,18 @@ fn the_display_shows_the_count_in_and_the_playing_clips_progress() {
     let mut rig = session_rig();
     let scene = rig.scenes()[0];
     rig.clip_in(scene);
-    rig.run("session.launch", json!({ "track": rig.track, "scene": scene }));
+    rig.run(
+        "session.launch",
+        json!({ "track": rig.track, "scene": scene }),
+    );
     rig.pass(300);
     assert!(rig.text_has("progress"), "{:?}", rig.sim_text());
     rig.run("transport.stop", json!({}));
     rig.pass(300);
-    rig.run("transport.set_metronome_count_in", json!({ "count_in": "1_bar" }));
+    rig.run(
+        "transport.set_metronome_count_in",
+        json!({ "count_in": "1_bar" }),
+    );
     rig.tap("record");
     let mut counted = false;
     for _ in 0..100 {
@@ -704,7 +825,10 @@ fn the_display_shows_the_count_in_and_the_playing_clips_progress() {
 #[test]
 fn phrase_sync_starts_the_take_part_way_into_the_clip() {
     let mut rig = session_rig();
-    rig.run("push.set_fixed_length", json!({ "enabled": true, "length": "4 bars", "phrase_sync": true }));
+    rig.run(
+        "push.set_fixed_length",
+        json!({ "enabled": true, "length": "4 bars", "phrase_sync": true }),
+    );
     rig.run("transport.locate", json!({ "position": 5 * BAR }));
     rig.run("transport.play", json!({}));
     rig.pass(100);
@@ -722,5 +846,8 @@ fn phrase_sync_starts_the_take_part_way_into_the_clip() {
         panic!("a MIDI clip")
     };
     let start = midi.notes.iter().next().expect("the note").start.get();
-    assert!(start >= BAR && start < BAR + BAR / 2, "the note is at bar 2 of the clip: {start}");
+    assert!(
+        start >= BAR && start < BAR + BAR / 2,
+        "the note is at bar 2 of the clip: {start}"
+    );
 }

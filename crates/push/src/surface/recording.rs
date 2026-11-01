@@ -70,12 +70,7 @@ impl Push {
 
     /// What a core button of this package does with a modifier held (R49,
     /// R53, R63).
-    pub(super) fn recording_combination(
-        &mut self,
-        button: u8,
-        modifiers: &Modifiers,
-        cx: &mut Cx,
-    ) {
+    pub(super) fn recording_combination(&mut self, button: u8, modifiers: &Modifiers, cx: &mut Cx) {
         match button {
             cc::RECORD if modifiers.shift() => self.record(true, cx),
             cc::DUPLICATE if modifiers.shift() => {
@@ -284,8 +279,13 @@ impl Push {
         let model = self.model.as_ref()?;
         let grid = GRIDS
             .iter()
-            .find(|&&(_, n, t)| grid_ticks(n) == model.quantize.grid && t == model.quantize.triplets)
-            .map_or_else(|| format!("{} ticks", model.quantize.grid.get()), |g| g.0.to_owned());
+            .find(|&&(_, n, t)| {
+                grid_ticks(n) == model.quantize.grid && t == model.quantize.triplets
+            })
+            .map_or_else(
+                || format!("{} ticks", model.quantize.grid.get()),
+                |g| g.0.to_owned(),
+            );
         Some(QuantizeMenu {
             swing: (self.shared.swing() * 100.0).round() as u8,
             quantize_to: grid,
@@ -337,8 +337,11 @@ impl Push {
         self.screen.title = None;
         self.screen.upper[0] = Label::new("Phrase Sync", [255, 255, 255], fixed.phrase_sync);
         for (column, length) in LENGTHS.iter().enumerate() {
-            self.screen.lower[column] =
-                Label::new(length.label(), [255, 255, 255], usize::from(fixed.length) == column);
+            self.screen.lower[column] = Label::new(
+                length.label(),
+                [255, 255, 255],
+                usize::from(fixed.length) == column,
+            );
         }
     }
 }

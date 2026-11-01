@@ -687,9 +687,9 @@ impl DeviceMode {
             device: focus.device,
             param: param.param,
         };
-        let dot = doc
-            .device_track(focus.device)
-            .map_or(Dot::None, |track| crate::automation::dot(model, track, &target));
+        let dot = doc.device_track(focus.device).map_or(Dot::None, |track| {
+            crate::automation::dot(model, track, &target)
+        });
         // Spec: push-2-notes R66. Holding steps shows the value at the first.
         let graphic = match crate::automation::value_at_first_step(model, held, &target) {
             Some(value) if !matches!(graphic, Graphic::Choice(_)) => {

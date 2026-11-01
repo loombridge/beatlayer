@@ -246,7 +246,11 @@ impl MidiHost {
             show_resync_button: self.show_resync_button,
             external_sync: self.external_sync,
             push_declined: self.push_declined.clone(),
-            push: PushPrefs::of(self.push.setup(), self.push.swing(), self.push.fixed_length()),
+            push: PushPrefs::of(
+                self.push.setup(),
+                self.push.swing(),
+                self.push.fixed_length(),
+            ),
         }
     }
 

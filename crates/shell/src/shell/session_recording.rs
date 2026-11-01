@@ -438,12 +438,18 @@ impl Shell {
         let fixed = (fixed.on && slots.iter().any(|run| !run.slot.overdub)).then(|| {
             let signatures = &self.editor.document().settings().time_signatures;
             let at = self.arrangement.transport().position;
-            (fixed.value().ticks(signatures.signature_at(at)), fixed.phrase_sync)
+            (
+                fixed.value().ticks(signatures.signature_at(at)),
+                fixed.phrase_sync,
+            )
         });
         match fixed {
-            Some((length, phrase_sync)) => self
-                .audio
-                .send_session(SessionCommand::RecordFixed { length, phrase_sync })?,
+            Some((length, phrase_sync)) => {
+                self.audio.send_session(SessionCommand::RecordFixed {
+                    length,
+                    phrase_sync,
+                })?
+            }
             None => self.audio.send_session(SessionCommand::Record)?,
         }
         let started = RecordingStarted {

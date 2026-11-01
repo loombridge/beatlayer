@@ -84,7 +84,7 @@ impl Note {
         }
         match gesture {
             Gesture::Tap => {
-                if let Some(track) = ctx.model.and_then(|m| super::clip::selected_track(m)) {
+                if let Some(track) = ctx.model.and_then(super::clip::selected_track) {
                     let memory = self.memory(track);
                     memory.repeat = !memory.repeat;
                 }
@@ -100,7 +100,12 @@ impl Note {
         if !self.repeating(track) {
             return;
         }
-        if let Down::Played(note) | Down::Picked { key: note, played: true } = down {
+        if let Down::Played(note)
+        | Down::Picked {
+            key: note,
+            played: true,
+        } = down
+        {
             self.repeat.pads.insert(pad, (note, velocity));
         }
     }
@@ -141,12 +146,19 @@ impl Note {
             model.transport.position.get()
         } else {
             let origin = *repeat.origin.get_or_insert(ctx.at);
-            let beats = ctx.at.saturating_duration_since(origin).as_secs_f64() * model.tempo.get()
-                / 60.0;
+            let beats =
+                ctx.at.saturating_duration_since(origin).as_secs_f64() * model.tempo.get() / 60.0;
             (beats * Ticks::QUARTER.get() as f64) as i64
         };
         // Every second note is delayed by `swing` of half a step.
-        let due = |n: i64| n * step + if n % 2 != 0 { (step as f64 * swing / 2.0) as i64 } else { 0 };
+        let due = |n: i64| {
+            n * step
+                + if n % 2 != 0 {
+                    (step as f64 * swing / 2.0) as i64
+                } else {
+                    0
+                }
+        };
         let mut ended = Vec::new();
         repeat.sounding.retain(|&(note, end)| {
             let over = repeat.pads.is_empty() || now >= end;

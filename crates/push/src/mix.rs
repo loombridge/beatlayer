@@ -186,12 +186,35 @@ impl Param {
     /// The track and the automation target of a track's control; a rack
     /// chain's has none here.
     fn automation(self) -> Option<(TrackId, bl_model::AutomationTarget)> {
-        use bl_model::{AutomationTarget::{Mixer, Send}, MixerParam};
+        use bl_model::{
+            AutomationTarget::{Mixer, Send},
+            MixerParam,
+        };
         Some(match self {
-            Self::Volume(t) => (t, Mixer { param: MixerParam::Volume }),
-            Self::Pan(t) => (t, Mixer { param: MixerParam::Pan }),
-            Self::SplitLeft(t) => (t, Mixer { param: MixerParam::SplitLeft }),
-            Self::SplitRight(t) => (t, Mixer { param: MixerParam::SplitRight }),
+            Self::Volume(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::Volume,
+                },
+            ),
+            Self::Pan(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::Pan,
+                },
+            ),
+            Self::SplitLeft(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::SplitLeft,
+                },
+            ),
+            Self::SplitRight(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::SplitRight,
+                },
+            ),
             Self::Send(t, to) => (t, Send { to }),
             _ => return None,
         })
@@ -1170,9 +1193,11 @@ impl Content for Mix {
                     Kind::Move(Some(param)) => param.automation().map(|a| (param, a)),
                     _ => None,
                 };
-                let dot = automated.as_ref().map_or(crate::screen::Dot::None, |(_, (track, at))| {
-                    crate::automation::dot(model, *track, at)
-                });
+                let dot = automated
+                    .as_ref()
+                    .map_or(crate::screen::Dot::None, |(_, (track, at))| {
+                        crate::automation::dot(model, *track, at)
+                    });
                 let graphic = automated
                     .as_ref()
                     .and_then(|(param, (_, at))| {

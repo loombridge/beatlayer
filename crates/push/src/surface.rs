@@ -525,12 +525,6 @@ impl Push {
                 | cc::CLIP
                 | cc::SHIFT
                 | cc::MASTER
-                | cc::RECORD
-                | cc::NEW
-                | cc::DUPLICATE
-                | cc::AUTOMATE
-                | cc::FIXED_LENGTH
-                | cc::QUANTIZE
         ) || (controls::lower_column(button).is_some() && !self.lower_claimed())
     }
 
@@ -582,8 +576,7 @@ impl Push {
         if (self.menu == Some(Menu::FixedLength)
             && (controls::upper_column(button).is_some()
                 || controls::lower_column(button).is_some()))
-            || (self.menu == Some(Menu::Quantize)
-                && controls::upper_column(button) == Some(4))
+            || (self.menu == Some(Menu::Quantize) && controls::upper_column(button) == Some(4))
         {
             self.buttons.mark_used(button);
             self.recording_menu_button(button, cx);
@@ -591,6 +584,11 @@ impl Push {
         }
         if self.stop_clip(button, cx) {
             return;
+        }
+        // Record, Duplicate and Automate with a modifier held (notes R49,
+        // R53, R63); the content hears them too.
+        if others_held {
+            self.recording_combination(button, &others, cx);
         }
         if self.is_core(button) {
             if others_held {
@@ -618,12 +616,10 @@ impl Push {
             self.arm_by_hand(column, cx);
             return;
         }
-        self.recording_combination(button, modifiers, cx);
         if !modifiers.shift() {
             return;
         }
         match button {
-            cc::RECORD | cc::DUPLICATE | cc::AUTOMATE => {}
             cc::PLAY => {
                 let playing = self.model.as_ref().is_some_and(|m| m.transport.playing);
                 if playing {
@@ -727,6 +723,7 @@ impl Push {
                 self.with_contents(cx, Who::Both, |content, ctx| {
                     content.button(button, Gesture::Tap, ctx)
                 });
+                self.recording_tap(button, cx);
                 // Add Track leads to Browse Mode with the track kinds
                 // (push-2-tracks R12).
                 if button == cc::ADD_TRACK {
@@ -775,11 +772,6 @@ impl Push {
                 if self.pad_content().scale_available() {
                     self.toggle_menu(Menu::Scale);
                 }
-            }
-            cc::RECORD | cc::NEW | cc::DUPLICATE | cc::AUTOMATE | cc::FIXED_LENGTH | cc::QUANTIZE
-                if tap =>
-            {
-                self.recording_tap(button, cx);
             }
             cc::MASTER if tap => self.master(cx),
             cc::USER if tap => self.set_user_mode(true, cx),
@@ -1381,6 +1373,42 @@ impl Push {
             }
         }
 
+        // Recording's buttons (notes R48, R50, R61): the modes may paint
+        // over them.
+        {
+            let mut lights = Lights {
+                leds: &mut self.leds,
+                palette: &mut self.palette,
+            };
+            let recording = model.session_record || model.transport.recording;
+            lights.button(
+                cc::RECORD,
+                Led::steady(if recording {
+                    fixed::RED
+                } else {
+                    fixed::DARK_GREY
+                }),
+            );
+            lights.button(
+                cc::AUTOMATE,
+                Led::steady(if model.automation_arm {
+                    fixed::RED
+                } else {
+                    fixed::DARK_GREY
+                }),
+            );
+            lights.button(
+                cc::FIXED_LENGTH,
+                Led::level(true, self.shared.fixed_length().on),
+            );
+            lights.button(cc::NEW, Led::level(true, false));
+            lights.button(cc::DUPLICATE, Led::level(true, false));
+            lights.button(
+                cc::QUANTIZE,
+                Led::level(true, self.menu == Some(Menu::Quantize)),
+            );
+        }
+
         // The modes draw the pads, the buttons they own and the display.
         let held_steps = self.held_steps();
         {
@@ -1463,31 +1491,6 @@ impl Push {
             Led::switch(model.document.settings().metronome.enabled),
         );
         lights.button(cc::UNDO, Led::level(true, false));
-        // Recording (notes R48, R50, R61).
-        let recording = model.session_record || model.transport.recording;
-        lights.button(
-            cc::RECORD,
-            Led::steady(if recording {
-                fixed::RED
-            } else {
-                fixed::DARK_GREY
-            }),
-        );
-        lights.button(
-            cc::AUTOMATE,
-            Led::steady(if model.automation_arm {
-                fixed::RED
-            } else {
-                fixed::DARK_GREY
-            }),
-        );
-        lights.button(cc::FIXED_LENGTH, Led::level(true, self.shared.fixed_length().on));
-        lights.button(cc::NEW, Led::level(true, false));
-        lights.button(cc::DUPLICATE, Led::level(true, false));
-        lights.button(
-            cc::QUANTIZE,
-            Led::level(true, self.menu == Some(Menu::Quantize)),
-        );
         lights.button(cc::DOUBLE_LOOP, Led::level(true, false));
         lights.button(cc::SETUP, Led::level(true, self.menu == Some(Menu::Setup)));
         let scale = self.contents.pads[match self.pad_mode {

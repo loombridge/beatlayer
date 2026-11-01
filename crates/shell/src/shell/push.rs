@@ -34,8 +34,8 @@ fn setup_info(setup: Setup) -> ids::PushSetup {
 fn fixed_info(fixed: bl_push::recording::FixedLength) -> ids::PushFixedLength {
     ids::PushFixedLength {
         on: fixed.on,
-        length: ids::PushFixedLengthValue::ALL[usize::from(fixed.length)
-            .min(ids::PushFixedLengthValue::ALL.len() - 1)],
+        length: ids::PushFixedLengthValue::ALL
+            [usize::from(fixed.length).min(ids::PushFixedLengthValue::ALL.len() - 1)],
         phrase_sync: fixed.phrase_sync,
     }
 }
@@ -157,13 +157,16 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             fixed_length: fixed_info(snapshot.fixed_length),
             swing: (snapshot.swing * 100.0).round() as u8,
             automation_arm: snapshot.automation_arm,
-            quantize_menu: snapshot.quantize_menu.clone().map(|menu| ids::PushQuantizeMenu {
-                swing: menu.swing,
-                quantize_to: menu.quantize_to,
-                amount: menu.amount,
-                record_quantize: menu.record_quantize,
-                stays: menu.stays,
-            }),
+            quantize_menu: snapshot
+                .quantize_menu
+                .clone()
+                .map(|menu| ids::PushQuantizeMenu {
+                    swing: menu.swing,
+                    quantize_to: menu.quantize_to,
+                    amount: menu.amount,
+                    record_quantize: menu.record_quantize,
+                    stays: menu.stays,
+                }),
         },
         held: snapshot.held.iter().map(|b| (*b).to_owned()).collect(),
         locked: snapshot.locked.iter().map(|b| (*b).to_owned()).collect(),

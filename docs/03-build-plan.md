@@ -1042,7 +1042,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.6 | todo |  |  |
 | 9.7 | todo |  |  |
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |
-| 9.9 | todo |  |  |
+| 9.9 | done | 1 November 2026 | [#677](https://github.com/loombridge/beatlayer/pull/677): Show Similar Files from the icon beside a selected file, the item menu and the View menu (Cmd-Shift-F) puts the reference in the search field and lists its neighbours most similar first, with `browser.similar` for agents and saved labels keeping the reference first. |
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |
 | 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |

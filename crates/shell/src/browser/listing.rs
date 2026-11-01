@@ -8,10 +8,11 @@ use std::path::{Path, PathBuf};
 use bl_shell_spec::browser::ItemKind;
 
 /// The extensions of the audio files Beatlayer opens (audio-import R1),
-/// lower-case.
+/// lower-case, and of the QuickTime movies, whose sound it opens (video R1,
+/// R5).
 pub const AUDIO_EXTENSIONS: &[&str] = &[
     "wav", "wave", "bwf", "rf64", "bw64", "aif", "aiff", "aifc", "flac", "ogg", "oga", "mp3",
-    "m4a", "aac",
+    "m4a", "aac", "mov",
 ];
 
 /// The extensions of the tuning files Beatlayer opens (the tunings spec, R25),

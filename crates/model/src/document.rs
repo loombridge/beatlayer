@@ -461,6 +461,19 @@ impl Document {
             .collect()
     }
 
+    /// The video clip whose picture shows at `at` (the video spec, R10, R18):
+    /// of the active video clips playing there, the one on the track lowest
+    /// in the track list. `None` where none plays: black.
+    #[must_use]
+    pub fn video_clip_at(&self, at: Ticks) -> Option<&Clip> {
+        self.track_order()
+            .into_iter()
+            .filter_map(|id| self.tracks.get(&id))
+            .flat_map(|track| track.clips())
+            .filter(|clip| !clip.mute && clip.start <= at && at < clip.end())
+            .rfind(|clip| matches!(&clip.data, ClipData::Audio(audio) if audio.video))
+    }
+
     /// The spans of the Arrangement clips that lead the tempo (R43), in
     /// display order: what the Main track's lane shows and where the tempo
     /// commands refuse.

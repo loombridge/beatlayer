@@ -47,7 +47,7 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 - **R10.** A video clip leads only with Warp on; of the playing warped leaders, the one on the bottom-most track leads ([warping](warping.md) R44, R57). A video clip that isn't leading but is warped plays its picture through its warp map, so the picture is warped. (S5)
 - **R11.** A video clip's warp markers move which frame plays when: the frame shown at a song time is the frame at the movie time the warp map gives. (S5)
 - **R12.** The markers embedded in a movie (its chapter and marker tracks) show in the Clip View's Sample Editor as cues at their movie times, named as the movie names them, and can't be moved. (S6)
-- **R13.** `video.frame_at` (`read`) gives a video clip's frame index and movie time at a song time; `clip` reads back a clip's video. (S10)
+- **R13.** `video.frame_at` (`read`) gives a video clip's frame index and movie time at a song time, or the frame at a time in the movie, as for a warp marker; `clip` reads back a clip's video. (S10)
 - **R14.** A video clip's movie is a media file: it's collected, relinked and listed by the File Manager as audio files are. (S10)
 - **R15.** Video clips import from DAWproject ([DAWproject](dawproject.md) R89) and from Live sets ([Live set import](live-set-import.md) R66). (S10)
 
@@ -81,6 +81,13 @@ Decoding runs in a crate of its own, `bl-video`, on a video thread that decodes 
 | R3, R4 | `crates/video/tests/audio.rs`: a movie's audio against the same samples as a WAV file, silence in the gaps, blocks read anywhere | unit |
 | R27 | `crates/video/tests/thread.rs`: decoding ahead, dropping what's done with, seeks, gaps | unit |
 | R28 | `crates/video/tests/damaged.rs` and `fuzz/fuzz_targets/movie.rs` | unit, fuzz |
-| R5 to R15 | to be written in WP-9.25: model, shell and UI tests per rule; a save and load round trip | unit, shell test, UI script |
+| R5, R9 | `crates/shell/tests/video_clips.rs`: a dropped movie is a video clip that leads, saves and reopens, and in a Session slot is an audio clip; `crates/model/tests/video_clips.rs` and `crates/project/tests/schemas.rs` (`a_video_clip_saves_and_reopens_as_a_video_clip`, the schema 14 fixtures) | unit, shell test |
+| R6 | `crates/ui/tests/arrangement.rs`: a video clip draws sprocket holes along its title bar | UI script |
+| R7, R10, R11 | `crates/model/tests/video_clips.rs`: the movie time through the warp map and loop brace, the bottom-most video clip shows; `crates/shell/tests/video_clips.rs`: a warp marker moves which frame plays when, the bottom-most leader leads | unit, shell test |
+| R8 | `crates/model/tests/video_clips.rs` and `crates/shell/tests/video_clips.rs`: Reverse, Crop, Consolidate and the Session View make an audio clip and the movie file is byte for byte as it was | unit, shell test |
+| R12 | `crates/video/tests/decode.rs` and `crates/video/tests/damaged.rs` (the markers of a chapter track); `crates/shell/tests/video_clips.rs` (the Sample Editor's state lists them as cues); `crates/ui/tests/sample_editor.rs` (the cues in the marker strip) | unit, shell test, UI script |
+| R13 | `crates/shell/tests/video_clips.rs`: `video.frame_at` at a song position and at a movie time | shell test |
+| R14 | `crates/shell/tests/video_clips.rs`: the File Manager lists a movie, and replacing it by a movie keeps a video clip | shell test |
+| R15 | `crates/interop/tests/dawproject.rs` (`video_timelines_become_video_clips`); a Live set's video clips wait on the Live set importer (WP-9.14 to WP-9.17) | interop test |
 | R16 to R23 | to be written in WP-9.26: `crates/ui/tests/video_window.rs` on the test clock; `crates/ui/tests/keymap/resolve.rs` for S-VIEW-009 | UI script |
 | R24, R25 | to be written in WP-9.27: a Motion JPEG export checked frame by frame | shell test |

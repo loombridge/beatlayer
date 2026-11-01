@@ -1031,7 +1031,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.47 | todo |  |  |
 | 8.48 | todo |  |  |
 | 8.49 | todo |  |  |
-| 8.50 | todo |  |  |
+| 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
 | 8.51 | todo |  |  |
 | 8.52 | todo |  |  |
 | 9.1 | todo |  |  |

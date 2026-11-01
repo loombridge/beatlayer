@@ -8556,3 +8556,145 @@ fn an_agent_routes_the_three_cv_modulators_and_reads_everything_back() {
     }
     assert_eq!(reading(&shown, "CV")["value"], 0.0, "silence is 0 V");
 }
+
+/// A 16-bit mono WAV of a decaying tone of `hz`, `seconds` long.
+fn decaying_tone(path: &Path, hz: f64, seconds: f64, rate: u32) {
+    let frames = (seconds * f64::from(rate)) as u32;
+    let data = frames * 2;
+    let mut bytes = Vec::new();
+    for chunk in [
+        &b"RIFF"[..],
+        &(36 + data).to_le_bytes(),
+        b"WAVEfmt ",
+        &16u32.to_le_bytes(),
+        &1u16.to_le_bytes(),
+        &1u16.to_le_bytes(),
+        &rate.to_le_bytes(),
+        &(rate * 2).to_le_bytes(),
+        &2u16.to_le_bytes(),
+        &16u16.to_le_bytes(),
+        b"data",
+        &data.to_le_bytes(),
+    ] {
+        bytes.extend_from_slice(chunk);
+    }
+    for i in 0..frames {
+        let t = f64::from(i) / f64::from(rate);
+        let sample = (t * hz * std::f64::consts::TAU).sin() * (-t * 6.0).exp() * 20_000.0;
+        bytes.extend_from_slice(&(sample as i16).to_le_bytes());
+    }
+    fs::write(path, bytes).unwrap();
+}
+
+// Spec: sound-similarity R21, R23, R28 (WP-9.10): an agent loads a sample into
+// Simpler, swaps it for the next similar one, keeps it as the reference,
+// goes back, and reads the sample, the reference and the sample's place in
+// the list back from the query tool's `device`, by command ID.
+#[test]
+fn an_agent_swaps_to_a_similar_sample_and_reads_the_sample_and_reference_back() {
+    let dir = std::env::temp_dir().join(format!("bl-agent-swap-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    let library = dir.join("Library");
+    fs::create_dir_all(&library).unwrap();
+    for (name, hz) in [("Kick 50", 50.0), ("Kick 55", 55.0), ("Kick 60", 60.0)] {
+        decaying_tone(&library.join(format!("{name}.wav")), hz, 0.4, 22_050);
+    }
+    decaying_tone(&library.join("Hat 8k.wav"), 8_000.0, 0.12, 22_050);
+    let mut shell = Shell::new(
+        bl_shell::settings::Preferences::default(),
+        Some(dir.join("config")),
+        bl_shell::audio::AudioHost::null(Default::default()),
+        Box::new(bl_shell::files::ProjectFiles::new()),
+    );
+    shell.pace_analysis_by_hand();
+    shell.set_user_library(Some(library.clone()));
+    assert!(shell.wait_for_browser_index(std::time::Duration::from_secs(60)));
+    shell.release_analysis(4);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("swap-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let sampler = bl_devices::sampler_type();
+    let kick = library.join("Kick 50.wav");
+    let added = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.add",
+            "args": {
+                "track": track,
+                "device": { "kind": sampler.kind, "name": sampler.name, "role": sampler.role },
+            },
+        }] }),
+    );
+    let device = added["results"][0]["result"]["device"].clone();
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.load_sample",
+            "args": { "device": device, "path": kick.to_string_lossy() },
+        }] }),
+    );
+    let read = |client: &mut Client<InProcess>| {
+        call(client, "query", json!({ "id": device, "detail": "full" }))
+    };
+    let before = read(&mut client);
+    assert_eq!(before["similar"]["position"], 0, "{before}");
+    assert_eq!(before["similar"]["sample"], before["similar"]["reference"]);
+    assert_eq!(
+        before["saved"]["media"]["items"],
+        json!([before["similar"]["sample"]])
+    );
+
+    let swapped = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.swap_similar",
+            "args": { "device": device, "direction": "next" },
+        }] }),
+    );
+    let result = &swapped["results"][0]["result"];
+    assert_eq!(result["position"], 1, "{swapped}");
+    let after = read(&mut client);
+    assert_eq!(after["similar"]["position"], 1);
+    assert_eq!(after["similar"]["sample"], result["media"]);
+    assert_eq!(after["similar"]["reference"], before["similar"]["sample"]);
+    assert_eq!(
+        after["saved"]["similarity_reference"],
+        before["similar"]["sample"]
+    );
+    assert_eq!(after["similar"]["can_return"], true);
+
+    // Past the end the command is refused, with the reason.
+    let mut last = after;
+    for _ in 0..5 {
+        let outcome = client
+            .call(
+                "run",
+                json!({ "commands": [{
+                    "command": "device.swap_similar",
+                    "args": { "device": device, "direction": "next" },
+                }] }),
+            )
+            .unwrap();
+        if outcome.ok().is_err() {
+            break;
+        }
+        last = read(&mut client);
+    }
+    assert_eq!(last["similar"]["can_next"], false, "{last}");
+
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{
+            "command": "device.return_to_reference",
+            "args": { "device": device },
+        }] }),
+    );
+    let home = read(&mut client);
+    assert_eq!(home["similar"]["position"], 0);
+    assert_eq!(home["similar"]["sample"], before["similar"]["sample"]);
+    let _ = fs::remove_dir_all(&dir);
+}

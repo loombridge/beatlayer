@@ -625,14 +625,18 @@ impl Compiler {
                 self.send_device_data(document, id, &mut update);
             }
             // A sampler whose sample's edits, warp or slices changed gets the
-            // edited sample again as node data, with no new program (R57).
+            // edited sample again as node data, with no new program (R57);
+            // so does one that swaps samples in place, for another sample.
             if let (Change::Modified, Some(before), Some(after)) =
                 (change, old.device(id), document.device(id))
-                && (before.sample_edits != after.sample_edits
+                && (((before.sample_edits != after.sample_edits
                     || before.warp != after.warp
                     || before.slices != after.slices
                     || before.region != after.region)
-                && before.media == after.media
+                    && before.media == after.media)
+                    || (before.media != after.media
+                        && before.media_at(0).is_some()
+                        && self.registry.swaps_samples_in_place(&after.kind)))
                 && let Some(media) = after.media_at(0)
             {
                 self.send_slot_sample(document, id, 0, media, &after.sample_edits, &mut update);
@@ -2202,9 +2206,19 @@ impl Compiler {
                             .frames(self.config.sample_rate.hz()),
                     )
                 });
+            // A node that swaps samples in place is the same node while it
+            // holds one, whichever it is (sound similarity R29).
+            let media = if self.registry.swaps_samples_in_place(&device.kind) {
+                device
+                    .media_at(0)
+                    .map(|_| vec![Some(ContentHash([0; 32]))])
+                    .unwrap_or_default()
+            } else {
+                device.media.clone()
+            };
             let identity = Identity::Device(
                 device.kind.clone(),
-                device.media.clone(),
+                media,
                 external_latency,
                 device
                     .external

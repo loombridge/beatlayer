@@ -137,6 +137,7 @@ mod roar;
 mod routing;
 mod sample_editor;
 mod sample_edits;
+mod sample_swap;
 mod sampler;
 mod save_history;
 mod scales;

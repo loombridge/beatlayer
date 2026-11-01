@@ -162,6 +162,13 @@ pub struct Device {
     /// moves it. Left out of the saved set while it is the whole sample.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<SampleRegion>,
+    /// The sample similar-sample swapping goes by (sound similarity R23):
+    /// the one Save as Similarity Reference kept, or the one a swap started
+    /// from. `None` while it is the sample the device was loaded with,
+    /// slot 0's own; loading another sample clears it. Left out of the saved
+    /// set while it is `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub similarity_reference: Option<ContentHash>,
     /// A multisampler's layers and the options of its layer list (WP-5.13,
     /// the multisampler spec, R2). Left out of the saved set for a device
     /// that holds none.
@@ -517,6 +524,7 @@ impl Device {
             sample_edits: Vec::new(),
             wavetables: Vec::new(),
             region: None,
+            similarity_reference: None,
             layers: Layers::default(),
             mappings: Vec::new(),
             shape: None,
@@ -536,14 +544,23 @@ impl Device {
         self.media.get(slot).copied().flatten()
     }
 
+    /// The sample similar-sample swapping goes by: the one kept as the
+    /// reference, else the one slot 0 holds (sound similarity R20, R23).
+    #[must_use]
+    pub fn similarity_reference(&self) -> Option<ContentHash> {
+        self.similarity_reference.or_else(|| self.media_at(0))
+    }
+
     /// Puts `media` in sample slot `slot`, growing the list to reach it and
     /// trimming empty slots off its end. Another sample in slot 0 clears the
-    /// edits made to the one before it, any manual slices and the region.
+    /// edits made to the one before it, any manual slices, the region and the
+    /// similarity reference.
     pub fn set_media(&mut self, slot: usize, media: Option<ContentHash>) {
         if slot == 0 && self.media_at(0) != media {
             self.sample_edits.clear();
             self.slices.clear();
             self.region = None;
+            self.similarity_reference = None;
         }
         if self.media.len() <= slot {
             if media.is_none() {
@@ -1042,5 +1059,28 @@ mod tests {
         assert!(device.region.is_some());
         device.set_media(0, Some(b));
         assert_eq!(device.region, None);
+    }
+
+    // Spec: sound-similarity R20, R23. A device's reference is the sample it
+    // was loaded with until one is kept; loading another sample starts over.
+    #[test]
+    fn the_reference_is_the_loaded_sample_until_kept_and_another_load_clears_it() {
+        let mut device = plugin();
+        let (a, b, c) = (
+            ContentHash([1; 32]),
+            ContentHash([2; 32]),
+            ContentHash([3; 32]),
+        );
+        assert_eq!(device.similarity_reference(), None);
+        device.set_media(0, Some(a));
+        assert_eq!(device.similarity_reference(), Some(a));
+        device.similarity_reference = Some(a);
+        device.set_media(0, Some(a));
+        assert_eq!(device.similarity_reference(), Some(a), "the same sample");
+        device.set_media(0, Some(b));
+        assert_eq!(device.similarity_reference, None, "another sample");
+        assert_eq!(device.similarity_reference(), Some(b));
+        device.similarity_reference = Some(c);
+        assert_eq!(device.similarity_reference(), Some(c));
     }
 }

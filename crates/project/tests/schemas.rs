@@ -287,6 +287,7 @@ fn fixture_project() -> Project {
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
         column_widths: bl_model::ColumnWidths::new(),
+        pages: bl_model::DevicePages::new(),
     }
 }
 
@@ -831,6 +832,7 @@ fn simplers_project(driven: bool) -> Project {
         mpe_view: bl_model::MpeView::default(),
         lane_views: bl_model::LaneViews::new(),
         column_widths: bl_model::ColumnWidths::new(),
+        pages: bl_model::DevicePages::new(),
     }
 }
 

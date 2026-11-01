@@ -146,6 +146,8 @@ pub struct Snapshot {
     pub browse: Option<crate::browse::State>,
     /// What Device Mode shows, while it is the display mode.
     pub device: Option<crate::device::State>,
+    /// What Session Mode shows, while it is the pad mode.
+    pub session: Option<crate::session::State>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix: Option<crate::mix::State>,
     /// What the display's thread is doing.
@@ -173,6 +175,7 @@ impl Snapshot {
             screen: Screen::default(),
             browse: None,
             device: None,
+            session: None,
             mix: None,
             display: Status::default(),
         }

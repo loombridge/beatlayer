@@ -1,6 +1,6 @@
 # Re-Enveloper: a three-band envelope processor
 
-- **Status:** draft
+- **Status:** implemented (every rule has a passing test)
 - **Work packages:** WP-8.50, with [Color Limiter](color-limiter.md) (all of it: R1 to R10). Its crossovers are [Multiband Dynamics](multiband-dynamics.md)'s, the same code; the framework is WP-2.5's ([the native device framework](device-framework.md)), its envelope follower WP-5.42's
 - **Parity-matrix row:** Audio effects: Convolution Reverb, Color Limiter, Gated Delay, Pitch Hack, PitchLoop89, Re-Enveloper, Spectral Blur, Vector Delay
 - **Checked against:** Ableton's Creative Extensions pack page, read 30 October 2026; the Live 12 reference manual, which doesn't describe the device
@@ -35,7 +35,12 @@ Live's Re-Enveloper comes in its Creative Extensions pack as a Max device; Beatl
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-8.50 | unit; agent API (`device.display`) |
-| R2 to R5 | to be written in WP-8.50 | unit (crossovers sum flat within 0.1 dB at factor 0; a positive factor flattening and a negative one sharpening a generated envelope; Gains at −∞) |
-| R6 | to be written in WP-8.50 | golden renders at four block sizes; real-time trap |
-| R7 to R10 | to be written in WP-8.50 | `crates/devices/tests/rules.rs`; agent API; `crates/devices/tests/banks.rs`; save and reopen |
+| R1 | `crates/devices/tests/re_enveloper.rs`, `re_enveloper_is_described_with_two_banks_and_no_latency`, `the_display_reads_each_bands_envelope_and_gain` | unit |
+| R2 | `crates/devices/tests/re_enveloper.rs`, `with_every_factor_at_zero_the_crossovers_sum_flat_within_a_tenth_of_a_decibel` | unit, real-time trap |
+| R3, R4 | `crates/devices/tests/re_enveloper.rs`, `a_positive_factor_flattens_a_percussive_envelope_and_a_negative_one_sharpens_it` | unit, real-time trap |
+| R5 | `crates/devices/tests/re_enveloper.rs`, `band_gains_and_output_reach_minus_infinity`, `output_sets_the_level_of_the_sum`, `re_enveloper_is_described_with_two_banks_and_no_latency` | unit, real-time trap |
+| R6 | `crates/devices/tests/re_enveloper.rs`, `renders_are_the_same_at_any_block_size`; `rtsan/tests/devices.rs`, `re_enveloper_passes_under_rtsan` | real-time trap, RTSan |
+| R7 | `crates/cli/tests/agent.rs`, `an_agent_inserts_color_limiter_and_re_enveloper_and_sets_and_reads_them`; `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_is_modulatable_to_the_frame` | MCP script, real-time trap |
+| R8 | `crates/devices/tests/banks.rs`, `every_native_device_types_banks_hold_every_parameter_and_none_more_than_eight` | unit |
+| R9 | `crates/shell/tests/creative_extensions.rs`, `a_set_with_re_enveloper_reopens_with_every_parameter` | unit |
+| R10 | `crates/devices/src/re_enveloper.rs` calls `multiband_dynamics::Crossover` (Multiband Dynamics' own: `crates/devices/tests/multiband_dynamics.rs`) | review |

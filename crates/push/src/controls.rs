@@ -55,6 +55,14 @@ pub mod cc {
     pub const UP: u8 = 46;
     /// Down arrow.
     pub const DOWN: u8 = 47;
+    /// Octave Down.
+    pub const OCTAVE_DOWN: u8 = 54;
+    /// Octave Up.
+    pub const OCTAVE_UP: u8 = 55;
+    /// Page Left.
+    pub const PAGE_LEFT: u8 = 62;
+    /// Page Right.
+    pub const PAGE_RIGHT: u8 = 63;
     /// Add Device.
     pub const ADD_DEVICE: u8 = 52;
     /// Add Track.

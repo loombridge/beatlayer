@@ -465,6 +465,11 @@ pub trait Content: Send {
         None
     }
 
+    /// What Session Mode shows, for `push.state` (push-2-tracks R73).
+    fn session_state(&self) -> Option<crate::session::State> {
+        None
+    }
+
     /// Draws the mode: the display's columns and labels, the pads, the
     /// buttons it owns.
     fn paint(&mut self, _paint: &mut Paint<'_>) {}

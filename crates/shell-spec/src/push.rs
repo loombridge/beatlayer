@@ -258,6 +258,47 @@ pub struct PushDeviceMode {
     pub mute_locked: bool,
 }
 
+/// What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks
+/// R73).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushSessionLook {
+    /// Of a pad in the slots: `none` (no track or scene), `empty`,
+    /// `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad
+    /// in Session Overview: `none`, `ring`, `playing` or `block`. Of a
+    /// Scene/Grid button: `none`, `empty` or `clip`; in the overview,
+    /// `none`, `part` or `shown`.
+    pub shows: String,
+    /// The clip in the pad's slot.
+    pub clip: Option<bl_model::ClipId>,
+    /// The swatch of the clip's colour, or of the scene's.
+    pub colour: Option<u8>,
+}
+
+/// What Session Mode shows (push-2-tracks R73).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushSession {
+    /// The ring's first track.
+    pub first_track: Option<bl_model::TrackId>,
+    /// The ring's first scene.
+    pub first_scene: Option<bl_model::SceneId>,
+    /// How many tracks the ring covers.
+    pub tracks: usize,
+    /// How many scenes the ring covers.
+    pub scenes: usize,
+    /// Whether Session Overview is shown.
+    pub overview: bool,
+    /// Whether Session Overview is locked on.
+    pub overview_locked: bool,
+    /// The part of 64 scenes the overview shows, from 0.
+    pub overview_part: usize,
+    /// Whether Stop Clip is locked.
+    pub stop_clip_locked: bool,
+    /// The 64 pads, the top row first and each row from the left.
+    pub pads: Vec<PushSessionLook>,
+    /// The eight Scene/Grid buttons, top to bottom.
+    pub scene_buttons: Vec<PushSessionLook>,
+}
+
 /// What one encoder sets in Mix Mode (push-2-tracks R42).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PushMixControl {
@@ -352,6 +393,8 @@ pub struct PushInfo {
     pub browse: Option<PushBrowse>,
     /// What Device Mode shows, while it is the display mode.
     pub device: Option<PushDeviceMode>,
+    /// What Session Mode shows, while it is the pad mode.
+    pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix_mode: Option<PushMix>,
 }
@@ -459,10 +502,12 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  entries and selection and the column in use; in Device Mode, the devices on \
                  the upper buttons with their depth and which is selected, whether Edit Mode is \
                  on, the bank and its page of banks, the parameters on the encoders, the chains \
-                 shown while a rack's button is held, and whether Mute is locked; and, in Mix \
-                 Mode, Track Mix's view, what Global Mix sets, the sends' shift, the eight \
-                 tracks or chains shown with what each encoder sets and its value, and the \
-                 groups and racks that are unfolded. Changes nothing.",
+                 shown while a rack's button is held, and whether Mute is locked; in Mix Mode, \
+                 Track Mix's view, what Global Mix sets, the sends' shift, the eight tracks or \
+                 chains shown with what each encoder sets and its value, and the groups and \
+                 racks that are unfolded; and, in Session Mode, the ring, what each pad and \
+                 Scene/Grid button shows, whether Session Overview is shown or locked and the \
+                 Stop Clip lock. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

@@ -24,6 +24,7 @@ pub mod mix;
 pub mod paint;
 pub mod ports;
 pub mod screen;
+pub mod session;
 pub mod sim;
 pub mod state;
 mod surface;
@@ -68,9 +69,9 @@ pub fn placeholder_contents() -> MakeContents {
     Arc::new(Contents::placeholders)
 }
 
-/// The contents of the modes that are built: Device Mode's, Browse Mode's and
-/// Mix Mode's own, and the placeholders for the others
-/// (`docs/specs/push-2-tracks.md` R5, R15, R28).
+/// The contents of the modes that are built: Device Mode's, Browse Mode's,
+/// Mix Mode's and Session Mode's own, and the placeholders for the others
+/// (`docs/specs/push-2-tracks.md` R5, R15, R28, R59).
 #[must_use]
 pub fn contents() -> MakeContents {
     Arc::new(|| {
@@ -79,6 +80,7 @@ pub fn contents() -> MakeContents {
             Box::new(device::DeviceMode::new());
         contents.display[content::DisplayMode::Browse.index()] = Box::new(browse::Browse::new());
         contents.display[content::DisplayMode::Mix.index()] = Box::new(mix::Mix::new());
+        contents.pads[1] = Box::new(session::Session::new());
         contents
     })
 }

@@ -33,6 +33,7 @@ mod template_surface;
 #[cfg(feature = "testing")]
 pub mod testing;
 
+pub use bl_engine::{SlotState, SlotStatus};
 pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, Traffic};
 pub use surface::{
     Ask, Control, ControlSurface, Cx, DeviceViews, DrumView, Focus, Gesture, Kind, Lock, Moves,

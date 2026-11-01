@@ -47,6 +47,13 @@ pub const ROUTING: ParamId = ParamId(6);
 /// Link: how much of the gain reduction both channels share, per cent.
 pub const LINK: ParamId = ParamId(7);
 
+/// Maximize: Threshold takes Ceiling's control and Output Gain's.
+pub const MAXIMIZE: ParamId = ParamId(8);
+/// Threshold: with Maximize on, the level the input is lifted from, in dB.
+pub const THRESHOLD: ParamId = ParamId(9);
+/// Output: with Maximize on, the level the output is limited at.
+pub const OUTPUT: ParamId = ParamId(10);
+
 /// The parameters', descriptors', and bank's order.
 const CEILING_INDEX: usize = 0;
 const GAIN_INDEX: usize = 1;
@@ -56,6 +63,9 @@ const LOOKAHEAD_INDEX: usize = 4;
 const MODE_INDEX: usize = 5;
 const ROUTING_INDEX: usize = 6;
 const LINK_INDEX: usize = 7;
+const MAXIMIZE_INDEX: usize = 8;
+const THRESHOLD_INDEX: usize = 9;
+const OUTPUT_INDEX: usize = 10;
 
 /// The look-ahead times the chooser offers, in seconds.
 const LOOKAHEAD_SECONDS: [f64; 3] = [0.0015, 0.003, 0.006];
@@ -116,6 +126,20 @@ pub fn limiter_type() -> DeviceType {
             .describe("Whether the channels are left/right or mid/side."),
         ParamDescriptor::continuous(LINK, "Link", (0.0, 100.0), 100.0, ParamUnit::Percent)
             .describe("How much of the gain reduction both channels share."),
+        ParamDescriptor::toggle(MAXIMIZE, "Maximize", false).describe(
+            "Turns Ceiling into Threshold and Gain into Output: the level the signal is \
+             lifted from, and the level it is limited at.",
+        ),
+        ParamDescriptor::continuous(
+            THRESHOLD,
+            "Threshold",
+            (-24.0, 0.0),
+            0.0,
+            ParamUnit::Decibels,
+        )
+        .describe("With Maximize on, the level the signal is lifted from: lower is louder."),
+        ParamDescriptor::gain(OUTPUT, "Output", 0.0, -0.3)
+            .describe("With Maximize on, the level the output is limited at."),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(ControlBand::stacked(BODY_HEIGHT, &[(GAIN, Widget::Knob)])),
@@ -129,6 +153,7 @@ pub fn limiter_type() -> DeviceType {
                 (RELEASE, Widget::Knob),
                 (LINK, Widget::Knob),
                 (AUTO, Widget::Toggle),
+                (MAXIMIZE, Widget::Toggle),
                 (LOOKAHEAD, Widget::Chooser),
                 (CEILING_MODE, Widget::Chooser),
                 (ROUTING, Widget::Chooser),
@@ -138,19 +163,24 @@ pub fn limiter_type() -> DeviceType {
     DeviceType::native(LIMITER, "Limiter", DeviceRole::AudioEffect).with_description(
         DeviceDescription::new(params)
             .with_layout(layout)
-            .with_banks(&[(
-                "Limiter",
-                &[
-                    "Ceiling",
-                    "Gain",
-                    "Release",
-                    "Auto",
-                    "Lookahead",
-                    "Ceiling Mode",
-                    "Routing Mode",
-                    "Link",
-                ],
-            )]),
+            .with_alternate(MAXIMIZE, CEILING, THRESHOLD)
+            .with_alternate(MAXIMIZE, GAIN, OUTPUT)
+            .with_banks(&[
+                (
+                    "Limiter",
+                    &[
+                        "Ceiling",
+                        "Gain",
+                        "Release",
+                        "Auto",
+                        "Lookahead",
+                        "Ceiling Mode",
+                        "Routing Mode",
+                        "Link",
+                    ],
+                ),
+                ("Maximize", &["Maximize", "Threshold", "Output"]),
+            ]),
     )
 }
 
@@ -217,6 +247,8 @@ impl MinQueue {
 /// Limiter's audio-thread half.
 pub struct Brickwall {
     rate: f64,
+    /// The look-ahead times the Lookahead chooser offers, in seconds.
+    times: [f64; 3],
     /// The most samples of look-ahead any choice asks for.
     max_lookahead: usize,
     /// The look-ahead in force, in samples: the output's delay.
@@ -247,20 +279,28 @@ pub struct Brickwall {
 
 impl Brickwall {
     fn new(device: &Device, config: &NodeConfig) -> Self {
-        let rate = config.sample_rate.as_f64();
-        let max_lookahead = (LOOKAHEAD_SECONDS[2] * rate).ceil() as usize + 1;
-        let frames = config.max_frames.max(1);
-        let buffer = || vec![0.0f32; frames];
-        let detector = || Oversampler::new(TRUE_PEAK_STAGES, 1, frames);
         let choice = device
             .params
             .get(&LOOKAHEAD)
             .copied()
             .unwrap_or(DEFAULT_LOOKAHEAD as f64);
-        let choice = (choice.max(0.0) as usize).min(LOOKAHEAD_SECONDS.len() - 1);
-        let lookahead = ((LOOKAHEAD_SECONDS[choice] * rate).ceil() as usize).min(max_lookahead);
+        Self::with_times(LOOKAHEAD_SECONDS, choice.max(0.0) as usize, config)
+    }
+
+    /// A limiter whose Lookahead chooser offers `times` (in seconds, the
+    /// longest last) and starts at `choice`: the look-ahead stage another
+    /// device calls ([`Settings`], [`limit`](Self::limit)).
+    pub(crate) fn with_times(times: [f64; 3], choice: usize, config: &NodeConfig) -> Self {
+        let rate = config.sample_rate.as_f64();
+        let max_lookahead = (times[2] * rate).ceil() as usize + 1;
+        let frames = config.max_frames.max(1);
+        let buffer = || vec![0.0f32; frames];
+        let detector = || Oversampler::new(TRUE_PEAK_STAGES, 1, frames);
+        let choice = choice.min(times.len() - 1);
+        let lookahead = ((times[choice] * rate).ceil() as usize).min(max_lookahead);
         Self {
             rate,
+            times,
             max_lookahead,
             lookahead: lookahead as u32,
             work: [buffer(), buffer()],
@@ -282,7 +322,7 @@ impl Brickwall {
 
     /// The look-ahead in samples for the chooser's `choice`.
     fn lookahead_frames(&self, choice: usize) -> usize {
-        let seconds = LOOKAHEAD_SECONDS[choice.min(LOOKAHEAD_SECONDS.len() - 1)];
+        let seconds = self.times[choice.min(self.times.len() - 1)];
         ((seconds * self.rate).ceil() as usize).min(self.max_lookahead)
     }
 
@@ -315,35 +355,108 @@ fn soft_clip(sample: f32, ceiling: f32) -> f32 {
     sample.signum() * (knee + (ceiling - knee) * over.tanh())
 }
 
+/// What one run of the look-ahead stage needs, whether Limiter's
+/// parameters or another device's choices (Color Limiter's).
+pub(crate) struct Settings<'a> {
+    /// The ceiling, as a gain.
+    pub ceiling: f64,
+    /// The input gain per frame, or `None` for none.
+    pub gain: Option<&'a [f32]>,
+    /// A constant gain on the input, after `gain` (Maximize's lift).
+    pub lift: f32,
+    pub release_ms: f64,
+    pub auto: bool,
+    /// The Lookahead chooser's index.
+    pub lookahead: usize,
+    /// Standard, Soft Clip or True Peak ([`CEILING_MODE`]'s indices).
+    pub mode: usize,
+    /// L/R or M/S ([`ROUTING`]'s indices).
+    pub routing: usize,
+    /// How much of the gain reduction the channels share, from 0 to 1.
+    pub link: f32,
+}
+
 impl NativeDevice for Brickwall {
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        // Maximize (Spec: limiter R11): the limit is Output, and the input is
+        // lifted by Output minus Threshold in dB.
+        let maximize = params.value(MAXIMIZE_INDEX) >= 0.5;
+        let (ceiling, gain, lift) = if maximize {
+            (
+                params.value(OUTPUT_INDEX),
+                params.ramp(OUTPUT_INDEX),
+                (1.0 / db_to_gain(params.value(THRESHOLD_INDEX))) as f32,
+            )
+        } else {
+            (
+                db_to_gain(params.value(CEILING_INDEX)),
+                params.ramp(GAIN_INDEX),
+                1.0,
+            )
+        };
+        let settings = Settings {
+            ceiling,
+            gain: Some(gain),
+            lift,
+            release_ms: params.value(RELEASE_INDEX),
+            auto: params.value(AUTO_INDEX) >= 0.5,
+            lookahead: params.value(LOOKAHEAD_INDEX) as usize,
+            mode: params.value(MODE_INDEX) as usize,
+            routing: params.value(ROUTING_INDEX) as usize,
+            link: (params.value(LINK_INDEX) / 100.0).clamp(0.0, 1.0) as f32,
+        };
+        self.limit(audio, &settings);
+    }
+
+    fn latency(&self) -> u32 {
+        self.lookahead
+    }
+
+    fn gain_reduction(&self) -> f32 {
+        self.reduction
+    }
+}
+
+impl Brickwall {
+    /// Limits `audio` in place under `settings`: the look-ahead stage
+    /// itself, which Limiter's `process` and Color Limiter's both call.
+    pub(crate) fn limit(&mut self, audio: &mut Audio<'_, '_>, settings: &Settings<'_>) {
         let frames = audio.frames();
         let channels = audio.channels().min(2);
         if frames == 0 || channels == 0 {
             return;
         }
 
-        let ceiling = db_to_gain(params.value(CEILING_INDEX)).max(1e-6) as f32;
-        let mode = (params.value(MODE_INDEX) as usize).min(MODE_TRUE_PEAK);
+        let ceiling = settings.ceiling.max(1e-6) as f32;
+        let mode = settings.mode.min(MODE_TRUE_PEAK);
         // True Peak leaves a little headroom for the reconstruction filters.
         let limit = if mode == MODE_TRUE_PEAK {
             ceiling * TRUE_PEAK_HEADROOM
         } else {
             ceiling
         };
-        let routing = params.value(ROUTING_INDEX) as usize;
-        let link = (params.value(LINK_INDEX) / 100.0).clamp(0.0, 1.0) as f32;
-        let auto = params.value(AUTO_INDEX) >= 0.5;
-        let lookahead = self.lookahead_frames(params.value(LOOKAHEAD_INDEX) as usize);
+        let routing = settings.routing;
+        let link = settings.link;
+        let auto = settings.auto;
+        let lookahead = self.lookahead_frames(settings.lookahead);
         self.lookahead = lookahead as u32;
 
         // 1. The input gain, into the working buffers.
-        let gain = params.ramp(GAIN_INDEX);
         for channel in 0..channels {
             let src = audio.channel_mut(channel);
             let work = &mut self.work[channel][..frames];
-            for ((sample, out), g) in src.iter().zip(work.iter_mut()).zip(gain) {
-                *out = *sample * *g;
+            let lift = settings.lift;
+            match settings.gain {
+                Some(gain) => {
+                    for ((sample, out), g) in src.iter().zip(work.iter_mut()).zip(gain) {
+                        *out = *sample * *g * lift;
+                    }
+                }
+                None => {
+                    for (sample, out) in src.iter().zip(work.iter_mut()) {
+                        *out = *sample * lift;
+                    }
+                }
             }
         }
 
@@ -432,7 +545,7 @@ impl NativeDevice for Brickwall {
         } else {
             self.hold_frames = 0.0;
         }
-        let release = self.release_step(params.value(RELEASE_INDEX), auto);
+        let release = self.release_step(settings.release_ms, auto);
         // The least gain of the block, for the gain-reduction meter (R40).
         let mut least_gain = 1.0f32;
         for channel in 0..channels {
@@ -492,13 +605,5 @@ impl NativeDevice for Brickwall {
                 }
             }
         }
-    }
-
-    fn latency(&self) -> u32 {
-        self.lookahead
-    }
-
-    fn gain_reduction(&self) -> f32 {
-        self.reduction
     }
 }

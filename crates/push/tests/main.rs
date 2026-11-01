@@ -14,4 +14,5 @@ mod mix;
 mod modes;
 mod realtime;
 mod rig;
+mod session;
 mod sim;

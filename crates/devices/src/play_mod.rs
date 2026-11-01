@@ -701,6 +701,7 @@ pub fn display(
     const POINTS: usize = 48;
     let value = |id: ParamId| description.value(values, id).unwrap_or(0.0);
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

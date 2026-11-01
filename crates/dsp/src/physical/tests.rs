@@ -686,6 +686,46 @@ fn voices_are_independent_and_a_table_swaps_without_allocating() {
     lspk_rt::rt_test!({ many.process(&input, &mut output) });
 }
 
+// Spec: physical-models R12
+#[test]
+fn a_table_rebuilds_in_place_as_new_makes_it_without_allocating() {
+    let qualities = [Quality::Eco, Quality::Low, Quality::Medium, Quality::High];
+    let shapes = [
+        Shape::Beam,
+        Shape::Marimba,
+        Shape::Cantilever,
+        Shape::Membrane,
+        Shape::Plate,
+    ];
+    // Every table starts as a High Beam and is made over, in place, to each
+    // other setting; it holds what `new` makes.
+    let mut table = ModalTable::new(Shape::Beam, Quality::High, 1.0, 0.0);
+    for &shape in &shapes {
+        for &quality in &qualities {
+            for (aspect, inharm) in [(1.0, 0.0), (0.4, -0.7), (3.3, 0.9), (3.3, 0.1)] {
+                lspk_rt::rt_test!({ table.rebuild(shape, quality, aspect, inharm) });
+                let made = ModalTable::new(shape, quality, aspect, inharm);
+                assert_eq!(table.ratio, made.ratio, "{shape:?} {quality:?} {aspect}");
+                assert_eq!(table.ln_ratio, made.ln_ratio);
+                assert_eq!(table.profile, made.profile, "{shape:?} {quality:?}");
+            }
+        }
+    }
+    // A bank follows it without allocating.
+    let mut bank = ModalBank::new(RATE, 2);
+    let params = sustained(300.0);
+    bank.reset_voice(0, &params);
+    let stride = bank.stride();
+    let mut input = vec![0.0; 64 * stride];
+    input[0] = 1.0;
+    let mut output = vec![0.0; input.len() * 2];
+    lspk_rt::rt_test!({
+        bank.rebuild_table(Shape::Plate, Quality::Eco, 2.0, 0.3);
+        bank.process(&input, &mut output);
+    });
+    assert!(output.iter().any(|&v| v != 0.0));
+}
+
 // Spec: physical-models R12, R15
 #[test]
 fn sixteen_resonators_and_sixteen_waveguides_run_under_the_trap() {

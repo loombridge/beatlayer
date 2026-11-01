@@ -1315,7 +1315,11 @@ mod tests {
             "a new device's MIDI sidechain has no source and saves none"
         );
         let set = |editor: &mut Editor, track| {
-            editor.apply(Command::SetMidiSidechainSource { device: id, track })
+            editor.apply(Command::SetMidiSidechainSource {
+                device: id,
+                track,
+                tap: None,
+            })
         };
         assert!(
             set(&mut editor, Some(a)).is_err(),
@@ -1350,11 +1354,83 @@ mod tests {
         assert!(matches!(
             editor.apply(Command::SetMidiSidechainSource {
                 device: plain,
-                track: None
+                track: None,
+                tap: None,
             }),
             Err(crate::EditError::Command(ModelError::NoMidiSidechain(_)))
         ));
         set(&mut editor, None).unwrap();
+    }
+
+    // Spec: routing R39
+    #[test]
+    fn a_midi_sidechain_with_a_tapping_point_saves_and_sets_it() {
+        let mut editor = Editor::new();
+        let a = add(&mut editor, TrackKind::Audio, None);
+        let m = add(&mut editor, TrackKind::Midi, None);
+        let (tapped, plain) = (editor.new_id(), editor.new_id());
+        for (id, name) in [(tapped, "Tapped"), (plain, "Plain")] {
+            let device = crate::Device::new(
+                id,
+                name,
+                crate::DeviceKind::Native {
+                    device_type: format!("test.{name}"),
+                },
+            );
+            editor
+                .apply(Command::InsertDevice {
+                    track: a,
+                    index: 0,
+                    device: if id == tapped {
+                        device.with_midi_sidechain_tap()
+                    } else {
+                        device.with_midi_sidechain()
+                    },
+                })
+                .unwrap();
+        }
+        let tap = |editor: &Editor, id| {
+            editor
+                .document()
+                .device(id)
+                .unwrap()
+                .midi_sidechain
+                .as_ref()
+                .unwrap()
+                .tapped()
+        };
+        assert_eq!(
+            tap(&editor, tapped),
+            Tap::PostFx,
+            "a new device's is Post FX"
+        );
+        assert_eq!(
+            tap(&editor, plain),
+            Tap::PreFx,
+            "no tapping point is Pre FX"
+        );
+        let set = |editor: &mut Editor, device, tap| {
+            editor.apply(Command::SetMidiSidechainSource {
+                device,
+                track: Some(m),
+                tap,
+            })
+        };
+        set(&mut editor, tapped, Some(Tap::PostMixer)).unwrap();
+        assert_eq!(tap(&editor, tapped), Tap::PostMixer);
+        set(&mut editor, tapped, None).unwrap();
+        assert_eq!(tap(&editor, tapped), Tap::PostMixer, "left out, it stays");
+        let loaded: Document =
+            serde_json::from_value(serde_json::to_value(editor.document()).unwrap()).unwrap();
+        assert_eq!(&loaded, editor.document());
+        assert!(matches!(
+            set(&mut editor, plain, Some(Tap::PostFx)),
+            Err(crate::EditError::Command(ModelError::NoMidiTap(_)))
+        ));
+        let undone = editor.document().clone();
+        set(&mut editor, tapped, Some(Tap::PreFx)).unwrap();
+        editor.undo().unwrap();
+        assert_eq!(editor.document(), &undone);
     }
 
     // Spec: routing R9 (IMP-01)

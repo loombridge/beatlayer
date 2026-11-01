@@ -151,6 +151,20 @@ impl ModalBank {
         std::mem::replace(&mut self.table, table)
     }
 
+    /// Makes the bank's table what [`ModalTable::new`] would, in place and
+    /// without allocating ([`ModalTable::rebuild`]), for every voice at the
+    /// next control update.
+    pub fn rebuild_table(
+        &mut self,
+        shape: Shape,
+        quality: Quality,
+        aspect: f32,
+        inharmonicity: f32,
+    ) {
+        self.table_changed = true;
+        self.table.rebuild(shape, quality, aspect, inharmonicity);
+    }
+
     /// Moves `voice` towards `params`: its pitch at once, the rest smoothly
     /// (R17).
     ///

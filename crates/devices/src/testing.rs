@@ -6,6 +6,7 @@
 //! | [`UTILITY`] | Framework Test Utility | gain to −∞ dB, mute, polarity, balance | generic |
 //! | [`DRIVE`] | Framework Test Drive | a `tanh` saturator, oversampled 1 to 8 times | generic |
 //! | [`SCOPE`] | Framework Test Scope | passes audio through; a display cell between control bands, with a row inside its bottom edge | its own |
+//! | [`SPECTROGRAM`] | Framework Test Spectrogram | passes audio through; a display cell that draws a spectrogram of it from `bl_dsp::stft` | its own |
 //! | [`EFFECTS`] | Framework Test Effects | the effects' shared parts: an LFO tremolo, or the LFO's or the envelope follower's value as the output; a menu option and an expanded part | its own |
 //! | [`INSTRUMENT`] | Framework Test Instrument | the instruments' shared parts: sine voices with every part of the voice section, or a source as the output; a menu option | generic |
 //! | [`PAGES`] | Framework Test Pages | passes audio through; tabs of three pages in the body beside a shell of three sections and its display | its own |
@@ -14,6 +15,7 @@
 //! values with linear and logarithmic tapers, toggles, choices, and whole
 //! numbers.
 
+use bl_dsp::stft::{self, Stft, Window};
 use bl_dsp::{EnvelopeFollower, Oversampler};
 use bl_engine::{DeviceType, NodeConfig, NodeData, Registry};
 use bl_model::device_layout::{
@@ -21,7 +23,8 @@ use bl_model::device_layout::{
     Widget,
 };
 use bl_model::{
-    Device, DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit,
+    Device, DeviceDescription, DeviceDisplay, DeviceId, DeviceLayout, DeviceRole,
+    DisplaySpectrogram, ParamDescriptor, ParamId, ParamUnit, SpectrogramGrid,
 };
 
 use core::f64::consts::TAU;
@@ -39,6 +42,9 @@ pub const UTILITY: &str = "test.framework.utility";
 pub const DRIVE: &str = "test.framework.drive";
 /// The test scope's device type.
 pub const SCOPE: &str = "test.framework.scope";
+
+/// The test spectrogram's device type.
+pub const SPECTROGRAM: &str = "test.framework.spectrogram";
 
 /// The test effects' device type.
 pub const EFFECTS: &str = "test.framework.effects";
@@ -73,6 +79,23 @@ pub const SCOPE_FREEZE: ParamId = ParamId(2);
 pub const SCOPE_DIVISIONS: ParamId = ParamId(3);
 /// The scope's trigger level, −100 to 100 %.
 pub const SCOPE_TRIGGER: ParamId = ParamId(4);
+
+/// The spectrogram's freeze.
+pub const SPECTROGRAM_FREEZE: ParamId = ParamId(0);
+
+/// The spectrogram's grid: 64 columns of the newest frames, 48 rows from
+/// 40 Hz to 16 kHz, drawn between -90 and 0 dB.
+pub const SPECTROGRAM_GRID: SpectrogramGrid = SpectrogramGrid {
+    columns: 64,
+    rows: 48,
+    frequencies: [40.0, 16_000.0],
+    log_frequency: true,
+    levels: [-90.0, 0.0],
+};
+
+/// The spectrogram's frame size and overlap.
+const SPECTROGRAM_FRAME: usize = 4096;
+const SPECTROGRAM_OVERLAP: usize = 4;
 
 /// The effects' output: Audio (a tremolo), LFO (the LFO's value on each
 /// channel), or Envelope (the envelope follower's level of the input).
@@ -264,6 +287,57 @@ pub fn scope_type() -> DeviceType {
     ]));
     DeviceType::native(SCOPE, "Framework Test Scope", DeviceRole::AudioEffect)
         .with_description(DeviceDescription::new(params).with_layout(layout))
+}
+
+/// The test spectrogram's type: a display cell that draws a spectrogram.
+#[must_use]
+pub fn spectrogram_type() -> DeviceType {
+    let params = vec![
+        ParamDescriptor::toggle(SPECTROGRAM_FREEZE, "Freeze", false)
+            .describe("Holds the display still while the audio keeps going."),
+    ];
+    let layout = DeviceLayout::new(LayoutNode::Row(vec![
+        LayoutNode::Cell(DisplayCell::new("Spectrogram", 240.0, BODY_HEIGHT, 1.0)),
+        LayoutNode::Band(ControlBand::stacked(
+            BODY_HEIGHT,
+            &[(SPECTROGRAM_FREEZE, Widget::Toggle)],
+        )),
+    ]));
+    DeviceType::native(
+        SPECTROGRAM,
+        "Framework Test Spectrogram",
+        DeviceRole::AudioEffect,
+    )
+    .with_description(
+        DeviceDescription::new(params)
+            .with_layout(layout)
+            .with_spectrogram(SPECTROGRAM_GRID),
+    )
+}
+
+/// What the test spectrogram's display shows, from the `data` its node
+/// published.
+#[must_use]
+pub fn spectrogram_display(
+    device: DeviceId,
+    description: &DeviceDescription,
+    data: Option<&[f32]>,
+) -> DeviceDisplay {
+    let spectrograms = description
+        .spectrogram
+        .zip(data)
+        .and_then(|(grid, data)| DisplaySpectrogram::from_data("Spectrogram", grid, data))
+        .into_iter()
+        .collect();
+    DeviceDisplay {
+        device,
+        live: data.is_some(),
+        view: None,
+        series: Vec::new(),
+        spectrograms,
+        markers: Vec::new(),
+        readings: Vec::new(),
+    }
 }
 
 /// The pages node of the test pages' body, in the tab style.
@@ -500,6 +574,7 @@ pub fn device_types() -> Vec<DeviceType> {
         utility_type(),
         drive_type(),
         scope_type(),
+        spectrogram_type(),
         effects_type(),
         instrument_type(),
         pages_type(),
@@ -511,6 +586,9 @@ pub fn register(registry: &mut Registry) {
     add(registry, utility_type(), |_, _| Utility);
     add(registry, drive_type(), |_, config| Drive::new(config));
     add(registry, scope_type(), |_, _| Scope);
+    add(registry, spectrogram_type(), |_, config| {
+        Spectrogram::new(config)
+    });
     add(registry, effects_type(), Effects::new);
     add(registry, instrument_type(), |_, config| {
         TestInstrument::new(config)
@@ -602,6 +680,84 @@ struct Scope;
 
 impl NativeDevice for Scope {
     fn process(&mut self, _audio: &mut Audio<'_, '_>, _params: &ParamBank) {}
+}
+
+/// Passes audio through and publishes a spectrogram of it: a column of the
+/// newest frame's magnitudes in dB after each frame of the STFT.
+struct Spectrogram {
+    stft: Stft,
+    /// The bins each row covers.
+    rows: Vec<(usize, usize)>,
+    /// The columns, a ring of `rows` values each; `head` is the next to write
+    /// and so the oldest.
+    grid: Vec<f32>,
+    head: usize,
+}
+
+impl Spectrogram {
+    fn new(config: &NodeConfig) -> Self {
+        let grid = SPECTROGRAM_GRID;
+        let stft = Stft::new(SPECTROGRAM_FRAME, SPECTROGRAM_OVERLAP, Window::Hann)
+            .expect("a frame size and overlap the STFT offers");
+        Self {
+            rows: stft::row_bins(
+                grid.rows,
+                grid.frequencies[0],
+                grid.frequencies[1],
+                grid.log_frequency,
+                SPECTROGRAM_FRAME,
+                config.sample_rate.as_f64(),
+            ),
+            stft,
+            grid: vec![grid.levels[0]; grid.columns * grid.rows],
+            head: 0,
+        }
+    }
+}
+
+impl NativeDevice for Spectrogram {
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        let frozen = params.value(SPECTROGRAM_FREEZE.0 as usize) >= 0.5;
+        let Self {
+            stft,
+            rows,
+            grid,
+            head,
+        } = self;
+        let scale = stft.amplitude_scale();
+        let (frames, channels) = (audio.frames(), audio.channels());
+        for i in 0..frames {
+            let sample = (0..channels).map(|c| audio.channel_mut(c)[i]).sum::<f32>()
+                / channels.max(1) as f32;
+            // The resynthesis isn't used: the audio passes through as it is.
+            stft.process_sample(sample, |spectrum| {
+                if frozen {
+                    return;
+                }
+                let column = &mut grid[*head * rows.len()..][..rows.len()];
+                for (cell, &(from, to)) in column.iter_mut().zip(rows.iter()) {
+                    let loudest = spectrum[from..=to]
+                        .iter()
+                        .map(|bin| bin.norm())
+                        .fold(0.0, f32::max);
+                    *cell = 20.0 * (loudest * scale).max(1e-9).log10();
+                }
+                *head = (*head + 1) % SPECTROGRAM_GRID.columns;
+            });
+        }
+    }
+
+    fn display_len(&self) -> usize {
+        self.grid.len()
+    }
+
+    fn display(&mut self, out: &mut [f32]) {
+        // Oldest column first.
+        let (newer, older) = self.grid.split_at(self.head * self.rows.len());
+        let (first, second) = out.split_at_mut(older.len());
+        first.copy_from_slice(older);
+        second.copy_from_slice(newer);
+    }
 }
 
 /// The effects' shared parts, each used: the LFO moves the audio or is the

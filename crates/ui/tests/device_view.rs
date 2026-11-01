@@ -595,6 +595,159 @@ fn the_midi_sidechain_strip_shows_the_section_and_its_chooser_sets_the_source() 
     assert_eq!(last_step(&h), "Change \"Routing\"");
 }
 
+fn corpus() -> Value {
+    let t = bl_devices::corpus::corpus_type();
+    json!({ "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true })
+}
+
+fn param_of(h: &Harness, device: DeviceId, param: bl_model::ParamId) -> f64 {
+    let d = h.shell.editor().document().device(device).unwrap();
+    d.params.get(&param).copied().unwrap_or_else(|| {
+        bl_devices::corpus::corpus_type()
+            .description
+            .param(param)
+            .unwrap()
+            .default
+    })
+}
+
+/// Picks the open list's entry labelled `label`, under `below`.
+fn pick(h: &mut Harness, label: &str, below: Rect) {
+    let nodes = Harness::nodes(&h.settle());
+    let entry = nodes
+        .iter()
+        .find(|n| n.label == label && n.bounds.is_some_and(|b| b.y0 as f32 > below.top()))
+        .unwrap_or_else(|| panic!("{label} is in the open list"));
+    let b = entry.bounds.unwrap();
+    h.click(pos2(
+        ((b.x0 + b.x1) / 2.0) as f32,
+        ((b.y0 + b.y1) / 2.0) as f32,
+    ));
+    h.settle();
+}
+
+/// A drag from `from` to `to` in a few steps.
+fn drag(h: &mut Harness, from: Pos2, to: Pos2) {
+    h.frame(vec![Event::PointerMoved(from)]);
+    h.frame(vec![press(from, true, PointerButton::Primary)]);
+    for step in 1..=5 {
+        h.frame(vec![Event::PointerMoved(
+            from + (to - from) * (step as f32 / 5.0),
+        )]);
+    }
+    h.frame(vec![press(to, false, PointerButton::Primary)]);
+    h.settle();
+}
+
+// Spec: corpus R1, R11 (Corpus's MIDI source and its tapping point), routing
+// R39
+#[test]
+fn corpus_chooses_its_midi_source_and_its_tapping_point_in_its_sidechain_strip() {
+    use bl_ui::sidechain::{rows, strip_buttons};
+    let mut h = harness();
+    let corpus = add(&mut h, corpus());
+    let fc = frame_of(&mut h, corpus);
+    h.click(strip_buttons(fc)[0].center());
+    h.settle();
+    let fc = frame_of(&mut h, corpus);
+    let nodes = Harness::nodes(&h.settle());
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Source").value,
+        "No Input"
+    );
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Tapping Point").value,
+        "Post FX",
+        "a new Corpus takes the notes Post FX"
+    );
+    assert_eq!(midi_section(&h, corpus).tap.as_deref(), Some("Post FX"));
+    let [_, source, tap, ..] = rows(fc);
+    h.click(source.center());
+    pick(&mut h, "1-MIDI", source);
+    assert_eq!(midi_section(&h, corpus).source, "1-MIDI");
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+    // The tapping point is one undo step too, and keeps the source.
+    let steps = h.shell.editor().undo_history().len();
+    h.click(tap.center());
+    pick(&mut h, "Pre FX", tap);
+    assert_eq!(midi_section(&h, corpus).tap.as_deref(), Some("Pre FX"));
+    assert_eq!(midi_section(&h, corpus).source, "1-MIDI");
+    assert_eq!(h.shell.editor().undo_history().len(), steps + 1);
+    assert_eq!(last_step(&h), "Change \"Routing\"");
+    let saved = h
+        .shell
+        .editor()
+        .document()
+        .device(corpus)
+        .unwrap()
+        .midi_sidechain
+        .clone()
+        .unwrap();
+    assert_eq!(saved.tapped(), bl_model::Tap::PreFx);
+    h.shell.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert_eq!(midi_section(&h, corpus).tap.as_deref(), Some("Post FX"));
+}
+
+// Spec: corpus R1, R2 (the X–Y control, the dimmed controls)
+#[test]
+fn dragging_corpus_xy_control_sets_decay_and_material_or_radius_in_one_undo_step() {
+    use bl_devices::corpus::{DECAY, HIT, MATERIAL, QUALITY, RADIUS, TYPE, unused};
+    let mut h = harness();
+    let corpus = add(&mut h, corpus());
+    let cell = |h: &mut Harness| {
+        let nodes = Harness::nodes(&h.settle());
+        let b = Harness::node(&nodes, "X-Y").bounds.unwrap();
+        Rect::from_min_max(
+            pos2(b.x0 as f32, b.y0 as f32),
+            pos2(b.x1 as f32, b.y1 as f32),
+        )
+    };
+    let at = |r: Rect, across: f32, up: f32| {
+        pos2(r.left() + across * r.width(), r.bottom() - up * r.height())
+    };
+    let r = cell(&mut h);
+    let steps = h.shell.editor().undo_history().len();
+    drag(&mut h, at(r, 0.5, 0.5), at(r, 0.8, 0.25));
+    let (decay, material) = (param_of(&h, corpus, DECAY), param_of(&h, corpus, MATERIAL));
+    assert!((decay - 80.0).abs() < 3.0, "Decay {decay}");
+    assert!((material + 50.0).abs() < 6.0, "Material {material}");
+    assert_eq!(
+        h.shell.editor().undo_history().len(),
+        steps + 1,
+        "one undo step"
+    );
+    assert_eq!(last_step(&h), "Change \"Decay\" and \"Material\"");
+    h.shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(param_of(&h, corpus, DECAY), 50.0);
+    assert_eq!(param_of(&h, corpus, MATERIAL), 0.0);
+    // A pipe's vertical axis is Radius, and its dimmed controls are the
+    // spec's.
+    h.shell
+        .run(
+            "device.set_param",
+            json!({ "device": corpus, "param": TYPE, "value": 5.0 }),
+        )
+        .unwrap();
+    h.settle();
+    let locked = h
+        .shell
+        .device_view_state()
+        .devices
+        .into_iter()
+        .find(|d| d.id == corpus)
+        .and_then(|d| d.panel)
+        .unwrap()
+        .locked;
+    assert_eq!(locked, unused(5));
+    assert!(locked.contains(&HIT) && locked.contains(&QUALITY) && !locked.contains(&RADIUS));
+    let r = cell(&mut h);
+    drag(&mut h, at(r, 0.5, 0.5), at(r, 0.25, 0.75));
+    assert!((param_of(&h, corpus, DECAY) - 25.0).abs() < 3.0);
+    assert!((param_of(&h, corpus, RADIUS) - 75.0).abs() < 6.0);
+    assert_eq!(param_of(&h, corpus, MATERIAL), 0.0, "Material stays");
+}
+
 fn hardware() -> Value {
     let t = bl_devices::hardware_instrument_type();
     json!({ "kind": t.kind, "name": t.name, "role": t.role })

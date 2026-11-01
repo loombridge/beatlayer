@@ -1257,6 +1257,17 @@ pub struct QuantizeNotesArgs {
     /// How far each note moves toward its grid line, from 0 to 100 percent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub amount: Option<u8>,
+    /// How much every second grid line is delayed, from 0 to 100 percent of
+    /// half a step. Left out, none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub swing: Option<u8>,
+    /// Only the notes of this pitch, in place of `notes` and the selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pitch: Option<u8>,
+    /// With no `notes` and none selected, quantise every note of the clip
+    /// rather than refusing.
+    #[serde(default)]
+    pub or_all: bool,
 }
 
 /// Arguments of `clip_view.quantize_settings`. Fields left out keep their
@@ -1779,8 +1790,11 @@ fn specs() -> Vec<CommandSpec> {
                  toward the first line after the start instead. `grid`, `target`, and `amount` \
                  left out use the Quantize tool's settings (`clip_view.quantize_settings`, \
                  `midi_tool.state`), whose grid follows the note editor's editing grid until a \
-                 note division is chosen and is a triplet of it with Triplets on. Quantising is \
-                 one undo step, and the quantised notes stay selected.",
+                 note division is chosen and is a triplet of it with Triplets on. `swing`, from 0 to \
+                 100, delays every second line of the grid by that share of half a step; \
+                 `pitch` quantises only the notes of that pitch; `or_all` quantises every note \
+                 when none is selected. Quantising is one undo step, and the quantised notes \
+                 stay selected.",
             )
             .permission(Permission::Edit)
             .contexts([NoteEditor, NoteSelectionContext])

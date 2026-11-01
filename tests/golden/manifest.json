@@ -409,6 +409,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:9d10bf32cbd981fd"
     },
+    "operator": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 144000,
+      "bits": 24,
+      "render_hash": "fnv1a64:5fac1e2b9916e3f4"
+    },
     "overlapping-clips": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

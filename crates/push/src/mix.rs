@@ -182,6 +182,74 @@ impl Param {
     }
 }
 
+impl Param {
+    /// The track and the automation target of a track's control; a rack
+    /// chain's has none here.
+    fn automation(self) -> Option<(TrackId, bl_model::AutomationTarget)> {
+        use bl_model::{
+            AutomationTarget::{Mixer, Send},
+            MixerParam,
+        };
+        Some(match self {
+            Self::Volume(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::Volume,
+                },
+            ),
+            Self::Pan(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::Pan,
+                },
+            ),
+            Self::SplitLeft(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::SplitLeft,
+                },
+            ),
+            Self::SplitRight(t) => (
+                t,
+                Mixer {
+                    param: MixerParam::SplitRight,
+                },
+            ),
+            Self::Send(t, to) => (t, Send { to }),
+            _ => return None,
+        })
+    }
+
+    /// The control's value at `position` on its travel, as an envelope holds
+    /// it.
+    fn value(self, position: f64) -> f64 {
+        let pan = (position * 2.0 - 1.0).clamp(-1.0, 1.0);
+        match self {
+            Self::Volume(_) | Self::ChainVolume(_) => fader_gain(position),
+            Self::Send(..) | Self::ChainSend(..) => send_level(position),
+            _ => pan,
+        }
+    }
+
+    /// Where an envelope's `value` sits on the control's travel.
+    fn position_of(self, value: f64) -> f64 {
+        match self {
+            Self::Volume(_) | Self::ChainVolume(_) => fader_position(value),
+            Self::Send(..) | Self::ChainSend(..) => send_position(value),
+            _ => (value + 1.0) / 2.0,
+        }
+    }
+
+    /// Where the control rests with nothing set: 0 dB, centre, or no send.
+    fn default_position(self) -> f64 {
+        match self {
+            Self::Volume(_) | Self::ChainVolume(_) => fader_position(1.0),
+            Self::Send(..) | Self::ChainSend(..) => 0.0,
+            _ => 0.5,
+        }
+    }
+}
+
 /// What an encoder does.
 enum Kind {
     /// A continuous control; none when it is shown but inert (R33).
@@ -898,6 +966,34 @@ impl Mix {
     }
 }
 
+impl Mix {
+    /// Delete and a touch: the control's automation goes, or the control
+    /// goes back to where it rests where it has none (R62).
+    fn delete_automation(&mut self, column: u8, ctx: &mut Ctx<'_>) {
+        let Some(model) = ctx.model else {
+            return;
+        };
+        let row = ctx.cx.row();
+        self.sync(model, row);
+        let layout = self.layout(model, row);
+        let mut knobs = self.knobs(model, &layout, ctx.mix_page);
+        let Some(Kind::Move(Some(param))) = knobs
+            .get_mut(usize::from(column))
+            .and_then(Option::take)
+            .map(|knob| knob.kind)
+        else {
+            return;
+        };
+        if let Some((track, target)) = param.automation()
+            && crate::automation::delete(ctx, model, track, &target)
+        {
+            return;
+        }
+        let (id, args) = param.command(param.default_position());
+        ctx.run_turn(column, id, args);
+    }
+}
+
 impl Content for Mix {
     fn name(&self) -> &str {
         "Mix"
@@ -1007,6 +1103,9 @@ impl Content for Mix {
             self.moving[col].touch();
             self.counts[col].reset();
             self.stepped[col] = None;
+            if turn == Turn::Touch && ctx.modifiers.has(cc::DELETE) {
+                self.delete_automation(column, ctx);
+            }
             return;
         };
         let Some(model) = ctx.model else {
@@ -1022,8 +1121,30 @@ impl Content for Mix {
         let now = ctx.cx.now();
         match knob.kind {
             Kind::Move(Some(target)) => {
-                let position =
-                    self.moving[col].turn(now, knob.position, steps, ctx.modifiers.shift());
+                // Spec: push-2-notes R66. With steps held, the turn is the
+                // value at the first held step, written into their span.
+                let held = target.automation().filter(|_| !ctx.held_steps.is_empty());
+                let from = held
+                    .as_ref()
+                    .and_then(|(_, at)| {
+                        crate::automation::value_at_first_step(model, ctx.held_steps, at)
+                    })
+                    .map_or(knob.position, |value| target.position_of(value));
+                let position = self.moving[col].turn(now, from, steps, ctx.modifiers.shift());
+                if let Some((_, at)) = held {
+                    if let Some(clip) = crate::automation::edited_clip(model).map(|c| c.id) {
+                        let gesture = crate::surface::ENCODER_GESTURE + u32::from(column);
+                        crate::automation::write_steps(
+                            ctx,
+                            gesture,
+                            clip,
+                            &at,
+                            target.value(position),
+                        );
+                        ctx.gesture(column);
+                    }
+                    return;
+                }
                 let (id, args) = target.command(position);
                 ctx.run_turn(column, id, args);
             }
@@ -1057,6 +1178,7 @@ impl Content for Mix {
         self.sync(model, paint.row);
         let layout = self.layout(model, paint.row);
         self.paint_lower(paint, &layout);
+        let held_steps = paint.held_steps;
         self.paint_upper(paint);
         Self::paint_buttons(paint);
         for (column, knob) in self
@@ -1065,10 +1187,29 @@ impl Content for Mix {
             .enumerate()
         {
             if let Some(knob) = knob {
+                // Spec: push-2-notes R64. The automation's dot; R66, with
+                // steps held the value at the first.
+                let automated = match knob.kind {
+                    Kind::Move(Some(param)) => param.automation().map(|a| (param, a)),
+                    _ => None,
+                };
+                let dot = automated
+                    .as_ref()
+                    .map_or(crate::screen::Dot::None, |(_, (track, at))| {
+                        crate::automation::dot(model, *track, at)
+                    });
+                let graphic = automated
+                    .as_ref()
+                    .and_then(|(param, (_, at))| {
+                        crate::automation::value_at_first_step(model, held_steps, at)
+                            .map(|value| Graphic::Arc(param.position_of(value) as f32))
+                    })
+                    .unwrap_or(knob.graphic);
                 paint.screen.columns[column] = Column {
                     name: knob.name,
                     value: knob.value,
-                    graphic: knob.graphic,
+                    graphic,
+                    dot,
                     ..Column::default()
                 };
             }

@@ -234,6 +234,12 @@ pub struct EngineState {
     /// The parameters under modulation while the song plays, as the last
     /// block played them (WP-5.9); the rest play their base.
     pub modulated: Vec<PlayedParam>,
+    /// The parameters an instrument's modulation matrix moved in the last
+    /// block, each with its base and the value it played for the newest
+    /// sounding voice, matrix included (the instrument modulation spec, R12;
+    /// modulation R31). Apart from [`modulated`](Self::modulated), which the
+    /// matrix never changes (modulation R30).
+    pub matrix_played: Vec<PlayedParam>,
     /// The devices whose node reports a latency other than the one the
     /// program compensates for (WP-2.11): what the shell hands to
     /// [`Engine::set_device_latency`](crate::Engine::set_device_latency), so
@@ -298,6 +304,7 @@ impl EngineState {
             chain_meters: Vec::with_capacity(chain_meters),
             chain_meters_truncated: false,
             modulated: Vec::with_capacity(modulated),
+            matrix_played: Vec::with_capacity(modulated),
             latency_changes: Vec::with_capacity(LATENCY_CHANGES),
             processing: Vec::with_capacity(processing),
             counters: EngineCounters::default(),
@@ -362,6 +369,8 @@ impl Clone for EngineState {
         session.extend_from_slice(&self.session);
         let mut modulated = Vec::with_capacity(self.modulated.capacity());
         modulated.extend_from_slice(&self.modulated);
+        let mut matrix_played = Vec::with_capacity(self.matrix_played.capacity());
+        matrix_played.extend_from_slice(&self.matrix_played);
         let mut latency_changes = Vec::with_capacity(self.latency_changes.capacity());
         latency_changes.extend_from_slice(&self.latency_changes);
         let mut processing = Vec::with_capacity(self.processing.capacity());
@@ -399,6 +408,7 @@ impl Clone for EngineState {
             chain_meters,
             chain_meters_truncated: self.chain_meters_truncated,
             modulated,
+            matrix_played,
             latency_changes,
             processing,
             counters: self.counters,

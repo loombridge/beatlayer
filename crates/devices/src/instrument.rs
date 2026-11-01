@@ -12,6 +12,8 @@
 
 use core::ops::Range;
 
+pub mod matrix;
+
 use bl_dsp::random::Random;
 use bl_engine::{KeyPitches, NodeData, NoteExpression, NoteKind};
 use bl_model::{ParamDescriptor, ParamId, ParamUnit, Scale};
@@ -539,6 +541,25 @@ impl State {
     #[must_use]
     pub fn frames_since_start(&self, voice: usize, frame: usize) -> u64 {
         self.clock(frame).saturating_sub(self.started[voice])
+    }
+
+    /// The oldest voice still sounding: the one a global destination of the
+    /// modulation matrix reads per-voice sources from (spec: instrument
+    /// modulation R6).
+    #[must_use]
+    pub fn oldest(&self, voices: &VoiceBlock) -> Option<usize> {
+        voices
+            .active_voices()
+            .min_by_key(|&voice| self.started[voice])
+    }
+
+    /// The newest voice still sounding: the one a control shows the matrix's
+    /// movement of (spec: modulation R31).
+    #[must_use]
+    pub fn newest(&self, voices: &VoiceBlock) -> Option<usize> {
+        voices
+            .active_voices()
+            .max_by_key(|&voice| self.started[voice])
     }
 
     /// The voice's Random source: from 0 to 1, drawn when its note started

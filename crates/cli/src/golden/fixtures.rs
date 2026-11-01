@@ -73,6 +73,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: cv_modulators,
     },
     Fixture {
+        name: "analog-voices",
+        about: "A phrase of four notes through Analog (WP-8.14): a sub oscillator and a synced \
+                rectangle, noise, a resonant 24 dB low-pass whose cutoff \
+                follows its envelope into a formant filter with Drive, and an amplifier \
+                envelope that loops its attack, decay and release.",
+        build: analog_voices,
+    },
+    Fixture {
         name: "summed-tracks",
         about: "Four tracks summed into Main through their faders, at three volumes, one muted.",
         build: summed_tracks,
@@ -1220,6 +1228,100 @@ fn cv_instrument_and_triggers() -> Scene {
     });
     song.device_channels = 6;
     song.finish(3.5)
+}
+
+/// A phrase through Analog's oscillators, filters, Drive and looping
+/// envelope (WP-8.14; the Analog spec, R2 to R15).
+fn analog_voices() -> Scene {
+    use bl_devices::analog::{
+        DRIVES, LOOPS, MODES, SHAPES, SUB_SYNC, amp, analog_type, env, filter, noise, osc,
+    };
+
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let keys = song.track(TrackKind::Midi, "Keys", None);
+    let id = song.editor.new_id();
+    let mut analog = analog_type().device(id);
+    let choice =
+        |list: &[&str], name: &str| list.iter().position(|n| *n == name).expect("listed") as f64;
+    for (param, value) in [
+        (osc::id(0, osc::SHAPE), choice(&SHAPES, "Rectangle")),
+        (osc::id(0, osc::PULSE_WIDTH), 30.0),
+        (osc::id(0, osc::SUB_SYNC), choice(&SUB_SYNC, "Sub")),
+        (osc::id(0, osc::SUB_SYNC_AMOUNT), 50.0),
+        (osc::id(0, osc::BALANCE), 20.0),
+        (osc::id(1, osc::ON), 1.0),
+        (osc::id(1, osc::LEVEL), 0.35),
+        (osc::id(1, osc::OCTAVE), -1.0),
+        (osc::id(1, osc::DETUNE), 7.0),
+        (osc::id(1, osc::SUB_SYNC), choice(&SUB_SYNC, "Sync")),
+        (osc::id(1, osc::SUB_SYNC_AMOUNT), 45.0),
+        (osc::id(1, osc::BALANCE), 90.0),
+        (noise::id(noise::ON), 1.0),
+        (noise::id(noise::LEVEL), 0.05),
+        (noise::id(noise::COLOR), 4_000.0),
+        (filter::id(0, filter::MODE), choice(&MODES, "LP24")),
+        (filter::id(0, filter::FREQ), 600.0),
+        (filter::id(0, filter::RESO), 55.0),
+        (filter::id(0, filter::DRIVE), choice(&DRIVES, "Asym 1")),
+        (filter::id(0, filter::FREQ_ENV), 55.0),
+        (filter::id(0, filter::EXTRA), 40.0),
+        (filter::id(1, filter::ON), 1.0),
+        (filter::id(1, filter::MODE), choice(&MODES, "Formant12")),
+        (filter::id(1, filter::FREQ), 1_000.0),
+        (filter::id(1, filter::RESO), 35.0),
+        (amp::id(0, amp::LEVEL), 0.08),
+        (amp::id(1, amp::LEVEL), 0.08),
+        (env::id(0, env::ATTACK), 40.0),
+        (env::id(0, env::DECAY), 350.0),
+        (env::id(0, env::SUSTAIN), 25.0),
+        (env::id(0, env::SLOPE), 1.0),
+        (env::id(2, env::ATTACK), 8.0),
+        (env::id(2, env::DECAY), 250.0),
+        (env::id(2, env::SUSTAIN), 70.0),
+        (env::id(2, env::RELEASE), 180.0),
+        (env::id(2, env::LOOP), choice(&LOOPS, "ADR-R")),
+        (env::id(3, env::ATTACK), 8.0),
+        (env::id(3, env::DECAY), 250.0),
+        (env::id(3, env::SUSTAIN), 70.0),
+        (env::id(3, env::RELEASE), 180.0),
+    ] {
+        analog.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track: keys,
+        index: 0,
+        device: analog,
+    });
+    let clip = song.editor.new_id();
+    let notes = [
+        (45u8, 0i64, 6i64, 100u8),
+        (52, 4, 8, 70),
+        (57, 10, 6, 120),
+        (64, 14, 8, 90),
+    ];
+    song.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 8,
+            ClipData::Midi(bl_model::MidiData::new(
+                notes
+                    .iter()
+                    .map(|&(key, start, length, velocity)| {
+                        bl_model::Note::new(
+                            key,
+                            Ticks(start * beat / 4),
+                            Ticks(length * beat / 4),
+                            velocity,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )),
+        ),
+    });
+    song.finish(4.0)
 }
 
 /// CV Clock Out over a tempo ramp, captured on its device channel after

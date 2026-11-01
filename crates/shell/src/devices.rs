@@ -1860,6 +1860,7 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
+            ids::SET_ROUTE | ids::CLEAR_ROUTE => has_target(),
             ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW | ids::SET_PAGE => has_target(),
             ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
@@ -2625,6 +2626,12 @@ impl DeviceView {
                 outcome.value = to_value(&self.parameters(current, editor.document()));
                 return Ok(outcome);
             }
+            ids::SET_ROUTE | ids::CLEAR_ROUTE => {
+                let changed = self.edit_route(id, args, editor)?;
+                outcome.document_changed = true;
+                outcome.value = to_value(&changed);
+                return Ok(outcome);
+            }
             ids::ARTICULATION_LIST => {
                 let ArticulationListArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
@@ -2771,6 +2778,102 @@ impl DeviceView {
         Ok(outcome)
     }
 
+    /// Sets or clears a route of an instrument's modulation matrix
+    /// (`device.set_route`, `device.clear_route`; instrument modulation R8,
+    /// R9): the route and its amount, in one undo step.
+    fn edit_route(
+        &self,
+        id: &str,
+        args: Value,
+        editor: &mut Editor,
+    ) -> Result<ids::RouteChanged, DeviceError> {
+        let (device, set) = if id == ids::SET_ROUTE {
+            let set: ids::SetRouteArgs = parse(args)?;
+            (set.device, Some(set))
+        } else {
+            let clear: ids::ClearRouteArgs = parse(args)?;
+            let device = clear.device;
+            return self.clear_route(device, clear, editor);
+        };
+        let set = set.expect("set_route has its arguments");
+        let device = self.target(editor.document(), device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        let layout = self.matrix_of(device, current)?;
+        let route = layout
+            .plan_set(
+                current,
+                set.slot.map(usize::from),
+                &set.source,
+                &set.destination,
+            )
+            .map_err(|e| DeviceError::InvalidArgs(e.to_string()))?;
+        let amount = layout.slots[usize::from(route.slot)].amount;
+        let slot = route.slot;
+        editor
+            .transact("Change Modulation Route", |editor| {
+                editor.apply(Command::SetModRoute {
+                    device,
+                    slot,
+                    source: route.source,
+                    destination: route.destination,
+                })?;
+                if let Some(value) = set.amount {
+                    editor.apply(Command::SetDeviceParam {
+                        device,
+                        param: amount,
+                        value: value.clamp(-100.0, 100.0),
+                    })?;
+                }
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::RouteChanged { device, slot })
+    }
+
+    /// `device.clear_route`: empties the slot and puts its amount back to 0 %.
+    fn clear_route(
+        &self,
+        device: Option<DeviceId>,
+        args: ids::ClearRouteArgs,
+        editor: &mut Editor,
+    ) -> Result<ids::RouteChanged, DeviceError> {
+        let device = self.target(editor.document(), device)?;
+        let current = editor.document().device(device).expect("the target exists");
+        let layout = self.matrix_of(device, current)?;
+        let slot = layout
+            .plan_clear(
+                current,
+                args.slot.map(usize::from),
+                args.source.as_deref(),
+                args.destination.as_deref(),
+            )
+            .map_err(|e| DeviceError::InvalidArgs(e.to_string()))?;
+        let amount = layout.slots[usize::from(slot)].amount;
+        editor
+            .transact("Clear Modulation Route", |editor| {
+                editor.apply(Command::ClearModRoute { device, slot })?;
+                editor.apply(Command::SetDeviceParam {
+                    device,
+                    param: amount,
+                    value: 0.0,
+                })?;
+                Ok::<(), bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))?;
+        Ok(ids::RouteChanged { device, slot })
+    }
+
+    /// The modulation matrix `device`'s type declares.
+    fn matrix_of(
+        &self,
+        device: DeviceId,
+        current: &Device,
+    ) -> Result<std::sync::Arc<bl_model::MatrixLayout>, DeviceError> {
+        self.device_type(&current.kind)
+            .and_then(|device_type| device_type.matrix.clone())
+            .ok_or_else(|| DeviceError::Unavailable(format!("{device} has no modulation matrix")))
+    }
+
     /// Replaces the Drum Sampler `device` with Simpler in One-Shot
     /// mode (`device.swap_to_snapshot`; one-shot drum sampler R22, R23): the
     /// same place, sample and on or off state, and its Start and Length as
@@ -2906,13 +3009,14 @@ impl DeviceView {
                 index,
                 device,
             })?;
-            if let Some((params, name, shape, articulations, mpe)) = state {
+            if let Some((params, name, shape, articulations, routes, mpe)) = state {
                 editor.apply(Command::SetDeviceState {
                     device: id,
                     params,
                     name,
                     shape,
                     articulations,
+                    routes,
                     mpe,
                 })?;
             }
@@ -2961,6 +3065,7 @@ impl DeviceView {
                 preset::preset_name(&path),
                 preset.shape,
                 preset.articulations,
+                preset.routes,
                 preset.mpe,
             )
         });
@@ -3015,13 +3120,14 @@ impl DeviceView {
                     index,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations, mpe)) = state {
+                if let Some((params, name, shape, articulations, routes, mpe)) = state {
                     editor.apply(Command::SetDeviceState {
                         device: id,
                         params,
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                     })?;
                 }
@@ -3471,7 +3577,7 @@ impl DeviceView {
                     chain.receive = bl_model::Receive::Note(note);
                 }
                 editor.apply(Command::AddChain { rack, index, chain })?;
-                if let (Some(device), Some((params, name, shape, articulations, mpe))) =
+                if let (Some(device), Some((params, name, shape, articulations, routes, mpe))) =
                     (device_id, state)
                 {
                     editor.apply(Command::SetDeviceState {
@@ -3480,6 +3586,7 @@ impl DeviceView {
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                     })?;
                 }
@@ -3755,6 +3862,7 @@ fn load_preset(
             name: preset::preset_name(path),
             shape: loaded.shape,
             articulations: loaded.articulations,
+            routes: loaded.routes,
             mpe: loaded.mpe,
         })
         .map(|_| ())

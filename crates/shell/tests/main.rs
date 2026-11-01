@@ -77,6 +77,7 @@ mod gain_reduction;
 mod grooves;
 mod info_text;
 mod instant_mappings;
+mod instrument_matrix;
 mod interface_zoom;
 mod keymap;
 mod kitbag;

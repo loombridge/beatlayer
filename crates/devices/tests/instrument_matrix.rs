@@ -327,6 +327,58 @@ fn a_route_changed_during_playback_takes_effect_and_allocates_nothing() {
     assert_all(&third[100..], 1.0, "cleared");
 }
 
+// Spec: instrument modulation R10
+#[test]
+fn a_route_set_in_the_document_reaches_its_node_as_data_with_no_new_program() {
+    let mut editor = Editor::new();
+    let track = editor.new_id();
+    editor
+        .apply(Command::CreateTrack {
+            id: track,
+            kind: TrackKind::Midi,
+            name: String::new(),
+            parent: None,
+            index: 0,
+        })
+        .unwrap();
+    let id = editor.new_id();
+    let device = instrument_type().device(id);
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device,
+        })
+        .unwrap();
+    let collector = Collector::new();
+    let mut compiler = Compiler::new(
+        EngineConfig::new(RATE, 512),
+        testing::registry(),
+        collector.handle(),
+    );
+    let first = compiler.sync(editor.document());
+    assert!(first.program.is_some());
+    editor
+        .apply(Command::SetModRoute {
+            device: id,
+            slot: 1,
+            source: "Velocity".to_owned(),
+            destination: "Fine Tune".to_owned(),
+        })
+        .unwrap();
+    let update = compiler.sync(editor.document());
+    assert!(update.program.is_none(), "a route needs no new program");
+    let routes = update
+        .data
+        .iter()
+        .find(|(key, _)| matches!(key, NodeKey::Device(device) if *device == id))
+        .and_then(|(_, data)| data.downcast_ref::<ModRoutes>())
+        .expect("the node is sent its routes");
+    // Slot 1 routes source 0 (Velocity) to destination 1 (Fine Tune).
+    assert_eq!(routes.0.0[1], [0, 1]);
+    assert_eq!(routes.0.0[0], bl_model::FreeRoutes::NONE);
+}
+
 // Spec: instrument modulation R2, R10
 #[test]
 fn a_chosen_slot_takes_its_source_and_destination_from_its_choosers() {

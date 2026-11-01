@@ -9440,6 +9440,9 @@ fn check_one_device(device: &Device) -> Result<(), ModelError> {
     if device.is_articulation_map() {
         crate::articulation::check(&device.articulations).map_err(ModelError::InvalidInput)?;
     }
+    // Spec: instrument modulation R10. A saved device whose routes repeat a
+    // slot or name nothing doesn't load.
+    crate::matrix::check_routes(&device.routes)?;
     if !device.can_compare() && (device.b_active || device.other_params.is_some()) {
         return Err(ModelError::NoCompare(device.id));
     }

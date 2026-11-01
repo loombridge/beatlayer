@@ -30,6 +30,7 @@ type PresetState = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
 );
 
@@ -626,6 +627,7 @@ impl DeviceView {
                             bl_project::preset::preset_name(&path),
                             loaded.shape,
                             loaded.articulations,
+                            loaded.routes,
                             loaded.mpe,
                         )),
                     ))
@@ -950,13 +952,14 @@ impl DeviceView {
                             index,
                             device,
                         })?;
-                        if let Some((params, name, shape, articulations, mpe)) = state {
+                        if let Some((params, name, shape, articulations, routes, mpe)) = state {
                             editor.apply(Command::SetDeviceState {
                                 device: id,
                                 params,
                                 name,
                                 shape,
                                 articulations,
+                                routes,
                                 mpe,
                             })?;
                         }

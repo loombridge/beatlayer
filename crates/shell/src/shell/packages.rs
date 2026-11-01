@@ -49,6 +49,12 @@ impl Shell {
         packages::folder(self.config_dir.as_deref())
     }
 
+    /// The folder compiled models are cached in (stem separation R34).
+    #[must_use]
+    pub fn cache_folder(&self) -> PathBuf {
+        packages::cache_folder(self.config_dir.as_deref())
+    }
+
     /// The manifest in use (R21): the run's, unless a test gave this shell
     /// its own with [`Shell::use_manifest`].
     fn manifest(&self) -> &Manifest {

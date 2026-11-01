@@ -720,6 +720,7 @@ dependencies = [
  "rayon",
  "realfft",
  "rtrb",
+ "sha2",
 ]
 
 [[package]]

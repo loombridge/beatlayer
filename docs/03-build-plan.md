@@ -1032,11 +1032,11 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.48 | todo |  |  |
 | 8.49 | todo |  |  |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
-| 8.51 | todo |  |  |
+| 8.51 | done | 1 November 2026 | [#653](https://github.com/loombridge/beatlayer/pull/653): Gated Delay (a delay fed through a 16-step gate sequencer on the tempo map, with random steps and feedback) and Pitch Hack (a pitch-shifting delay line on the Shifter's line, with reverse, random intervals and feedback) are native devices with their pages |
 | 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
 | 9.1 | done | 1 November 2026 | [#658](https://github.com/loombridge/beatlayer/pull/658): one Packages manager installs each feature's ONNX Runtime build and models from a manifest on one installer thread, with a record per package, the shared download page, and `packages.list`, `packages.install` and `packages.remove`; stem separation's download runs through it |
 | 9.2 | todo |  |  |
-| 9.3 | todo |  |  |
+| 9.3 | done | 1 November 2026 | [#683](https://github.com/loombridge/beatlayer/pull/683): the split stems model runs with the STFT and its inverse in Rust, on Core ML on macOS with the CPU as fallback (named in `stems.status`), and `bl-cli bench stems` separates a 3-minute generated mix in High Speed in about 7 seconds on an M5 Max, reporting the first compile apart |
 | 9.4 | todo |  |  |
 | 9.5 | done | 1 November 2026 | [#684](https://github.com/loombridge/beatlayer/pull/684): basic-pitch's note step is ported in `bl_analysis::transcribe` with the Melody rule and the clean-up (weak re-onsets merged, confident onsets snapped, velocity from onset strength), its model is the `pitch-model` package, and `cargo xtask transcribe-bench` scores Melody and Harmony above the spec's F-measure targets |
 | 9.6 | todo |  |  |

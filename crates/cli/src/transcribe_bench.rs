@@ -31,16 +31,17 @@ use bl_engine::MediaMap;
 use bl_model::{Clip, ClipData, Command, ContentHash, Editor, MidiData, Note, TrackKind};
 
 use crate::Outcome;
+use crate::drum_bench;
 use crate::render::{Cue, Settings, interleave, render_with};
 
 /// Onset tolerance, in seconds (mir_eval's default).
 const ONSET_TOLERANCE: f64 = 0.05;
 
 /// The rate phrases are rendered at.
-const RATE: SampleRate = SampleRate::HZ_48000;
+pub(crate) const RATE: SampleRate = SampleRate::HZ_48000;
 
 /// The tempo of every phrase, so a sixteenth is 125 ms.
-const SIXTEENTH: f64 = 0.125;
+pub(crate) const SIXTEENTH: f64 = 0.125;
 
 /// Noise's level against the signal's, in dB.
 const NOISE_DB: f64 = -20.0;
@@ -57,12 +58,16 @@ pub struct BenchArgs {
     /// ONNX Runtime's shared library, from the Packages manager's
     /// `onnx-runtime` package. Defaults to `BL_ONNX_RUNTIME`.
     #[arg(long, env = "BL_ONNX_RUNTIME")]
-    pub runtime: PathBuf,
+    pub runtime: Option<PathBuf>,
 
     /// basic-pitch's model, from the `pitch-model` package. Defaults to
     /// `BL_PITCH_MODEL`.
     #[arg(long, env = "BL_PITCH_MODEL")]
-    pub model: PathBuf,
+    pub model: Option<PathBuf>,
+
+    /// Runs only Drums, which needs neither the runtime nor the model.
+    #[arg(long)]
+    pub drums: bool,
 
     /// Phrases rendered for each kind and variant.
     #[arg(long, default_value_t = 12)]
@@ -75,15 +80,15 @@ pub struct BenchArgs {
 
 /// A note of a phrase, in seconds.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Reference {
-    start: f64,
-    end: f64,
-    pitch: u8,
+pub(crate) struct Reference {
+    pub(crate) start: f64,
+    pub(crate) end: f64,
+    pub(crate) pitch: u8,
 }
 
 /// How a phrase is played.
 #[derive(Clone, Copy, Debug)]
-enum Instrument {
+pub(crate) enum Instrument {
     /// Drift, with the oscillator's wave (an index in its list).
     Drift(f64),
     /// Simpler playing a generated sustained tone.
@@ -94,16 +99,16 @@ enum Instrument {
 
 /// What is done to the render.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Variant {
+pub(crate) enum Variant {
     Clean,
     Room,
     Noise,
 }
 
 impl Variant {
-    const ALL: [Self; 3] = [Self::Clean, Self::Room, Self::Noise];
+    pub(crate) const ALL: [Self; 3] = [Self::Clean, Self::Room, Self::Noise];
 
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Clean => "clean",
             Self::Room => "room",
@@ -114,10 +119,10 @@ impl Variant {
 
 /// A small seeded generator (xorshift64*): the phrases are the same on
 /// every computer.
-struct Rng(u64);
+pub(crate) struct Rng(u64);
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub(crate) fn new(seed: u64) -> Self {
         Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
     }
 
@@ -129,23 +134,23 @@ impl Rng {
     }
 
     /// 0 up to `n`.
-    fn below(&mut self, n: u64) -> u64 {
+    pub(crate) fn below(&mut self, n: u64) -> u64 {
         self.next() % n
     }
 
     /// -1 to 1.
-    fn signed(&mut self) -> f32 {
+    pub(crate) fn signed(&mut self) -> f32 {
         (self.next() as f64 / (1u64 << 52) as f64 * 2.0 - 1.0) as f32
     }
 }
 
 /// A note of a phrase on the sixteenth grid.
 #[derive(Clone, Copy)]
-struct Hit {
-    pitch: u8,
-    start: u32,
-    length: u32,
-    velocity: u8,
+pub(crate) struct Hit {
+    pub(crate) pitch: u8,
+    pub(crate) start: u32,
+    pub(crate) length: u32,
+    pub(crate) velocity: u8,
 }
 
 /// A monophonic melody of 24 notes: a walk over C3 to C6 in notes of two to
@@ -178,7 +183,7 @@ fn melody(rng: &mut Rng) -> Vec<Hit> {
 /// sixteenth's rest, from triads and sevenths on roots from C2 to B3. Odd
 /// phrases are piano-like voicings: the bass an octave below the chord, and
 /// a melody of two to four sixteenths' notes above it.
-fn harmony(rng: &mut Rng, voicing: bool) -> Vec<Hit> {
+pub(crate) fn harmony(rng: &mut Rng, voicing: bool) -> Vec<Hit> {
     const CHORDS: [&[u8]; 5] = [
         &[0, 4, 7],
         &[0, 3, 7],
@@ -272,7 +277,7 @@ fn tone(instrument: Instrument) -> Vec<f32> {
 
 /// The WAV file's bytes of `samples`, and its hash as the engine's media
 /// map keys it.
-fn media(samples: &[f32], media: &mut MediaMap) -> Result<ContentHash, String> {
+pub(crate) fn media(samples: &[f32], media: &mut MediaMap) -> Result<ContentHash, String> {
     let spec = hound::WavSpec {
         channels: 1,
         sample_rate: 44_100,
@@ -294,12 +299,12 @@ fn media(samples: &[f32], media: &mut MediaMap) -> Result<ContentHash, String> {
     Ok(hash)
 }
 
-fn apply(editor: &mut Editor, command: Command) -> Result<(), String> {
+pub(crate) fn apply(editor: &mut Editor, command: Command) -> Result<(), String> {
     editor.apply(command).map(drop).map_err(|e| e.to_string())
 }
 
 /// `hits` played by `instrument` through the engine: a mono mix at [`RATE`].
-fn play(hits: &[Hit], instrument: Instrument) -> Result<Vec<f32>, String> {
+pub(crate) fn play(hits: &[Hit], instrument: Instrument) -> Result<Vec<f32>, String> {
     let mut editor = Editor::new();
     let mut files = MediaMap::new();
     let tempo = TempoMap::constant(Bpm::new(120.0).map_err(|e| e.to_string())?);
@@ -391,7 +396,7 @@ fn play(hits: &[Hit], instrument: Instrument) -> Result<Vec<f32>, String> {
 
 /// `signal` with a generated room: a sparse tail of 1,500 taps a second,
 /// decaying 60 dB in [`ROOM_RT60`] seconds, a third as loud as the signal.
-fn room(signal: &[f32], rng: &mut Rng) -> Vec<f32> {
+pub(crate) fn room(signal: &[f32], rng: &mut Rng) -> Vec<f32> {
     let rate = f64::from(RATE.hz());
     let length = (ROOM_RT60 * rate) as usize;
     let taps: Vec<(usize, f32)> = (0..(ROOM_RT60 * 1_500.0) as usize)
@@ -415,7 +420,7 @@ fn room(signal: &[f32], rng: &mut Rng) -> Vec<f32> {
 }
 
 /// `signal` with white noise at [`NOISE_DB`] against its RMS.
-fn noisy(signal: &[f32], rng: &mut Rng) -> Vec<f32> {
+pub(crate) fn noisy(signal: &[f32], rng: &mut Rng) -> Vec<f32> {
     let rms = (signal.iter().map(|s| s * s).sum::<f32>() / signal.len() as f32).sqrt();
     // Uniform noise of amplitude `a` has an RMS of a / sqrt(3).
     let amplitude = rms * 10f32.powf(NOISE_DB as f32 / 20.0) * 3f32.sqrt();
@@ -464,7 +469,7 @@ fn match_notes(reference: &[Reference], estimated: &[Reference]) -> (usize, usiz
 
 /// Counts pooled over phrases.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-struct Tally {
+pub(crate) struct Tally {
     phrases: usize,
     reference: usize,
     estimated: usize,
@@ -473,7 +478,7 @@ struct Tally {
 }
 
 impl Tally {
-    fn add(&mut self, reference: &[Reference], estimated: &[Reference]) {
+    pub(crate) fn add(&mut self, reference: &[Reference], estimated: &[Reference]) {
         let (onsets, with_offsets) = match_notes(reference, estimated);
         self.phrases += 1;
         self.reference += reference.len();
@@ -490,7 +495,7 @@ impl Tally {
         ratio(self.onsets, self.reference)
     }
 
-    fn f_measure(&self) -> f64 {
+    pub(crate) fn f_measure(&self) -> f64 {
         f_of(self.onsets, self.estimated, self.reference)
     }
 
@@ -571,7 +576,7 @@ fn name(kind: Kind) -> &'static str {
     }
 }
 
-fn header() {
+pub(crate) fn header() {
     println!(
         "{:<8} {:<8} {:>7} {:>6} {:>10} {:>7} {:>9} {:>11} {:>7}",
         "kind",
@@ -586,11 +591,11 @@ fn header() {
     );
 }
 
-fn row(kind: Kind, set: &str, tally: &Tally, target: Option<f64>) -> bool {
+pub(crate) fn row(kind: &str, set: &str, tally: &Tally, target: Option<f64>) -> bool {
     let met = target.is_none_or(|t| tally.f_measure() >= t);
     println!(
         "{:<8} {:<8} {:>7} {:>6} {:>10.3} {:>7.3} {:>9.3} {:>11.3} {:>7}{}",
-        name(kind),
+        kind,
         set,
         tally.phrases,
         tally.reference,
@@ -635,8 +640,9 @@ fn read_notes(path: &Path) -> Result<Vec<Reference>, String> {
         .collect()
 }
 
-/// Both kinds on the open labelled set in `folder`, with no target.
-fn corpus(network: &mut BasicPitch, folder: &Path) -> Result<bool, String> {
+/// Every kind on the open labelled set in `folder`, with no target (the pitch
+/// kinds only with a network).
+fn corpus(network: Option<&mut BasicPitch>, folder: &Path) -> Result<bool, String> {
     let mut pairs: Vec<(PathBuf, PathBuf)> = std::fs::read_dir(folder)
         .map_err(|e| format!("{}: {e}", folder.display()))?
         .filter_map(Result::ok)
@@ -651,27 +657,33 @@ fn corpus(network: &mut BasicPitch, folder: &Path) -> Result<bool, String> {
             folder.display()
         ));
     }
-    for kind in [Kind::Melody, Kind::Harmony] {
-        let mut tally = Tally::default();
-        for (audio, notes) in &pairs {
-            let data = bl_media::Decoder::open(audio)
-                .and_then(bl_media::Decoder::decode_to_end)
-                .map_err(|e| format!("{}: {e}", audio.display()))?;
-            let mut interleaved = Vec::with_capacity(data.frames() * data.channel_count());
-            for frame in 0..data.frames() {
-                interleaved.extend(data.channels().map(|c| c[frame]));
-            }
-            let found = transcribe_notes(
-                network,
-                &interleaved,
-                data.channel_count(),
-                data.sample_rate(),
-                kind,
-            )?;
-            tally.add(&read_notes(notes)?, &found);
+    let mut files = Vec::with_capacity(pairs.len());
+    for (audio, notes) in &pairs {
+        let data = bl_media::Decoder::open(audio)
+            .and_then(bl_media::Decoder::decode_to_end)
+            .map_err(|e| format!("{}: {e}", audio.display()))?;
+        let mut interleaved = Vec::with_capacity(data.frames() * data.channel_count());
+        for frame in 0..data.frames() {
+            interleaved.extend(data.channels().map(|c| c[frame]));
         }
-        row(kind, "corpus", &tally, None);
+        files.push((
+            interleaved,
+            data.channel_count(),
+            data.sample_rate(),
+            read_notes(notes)?,
+        ));
     }
+    if let Some(network) = network {
+        for kind in [Kind::Melody, Kind::Harmony] {
+            let mut tally = Tally::default();
+            for (samples, channels, rate, notes) in &files {
+                let found = transcribe_notes(network, samples, *channels, *rate, kind)?;
+                tally.add(notes, &found);
+            }
+            row(name(kind), "corpus", &tally, None);
+        }
+    }
+    drum_bench::corpus_row(&files)?;
     Ok(true)
 }
 
@@ -682,48 +694,59 @@ fn corpus(network: &mut BasicPitch, folder: &Path) -> Result<bool, String> {
 /// A message if the runtime or the model won't load, or a phrase can't be
 /// rendered. The exit code is a failure if a target isn't met.
 pub fn run(args: &BenchArgs) -> Outcome {
-    let mut network = BasicPitch::load(&args.runtime, &args.model)?;
+    let mut network = match (args.drums, &args.runtime, &args.model) {
+        (true, ..) => None,
+        (false, Some(runtime), Some(model)) => Some(BasicPitch::load(runtime, model)?),
+        _ => {
+            return Err(
+                "the pitch kinds need --runtime and --model; --drums runs without".to_owned(),
+            );
+        }
+    };
     header();
     let mut passed = true;
     let mut identical = true;
-    for (kind, target) in TARGETS {
-        let set = phrases(kind, args.phrases, args.seed);
-        for variant in Variant::ALL {
-            let mut tally = Tally::default();
-            for (i, (hits, instrument)) in set.iter().enumerate() {
-                let clean = play(hits, *instrument)?;
-                let mut rng = Rng::new(args.seed * 7_919 + i as u64);
-                let heard = match variant {
-                    Variant::Clean => clean,
-                    Variant::Room => room(&clean, &mut rng),
-                    Variant::Noise => noisy(&clean, &mut rng),
-                };
-                let reference: Vec<Reference> = hits
-                    .iter()
-                    .map(|h| Reference {
-                        start: f64::from(h.start) * SIXTEENTH,
-                        end: f64::from(h.start + h.length) * SIXTEENTH,
-                        pitch: h.pitch,
-                    })
-                    .collect();
-                let found = transcribe_notes(&mut network, &heard, 1, RATE.hz(), kind)?;
-                // R17: the first phrase of each row is transcribed twice.
-                if i == 0 {
-                    identical &=
-                        found == transcribe_notes(&mut network, &heard, 1, RATE.hz(), kind)?;
+    if let Some(network) = network.as_mut() {
+        for (kind, target) in TARGETS {
+            let set = phrases(kind, args.phrases, args.seed);
+            for variant in Variant::ALL {
+                let mut tally = Tally::default();
+                for (i, (hits, instrument)) in set.iter().enumerate() {
+                    let clean = play(hits, *instrument)?;
+                    let mut rng = Rng::new(args.seed * 7_919 + i as u64);
+                    let heard = match variant {
+                        Variant::Clean => clean,
+                        Variant::Room => room(&clean, &mut rng),
+                        Variant::Noise => noisy(&clean, &mut rng),
+                    };
+                    let reference: Vec<Reference> = hits
+                        .iter()
+                        .map(|h| Reference {
+                            start: f64::from(h.start) * SIXTEENTH,
+                            end: f64::from(h.start + h.length) * SIXTEENTH,
+                            pitch: h.pitch,
+                        })
+                        .collect();
+                    let found = transcribe_notes(network, &heard, 1, RATE.hz(), kind)?;
+                    // R17: the first phrase of each row is transcribed twice.
+                    if i == 0 {
+                        identical &=
+                            found == transcribe_notes(network, &heard, 1, RATE.hz(), kind)?;
+                    }
+                    tally.add(&reference, &found);
                 }
-                tally.add(&reference, &found);
+                passed &= row(name(kind), variant.name(), &tally, Some(target));
             }
-            passed &= row(kind, variant.name(), &tally, Some(target));
         }
+        println!(
+            "a repeat run gives {} notes",
+            if identical { "identical" } else { "DIFFERENT" }
+        );
+        passed &= identical;
     }
-    println!(
-        "a repeat run gives {} notes",
-        if identical { "identical" } else { "DIFFERENT" }
-    );
-    passed &= identical;
+    passed &= drum_bench::bench(args.phrases, args.seed)?;
     if let Some(folder) = std::env::var_os("BL_TRANSCRIBE_CORPUS") {
-        corpus(&mut network, Path::new(&folder))?;
+        corpus(network.as_mut(), Path::new(&folder))?;
     }
     Ok(if passed {
         ExitCode::SUCCESS

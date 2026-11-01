@@ -3,6 +3,7 @@
 //! movie's markers give the Sample Editor.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use bl_media::ContentHash;
@@ -15,10 +16,11 @@ use serde_json::Value;
 use super::*;
 
 /// The movies the set's video clips name, by the content hash of their
-/// files, each read once. A file that can't be read is asked for again, in
-/// case it has been relinked.
+/// files, each read once from where the media store found it. A movie that
+/// couldn't be read is remembered too, so a frame that asks again doesn't
+/// read the file again; it is tried again when the file is somewhere else.
 #[derive(Default)]
-pub(super) struct Movies(Mutex<HashMap<ContentHash, Arc<Movie>>>);
+pub(super) struct Movies(Mutex<HashMap<ContentHash, (PathBuf, Option<Arc<Movie>>)>>);
 
 impl Shell {
     /// The movie a clip plays, if it is a video clip whose file can be read.
@@ -35,13 +37,16 @@ impl Shell {
     }
 
     fn movie_of(&self, hash: ContentHash) -> Option<Arc<Movie>> {
+        let path = self.media.entry(hash)?.path;
         let mut movies = self.movies.0.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(movie) = movies.get(&hash) {
-            return Some(Arc::clone(movie));
+        if let Some((read, movie)) = movies.get(&hash)
+            && *read == path
+        {
+            return movie.clone();
         }
-        let movie = Arc::new(Movie::open(self.media.entry(hash)?.path).ok()?);
-        movies.insert(hash, Arc::clone(&movie));
-        Some(movie)
+        let movie = Movie::open(&path).ok().map(Arc::new);
+        movies.insert(hash, (path, movie.clone()));
+        movie
     }
 
     /// A video clip's cues (R12): the markers its movie holds, at their

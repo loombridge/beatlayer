@@ -10,9 +10,7 @@ use serde::{Deserialize, Serialize};
 
 /// The interval between a pad and the one above it (or beside it, with
 /// Direction Horizontal): the Layout of the Scale menu.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(description = "A pad layout's row interval: `fourths`, `thirds` or `sequent`.")]
 pub enum PadSpacing {
@@ -53,9 +51,7 @@ impl PadSpacing {
 }
 
 /// Which way the rows run.
-#[derive(
-    Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema,
-)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[schemars(description = "A pad layout's direction: `vertical` or `horizontal`.")]
 pub enum PadDirection {

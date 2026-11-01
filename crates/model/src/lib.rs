@@ -95,9 +95,9 @@ mod mpe_settings;
 mod mpe_view;
 pub mod note_expression;
 pub mod note_ops;
+mod pad_layout;
 pub mod param;
 pub mod rack;
-mod pad_layout;
 mod record_quantization;
 pub mod registry;
 pub mod remote;
@@ -186,6 +186,7 @@ pub use layers::{
 };
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
+pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{
     BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
 };
@@ -204,7 +205,6 @@ pub use remote::{
 };
 pub use repr::{SavedSong, saved_schema};
 pub use sample_edits::{SampleEdit, SampleEditKind, SampleRange, SampleRegion};
-pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use scale::{CHROMATIC, Scale, ScaleName};
 pub use scene::{DEFAULT_SCENE_COUNT, SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 pub use spelling::NoteSpelling;

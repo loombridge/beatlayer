@@ -1745,7 +1745,11 @@ impl Processor {
                 self.session.back_to_arrangement(Some(track), self.position);
             }
             SessionCommand::SetQuantization(settings) => self.session.set_settings(settings),
-            SessionCommand::Record => self.record_session(),
+            SessionCommand::Record => self.record_session(None),
+            SessionCommand::RecordFixed {
+                length,
+                phrase_sync,
+            } => self.record_session((length.0 > 0).then_some((length, phrase_sync))),
             SessionCommand::StopRecording => self.stop_session_take(true),
             SessionCommand::MoveToScene(scene) => {
                 let slots = self
@@ -1778,7 +1782,7 @@ impl Processor {
     /// it's stopped, when the transport starts too, after any count-in. A
     /// clip playing on a track that records a new clip stops where the
     /// recording starts.
-    fn record_session(&mut self) {
+    fn record_session(&mut self, fixed: Option<(Ticks, bool)>) {
         let targets = self
             .plan
             .as_mut()
@@ -1799,7 +1803,15 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        let start = self.session.frame_for(playhead);
+        let (start, stop) = match fixed {
+            // Spec: push-2-notes R51. A fixed-length take ends on its own,
+            // and its clip plays on.
+            Some((length, phrase_sync)) => {
+                let (start, stop) = self.session.fixed_take(playhead, length, phrase_sync);
+                (start, Some(stop))
+            }
+            None => (self.session.frame_for(playhead), None),
+        };
         if let Some(plan) = self.plan.as_mut() {
             for target in plan.get_mut().session.iter().filter(|t| !t.overdub) {
                 self.session.stop(Some(target.track), &[], playhead);
@@ -1807,8 +1819,8 @@ impl Processor {
         }
         self.session_take = Some(SessionTake {
             start,
-            stop: None,
-            launch: false,
+            stop,
+            launch: stop.is_some(),
             last: None,
         });
     }

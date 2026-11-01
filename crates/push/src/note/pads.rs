@@ -60,17 +60,15 @@ impl Note {
     /// Releasing a pad ends the note it played, whatever the layout has
     /// become since (R2).
     pub(super) fn pad_off(&mut self, pad: Pad, ctx: &mut Ctx<'_>) {
-        match self.down.remove(&(pad.row, pad.column)) {
-            Some(
-                Down::Played(note)
-                | Down::Picked {
-                    key: note,
-                    played: true,
-                },
-            ) => {
-                ctx.cx.play_at(ctx.at, MidiMessage::note_off(0, note));
-            }
-            _ => {}
+        if let Some(
+            Down::Played(note)
+            | Down::Picked {
+                key: note,
+                played: true,
+            },
+        ) = self.down.remove(&(pad.row, pad.column))
+        {
+            ctx.cx.play_at(ctx.at, MidiMessage::note_off(0, note));
         }
     }
 

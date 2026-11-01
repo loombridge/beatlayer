@@ -12,6 +12,8 @@ publish.workspace = true
 bl-core.workspace = true
 bl-model.workspace = true
 bl-midi-io.workspace = true
+# The waveform a surface draws of a Simpler's sample.
+bl-media.workspace = true
 # The slots' states and the meters the engine publishes, which a surface
 # reads (control surfaces R6).
 bl-engine.workspace = true

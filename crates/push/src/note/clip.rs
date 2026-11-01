@@ -6,8 +6,7 @@ use bl_control::ReadModel;
 use bl_core::time::Ticks;
 use bl_engine::SlotState;
 use bl_model::{
-    Clip, ClipData, ClipId, DeviceKind, DeviceRole, MidiData, Note, RackKind, SceneId, TrackId,
-    TrackKind,
+    Clip, ClipData, ClipId, DeviceRole, MidiData, Note, RackKind, SceneId, TrackId, TrackKind,
 };
 
 use super::Kind;
@@ -53,14 +52,19 @@ pub fn classify(model: &ReadModel, track: TrackId) -> Kind {
             filled: drum.map_or(0, |d| d.filled),
         };
     }
-    let slicing = matches!(
-        &instrument.kind,
-        DeviceKind::Native { device_type } if device_type == bl_devices::sampler::SAMPLER
-    ) && instrument
-        .params
-        .get(&bl_devices::sampler::MODE)
-        .is_some_and(|mode| *mode >= 2.0);
-    if slicing { Kind::Slices } else { Kind::Melodic }
+    if let Some(view) = crate::simpler::View::of(model, instrument.id)
+        && view.mode() == crate::simpler::Mode::Slice
+    {
+        // Each slice's key is a pad: the pads past the last are empty (R75).
+        let filled = (0..view.slice_count()).fold(0u128, |all, slice| {
+            all | 1 << (crate::simpler::FIRST_KEY as usize + slice)
+        });
+        return Kind::Slices {
+            device: instrument.id,
+            filled,
+        };
+    }
+    Kind::Melodic
 }
 
 /// The MIDI clip in `track`'s slot at `scene`, if the slot holds one.

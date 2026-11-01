@@ -761,8 +761,11 @@ fn fingerprint(format: PluginFormat, path: &Path) -> std::io::Result<(u64, u128)
             continue;
         };
         for entry in entries.flatten() {
-            // Not following links, so a bundle's links can't loop.
-            let Ok(metadata) = entry.metadata() else {
+            // Not following links, so a bundle's links can't loop. Asked of
+            // the file itself: on Windows `DirEntry::metadata` answers from
+            // the folder's index, which NTFS updates lazily, so a later scan
+            // could see a different time and miss the cache.
+            let Ok(metadata) = std::fs::symlink_metadata(entry.path()) else {
                 continue;
             };
             modified = modified.max(nanos(metadata.modified().ok()));

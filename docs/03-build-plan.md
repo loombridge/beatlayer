@@ -962,7 +962,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.13 | done | 30 October 2026 | [#543](https://github.com/loombridge/beatlayer/pull/543): an input's Sync Type, frame rate (24, 25, 29.97 drop frame, 30, SMPTE All) and offset; quarter and full frames assembled on the audio thread without allocating; the Arrangement starts on the first whole time, relocates past one frame, jumps on a full frame and stops after 100 ms while the tempo stays Beatlayer's; the upper lamp and `sync.state` report timecode |
 | 7.14 | done | 30 October 2026 | [#540](https://github.com/loombridge/beatlayer/pull/540): `bl-link` builds the vendored Link 4.1.1; the engine joins and leaves without jumps, shares tempo both ways with a peer overriding tempo automation, keeps phase on the global quantum, waits for it to start, follows Start Stop Sync, lets EXT lead the session and skips the count-in; `link.set_enabled`, `link.set_start_stop_sync` and `link.state` |
 | 7.15 | done | 30 October 2026 | [#552](https://github.com/loombridge/beatlayer/pull/552): the Control Bar's Link toggle before Tap with its peer count and menu, Settings ▸ Link's Show Link Toggle and Start Stop Sync, Playback ▸ Options ▸ Link Start Stop Sync, and the quantum's progress bar over the Position fields; `link.set_show_toggle` and `link.state.show_toggle` |
-| 7.16 | todo |  |  |
+| 7.16 | done | 1 November 2026 | [#636](https://github.com/loombridge/beatlayer/pull/636): each track with audio output sent as a Link Audio channel through an allocation-free send; peers' channels as an audio track's Input Type and Input Channel, buffered by playout frame, monitored and recorded on their beat plus the Latency, with late buffers dropped and counted and missing peers kept by name and silent; Name, Latency and Sync to Incoming Audio in Settings ▸ Link; the peers list and the Link menu's peers; `link.state` reports peers and channels |
 | 7.17 | done | 30 October 2026 | [#506](https://github.com/loombridge/beatlayer/pull/506): CV in the engine as DC samples on the interface's channels with output and input choosers, timed against Main and exported in real time; CV Instrument (pitch under the set's tuning, gate with Retrigger, two Mod outputs, calibration against the returning oscillator kept as one undo step) and CV Triggers; `cv.calibrate`, `cv.clear_calibration` and `cv.set_calibration` |
 | 7.18 | done | 30 October 2026 | [#556](https://github.com/loombridge/beatlayer/pull/556): CV Clock Out (pulses on the tempo map's frames through ramps and loop jumps), CV Clock In (a modular clock leads the tempo through MIDI clock's follower and holds the last tempo when it stops), CV In (a modulator worked out before any track runs) and CV Utility (adds and multiplies two signals), matching at any block size |
 | 7.18b | done | 31 October 2026 | [#632](https://github.com/loombridge/beatlayer/pull/632): CV Envelope Follower, CV LFO and CV Shaper share the modulators' laws, worked out every frame and equal to the modulators on their 32-frame grid points, with Min, Max and Depth in volts |
@@ -972,7 +972,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.22 | todo |  |  |
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
-| 7.25 | todo |  |  |
+| 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
 | 7.27 | todo |  |  |
 | 7.28 | done | 31 October 2026 | [#635](https://github.com/loombridge/beatlayer/pull/635): Session Mode on Push 2 launches, records and colours slots from the pads and scenes from the scene buttons, moves the ring with the arrows, Octave and Page, runs Stop Clip in every mode and shows the Session Overview, read back in `push.state`; R71 comes with Clip Mode (WP-7.27) |
@@ -1024,7 +1024,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.40 | todo |  |  |
 | 8.41 | todo |  |  |
 | 8.42 | todo |  |  |
-| 8.43 | todo |  |  |
+| 8.43 | done | 1 November 2026 | [#670](https://github.com/loombridge/beatlayer/pull/670): Resonators is a native device with its input filter, five tuned comb resonators (I by note and fine, II to V by interval), Decay, Const, Color, Mode A and B, Width, Gain and Dry/Wet, following the current scale and the set's tuning |
 | 8.44 | todo |  |  |
 | 8.45 | todo |  |  |
 | 8.46 | todo |  |  |
@@ -1033,8 +1033,8 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.49 | todo |  |  |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
 | 8.51 | todo |  |  |
-| 8.52 | todo |  |  |
-| 9.1 | todo |  |  |
+| 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
+| 9.1 | done | 1 November 2026 | [#658](https://github.com/loombridge/beatlayer/pull/658): one Packages manager installs each feature's ONNX Runtime build and models from a manifest on one installer thread, with a record per package, the shared download page, and `packages.list`, `packages.install` and `packages.remove`; stem separation's download runs through it |
 | 9.2 | todo |  |  |
 | 9.3 | todo |  |  |
 | 9.4 | todo |  |  |
@@ -1057,7 +1057,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.21 | todo |  |  |
 | 9.22 | todo |  |  |
 | 9.23 | todo |  |  |
-| 9.24 | todo |  |  |
+| 9.24 | done | 1 November 2026 | [#665](https://github.com/loombridge/beatlayer/pull/665): a new `bl-video` crate reads QuickTime movies with exact frame times and edit lists, decodes frames ahead of the playhead on a video thread through VideoToolbox, Media Foundation, FFmpeg or its own MJPEG decoder, decodes the movie's audio through `bl-media`, and gives black and silence in gaps |
 | 9.25 | todo |  |  |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |

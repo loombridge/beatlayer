@@ -1102,6 +1102,7 @@ dependencies = [
  "bl-test-lv2",
  "bl-test-vst3",
  "flate2",
+ "gethostname",
  "getrandom 0.3.4",
  "libc",
  "lspk-example-gain",
@@ -1205,6 +1206,19 @@ dependencies = [
  "serde_json",
  "toml",
  "wgpu",
+]
+
+[[package]]
+name = "bl-video"
+version = "0.2.0"
+dependencies = [
+ "bl-media",
+ "core-foundation-sys",
+ "libloading 0.8.9",
+ "serde_json",
+ "windows",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

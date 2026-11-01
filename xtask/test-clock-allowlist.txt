@@ -38,6 +38,7 @@ crates/engine/tests/session_recording.rs # stamps messages with the system's clo
 crates/engine/tests/streaming.rs # measures disk streaming in real time
 crates/engine/tests/stress.rs # a real-time stress test
 crates/engine/tests/warp_streaming.rs # measures a warp's real-time load
+crates/link/tests/link_audio.rs # two Link instances find each other over the loopback network and stream a channel, so the tests wait for discovery and for buffers with a deadline
 crates/link/tests/loopback.rs # two Link instances find each other over the loopback network, so the tests wait for discovery with a deadline
 crates/media/tests/stream.rs # measures a disk read
 crates/media/tests/stream_realtime.rs # measures real-time streaming and dropouts
@@ -67,6 +68,7 @@ crates/shell/tests/dawproject_export.rs # waits for a real CLAP plug-in to start
 crates/shell/tests/device_input.rs # a timeout on the engine's input
 crates/shell/tests/export.rs # waits for a real plug-in render's thread
 crates/shell/tests/link.rs # a second Link instance plays the peer over the loopback network, so the tests wait for discovery with a deadline
+crates/shell/tests/link/audio.rs # two sessions on real-time null devices find each other over the loopback network and stream a track, so the tests wait for discovery and for audio with a deadline
 crates/shell/tests/midi_io.rs # waits for the MIDI output thread to hand messages to the port
 crates/shell/tests/multi_output.rs # waits for a real CLAP plug-in
 crates/shell/tests/offline_plugins.rs # waits for a real CLAP render

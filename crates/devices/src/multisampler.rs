@@ -1001,7 +1001,7 @@ impl Sinc {
 }
 
 /// The modified Bessel function of the first kind, order 0, by its series.
-fn bessel_i0(x: f64) -> f64 {
+pub(crate) fn bessel_i0(x: f64) -> f64 {
     let mut sum = 1.0;
     let mut term = 1.0;
     let quarter = x * x / 4.0;

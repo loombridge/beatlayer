@@ -241,8 +241,8 @@ impl NativeDevice for SpectralBlur {
         };
         let latency = size - 1;
         let channels = self.lanes.len().min(audio.channels());
-        for i in 0..audio.frames() {
-            let mix = dry_wet[i] / 100.0;
+        for (i, percent) in dry_wet.iter().enumerate().take(audio.frames()) {
+            let mix = percent / 100.0;
             for channel in 0..channels {
                 let lane = &mut self.lanes[channel];
                 let input = audio.channel(channel)[i];

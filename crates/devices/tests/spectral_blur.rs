@@ -83,6 +83,11 @@ fn amplitude(signal: &[f32], hz: f64) -> f64 {
     2.0 * re.hypot(im) / signal.len() as f64
 }
 
+/// `n` seconds of frames.
+fn seconds(n: usize) -> usize {
+    n * 48_000
+}
+
 fn db(ratio: f64) -> f64 {
     20.0 * ratio.log10()
 }
@@ -257,7 +262,7 @@ fn freeze_holds_the_cloud_within_half_a_decibel_while_the_rest_passes() {
     let mut held = blur(&[(HALO, 200.0)]);
     let out = render_blocks(held.as_mut(), &input, 4_096, &frozen);
     let windows: Vec<f64> = out[burst + 2 * LATENCY..]
-        .chunks_exact(2 * 48_000)
+        .chunks_exact(seconds(2))
         .map(|c| 10.0 * power(c).log10())
         .collect();
     let (high, low) = windows
@@ -276,7 +281,7 @@ fn freeze_holds_the_cloud_within_half_a_decibel_while_the_rest_passes() {
     rest.resize(total, 0.0);
     let mixed: Vec<f32> = rest.iter().zip(&above).map(|(a, b)| a + b).collect();
     let out = render_blocks(blur(&[(HALO, 200.0)]).as_mut(), &mixed, 4_096, &frozen);
-    for chunk in out[burst + 2 * LATENCY..].chunks_exact(5 * 48_000) {
+    for chunk in out[burst + 2 * LATENCY..].chunks_exact(seconds(5)) {
         assert!(db(amplitude(chunk, 10_000.0) / 0.02).abs() < 0.1);
     }
 }

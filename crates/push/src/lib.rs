@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use bl_control::{Kind, Ring};
 
+pub mod automation;
 pub mod browse;
 pub mod buttons;
 pub mod content;

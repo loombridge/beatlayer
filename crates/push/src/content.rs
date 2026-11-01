@@ -350,6 +350,12 @@ impl Ctx<'_> {
         self.actions.push(Action::Picker(target));
     }
 
+    /// Makes the commands run for encoder `column` a gesture the surface ends
+    /// at the encoder's release (R9), as [`Ctx::run_turn`] does for its own.
+    pub fn gesture(&mut self, column: u8) {
+        self.actions.push(Action::Gesture(column));
+    }
+
     /// Asks for a command that is part of the gesture on encoder `column`:
     /// its changes, from touch to release, are one undo step (R9).
     pub fn run_turn(&mut self, column: u8, id: &str, args: Value) {

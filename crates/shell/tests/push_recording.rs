@@ -480,3 +480,199 @@ fn the_quantize_menu_stays_after_a_change_until_the_next_tap() {
     let (_, midi) = rig.clip().unwrap();
     assert_eq!(midi.notes.iter().next().unwrap().start.get(), step + 5000, "nothing quantised");
 }
+
+impl Rig {
+    /// Shows Mix Mode and returns the encoder that sets the track's volume.
+    fn mix_column(&mut self) -> u8 {
+        self.run("push.set_mode", json!({ "display": "mix" }));
+        self.pass(100);
+        let state = self.state();
+        let places = state["mix_mode"]["places"].as_array().unwrap().clone();
+        let at = places
+            .iter()
+            .position(|p| p["track"] == json!(self.track))
+            .expect("the track is in the ring");
+        at as u8
+    }
+
+    /// The clip's Automation envelopes' targets and breakpoints.
+    fn automation(&self, clip: bl_model::ClipId) -> Vec<(bl_model::AutomationTarget, Vec<(i64, f64)>)> {
+        let doc = self.shell.editor().document();
+        doc.clip(clip)
+            .unwrap()
+            .envelopes
+            .iter()
+            .filter(|e| e.kind == bl_model::EnvelopeKind::Automation)
+            .map(|e| {
+                let points = e.envelope.points().map(|p| (p.at.get(), p.value)).collect();
+                (e.target.clone(), points)
+            })
+            .collect()
+    }
+
+    fn volume(&self) -> f64 {
+        self.shell.editor().document().track(self.track).unwrap().mixer().volume
+    }
+
+    fn text_has(&mut self, needle: &str) -> bool {
+        self.sim_text().iter().any(|line| line.contains(needle))
+    }
+}
+
+// Spec: push-2-notes R61, R65. Automate arms automation (red while on); with
+// it on, an encoder's touch and turns during a Session recording go into the
+// clip's Automation envelope.
+#[test]
+fn automate_arms_and_an_encoders_turns_are_recorded_into_the_clip() {
+    let mut rig = session_rig();
+    let column = rig.mix_column();
+    rig.tap("automate");
+    assert_eq!(rig.state()["recording"]["automation_arm"], true);
+    assert_eq!(rig.led("automate").colour, bl_push::leds::fixed::RED);
+    rig.tap("record");
+    rig.wait("the recording", |rig| rig.record() == "session");
+    assert!(rig.sim.touch(column));
+    rig.pass(50);
+    assert!(rig.sim.turn(column, -20));
+    rig.pass(50);
+    assert!(rig.sim.release(column));
+    rig.pass(300);
+    rig.tap("record");
+    rig.wait("it to end", |rig| rig.record() == "off");
+    let scene = rig.scenes()[0];
+    let clip = rig.shell.editor().document().slot(rig.track, scene).unwrap().id;
+    let automation = rig.automation(clip);
+    assert_eq!(automation.len(), 1, "{automation:?}");
+    assert!(matches!(
+        automation[0].0,
+        bl_model::AutomationTarget::Mixer { param: bl_model::MixerParam::Volume }
+    ));
+    rig.tap("automate");
+    assert_eq!(rig.state()["recording"]["automation_arm"], false);
+}
+
+/// A clip with an Automation envelope for the track's volume, selected, with
+/// Mix Mode shown: the column of the volume encoder.
+fn automated_clip() -> (Rig, bl_model::ClipId, u8) {
+    let mut rig = session_rig();
+    let column = rig.mix_column();
+    let scene = rig.scenes()[0];
+    let clip = rig.clip_in(scene);
+    rig.run(
+        "clip.set_envelope_breakpoint",
+        json!({
+            "clip": clip,
+            "target": { "type": "mixer", "param": "volume" },
+            "kind": "automation",
+            "at": 0,
+            "value": 0.5,
+        }),
+    );
+    rig.pass(50);
+    (rig, clip, column)
+}
+
+// Spec: push-2-notes R64. The white dot shows while the clip playing on the
+// track has an enabled Automation envelope for the parameter.
+#[test]
+fn the_dot_follows_the_playing_clips_automation() {
+    let (mut rig, _clip, _) = automated_clip();
+    assert!(!rig.text_has("white dot"));
+    let scene = rig.scenes()[0];
+    rig.run("session.launch", json!({ "track": rig.track, "scene": scene }));
+    rig.pass(200);
+    assert!(rig.text_has("white dot"), "{:?}", rig.sim_text());
+}
+
+// Spec: push-2-notes R62. With Delete held, touching an encoder deletes its
+// parameter's Automation envelope in the clip the steps edit, as one undo
+// step; a parameter with none goes back to its default.
+#[test]
+fn delete_and_a_touch_delete_the_envelope_or_reset_the_parameter() {
+    let (mut rig, clip, column) = automated_clip();
+    assert_eq!(rig.automation(clip).len(), 1);
+    let steps = rig.steps();
+    assert!(rig.sim.press("delete"));
+    rig.pass(50);
+    assert!(rig.sim.touch(column));
+    rig.pass(50);
+    assert!(rig.sim.release(column));
+    rig.pass(50);
+    assert!(rig.automation(clip).is_empty());
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+    // Nothing to delete now: the volume goes back to its default.
+    rig.run("mixer.set_volume", json!({ "track": rig.track, "volume": 0.25 }));
+    rig.pass(50);
+    assert!(rig.sim.touch(column));
+    rig.pass(50);
+    assert!(rig.sim.release(column));
+    assert!(rig.sim.let_go("delete"));
+    rig.pass(50);
+    assert!((rig.volume() - 1.0).abs() < 1e-6, "{}", rig.volume());
+    assert!(rig.clip().is_some(), "Delete used with an encoder doesn't delete the clip");
+}
+
+// Spec: push-2-notes R63. Delete with Automate deletes every Automation
+// envelope of the clip the steps edit, as one undo step.
+#[test]
+fn delete_and_automate_clear_the_clips_automation() {
+    let (mut rig, clip, _) = automated_clip();
+    rig.run(
+        "clip.set_envelope_breakpoint",
+        json!({
+            "clip": clip,
+            "target": { "type": "mixer", "param": "pan" },
+            "kind": "automation",
+            "at": 0,
+            "value": 0.1,
+        }),
+    );
+    assert_eq!(rig.automation(clip).len(), 2);
+    let steps = rig.steps();
+    assert!(rig.sim.press("delete"));
+    rig.pass(50);
+    assert!(rig.sim.press("automate"));
+    rig.pass(50);
+    assert!(rig.sim.let_go("automate"));
+    assert!(rig.sim.let_go("delete"));
+    rig.pass(50);
+    assert!(rig.automation(clip).is_empty());
+    assert_eq!(rig.steps(), steps + 1, "one undo step");
+    assert_eq!(rig.state()["recording"]["automation_arm"], false, "no arm toggle");
+}
+
+// Spec: push-2-notes R66. Two held steps and a turn write flat values over
+// those steps' spans, one undo step per touch.
+#[test]
+fn held_steps_and_a_turn_write_the_value_over_their_spans() {
+    let mut rig = session_rig();
+    let column = rig.mix_column();
+    let scene = rig.scenes()[0];
+    let clip = rig.clip_in(scene);
+    let step = Ticks::SIXTEENTH.get();
+    let steps = rig.steps();
+    assert!(rig.sim.press_pad(4, 1, 100));
+    rig.pass(50);
+    assert!(rig.sim.press_pad(4, 2, 100));
+    rig.pass(50);
+    assert_eq!(rig.note()["held_steps"].as_array().unwrap().len(), 2);
+    assert!(rig.sim.touch(column));
+    rig.pass(50);
+    assert!(rig.sim.turn(column, -30));
+    rig.pass(50);
+    assert!(rig.sim.turn(column, -10));
+    rig.pass(50);
+    assert!(rig.sim.release(column));
+    rig.pass(50);
+    assert!(rig.sim.release_pad(4, 1));
+    assert!(rig.sim.release_pad(4, 2));
+    rig.pass(50);
+    let automation = rig.automation(clip);
+    assert_eq!(automation.len(), 1, "{automation:?}");
+    let points = &automation[0].1;
+    let ats: Vec<i64> = points.iter().map(|p| p.0).collect();
+    assert_eq!(ats, [step, 2 * step, 3 * step], "breakpoints at the steps' edges");
+    assert!(points.iter().all(|p| (p.1 - points[0].1).abs() < 1e-9), "flat over the spans");
+    assert!(points[0].1 < 1.0, "the turn lowered it: {points:?}");
+    assert_eq!(rig.steps() - steps, 1 + 2, "the clip's notes aside, one undo step for the touch: {}", rig.steps());
+}

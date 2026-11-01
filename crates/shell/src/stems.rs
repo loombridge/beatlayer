@@ -54,6 +54,8 @@ pub struct Progress {
     pub(crate) done: Arc<AtomicU64>,
     pub(crate) total: Arc<AtomicU64>,
     stage: Arc<Mutex<String>>,
+    /// What a separation runs on, once its model is loaded.
+    provider: Arc<Mutex<String>>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -74,6 +76,13 @@ impl Progress {
         self.stage.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
+    /// The hardware a separation runs on, and why it isn't the GPU when it
+    /// should have been (R33); empty until the model is loaded.
+    #[must_use]
+    pub fn provider(&self) -> String {
+        self.provider.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
     /// Asks the thread to stop.
     pub fn cancel(&self) {
         self.cancel.store(true, Ordering::Relaxed);
@@ -81,6 +90,12 @@ impl Progress {
 
     pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(Ordering::Relaxed)
+    }
+
+    fn set_provider(&self, provider: String) {
+        if let Ok(mut p) = self.provider.lock() {
+            *p = provider;
+        }
     }
 
     pub(crate) fn set_stage(&self, stage: impl Into<String>) {
@@ -150,6 +165,8 @@ pub enum Backend {
         runtime: PathBuf,
         /// The model.
         model: PathBuf,
+        /// Where Core ML keeps its compiled model (R34).
+        cache: PathBuf,
     },
     /// A generated stand-in for tests, which splits a mix into four fixed
     /// shares that sum to it.
@@ -226,13 +243,28 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Vec<Separated>, sepa
     let failed = separation::Error::Failed;
     progress.total.store(1000, Ordering::Relaxed);
     progress.set_stage("Loading the model");
-    let mut network: Box<dyn separation::Network> = match &job.backend {
-        Backend::Packages { runtime, model } => {
+    let mut demucs = match &job.backend {
+        Backend::Packages {
+            runtime,
+            model,
+            cache,
+        } => {
             let threads = thread::available_parallelism().map_or(4, std::num::NonZero::get);
-            Box::new(separation::onnx::Demucs::load(runtime, model, threads).map_err(failed)?)
+            let options = separation::onnx::Options {
+                threads,
+                accelerate: true,
+                cache: Some(cache.clone()),
+            };
+            let network = separation::onnx::Demucs::load(runtime, model, &options, &mut |stage| {
+                progress.set_stage(stage);
+            })
+            .map_err(failed)?;
+            progress.set_provider(network.report().describe());
+            Some(network)
         }
-        Backend::Fixture => Box::new(Shares),
+        Backend::Fixture => None,
     };
+    let mut shares = Shares;
     let count = job.inputs.len();
     let mut out = Vec::with_capacity(count);
     for (index, input) in job.inputs.iter().enumerate() {
@@ -244,13 +276,19 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Vec<Separated>, sepa
         if progress.cancelled() {
             return Err(separation::Error::Cancelled);
         }
-        progress.set_stage("Separating");
+        progress.set_stage(match &demucs {
+            Some(network) => format!("Separating on {}", network.report().describe()),
+            None => "Separating".to_owned(),
+        });
         // Each input's share of the bar, so several tracks fill it in turn.
         let share = |fraction: f32| (index as f32 + fraction) / count as f32;
         let stems = separation::separate(
             &left,
             &right,
-            network.as_mut(),
+            match &mut demucs {
+                Some(network) => network,
+                None => &mut shares,
+            },
             job.quality,
             &mut |fraction| {
                 progress.done.store(
@@ -259,8 +297,15 @@ fn run_separation(job: &Job, progress: &Progress) -> Result<Vec<Separated>, sepa
                 );
                 !progress.cancelled()
             },
-        )?;
-        out.push(Separated { from, stems });
+        );
+        // A GPU run that failed part way finished on the CPU (R33).
+        if let Some(network) = &demucs {
+            progress.set_provider(network.report().describe());
+        }
+        out.push(Separated {
+            from,
+            stems: stems?,
+        });
     }
     Ok(out)
 }

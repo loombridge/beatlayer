@@ -214,7 +214,8 @@ fn merge_needs_two_or_three_parts() {
     }
 }
 
-// Spec: stem-separation R6, R8, R9, R10, R11.
+// Spec: stem-separation R6, R8, R9, R10, R11; R33 (`stems.status` names the
+// provider).
 #[test]
 fn separating_makes_a_group_of_stem_tracks_and_deactivates_the_clip() {
     let scratch = Scratch::new("separate");
@@ -240,6 +241,11 @@ fn separating_makes_a_group_of_stem_tracks_and_deactivates_the_clip() {
     let status = status(&mut shell);
     assert_eq!(status["separation"]["state"], "done", "{status}");
     assert!(status.get("dialog").is_none());
+    let provider = status["provider"].as_str().unwrap();
+    assert!(
+        provider.starts_with("CPU") || provider.starts_with("Core ML"),
+        "{status}"
+    );
     let created: Vec<bl_model::TrackId> =
         serde_json::from_value(status["created_tracks"].clone()).unwrap();
     assert_eq!(created.len(), 5);

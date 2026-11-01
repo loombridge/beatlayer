@@ -1010,7 +1010,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |
 | 8.28 | done | 1 November 2026 | [#648](https://github.com/loombridge/beatlayer/pull/648): `bl_dsp::stft` gives a streaming STFT with exact overlap-add resynthesis, phase-vocoder helpers and a cepstral envelope, reporting `size - 1` frames of latency, and devices get a spectrogram display kind that reads back through `device.display`; Spectrum keeps its own FFT for now |
-| 8.29 | todo |  |  |
+| 8.29 | done | 1 November 2026 | [#695](https://github.com/loombridge/beatlayer/pull/695): `bl_dsp::convolution` gives zero-latency partitioned convolution (a 64-tap direct head and FFT stages of 64, 512 and 2,048 with their work sliced evenly per block) for mono, stereo and true-stereo responses up to 30 seconds, prepared off the audio thread and swapped with a crossfade, the old response freed off the audio thread |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
 | 8.32 | done | 1 November 2026 | [#697](https://github.com/loombridge/beatlayer/pull/697): `bl_dsp::pitch` has a streaming tracker (the Tuner's detector moved out, with confidence, voiced and onset every hop) and a PSOLA voice shifter that keeps or moves formants; a quiet reading in the shifter dated one interval early is a follow-up |
@@ -1028,18 +1028,18 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.44 | done | 1 November 2026 | [#659](https://github.com/loombridge/beatlayer/pull/659): Corpus is a native device with its seven resonator types on the shared physical models, the LFO, the input filter, the global controls and Bleed, and its frequency set by notes from a MIDI sidechain (routing R39) |
 | 8.45 | todo |  |  |
 | 8.46 | todo |  |  |
-| 8.47 | todo |  |  |
+| 8.47 | done | 1 November 2026 | [#699](https://github.com/loombridge/beatlayer/pull/699): Spectral Time, an STFT effect with the Freezer (Manual and Retrigger on onsets or synced divisions, crossfade and envelope fades), the spectral delay (time in milliseconds, notes or sixteenths, Feedback, Tilt, Spray, Mask, Stereo), the order switch, Resolution with a crossfade, the global controls and a headless spectrogram, its banks covering every parameter |
 | 8.48 | todo |  |  |
 | 8.49 | todo |  |  |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
-| 8.51 | todo |  |  |
+| 8.51 | done | 1 November 2026 | [#653](https://github.com/loombridge/beatlayer/pull/653): Gated Delay (a delay fed through a 16-step gate sequencer on the tempo map, with random steps and feedback) and Pitch Hack (a pitch-shifting delay line on the Shifter's line, with reverse, random intervals and feedback) are native devices with their pages |
 | 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
 | 9.1 | done | 1 November 2026 | [#658](https://github.com/loombridge/beatlayer/pull/658): one Packages manager installs each feature's ONNX Runtime build and models from a manifest on one installer thread, with a record per package, the shared download page, and `packages.list`, `packages.install` and `packages.remove`; stem separation's download runs through it |
 | 9.2 | todo |  |  |
-| 9.3 | todo |  |  |
+| 9.3 | done | 1 November 2026 | [#683](https://github.com/loombridge/beatlayer/pull/683): the split stems model runs with the STFT and its inverse in Rust, on Core ML on macOS with the CPU as fallback (named in `stems.status`), and `bl-cli bench stems` separates a 3-minute generated mix in High Speed in about 7 seconds on an M5 Max, reporting the first compile apart |
 | 9.4 | todo |  |  |
 | 9.5 | done | 1 November 2026 | [#684](https://github.com/loombridge/beatlayer/pull/684): basic-pitch's note step is ported in `bl_analysis::transcribe` with the Melody rule and the clean-up (weak re-onsets merged, confident onsets snapped, velocity from onset strength), its model is the `pitch-model` package, and `cargo xtask transcribe-bench` scores Melody and Harmony above the spec's F-measure targets |
-| 9.6 | todo |  |  |
+| 9.6 | done | 1 November 2026 | [#707](https://github.com/loombridge/beatlayer/pull/707): `bl_analysis::drums` finds onsets and classes them as kick, snare and hi-hat with a small network whose weights `tools/drum-classifier/train.py` reproduces byte for byte from its seed, velocity from onset strength, and `cargo xtask transcribe-bench --drums` scores each class at 0.90 or above on generated breaks, clean and with noise and reverb |
 | 9.7 | todo |  |  |
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |
 | 9.9 | done | 1 November 2026 | [#677](https://github.com/loombridge/beatlayer/pull/677): Show Similar Files from the icon beside a selected file, the item menu and the View menu (Cmd-Shift-F) puts the reference in the search field and lists its neighbours most similar first, with `browser.similar` for agents and saved labels keeping the reference first. |

@@ -1044,6 +1044,7 @@ fn new_clip(
             let scale = copy.scale;
             if let ClipData::Audio(audio) = &mut copy.data {
                 audio.media = hash;
+                audio.video = false;
             }
             editor
                 .apply(match scene {

@@ -200,6 +200,9 @@ pub struct Outcome {
     /// Preview buttons pressed (true) and released (false), which the shell
     /// tells the engine (the drum racks spec, R5).
     pub previews: Vec<(ChainId, bool)>,
+    /// A Drum Synth to play a hit of, which the shell tells the engine (the
+    /// drum synths spec, R6).
+    pub hit: Option<DeviceId>,
     /// Folders for the browser to open, outermost first, with the User
     /// Library's label chosen: hot-swapping's way to the device's presets.
     pub browse: Option<Vec<PathBuf>>,
@@ -1890,7 +1893,11 @@ impl DeviceView {
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
             ids::SET_ROUTE | ids::CLEAR_ROUTE => has_target(),
-            ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW | ids::SET_PAGE => has_target(),
+            ids::PARAMETERS
+            | ids::DISPLAY
+            | ids::PREVIEW_HIT
+            | ids::SET_DISPLAY_VIEW
+            | ids::SET_PAGE => has_target(),
             ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
                     .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
@@ -2592,6 +2599,17 @@ impl DeviceView {
                 outcome.value =
                     to_value(&self.display(current, followed_tuning(editor.document(), device)));
                 return Ok(outcome);
+            }
+            ids::PREVIEW_HIT => {
+                let DeviceArgs { device } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                if !bl_devices::drum_synth::is_drum_synth(&current.kind) {
+                    return Err(DeviceError::Unavailable(format!(
+                        "{device} isn't a Drum Synth"
+                    )));
+                }
+                outcome.hit = Some(device);
             }
             ids::SET_DISPLAY_VIEW => {
                 let ids::SetDisplayViewArgs { device, view } = parse(args)?;

@@ -682,6 +682,7 @@ fn fixture() -> Project {
             ram: true,
             high_quality: false,
             tempo_leader: true,
+            video: true,
             transpose: 7,
             detune: -12.5,
             transient_edits: TransientEdits {

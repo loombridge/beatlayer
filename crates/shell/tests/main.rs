@@ -18,6 +18,7 @@ mod audio_editing;
 mod audio_panel;
 mod audio_settings;
 mod auto_filter;
+mod auto_tags;
 mod auto_warp;
 mod automation;
 mod automation_lanes;

@@ -25,7 +25,7 @@ use super::tags::{Tag, TagGroup};
 
 /// The schema version this build writes. A file with a higher version is
 /// left alone.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// The file's schema, as SQLite statements.
 const SCHEMA: &str = "
@@ -89,7 +89,19 @@ CREATE TABLE IF NOT EXISTS analysed_files (
 CREATE TABLE IF NOT EXISTS descriptors (
     key TEXT PRIMARY KEY,
     version INTEGER NOT NULL,
-    vector BLOB NOT NULL
+    vector BLOB NOT NULL,
+    tags TEXT
+);
+CREATE TABLE IF NOT EXISTS auto_tags (
+    item_key TEXT NOT NULL,
+    tag_id INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    PRIMARY KEY (item_key, tag_id)
+);
+CREATE TABLE IF NOT EXISTS removed_auto_tags (
+    item_key TEXT NOT NULL,
+    tag_id INTEGER NOT NULL,
+    PRIMARY KEY (item_key, tag_id)
 );
 ";
 
@@ -149,7 +161,9 @@ pub enum AnalysisOp {
     /// yet.
     Row {
         row: AnalysedRow,
-        descriptor: Option<(u32, Vec<u8>)>,
+        /// Its version, bytes and sound tags (the classifier's version,
+        /// then their names joined by `|`).
+        descriptor: Option<(u32, Vec<u8>, String)>,
     },
 }
 
@@ -205,6 +219,16 @@ pub enum TagOp {
     MoveGroup { id: i64, position: i32 },
     /// The tags an item carries.
     SetItemTags { key: String, tags: Vec<i64> },
+    /// The automatic tags an item has from one source, `plugin` or `sound`
+    /// (spec: browser-tags R51).
+    SetAutoTags {
+        key: String,
+        source: String,
+        tags: Vec<i64>,
+    },
+    /// The automatic tags a person took off an item, which stay off
+    /// (spec: browser-tags R51).
+    SetRemovedAutoTags { key: String, tags: Vec<i64> },
 }
 
 /// A change to the collections (spec: browser-tags R35).
@@ -238,14 +262,19 @@ pub struct Loaded {
     pub tags: Vec<Tag>,
     /// The tags each item carries, by its key.
     pub item_tags: Vec<(String, Vec<i64>)>,
+    /// The automatic tags each item has: its key, the tag and the source.
+    pub auto_tags: Vec<(String, i64, String)>,
+    /// The automatic tags a person took off each item.
+    pub removed_auto_tags: Vec<(String, Vec<i64>)>,
     /// The saved labels, in the order they were made.
     pub saved_labels: Vec<SavedLabel>,
     /// The collections each item is in, by its key.
     pub item_collections: Vec<(String, Vec<u8>)>,
     /// What sound analysis made of each file it looked at.
     pub analysed: Vec<AnalysedRow>,
-    /// The content keys that have a descriptor, with its version.
-    pub descriptor_keys: Vec<(String, u32)>,
+    /// The content keys that have a descriptor, with its version and the
+    /// sound tags kept with it.
+    pub descriptor_keys: Vec<(String, u32, Option<String>)>,
 }
 
 /// A stored descriptor: its content key, version and bytes.
@@ -547,6 +576,11 @@ fn migrate(connection: &rusqlite::Connection, from: i64) -> Result<(), String> {
             [],
         );
     }
+    if from == 5 {
+        // Version 6 keeps a descriptor's sound tags with it. The file's
+        // descriptors have none, so they are made again.
+        let _ = connection.execute("ALTER TABLE descriptors ADD COLUMN tags TEXT", []);
+    }
     connection
         .pragma_update(None, "user_version", SCHEMA_VERSION)
         .map_err(|error| format!("couldn't record the schema version: {error}"))?;
@@ -625,6 +659,12 @@ fn read_all(connection: &rusqlite::Connection) -> Loaded {
         groups,
         tags,
         item_tags,
+        auto_tags: rows(
+            connection,
+            "SELECT item_key, tag_id, source FROM auto_tags ORDER BY item_key, tag_id",
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ),
+        removed_auto_tags: read_removed_auto_tags(connection),
         saved_labels: read_labels(connection),
         item_collections: read_collections(connection),
         analysed: rows(
@@ -640,9 +680,17 @@ fn read_all(connection: &rusqlite::Connection) -> Loaded {
                 })
             },
         ),
-        descriptor_keys: rows(connection, "SELECT key, version FROM descriptors", |row| {
-            Ok((row.get(0)?, row.get::<_, i64>(1)?.max(0) as u32))
-        }),
+        descriptor_keys: rows(
+            connection,
+            "SELECT key, version, tags FROM descriptors",
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get::<_, i64>(1)?.max(0) as u32,
+                    row.get(2)?,
+                ))
+            },
+        ),
     }
 }
 
@@ -655,10 +703,11 @@ fn write_analysis(connection: &rusqlite::Connection, ops: &[AnalysisOp]) {
         return;
     };
     for AnalysisOp::Row { row, descriptor } in ops {
-        if let Some((version, vector)) = descriptor {
+        if let Some((version, vector, tags)) = descriptor {
             let _ = transaction.execute(
-                "INSERT OR REPLACE INTO descriptors (key, version, vector) VALUES (?1, ?2, ?3)",
-                rusqlite::params![row.key, version, vector],
+                "INSERT OR REPLACE INTO descriptors (key, version, vector, tags) \
+                 VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params![row.key, version, vector, tags],
             );
         }
         let _ = transaction.execute(
@@ -668,6 +717,22 @@ fn write_analysis(connection: &rusqlite::Connection, ops: &[AnalysisOp]) {
         );
     }
     let _ = transaction.commit();
+}
+
+/// Reads the automatic tags a person took off each item.
+fn read_removed_auto_tags(connection: &rusqlite::Connection) -> Vec<(String, Vec<i64>)> {
+    let mut items: Vec<(String, Vec<i64>)> = Vec::new();
+    for (key, tag) in rows(
+        connection,
+        "SELECT item_key, tag_id FROM removed_auto_tags ORDER BY item_key, tag_id",
+        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+    ) {
+        match items.last_mut() {
+            Some((last, tags)) if *last == key => tags.push(tag),
+            _ => items.push((key, vec![tag])),
+        }
+    }
+    items
 }
 
 /// Reads the collections each item is in.
@@ -1008,6 +1073,32 @@ fn write_tags(connection: &rusqlite::Connection, ops: &[TagOp]) {
                     );
                 }
             }
+            TagOp::SetAutoTags { key, source, tags } => {
+                let _ = transaction.execute(
+                    "DELETE FROM auto_tags WHERE item_key = ?1 AND source = ?2",
+                    rusqlite::params![key, source],
+                );
+                for tag in tags {
+                    let _ = transaction.execute(
+                        "INSERT OR REPLACE INTO auto_tags (item_key, tag_id, source) \
+                         VALUES (?1, ?2, ?3)",
+                        rusqlite::params![key, tag, source],
+                    );
+                }
+            }
+            TagOp::SetRemovedAutoTags { key, tags } => {
+                let _ = transaction.execute(
+                    "DELETE FROM removed_auto_tags WHERE item_key = ?1",
+                    rusqlite::params![key],
+                );
+                for tag in tags {
+                    let _ = transaction.execute(
+                        "INSERT OR IGNORE INTO removed_auto_tags (item_key, tag_id) \
+                         VALUES (?1, ?2)",
+                        rusqlite::params![key, tag],
+                    );
+                }
+            }
         }
     }
     let _ = transaction.commit();
@@ -1156,7 +1247,7 @@ mod tests {
         db.save_analysis(vec![
             AnalysisOp::Row {
                 row: row("/lib/Kick.wav", "done", Some("abc")),
-                descriptor: Some((1, vec![1, 2, 3, 4])),
+                descriptor: Some((1, vec![1, 2, 3, 4], "v1:Kick|One-Shot".to_owned())),
             },
             AnalysisOp::Row {
                 row: row("/lib/Copy.wav", "done", Some("abc")),
@@ -1175,8 +1266,73 @@ mod tests {
         let mut paths: Vec<_> = loaded.analysed.iter().map(|r| r.path.as_str()).collect();
         paths.sort_unstable();
         assert_eq!(paths, ["/lib/Bad.wav", "/lib/Kick.wav"]);
-        assert_eq!(loaded.descriptor_keys, [("abc".to_owned(), 1)]);
+        assert_eq!(
+            loaded.descriptor_keys,
+            [("abc".to_owned(), 1, Some("v1:Kick|One-Shot".to_owned()))]
+        );
         assert_eq!(db.descriptors(), [("abc".to_owned(), 1, vec![1, 2, 3, 4])]);
+    }
+
+    #[test]
+    fn a_database_of_version_five_gains_the_auto_tag_tables_and_the_descriptors_tags_column() {
+        // Spec: browser-tags R4, R51, R56.
+        let dir = scratch("migrate-auto");
+        let path = dir.join("browser.db");
+        {
+            let db = Db::open(path.clone());
+            db.flush();
+        }
+        let connection = rusqlite::Connection::open(&path).expect("the file");
+        connection
+            .execute_batch(
+                "DROP TABLE auto_tags; DROP TABLE removed_auto_tags; DROP TABLE descriptors; \
+                 CREATE TABLE descriptors (key TEXT PRIMARY KEY, version INTEGER NOT NULL, \
+                 vector BLOB NOT NULL); \
+                 INSERT INTO descriptors VALUES ('abc', 1, x'01020304'); \
+                 PRAGMA user_version = 5;",
+            )
+            .expect("the old file");
+        drop(connection);
+        let db = Db::open(path.clone());
+        assert!(db.damaged().is_none() && !db.is_newer());
+        // A descriptor from before has no tags.
+        assert_eq!(db.load().descriptor_keys, [("abc".to_owned(), 1, None)]);
+        db.save_tags(vec![
+            TagOp::SetAutoTags {
+                key: "/lib/Kick.wav".to_owned(),
+                source: "sound".to_owned(),
+                tags: vec![30, 31],
+            },
+            TagOp::SetRemovedAutoTags {
+                key: "/lib/Kick.wav".to_owned(),
+                tags: vec![31],
+            },
+            // The sound's tags are replaced, the plug-in's kept.
+            TagOp::SetAutoTags {
+                key: "/lib/Kick.wav".to_owned(),
+                source: "plugin".to_owned(),
+                tags: vec![40],
+            },
+            TagOp::SetAutoTags {
+                key: "/lib/Kick.wav".to_owned(),
+                source: "sound".to_owned(),
+                tags: vec![30],
+            },
+        ]);
+        db.flush();
+        drop(db);
+        let loaded = Db::open(path).load();
+        assert_eq!(
+            loaded.auto_tags,
+            [
+                ("/lib/Kick.wav".to_owned(), 30, "sound".to_owned()),
+                ("/lib/Kick.wav".to_owned(), 40, "plugin".to_owned()),
+            ]
+        );
+        assert_eq!(
+            loaded.removed_auto_tags,
+            [("/lib/Kick.wav".to_owned(), vec![31])]
+        );
     }
 
     #[test]

@@ -14,6 +14,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ("browser.clear_filters", Exception(FILTERS)),
         ("browser.filter", Exception(FILTERS)),
         ("browser.set_filter_groups", Exception(FILTERS)),
+        ("browser.set_include_auto_tags", Exception(FILTERS)),
         ("browser.move_label", Exception(LABELS)),
         ("browser.remove_label", Exception(LABELS)),
         ("browser.reset_label_order", Exception(LABELS)),

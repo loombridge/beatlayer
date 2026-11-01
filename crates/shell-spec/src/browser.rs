@@ -80,6 +80,8 @@ pub const SHOW_TAG_EDITOR: &str = "browser.show_tag_editor";
 pub const SHOW_QUICK_TAGS: &str = "browser.show_quick_tags";
 /// `browser.set_filter_view`: show or hide the Filter View (Cmd-Option-G).
 pub const SET_FILTER_VIEW: &str = "browser.set_filter_view";
+/// `browser.set_include_auto_tags`: the Filter View Menu's Include Auto Tags.
+pub const SET_INCLUDE_AUTO_TAGS: &str = "browser.set_include_auto_tags";
 /// `browser.set_filter_groups`: which filter groups a label shows.
 pub const SET_FILTER_GROUPS: &str = "browser.set_filter_groups";
 /// `browser.filter`: select filter tags.
@@ -152,6 +154,7 @@ pub const IDS: &[&str] = &[
     SHOW_TAG_EDITOR,
     SHOW_QUICK_TAGS,
     SET_FILTER_VIEW,
+    SET_INCLUDE_AUTO_TAGS,
     SET_FILTER_GROUPS,
     FILTER,
     CLEAR_FILTERS,
@@ -783,6 +786,10 @@ pub struct FilterViewState {
     pub menu: Vec<FilterGroupChoice>,
     /// The selected tags' full names.
     pub selected: Vec<String>,
+    /// Whether the Filter View Menu's Include Auto Tags is on: automatic
+    /// tags show in the Filter View, filter and answer `#` search (spec:
+    /// browser-tags R55).
+    pub include_auto_tags: bool,
 }
 
 /// A saved label (spec: browser-tags R24).
@@ -827,6 +834,10 @@ pub enum TagSource {
     Folder,
     /// Beatlayer gave it, from what it knows of the item.
     Beatlayer,
+    /// Beatlayer gave it automatically, from a plug-in's categories or a
+    /// sample's sound (spec: browser-tags R49); a person can take it off or
+    /// make it their own.
+    Auto,
 }
 
 /// A tag, as `browser.tags` reports it.
@@ -863,6 +874,10 @@ pub struct ItemTag {
     pub tag: String,
     /// Where it comes from.
     pub source: TagSource,
+    /// For an automatic tag, what it was found from: `plugin` (its
+    /// categories) or `sound` (the sample's sound).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 /// An item and the tags it carries.
@@ -907,6 +922,10 @@ pub struct TagEditorRow {
     pub has_subtags: bool,
     /// Whether the selection carries one of its tags, for a folded row.
     pub marked: bool,
+    /// Whether some selected item carries the tag automatically, which the
+    /// row marks (spec: browser-tags R51); unticking it takes it off those
+    /// items for good.
+    pub auto: bool,
 }
 
 /// What a row of the Tag Editor is.
@@ -937,8 +956,11 @@ pub struct QuickTag {
     /// asterisk.
     pub all: bool,
     /// Whether it can be taken off the selected items: the person's own
-    /// tags can, Beatlayer's and a folder's can't.
+    /// tags and automatic ones can, Beatlayer's and a folder's can't.
     pub removable: bool,
+    /// Whether some selected item carries it automatically (spec:
+    /// browser-tags R51).
+    pub auto: bool,
 }
 
 /// Arguments of `browser.tags`.
@@ -1095,6 +1117,16 @@ pub struct SetFilterViewArgs {
     /// Whether the Filter View shows. Left out, it toggles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub show: Option<bool>,
+}
+
+/// Arguments of `browser.set_include_auto_tags`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetIncludeAutoTagsArgs {
+    /// Whether automatic tags show in the Filter View, filter and answer
+    /// `#` search. Left out, it toggles.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub include: Option<bool>,
 }
 
 /// Arguments of `browser.set_filter_groups`. Give `group`, `show_all` or
@@ -1887,6 +1919,20 @@ fn specs() -> Vec<CommandSpec> {
             .binding("S-BRW-013")
             .args::<SetFilterViewArgs>()
             .result::<FilterViewState>(),
+        CommandSpec::new(SET_INCLUDE_AUTO_TAGS, "Include Auto Tags")
+            .description(
+                "Switches the Filter View Menu's Include Auto Tags on or off. On, which is how \
+                 a new install starts, the automatic tags Beatlayer gives plug-ins from their \
+                 categories and samples from their sound show in the Filter View, filter the \
+                 list and answer `#` search; off, only a person's tags and Beatlayer's own \
+                 four groups' do. Left out, `include` toggles. Kept for the next start. Read \
+                 it in `browser.state`'s `filter_view.include_auto_tags`; `browser.tags` marks \
+                 each tag on an item `auto` or not.",
+            )
+            .permission(Permission::Edit)
+            .contexts([Global, Browser])
+            .args::<SetIncludeAutoTagsArgs>()
+            .result::<FilterViewState>(),
         CommandSpec::new(SET_FILTER_GROUPS, "Set Filter Groups")
             .description(
                 "Chooses which filter groups a label shows in the Filter View (`label`, or the \
@@ -2167,6 +2213,7 @@ mod tests {
             RESET_TAG_ORDER,
             SHOW_QUICK_TAGS,
             SET_FILTER_VIEW,
+            SET_INCLUDE_AUTO_TAGS,
             SET_FILTER_GROUPS,
             ADD_LABEL,
             RENAME_LABEL,

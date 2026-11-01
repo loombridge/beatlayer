@@ -35,6 +35,7 @@ type State = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
     Option<bl_model::ContentHash>,
 );
@@ -210,6 +211,7 @@ impl DeviceView {
                     name.to_owned(),
                     p.shape,
                     p.articulations,
+                    p.routes,
                     p.mpe,
                     p.similarity_reference,
                 );
@@ -437,7 +439,15 @@ impl DeviceView {
                         device,
                     }),
                 }?;
-                if let Some((params, name, shape, articulations, mpe, similarity_reference)) = state
+                if let Some((
+                    params,
+                    name,
+                    shape,
+                    articulations,
+                    routes,
+                    mpe,
+                    similarity_reference,
+                )) = state
                 {
                     editor.apply(Command::SetDeviceState {
                         device: id,
@@ -445,6 +455,7 @@ impl DeviceView {
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                         similarity_reference,
                     })?;
@@ -501,7 +512,15 @@ impl DeviceView {
                     index: 0,
                     device,
                 })?;
-                if let Some((params, name, shape, articulations, mpe, similarity_reference)) = state
+                if let Some((
+                    params,
+                    name,
+                    shape,
+                    articulations,
+                    routes,
+                    mpe,
+                    similarity_reference,
+                )) = state
                 {
                     editor.apply(Command::SetDeviceState {
                         device: id,
@@ -509,6 +528,7 @@ impl DeviceView {
                         name,
                         shape,
                         articulations,
+                        routes,
                         mpe,
                         similarity_reference,
                     })?;

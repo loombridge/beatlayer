@@ -30,6 +30,7 @@ type PresetState = (
     String,
     Option<Vec<bl_model::modulator::ShapePoint>>,
     Option<Vec<bl_model::Articulation>>,
+    Option<Vec<bl_model::ModRoute>>,
     Option<bl_model::PluginMpe>,
     Option<bl_model::ContentHash>,
 );
@@ -692,6 +693,7 @@ impl DeviceView {
                             bl_project::preset::preset_name(&path),
                             loaded.shape,
                             loaded.articulations,
+                            loaded.routes,
                             loaded.mpe,
                             loaded.similarity_reference,
                         )),
@@ -1022,6 +1024,7 @@ impl DeviceView {
                             name,
                             shape,
                             articulations,
+                            routes,
                             mpe,
                             similarity_reference,
                         )) = state
@@ -1032,6 +1035,7 @@ impl DeviceView {
                                 name,
                                 shape,
                                 articulations,
+                                routes,
                                 mpe,
                                 similarity_reference,
                             })?;

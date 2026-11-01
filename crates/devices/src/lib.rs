@@ -24,6 +24,7 @@
 //! `kit-examples` feature, off by default.
 
 pub mod alignment_delay;
+pub mod analog;
 pub mod arpeggiator;
 pub mod articulation_map;
 pub mod auto_filter;
@@ -118,6 +119,7 @@ pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
+pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
@@ -320,6 +322,7 @@ pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     corpus::register(registry);
     polysynth::register(registry);
+    analog::register(registry);
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);

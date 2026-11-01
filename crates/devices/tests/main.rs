@@ -8,6 +8,7 @@
 bl_rt::install_trap!();
 
 mod alignment_delay;
+mod analog;
 mod arpeggiator;
 mod articulation_map;
 mod auto_filter;
@@ -48,6 +49,7 @@ mod grain_delay;
 mod hardware;
 mod hold;
 mod instrument_filter;
+mod instrument_matrix;
 mod instrument_voices;
 mod kit;
 mod kitbag;

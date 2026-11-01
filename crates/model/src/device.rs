@@ -206,6 +206,12 @@ pub struct Device {
     /// articulation map, and left out of the saved set then.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub articulations: Vec<crate::articulation::Articulation>,
+    /// The routes an instrument's modulation matrix holds in its free slots
+    /// (the instrument modulation spec, R8 to R10), by slot number. A
+    /// route's amount is the slot's parameter. Empty for a device without
+    /// free slots or with none set, and left out of the saved set then.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<crate::matrix::ModRoute>,
     /// The user's own info text (Edit Info Text), which the Info View shows while the pointer is over the device; empty for none, and left out of the saved set then (the Info View spec, R9).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info_text: String,
@@ -527,6 +533,7 @@ impl Device {
             warp: DeviceWarp::default(),
             slices: Vec::new(),
             articulations,
+            routes: Vec::new(),
             info_text: String::new(),
         }
     }

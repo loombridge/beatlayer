@@ -3048,6 +3048,33 @@ const ENTRIES: &[Entry] = &[
             overlapping ranges of the same controller. One undo step (Change Articulation).",
     },
     Entry {
+        id: "device.write_route",
+        action: Action::Apply("set_mod_route"),
+        label: "Change Modulation Route",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Writes a route into slot `slot` of an instrument's modulation matrix as \
+            it is: the `source` and the `destination` by name. It checks the shape of the \
+            names only, and the device ignores a name it doesn't have. A slot's amount is a \
+            parameter, which `device.set_param` sets. To set a route with the matrix's \
+            rules (the first empty free slot, refusals for an unknown name or a full matrix, \
+            the amount in the same undo step), use `device.set_route`. One undo step (Change \
+            Modulation Route).",
+    },
+    Entry {
+        id: "device.erase_route",
+        action: Action::Apply("clear_mod_route"),
+        label: "Clear Modulation Route",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Empties slot `slot` of an instrument's modulation matrix as it is, \
+            leaving its amount. To clear a route with the matrix's rules (the amount goes \
+            back to 0 % in the same undo step), use `device.clear_route`. One undo step \
+            (Clear Modulation Route).",
+    },
+    Entry {
         id: "device.compare_switch",
         action: Action::Apply("compare_switch"),
         label: "Compare: Switch",

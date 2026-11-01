@@ -693,10 +693,16 @@ impl DeviceViewUi {
             UiBuilder::new().max_rect(rect).accessibility_parent(id),
             |ui| {
                 let track = shell.editor().document().device_track(frame.id);
+                // Spec: modulation R31. A parameter an instrument's matrix
+                // moves shows the newest voice's movement as modulation
+                // does, from its base.
                 let played = |param| {
                     let device = frame.id;
                     track.and_then(|track| {
-                        shell.played(track, &AutomationTarget::Device { device, param })
+                        let target = AutomationTarget::Device { device, param };
+                        shell
+                            .matrix_played(track, &target)
+                            .or_else(|| shell.played(track, &target))
                     })
                 };
                 // Spec: device-framework R15. A described device's body is

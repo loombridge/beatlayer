@@ -571,6 +571,12 @@ impl View<'_> {
         if let Some(state) = self.shell.sampler_similar_state(device.id) {
             value["similar"] = json!(state);
         }
+        // Spec: instrument modulation R11. An instrument's modulation matrix:
+        // its sources and destinations, and every slot, which
+        // `device.set_route` and `device.clear_route` change.
+        if let Some(matrix) = self.shell.device_matrix(device) {
+            value["matrix"] = json!(matrix);
+        }
         if device.can_compare() {
             // Spec: device-compare R11.
             let pairs = |params: &bl_model::OrdMap<bl_model::ParamId, f64>| {

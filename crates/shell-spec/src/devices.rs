@@ -169,6 +169,13 @@ pub const COMPARE_SWITCH: &str = "device.compare_switch";
 /// other (`bl-model`'s).
 pub const COMPARE_COPY: &str = "device.compare_copy";
 
+/// `device.set_route`: puts a route in a free slot of an instrument's
+/// modulation matrix.
+pub const SET_ROUTE: &str = "device.set_route";
+/// `device.clear_route`: empties a free slot of an instrument's modulation
+/// matrix.
+pub const CLEAR_ROUTE: &str = "device.clear_route";
+
 /// `articulation.list`: the articulations an Articulation Map holds.
 pub const ARTICULATION_LIST: &str = "articulation.list";
 /// `articulation.learn`: arms a row's Learn button.
@@ -231,6 +238,8 @@ pub const IDS: &[&str] = &[
     RACK_SELECT_MACRO,
     RACK_SHOW_VARIATIONS,
     RACK_SELECT_VARIATION,
+    SET_ROUTE,
+    CLEAR_ROUTE,
     ARTICULATION_LIST,
     ARTICULATION_LEARN,
 ];
@@ -555,11 +564,26 @@ pub struct DevicePanel {
     /// panel's state, not the set's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub learning: Option<u8>,
+    /// For each parameter an instrument's modulation matrix moves, the
+    /// sources routed into it, in slot order (the instrument modulation
+    /// spec, R12): what assistive technology reads beside the control's
+    /// value. Empty for a device without a matrix or with no route.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matrix_routes: Vec<MatrixRoutes>,
     /// The parameters drawn disabled because the device takes them from its
     /// current scale: Scale's Base and Scale Name and Arpeggiator's Root and
     /// Scale, while Use Current Scale is on (the scales spec, R16).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked: Vec<ParamId>,
+}
+
+/// The sources routed into one parameter of an instrument's matrix.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MatrixRoutes {
+    /// The parameter.
+    pub param: ParamId,
+    /// The names of the sources routed into it, in slot order.
+    pub sources: Vec<String>,
 }
 
 /// A pages node of a device's layout as the panel shows it (device framework
@@ -1290,6 +1314,55 @@ pub struct ArticulationLearn {
     /// The articulation's place in the list, from 0, or `null` when none is
     /// learning.
     pub index: Option<u8>,
+}
+
+/// Arguments of `device.set_route`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SetRouteArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The free slot, by its number; without one, the free slot that already
+    /// routes this source to this destination, else the first empty one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The source's name, as the device's `matrix` lists it.
+    pub source: String,
+    /// The destination's name, as the device's `matrix` lists it.
+    pub destination: String,
+    /// The route's amount, in per cent from -100 to 100; the slot's amount
+    /// is left as it is if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+}
+
+/// Arguments of `device.clear_route`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ClearRouteArgs {
+    /// The device; the selected one if left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceId>,
+    /// The free slot, by its number; or name its source and destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<u8>,
+    /// The source of the route to clear, with its destination.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The destination of the route to clear, with its source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub destination: Option<String>,
+}
+
+/// What `device.set_route` and `device.clear_route` return: the slot they
+/// changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RouteChanged {
+    /// The device.
+    pub device: DeviceId,
+    /// The slot's number.
+    pub slot: u8,
 }
 
 /// Arguments of `device_view.scroll`.
@@ -2865,6 +2938,33 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<SetPageArgs>()
             .result::<DeviceViewState>(),
+        CommandSpec::new(SET_ROUTE, "Change Modulation Route")
+            .description(
+                "Routes a modulation source to a destination in a free slot of an instrument's \
+                 matrix, as dragging in its Matrix tab does: `source` and `destination` by the \
+                 names the device's `matrix` (in the query tool's `device` result) lists, in \
+                 the slot named by `slot` or, without one, the free slot that already routes \
+                 them, else the first empty free slot. `amount` is in per cent from -100 to 100 \
+                 and goes to the slot's amount parameter in the same undo step; without it the \
+                 amount stays. A fixed or chosen slot, an unknown name, a pair the device \
+                 refuses and a matrix with every free slot taken are refused. One undo step \
+                 (Change Modulation Route) restoring source, destination and amount together.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<SetRouteArgs>()
+            .result::<RouteChanged>(),
+        CommandSpec::new(CLEAR_ROUTE, "Clear Modulation Route")
+            .description(
+                "Empties a free slot of an instrument's matrix, by `slot` or by the `source` \
+                 and `destination` it routes, and sets the slot's amount to 0 %, in one undo \
+                 step (Clear Modulation Route) that restores both. A fixed or chosen slot, an \
+                 empty one and a pair no slot routes are refused.",
+            )
+            .permission(Permission::Edit)
+            .context(DeviceView)
+            .args::<ClearRouteArgs>()
+            .result::<RouteChanged>(),
         CommandSpec::new(ARTICULATION_LIST, "List Articulations")
             .description(
                 "Reports the articulations an Articulation Map holds, in order: each with its \

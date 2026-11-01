@@ -67,6 +67,7 @@ mod play_mod;
 mod polysynth;
 mod re_enveloper;
 mod remap;
+mod resonators;
 mod reverb;
 mod roar;
 mod rules;

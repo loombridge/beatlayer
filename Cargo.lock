@@ -1210,6 +1210,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "bl-video"
+version = "0.2.0"
+dependencies = [
+ "bl-media",
+ "core-foundation-sys",
+ "libloading 0.8.9",
+ "serde_json",
+ "windows",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "blake3"
 version = "1.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -15,7 +15,10 @@ use std::time::{Duration, Instant};
 use bl_core::midi::MidiMessage;
 use bl_core::time::{Bpm, Ticks};
 use bl_engine::{SlotStatus, TrackMeter};
-use bl_model::{DeviceId, Document, ParamId, RemoteMode, SceneId, TrackId};
+use bl_model::{
+    ChainId, DeviceId, Document, ParamDescriptor, ParamId, RackViewMap, RemoteMode, SceneId,
+    TrackId,
+};
 use serde_json::Value;
 
 use crate::Hit;
@@ -96,9 +99,24 @@ pub struct ReadModel {
     pub selected_device: Option<DeviceId>,
     /// Whether the Session View is the main view, not the Arrangement.
     pub session_view: bool,
+    /// What the Device View shows besides the set (push-2-tracks R22, R24).
+    pub devices: DeviceViews,
     /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
     /// R37).
     pub mix: crate::mix::Mix,
+}
+
+/// What the Device View keeps beside the set, for a surface that follows it:
+/// view state, never saved as the document and never an undo step.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DeviceViews {
+    /// The views each rack shows, whose devices view is the rack's fold. A
+    /// rack that isn't listed shows them all.
+    pub racks: Arc<RackViewMap>,
+    /// The chain each rack's devices view shows, for the racks on the shown
+    /// track: the chain clicked, or the first while none is. A rack with
+    /// several chains selected shows none.
+    pub chains: Arc<std::collections::BTreeMap<DeviceId, ChainId>>,
 }
 
 impl ReadModel {
@@ -131,6 +149,7 @@ impl ReadModel {
             browse: None,
             selected_device: None,
             session_view: false,
+            devices: DeviceViews::default(),
             mix: crate::mix::Mix::default(),
         }
     }
@@ -178,6 +197,9 @@ pub struct ParamView {
     pub text: String,
     /// Whether a macro holds it, so the surface can't move it (R22).
     pub held: bool,
+    /// What it is: its range, kind and default, which a surface that sets
+    /// it by steps needs.
+    pub descriptor: ParamDescriptor,
 }
 
 /// The device a surface's device controls reach (R17 to R21, R35).

@@ -60,6 +60,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
@@ -22639,25 +22640,95 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageState`
+
+Where a package is.
+
+One of:
+
+- `"not_installed"`: Not on this computer.
+- `"queued"`: Waiting for the download before it.
+- `"downloading"`: Downloading: see `progress`.
+- `"installed"`: Installed.
+- `"removed_at_next_launch"`: Removed, but its library is loaded: its files go the next time Beatlayer starts.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a package is.",
+  "oneOf": [
+    {
+      "const": "not_installed",
+      "description": "Not on this computer.",
+      "type": "string"
+    },
+    {
+      "const": "queued",
+      "description": "Waiting for the download before it.",
+      "type": "string"
+    },
+    {
+      "const": "downloading",
+      "description": "Downloading: see `progress`.",
+      "type": "string"
+    },
+    {
+      "const": "installed",
+      "description": "Installed.",
+      "type": "string"
+    },
+    {
+      "const": "removed_at_next_launch",
+      "description": "Removed, but its library is loaded: its files go the next time Beatlayer starts.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PackageStatus`
 
-A package the separation needs.
+A package of the manifest, as `packages.list` and `stems.status` give it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `id` | string | yes | Its ID, which `packages.install` and `packages.remove` take. |
 | `name` | string | yes | Its name. |
 | `purpose` | string | yes | What it does. |
 | `version` | string | yes | Its version. |
 | `url` | string | yes | Its project's page. |
 | `size` | integer, at least 0 | yes | The download's size in bytes. |
 | `installed` | boolean | yes | Whether it's installed. |
+| `role` | string | yes | The role it fills: features share a package by role. |
+| `state` | [`PackageState`](#packagestate) | yes | Where it is. |
+| `features` | array of string | yes | The features that need it, by ID. |
+| `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A package the separation needs.",
+  "description": "A package of the manifest, as `packages.list` and `stems.status` give it.",
   "properties": {
+    "at_next_launch": {
+      "description": "Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts.",
+      "type": "boolean"
+    },
+    "features": {
+      "description": "The features that need it, by ID.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Its ID, which `packages.install` and `packages.remove` take.",
+      "type": "string"
+    },
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
@@ -22666,8 +22737,17 @@ A package the separation needs.
       "description": "Its name.",
       "type": "string"
     },
+    "progress": {
+      "description": "While it downloads, how far it is, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
     "purpose": {
       "description": "What it does.",
+      "type": "string"
+    },
+    "role": {
+      "description": "The role it fills: features share a package by role.",
       "type": "string"
     },
     "size": {
@@ -22675,6 +22755,10 @@ A package the separation needs.
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/PackageState",
+      "description": "Where it is."
     },
     "url": {
       "description": "Its project's page.",
@@ -22686,12 +22770,53 @@ A package the separation needs.
     }
   },
   "required": [
+    "id",
     "name",
     "purpose",
     "version",
     "url",
     "size",
-    "installed"
+    "installed",
+    "role",
+    "state",
+    "features"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PackagesStatus`
+
+What `packages.list` and the other commands return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages of the manifest for this platform. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `packages.list` and the other commands return.",
+  "properties": {
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "packages": {
+      "description": "The packages of the manifest for this platform.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "packages"
   ],
   "type": "object"
 }
@@ -25280,6 +25405,232 @@ One column of Browse Mode (push-2-tracks R14).
 
 </details>
 
+### `PushChain`
+
+A chain on one of the lower buttons while a rack's button is held.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | Its name. |
+| `selected` | boolean | yes | Whether it is the selected chain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain on one of the lower buttons while a rack's button is held.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the selected chain.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "chain",
+    "name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDevice`
+
+A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper display button, from 1. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. |
+| `depth` | integer, at least 0 | yes | How deep it is inside racks: 0 on the track's own chain. |
+| `kind` | string | yes | What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`. |
+| `enabled` | boolean | yes | Whether it is switched on. |
+| `selected` | boolean | yes | Whether it is the device in focus, which is the window's selected one. |
+| `unfolded` | boolean | yes | For a rack, whether its devices follow it on the buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device on one of the upper buttons in Device Mode (push-2-tracks R27).",
+  "properties": {
+    "button": {
+      "description": "The upper display button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "depth": {
+      "description": "How deep it is inside racks: 0 on the track's own chain.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "enabled": {
+      "description": "Whether it is switched on.",
+      "type": "boolean"
+    },
+    "kind": {
+      "description": "What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the device in focus, which is the window's selected one.",
+      "type": "boolean"
+    },
+    "unfolded": {
+      "description": "For a rack, whether its devices follow it on the buttons.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "button",
+    "device",
+    "name",
+    "depth",
+    "kind",
+    "enabled",
+    "selected",
+    "unfolded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDeviceMode`
+
+What Device Mode shows (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`PushDevice`](#pushdevice) | yes | The devices on the upper buttons, in order. |
+| `left_arrow` | boolean | yes | Whether the first upper button is an arrow that moves the devices shown back. |
+| `right_arrow` | boolean | yes | Whether the last upper button is an arrow that moves them on. |
+| `empty` | boolean | yes | Whether the track has no devices. |
+| `edit` | boolean | yes | Whether Edit Mode is on. |
+| `bank` | integer, at least 0 | yes | The bank on the encoders, from 0. |
+| `banks` | array of string | yes | Every bank's name. |
+| `bank_page` | integer, at least 0 | yes | The page of banks the lower buttons show in Edit Mode, from 0. |
+| `bank_pages` | integer, at least 0 | yes | How many pages the banks make. |
+| `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
+| `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
+| `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows (push-2-tracks R27).",
+  "properties": {
+    "bank": {
+      "description": "The bank on the encoders, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_page": {
+      "description": "The page of banks the lower buttons show in Edit Mode, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_pages": {
+      "description": "How many pages the banks make.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "banks": {
+      "description": "Every bank's name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "chains": {
+      "description": "The chains the lower buttons show while a rack's button is held.",
+      "items": {
+        "$ref": "#/$defs/PushChain"
+      },
+      "type": "array"
+    },
+    "devices": {
+      "description": "The devices on the upper buttons, in order.",
+      "items": {
+        "$ref": "#/$defs/PushDevice"
+      },
+      "type": "array"
+    },
+    "edit": {
+      "description": "Whether Edit Mode is on.",
+      "type": "boolean"
+    },
+    "empty": {
+      "description": "Whether the track has no devices.",
+      "type": "boolean"
+    },
+    "left_arrow": {
+      "description": "Whether the first upper button is an arrow that moves the devices shown back.",
+      "type": "boolean"
+    },
+    "mute_locked": {
+      "description": "Whether Mute is locked, so each device button switches its device.",
+      "type": "boolean"
+    },
+    "params": {
+      "description": "The parameters on the eight encoders.",
+      "items": {
+        "$ref": "#/$defs/PushParam"
+      },
+      "type": "array"
+    },
+    "right_arrow": {
+      "description": "Whether the last upper button is an arrow that moves them on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "devices",
+    "left_arrow",
+    "right_arrow",
+    "empty",
+    "edit",
+    "bank",
+    "banks",
+    "bank_page",
+    "bank_pages",
+    "params",
+    "chains",
+    "mute_locked"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -25455,6 +25806,7 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 
@@ -25478,6 +25830,17 @@ One connected Push 2.
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
+    },
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushDeviceMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Device Mode shows, while it is the display mode."
     },
     "display": {
       "$ref": "#/$defs/PushDisplay",
@@ -25625,6 +25988,7 @@ One connected Push 2.
     "setup",
     "display",
     "browse",
+    "device",
     "session",
     "mix_mode"
   ],
@@ -26031,6 +26395,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushParam`
+
+A parameter on one of the encoders in Device Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `value` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so the encoder doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter on one of the encoders in Device Mode.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so the encoder doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "held"
+  ],
+  "type": "object"
 }
 ```
 

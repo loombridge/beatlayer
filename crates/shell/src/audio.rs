@@ -501,7 +501,12 @@ pub struct AudioHost {
     /// The Link instance the engine follows a session of, and where it
     /// leaves a peer's tempo (the Link spec, R12): each engine that starts
     /// gets a session of its own over it.
-    link: Option<(bl_link::Handle, Arc<crate::link::PeerTempo>)>,
+    link: Option<crate::link::LinkHandles>,
+    /// Link Audio's sinks and rings, which every engine reads and offers
+    /// through (the Link Audio spec, R4 to R6), and the frames its blocks
+    /// have at most.
+    link_audio: Option<Arc<crate::link_audio::Plan>>,
+    link_frames: usize,
     /// The output latency and round trip, in frames, the engine was last
     /// told (WP-5.34).
     latency_sent: (u32, u32),
@@ -599,6 +604,8 @@ impl AudioHost {
             sync_inputs: Vec::new(),
             external_sync: false,
             link: None,
+            link_audio: None,
+            link_frames: 0,
             latency_sent: (0, 0),
             test_clock: None,
             blocks_seen: (0, Instant::now()),
@@ -675,7 +682,7 @@ impl AudioHost {
     /// Has the engine follow a Link session over `link`, now and for every
     /// engine that starts (the Link spec, R12). The follower reads whether
     /// Link is on at each block, so switching it needs nothing more.
-    pub fn set_link(&mut self, link: Option<(bl_link::Handle, Arc<crate::link::PeerTempo>)>) {
+    pub fn set_link(&mut self, link: Option<crate::link::LinkHandles>) {
         self.link = link;
         if let Some(engine) = &self.engine {
             Self::follow_link(engine, self.link.as_ref());
@@ -684,12 +691,48 @@ impl AudioHost {
 
     /// Gives `engine` a follower over a new session of `link`, made here,
     /// before the audio thread reads it.
-    fn follow_link(engine: &Engine, link: Option<&(bl_link::Handle, Arc<crate::link::PeerTempo>)>) {
-        let follower = link.map(|(handle, peer)| {
-            let session = crate::link::LinkSession::new(handle.audio(), Arc::clone(peer));
+    fn follow_link(engine: &Engine, link: Option<&crate::link::LinkHandles>) {
+        let follower = link.map(|link| {
+            let session = crate::link::LinkSession::with_settings(
+                link.link.audio(),
+                Arc::clone(&link.peer),
+                Arc::clone(&link.settings),
+            );
             Box::new(bl_engine::LinkFollower::new(session)) as Box<dyn bl_engine::Follower>
         });
         engine.set_follower(follower);
+    }
+
+    /// Has the engine read and offer through `plan`, now and for every engine
+    /// that starts (the Link Audio spec, R4 to R6, R11).
+    pub fn set_link_audio(&mut self, plan: Option<Arc<crate::link_audio::Plan>>) {
+        self.link_audio = plan;
+        if let Some(engine) = &self.engine {
+            Self::bank_link_audio(
+                engine,
+                self.link.as_ref(),
+                self.link_audio.as_ref(),
+                self.link_frames,
+            );
+        }
+    }
+
+    /// Gives `engine` a bank over `plan`, made here, before the audio thread
+    /// reads it; without a plan or a Link instance, none.
+    fn bank_link_audio(
+        engine: &Engine,
+        link: Option<&crate::link::LinkHandles>,
+        plan: Option<&Arc<crate::link_audio::Plan>>,
+        frames: usize,
+    ) {
+        let bank = link.zip(plan).map(|(link, plan)| {
+            Box::new(crate::link_audio::Bank::new(
+                &link.link,
+                Arc::clone(plan),
+                frames,
+            )) as Box<dyn bl_engine::LinkAudio>
+        });
+        engine.set_link_audio(bank);
     }
 
     /// What the engine reports of the MIDI clock it follows; all zeros while
@@ -1635,6 +1678,13 @@ impl AudioHost {
         engine.sync_inputs(&self.sync_inputs);
         engine.set_external_sync(self.external_sync);
         Self::follow_link(&engine, self.link.as_ref());
+        self.link_frames = max_frames;
+        Self::bank_link_audio(
+            &engine,
+            self.link.as_ref(),
+            self.link_audio.as_ref(),
+            max_frames,
+        );
         let _ = engine.flush(ENGINE_START_TIMEOUT);
         handoff
             .push(processor)

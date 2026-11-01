@@ -559,9 +559,11 @@ impl DeviceView {
                 params: selected,
                 layout,
                 views: Vec::new(),
+                display_drag: Vec::new(),
                 menu_options: Vec::new(),
                 title_switch: None,
                 banks: Vec::new(),
+                alternates: Vec::new(),
             },
             plugin: true,
             configured: knob_params,
@@ -665,6 +667,7 @@ impl DeviceView {
                             menu_option: description.menu_options.contains(&p.id),
                             title_switch: description.title_switch == Some(p.id),
                             configured: configured.contains(&p.id),
+                            shown: description.shown(&device.params, p.id),
                             other: device.can_compare().then(|| {
                                 description
                                     .value(device.other_params(), p.id)

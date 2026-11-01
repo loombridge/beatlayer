@@ -393,6 +393,14 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: corpus R1. Corpus's X–Y control is its display cell.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::corpus::CORPUS)
+            && name == bl_devices::corpus::XY_CELL
+        {
+            corpus_xy(ui, theme, frame, (panel, display), (id, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Shaper, its shape.
@@ -745,6 +753,97 @@ fn slot_cell(
             "plays {key}, {}{}",
             if loaded { "holds a sample" } else { "empty" },
             if selected { ", selected" } else { "" }
+        ));
+    });
+}
+
+/// Corpus's X–Y control (the Corpus spec, R1): Decay across and Material up,
+/// or Radius up for a pipe and a tube, a dot where they stand and the
+/// limiter's lamp in a corner. A press or a drag sets both at the pointer, as
+/// one undo step.
+fn corpus_xy(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    (panel, display): (&DevicePanel, Option<&DeviceDisplay>),
+    (id, rect): (Id, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    use bl_devices::corpus::{DECAY, LAMP_DB, LIMITER, TYPE, xy_vertical};
+    let find = |param: ParamId| panel.description.params.iter().position(|p| p.id == param);
+    let (Some(x_at), Some(type_at)) = (find(DECAY), find(TYPE)) else {
+        return;
+    };
+    let Some(y_at) = find(xy_vertical(panel.value(type_at) as usize)) else {
+        return;
+    };
+    let (x, y) = (
+        &panel.description.params[x_at],
+        &panel.description.params[y_at],
+    );
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let set = |param: &ParamDescriptor, value: f64| {
+        UiEvent::Invoke(Invocation::new(
+            "device.set_param",
+            json!({ "device": frame.id, "param": param.id, "value": value }),
+        ))
+    };
+    let at_pointer = |events: &mut Vec<UiEvent>| {
+        let Some(pointer) = response.interact_pointer_pos() else {
+            return;
+        };
+        let across = f64::from(((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0));
+        let up = f64::from(((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0));
+        events.push(set(x, x.denormalize(across)));
+        events.push(set(y, y.denormalize(up)));
+    };
+    let gesture =
+        || UiEvent::BeginNamedGesture(format!("Change \"{}\" and \"{}\"", x.name, y.name));
+    if response.drag_started() {
+        events.push(gesture());
+    }
+    if response.dragged() {
+        at_pointer(events);
+    }
+    if response.drag_stopped() {
+        events.push(UiEvent::EndGesture);
+    }
+    if response.clicked() {
+        events.push(gesture());
+        at_pointer(events);
+        events.push(UiEvent::EndGesture);
+    }
+    let ink = highlight(theme, frame.enabled);
+    let painter = ui.painter_at(rect);
+    let dot = pos2(
+        rect.left() + rect.width() * x.normalize(panel.value(x_at)) as f32,
+        rect.bottom() - rect.height() * y.normalize(panel.value(y_at)) as f32,
+    );
+    let line = Stroke::new(1.0, ink.gamma_multiply(0.4));
+    painter.hline(rect.x_range(), dot.y, line);
+    painter.vline(dot.x, rect.y_range(), line);
+    painter.circle_filled(dot, 4.0, ink);
+    let lamp = display
+        .and_then(|d| d.reading(LIMITER))
+        .is_some_and(|reading| reading.value < LAMP_DB);
+    painter.circle(
+        pos2(rect.right() - 7.0, rect.top() + 7.0),
+        3.0,
+        if lamp { ink } else { Color32::TRANSPARENT },
+        Stroke::new(1.0, theme.colors.separator.0),
+    );
+    focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Image);
+        node.set_label(bl_devices::corpus::XY_CELL.to_owned());
+        node.set_value(format!(
+            "{} {}, {} {}{}",
+            x.name,
+            x.format(panel.value(x_at)),
+            y.name,
+            y.format(panel.value(y_at)),
+            if lamp { ", limiter on" } else { "" }
         ));
     });
 }

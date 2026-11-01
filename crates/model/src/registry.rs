@@ -3427,8 +3427,13 @@ const ENTRIES: &[Entry] = &[
             source chooser in its sidechain parameters does: `track` is a MIDI track (the \
             device's own track too), or left out for No Input, a new device's. The device \
             hears the notes and channel messages that track's clips and input play, before \
-            its own devices change them; the track still plays as before. Only devices that \
-            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
+            its own devices change them (`pre_fx`); the track still plays as before. A \
+            device whose MIDI sidechain has a tapping point (Corpus) takes `tap`: `pre_fx` \
+            as above, `post_fx` (a new device's) for the notes leaving the track's MIDI \
+            effects, or `post_mixer`, the same; left out, it stays. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input. \
+            Read back in the query tool's `device` result, under `midi_sidechain`: its \
+            `source` and `tap`.",
     },
     Entry {
         id: "device.set_sidechain_enabled",

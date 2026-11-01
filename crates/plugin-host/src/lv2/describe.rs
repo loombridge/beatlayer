@@ -217,6 +217,7 @@ pub(crate) fn device_type(info: &PluginInfo) -> (DeviceType, Vec<Parameter>) {
         sidechain: false,
         external: false,
         midi_sidechain: false,
+        midi_tap: false,
         note_output: note_output(info),
         outputs: Vec::new(),
     };

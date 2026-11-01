@@ -737,6 +737,7 @@ fn finish(editor: &mut Editor, data: &TrackData, copies: &Copies) -> Result<(), 
             editor.apply(Command::SetMidiSidechainSource {
                 device: copy,
                 track: source,
+                tap: None,
             })?;
         }
     }

@@ -2,7 +2,7 @@
 
 <!-- Generated from shortcuts.toml by `cargo xtask ui-parity`. Don't edit this file by hand: edit shortcuts.toml and regenerate. `cargo xtask check` fails if the two differ. -->
 
-Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 381 shortcuts in 24 contexts; 19 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
+Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Source: Ableton Live 12 reference manual, chapters 41 and 42, read 10 October 2026, and observation of Live 12.4.3 where the Source column says so. 383 shortcuts in 24 contexts; 21 need confirming (see the notes at the end). How to read and change this table: [README](README.md).
 
 ## By milestone
 
@@ -12,7 +12,7 @@ Live 12.4.3's keyboard shortcuts, the default keymap Beatlayer binds (D16). Sour
 | M2 | 85 |
 | M3 | 43 |
 | M4 | 21 |
-| M5 | 10 |
+| M5 | 12 |
 | M6 | 80 |
 | M7 | 2 |
 | M9 | 8 |
@@ -40,7 +40,7 @@ A shortcut applies in its context. The same keys may mean different things in di
 | [`sample-editor`](#sample-editor) | The Clip View shows an audio clip's Sample Editor. | 16 |
 | [`note-editor`](#note-editor) | The Clip View shows a MIDI clip's MIDI Note Editor. | 41 |
 | [`note-selection`](#note-selection) | Notes are selected in the MIDI Note Editor. | 16 |
-| [`device-view`](#device-view) | The Device View has focus. | 12 |
+| [`device-view`](#device-view) | The Device View has focus. | 14 |
 | [`rack-chains`](#rack-chains) | A rack's chain list has focus. | 1 |
 | [`sample-swap`](#sample-swap) | A Drum Rack, a pad, Simpler or Drum Sampler is selected. | 5 |
 | [`browser`](#browser) | The browser's content pane has focus. | 15 |
@@ -513,6 +513,8 @@ The Device View has focus.
 | S-DEV-013 | Hide the selected rack's chain list | `Minus` | `Minus` | key | press | M5 | observed in 12.4.3 (macOS), 10 October 2026: View menu (Hide Chains) |
 | S-DEV-014 | Fold or unfold the selected device (unconfirmed) | `Minus` | `Minus` | key | press | M2 | observed in 12.4.3 (macOS), 10 October 2026: device title bar's context menu (Fold) |
 | S-DEV-015 | Float the selected device in its own window, or dock it | `Option+F` | `Ctrl+Alt+F` | key | press | M2 | Beatlayer (IMP-14, WP-2.5b), decided 12 October 2026; not in Live |
+| S-DEV-016 | Step Roar's Feedback Note by a semitone (unconfirmed) | `Down` or `Up` | `Down` or `Up` | key | press | M5 | manual 29.33.4; Live 12.4 release notes (Roar) |
+| S-DEV-017 | Step Roar's Feedback Note by an octave (unconfirmed) | `Shift+Down` or `Shift+Up` | `Shift+Down` or `Shift+Up` | key | press | M5 | Live 12.4 release notes (Roar) |
 
 ## rack-chains
 
@@ -699,6 +701,8 @@ The Settings window has focus.
 | S-DEV-013 | shares keys with S-DEV-014 | Live shows the same key beside Fold in the device title bar's context menu (S-DEV-014). |
 | S-DEV-014 | unconfirmed; shares keys with S-DEV-013 | Live shows the minus key beside Fold in the device's context menu and beside Hide Chains in the View menu (S-DEV-013). |
 | S-DEV-015 | note | Beatlayer's own key for Float, its item after Fold in the device's context menu. Scoped by focus: only with the Device View or a floating device's window focused and a device selected. On Windows and Linux it's Ctrl+Alt+F, which with the Arrangement focused stays Create Fade/Crossfade (S-ARR-008); Alt+F alone opens the File menu there (S-MENU-001). On macOS Option+F, beside Cmd+Option+F for fades. |
+| S-DEV-016 | unconfirmed | With the focus on the Note control while Roar's Feedback Mode is Note, Up and Down step the key by a semitone, as every focused value control's keys do (S-VAL-001). Whether Live steps a semitone is to observe. |
+| S-DEV-017 | unconfirmed | With the focus on the Note control while Roar's Feedback Mode is Note, Shift with Up or Down moves the pitch by an octave: the note control's coarse step, where S-VAL-002 gives other value controls a fine step. Each press is one undo step. |
 | S-SES-024 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-SES-025 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |
 | S-SES-026 | note | Context-dependent keys: listed in the Options menu with the Session View focused; in the Arrangement the same keys are the grid commands (S-GRID-002 to S-GRID-005). The Windows binding is inferred from macOS (Cmd to Ctrl, Option to Alt). |

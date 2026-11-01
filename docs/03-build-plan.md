@@ -997,7 +997,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.13 | todo |  |  |
 | 8.14 | done | 1 November 2026 | [#731](https://github.com/loombridge/beatlayer/pull/731): Analog has two band-limited oscillators (sine, saw, rectangle with pulse width, noise) with sub, sync and a pitch envelope, the noise generator with Color, two filters with ten modes, Drive, key tracking and serial or parallel routing, two amplifiers with pan, and four envelopes with their loop modes, on the shell-and-display pages; the LFO amounts act on nothing until part 2, and factory presets wait on a preset mechanism |
 | 8.15 | todo |  |  |
-| 8.16 | todo |  |  |
+| 8.16 | done | 1 November 2026 | [#729](https://github.com/loombridge/beatlayer/pull/729): Bass, a monophonic synthesiser with legato glide and no retrigger, and Poli, a polyphonic one with detunable oscillators, its modulation section and the Chorus-Ensemble core as its chorus, on the instruments' voice section and filter, listed under Instruments with banks holding every parameter; their presets exist as code with no loader yet, and exact block-size identity while pitch moves waits on the kit as for Drift |
 | 8.17 | todo |  |  |
 | 8.18 | todo |  |  |
 | 8.19 | todo |  |  |

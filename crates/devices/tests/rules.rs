@@ -62,7 +62,11 @@ fn every_gain_parameter_reaches_minus_infinity() {
             };
             let group: Vec<_> = if device_type.name == "EQ Three" {
                 BAND_GAINS.to_vec()
-            } else if device_type.name == "Multiband Dynamics" && band_gain(param).is_some() {
+            } else if matches!(
+                device_type.name.as_str(),
+                "Multiband Dynamics" | "Re-Enveloper"
+            ) && band_gain(param).is_some()
+            {
                 let same = |p: &&bl_model::ParamDescriptor| {
                     p.is_gain() && band_gain(p) == band_gain(param)
                 };

@@ -715,9 +715,11 @@ version = "0.2.0"
 dependencies = [
  "bl-dsp",
  "bl-media",
+ "bl-rt",
  "ort",
  "rayon",
  "realfft",
+ "rtrb",
 ]
 
 [[package]]

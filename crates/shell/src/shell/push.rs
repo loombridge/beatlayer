@@ -31,6 +31,15 @@ fn setup_info(setup: Setup) -> ids::PushSetup {
     }
 }
 
+fn fixed_info(fixed: bl_push::recording::FixedLength) -> ids::PushFixedLength {
+    ids::PushFixedLength {
+        on: fixed.on,
+        length: ids::PushFixedLengthValue::ALL
+            [usize::from(fixed.length).min(ids::PushFixedLengthValue::ALL.len() - 1)],
+        phrase_sync: fixed.phrase_sync,
+    }
+}
+
 fn led_info(led: Led) -> ids::PushLed {
     ids::PushLed {
         colour: led.colour,
@@ -185,8 +194,26 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
         menu: snapshot.menu.map(|menu| match menu {
             bl_push::state::Menu::Setup => ids::PushMenu::Setup,
             bl_push::state::Menu::Scale => ids::PushMenu::Scale,
+            bl_push::state::Menu::Quantize => ids::PushMenu::Quantize,
+            bl_push::state::Menu::FixedLength => ids::PushMenu::FixedLength,
             bl_push::state::Menu::Convert => ids::PushMenu::Convert,
         }),
+        recording: ids::PushRecording {
+            record: snapshot.record.to_owned(),
+            fixed_length: fixed_info(snapshot.fixed_length),
+            swing: (snapshot.swing * 100.0).round() as u8,
+            automation_arm: snapshot.automation_arm,
+            quantize_menu: snapshot
+                .quantize_menu
+                .clone()
+                .map(|menu| ids::PushQuantizeMenu {
+                    swing: menu.swing,
+                    quantize_to: menu.quantize_to,
+                    amount: menu.amount,
+                    record_quantize: menu.record_quantize,
+                    stays: menu.stays,
+                }),
+        },
         held: snapshot.held.iter().map(|b| (*b).to_owned()).collect(),
         locked: snapshot.locked.iter().map(|b| (*b).to_owned()).collect(),
         colour_picker: snapshot.picker,
@@ -328,6 +355,8 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             page: note.page,
             following: note.following,
             velocity: note.velocity,
+            accent: note.accent,
+            repeat: note.repeat,
             held_steps: note
                 .held_steps
                 .into_iter()
@@ -472,6 +501,47 @@ impl Shell {
                 self.prefs.midi = self.midi.prefs();
                 self.save_preferences();
                 Ok(to_value(&setup_info(self.midi.push().setup())))
+            }
+            ids::SET_FIXED_LENGTH => {
+                let args = Self::args::<ids::PushSetFixedLengthArgs>(id, args)?;
+                let mut fixed = self.midi.push().fixed_length();
+                let was = fixed.on;
+                fixed.on = args.enabled.unwrap_or(fixed.on);
+                fixed.phrase_sync = args.phrase_sync.unwrap_or(fixed.phrase_sync);
+                if let Some(length) = args.length {
+                    fixed.length = ids::PushFixedLengthValue::ALL
+                        .iter()
+                        .position(|&l| l == length)
+                        .map_or(fixed.length, |at| at as u8);
+                }
+                self.midi.push().set_fixed_length(fixed);
+                // A preference: kept for the next start, no part of the set.
+                self.surface_push_saved();
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                if fixed.on && !was {
+                    let signatures = &self.editor.document().settings().time_signatures;
+                    let at = self.arrangement.transport().position;
+                    let length = fixed.value().ticks(signatures.signature_at(at));
+                    self.loop_last_stretch(length);
+                }
+                Ok(to_value(&fixed_info(fixed)))
+            }
+            ids::SET_SWING => {
+                let args = Self::args::<ids::PushSetSwingArgs>(id, args)?;
+                self.midi.push().set_swing(f64::from(args.amount) / 100.0);
+                self.surface_push_saved();
+                self.prefs.midi = self.midi.prefs();
+                self.save_preferences();
+                Ok(to_value(&args.amount))
+            }
+            ids::NEW => {
+                let args = Self::args::<ids::PushSessionArgs>(id, args)?;
+                self.push_new(id, args)
+            }
+            ids::DUPLICATE => {
+                let args = Self::args::<ids::PushSessionArgs>(id, args)?;
+                self.push_duplicate(id, args)
             }
             ids::CONVERT => {
                 let args = Self::args::<ids::PushConvertArgs>(id, args)?;

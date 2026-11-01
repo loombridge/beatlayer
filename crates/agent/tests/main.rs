@@ -21,6 +21,7 @@ mod meld;
 mod midi_clock;
 mod midi_effects;
 mod midi_tools;
+mod operator;
 mod perception;
 mod permissions;
 mod plugin_lv2;

@@ -3378,6 +3378,196 @@ fn an_agent_sets_every_corpus_parameter_and_its_midi_source_with_its_tapping_poi
     assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("post_mixer"));
 }
 
+// Spec: spectral-resonator R14, R16 and routing R39: an agent adds Spectral
+// Resonator, sets every parameter by ID, points its MIDI source at a MIDI
+// track with a tapping point and reads them all back.
+#[test]
+fn an_agent_sets_every_spectral_resonator_parameter_and_its_midi_source_and_reads_them_back() {
+    use bl_devices::spectral_resonator::{SPECTRAL_RESONATOR, spectral_resonator_type};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("spectral-resonator-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Spectral Resonator", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": SPECTRAL_RESONATOR } },
+                                    "name": "Spectral Resonator", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    // Every parameter moved to a value other than its default.
+    let description = spectral_resonator_type().description;
+    let wanted: Vec<(bl_model::ParamId, f64)> = description
+        .params
+        .iter()
+        .map(|p| {
+            let (lo, hi) = (p.min(), p.max());
+            let value = if (p.default - hi).abs() > (p.default - lo).abs() {
+                lo + 0.75 * (hi - lo)
+            } else {
+                lo + 0.25 * (hi - lo)
+            };
+            (p.id, p.clamp(value))
+        })
+        .collect();
+    let mut commands: Vec<Value> = wanted
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": device, "param": param, "value": value } })
+        })
+        .collect();
+    commands.push(json!({ "command": "device.set_midi_sidechain_source",
+                          "args": { "device": device, "track": keys, "tap": "post_fx" } }));
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Spectral Resonator", "commands": commands }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(
+        params.len(),
+        description.params.len(),
+        "every parameter is listed"
+    );
+    for (id, value) in &wanted {
+        let found = params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"));
+        assert_eq!(found["value"], json!(value), "{}", found["name"]);
+        assert_eq!(found["automatable"], json!(true));
+    }
+    // The source and its tapping point read back from the device, and the
+    // source goes with its track.
+    let query =
+        || json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" });
+    let found = call(&mut client, "query", query());
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("post_fx"));
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.delete", "args": { "track": keys } }] }),
+    );
+    let found = call(&mut client, "query", query());
+    assert!(
+        found["saved"]["midi_sidechain"].get("source").is_none(),
+        "{found}"
+    );
+}
+
+// Spec: spectral-resonator R14, R15: `device.display` reads the spectrogram of
+// a running Spectral Resonator headless as numbers with its axes, with each
+// partial marked and the voice's fundamental read.
+#[test]
+fn an_agent_reads_spectral_resonators_spectrogram_partials_and_fundamental_through_device_display()
+{
+    use bl_devices::spectral_resonator::{self, GRID, SPECTRAL_RESONATOR};
+
+    let mut registry = bl_devices::testing::registry();
+    bl_devices::register(&mut registry);
+    let mut host = EngineHost::with_registry(512, registry);
+    host.client
+        .transport()
+        .shell
+        .set_device_types(bl_devices::device_types());
+    let device = |index: u32, name: &str, device_type: &str| {
+        json!({ "command": "device.insert",
+                "args": { "track": {"$ref": "Track"}, "index": index,
+                          "device": { "id": {"$new": name}, "name": name,
+                                      "kind": { "native": { "device_type": device_type } },
+                                      "enabled": true, "params": [] } } })
+    };
+    let set = |name: &str, param: bl_model::ParamId, value: f64| {
+        json!({ "command": "device.set_param",
+                "args": { "device": {"$ref": name}, "param": param.0, "value": value } })
+    };
+    host.call(
+        "run",
+        json!({ "label": "Add devices", "commands": [
+            { "command": "track.create",
+              "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+            device(0, "Tone", bl_engine::nodes::TEST_TONE),
+            device(1, "Resonator", SPECTRAL_RESONATOR),
+            { "command": "device.set_param",
+              "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 330.0 } },
+            { "command": "device.set_param",
+              "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+            set("Resonator", spectral_resonator::FREQ, 110.0),
+            set("Resonator", spectral_resonator::HARMONICS, 4.0),
+            set("Resonator", spectral_resonator::DECAY, 2.0),
+        ] }),
+    );
+    let resonator = {
+        let document = host.client.transport().shell.editor().document();
+        let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+        track.devices().nth(1).unwrap().id
+    };
+    host.play_to(98_304);
+    host.publish_displays();
+    let reply = host.call(
+        "run",
+        json!({ "label": "Read", "commands": [
+            { "command": "device.display", "args": { "device": resonator } },
+        ] }),
+    );
+    let shown = &reply["results"][0]["result"];
+    assert_eq!(shown["live"], true);
+    let grid = &shown["spectrograms"][0];
+    assert_eq!(grid["name"], "Spectrogram");
+    assert_eq!(grid["columns"], GRID.columns);
+    assert_eq!(grid["rows"], GRID.rows);
+    assert_eq!(grid["frequencies"], json!(GRID.frequencies));
+    // The tone at 330 Hz is the third partial of 110 Hz: the newest column
+    // peaks at its row.
+    let values: Vec<f64> = grid["values"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_f64().unwrap())
+        .collect();
+    let newest = &values[values.len() - GRID.rows..];
+    let (loudest, level) = newest
+        .iter()
+        .copied()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap();
+    let [low, high] = GRID.frequencies.map(f64::from);
+    let hz = low * (high / low).powf(loudest as f64 / (GRID.rows - 1) as f64);
+    assert!((hz / 330.0).ln().abs() < 0.15, "{hz:.0} Hz");
+    assert!(level > -40.0, "{level} dB");
+    // Four partials are marked, at multiples of 110 Hz.
+    let markers = shown["markers"].as_array().unwrap();
+    assert_eq!(markers.len(), 4);
+    for (k, marker) in markers.iter().enumerate() {
+        let x = marker["x"].as_f64().unwrap();
+        assert!((x - 110.0 * (k + 1) as f64).abs() < 0.5, "{x}");
+    }
+    let fundamental = shown["readings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "Voice 1 Fundamental")
+        .expect("the sounding voice's fundamental");
+    assert!((fundamental["value"].as_f64().unwrap() - 110.0).abs() < 0.5);
+    assert_eq!(host.offline.heap_operations(), 0);
+}
+
 // Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Drum Sampler,
 // reads its parameters with its two menu options, switches one by ID, and
 // swaps it to Simpler, by command ID.

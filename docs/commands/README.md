@@ -26525,6 +26525,113 @@ One of:
 
 </details>
 
+### `PushFixedLength`
+
+Fixed Length's settings (the notes on Push 2 spec, R50).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether it is on. |
+| `length` | [`PushFixedLengthValue`](#pushfixedlengthvalue) | yes | The length of the clip a recording makes. |
+| `phrase_sync` | boolean | yes | Whether Phrase Sync is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Fixed Length's settings (the notes on Push 2 spec, R50).",
+  "properties": {
+    "length": {
+      "$ref": "#/$defs/PushFixedLengthValue",
+      "description": "The length of the clip a recording makes."
+    },
+    "on": {
+      "description": "Whether it is on.",
+      "type": "boolean"
+    },
+    "phrase_sync": {
+      "description": "Whether Phrase Sync is on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on",
+    "length",
+    "phrase_sync"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushFixedLengthValue`
+
+The lengths Fixed Length offers (the notes on Push 2 spec, R50).
+
+One of:
+
+- `"1 beat"`: 1 beat.
+- `"2 beats"`: 2 beats.
+- `"1 bar"`: 1 bar.
+- `"2 bars"`: 2 bars.
+- `"4 bars"`: 4 bars.
+- `"8 bars"`: 8 bars.
+- `"16 bars"`: 16 bars.
+- `"32 bars"`: 32 bars.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The lengths Fixed Length offers (the notes on Push 2 spec, R50).",
+  "oneOf": [
+    {
+      "const": "1 beat",
+      "description": "1 beat.",
+      "type": "string"
+    },
+    {
+      "const": "2 beats",
+      "description": "2 beats.",
+      "type": "string"
+    },
+    {
+      "const": "1 bar",
+      "description": "1 bar.",
+      "type": "string"
+    },
+    {
+      "const": "2 bars",
+      "description": "2 bars.",
+      "type": "string"
+    },
+    {
+      "const": "4 bars",
+      "description": "4 bars.",
+      "type": "string"
+    },
+    {
+      "const": "8 bars",
+      "description": "8 bars.",
+      "type": "string"
+    },
+    {
+      "const": "16 bars",
+      "description": "16 bars.",
+      "type": "string"
+    },
+    {
+      "const": "32 bars",
+      "description": "32 bars.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PushHeldStep`
 
 A step held down in Note Mode.
@@ -26611,6 +26718,7 @@ One connected Push 2.
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 | `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
+| `recording` | [`PushRecording`](#pushrecording) | yes | Recording, Fixed Length and the swing amount (the notes on Push 2 spec, R48 to R63). |
 
 <details><summary>JSON Schema</summary>
 
@@ -26765,6 +26873,10 @@ One connected Push 2.
       "$ref": "#/$defs/PushPadMode",
       "description": "The pad mode."
     },
+    "recording": {
+      "$ref": "#/$defs/PushRecording",
+      "description": "Recording, Fixed Length and the swing amount (the notes on Push 2 spec, R48 to R63)."
+    },
     "row": {
       "description": "The Control Surfaces table's row it runs in, from 1.",
       "format": "uint8",
@@ -26816,7 +26928,8 @@ One connected Push 2.
     "clip",
     "session",
     "mix_mode",
-    "note"
+    "note",
+    "recording"
   ],
   "type": "object"
 }
@@ -27017,6 +27130,8 @@ One of:
 
 - `"setup"`: Setup.
 - `"scale"`: Scale.
+- `"quantize"`: Quantize (the notes on Push 2 spec, R58).
+- `"fixed_length"`: Fixed Length (the notes on Push 2 spec, R50).
 - `"convert"`: The choices Convert offers for an audio clip.
 
 <details><summary>JSON Schema</summary>
@@ -27033,6 +27148,16 @@ One of:
     {
       "const": "scale",
       "description": "Scale.",
+      "type": "string"
+    },
+    {
+      "const": "quantize",
+      "description": "Quantize (the notes on Push 2 spec, R58).",
+      "type": "string"
+    },
+    {
+      "const": "fixed_length",
+      "description": "Fixed Length (the notes on Push 2 spec, R50).",
       "type": "string"
     },
     {
@@ -27315,6 +27440,8 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R47).
 | `following` | boolean | yes | Whether the step area follows the page that plays. |
 | `velocity` | integer or null | yes | The velocity new steps take, once a velocity pad chose one. |
 | `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held down now. |
+| `accent` | boolean | yes | Whether Accent is on, tapped or held (the notes on Push 2 spec, R54). |
+| `repeat` | boolean | yes | Whether Repeat is on for the track, tapped or held (R55). |
 | `melody` | [`PushMelody`](#pushmelody) or null | yes | What a melodic layout shows, on a melodic track. |
 
 <details><summary>JSON Schema</summary>
@@ -27323,6 +27450,10 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R47).
 {
   "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R47).",
   "properties": {
+    "accent": {
+      "description": "Whether Accent is on, tapped or held (the notes on Push 2 spec, R54).",
+      "type": "boolean"
+    },
     "bank": {
       "description": "The first note of the drum rack's pad view, which the pads show.",
       "format": "uint8",
@@ -27399,6 +27530,10 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R47).
       "minimum": 0,
       "type": "integer"
     },
+    "repeat": {
+      "description": "Whether Repeat is on for the track, tapped or held (R55).",
+      "type": "boolean"
+    },
     "selected_pad": {
       "description": "The drum pad the steps edit, as a MIDI note.",
       "format": "uint8",
@@ -27449,6 +27584,8 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R47).
     "following",
     "velocity",
     "held_steps",
+    "accent",
+    "repeat",
     "melody"
   ],
   "type": "object"
@@ -27521,6 +27658,126 @@ A parameter on one of the encoders in Device Mode.
     "name",
     "value",
     "held"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushQuantizeMenu`
+
+The Quantize menu (the notes on Push 2 spec, R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `swing` | integer from 0 to 255 | yes | Swing Amount, 0 to 100 %. |
+| `quantize_to` | string | yes | Quantize To, as the grid's note value, such as `1/16`. |
+| `amount` | integer from 0 to 255 | yes | Quantize Amount, 0 to 100 %. |
+| `record_quantize` | string | yes | Record Quantize's value, as `transport.set_record_quantization` names it. |
+| `stays` | boolean | yes | Whether the menu stays after Quantize is released. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The Quantize menu (the notes on Push 2 spec, R58).",
+  "properties": {
+    "amount": {
+      "description": "Quantize Amount, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "quantize_to": {
+      "description": "Quantize To, as the grid's note value, such as `1/16`.",
+      "type": "string"
+    },
+    "record_quantize": {
+      "description": "Record Quantize's value, as `transport.set_record_quantization` names it.",
+      "type": "string"
+    },
+    "stays": {
+      "description": "Whether the menu stays after Quantize is released.",
+      "type": "boolean"
+    },
+    "swing": {
+      "description": "Swing Amount, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "swing",
+    "quantize_to",
+    "amount",
+    "record_quantize",
+    "stays"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushRecording`
+
+What `push.state` reports of recording on Push 2.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `record` | string | yes | What Record shows: `off`, `session` (a Session recording or an overdub) or `arrangement`. |
+| `fixed_length` | [`PushFixedLength`](#pushfixedlength) | yes | Fixed Length's settings. |
+| `swing` | integer from 0 to 255 | yes | The swing amount, 0 to 100 %. |
+| `automation_arm` | boolean | yes | Whether Automation Arm is on (Automate). |
+| `quantize_menu` | [`PushQuantizeMenu`](#pushquantizemenu) or null | yes | What the Quantize menu shows while it is open. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.state` reports of recording on Push 2.",
+  "properties": {
+    "automation_arm": {
+      "description": "Whether Automation Arm is on (Automate).",
+      "type": "boolean"
+    },
+    "fixed_length": {
+      "$ref": "#/$defs/PushFixedLength",
+      "description": "Fixed Length's settings."
+    },
+    "quantize_menu": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushQuantizeMenu"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What the Quantize menu shows while it is open."
+    },
+    "record": {
+      "description": "What Record shows: `off`, `session` (a Session recording or an overdub) or `arrangement`.",
+      "type": "string"
+    },
+    "swing": {
+      "description": "The swing amount, 0 to 100 %.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "record",
+    "fixed_length",
+    "swing",
+    "automation_arm",
+    "quantize_menu"
   ],
   "type": "object"
 }
@@ -41051,6 +41308,23 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `uint8`
+
+Type: integer from 0 to 255.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "format": "uint8",
+  "maximum": 255,
+  "minimum": 0,
+  "type": "integer"
 }
 ```
 

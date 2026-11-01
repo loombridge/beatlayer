@@ -25,6 +25,8 @@ use crate::screen::{Column, Graphic, Label, Screen};
 use crate::state::{Command, Handle, Menu, Shared, Snapshot};
 use crate::sysex::{self, MidiMode, Reply};
 
+mod recording;
+
 /// How long a reply to a command may take before the command is sent again,
 /// and then before the surface carries on without it (R4).
 const REPLY: Duration = Duration::from_millis(500);
@@ -113,6 +115,11 @@ pub struct Push {
     momentary_pad: Option<PadMode>,
     momentary_display: Option<(DisplayMode, MixPage)>,
     menu: Option<Menu>,
+    /// Whether a value of the Quantize menu changed since it opened (notes
+    /// R58).
+    quantize_changed: bool,
+    /// Record Quantize's value before its switch turned it off.
+    record_quantize_last: bl_model::RecordQuantization,
     picker: Option<Picker>,
     strip: StripUse,
     strip_sent: StripUse,
@@ -180,6 +187,8 @@ impl Push {
             momentary_pad: None,
             momentary_display: None,
             menu: None,
+            quantize_changed: false,
+            record_quantize_last: bl_model::RecordQuantization::Sixteenth,
             picker: None,
             strip: StripUse::default(),
             strip_sent: StripUse::default(),
@@ -428,6 +437,7 @@ impl Push {
     ) {
         let modifiers = self.buttons.modifiers();
         let setup = self.shared.setup();
+        let swing = self.shared.swing();
         let held_steps = self.held_steps();
         let note = self.contents.pads[0].note_state();
         let slice = self.picked_slice();
@@ -452,6 +462,7 @@ impl Push {
                     model: self.model.as_ref(),
                     modifiers: &modifiers,
                     setup,
+                    swing,
                     at: self.at,
                     held_steps: &held_steps,
                     mix_page,
@@ -484,7 +495,8 @@ impl Push {
 
     fn lower_claimed(&mut self) -> bool {
         // The Scale menu's keys are on the lower buttons too (notes R35).
-        self.menu == Some(Menu::Scale) || self.display_content().claims_lower()
+        matches!(self.menu, Some(Menu::Scale | Menu::FixedLength))
+            || self.display_content().claims_lower()
     }
 
     // ----- the colour picker (R27) -----
@@ -602,8 +614,24 @@ impl Push {
             });
             return;
         }
+        // Fixed Length's and Quantize's menus take display buttons (notes
+        // R50, R58).
+        if (self.menu == Some(Menu::FixedLength)
+            && (controls::upper_column(button).is_some()
+                || controls::lower_column(button).is_some()))
+            || (self.menu == Some(Menu::Quantize) && controls::upper_column(button) == Some(4))
+        {
+            self.buttons.mark_used(button);
+            self.recording_menu_button(button, cx);
+            return;
+        }
         if self.stop_clip(button, cx) {
             return;
+        }
+        // Record, Duplicate and Automate with a modifier held (notes R49,
+        // R53, R63); the content hears them too.
+        if others_held {
+            self.recording_combination(button, &others, cx);
         }
         if self.is_core(button) {
             if others_held {
@@ -723,6 +751,7 @@ impl Push {
         if self.user_mode {
             return;
         }
+        self.open_hold_menu(button);
         for mode in [PadMode::Note, PadMode::Session] {
             if mode.button() == button && mode != self.pad_mode {
                 self.momentary_pad = Some(self.pad_mode);
@@ -759,6 +788,7 @@ impl Push {
             return;
         }
         if held {
+            self.close_hold_menu(button);
             if [PadMode::Note.button(), PadMode::Session.button()].contains(&button)
                 && let Some(base) = self.momentary_pad.take()
             {
@@ -781,6 +811,7 @@ impl Push {
                 self.with_contents(cx, Who::Both, |content, ctx| {
                     content.button(button, Gesture::Tap, ctx)
                 });
+                self.recording_tap(button, cx);
                 // Add Track leads to Browse Mode with the track kinds
                 // (push-2-tracks R12).
                 if button == cc::ADD_TRACK {
@@ -1155,6 +1186,9 @@ impl Push {
                 self.notify(now, format!("Swing {:.0} %", swing * 100.0));
             }
             column if self.menu == Some(Menu::Setup) => self.setup_turn(column, steps, shift),
+            column if self.menu == Some(Menu::Quantize) => {
+                self.quantize_turn(column, steps, shift, cx);
+            }
             column if self.menu == Some(Menu::Scale) => {
                 self.with_contents(cx, Who::Pads, |content, ctx| {
                     content.scale_turn(column, steps, ctx)
@@ -1225,6 +1259,7 @@ impl Push {
                 content.button(button, gesture, ctx)
             });
         }
+        self.core_tap(button, cx);
     }
 
     // ----- the messages (R6) -----
@@ -1426,6 +1461,42 @@ impl Push {
             }
         }
 
+        // Recording's buttons (notes R48, R50, R61): the modes may paint
+        // over them.
+        {
+            let mut lights = Lights {
+                leds: &mut self.leds,
+                palette: &mut self.palette,
+            };
+            let recording = model.session_record || model.transport.recording;
+            lights.button(
+                cc::RECORD,
+                Led::steady(if recording {
+                    fixed::RED
+                } else {
+                    fixed::DARK_GREY
+                }),
+            );
+            lights.button(
+                cc::AUTOMATE,
+                Led::steady(if model.automation_arm {
+                    fixed::RED
+                } else {
+                    fixed::DARK_GREY
+                }),
+            );
+            lights.button(
+                cc::FIXED_LENGTH,
+                Led::level(true, self.shared.fixed_length().on),
+            );
+            lights.button(cc::NEW, Led::level(true, false));
+            lights.button(cc::DUPLICATE, Led::level(true, false));
+            lights.button(
+                cc::QUANTIZE,
+                Led::level(true, self.menu == Some(Menu::Quantize)),
+            );
+        }
+
         // The modes draw the pads, the buttons they own and the display.
         let held_steps = self.held_steps();
         let slice = self.picked_slice();
@@ -1572,6 +1643,8 @@ impl Push {
         // The menus (R23, R31).
         match self.menu {
             Some(Menu::Setup) => self.paint_setup(),
+            Some(Menu::Quantize) => self.paint_quantize(),
+            Some(Menu::FixedLength) => self.paint_fixed_length(),
             Some(Menu::Convert) => self.paint_convert(),
             Some(Menu::Scale) => {
                 let mut paint = Paint {
@@ -1759,6 +1832,21 @@ impl Push {
         snapshot.strip = self.strip;
         snapshot.strip_leds = *self.leds.strip();
         snapshot.setup = self.shared.setup();
+        snapshot.fixed_length = self.shared.fixed_length();
+        snapshot.swing = self.shared.swing();
+        snapshot.quantize_menu = self
+            .quantize_values()
+            .filter(|_| self.menu == Some(Menu::Quantize));
+        if let Some(model) = &self.model {
+            snapshot.record = if model.transport.recording {
+                "arrangement"
+            } else if model.session_record {
+                "session"
+            } else {
+                "off"
+            };
+            snapshot.automation_arm = model.automation_arm;
+        }
         snapshot.screen = self.screen.clone();
         snapshot.browse = self.display_content().browse_state();
         snapshot.device = self.display_content().device_state();

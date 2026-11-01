@@ -318,6 +318,8 @@ pub struct Ctx<'a> {
     pub modifiers: &'a Modifiers,
     /// The Setup values.
     pub setup: Setup,
+    /// The swing amount, 0 to 1.
+    pub swing: f64,
     /// When Push 2 sent what the content is handling, on the host's clock.
     pub at: std::time::Instant,
     /// The steps held in Note Mode.
@@ -365,6 +367,12 @@ impl Ctx<'_> {
     /// Opens the colour picker on `target` (R27).
     pub fn open_picker(&mut self, target: Target) {
         self.actions.push(Action::Picker(target));
+    }
+
+    /// Makes the commands run for encoder `column` a gesture the surface ends
+    /// at the encoder's release (R9), as [`Ctx::run_turn`] does for its own.
+    pub fn gesture(&mut self, column: u8) {
+        self.actions.push(Action::Gesture(column));
     }
 
     /// Asks for a command that is part of the gesture on encoder `column`:

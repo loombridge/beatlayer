@@ -662,6 +662,16 @@ pub trait Node: Send + 'static {
         let _ = report;
     }
 
+    /// Calls `report` for each parameter an instrument's modulation matrix
+    /// moved in the node's last block, with its base and the value it played
+    /// for the newest sounding voice, matrix included (the instrument
+    /// modulation spec, R12; modulation R31). Apart from
+    /// [`modulated`](Self::modulated), which the matrix never changes
+    /// (modulation R30). The default reports none.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        let _ = report;
+    }
+
     /// How many frames the node delays its input by, for delay compensation
     /// (WP-2.11).
     fn latency(&self) -> u32 {

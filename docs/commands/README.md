@@ -8872,6 +8872,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `routes` | array of [`ModRoute`](#modroute) | no | The routes an instrument's modulation matrix holds in its free slots (the instrument modulation spec, R8 to R10), by slot number. A route's amount is the slot's parameter. Empty for a device without free slots or with none set, and left out of the saved set then. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
@@ -9067,6 +9068,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
+    },
+    "routes": {
+      "description": "The routes an instrument's modulation matrix holds in its free slots (the instrument modulation spec, R8 to R10), by slot number. A route's amount is the slot's parameter. Empty for a device without free slots or with none set, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/ModRoute"
+      },
+      "type": "array"
     },
     "sample_edits": {
       "description": "The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none.",
@@ -20830,6 +20838,49 @@ What `mixer_view.state` and the other view commands return.
 
 </details>
 
+### `ModRoute`
+
+A route a device holds in a free slot: saved with the set and with the device's presets (R10). Its amount is the slot's parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+| `source` | string | yes | The source's name. |
+| `destination` | string | yes | The destination's name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A route a device holds in a free slot: saved with the set and with the device's presets (R10). Its amount is the slot's parameter.",
+  "properties": {
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source": {
+      "description": "The source's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "slot",
+    "source",
+    "destination"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ModTarget`
 
 A parameter a modulator maps: `mixer` with a `track` and a `param`, `send` with the sending `track` and the return track `to`, or `device` with the device and its `param`.
@@ -30314,6 +30365,43 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `RouteChanged`
+
+What `device.set_route` and `device.clear_route` return: the slot they changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_route` and `device.clear_route` return: the slot they changed.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot"
+  ],
+  "type": "object"
 }
 ```
 

@@ -547,11 +547,26 @@ pub struct DevicePanel {
     /// panel's state, not the set's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub learning: Option<u8>,
+    /// For each parameter an instrument's modulation matrix moves, the
+    /// sources routed into it, in slot order (the instrument modulation
+    /// spec, R12): what assistive technology reads beside the control's
+    /// value. Empty for a device without a matrix or with no route.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub matrix_routes: Vec<MatrixRoutes>,
     /// The parameters drawn disabled because the device takes them from its
     /// current scale: Scale's Base and Scale Name and Arpeggiator's Root and
     /// Scale, while Use Current Scale is on (the scales spec, R16).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub locked: Vec<ParamId>,
+}
+
+/// The sources routed into one parameter of an instrument's matrix.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct MatrixRoutes {
+    /// The parameter.
+    pub param: ParamId,
+    /// The names of the sources routed into it, in slot order.
+    pub sources: Vec<String>,
 }
 
 /// A pages node of a device's layout as the panel shows it (device framework

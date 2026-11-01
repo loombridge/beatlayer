@@ -67,6 +67,10 @@ pub struct Matrix {
     /// whether it holds one: the movement is held between grid points (R7).
     held: Vec<Cell<(f64, bool)>>,
     oldest: Option<usize>,
+    /// The newest sounding voice, and for each destination the position
+    /// that voice played last in the stretch (R12).
+    newest: Option<usize>,
+    shown: Vec<Cell<Option<f64>>>,
 }
 
 impl Matrix {
@@ -82,6 +86,8 @@ impl Matrix {
             amount: 1.0,
             held: vec![Cell::new((0.0, false)); dests * MAX_VOICES],
             oldest: None,
+            newest: None,
+            shown: vec![Cell::new(None); dests],
         }
     }
 
@@ -116,6 +122,7 @@ impl Matrix {
     /// that's Off, empty or at 0 % has no route (R2).
     pub fn begin(&mut self, params: &ParamBank) {
         self.routes.clear();
+        self.shown.iter().for_each(|shown| shown.set(None));
         let value = |id: ParamId| params.index(id).map_or(0.0, |at| params.value(at));
         for (slot, def) in self.layout.slots.iter().enumerate() {
             let pick = |pick: Pick, free: u8, len: usize| {
@@ -169,6 +176,25 @@ impl Matrix {
         }
     }
 
+    /// The newest voice still sounding, whose played positions a control
+    /// shows (R12; modulation R31).
+    pub fn set_newest(&mut self, newest: Option<usize>) {
+        self.newest = newest;
+    }
+
+    /// The position destination `dest` played for the newest voice at the
+    /// last frame worked out in the stretch, if any voice sounded.
+    #[must_use]
+    pub fn shown(&self, dest: usize) -> Option<f64> {
+        self.shown[dest].get()
+    }
+
+    /// Records `position` as what `dest` played for the newest voice, for a
+    /// destination a device works out itself.
+    pub fn show(&self, dest: usize, position: f64) {
+        self.shown[dest].set(Some(position));
+    }
+
     /// `voice` starts a note: its control-rate movements are worked out at
     /// once, on the frame of its note and not at the next grid point.
     pub fn start(&mut self, voice: usize) {
@@ -218,6 +244,23 @@ impl Matrix {
     /// ([`set_oldest`](Self::set_oldest)); `voice` then only names the
     /// voice whose value is wanted.
     pub fn position(
+        &self,
+        dest: usize,
+        base: f64,
+        voice: usize,
+        frame: usize,
+        due: bool,
+        read: &impl Read,
+    ) -> f64 {
+        let position = self.moved(dest, base, voice, frame, due, read);
+        let global = self.layout.dests[dest].scope == Scope::Global;
+        if self.has(dest) && (self.newest == Some(voice) || (global && self.oldest.is_some())) {
+            self.shown[dest].set(Some(position));
+        }
+        position
+    }
+
+    fn moved(
         &self,
         dest: usize,
         base: f64,

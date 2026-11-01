@@ -379,6 +379,38 @@ fn a_route_set_in_the_document_reaches_its_node_as_data_with_no_new_program() {
     assert_eq!(routes.0.0[0], bl_model::FreeRoutes::NONE);
 }
 
+// Spec: instrument modulation R12; modulation R30, R31
+#[test]
+fn the_node_publishes_what_the_newest_voice_plays_apart_from_modulation() {
+    let device = routed(
+        &[(INSTRUMENT_FREE_AMOUNTS[0], -50.0)],
+        &[(0, "Velocity", "Note Level")],
+    );
+    let mut node = node(&testing::registry(), &device, 512);
+    let played = |node: &dyn Node| {
+        let mut seen = Vec::new();
+        node.matrix_played(&mut |param, base, played| seen.push((param, base, played)));
+        seen
+    };
+    // With no voice sounding, nothing is published: only modulation shows.
+    render_node(node.as_mut(), 512, 512, &[], &Setting::default());
+    assert!(played(node.as_ref()).is_empty());
+    // Two notes: the newest, at velocity 0.5, plays 75 % of a travel at 100 %.
+    let notes = [on_at(0, 60, 1.0), on_at(100, 64, 0.5)];
+    render_node(node.as_mut(), 512, 1_024, &notes, &Setting::default());
+    let seen = played(node.as_ref());
+    assert_eq!(seen.len(), 1, "{seen:?}");
+    assert_eq!(seen[0].0, INSTRUMENT_NOTE_LEVEL);
+    assert!((seen[0].1 - 100.0).abs() < 1e-9, "its base: {seen:?}");
+    assert!(
+        (seen[0].2 - 75.0).abs() < 1e-4,
+        "the newest voice: {seen:?}"
+    );
+    // The matrix's movement is no modulation: the node reports none of it
+    // there, so `modulation.state` never sees it.
+    node.modulated(&mut |param, _, _| panic!("{param:?} is reported as modulated"));
+}
+
 // Spec: instrument modulation R2, R10
 #[test]
 fn a_chosen_slot_takes_its_source_and_destination_from_its_choosers() {

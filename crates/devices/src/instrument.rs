@@ -553,6 +553,15 @@ impl State {
             .min_by_key(|&voice| self.started[voice])
     }
 
+    /// The newest voice still sounding: the one a control shows the matrix's
+    /// movement of (spec: modulation R31).
+    #[must_use]
+    pub fn newest(&self, voices: &VoiceBlock) -> Option<usize> {
+        voices
+            .active_voices()
+            .max_by_key(|&voice| self.started[voice])
+    }
+
     /// The voice's Random source: from 0 to 1, drawn when its note started
     /// (R15).
     #[must_use]

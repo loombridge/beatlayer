@@ -462,6 +462,7 @@ impl DeviceView {
                 .collect(),
             articulations: device.articulations.clone(),
             learning: self.learning.get(&device.id).map(|learn| learn.row),
+            matrix_routes: self.matrix_routes(device),
             locked: Vec::new(),
         })
     }
@@ -577,8 +578,36 @@ impl DeviceView {
             slot_keys: Vec::new(),
             articulations: Vec::new(),
             learning: None,
+            matrix_routes: Vec::new(),
             locked: Vec::new(),
         }
+    }
+
+    /// The sources routed into each parameter `device`'s matrix moves (the
+    /// instrument modulation spec, R12): a slot counts while it has a source
+    /// and a destination and its amount isn't 0 %.
+    fn matrix_routes(&self, device: &Device) -> Vec<ids::MatrixRoutes> {
+        let Some(layout) = self
+            .device_type(&device.kind)
+            .and_then(|device_type| device_type.matrix.as_ref())
+        else {
+            return Vec::new();
+        };
+        let state = layout.state(device);
+        state
+            .destinations
+            .iter()
+            .filter_map(|dest| {
+                let param = dest.param?;
+                let sources: Vec<String> = state
+                    .slots
+                    .iter()
+                    .filter(|slot| slot.destination == Some(dest.name) && slot.amount != 0.0)
+                    .filter_map(|slot| slot.source.map(str::to_owned))
+                    .collect();
+                (!sources.is_empty()).then_some(ids::MatrixRoutes { param, sources })
+            })
+            .collect()
     }
 
     /// The parameters a plug-in device's panel and the automation and

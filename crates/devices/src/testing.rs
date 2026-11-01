@@ -1138,6 +1138,19 @@ impl NativeDevice for TestInstrument {
         }
     }
 
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let reach = INSTRUMENT_FINE_RANGE;
+        for (dest, param, low, high) in [
+            (0, INSTRUMENT_NOTE_LEVEL, 0.0, 100.0),
+            (1, INSTRUMENT_FINE_TUNE, -reach, reach),
+            (2, INSTRUMENT_MASTER, 0.0, 100.0),
+        ] {
+            if let Some(position) = self.voices.matrix.shown(dest) {
+                report(param, low + position * (high - low));
+            }
+        }
+    }
+
     fn receive_data(&mut self, data: NodeData) {
         self.section.receive_data(&data);
         if let Some(routes) = data.downcast_ref::<bl_engine::ModRoutes>() {
@@ -1231,6 +1244,7 @@ impl Voices {
         let copies = config.copies;
         let read = reader(sources, (self.velocity_curve, self.key_curve));
         self.matrix.set_oldest(state.oldest(voices));
+        self.matrix.set_newest(state.newest(voices));
         for voice in voices.active_voices() {
             let gain = INSTRUMENT_LEVEL * sources.velocity(voice) as f32;
             for frame in 0..frames.len() {
@@ -1311,6 +1325,7 @@ impl Voices {
         if self.output >= 13 {
             let read = reader(sources, (self.velocity_curve, self.key_curve));
             self.matrix.set_oldest(state.oldest(voices));
+            self.matrix.set_newest(state.newest(voices));
             let dest = self.output - 13;
             for frame in 0..frames.len() {
                 let at = frames.start + frame;

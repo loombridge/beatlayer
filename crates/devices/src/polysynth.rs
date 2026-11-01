@@ -1059,6 +1059,17 @@ impl NativeDevice for PolySynth {
         }
     }
 
+    /// Spec: instrument modulation R12; modulation R31. What the newest
+    /// voice plays for each parameter the matrix moves.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let matrix = &self.synth.matrix;
+        for (dest, def) in matrix.layout().dests.iter().enumerate() {
+            if let (Some(param), Some(position)) = (def.param, matrix.shown(dest)) {
+                report(param, self.synth.value_of(dest, position));
+            }
+        }
+    }
+
     fn flush(&mut self, _events: &[NodeEvent], _params: &ParamBank) {
         // A switched-off instrument is silent and holds no notes, so it
         // doesn't carry one over to the moment it comes back on.
@@ -1130,6 +1141,9 @@ struct Synth {
     /// stretch reads.
     lfos: Lfos,
     matrix: Matrix,
+    /// Oscillator 1's Shape as a position on its travel, for the control
+    /// to show the matrix's movement of it.
+    shape: f64,
     /// The filter's settings and the envelopes', kept so a change is
     /// applied once; and whether a route moved the resonance, so the
     /// voices come back to the base settings.
@@ -1247,6 +1261,7 @@ impl Synth {
                 hz: 1.0,
                 ratio: 1.0,
             },
+            shape: 0.0,
             matrix: Matrix::new(
                 polysynth_type()
                     .matrix
@@ -1301,6 +1316,7 @@ impl Synth {
         }
         let transpose = params.value(at(TRANSPOSE)) as f32;
         let shape1 = params.value(at(OSC1_SHAPE)) as f32 / 100.0;
+        self.shape = f64::from(shape1);
         let phase_mode = if self.retrigger {
             PhaseMode::NoteStart
         } else {
@@ -1690,6 +1706,9 @@ impl Instrument for Synth {
         if span == 0 {
             return;
         }
+        // Spec: modulation R31. The controls show what the newest voice plays.
+        let newest = state.newest(voices);
+        self.matrix.set_newest(newest);
 
         // 1. The envelopes and the LFO: the modulation sources of the
         //    stretch, before the routes that read them.
@@ -1941,6 +1960,30 @@ impl Instrument for Synth {
                 };
                 let mixed = self.audio[frame * stride + voice] * level * scale * volume;
                 self.out[from + frame] += mixed;
+            }
+        }
+
+        // Spec: modulation R31. The controls of Shape and LFO Rate show the
+        // newest voice's movement at the stretch's last frame, as the others
+        // do (the rest are shown as they are worked out).
+        if let Some(voice) = newest {
+            let last = count - 1;
+            if self.matrix.has(DEST_OSC1_SHAPE) {
+                let moved = self.matrix.add(
+                    DEST_OSC1_SHAPE,
+                    self.shape,
+                    voice,
+                    last,
+                    &|source, voice, frame| self.source(source, voice, frame, voices),
+                );
+                self.matrix.show(DEST_OSC1_SHAPE, moved.clamp(0.0, 1.0));
+            }
+            if self.matrix.has(DEST_LFO_RATE) && self.lfos.mode == MODE_RATE {
+                let hz = self.lfo_rate(voice, last, voices);
+                self.matrix.show(
+                    DEST_LFO_RATE,
+                    self.position_of(DEST_LFO_RATE, hz).clamp(0.0, 1.0),
+                );
             }
         }
 

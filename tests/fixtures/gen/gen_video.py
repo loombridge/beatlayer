@@ -31,6 +31,8 @@ The fixtures:
 - mjpeg-reordered.mov: 12 frames stored in an order unlike their display
   order (pairs swapped), with a composition-offset table and an edit list.
   Each picture holds its display index.
+- mjpeg-chapters.mov: mjpeg-24f.mov with a text track named as the video's
+  chapters: "Intro" at 0 and "Drop" half a second in.
 - h264.mov, hevc.mov, prores.mov: the 24 frames (H.264 with B-frames).
 """
 
@@ -180,7 +182,7 @@ def elst(edits) -> bytes:
 MATRIX = struct.pack(">9I", 0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000)
 
 
-def track(track_id, handler, media_scale, media_duration, movie_duration, edits, stsd, stbl_rest, media_header, width=0, height=0):
+def track(track_id, handler, media_scale, media_duration, movie_duration, edits, stsd, stbl_rest, media_header, width=0, height=0, tref=b""):
     tkhd = full(
         b"tkhd",
         struct.pack(">IIIII8xhhhH", 0, 0, track_id, 0, movie_duration, 0, 0, 0x100 if handler == b"soun" else 0, 0)
@@ -192,7 +194,7 @@ def track(track_id, handler, media_scale, media_duration, movie_duration, edits,
     dinf = atom(b"dinf", full(b"dref", struct.pack(">I", 1) + full(b"url ", b"", flags=1)))
     stbl = atom(b"stbl", full(b"stsd", struct.pack(">I", 1) + stsd) + stbl_rest)
     minf = atom(b"minf", media_header + dinf + stbl)
-    return atom(b"trak", tkhd + (elst(edits) if edits else b"") + atom(b"mdia", mdhd + hdlr + minf))
+    return atom(b"trak", tkhd + (elst(edits) if edits else b"") + tref + atom(b"mdia", mdhd + hdlr + minf))
 
 
 def video_entry() -> bytes:
@@ -212,9 +214,11 @@ def sine(seconds: float):
     return [round(0.5 * 32767 * math.sin(2 * math.pi * 440 * n / RATE)) for n in range(round(seconds * RATE))]
 
 
-def movie(path: Path, frames, video_edits, durations=None, offsets=None, audio=None, audio_edits=None):
+def movie(path: Path, frames, video_edits, durations=None, offsets=None, audio=None, audio_edits=None, chapters=None):
     """Writes a movie. `frames`: JPEG bytes in decode order. `video_edits` and
-    `audio_edits`: (duration in movie units, media time or -1)."""
+    `audio_edits`: (duration in movie units, media time or -1). `chapters`:
+    (time in movie units, title) for a text track the video track names as
+    its chapters."""
     durations = durations or [FRAME] * len(frames)
     media_duration = sum(durations)
     mdat = b"".join(frames)
@@ -230,8 +234,9 @@ def movie(path: Path, frames, video_edits, durations=None, offsets=None, audio=N
     stbl += full(b"stsz", struct.pack(">II", 0, len(frames)) + b"".join(struct.pack(">I", len(f)) for f in frames))
     stbl += full(b"stco", table(chunk_offsets, ">I"))
     movie_duration = sum(d for d, _ in video_edits)
+    tref = atom(b"tref", atom(b"chap", struct.pack(">I", 3))) if chapters else b""
     traks = track(1, b"vide", TIMESCALE, media_duration, movie_duration, video_edits, video_entry(), stbl,
-                  full(b"vmhd", b"\0" * 8, flags=1), W, H)
+                  full(b"vmhd", b"\0" * 8, flags=1), W, H, tref)
     if audio is not None:
         astbl = full(b"stts", table([(len(audio), 1)], ">II"))
         astbl += full(b"stsc", table([(1, len(audio), 1)], ">III"))
@@ -241,9 +246,21 @@ def movie(path: Path, frames, video_edits, durations=None, offsets=None, audio=N
         traks += track(2, b"soun", RATE, len(audio), audio_total, audio_edits, audio_entry(), astbl,
                        full(b"smhd", b"\0" * 4))
         movie_duration = max(movie_duration, audio_total)
+    text = b""
+    if chapters:
+        samples = [struct.pack(">H", len(t.encode())) + t.encode() for _, t in chapters]
+        starts = [c[0] for c in chapters] + [movie_duration]
+        text_offset = sample_offset + len(pcm)
+        text = b"".join(samples)
+        cstbl = full(b"stts", table([(1, b - a) for a, b in zip(starts, starts[1:])], ">II"))
+        cstbl += full(b"stsc", table([(1, len(samples), 1)], ">III"))
+        cstbl += full(b"stsz", struct.pack(">II", 0, len(samples)) + b"".join(struct.pack(">I", len(x)) for x in samples))
+        cstbl += full(b"stco", table([text_offset], ">I"))
+        traks += track(3, b"text", TIMESCALE, movie_duration, movie_duration, None, atom(b"text", b"\0" * 6 + struct.pack(">H", 1) + b"\0" * 51),
+                       cstbl, full(b"gmhd", b""))
     mvhd = full(b"mvhd", struct.pack(">IIII", 0, 0, TIMESCALE, movie_duration)
                 + struct.pack(">IhH8x", 0x10000, 0x100, 0) + MATRIX + b"\0" * 24 + struct.pack(">I", 3))
-    path.write_bytes(ftyp + atom(b"mdat", mdat + pcm) + atom(b"moov", mvhd + traks))
+    path.write_bytes(ftyp + atom(b"mdat", mdat + pcm + text) + atom(b"moov", mvhd + traks))
 
 
 def _runs(values):
@@ -291,6 +308,11 @@ def main():
           audio=audio[: round(0.6 * RATE)],
           audio_edits=[(3000, -1), (6000, 0), (3000, -1), (9000, round(0.2 * RATE))])
     manifest["files"]["mjpeg-gaps.mov"] = {"frames": 16, "audio": "mjpeg-24f.wav"}
+
+    # Two chapter markers, the second a second in.
+    movie(OUT / "mjpeg-chapters.mov", jpegs, [(24 * FRAME, 0)], audio=audio, audio_edits=[(TIMESCALE, 0)],
+          chapters=[(0, "Intro"), (round(TIMESCALE * 0.5), "Drop")])
+    manifest["files"]["mjpeg-chapters.mov"] = {"frames": 24, "audio": "mjpeg-24f.wav", "chapters": [[0, "Intro"], [round(TIMESCALE * 0.5), "Drop"]]}
 
     # Decode order 0 2 1 4 3 6 5 ...: the sample at decode position k shows
     # at display position order[k]. With one frame of offset added to keep

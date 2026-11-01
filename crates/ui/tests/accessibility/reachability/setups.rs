@@ -415,6 +415,24 @@ pub(crate) fn a_drum_sampler(h: &mut Harness) {
         .unwrap();
 }
 
+/// DS Kick on the third track, the selected track, no device selected (WP-8.24).
+pub(crate) fn a_drum_synth(h: &mut Harness) {
+    let track = h.shell.editor().document().top_level().nth(2).unwrap();
+    h.shell
+        .run("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    let t = bl_devices::ds_kick::ds_kick_type();
+    h.shell
+        .run(
+            "device.add",
+            json!({ "device": { "kind": t.kind, "name": t.name, "role": t.role } }),
+        )
+        .unwrap();
+    h.shell
+        .run("device.select", json!({ "device": null }))
+        .unwrap();
+}
+
 /// The Test Sidechain on audio track 3, the selected track, its sidechain
 /// section shown, no device selected (WP-2.19b).
 pub(crate) fn a_sidechained_device(h: &mut Harness) {

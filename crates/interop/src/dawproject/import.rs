@@ -636,21 +636,17 @@ impl<'a> Importer<'a, '_> {
             .or_else(|| channel.as_ref().and_then(|c| c.info.name.clone()));
         let place = self.track_place(track, &name);
 
-        // A track of video or markers is no Beatlayer track (R36); its
-        // markers are read as locators (R63).
+        // A track of markers is no Beatlayer track (R36); its markers are
+        // read as locators (R63). A track of video is an audio track whose
+        // clips are video clips (R89).
         let types = &track.content_types;
         if !types.is_empty()
             && track.children.is_empty()
             && types
                 .iter()
-                .all(|kind| matches!(kind, ContentKind::Video | ContentKind::Markers))
+                .all(|kind| matches!(kind, ContentKind::Markers))
         {
-            let what = if types.contains(&ContentKind::Video) {
-                "a video track"
-            } else {
-                "a track of markers"
-            };
-            self.report.add(what, &place, "left out");
+            self.report.add("a track of markers", &place, "left out");
             self.left_out.extend(track.info.id.clone());
             return;
         }
@@ -715,7 +711,8 @@ impl<'a> Importer<'a, '_> {
                 } else if types.contains(&ContentKind::Notes) {
                     // A track of audio and notes is split in two (R17).
                     TrackKind::Midi
-                } else if types.contains(&ContentKind::Audio) {
+                } else if types.contains(&ContentKind::Audio) || types.contains(&ContentKind::Video)
+                {
                     TrackKind::Audio
                 } else if channel
                     .as_ref()
@@ -1755,7 +1752,7 @@ impl Drop for Spool {
 /// the audio inside (R34, R37).
 fn timeline_is_audio(timeline: &Timeline, depth: usize) -> bool {
     match timeline {
-        Timeline::Audio(_) | Timeline::Warps(_) => true,
+        Timeline::Audio(_) | Timeline::Video(_) | Timeline::Warps(_) => true,
         Timeline::Clips(clips) if depth < 8 => clips.clips.iter().any(|clip| {
             clip.content
                 .as_ref()
@@ -1896,7 +1893,11 @@ fn collect_timelines<'a>(timeline: &'a Timeline, found: &mut Vec<(&'a str, Cow<'
             if let Some(audio) = &warps.audio {
                 found.push((
                     audio.info.id.as_deref().unwrap_or_default(),
-                    Cow::Owned(Timeline::Audio(audio.clone())),
+                    Cow::Owned(if warps.video {
+                        Timeline::Video(audio.clone())
+                    } else {
+                        Timeline::Audio(audio.clone())
+                    }),
                 ));
             }
         }
@@ -1953,7 +1954,7 @@ fn collect_lanes(
                 }
             }
         }
-        Timeline::Notes(_) | Timeline::Audio(_) | Timeline::Warps(_) => {
+        Timeline::Notes(_) | Timeline::Audio(_) | Timeline::Video(_) | Timeline::Warps(_) => {
             if let Some(scope) = scope {
                 loose.push((scope, timeline.clone(), unit));
             }

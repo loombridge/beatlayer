@@ -19,3 +19,4 @@ mod scales;
 mod take_lanes;
 mod tunings;
 mod undo_properties;
+mod video_clips;

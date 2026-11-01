@@ -13,6 +13,7 @@ mod agent_bounce;
 mod agent_dawproject;
 mod agent_device_compare;
 mod agent_drum_sampler;
+mod agent_drum_synths;
 mod agent_export;
 mod agent_macros;
 mod agent_midi_files;

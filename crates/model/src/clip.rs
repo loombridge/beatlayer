@@ -173,6 +173,42 @@ impl Clip {
         self.start.saturating_add(self.length)
     }
 
+    /// The time in the movie, in seconds, that a video clip plays at the song
+    /// position `at` (the video spec, R7, R11): the position in the clip's
+    /// contents, through its warp map if it's warped, folded into its loop
+    /// brace while the loop is on, and out of the clip's form into seconds in
+    /// the file. `movie_seconds` is the movie's length, which ends a loop
+    /// brace the clip doesn't set the end of. `None` for a clip that isn't a
+    /// video clip, a position outside the clip, and a time before the movie.
+    #[must_use]
+    pub fn movie_time_at(&self, at: Ticks, tempo: &TempoMap, movie_seconds: f64) -> Option<f64> {
+        let ClipData::Audio(audio) = &self.data else {
+            return None;
+        };
+        if !audio.video || at < self.start || at >= self.end() {
+            return None;
+        }
+        // A warped clip's contents advance a tick per tick of the song, an
+        // unwarped clip's by the time between the ticks.
+        let elapsed = if audio.warp {
+            (at - self.start).get() as f64
+        } else {
+            tempo.ticks_to_seconds(at) - tempo.ticks_to_seconds(self.start)
+        };
+        let mut position = audio.start + elapsed;
+        if audio.looping {
+            let end = audio
+                .loop_end
+                .unwrap_or_else(|| audio.in_clip_form(movie_seconds));
+            let length = end - audio.loop_start;
+            if length > 0.0 && position >= end {
+                position = audio.loop_start + (position - audio.loop_start).rem_euclid(length);
+            }
+        }
+        let seconds = audio.in_file_seconds(position);
+        (seconds >= 0.0).then_some(seconds)
+    }
+
     /// Where the clip's contents begin in the arrangement: its start less
     /// its offset. A MIDI clip's notes are placed from it. An audio clip's
     /// offset is 0, so this is its start, where it plays its file from its
@@ -655,6 +691,11 @@ pub struct AudioData {
     /// unless given, a follower. Only a warped Arrangement clip can lead.
     #[serde(default, skip_serializing_if = "is_false")]
     pub tempo_leader: bool,
+    /// Whether the clip is a video clip (the video spec, R5): its media is a
+    /// QuickTime movie, whose sound the clip plays and whose picture follows
+    /// the sound's time. Off unless given; only an Arrangement clip is one.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub video: bool,
     /// The RAM switch (R11): off unless given. On, the clip's whole file is
     /// held in memory instead of streamed.
     #[serde(default, skip_serializing_if = "is_false")]
@@ -708,12 +749,36 @@ impl AudioData {
             warp_mode: WarpMode::Beats,
             warp_settings: WarpSettings::default(),
             tempo_leader: false,
+            video: false,
             ram: false,
             high_quality: true,
             transpose: 0,
             detune: 0.0,
             transient_edits: TransientEdits::default(),
         }
+    }
+
+    /// A new video clip of the movie `media` (the video spec, R5, R9): the
+    /// whole movie, warped with one marker at its start at `tempo` and
+    /// leading the set's tempo, so its sound plays at its own speed.
+    ///
+    /// # Errors
+    ///
+    /// If `tempo` is outside 1 to 1,000 BPM.
+    pub fn new_video(media: ContentHash, tempo: f64) -> Result<Self, ModelError> {
+        let data = Self::new(media).with_map(
+            vec![WarpMarker {
+                time: 0.0,
+                beat: Ticks::ZERO,
+            }],
+            tempo,
+        )?;
+        Ok(Self {
+            warp: true,
+            tempo_leader: true,
+            video: true,
+            ..data
+        })
     }
 
     /// The data of a clip whose left edge moved from `from` to `to`: its
@@ -850,6 +915,7 @@ impl AudioData {
             next.warp_markers = markers;
             if let Some(media) = media {
                 next.media = media;
+                next.video = false;
             }
             return next;
         }
@@ -869,6 +935,7 @@ impl AudioData {
         next.warp_markers = self.mirrored_markers(seconds);
         if let Some(media) = media {
             next.media = media;
+            next.video = false;
         }
         next
     }

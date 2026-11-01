@@ -40,6 +40,7 @@ mod drum_sampler;
 mod drum_synths;
 mod echo;
 mod effect_parts;
+mod electric;
 mod eq;
 mod filter_delay;
 mod fm;

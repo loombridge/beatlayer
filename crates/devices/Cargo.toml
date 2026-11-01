@@ -62,5 +62,10 @@ realfft = "3.5.0"
 name = "devices_tests"
 path = "tests/main.rs"
 
+# Electric against the device budget, run by hand: `cargo bench -p bl-devices --bench electric`.
+[[bench]]
+name = "electric"
+harness = false
+
 [lints]
 workspace = true

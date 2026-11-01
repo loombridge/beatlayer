@@ -1059,7 +1059,7 @@ impl Section {
         // The wheel moves every note by PB Range; Note PB follows a
         // per-note bend over its own range.
         settings.mpe.enabled = cfg.note_pb;
-        settings.mpe.bend_range = cfg.note_range.clamp(1.0, 96.0);
+        settings.mpe.bend_range = cfg.note_range.clamp(0.0, 96.0);
         let wheel = cfg.pb_range.clamp(0.0, 96.0);
         settings.bend_up = wheel;
         settings.bend_down = -wheel;

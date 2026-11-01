@@ -467,10 +467,15 @@ impl Editor {
             outer.keep |= open.keep;
             return Ok(false);
         }
-        if open.start == self.document && !open.keep {
+        // Cue mode and the pad layout are no undo step, so a batch that
+        // changed only them records none; undoing keeps them as they are.
+        let mut start = open.start;
+        start.settings.cue_mode = self.document.settings.cue_mode;
+        start.settings.pad_layout = self.document.settings.pad_layout;
+        if start == self.document && !open.keep {
             return Ok(false);
         }
-        self.record(open.label, open.maker, open.start);
+        self.record(open.label, open.maker, start);
         Ok(true)
     }
 
@@ -1448,6 +1453,30 @@ mod tests {
             .unwrap();
         let saved = serde_json::to_value(editor.document().settings()).unwrap();
         assert!(saved.get("pad_layout").is_none());
+    }
+
+    // Spec: push-2-notes R37. A batch that only sets the pad layout, as an
+    // agent's `run` does, records no undo step either.
+    #[test]
+    fn a_transaction_that_only_sets_the_pad_layout_records_no_step() {
+        use crate::PadDirection;
+        let mut editor = Editor::new();
+        let steps = editor.undo_history().len();
+        editor.begin("run");
+        editor
+            .apply(Command::SetPadLayout {
+                in_key: None,
+                fixed: None,
+                spacing: None,
+                direction: Some(PadDirection::Horizontal),
+            })
+            .unwrap();
+        assert!(!editor.commit().unwrap());
+        assert_eq!(editor.undo_history().len(), steps);
+        assert_eq!(
+            editor.document().settings().pad_layout.direction,
+            PadDirection::Horizontal
+        );
     }
 
     #[test]

@@ -1041,7 +1041,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.5 | todo |  |  |
 | 9.6 | todo |  |  |
 | 9.7 | todo |  |  |
-| 9.8 | todo |  |  |
+| 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |
 | 9.9 | todo |  |  |
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |

@@ -6,7 +6,8 @@
 //!
 //! A device owns a [`Core`], writes its [`Settings`] each stretch, calls
 //! [`Core::begin`], plays its voices through [`Core::start`] and
-//! [`Core::render`], and takes the stretch's output from [`Core::finish`].
+//! [`Core::render`], and takes the stretch's stereo output from
+//! [`Core::finish`].
 //! Everything is made in [`Core::new`] and [`user_table`], off the audio
 //! thread; nothing here allocates, locks or blocks on it.
 
@@ -145,6 +146,28 @@ impl OperatorSettings {
             feedback: 0.0,
             phase: 0.0,
             retrigger: true,
+        }
+    }
+}
+
+/// What a device adds to one operator of one voice at one frame (operator
+/// R16): its amplitude on top of Level, a move of its pitch in semitones
+/// and an addition to its Feedback.
+#[derive(Clone, Copy, Debug)]
+pub struct Moves {
+    pub gain: f32,
+    pub semitones: f32,
+    pub feedback: f32,
+}
+
+impl Moves {
+    /// Only an amplitude: the operator plays at its pitch and Feedback.
+    #[must_use]
+    pub const fn gain(gain: f32) -> Self {
+        Self {
+            gain,
+            semitones: 0.0,
+            feedback: 0.0,
         }
     }
 }
@@ -289,8 +312,8 @@ pub struct Core {
     /// Each voice's operators' last table level, by the increment it was
     /// chosen for.
     levels: [[(u32, usize); OPERATORS]; MAX_VOICES],
-    /// The stretch's mix, at the operators' rate.
-    mix: Vec<f32>,
+    /// The stretch's mix, left and right, at the operators' rate.
+    mix: [Vec<f32>; 2],
     oversampler: Oversampler,
     /// 1, or 2 with Antialias.
     factor: usize,
@@ -319,8 +342,11 @@ impl Core {
             phase: [[0; OPERATORS]; MAX_VOICES],
             history: [[[0.0; 2]; OPERATORS]; MAX_VOICES],
             levels: [[(0, 0); OPERATORS]; MAX_VOICES],
-            mix: vec![0.0; max_frames.max(1) * 2],
-            oversampler: Oversampler::new(1, 1, max_frames.max(1)),
+            mix: [
+                vec![0.0; max_frames.max(1) * 2],
+                vec![0.0; max_frames.max(1) * 2],
+            ],
+            oversampler: Oversampler::new(1, 2, max_frames.max(1)),
             factor: 1,
         }
     }
@@ -362,7 +388,9 @@ impl Core {
             self.oversampler.reset();
             self.factor = factor;
         }
-        self.mix[..frames * factor].fill(0.0);
+        for mix in &mut self.mix {
+            mix[..frames * factor].fill(0.0);
+        }
     }
 
     /// A voice's note starts (R8): a fresh voice's operators start at their
@@ -386,9 +414,11 @@ impl Core {
     }
 
     /// Renders `frames` of the stretch for the active voices into the
-    /// stretch's mix. `gain(voice, op, frame)` is the amplitude the device
-    /// gives each operator on top of its Level (an envelope, say), for
-    /// `frame` counted from the start of `frames`.
+    /// stretch's mix. `operator(voice, op, frame)` is what the device gives
+    /// each operator on top of its settings (an envelope's amplitude, a
+    /// pitch envelope's move), and `pan(voice, frame)` the left and right
+    /// gains of the voice's place in the mix, for `frame` counted from the
+    /// start of `frames`.
     ///
     /// Frames go first, then voices, so the noise waves draw the same
     /// values at any block size.
@@ -397,7 +427,8 @@ impl Core {
         voices: &VoiceBlock,
         state: &State,
         frames: Range<usize>,
-        gain: impl Fn(usize, usize, usize) -> f32,
+        operator: impl Fn(usize, usize, usize) -> Moves,
+        pan: impl Fn(usize, usize) -> [f32; 2],
     ) {
         let settings = self.settings;
         let factor = self.factor;
@@ -430,20 +461,26 @@ impl Core {
                 let note = 440.0 * ((state.pitch(voices, voice, &frames, i) - 69.0) / 12.0).exp2();
                 let mut steps = [0u32; OPERATORS];
                 let mut amps = [0.0f32; OPERATORS];
+                let mut feedbacks = [0.0f32; OPERATORS];
                 for (op, s) in settings.ops.iter().enumerate() {
+                    let moves = operator(voice, op, i);
                     let fixed = f64::from(s.freq) * f64::from(s.multi);
-                    let hz = if s.fixed {
+                    let mut hz = if s.fixed {
                         fixed
                     } else {
                         note * ratios[voice][op]
                     };
+                    if moves.semitones != 0.0 {
+                        hz *= (f64::from(moves.semitones) / 12.0).exp2();
+                    }
                     steps[op] = increment(hz, internal);
                     let silent = s.fixed && hz >= FIXED_TOP * self.rate;
                     amps[op] = if s.on && !silent {
-                        s.level * gain(voice, op, i)
+                        s.level * moves.gain
                     } else {
                         0.0
                     };
+                    feedbacks[op] = (s.feedback + moves.feedback).clamp(0.0, 1.0);
                 }
                 let mut table_levels = [0usize; OPERATORS];
                 for (op, level) in table_levels.iter_mut().enumerate() {
@@ -455,9 +492,12 @@ impl Core {
                     }
                     *level = cached.1;
                 }
+                let place = pan(voice, i);
                 for sub in 0..factor {
-                    let out = self.step(voice, algorithm, &steps, &amps, &table_levels);
-                    self.mix[(frames.start + i) * factor + sub] += out * normal;
+                    let out = self.step(voice, algorithm, &steps, &amps, &feedbacks, &table_levels);
+                    let at = (frames.start + i) * factor + sub;
+                    self.mix[0][at] += out * normal * place[0];
+                    self.mix[1][at] += out * normal * place[1];
                 }
             }
         }
@@ -472,6 +512,7 @@ impl Core {
         algorithm: usize,
         steps: &[u32; OPERATORS],
         amps: &[f32; OPERATORS],
+        feedbacks: &[f32; OPERATORS],
         levels: &[usize; OPERATORS],
     ) -> f32 {
         let carriers = carriers(algorithm);
@@ -496,7 +537,7 @@ impl Core {
             moved *= INDEX;
             let [last, before] = self.history[voice][op];
             if modulators == 0 {
-                moved += s.feedback * FEEDBACK * (last + before) * 0.5;
+                moved += feedbacks[op] * FEEDBACK * (last + before) * 0.5;
             }
             let out = if amps[op] == 0.0 {
                 0.0
@@ -562,19 +603,23 @@ impl Core {
     }
 
     /// Ends a stretch of `frames`: the mix, decimated if it was made at
-    /// twice the rate (R9), into `out`.
-    pub fn finish(&mut self, frames: usize, out: &mut [f32]) {
-        let out = &mut out[..frames];
+    /// twice the rate (R9), into `left` and `right`.
+    pub fn finish(&mut self, frames: usize, left: &mut [f32], right: &mut [f32]) {
+        let outs = [&mut left[..frames], &mut right[..frames]];
         if self.factor == 1 {
-            out.copy_from_slice(&self.mix[..frames]);
+            for (out, mix) in outs.into_iter().zip(&self.mix) {
+                out.copy_from_slice(&mix[..frames]);
+            }
             return;
         }
-        out.fill(0.0);
-        let mix = &self.mix;
-        let mut at = 0;
-        self.oversampler.process(0, out, |up| {
-            up.copy_from_slice(&mix[at..at + up.len()]);
-            at += up.len();
-        });
+        for (channel, out) in outs.into_iter().enumerate() {
+            out.fill(0.0);
+            let mix = &self.mix[channel];
+            let mut at = 0;
+            self.oversampler.process(channel, out, |up| {
+                up.copy_from_slice(&mix[at..at + up.len()]);
+                at += up.len();
+            });
+        }
     }
 }

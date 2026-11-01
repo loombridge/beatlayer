@@ -65,6 +65,7 @@ mod modulators;
 mod multiband_dynamics;
 mod multisampler;
 mod note_echo;
+mod operator;
 mod oscilloscope;
 mod overdrive;
 mod pedal;

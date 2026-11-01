@@ -229,6 +229,16 @@ pub enum SessionCommand {
         /// The scene whose slot it is.
         scene: SceneId,
     },
+    /// Launches the clip in a slot at once as a Legato launch, whatever its
+    /// own Legato and launch quantisation say: it takes over the clip time
+    /// of the clip playing on its track, and changes nothing in the set
+    /// (the notes on Push 2 spec, R46).
+    LaunchLegato {
+        /// The track whose slot it is.
+        track: TrackId,
+        /// The scene whose slot it is.
+        scene: SceneId,
+    },
     /// Launches the clip in a slot as [`SessionCommand::Launch`] does, with
     /// a velocity from 1 to 127 that the clip's velocity amount turns into a
     /// gain on the launch frame (the remote mapping spec, R16), and a
@@ -1430,6 +1440,11 @@ pub struct LaunchArgs {
     #[serde(default)]
     #[schemars(range(min = -127, max = 127))]
     pub transpose: Option<i8>,
+    /// Launches the clip at once as a Legato launch, whatever its own Legato
+    /// and Quantize settings say, leaving them as they are. Not with a
+    /// velocity or a transposition.
+    #[serde(default)]
+    pub legato: Option<bool>,
 }
 
 /// The arguments of `session.release`: the slot whose launch button lets go.
@@ -1524,7 +1539,17 @@ pub fn command_from_args(id: &str, args: Value) -> Result<SessionCommand, RunErr
                 scene,
                 velocity,
                 transpose,
+                legato,
             } = serde_json::from_value(args).map_err(invalid)?;
+            if legato == Some(true) {
+                if velocity.is_some() || transpose.is_some() {
+                    return Err(RunError::InvalidArgs {
+                        command: entry.id,
+                        message: "a legato launch takes no velocity or transposition".to_owned(),
+                    });
+                }
+                return Ok(SessionCommand::LaunchLegato { track, scene });
+            }
             let (velocity, transpose) = (
                 velocity.unwrap_or(VELOCITY_MAX),
                 transpose.unwrap_or_default(),
@@ -1714,7 +1739,10 @@ const ENTRIES: &[Entry] = &[
             the clip's velocity amount (`clip.set_velocity_amount`) turns it into the clip's \
             gain, from full at 127 down to silence at 1 with the amount at 100 %, and the gain \
             holds until the clip stops or launches again; a launch without one is at 127. \
-            The optional `transpose`, −127 to 127 semitones, is a chromatic slot's key minus \
+            The optional `legato`, true, launches the clip at once as a Legato launch, \
+            whatever the clip's own Legato and Quantize say: it takes over the clip time of \
+            the clip playing on its track, and changes no setting. It takes no velocity or \
+            transposition. The optional `transpose`, −127 to 127 semitones, is a chromatic slot's key minus \
             its root: a MIDI clip's notes play that far up or down (a note moved outside 0 to \
             127 doesn't play), and an audio clip's pitch moves by it on top of its Transpose, \
             held to 48 semitones either way, from the launch frame until the clip stops or \

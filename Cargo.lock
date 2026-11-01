@@ -1054,6 +1054,7 @@ version = "0.2.0"
 dependencies = [
  "bl-control",
  "bl-core",
+ "bl-devices",
  "bl-engine",
  "bl-midi-io",
  "bl-model",

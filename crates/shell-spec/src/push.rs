@@ -397,6 +397,54 @@ pub struct PushInfo {
     pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix_mode: Option<PushMix>,
+    /// What Note Mode shows, while it is the pad mode.
+    pub note: Option<PushNote>,
+}
+
+/// A step held down in Note Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushHeldStep {
+    /// The clip the step belongs to, if the slot holds one.
+    pub clip: Option<bl_model::ClipId>,
+    /// The step's drum pad, as a MIDI note.
+    pub pad: u8,
+    /// Where the step starts in the clip's contents.
+    pub start: bl_core::time::Ticks,
+    /// How long the step is.
+    pub length: bl_core::time::Ticks,
+}
+
+/// What Note Mode shows (the notes on Push 2 spec, R1 to R31).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushNote {
+    /// The track the pads play: the first selected one.
+    pub track: Option<bl_model::TrackId>,
+    /// The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum
+    /// track, `Melodic` on another MIDI track, `None` on any other track.
+    pub layout: String,
+    /// What holding Layout, or Shift and Layout, shows in the lower-right
+    /// pads, if anything: `16 Velocities` or `Loop Length Pads`.
+    pub overlay: Option<String>,
+    /// Whether that stays in view after Layout is released.
+    pub overlay_locked: bool,
+    /// The first note of the drum rack's pad view, which the pads show.
+    pub bank: Option<u8>,
+    /// The drum pad the steps edit, as a MIDI note.
+    pub selected_pad: Option<u8>,
+    /// The step size, such as `1/16` or `1/8T`.
+    pub step_size: String,
+    /// The clip the steps edit, if the slot holds one.
+    pub edited_clip: Option<bl_model::ClipId>,
+    /// The scene whose slot holds it.
+    pub edited_scene: Option<bl_model::SceneId>,
+    /// The first of the two pages the step area shows, counting from 1.
+    pub page: u8,
+    /// Whether the step area follows the page that plays.
+    pub following: bool,
+    /// The velocity new steps take, once a velocity pad chose one.
+    pub velocity: Option<u8>,
+    /// The steps held down now.
+    pub held_steps: Vec<PushHeldStep>,
 }
 
 /// What `push.state` returns.

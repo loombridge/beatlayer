@@ -176,6 +176,11 @@ pub fn tempo(shell: &Shell) -> f64 {
     if let Some(followed) = shell.external_tempo() {
         return followed;
     }
+    // Spec: tempo-follower R6, control-bar-transport R25. While Follow is on
+    // the field shows the tempo the song follows.
+    if let Some(followed) = shell.followed_tempo() {
+        return followed;
+    }
     // Spec: link R4. While a peer's change took the tempo envelope's place,
     // the field shows the session's tempo.
     if let Some(session) = shell.link_override_tempo() {

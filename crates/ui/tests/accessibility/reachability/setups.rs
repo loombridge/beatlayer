@@ -127,6 +127,23 @@ pub(crate) fn the_link_toggle_shown(h: &mut Harness) {
         .unwrap();
 }
 
+/// Show Tempo Follower Toggle is on and the audio device's input is on, so
+/// the Control Bar has the Follow toggle and it can be switched.
+pub(crate) fn the_follow_toggle_shown(h: &mut Harness) {
+    h.shell
+        .run(
+            "audio.configure",
+            serde_json::json!({ "input_device": "null:null" }),
+        )
+        .unwrap();
+    h.shell
+        .run(
+            "settings.set_show_tempo_follower_toggle",
+            serde_json::json!({ "on": true }),
+        )
+        .unwrap();
+}
+
 /// The Arrangement View has the keyboard.
 pub(crate) fn arrangement_view(h: &mut Harness) {
     h.key(Key::Num2, Modifiers::ALT);

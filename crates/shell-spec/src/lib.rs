@@ -67,6 +67,7 @@
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
 //! - [`link`]: Link's state and switches (`link.*`, WP-7.14).
+//! - [`tempo_follower`]: Tempo Follower's state, switch and settings (WP-9.13).
 //! - [`sync`]: the state of MIDI clock (`sync.state`, WP-7.11).
 //! - [`midi_tools`]: the MIDI Tools' commands (`midi_tool.*`, WP-6.11): the
 //!   Transform and Generate panels, choosing a tool, its settings, applying
@@ -156,6 +157,7 @@ pub mod settings;
 pub mod slice;
 pub mod stems;
 pub mod sync;
+pub mod tempo_follower;
 pub mod tracks;
 pub mod transport;
 pub mod tunings;
@@ -224,6 +226,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     tunings::register(registry)?;
     link::register(registry)?;
     sync::register(registry)?;
+    tempo_follower::register(registry)?;
     search::register(registry)
 }
 
@@ -239,12 +242,14 @@ mod tests {
         // and asks the person first. `groove.to_clip` is external only when
         // given a `path`: the shell raises its class from its arguments.
         // `browser.remove_folder` names a Places entry, whose files it never
-        // touches. `midi_tool.load_bank` still reads its file as an edit: classing
-        // it external is not done yet.
+        // touches. `browser.similar` names a file the browser's index already
+        // holds and reads only the database. `midi_tool.load_bank` still reads
+        // its file as an edit: classing it external is not done yet.
         let exempt = [
             groove::TO_CLIP,
             midi_tools::LOAD_BANK,
             browser::REMOVE_FOLDER,
+            browser::SIMILAR,
         ];
         let mut registry = Registry::new();
         super::register(&mut registry).unwrap();

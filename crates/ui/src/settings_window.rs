@@ -26,6 +26,7 @@ use bl_shell::settings::{
     GRID_LINE_INTENSITY, LoopWarpShortSamples, SessionAutomationTracks, SettingsPage, Tone,
     ZOOM_MAX_PERCENT, ZOOM_MIN_PERCENT, zoom_step,
 };
+use bl_shell::tempo_follower_commands as tempo_follower_ids;
 use bl_shell::{Invocation, Shell, agent, assistant, commands as ids};
 use egui::accesskit::Role;
 use egui::{
@@ -2127,15 +2128,84 @@ fn link_audio_peers(ui: &mut Ui, shell: &Shell, theme: &Theme, rows: &mut Rows<'
     }
 }
 
+/// The Tempo Follower section (L-SET-014; the Tempo Follower spec, R1): Show
+/// Tempo Follower Toggle, and Input Channel, the audio input's single
+/// channels then its stereo pairs, as the Routing choosers list them. A
+/// channel the device hasn't, which the preferences keep, is listed too.
+fn tempo_follower_rows(
+    ui: &mut Ui,
+    shell: &Shell,
+    theme: &Theme,
+    rows: &mut Rows<'_>,
+    events: &mut Vec<UiEvent>,
+) {
+    rows.heading(ui, "Tempo Follower");
+    let choices = [("Show", true), ("Hide", false)].map(|(label, value)| Choice {
+        label: label.to_owned(),
+        value,
+        leds: NO_LEDS,
+    });
+    let rect = rows.row(ui, "Show Tempo Follower Toggle", SettingsLayout::CHOOSER);
+    if let Some(on) = chooser(
+        ui,
+        theme,
+        "show-tempo-follower-toggle",
+        "Show Tempo Follower Toggle",
+        rect,
+        &choices,
+        Some(&shell.tempo_follower_toggle_shown()),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            tempo_follower_ids::SET_SHOW_TOGGLE,
+            json!({ "on": on }),
+        )));
+    }
+    let inputs = shell.audio().channels().0;
+    let current = shell.tempo_follower_input();
+    let mut channels: Vec<bl_model::Channel> = (1..=inputs)
+        .map(bl_model::Channel::Mono)
+        .chain((1..inputs).step_by(2).map(bl_model::Channel::Pair))
+        .collect();
+    if !channels.contains(&current) {
+        channels.push(current);
+    }
+    let channels: Vec<Choice<bl_model::Channel>> = channels
+        .into_iter()
+        .map(|value| Choice {
+            label: value.label(),
+            value,
+            leds: NO_LEDS,
+        })
+        .collect();
+    let rect = rows.row(ui, "Input Channel", SettingsLayout::CHOOSER);
+    if let Some(channel) = chooser(
+        ui,
+        theme,
+        "tempo-follower-input-channel",
+        "Input Channel",
+        rect,
+        &channels,
+        Some(&current),
+        true,
+    ) {
+        events.push(UiEvent::Invoke(Invocation::new(
+            tempo_follower_ids::SET_INPUT,
+            json!({ "channel": channel }),
+        )));
+    }
+}
+
 /// Tempo & MIDI (L-SET-014): the second section's Show Resync Button, and the
 /// MIDI ports table (WP-2.2), each input and output with its Track, Sync, and
 /// Remote switches, and an input its MPE switch after them, as the MIDI I/O
 /// spec R2 and R27 give it. An output with Sync on has a disclosure triangle
 /// after its switches that opens its MIDI Clock Sync Delay, MIDI Clock Type
 /// and Hardware Resync (the MIDI clock spec, R1). Takeover Mode comes before
-/// the ports (the remote mapping spec, R28). The Tempo Follower and control
-/// surfaces come with later packages. Remote is kept and acts when MIDI
-/// mapping is built (R5).
+/// the ports (the remote mapping spec, R28). The page starts with the Tempo
+/// Follower section: Show Tempo Follower Toggle and Input Channel (the Tempo
+/// Follower spec, R1). Remote is kept and acts when MIDI mapping is built
+/// (R5).
 fn tempo_midi_page(
     ui: &mut Ui,
     shell: &Shell,
@@ -2143,6 +2213,7 @@ fn tempo_midi_page(
     rows: &mut Rows<'_>,
     events: &mut Vec<UiEvent>,
 ) {
+    tempo_follower_rows(ui, shell, theme, rows, events);
     // Spec: midi-clock R10
     let rect = rows.row(ui, "Show Resync Button", SettingsLayout::SWITCH);
     if let Some(on) = switch(
@@ -2160,7 +2231,6 @@ fn tempo_midi_page(
     }
     rows.heading(ui, "MIDI");
     control_surfaces_table(ui, shell, theme, rows, events);
-    rows.note(ui, "The Tempo Follower settings come with a later package.");
     // Spec: remote-mapping R28. Takeover Mode sits where Live has it: after
     // the Control Surfaces table's place and before the MIDI ports table.
     let modes: Vec<Choice<TakeoverMode>> = TakeoverMode::ALL

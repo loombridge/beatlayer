@@ -69,6 +69,9 @@ pub struct MidiLink {
     pub to: TrackId,
     /// The device.
     pub device: DeviceId,
+    /// Where on the source track the device takes the notes (the routing
+    /// spec, R39).
+    pub tap: Tap,
 }
 
 /// One route in the graph.
@@ -365,7 +368,11 @@ impl Graph {
                 continue;
             };
             for device in track.devices_deep() {
-                let Some(from) = device.midi_sidechain.as_ref().and_then(|s| s.source) else {
+                let Some((from, tap)) = device
+                    .midi_sidechain
+                    .as_ref()
+                    .and_then(|s| Some((s.source?, s.tapped())))
+                else {
                     continue;
                 };
                 if document.track(from).is_none() {
@@ -377,6 +384,7 @@ impl Graph {
                         from,
                         to: id,
                         device: device.id,
+                        tap,
                     });
                 } else if reaches(&all, id, from) {
                     self.broken.push((from, id));
@@ -386,6 +394,7 @@ impl Graph {
                         from,
                         to: id,
                         device: device.id,
+                        tap,
                     });
                 }
             }

@@ -13,6 +13,8 @@ bl-core.workspace = true
 bl-model.workspace = true
 bl-midi-io.workspace = true
 bl-control.workspace = true
+bl-devices.workspace = true
+bl-engine.workspace = true
 # The commands a surface asks for are JSON, as the host takes them.
 serde_json = "1"
 # The display's USB interface (R17). Pure Rust, Apache-2.0 or MIT.
@@ -25,7 +27,6 @@ skrifa = "0.44"
 png = "0.18"
 
 [dev-dependencies]
-bl-engine.workspace = true
 # The simulated Push 2 (R36) is this crate's own public `sim` module.
 rtrb = "0.4.0"
 bl-rt.workspace = true

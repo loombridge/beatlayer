@@ -562,19 +562,106 @@ fn a_set_with_a_kit_saves_and_loads_what_it_holds() {
             to: kit.returns[1],
             level: 0.3,
         },
+        // Spec: push-2-notes R19.
+        Command::SetChainPushColour {
+            chain: kit.drums[1],
+            colour: Some(21),
+        },
     ] {
         kit.editor.apply(command).unwrap();
     }
     let json = serde_json::to_value(kit.editor.document()).unwrap();
     let loaded: bl_model::Document = serde_json::from_value(json.clone()).unwrap();
     assert_eq!(&loaded, kit.editor.document());
+    assert_eq!(chain(&kit, kit.drums[1]).push_colour, Some(21));
     // A drum chain with its defaults saves none of it, so sets saved before
     // drum racks load unchanged.
     let rack = json.to_string();
     let defaults =
         serde_json::to_value(Chain::new(ChainId(bl_core::id::Id::new(9).unwrap()), "x")).unwrap();
-    for field in ["receive", "play", "choke", "sends", "is_return", "audio_to"] {
+    for field in [
+        "receive",
+        "play",
+        "choke",
+        "sends",
+        "is_return",
+        "audio_to",
+        "push_colour",
+    ] {
         assert!(defaults.get(field).is_none(), "{field}");
     }
     assert!(rack.contains("all_notes") && rack.contains("is_return"));
+}
+
+// Spec: push-2-notes R19. The colour Push 2 shows for a pad belongs to a drum
+// rack's drum chain: any swatch of the palette, or none, one undo step, and
+// refused for a return chain, a chain of another rack and a swatch past the
+// palette; a chain that leaves the drum rack loses it.
+#[test]
+fn a_pads_push_colour_belongs_to_a_drum_chain() {
+    let mut kit = kit(2, 1);
+    let steps = kit.editor.undo_history().count();
+    kit.editor
+        .apply(Command::SetChainPushColour {
+            chain: kit.drums[0],
+            colour: Some(69),
+        })
+        .unwrap();
+    assert_eq!(kit.editor.undo_history().count(), steps + 1);
+    assert_eq!(chain(&kit, kit.drums[0]).push_colour, Some(69));
+    kit.editor.undo().unwrap();
+    assert_eq!(chain(&kit, kit.drums[0]).push_colour, None);
+
+    let error = rejected(
+        &mut kit.editor,
+        Command::SetChainPushColour {
+            chain: kit.drums[0],
+            colour: Some(70),
+        },
+    );
+    assert!(error.to_string().contains("pad colour"), "{error}");
+    let error = rejected(
+        &mut kit.editor,
+        Command::SetChainPushColour {
+            chain: kit.returns[0],
+            colour: Some(3),
+        },
+    );
+    assert!(matches!(error, ModelError::NotADrumChain(_)), "{error}");
+
+    // A chain of an effect rack has none to give.
+    let inner: DeviceId = kit.editor.new_id();
+    let chain_id: ChainId = kit.editor.new_id();
+    kit.editor
+        .apply(Command::InsertDevice {
+            track: kit.track,
+            index: 1,
+            device: Device::rack(inner, RackKind::AudioEffect)
+                .with_chain(Chain::new(chain_id, "Layer")),
+        })
+        .unwrap();
+    let error = rejected(
+        &mut kit.editor,
+        Command::SetChainPushColour {
+            chain: chain_id,
+            colour: Some(3),
+        },
+    );
+    assert!(matches!(error, ModelError::NotADrumChain(_)), "{error}");
+
+    // Moving a coloured pad's chain into it drops the colour.
+    kit.editor
+        .apply(Command::SetChainPushColour {
+            chain: kit.drums[1],
+            colour: Some(5),
+        })
+        .unwrap();
+    kit.editor
+        .apply(Command::MoveChain {
+            chain: kit.drums[1],
+            rack: inner,
+            index: 0,
+        })
+        .unwrap();
+    assert_eq!(chain(&kit, kit.drums[1]).push_colour, None);
 }

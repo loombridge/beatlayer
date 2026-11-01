@@ -150,6 +150,7 @@ mod recovery;
 mod remote;
 mod remote_targets;
 mod search;
+mod selection_arm;
 mod session_launch;
 mod session_recording;
 mod session_strip;
@@ -159,6 +160,7 @@ mod slice;
 mod stems;
 mod step_input;
 mod tap_tempo;
+mod tempo_follower;
 mod track_commands;
 mod tunings;
 mod view_commands;
@@ -611,6 +613,9 @@ pub struct Shell {
     /// Whether a start waits for the Link session's phase, as the engine last
     /// published it (the Link spec, R22).
     link_waiting_view: bool,
+    /// Whether Follow is on (the Tempo Follower spec, R3): not kept, off
+    /// when the app starts.
+    tempo_follow_on: bool,
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
@@ -1348,6 +1353,7 @@ impl Shell {
             keep_tempo: false,
             tempo_override: false,
             link_waiting_view: false,
+            tempo_follow_on: false,
             midi_listed: std::time::Instant::now(),
             push_display,
             midi_seen: (0, 0),
@@ -1738,6 +1744,7 @@ impl Shell {
         let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
         let revision = self.document_revision;
         let generation = self.editor_generation;
+        let arm_args = matches!(id, "mixer.set_arm" | "mixer.arm_exclusive").then(|| args.clone());
         let result = self.run_command(id, args);
         self.rack_map_mode_ends_map_mode(id);
         self.sync_key_edit();
@@ -1750,6 +1757,9 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
+            if let Some(args) = &arm_args {
+                self.arm_taken_by_hand(args);
+            }
             self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
@@ -1969,6 +1979,9 @@ impl Shell {
         }
         if bl_shell_spec::link::handles(id) {
             return self.run_link(id, args);
+        }
+        if bl_shell_spec::tempo_follower::handles(id) {
+            return self.run_tempo_follower(id, args);
         }
         if id == transport_ids::TAP_TEMPO {
             return self.run_tap_tempo(args);

@@ -148,6 +148,7 @@ mod signature_lane;
 mod slice_to_midi;
 mod snap_automation;
 mod snapping;
+mod sound_analysis;
 mod stems;
 mod step_recording;
 mod take_lanes_view;

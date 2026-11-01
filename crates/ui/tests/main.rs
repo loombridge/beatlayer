@@ -88,6 +88,7 @@ mod set_exchange;
 mod settings_window;
 mod signature_lane;
 mod slice_to_midi;
+mod sound_analysis;
 mod stems_dialog;
 mod take_lanes;
 mod theme_page;

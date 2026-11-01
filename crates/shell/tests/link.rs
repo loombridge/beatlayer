@@ -5,6 +5,8 @@
 //! for discovery with a deadline, and run one at a time with `bl-link`'s
 //! (`.config/nextest.toml`).
 
+mod audio;
+
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 

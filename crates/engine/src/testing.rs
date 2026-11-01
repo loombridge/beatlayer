@@ -970,6 +970,8 @@ mod link_session {
         told: [Real; TOLD],
         told_count: AtomicUsize,
         commits: AtomicU64,
+        /// Microseconds the audio host delays the song by.
+        delay: AtomicI64,
     }
 
     impl Shared {
@@ -1009,6 +1011,12 @@ mod link_session {
         /// Sets how many other peers are in the session.
         pub fn set_peers(&self, peers: u64) {
             self.0.peers.store(peers, Relaxed);
+        }
+
+        /// Sets how many microseconds Beatlayer delays its own playback by
+        /// (Sync to Incoming Audio, the Link Audio spec, R8).
+        pub fn set_audio_delay(&self, micros: i64) {
+            self.0.delay.store(micros, Relaxed);
         }
 
         /// Switches Beatlayer's Start Stop Sync.
@@ -1133,6 +1141,7 @@ mod link_session {
             told: std::array::from_fn(|_| Real::new(0.0)),
             told_count: AtomicUsize::new(0),
             commits: AtomicU64::new(0),
+            delay: AtomicI64::new(0),
         });
         (
             LinkSession {
@@ -1236,6 +1245,10 @@ mod link_session {
             self.playing_time = at;
         }
 
+        fn audio_delay(&self) -> i64 {
+            self.shared.delay.load(Relaxed)
+        }
+
         fn peer_tempo(&mut self, bpm: f64) {
             let shared = &self.shared;
             let count = shared.told_count.load(Relaxed);
@@ -1248,3 +1261,198 @@ mod link_session {
 }
 
 pub use link_session::{LinkPeers, LinkSession, link_session};
+
+/// A stand-in for the Link Audio an audio host builds over `bl-link`
+/// ([`crate::LinkAudio`]): named channels a test pushes a peer's frames into,
+/// the tracks it offers, and a log of what the engine sent them as, all made
+/// ahead so the engine's calls allocate nothing.
+mod link_audio {
+    use std::sync::Arc;
+    use std::sync::atomic::{
+        AtomicBool, AtomicI64, AtomicU32, AtomicUsize,
+        Ordering::{Acquire, Relaxed, Release},
+    };
+
+    use bl_model::TrackId;
+
+    use crate::link_audio::{Channel, LinkAudio};
+
+    /// Blocks the log has room for.
+    const BLOCKS: usize = 4096;
+    /// Frames the log has room for.
+    const FRAMES: usize = 1 << 20;
+
+    /// One block of one offered track the engine sent.
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct Sent {
+        /// The track.
+        pub track: TrackId,
+        /// Where Link's clock had the block's first frame heard, in
+        /// microseconds.
+        pub moment: i64,
+        /// The block's frames, left channel.
+        pub left: Vec<f32>,
+        /// The block's frames, right channel.
+        pub right: Vec<f32>,
+    }
+
+    /// What was sent, in atomics only: a lock allocates the first time it is
+    /// taken, which the allocation trap would catch.
+    struct Log {
+        /// Which offered track, when it was heard, where its frames start in
+        /// `left` and how many there are, for each block.
+        track: Vec<AtomicUsize>,
+        moment: Vec<AtomicI64>,
+        at: Vec<AtomicUsize>,
+        frames: Vec<AtomicUsize>,
+        blocks: AtomicUsize,
+        left: Vec<AtomicU32>,
+        right: Vec<AtomicU32>,
+        used: AtomicUsize,
+    }
+
+    struct Shared {
+        active: AtomicBool,
+        channels: Vec<(String, String, Arc<Channel>)>,
+        offered: Vec<TrackId>,
+        log: Log,
+    }
+
+    /// What a test acts on the Link Audio by: it turns it on and off, takes
+    /// each channel to push a peer's frames into, and reads what was sent.
+    #[derive(Clone)]
+    pub struct LinkAudioPeers(Arc<Shared>);
+
+    impl LinkAudioPeers {
+        /// Switches Link Audio on or off.
+        pub fn set_active(&self, on: bool) {
+            self.0.active.store(on, Relaxed);
+        }
+
+        /// The `index`th channel the stand-in was made with.
+        #[must_use]
+        pub fn channel(&self, index: usize) -> Arc<Channel> {
+            Arc::clone(&self.0.channels[index].2)
+        }
+
+        /// What the engine sent, block by block and track by track.
+        #[must_use]
+        pub fn sent(&self) -> Vec<Sent> {
+            let log = &self.0.log;
+            let samples = |cells: &[AtomicU32], at: usize, frames: usize| -> Vec<f32> {
+                cells[at..at + frames]
+                    .iter()
+                    .map(|cell| f32::from_bits(cell.load(Relaxed)))
+                    .collect()
+            };
+            (0..log.blocks.load(Acquire))
+                .map(|i| {
+                    let (at, frames) = (log.at[i].load(Relaxed), log.frames[i].load(Relaxed));
+                    Sent {
+                        track: self.0.offered[log.track[i].load(Relaxed)],
+                        moment: log.moment[i].load(Relaxed),
+                        left: samples(&log.left, at, frames),
+                        right: samples(&log.right, at, frames),
+                    }
+                })
+                .collect()
+        }
+    }
+
+    /// The Link Audio the engine reads and offers through in a test.
+    pub struct StandInLinkAudio {
+        shared: Arc<Shared>,
+        /// What each offered track's block holds so far.
+        staged: Vec<(Vec<f32>, Vec<f32>)>,
+    }
+
+    /// A stand-in at `rate` for blocks of up to `max_frames`, holding a
+    /// channel for each of `channels` (peer and channel names) and offering
+    /// `offered`, and the handle a test acts on it by.
+    #[must_use]
+    pub fn link_audio(
+        rate: u32,
+        max_frames: usize,
+        channels: &[(&str, &str)],
+        offered: &[TrackId],
+    ) -> (StandInLinkAudio, LinkAudioPeers) {
+        let mut offered = offered.to_vec();
+        offered.sort();
+        let cells = |len: usize| (0..len).map(|_| AtomicU32::new(0)).collect::<Vec<_>>();
+        let shared = Arc::new(Shared {
+            active: AtomicBool::new(true),
+            channels: channels
+                .iter()
+                .map(|&(peer, channel)| (peer.into(), channel.into(), Arc::new(Channel::new(rate))))
+                .collect(),
+            offered: offered.clone(),
+            log: Log {
+                track: (0..BLOCKS).map(|_| AtomicUsize::new(0)).collect(),
+                moment: (0..BLOCKS).map(|_| AtomicI64::new(0)).collect(),
+                at: (0..BLOCKS).map(|_| AtomicUsize::new(0)).collect(),
+                frames: (0..BLOCKS).map(|_| AtomicUsize::new(0)).collect(),
+                blocks: AtomicUsize::new(0),
+                left: cells(FRAMES),
+                right: cells(FRAMES),
+                used: AtomicUsize::new(0),
+            },
+        });
+        (
+            StandInLinkAudio {
+                shared: Arc::clone(&shared),
+                staged: offered
+                    .iter()
+                    .map(|_| (vec![0.0; max_frames], vec![0.0; max_frames]))
+                    .collect(),
+            },
+            LinkAudioPeers(shared),
+        )
+    }
+
+    impl LinkAudio for StandInLinkAudio {
+        fn active(&self) -> bool {
+            self.shared.active.load(Relaxed)
+        }
+
+        fn channel(&self, peer: &str, channel: &str) -> Option<&Channel> {
+            self.shared
+                .channels
+                .iter()
+                .find(|(p, c, _)| p == peer && c == channel)
+                .map(|(_, _, channel)| &**channel)
+        }
+
+        fn offered(&self) -> &[TrackId] {
+            &self.shared.offered
+        }
+
+        fn stage(&mut self, track: TrackId, at: usize, left: &[f32], right: &[f32]) {
+            if let Ok(i) = self.shared.offered.binary_search(&track) {
+                self.staged[i].0[at..at + left.len()].copy_from_slice(left);
+                self.staged[i].1[at..at + right.len()].copy_from_slice(right);
+            }
+        }
+
+        fn send(&mut self, moment: i64, frames: usize, _rate: u32) {
+            let log = &self.shared.log;
+            for (i, (left, right)) in self.staged.iter().enumerate() {
+                let (block, at) = (log.blocks.load(Relaxed), log.used.load(Relaxed));
+                if block == BLOCKS || at + frames > FRAMES {
+                    return;
+                }
+                log.track[block].store(i, Relaxed);
+                log.moment[block].store(moment, Relaxed);
+                log.at[block].store(at, Relaxed);
+                log.frames[block].store(frames, Relaxed);
+                for f in 0..frames {
+                    log.left[at + f].store(left[f].to_bits(), Relaxed);
+                    log.right[at + f].store(right[f].to_bits(), Relaxed);
+                }
+                log.used.store(at + frames, Relaxed);
+                log.blocks.store(block + 1, Release);
+            }
+        }
+    }
+}
+
+pub use link_audio::{LinkAudioPeers, Sent, StandInLinkAudio, link_audio};

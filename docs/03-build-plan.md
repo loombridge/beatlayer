@@ -984,7 +984,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.33b | done | 31 October 2026 | [#525](https://github.com/loombridge/beatlayer/pull/525): Simpler's Slice mode has the Playback chooser (Mono, Poly, Thru, parameter 56, in the Slicing bank), and Slice to Drum Rack and Slice to New MIDI Track run from Simpler's title-bar and display menus as one undo step each, and by ID for agents |
 | 8.1 | done | 31 October 2026 | [#640](https://github.com/loombridge/beatlayer/pull/640): a native device's body switches between named pages, as tabs or as a shell and display, set by clicks or `device.set_page` without an undo step and read back in `device_view.state`; the page saves with the set, and the multisampler's tabs are now pages that open on their saved tab |
 | 8.2 | todo |  |  |
-| 8.3 | todo |  |  |
+| 8.3 | done | 1 November 2026 | [#642](https://github.com/loombridge/beatlayer/pull/642): the instruments' filter has low-pass, high-pass, band-pass, notch and Morph at 12 and 24 dB per octave with the Clean, OSR, MS2, SMP and PRD circuits, Drive and Morph per voice; Simpler gains the circuits, Drive and Morph and Sampler the circuits and per-voice Resonance, Morph and Drive, with sets on Clean rendering as before; greying the controls a circuit doesn't use and Simpler's Morph menu are still to build |
 | 8.4 | todo |  |  |
 | 8.5 | done | 31 October 2026 | [#644](https://github.com/loombridge/beatlayer/pull/644): `bl_dsp::physical` has modal banks for Beam, Marimba, Cantilever, Membrane, Circular Membrane and Plate and waveguides for String, Tube and Pipe on the kit's SIMD lanes, tuned within 1 cent from 40 Hz to 4 kHz at 44.1 to 96 kHz and stable to 192 kHz; the R11 damper and finger and fret positions wait on Tension |
 | 8.6 | todo |  |  |
@@ -1031,7 +1031,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.47 | todo |  |  |
 | 8.48 | todo |  |  |
 | 8.49 | todo |  |  |
-| 8.50 | todo |  |  |
+| 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
 | 8.51 | todo |  |  |
 | 8.52 | todo |  |  |
 | 9.1 | todo |  |  |
@@ -1045,7 +1045,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.9 | todo |  |  |
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |
-| 9.12 | todo |  |  |
+| 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
 | 9.13 | todo |  |  |
 | 9.14 | todo |  |  |
 | 9.15 | todo |  |  |

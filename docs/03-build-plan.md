@@ -1033,7 +1033,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.49 | todo |  |  |
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
 | 8.51 | todo |  |  |
-| 8.52 | todo |  |  |
+| 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
 | 9.1 | todo |  |  |
 | 9.2 | todo |  |  |
 | 9.3 | todo |  |  |
@@ -1045,7 +1045,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.9 | todo |  |  |
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |
-| 9.12 | todo |  |  |
+| 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
 | 9.13 | todo |  |  |
 | 9.14 | todo |  |  |
 | 9.15 | todo |  |  |

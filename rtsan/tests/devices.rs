@@ -1306,3 +1306,54 @@ fn oscilloscope_passes_under_rtsan() {
         ],
     );
 }
+
+// Spec: pitchloop89 R9
+#[test]
+fn pitchloop89_passes_under_rtsan() {
+    use bl_devices::pitchloop89::*;
+    run_lo_fi_device(
+        PITCHLOOP89,
+        &[
+            (BANDWIDTH_A, &[0.0, 2.0, 5.0]),
+            (BANDWIDTH_B, &[1.0, 3.0, 4.0]),
+            (SPEED_A, &[-200.0, -100.0, 50.0, 100.0, 200.0]),
+            (SPEED_B, &[200.0, 100.0, -50.0]),
+            (DELAY_A, &[0.0, 50.0, 100.0]),
+            (HOLD_A, &[0.0, 1.0]),
+            (HOLD_B, &[1.0, 0.0]),
+            (FEEDBACK_A, &[0.0, 60.0, 100.0]),
+            (LOW_PASS_A, &[200.0, 4_000.0, 20_000.0]),
+            (HIGH_PASS_B, &[20.0, 500.0, 5_000.0]),
+            (ROUTING, &[0.0, 1.0, 2.0]),
+            (VIBRATO_DEPTH, &[0.0, 50.0, 100.0]),
+            (POSITION_WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (POSITION_DEPTH, &[0.0, 40.0, 100.0]),
+            (RANDOM, &[1.0, 0.0]),
+            (INPUT, &[0.0, 1.0, 3.98]),
+        ],
+    );
+}
+
+// Spec: vector-delay R7
+#[test]
+fn vector_delay_passes_under_rtsan() {
+    use bl_devices::vector_delay::*;
+    run_lo_fi_device(
+        VECTOR_DELAY,
+        &[
+            (TAPS, &[1.0, 8.0, 4.0]),
+            (GRAVITY, &[-100.0, 0.0, 100.0]),
+            (MAGNET, &[100.0, 0.0, -100.0]),
+            (FLOW, &[0.0, 100.0]),
+            (SPEED, &[0.0, 100.0, 400.0]),
+            (FRICTION, &[0.0, 20.0, 100.0]),
+            (FEEDBACK, &[0.0, 30.0, 100.0]),
+            (SYNC, &[0.0, 1.0]),
+            (DIVISION, &[0.0, 4.0, 12.0]),
+            (MAX_TIME, &[50.0, 1_000.0, 4_000.0]),
+            (RESET, &[1.0, 0.0]),
+            (tap_x(0), &[0.0, 0.5, 1.0]),
+            (tap_y(3), &[1.0, 0.0, 0.5]),
+        ],
+    );
+}

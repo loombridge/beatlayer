@@ -80,12 +80,14 @@ pub mod note_echo;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod phaser_flanger;
+pub mod pitchloop89;
 pub mod play_mod;
 pub mod polysynth;
 pub mod re_enveloper;
 pub mod remap;
 pub mod resonators;
 pub mod reverb;
+mod ring;
 pub mod roar;
 pub mod sampler;
 pub mod saturator;
@@ -101,6 +103,7 @@ pub mod touch;
 pub mod tube;
 pub mod tuner;
 pub mod utility;
+pub mod vector_delay;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
@@ -150,6 +153,7 @@ pub use note_echo::{NOTE_ECHO, note_echo_type};
 pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
+pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
@@ -165,6 +169,7 @@ pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
+pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -263,6 +268,7 @@ pub fn display_in(
         )),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
+        VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
         CV_CLOCK_OUT => Some(cv_clock_out::display(device, data)),
@@ -355,6 +361,8 @@ pub fn register(registry: &mut Registry) {
     tuner::register(registry);
     oscilloscope::register(registry);
     looper::register(registry);
+    pitchloop89::register(registry);
+    vector_delay::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

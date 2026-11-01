@@ -55,10 +55,16 @@ impl Shell {
             }
             match (track.kind(), &track.routing().input) {
                 (TrackKind::Midi, _) => midi.push(id),
-                (TrackKind::Audio, Input::External { channel }) => {
+                // Spec: link-audio R5. A peer's channel is recorded as Ext. In's
+                // is, stereo: the engine takes it from the channel's own buffer.
+                (TrackKind::Audio, Input::External { .. } | Input::LinkAudio { .. }) => {
+                    let channel = match &track.routing().input {
+                        Input::External { channel } => *channel,
+                        _ => bl_model::Channel::Pair(1),
+                    };
                     tracks.push(crate::recording::Track {
                         track: id,
-                        channel: *channel,
+                        channel,
                         name: crate::recording::file_name(
                             &crate::routing::track_label(document, id),
                             take,

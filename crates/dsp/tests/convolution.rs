@@ -325,6 +325,25 @@ fn a_swap_that_can_not_be_played_is_handed_back() {
     assert!(conv.swap(short, 0.01).is_ok());
 }
 
+// Spec: architecture, `bl_dsp::convolution`; real-time rules (the retired
+// list never grows on the audio thread)
+#[test]
+fn swaps_that_pile_up_between_blocks_retire_without_allocating() {
+    let short = prepared(&response(Layout::Stereo, 50, 5));
+    let mut conv = Convolver::with_response(short.clone());
+    let mut taken = 0;
+    for _ in 0..8 {
+        if conv.swap(short.clone(), 0.0).is_ok() {
+            taken += 1;
+        }
+    }
+    assert!(taken < 8, "the convolver took every swap");
+    let mut left = noise(512, 1);
+    let mut right = noise(512, 2);
+    lspk_rt::rt_test!({ conv.process(&mut left, &mut right) });
+    assert!(!conv.swapping());
+}
+
 // Spec: architecture, `bl_dsp::convolution` (a later swap replaces one waiting)
 #[test]
 fn the_newest_of_swaps_that_wait_is_the_one_that_plays() {

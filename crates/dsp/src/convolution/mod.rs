@@ -618,9 +618,11 @@ impl Convolver {
         if (0..3).any(|k| ir.parts[k] > self.max_parts[k]) {
             return Err((SwapError::TooLong, ir));
         }
-        // Room for the response this call may retire and the one the end of
-        // the fade will.
-        if self.retired.len() + 2 > RETIRED {
+        // Room for every response that may retire before the caller collects:
+        // the end of this fade alone, or, behind a running fade, the swap this
+        // call replaces and the ends of both fades.
+        let pending = if self.fade.is_some() { 3 } else { 1 };
+        if self.retired.len() + pending > RETIRED {
             return Err((SwapError::Busy, ir));
         }
         let len = ((f64::from(fade) * f64::from(self.rate)).round() as u64).max(MIN_FADE);

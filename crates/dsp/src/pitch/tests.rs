@@ -2,7 +2,7 @@
 //! material is made here: tones, and a synthetic voice, a Rosenberg glottal
 //! pulse train through three formant resonators.
 
-use std::f64::consts::{PI, TAU};
+use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
 use super::*;
 use crate::Random;
@@ -552,7 +552,7 @@ fn every_vowel_is_moved_within_5_cents() {
     let f0 = 120.0;
     for (what, formants) in [("i", I), ("u", U)] {
         let input = voice(|_| f0, formants, 48_000);
-        for ratio in [0.5, 0.7071, 1.3348, 2.0] {
+        for ratio in [0.5, FRAC_1_SQRT_2, 2.0f64.powf(5.0 / 12.0), 2.0] {
             let out = shift(40.0, &input, ratio as f32, 1.0);
             let heard = pitch_of(&out);
             assert!(

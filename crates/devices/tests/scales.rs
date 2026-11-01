@@ -232,6 +232,25 @@ fn resonators_has_the_switch_in_the_title_bar() {
     description.check().unwrap();
 }
 
+// Spec: scales R16, R29; spectral-resonator R1. Spectral Resonator, an audio
+// effect, has Use Current Scale as a parameter too, off in a new device,
+// drawn in the title bar.
+#[test]
+fn spectral_resonator_has_the_switch_in_the_title_bar() {
+    let description = bl_devices::spectral_resonator_type().description;
+    let param = description
+        .param(bl_devices::spectral_resonator::USE_SCALE)
+        .expect("the device has it");
+    assert_eq!(param.name, "Use Current Scale");
+    assert_eq!(param.default, 0.0, "off in a new device");
+    assert_eq!(
+        description.title_switch,
+        Some(bl_devices::spectral_resonator::USE_SCALE)
+    );
+    assert!(param.automatable);
+    description.check().unwrap();
+}
+
 // Spec: scales R15. A chain of all five, counting degrees, plays through a
 // change of the clip's scale at every block size, and its renders are the
 // same: two renders are bit for bit equal, and nothing hangs.

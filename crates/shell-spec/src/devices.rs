@@ -633,6 +633,17 @@ impl DevicePanel {
             .map_or(param, |a| a.on)
     }
 
+    /// The value of the parameter `id`: what a relabelled parameter's label
+    /// follows.
+    #[must_use]
+    pub fn read(&self, id: bl_model::ParamId) -> f64 {
+        self.description
+            .params
+            .iter()
+            .position(|p| p.id == id)
+            .map_or(0.0, |index| self.value(index))
+    }
+
     /// The value of the parameter at `index` in the description.
     #[must_use]
     pub fn value(&self, index: usize) -> f64 {

@@ -881,6 +881,7 @@ pub fn display(
     };
     let series = curve_series;
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

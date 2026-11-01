@@ -1049,6 +1049,7 @@ pub fn display(
         series: vec![series],
         markers: Vec::new(),
         readings: Vec::new(),
+        spectrograms: Vec::new(),
     };
     if let Some(peak) = data.and_then(|d| d.get(stage)).copied() {
         let input = level_db(peak);

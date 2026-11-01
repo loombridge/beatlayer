@@ -863,6 +863,8 @@ dependencies = [
  "lspk-dsp",
  "lspk-params",
  "lspk-rt",
+ "proptest",
+ "realfft",
 ]
 
 [[package]]

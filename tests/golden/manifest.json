@@ -417,6 +417,14 @@
       "bits": 24,
       "render_hash": "fnv1a64:ffa544717f30ea43"
     },
+    "resonators": {
+      "made_on": "macos-aarch64",
+      "sample_rate": 48000,
+      "channels": 2,
+      "frames": 144000,
+      "bits": 24,
+      "render_hash": "fnv1a64:e3034dc7490ce1f9"
+    },
     "scene-tempo": {
       "made_on": "macos-aarch64",
       "sample_rate": 48000,

@@ -117,4 +117,4 @@ While a tuning that doesn't hold twelve notes to its pseudo-octave is loaded, th
 | R32 | `crates/agent/tests/tunings.rs`, `the_browsers_tuning_commands_run_by_id_and_read_back`; `crates/shell/tests/tunings_browser.rs`, `the_section_shows_hides_and_takes_the_focus`, `loading_the_selection_loads_the_tuning_and_shows_the_section`; `crates/model/tests/command_registry.rs`, `every_command_runs_by_id` | unit |
 | R33 | `crates/devices/tests/tuner_tuning.rs`, `sines_under_a_19_step_tuning_name_the_nearest_note_and_its_cents`, `the_reference_is_set_aside_under_a_tuning`, `the_display_names_the_note_as_the_editor_does`, `through_the_engine_a_tuner_follows_the_tuning_a_bypassing_track_does_not` | unit, real-time |
 | R34, R35 | to be written in WP-8.2, then with each instrument's package | render (every key of a 19-step tuning within 0.1 cent; Glissando's steps) |
-| R36 | to be written in WP-8.43 and WP-8.48 | unit under a 19-note tuning |
+| R36 | Resonators: `crates/devices/tests/resonators.rs`, `under_a_19_note_tuning_the_pitches_come_from_the_tuning`. Spectral Resonator: to be written in WP-8.48 | unit under a 19-note tuning |

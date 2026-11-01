@@ -5557,6 +5557,90 @@ fn an_agent_adds_sets_and_reads_echo_by_id_reads_its_displays_and_reopens_it() {
     }
 }
 
+// Spec: resonators R13, R15
+#[test]
+fn an_agent_adds_sets_and_reads_resonators_by_id_and_reopens_it() {
+    use bl_devices::resonators::{self, resonators_type};
+
+    let dir = TempDir::new("resonators");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("resonators-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        reply["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    let kind = resonators_type();
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "track": track,
+            "device": { "kind": kind.kind, "name": kind.name, "role": kind.role },
+        }),
+    );
+    let device = added["device"].clone();
+    let parameters = |client: &mut Client<InProcess>| {
+        run(client, "device.parameters", json!({ "device": device }))["params"].clone()
+    };
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 30);
+
+    // Every parameter moved to the other end of its range, and read back.
+    let mut wanted = Vec::new();
+    for param in &kind.description.params {
+        let to = if param.default == param.max() {
+            param.min()
+        } else {
+            param.max()
+        };
+        run(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": param.id.0, "value": to }),
+        );
+        wanted.push((param.id, param.name.clone(), to));
+    }
+    let read = parameters(&mut client);
+    for (_, name, to) in &wanted {
+        let found = read
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == *name)
+            .unwrap_or_else(|| panic!("no {name}"));
+        assert_eq!(found["value"].as_f64().unwrap(), *to, "{name}");
+    }
+
+    // Save and reopen.
+    let saved = run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": dir.0.join("Resonators.blset").to_string_lossy() }),
+    );
+    let (project, _) =
+        bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] }))).unwrap();
+    let reopened = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .find(|d| {
+            matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == resonators::RESONATORS)
+        })
+        .expect("Resonators in the reopened set");
+    for (param, name, to) in &wanted {
+        assert_eq!(reopened.params[param], *to, "{name} reopened");
+    }
+}
+
 // Spec: spectrum-analyser R9, tuner R8, oscilloscope R8 (WP-5.28): an agent adds
 // Spectrum, Tuner and Oscilloscope, reads their parameters, sets some by ID,
 // reads each display, and finds the devices and values again when the saved set

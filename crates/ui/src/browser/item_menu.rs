@@ -81,6 +81,22 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
         Button::new("Show Similar Files").shortcut_text(similar),
         false,
     );
+    // Spec: stem-separation R22. Separate Stems to New Audio Tracks, after
+    // Show Similar Files: Beatlayer's own place (C-BROWSER-003a).
+    let stems = json!({ "source": { "kind": "file", "path": item.path } });
+    let stems_ok = view.selected().len() <= 1
+        && item.kind == ItemKind::Audio
+        && shell.can_invoke(bl_shell::stems_commands::OPEN, &stems);
+    if add(
+        ui,
+        Button::new("Separate Stems to New Audio Tracks"),
+        stems_ok,
+    )
+    .clicked()
+    {
+        invoke(events, bl_shell::stems_commands::OPEN, stems);
+        ui.close();
+    }
     ui.separator();
     // C-BROWSER-004 to 011.
     if add(ui, Button::new("Clear All Colors").shortcut_text("0"), true).clicked() {

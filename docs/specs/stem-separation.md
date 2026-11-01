@@ -106,8 +106,17 @@ IMP-11's first package built the command for Arrangement clips, the dialog, the 
 | R19 | `crates/analysis/src/stems/onnx.rs`, `the_library_loads_once_for_every_feature`; `crates/shell/src/packages.rs`, `a_loaded_package_is_removed_at_the_next_launch`; `crates/shell/src/shell/packages.rs`, `a_package_whose_library_is_loaded_shows_removed_at_the_next_launch` | unit |
 | R20 | `crates/shell/tests/packages.rs`, `a_manifest_served_from_files_installs_a_features_packages`; the readback rows in `crates/commands/src/readback/song.rs`, checked by `cargo xtask commands` | shell test |
 | R21 | `crates/shell/tests/packages.rs`, `a_headless_run_keeps_its_packages_in_the_temporary_folder`; `crates/shell/src/packages.rs`, `a_manifest_file_replaces_the_built_in_one` | shell test, unit |
-| R22 to R31 | to be written in WP-9.2: `crates/shell/tests/stems.rs` for each source, with the generated stem fixture standing in for the network's output; `crates/ui/tests/stems_dialog.rs` from each menu; `crates/agent/tests/stems.rs` | shell test, UI script, agent API |
+| R22 | `crates/shell-spec/src/context_menus.rs`, `separate_stems_is_in_the_session_clips_and_the_time_selections_menus`; `crates/shell/tests/stems.rs`, `stems_open_acts_on_the_selection`, `what_holds_no_audio_is_refused_with_its_reason`; `crates/ui/tests/session_menus.rs`, `separate_stems_in_a_session_clips_menu_opens_the_dialog_on_the_clip`; `crates/ui/tests/browser_collections.rs`, `separate_stems_in_an_audio_files_menu_opens_the_dialog_on_the_file`; `crates/ui/tests/stems_dialog.rs`, `a_time_selections_menu_opens_the_dialog_on_its_range`, `the_create_menus_item_acts_on_the_selection` | unit, shell test, UI script |
+| R23 | `crates/shell/tests/stems.rs`, `a_session_clips_stems_go_in_its_scenes_slots` | shell test |
+| R24 | `crates/shell/tests/stems.rs`, `a_browser_files_stems_follow_the_selected_track_at_the_insert_marker`, `a_file_with_no_track_selected_goes_after_the_last_track` | shell test |
+| R25 | `crates/shell/tests/stems.rs`, `a_time_selection_separates_its_range_and_leaves_the_set_sounding_the_same`, `a_time_selection_over_two_tracks_separates_each` | shell test |
+| R26 | `crates/shell/tests/stems.rs`, `a_session_clips_stems_go_in_its_scenes_slots`, `a_browser_files_stems_follow_the_selected_track_at_the_insert_marker` | shell test |
+| R27 | `crates/shell/tests/stems.rs`, `the_group_carries_the_source_tracks_devices_and_automation` | shell test |
+| R28 | `crates/shell/tests/stems.rs`, `a_browser_files_stems_follow_the_selected_track_at_the_insert_marker`, `a_time_selection_separates_its_range_and_leaves_the_set_sounding_the_same` | shell test |
+| R29 | `crates/shell/tests/stems.rs`, `a_session_clips_stems_go_in_its_scenes_slots`, `a_browser_files_stems_follow_the_selected_track_at_the_insert_marker`, `a_time_selection_separates_its_range_and_leaves_the_set_sounding_the_same` | shell test |
+| R30 | `crates/agent/tests/stems.rs`, `an_agent_separates_each_source_by_id_and_reads_the_tracks_back` | agent API |
+| R31 | `crates/shell/tests/stems.rs`, `what_holds_no_audio_is_refused_with_its_reason` | shell test |
 | R32 to R38 | to be written in WP-9.3: `crates/analysis/tests/stems_model.rs` against generated sources on both providers; the fallback by refusing the provider; `bl-cli bench stems` | unit, benchmark |
 | R39 to R41 | to be written in WP-9.4: the fallback and the manifest on Windows and Linux CI | unit |
 
-The tests that separate with the real network run where `BL_STEMS_RUNTIME` names ONNX Runtime's shared library and `BL_STEMS_MODEL` the model; without them they pass untested.
+The tests of R22 to R31 run with a generated stand-in for the network, which splits a mix into four fixed shares that sum to it, so they need no packages. The tests that separate with the real network run where `BL_STEMS_RUNTIME` names ONNX Runtime's shared library and `BL_STEMS_MODEL` the model; without them they pass untested.

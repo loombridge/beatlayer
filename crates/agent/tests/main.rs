@@ -32,6 +32,7 @@ mod recording;
 mod recovery;
 mod save_history;
 mod stdio;
+mod stems;
 mod tools;
 mod tunings;
 mod undo_history;

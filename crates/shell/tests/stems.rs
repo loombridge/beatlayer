@@ -14,6 +14,7 @@ use bl_model::{ClipData, ClipId, TrackKind};
 use bl_shell::audio::AudioHost;
 use bl_shell::files::ProjectFiles;
 use bl_shell::settings::Preferences;
+use bl_shell::stems_commands::StemKind;
 use bl_shell::{Shell, ShellError};
 use serde_json::{Value, json};
 
@@ -446,4 +447,530 @@ fn the_stems_sound_through_their_group() {
         .unwrap();
     let peak = exported["peak_dbfs"].as_f64();
     assert!(peak.is_some_and(|p| p > -20.0), "{exported}");
+}
+
+// The tests below run with `use_stem_fixture`: a generated stand-in splits
+// the mix into four fixed shares that sum to it, so they run without the
+// packages or the network (WP-9.2, stem separation R22 to R31).
+
+const WHOLE: i64 = bl_core::time::Ticks::WHOLE.get();
+
+fn ticks(bars: i64) -> bl_core::time::Ticks {
+    bl_core::time::Ticks(bars * WHOLE)
+}
+
+/// Eight seconds at 48 kHz of two low tones, which resample and render back
+/// to themselves closely enough for a null test.
+fn tone_file(path: &Path) {
+    let rate = 48_000u32;
+    let mut writer = AudioWriter::create(
+        path,
+        EncodeSpec {
+            file_type: FileType::Wav,
+            bit_depth: BitDepth::Float32,
+            dither: Dither::None,
+            sample_rate: rate,
+            channels: 2,
+        },
+    )
+    .unwrap();
+    let samples: Vec<f32> = (0..rate as usize * 8)
+        .flat_map(|i| {
+            let t = i as f64 / f64::from(rate);
+            let tone = 0.3 * (std::f64::consts::TAU * 110.0 * t).sin()
+                + 0.2 * (std::f64::consts::TAU * 330.0 * t).sin();
+            [tone as f32, tone as f32]
+        })
+        .collect();
+    writer.write(&samples).unwrap();
+    writer.finish().unwrap();
+}
+
+fn fixture_shell(scratch: &Scratch) -> Shell {
+    let mut shell = shell(&scratch.path("config"));
+    shell.use_stem_fixture();
+    shell
+}
+
+fn audio_tracks(shell: &Shell) -> Vec<bl_model::TrackId> {
+    let doc = shell.editor().document();
+    doc.top_level()
+        .filter(|t| doc.track(*t).unwrap().kind() == TrackKind::Audio)
+        .collect()
+}
+
+/// Puts the tone file on `track` at `bar`; the clip.
+fn place(shell: &mut Shell, file: &Path, track: bl_model::TrackId, bar: i64) -> ClipId {
+    let placed = shell
+        .run(
+            "browser.add_to_arrangement",
+            json!({ "paths": [text(file)], "track": track, "at": ticks(bar) }),
+        )
+        .unwrap();
+    serde_json::from_value(placed["clips"][0]["clip"].clone()).unwrap()
+}
+
+/// Separates and waits; the status.
+fn separate(shell: &mut Shell, args: Value) -> Value {
+    shell.run("stems.separate", args).unwrap();
+    shell.wait_stems();
+    let status = status(shell);
+    assert_eq!(status["separation"]["state"], "done", "{status}");
+    status
+}
+
+fn ids<T: serde::de::DeserializeOwned>(status: &Value, key: &str) -> Vec<T> {
+    serde_json::from_value(status[key].clone()).unwrap()
+}
+
+fn colours(shell: &Shell, tracks: &[bl_model::TrackId]) -> Vec<u8> {
+    let doc = shell.editor().document();
+    tracks
+        .iter()
+        .map(|t| doc.track(*t).unwrap().colour())
+        .collect()
+}
+
+fn names_of(shell: &Shell, tracks: &[bl_model::TrackId]) -> Vec<String> {
+    let doc = shell.editor().document();
+    tracks
+        .iter()
+        .map(|t| doc.track(*t).unwrap().name().to_owned())
+        .collect()
+}
+
+/// The undo steps' names, the newest first.
+fn step_names(shell: &Shell) -> Vec<String> {
+    shell.editor().undo_history().map(str::to_owned).collect()
+}
+
+// Spec: stem-separation R22, R23, R26, R29, R30. A Session clip's stems go in
+// new tracks after its own, each in the slot of the clip's scene with the
+// clip's launch settings; the clip is deactivated, and the group takes its
+// colour.
+#[test]
+fn a_session_clips_stems_go_in_its_scenes_slots() {
+    let scratch = Scratch::new("session");
+    let mut shell = fixture_shell(&scratch);
+    let file = scratch.path("Loop.wav");
+    loop_file(&file);
+    let track = audio_tracks(&shell)[0];
+    let scene = shell.editor().document().scenes().nth(1).unwrap().id;
+    shell
+        .run(
+            "session.drop_files",
+            json!({ "paths": [text(&file)], "track": track, "scene": scene }),
+        )
+        .unwrap();
+    let clip = shell.editor().document().slot(track, scene).unwrap().id;
+    shell
+        .run(
+            "clip.set_launch_mode",
+            json!({ "clip": clip, "mode": "gate" }),
+        )
+        .unwrap();
+    shell
+        .run("clip.set_colour", json!({ "clips": [clip], "colour": 33 }))
+        .unwrap();
+    let before = shell.editor().document().clone();
+    let source = shell
+        .editor()
+        .document()
+        .slot(track, scene)
+        .unwrap()
+        .clone();
+
+    let status = separate(
+        &mut shell,
+        json!({ "source": { "kind": "clip", "clip": clip } }),
+    );
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    let clips: Vec<ClipId> = ids(&status, "created_clips");
+    assert_eq!((created.len(), clips.len()), (5, 4));
+    let doc = shell.editor().document();
+    // After the clip's track, in a group named for the clip.
+    let order: Vec<_> = doc.top_level().collect();
+    let at = order.iter().position(|t| *t == track).unwrap();
+    assert_eq!(order[at + 1], created[0]);
+    assert_eq!(doc.track(created[0]).unwrap().name(), "Loop");
+    assert_eq!(
+        names_of(&shell, &created[1..]),
+        ["Vocals", "Drums", "Bass", "Others"]
+    );
+    // Each part's clip is in its track's slot in the clip's scene, with the
+    // clip's launch settings and no clip in the Arrangement.
+    for (track, clip) in created[1..].iter().zip(&clips) {
+        let held = doc.track(*track).unwrap();
+        assert_eq!(held.clips().count(), 0);
+        let slot = doc.slot(*track, scene).unwrap();
+        assert_eq!(slot.id, *clip);
+        assert_eq!(slot.launch, source.launch);
+        assert!(!slot.mute);
+        assert_eq!(held.slots().count(), 1);
+    }
+    // Spec: R26. The group takes the clip's colour, each part its own.
+    assert_eq!(colours(&shell, &created[..1]), [33]);
+    assert_eq!(colours(&shell, &created[1..]), [10, 2, 6, 4]);
+    // The source is deactivated, and one undo step takes it all back.
+    assert!(doc.slot(track, scene).unwrap().mute);
+    assert_eq!(step_names(&shell)[0], "Separate Stems");
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*shell.editor().document(), before);
+}
+
+// Spec: stem-separation R22, R24, R26, R28, R29. A file's stems go after the
+// selected track, their clips at the insert marker.
+#[test]
+fn a_browser_files_stems_follow_the_selected_track_at_the_insert_marker() {
+    let scratch = Scratch::new("file");
+    let mut shell = fixture_shell(&scratch);
+    let file = scratch.path("Pad.wav");
+    tone_file(&file);
+    let tracks = audio_tracks(&shell);
+    shell
+        .run(
+            "arrangement.select_tracks",
+            json!({ "tracks": [tracks[0]] }),
+        )
+        .unwrap();
+    shell
+        .run("arrangement.set_insert_marker", json!({ "at": ticks(3) }))
+        .unwrap();
+    let before = shell.editor().document().clone();
+
+    let status = separate(
+        &mut shell,
+        json!({ "source": { "kind": "file", "path": text(&file) }, "stems": ["vocals", "bass"] }),
+    );
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    assert_eq!(created.len(), 3);
+    let doc = shell.editor().document();
+    let order: Vec<_> = doc.top_level().collect();
+    let at = order.iter().position(|t| *t == tracks[0]).unwrap();
+    assert_eq!(order[at + 1], created[0]);
+    assert_eq!(doc.track(created[0]).unwrap().name(), "Pad");
+    // The group takes the selected track's colour.
+    assert_eq!(
+        colours(&shell, &created[..1]),
+        [doc.track(tracks[0]).unwrap().colour()]
+    );
+    for (track, part) in created[1..].iter().zip(["Vocals", "Bass"]) {
+        let clip = doc.track(*track).unwrap().clips().next().unwrap();
+        assert_eq!(clip.start, ticks(3));
+        assert_eq!(clip.name, part);
+        let ClipData::Audio(audio) = &clip.data else {
+            panic!("an audio clip");
+        };
+        assert!(audio.start.abs() < 1e-9, "the whole file");
+    }
+    let folder = shell.processed_folder(bl_shell::processed::Kind::Stems);
+    let mut files: Vec<_> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(files, ["Pad Bass.wav", "Pad Vocals.wav"]);
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*shell.editor().document(), before);
+}
+
+// Spec: stem-separation R24. With no track selected, they go after the last.
+#[test]
+fn a_file_with_no_track_selected_goes_after_the_last_track() {
+    let scratch = Scratch::new("file-last");
+    let mut shell = fixture_shell(&scratch);
+    let file = scratch.path("Pad.wav");
+    tone_file(&file);
+    shell
+        .run("arrangement.select_tracks", json!({ "tracks": [] }))
+        .unwrap();
+    let last = shell.editor().document().top_level().last().unwrap();
+    let status = separate(
+        &mut shell,
+        json!({ "source": { "kind": "file", "path": text(&file) }, "stems": ["drums"] }),
+    );
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    assert_eq!(created.len(), 1);
+    let order: Vec<_> = shell.editor().document().top_level().collect();
+    let at = order.iter().position(|t| *t == last).unwrap();
+    assert_eq!(order[at + 1], created[0]);
+}
+
+/// The set's output, left channel, at 48 kHz.
+fn output(shell: &mut Shell, scratch: &Scratch, name: &str) -> Vec<f32> {
+    let path = scratch.path(name);
+    shell
+        .run(
+            "export.audio",
+            json!({ "path": text(&path), "bit_depth": 32, "sample_rate": 48000 }),
+        )
+        .unwrap();
+    bl_media::decode_file(&path)
+        .unwrap()
+        .channel(0)
+        .unwrap()
+        .to_vec()
+}
+
+// Spec: stem-separation R25, R29. A time selection over two clips of a track
+// separates only its range: the clips are split at its edges and their
+// parts inside deactivated, so the set sounds as it did.
+#[test]
+fn a_time_selection_separates_its_range_and_leaves_the_set_sounding_the_same() {
+    let scratch = Scratch::new("selection");
+    let mut shell = fixture_shell(&scratch);
+    let file = scratch.path("Tone.wav");
+    tone_file(&file);
+    let track = audio_tracks(&shell)[0];
+    let first = place(&mut shell, &file, track, 0);
+    let second = place(&mut shell, &file, track, 6);
+    let before = shell.editor().document().clone();
+    let heard = output(&mut shell, &scratch, "before.wav");
+
+    // The set's output is the whole set, so no time selection is made: the
+    // source names the range.
+    let status = separate(
+        &mut shell,
+        json!({ "source": { "kind": "time_selection", "tracks": [track],
+                            "start": ticks(2), "end": ticks(8) } }),
+    );
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    assert_eq!(created.len(), 5);
+    let doc = shell.editor().document();
+    // The stems span the selection exactly, on tracks named for it.
+    assert_eq!(
+        doc.track(created[0]).unwrap().name(),
+        format!("{} 3-9", doc.track(track).unwrap().name())
+    );
+    for stem in &created[1..] {
+        let clips: Vec<_> = doc.track(*stem).unwrap().clips().collect();
+        assert_eq!(clips.len(), 1);
+        assert_eq!((clips[0].start, clips[0].length), (ticks(2), ticks(6)));
+    }
+    // The source clips are split at the selection's edges, and the parts
+    // inside are deactivated.
+    let mut parts: Vec<_> = doc
+        .track(track)
+        .unwrap()
+        .clips()
+        .map(|c| (c.start, c.end(), c.mute))
+        .collect();
+    parts.sort();
+    assert_eq!(
+        parts,
+        [
+            (ticks(0), ticks(2), false),
+            (ticks(2), ticks(4), true),
+            (ticks(6), ticks(8), true),
+            (ticks(8), ticks(10), false),
+        ]
+    );
+    assert_eq!(doc.clip(first).unwrap().start, ticks(0));
+    assert!(doc.clip(second).is_some());
+    // The set sounds as it did before: the stems sum to the selection.
+    let after = output(&mut shell, &scratch, "after.wav");
+    let length = heard.len().min(after.len());
+    assert!(length > 48_000 * 10, "{length}");
+    let worst = heard[..length]
+        .iter()
+        .zip(&after[..length])
+        .map(|(a, b)| (a - b).abs())
+        .fold(0.0f32, f32::max);
+    // The stems are 44.1 kHz, so what is left is the conversion's ringing at
+    // the clips' edges: under -40 dB of the tones' 0.5 peak.
+    assert!(worst < 0.01, "the render nulls to within {worst}");
+    // One undo step.
+    assert_eq!(step_names(&shell)[0], "Separate Stems");
+    shell.run("edit.undo", json!({})).unwrap();
+    assert_eq!(*shell.editor().document(), before);
+}
+
+// Spec: stem-separation R25. A time selection over two tracks separates each
+// on its own; a track with no audio in it is skipped.
+#[test]
+fn a_time_selection_over_two_tracks_separates_each() {
+    let scratch = Scratch::new("selection-two");
+    let mut shell = fixture_shell(&scratch);
+    let file = scratch.path("Tone.wav");
+    tone_file(&file);
+    let tracks = audio_tracks(&shell);
+    place(&mut shell, &file, tracks[0], 0);
+    place(&mut shell, &file, tracks[1], 0);
+    let empty = shell
+        .editor()
+        .document()
+        .top_level()
+        .find(|t| shell.editor().document().track(*t).unwrap().kind() == TrackKind::Midi)
+        .unwrap();
+    let selection = json!({ "kind": "time_selection",
+                            "tracks": [tracks[0], tracks[1], tracks[1], empty],
+                            "start": ticks(1), "end": ticks(3) });
+    let status = separate(
+        &mut shell,
+        json!({ "source": selection, "stems": ["drums", "bass"] }),
+    );
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    // A group of two stems after each of the two tracks.
+    assert_eq!(created.len(), 6);
+    let doc = shell.editor().document();
+    for (group, source) in [(created[0], tracks[0]), (created[3], tracks[1])] {
+        let order: Vec<_> = doc.top_level().collect();
+        let at = order.iter().position(|t| *t == source).unwrap();
+        assert_eq!(order[at + 1], group);
+        let inside: Vec<_> = doc.track(group).unwrap().children().collect();
+        assert_eq!(names_of(&shell, &inside), ["Drums", "Bass"]);
+        let parts: Vec<_> = doc
+            .track(source)
+            .unwrap()
+            .clips()
+            .map(|c| (c.start, c.end(), c.mute))
+            .collect();
+        assert_eq!(parts.iter().filter(|p| p.2).count(), 1);
+        assert!(parts.contains(&(ticks(1), ticks(3), true)), "{parts:?}");
+    }
+    assert_eq!(doc.track(empty).unwrap().clips().count(), 0);
+}
+
+// Spec: stem-separation R27. The group holds a copy of the source track's
+// devices and automation, and the source keeps its own; the one track of a
+// single part holds them itself.
+#[test]
+fn the_group_carries_the_source_tracks_devices_and_automation() {
+    let scratch = Scratch::new("group-copy");
+    let mut shell = fixture_shell(&scratch);
+    let (mut shell, clip) = {
+        let file = scratch.path("Loop.wav");
+        loop_file(&file);
+        let placed = shell
+            .run(
+                "browser.add_to_arrangement",
+                json!({ "paths": [text(&file)], "at": 0 }),
+            )
+            .unwrap();
+        let clip: ClipId = serde_json::from_value(placed["clips"][0]["clip"].clone()).unwrap();
+        (shell, clip)
+    };
+    let track = shell.editor().document().clip_track(clip).unwrap();
+    let eq = bl_devices::eq_type();
+    shell
+        .run(
+            "device.add",
+            json!({ "track": track, "device": {
+                "kind": eq.kind, "name": eq.name, "role": eq.role, "sidechain": eq.sidechain } }),
+        )
+        .unwrap();
+    for (at, value) in [(0, 0.5), (WHOLE, 0.25)] {
+        shell
+            .run(
+                "automation.set_breakpoint",
+                json!({ "track": track, "target": { "type": "mixer", "param": "volume" },
+                        "at": at, "value": value }),
+            )
+            .unwrap();
+    }
+    let envelope = |shell: &Shell, track| {
+        shell
+            .editor()
+            .document()
+            .track(track)
+            .unwrap()
+            .automation()
+            .map(|(target, automation)| (*target, automation.envelope.points().collect::<Vec<_>>()))
+            .collect::<Vec<_>>()
+    };
+    let source_envelope = envelope(&shell, track);
+    assert_eq!(source_envelope.len(), 1);
+
+    let status = separate(&mut shell, json!({ "clip": clip }));
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    let doc = shell.editor().document();
+    let group = doc.track(created[0]).unwrap();
+    let kinds = |t: &bl_model::Track| t.devices().map(|d| d.kind.clone()).collect::<Vec<_>>();
+    assert_eq!(kinds(group), kinds(doc.track(track).unwrap()));
+    assert_eq!(group.devices().count(), 1);
+    // A new device, with the same settings, not the source's own.
+    assert_ne!(
+        group.devices().next().unwrap().id,
+        doc.track(track).unwrap().devices().next().unwrap().id
+    );
+    assert_eq!(envelope(&shell, created[0]), source_envelope);
+    assert_eq!(envelope(&shell, track), source_envelope);
+    // The stems themselves hold none.
+    for stem in &created[1..] {
+        assert_eq!(doc.track(*stem).unwrap().devices().count(), 0);
+    }
+
+    // One part: the one new track holds the devices itself.
+    shell.run("edit.undo", json!({})).unwrap();
+    let status = separate(&mut shell, json!({ "clip": clip, "stems": ["bass"] }));
+    let created: Vec<bl_model::TrackId> = ids(&status, "created_tracks");
+    assert_eq!(created.len(), 1);
+    let doc = shell.editor().document();
+    assert_eq!(doc.track(created[0]).unwrap().devices().count(), 1);
+    assert_eq!(envelope(&shell, created[0]), source_envelope);
+    assert_eq!(
+        doc.track(created[0]).unwrap().colour(),
+        StemKind::Bass.swatch()
+    );
+}
+
+// Spec: stem-separation R22, R31. What can't be separated is refused, with
+// its reason: a time selection on MIDI tracks only, a folder, a missing file.
+#[test]
+fn what_holds_no_audio_is_refused_with_its_reason() {
+    let scratch = Scratch::new("refused");
+    let mut shell = fixture_shell(&scratch);
+    let midi = shell
+        .editor()
+        .document()
+        .top_level()
+        .find(|t| shell.editor().document().track(*t).unwrap().kind() == TrackKind::Midi)
+        .unwrap();
+    let selection = json!({ "kind": "time_selection", "tracks": [midi],
+                            "start": ticks(0), "end": ticks(2) });
+    let folder = json!({ "kind": "file", "path": text(&scratch.path("config")) });
+    let missing = json!({ "kind": "file", "path": text(&scratch.path("Nothing.wav")) });
+    for source in [selection, folder, missing] {
+        assert!(!shell.can_invoke("stems.open", &json!({ "source": source })));
+        let refused = shell.run("stems.separate", json!({ "source": source }));
+        assert!(
+            matches!(&refused, Err(ShellError::Unavailable { .. })),
+            "{source}: {refused:?}"
+        );
+    }
+    assert!(status(&mut shell)["created_tracks"].is_null());
+}
+
+// Spec: stem-separation R22. With no source named, the Create menu's item acts
+// on what is selected: a clip, else a time selection, else the clip the
+// Session View shows.
+#[test]
+fn stems_open_acts_on_the_selection() {
+    if bl_shell::stems::packages().is_empty() {
+        return;
+    }
+    let scratch = Scratch::new("open-selected");
+    let mut shell = fixture_shell(&scratch);
+    let file = scratch.path("Tone.wav");
+    tone_file(&file);
+    let track = audio_tracks(&shell)[0];
+    let clip = place(&mut shell, &file, track, 0);
+    assert!(!shell.can_invoke("stems.open", &json!({})));
+    shell
+        .run(
+            "arrangement.select_time",
+            json!({ "start": ticks(1), "end": ticks(2), "tracks": [track] }),
+        )
+        .unwrap();
+    let opened = shell.run("stems.open", json!({})).unwrap();
+    assert_eq!(opened["dialog"]["source"]["kind"], "time_selection");
+    shell.run("stems.close", Value::Null).unwrap();
+    shell
+        .run("arrangement.select_clips", json!({ "clips": [clip] }))
+        .unwrap();
+    let opened = shell.run("stems.open", json!({})).unwrap();
+    assert_eq!(
+        opened["dialog"]["source"],
+        json!({ "kind": "clip", "clip": clip })
+    );
 }

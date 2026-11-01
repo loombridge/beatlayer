@@ -228,7 +228,7 @@ pub(crate) const QUICK_TAGS: Reason = Equivalent(
 // sidebar and the header row's Content Options button.
 pub(crate) const FILTERS: Reason = Equivalent(
     "the browser's Filter View: its tag buttons (the arrow keys, Enter and Cmd-Enter), the \
-         Filter View Menu's group items, the Results bar's Clear and Add Label buttons, Esc and \
+         Filter View Menu's group items and its Include Auto Tags item, the Results bar's Clear and Add Label buttons, Esc and \
          Cmd-F in the search field (the browser tags spec, R20 to R23)",
 );
 

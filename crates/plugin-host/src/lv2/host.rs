@@ -38,6 +38,8 @@ pub struct Lv2Type {
     pub device_type: DeviceType,
     /// Its author, if it names one.
     pub vendor: Option<String>,
+    /// Its classes, such as `ReverbPlugin` (spec: browser-tags R49).
+    pub categories: Vec<String>,
 }
 
 /// What a device's plug-in is doing, for `plugin.info`.
@@ -751,6 +753,7 @@ impl Lv2Type {
             path: path.to_owned(),
             device_type,
             vendor: info.vendor.clone(),
+            categories: info.classes.clone(),
         }
     }
 }

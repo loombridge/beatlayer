@@ -294,7 +294,7 @@ pub fn notes(grams: &Posteriorgrams, kind: Kind, grid: Option<Grid>) -> Vec<Note
             confidence: n.strength,
         })
         .collect();
-    clean_up(&mut notes, grid);
+    clean_up(&mut notes, kind, grid);
     velocities(&mut notes);
     notes
 }
@@ -382,7 +382,7 @@ fn by_pitch(notes: &mut [Note]) {
 }
 
 /// R15: merge, drop, snap, trim overlaps, in that order.
-fn clean_up(notes: &mut Vec<Note>, grid: Option<Grid>) {
+fn clean_up(notes: &mut Vec<Note>, kind: Kind, grid: Option<Grid>) {
     // Merge: per pitch, in time order, a note starting within the gap of
     // the last one's end joins it.
     by_pitch(notes);
@@ -411,11 +411,17 @@ fn clean_up(notes: &mut Vec<Note>, grid: Option<Grid>) {
             }
         }
     }
-    // Overlaps: per pitch, the earlier ends where the later starts. What
-    // that or a snap leaves too short goes too.
-    by_pitch(&mut merged);
+    // Overlaps: per pitch, the earlier ends where the later starts; in
+    // Melody whatever the pitch, as a snap can move an attack before the
+    // last note's end (R14). What that or a snap leaves too short goes too.
+    let melody = kind == Kind::Melody;
+    if melody {
+        merged.sort_by(|a, b| a.start.total_cmp(&b.start));
+    } else {
+        by_pitch(&mut merged);
+    }
     for i in 1..merged.len() {
-        if merged[i - 1].pitch == merged[i].pitch {
+        if melody || merged[i - 1].pitch == merged[i].pitch {
             merged[i - 1].end = merged[i - 1].end.min(merged[i].start);
         }
     }
@@ -577,9 +583,9 @@ mod tests {
         assert!((start(64) - seconds(11)).abs() < 1e-9);
     }
 
-    // Spec: audio-to-midi R15, and the brief's acceptance: no note shorter
-    // than 40 ms, none overlapping another of its pitch, whatever the
-    // posteriorgram holds.
+    // Spec: audio-to-midi R14, R15: no note shorter than 40 ms, none
+    // overlapping another of its pitch, and in Melody none overlapping any
+    // other, whatever the posteriorgram holds.
     #[test]
     fn no_note_is_short_or_overlaps_one_of_its_pitch() {
         let mut g = silence(400);
@@ -608,6 +614,9 @@ mod tests {
             let found = notes(&g, kind, Some(grid));
             assert!(!found.is_empty());
             assert!(found.iter().all(|n| n.end - n.start >= MIN_LENGTH));
+            if kind == Kind::Melody {
+                assert!(found.windows(2).all(|w| w[0].end <= w[1].start));
+            }
             for pitch in 51..=70 {
                 let mut of: Vec<_> = found.iter().filter(|n| n.pitch == pitch).collect();
                 of.sort_by(|a, b| a.start.total_cmp(&b.start));

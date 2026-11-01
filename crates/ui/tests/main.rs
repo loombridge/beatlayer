@@ -90,6 +90,7 @@ mod signature_lane;
 mod similar_files;
 mod slice_to_midi;
 mod sound_analysis;
+mod spectral_blur;
 mod stems_dialog;
 mod take_lanes;
 mod tempo_follower;

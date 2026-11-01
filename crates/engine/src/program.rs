@@ -153,6 +153,14 @@ pub struct EngineProgram {
     pub(crate) device_input: Vec<f32>,
     /// The device's input channels; zero without a device that has input.
     pub(crate) device_input_channels: usize,
+    /// The peers' channels the tracks take (Link Audio), by the names their
+    /// inputs keep: slot `i` of `link_input` is the stereo pair `2 * i`.
+    pub(crate) link_inputs: Vec<LinkInput>,
+    /// What the peers' channels hold for the block being processed: two
+    /// channels of `max_frames` frames for each of `link_inputs`, filled by
+    /// [`Processor::process`](crate::Processor::process) before the tasks
+    /// run, as `device_input` is.
+    pub(crate) link_input: Vec<f32>,
     pub(crate) channels: usize,
     pub(crate) max_frames: usize,
     /// The task whose buffer is the engine's output: Main's.
@@ -609,8 +617,21 @@ pub(crate) struct DeviceInput {
     /// The slot of the route's gain.
     pub(crate) route: u32,
     /// Which of the interface's inputs, counted from 1: one channel, or a
-    /// stereo pair.
+    /// stereo pair. For a peer's channel (`link`), its slot's pair.
     pub(crate) channel: Channel,
+    /// Whether it is a peer's channel from Link Audio, read from
+    /// `link_input`, rather than the interface's.
+    pub(crate) link: bool,
+}
+
+/// A peer's channel a track takes (the Link Audio spec, R5, R10), by the
+/// names its input keeps.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct LinkInput {
+    pub(crate) peer: String,
+    pub(crate) channel: String,
+    /// The track that takes it, for recording.
+    pub(crate) track: bl_model::TrackId,
 }
 
 /// No delay line: an input that arrives with no compensation of its own.
@@ -1103,6 +1124,58 @@ impl EngineProgram {
                 }
                 None => to.fill(0.0),
             }
+        }
+    }
+
+    /// Fills `link_input` for the block that plays from `link`'s moment (a
+    /// [`frame_at`](crate::frame_at) of it): what each channel a track takes
+    /// holds, or silence for one the peers don't offer, or all of it while
+    /// there is no `link`. Real-time safe: the buffer was made with the
+    /// program, and names are compared, not made.
+    pub(crate) fn read_link_audio(
+        &mut self,
+        link: Option<(&dyn crate::LinkAudio, i64)>,
+        frames: usize,
+        rate: u32,
+    ) {
+        let stride = self.max_frames;
+        let frames = frames.min(stride);
+        for (slot, input) in self.link_inputs.iter().enumerate() {
+            let (left, right) =
+                self.link_input[slot * 2 * stride..(slot * 2 + 2) * stride].split_at_mut(stride);
+            let (left, right) = (&mut left[..frames], &mut right[..frames]);
+            let channel = link.and_then(|(link, moment)| {
+                Some((link.channel(&input.peer, &input.channel)?, moment))
+            });
+            match channel {
+                Some((channel, moment)) => {
+                    channel.read(crate::frame_at(moment, rate), left, right);
+                }
+                None => {
+                    left.fill(0.0);
+                    right.fill(0.0);
+                }
+            }
+        }
+    }
+
+    /// Gives `link` the part of the block `offset..offset + length`, of each
+    /// track it offers, as the track leaves its mixer (the Link Audio spec,
+    /// R4). Real-time safe.
+    pub(crate) fn stage_link_audio(
+        &self,
+        link: &mut dyn crate::LinkAudio,
+        offset: usize,
+        length: usize,
+    ) {
+        for i in 0..link.offered().len() {
+            let track = link.offered()[i];
+            let Some(task) = self.task_of(track) else {
+                continue;
+            };
+            let left = self.task_output(task, 0, length);
+            let right = self.task_output(task, 1.min(self.channels - 1), length);
+            link.stage(track, offset, left, right);
         }
     }
 
@@ -1648,10 +1721,15 @@ impl EngineProgram {
         // closes it (WP-2.13).
         if let Some(device) = task.device_input {
             delivered += gather(events, device.route, from, until, &mut lane.events);
+            let (input, input_channels) = if device.link {
+                (&self.link_input, self.link_inputs.len() * 2)
+            } else {
+                (&self.device_input, self.device_input_channels)
+            };
             map_device_input(
                 &mut lane.device,
-                &self.device_input,
-                self.device_input_channels,
+                input,
+                input_channels,
                 device.channel,
                 channels,
                 stride,

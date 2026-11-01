@@ -1,6 +1,6 @@
 # Sound similarity: analysis, Show Similar Files, and similar sample swapping
 
-- **Status:** draft
+- **Status:** partial (R1 to R10 each have a passing test; R11 to R30 are WP-9.9's and WP-9.10's)
 - **Work packages:** WP-9.8 (sound analysis: what is analysed, the descriptor, the database, the Status Bar's progress and Pause: R1 to R10); WP-9.9 (Show Similar Files and its results: R11 to R19); WP-9.10 (similar sample swapping in Simpler, Drum Sampler and Drum Rack pads, and the similarity reference: R20 to R30). Automatic tags from the same analysis are [browser tags](browser-tags.md) R49 to R58; the browser's places, search and item menu are [browser](browser.md)'s; the samplers' own rules are [sampler](sampler.md)'s, [one-shot drum sampler](one-shot-drum-sampler.md)'s and [drum racks](drum-racks.md)'
 - **Parity-matrix row:** Views and workflow: Browser: similarity search and similar-sample swapping
 - **Checked against:** the Live 12 reference manual (online edition), chapter 3 section 3.4 and chapter 4 section 4.4.2, read 30 October 2026; chapter 42, sections 42.22 and 42.23; the UI parity reference rows C-BROWSER-003, M-VIEW-026, S-BRW-010, S-SWAP-001 to 005 and I-HOLD-004
@@ -70,6 +70,6 @@ Analysis runs at low priority and never makes the browser or the interface wait.
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 to R10 | to be written in WP-9.8: `crates/analysis/src/similarity.rs`; `crates/shell/tests/sound_analysis.rs` over a generated place, a restart with real database files, a move, Pause on the test clock; R9's generated families | unit, shell test |
+| R1 to R10 | `crates/analysis/src/similarity.rs` (the descriptor, R3), `crates/analysis/tests/similarity.rs` (R9, over `tests/fixtures/gen/gen_families.py`'s families), `crates/shell/tests/sound_analysis.rs` (R1, R2, R4, R5 by hand-paced analysis, R6, R7, R8 over a generated place, a restart with real database files, a move, a rename and Pause), `crates/shell/src/browser/index.rs` (R5: search at 100,000 names while a file is analysed), `crates/ui/tests/sound_analysis.rs` (R6, the Status Bar). R10 has no test: nothing in the analysis reaches the network | unit, shell test, UI script |
 | R11 to R19 | to be written in WP-9.9: `crates/ui/tests/similar_files.rs` for each entry point; `crates/shell/tests/similar_files.rs` for the order; `crates/ui/tests/keymap/resolve.rs` for S-BRW-010 | UI script, shell test |
 | R20 to R30 | to be written in WP-9.10: `crates/shell/tests/sample_swap.rs` per device and pad, undo, a save and reload of the reference; `crates/ui/tests/sample_swap.rs` pressing every S-SWAP key | shell test, UI script |

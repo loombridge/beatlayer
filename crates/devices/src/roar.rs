@@ -2068,6 +2068,7 @@ pub fn display(
                 x,
                 y: at(f64::from(x)),
                 text: format!("Level {input:.1} dB"),
+                handle: None,
             });
         }
     }

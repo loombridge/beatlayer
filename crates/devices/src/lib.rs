@@ -32,6 +32,7 @@ pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod chorus_ensemble;
+pub mod color_limiter;
 pub mod compressor;
 pub mod crusher;
 mod cv;
@@ -48,6 +49,7 @@ pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
 mod dynamics;
+pub mod echo;
 pub mod eq;
 pub mod filter_delay;
 mod filters;
@@ -58,6 +60,7 @@ pub mod grain_delay;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod instrument_filter;
 pub mod kit;
 pub mod kitbag;
 pub mod level_mod;
@@ -79,6 +82,7 @@ pub mod overdrive;
 pub mod phaser_flanger;
 pub mod play_mod;
 pub mod polysynth;
+pub mod re_enveloper;
 pub mod remap;
 pub mod reverb;
 pub mod roar;
@@ -107,6 +111,7 @@ pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use chorus_ensemble::{CHORUS_ENSEMBLE, chorus_ensemble_type};
+pub use color_limiter::{COLOR_LIMITER, ColorLimiter, color_limiter_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
 pub use cv_clock_in::{CV_CLOCK_IN, cv_clock_in_type};
@@ -121,6 +126,7 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_bus::{DRUM_BUSS, drum_buss_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
+pub use echo::{ECHO, echo_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
@@ -145,6 +151,7 @@ pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
+pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use roar::{ROAR, roar_type};
@@ -205,12 +212,15 @@ pub fn display_in(
 ) -> Option<DeviceDisplay> {
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
+        ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        COLOR_LIMITER => Some(color_limiter::display(device, data)),
+        RE_ENVELOPER => Some(re_enveloper::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
@@ -282,6 +292,7 @@ pub fn register(registry: &mut Registry) {
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);
+    echo::register(registry);
     grain_delay::register(registry);
     alignment_delay::register(registry);
     reverb::register(registry);
@@ -333,6 +344,8 @@ pub fn register(registry: &mut Registry) {
     roar::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
+    color_limiter::register(registry);
+    re_enveloper::register(registry);
     shifter::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);

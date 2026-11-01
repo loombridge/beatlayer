@@ -353,6 +353,26 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "link.set_show_toggle",
             settings("link", nothing, "Show Link Toggle", Key::ArrowUp),
         ),
+        // Link Audio (the Link Audio spec, R2): the Link page's section.
+        (
+            "link.set_audio",
+            settings("link", nothing, "Link Audio", Key::Enter),
+        ),
+        (
+            "link.set_audio_latency",
+            settings("link", nothing, "Latency", Key::ArrowRight),
+        ),
+        (
+            "link.set_audio_name",
+            Exception(Equivalent(
+                "the Name field, typed into and then committed with Enter or by leaving it: \
+                 it sends its text once, so a typed space isn't trimmed away",
+            )),
+        ),
+        (
+            "link.set_sync_to_incoming_audio",
+            settings("link", nothing, "Sync to Incoming Audio", Key::Enter),
+        ),
         ("song.scales", Exception(Query)),
         (
             "song.unfollow_tempo_automation",

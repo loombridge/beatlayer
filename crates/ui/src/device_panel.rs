@@ -462,16 +462,7 @@ pub fn show(
             // The drag goes under the display, so its view buttons stay on
             // top and take their clicks.
             display_drag(ui, frame, panel, display, rect, id, events);
-            crate::device_display::draw(
-                ui,
-                theme,
-                rect,
-                id,
-                frame.enabled,
-                display,
-                &panel.description.views,
-                events,
-            );
+            crate::device_display::draw(ui, theme, rect, id, frame.enabled, display, panel, events);
         }
         // Spec: articulation-map R15. The Articulation Map's list shows
         // every articulation, the current one lit.
@@ -1203,7 +1194,7 @@ impl Control<'_> {
 
 /// The value `steps` key presses from `value`: one step of a stepped
 /// parameter, or 1% of the travel.
-fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
+pub(crate) fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
     if param.is_stepped() {
         param.clamp(value + f64::from(steps))
     } else {

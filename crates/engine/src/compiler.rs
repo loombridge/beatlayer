@@ -375,6 +375,11 @@ impl Compiler {
         Ok(())
     }
 
+    /// Whether the loader still owes an answer for some clip's source.
+    pub(crate) fn loading(&self) -> bool {
+        self.sources.loading()
+    }
+
     /// What the audio thread needs now that the loader has answered: the
     /// clips of the track whose clip's source is open, or the media it
     /// couldn't open. Nothing if the answer is stale, or no document has
@@ -1488,6 +1493,8 @@ impl Compiler {
             note_migrations,
             device_input: vec![0.0; self.config.input_channels * self.config.max_frames],
             device_input_channels: self.config.input_channels,
+            link_input: vec![0.0; build.link_inputs.len() * 2 * self.config.max_frames],
+            link_inputs: build.link_inputs,
             channels: self.config.channels,
             max_frames: self.config.max_frames,
             output: task_of[&document.main_id()],
@@ -1925,8 +1932,28 @@ impl Compiler {
         // The track's own input from the audio interface, Ext. In
         // (WP-2.13): its own route, whose Monitor gate opens and closes it
         // like any other input.
+        // Or a peer's channel from Link Audio (R5), through a route of its
+        // own just the same.
+        let link_input = match &track.routing().input {
+            bl_model::Input::LinkAudio { peer, channel } if track.kind() == TrackKind::Audio => {
+                let slot = build.link_inputs.len() as u16;
+                build.link_inputs.push(crate::program::LinkInput {
+                    peer: peer.clone(),
+                    channel: channel.clone(),
+                    track: track.id(),
+                });
+                Some(slot)
+            }
+            _ => None,
+        };
         let device_input = match track.routing().input {
-            bl_model::Input::External { channel } if track.kind() == TrackKind::Audio => {
+            bl_model::Input::External { .. } | bl_model::Input::LinkAudio { .. }
+                if track.kind() == TrackKind::Audio =>
+            {
+                let channel = match track.routing().input {
+                    bl_model::Input::External { channel } => channel,
+                    _ => bl_model::Channel::Pair(link_input.map_or(1, |slot| slot * 2 + 1)),
+                };
                 let key = NodeKey::DeviceInput(track.id());
                 let closed = !track.routing().monitoring(track.mixer().arm);
                 let auto = track.routing().monitor == bl_model::Monitor::Auto;
@@ -1945,7 +1972,11 @@ impl Compiler {
                         Route::new(1.0, false, &config).closed(closed).auto(auto),
                     ))
                 });
-                Some(DeviceInput { route, channel })
+                Some(DeviceInput {
+                    route,
+                    channel,
+                    link: link_input.is_some(),
+                })
             }
             _ => None,
         };
@@ -2583,6 +2614,8 @@ struct Build {
     /// The slot each device has in `slots` (WP-5.45).
     device_slots: BTreeMap<DeviceId, u32>,
     midi_sidechains: Vec<DeviceMidiSidechain>,
+    /// The peers' channels the tracks take (the Link Audio spec, R5).
+    link_inputs: Vec<crate::program::LinkInput>,
     unhosted: Vec<DeviceId>,
     /// The modulators' slots and devices, in the order their rows sit on the
     /// bus (WP-5.10).
@@ -3663,7 +3696,10 @@ fn route_events(changes: &ChangeSet, old: &Document, new: &Document, params: &mu
         // Ext. In hears the interface while the track monitors it; Monitor
         // or Arm alone doesn't recompile (WP-2.13). Under Monitor Auto it
         // also closes while the track's clips play (the routing spec, R11).
-        if matches!(track.routing().input, bl_model::Input::External { .. }) {
+        if matches!(
+            track.routing().input,
+            bl_model::Input::External { .. } | bl_model::Input::LinkAudio { .. }
+        ) {
             let closed = |t: &Track| !t.routing().monitoring(t.mixer().arm);
             if closed(then) != closed(track) {
                 params.push(ParamEvent::now(

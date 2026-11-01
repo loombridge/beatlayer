@@ -166,13 +166,13 @@ Every press and turn runs Beatlayer's registered commands, the same ones the win
 | R42 | `bl-push` `mix::the_display_and_the_state_show_names_values_and_the_underline`; `bl-shell` `push::mix_mode_sets_the_selected_tracks_volume_pan_and_sends_one_undo_step_a_touch`, `a_rack_tracks_second_press_unfolds_its_chains_in_the_mixer_and_they_are_mixed`; `bl-agent` `push::an_agent_reads_and_sets_a_simulated_push_2` | surface, agent |
 | R43 | `bl-shell` `push_clips::an_empty_audio_slot_loads_a_sample_through_browse_mode`, `push_clips::with_the_arrangement_shown_clip_mode_shows_the_clip_view_s_clip`; `bl-push` `clip::an_empty_slot_says_so_and_the_display_follows_the_selection` | surface, display frame |
 | R44 | `bl-push` `clip::the_display_names_the_clip_in_its_colour_and_a_notes_opacity_is_its_velocity` (golden `clip.png`), `clip::an_audio_clip_shows_its_waveform`, `clip::the_display_follows_a_playing_clip` | display frame |
-| R45 | `bl-shell` `push_clips::loop_position_moves_by_a_beat_and_a_sixteenth_and_carries_the_start`; `bl-agent` `push_clips::an_agent_reads_clip_mode_and_reads_back_what_its_controls_set` | surface, agent |
+| R45 | `bl-shell` `push_clips::loop_position_moves_by_a_beat_and_a_sixteenth_and_carries_the_start`, `push_clips::loop_position_moves_left_past_the_start_with_it`; `bl-agent` `push_clips::an_agent_reads_clip_mode_and_reads_back_what_its_controls_set` | surface, agent |
 | R46 | `bl-push` `clip::zoom_centres_on_the_marker_last_touched_and_asks_for_no_command` | surface |
 | R47, R48 | `bl-shell` `push_clips::an_audio_clip_steps_warp_mode_sets_gain_and_transposes`; `bl-push` `clip::the_state_reads_back_the_clip_its_controls_and_the_zoom` | surface |
 | R49 | `bl-shell` `push_clips::crop_deletes_the_notes_outside_the_loop_as_one_step` | surface |
 | R50, R51, R71 | `bl-push` `clip::the_layouts_fold_the_display_or_mark_their_sequenceable_area` | display frame |
 | R52 to R54 | `bl-push` `clip::the_layouts_fold_the_display_or_mark_their_sequenceable_area` (the Melodic Sequencer's page follows Page Right; the Sequencer + 32 Notes fits every note) | display frame |
-| R55, R56 | `bl-shell` `push_clips::holding_a_step_sets_nudge_length_fine_and_velocity_as_one_undo_step`, `push_clips::two_held_steps_show_a_range_and_change_together` | surface |
+| R55, R56 | `bl-shell` `push_clips::holding_a_step_sets_nudge_length_fine_and_velocity_as_one_undo_step`, `push_clips::two_held_steps_show_a_range_and_change_together`, `push_clips::a_note_nudged_out_of_its_step_stays_the_steps` | surface |
 | R57 | `bl-shell` `push_clips::an_empty_held_step_gets_a_note_as_one_undo_step`, `push_clips::select_with_a_drum_pad_changes_all_its_notes` | surface |
 | R58 | `bl-push` `clip::the_state_reads_back_the_clip_its_controls_and_the_zoom`; `bl-agent` `push_clips::an_agent_reads_clip_mode_and_reads_back_what_its_controls_set` | surface, agent |
 | R59 | `bl-push` `session::holding_session_in_note_mode_switches_the_pads_while_it_is_held`, `a_pad_let_go_after_the_momentary_mode_ended_still_sends_its_release` | surface |

@@ -401,6 +401,9 @@ pub struct ClipMode {
     select: bool,
     shadows: BTreeMap<(ClipId, u8, i64), Shadow>,
     recent: BTreeMap<(u8, i64), (u8, Instant)>,
+    /// The grid line of each note the gesture moved or added, by where it
+    /// is now, so a note nudged out of its step stays the step's (R55).
+    homes: BTreeMap<(ClipId, u8, i64), i64>,
 }
 
 impl Default for ClipMode {
@@ -423,6 +426,7 @@ impl ClipMode {
             select: false,
             shadows: BTreeMap::new(),
             recent: BTreeMap::new(),
+            homes: BTreeMap::new(),
         }
     }
 
@@ -493,7 +497,15 @@ impl ClipMode {
                 let inside: Vec<Held> = ordered
                     .iter()
                     .enumerate()
-                    .filter(|(_, n)| n.key == step.key && n.start >= from && n.start < to)
+                    .filter(|(_, n)| {
+                        n.key == step.key
+                            && self
+                                .homes
+                                .get(&(shown.clip.id, n.key, n.start.get()))
+                                .map_or(n.start >= from && n.start < to, |&home| {
+                                    home == step.start.get()
+                                })
+                    })
                     .map(|(place, n)| held(place, n, step.start.get()))
                     .collect();
                 if inside.is_empty() {
@@ -519,7 +531,14 @@ impl ClipMode {
             .iter()
             .enumerate()
             .filter(|(_, n)| n.key == key)
-            .map(|(place, n)| held(place, n, n.start.get().div_euclid(step) * step))
+            .map(|(place, n)| {
+                let grid = self
+                    .homes
+                    .get(&(shown.clip.id, n.key, n.start.get()))
+                    .copied()
+                    .unwrap_or(n.start.get().div_euclid(step) * step);
+                held(place, n, grid)
+            })
             .collect::<Vec<_>>();
         (!notes.is_empty()).then_some(Targets {
             clip: shown.clip.id,
@@ -691,6 +710,8 @@ impl ClipMode {
                 .max(0);
             let moved = wanted - note.start;
             if moved != 0 {
+                self.homes
+                    .insert((targets.clip, note.key, wanted), note.grid);
                 groups.entry(moved).or_default().push(note.place);
             }
         }
@@ -725,6 +746,8 @@ impl ClipMode {
                 },
                 step.start.get(),
             );
+            self.homes
+                .insert((targets.clip, step.key, values.start), step.start.get());
             self.shadows.insert(
                 id,
                 Shadow {
@@ -773,6 +796,7 @@ impl ClipMode {
             let places = [place as u32];
             let (sent, want) = (shadow.sent, shadow.want);
             if want.start != sent.start {
+                self.homes.insert((id.0, id.1, want.start), id.2);
                 self.run(
                     ctx,
                     "note.move",
@@ -886,8 +910,14 @@ impl ClipMode {
                     let length = marks.loop_end - marks.loop_start;
                     let at = (marks.loop_start + by).clamp(0.0, (limit - length).max(0.0));
                     let carry = (marks.start - marks.loop_start).abs() < 1e-6;
+                    // Start must stay before the loop's end, so moving left
+                    // it goes first and moving right the loop does.
+                    let start_first = carry && at < marks.loop_start;
+                    if start_first {
+                        Self::set_region(ctx, column, shown, id, at, raw_end);
+                    }
                     Self::set_loop(ctx, column, shown, id, at, at + length);
-                    if carry {
+                    if carry && !start_first {
                         Self::set_region(ctx, column, shown, id, at, raw_end);
                     }
                 }
@@ -1288,6 +1318,7 @@ impl Content for ClipMode {
             ctx.cx.end_gesture(NOTES_GESTURE);
             self.gesture = false;
             self.shadows.clear();
+            self.homes.clear();
         }
         self.catch_up(ctx);
     }

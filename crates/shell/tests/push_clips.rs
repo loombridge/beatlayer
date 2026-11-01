@@ -161,6 +161,36 @@ fn audio_clip(rig: &mut Rig, track: TrackId, file: &Path) -> ClipId {
         .id
 }
 
+// Spec: push-2-tracks R45. Moving a one-beat loop left by a beat carries
+// the Start marker with it, though the loop's new end is where Start was.
+#[test]
+fn loop_position_moves_left_past_the_start_with_it() {
+    let mut rig = Rig::new();
+    session_view(&mut rig);
+    let id = midi_clip(&mut rig);
+    rig.run(
+        "clip.set_midi_loop",
+        json!({ "clip": id, "start": 2 * BEAT, "end": 3 * BEAT }),
+    );
+    rig.run(
+        "clip.set_midi_region",
+        json!({ "clip": id, "start": 2 * BEAT }),
+    );
+    rig.tap("clip");
+    rig.tap("upper_2");
+    assert!(midi(&rig, id).looping);
+    turn(&mut rig, 1, -10);
+    let data = midi(&rig, id);
+    assert_eq!(
+        (
+            data.loop_start.get(),
+            data.loop_end.map(Ticks::get),
+            data.start.get()
+        ),
+        (BEAT, Some(2 * BEAT), BEAT)
+    );
+}
+
 // Spec: push-2-tracks R43, R44, R45. Clip Mode on a looping MIDI clip
 // switches Loop with the second upper button, moves Loop Position by a beat
 // and, with Shift, by a sixteenth, carrying Start Offset where they meet;
@@ -487,6 +517,25 @@ fn holding_a_step_sets_nudge_length_fine_and_velocity_as_one_undo_step() {
     assert_eq!(controls(&mut rig)[0].0, "Zoom");
     rig.run("edit.undo", json!({}));
     assert_eq!(notes_of(&rig, id)[0], (36, 0, STEP, 100));
+}
+
+// Spec: push-2-tracks R55. A note nudged before its step's grid line is
+// still the held step's: the next turn moves it again rather than adding a
+// note to a step that looks empty.
+#[test]
+fn a_note_nudged_out_of_its_step_stays_the_steps() {
+    let (mut rig, id) = two_steps();
+    assert!(rig.sim.press_pad(4, 1, 100));
+    rig.pass(400);
+    turn(&mut rig, 0, -10);
+    turn(&mut rig, 0, -10);
+    assert_eq!(value_of(&mut rig, "Nudge"), "-20 %");
+    assert!(rig.sim.release_pad(4, 1));
+    rig.pass(40);
+    assert_eq!(
+        notes_of(&rig, id),
+        [(36, 0, STEP, 100), (36, STEP - 20 * STEP / 100, STEP, 100)]
+    );
 }
 
 // Spec: push-2-tracks R56. With several steps held the encoders change

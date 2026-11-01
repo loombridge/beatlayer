@@ -886,3 +886,40 @@ fn held_steps_keep_the_earlier_values_either_side() {
     assert_eq!(at(2 * step), at(3 * step));
     assert_ne!(at(2 * step), Some(0.5));
 }
+
+// Spec: push-2-notes R66. Two neighbouring held steps both take the value
+// over their spans, with no earlier value kept between them.
+#[test]
+fn neighbouring_held_steps_take_the_value_without_a_dip_between() {
+    let (mut rig, clip, column) = automated_clip();
+    let step = Ticks::SIXTEENTH.get();
+    rig.run(
+        "clip.set_envelope_breakpoint",
+        json!({
+            "clip": clip,
+            "target": { "type": "mixer", "param": "volume" },
+            "kind": "automation",
+            "at": 8 * step,
+            "value": 0.5,
+        }),
+    );
+    rig.pass(50);
+    assert!(rig.sim.press_pad(4, 2, 100));
+    assert!(rig.sim.press_pad(4, 3, 100));
+    rig.pass(50);
+    assert!(rig.sim.touch(column));
+    rig.pass(50);
+    assert!(rig.sim.turn(column, -40));
+    rig.pass(50);
+    assert!(rig.sim.release(column));
+    rig.pass(50);
+    assert!(rig.sim.release_pad(4, 2));
+    assert!(rig.sim.release_pad(4, 3));
+    rig.pass(50);
+    let points = rig.automation(clip).remove(0).1;
+    let at = |t: i64| points.iter().find(|p| p.0 == t).map(|p| p.1);
+    assert_eq!(at(3 * step - 1), None, "{points:?}");
+    assert_eq!(at(3 * step + 1), None, "{points:?}");
+    assert_eq!(at(2 * step), at(4 * step), "{points:?}");
+    assert_eq!(at(4 * step + 1), Some(0.5), "{points:?}");
+}

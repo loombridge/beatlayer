@@ -136,6 +136,11 @@ impl Note {
         else {
             return;
         };
+        // Repeat switched off, or released, with pads still held: they stop
+        // repeating.
+        if !self.track.is_some_and(|track| self.repeating(track)) {
+            self.repeat.pads.clear();
+        }
         let step = size.ticks().get();
         let swing = ctx.swing.clamp(0.0, 1.0);
         let playing = model.transport.playing;

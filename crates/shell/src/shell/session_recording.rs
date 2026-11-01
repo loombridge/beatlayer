@@ -715,8 +715,11 @@ impl Shell {
                         };
                         // Spec: midi-controller-data R14. The controllers
                         // become the clip's envelopes when the take ends.
-                        let moves =
+                        let mut moves =
                             crate::recording::session_moves(messages, take.start, &tempo, rate);
+                        for (at, _) in &mut moves {
+                            *at += offset;
+                        }
                         crate::recording::write_moves(&mut self.editor, clip, &moves, None)?;
                     }
                     _ => {
@@ -922,7 +925,15 @@ impl Shell {
                 return None;
             }
             let start = tempo.frames_to_ticks(self.session_take_start?, rate);
-            let at = now - start;
+            // Spec: push-2-notes R51. A phrase-synced take starts part-way in.
+            let offset = self
+                .session_run
+                .as_ref()
+                .and_then(|run| run.fixed)
+                .map_or(Ticks::ZERO, |(length, phrase)| {
+                    phrase_offset(start, length, phrase)
+                });
+            let at = now - start + offset;
             return (at >= Ticks::ZERO).then_some((scene, true, at));
         }
         let clip = document.slot(track, scene)?;
@@ -1044,7 +1055,6 @@ fn quantized_session_notes(
         .collect()
 }
 
-/// A new recording's MIDI data: the notes in a clip that loops.
 /// `notes` moved `by` later.
 fn shifted(mut notes: Vec<bl_model::Note>, by: Ticks) -> Vec<bl_model::Note> {
     for note in &mut notes {
@@ -1053,6 +1063,7 @@ fn shifted(mut notes: Vec<bl_model::Note>, by: Ticks) -> Vec<bl_model::Note> {
     notes
 }
 
+/// A new recording's MIDI data: the notes in a clip that loops.
 fn new_midi(notes: Vec<bl_model::Note>) -> MidiData {
     MidiData {
         looping: true,

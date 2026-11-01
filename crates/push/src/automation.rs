@@ -130,14 +130,21 @@ pub(crate) fn write_steps(
                 .find(|e| e.kind == EnvelopeKind::Automation && e.target == *target)
         })
         .map(|e| &e.envelope);
-    for step in ctx.held_steps {
+    let steps = ctx.held_steps;
+    let held = |at: Ticks| {
+        steps
+            .iter()
+            .any(|s| s.start <= at && at <= s.start + s.length)
+    };
+    for step in steps {
         let end: Ticks = step.start + step.length;
         // Breakpoints that hold the earlier values just outside the span, so
-        // the envelope keeps them on either side (R66).
+        // the envelope keeps them on either side (R66); none inside another
+        // held step, which takes the value too.
         let guards = old.into_iter().flat_map(|envelope| {
             [step.start - Ticks(1), end + Ticks(1)]
                 .into_iter()
-                .filter(|at| *at >= Ticks::ZERO)
+                .filter(|at| *at >= Ticks::ZERO && !held(*at))
                 .filter_map(|at| envelope.value_at(at).map(|v| (at, v)))
         });
         let writes = guards.chain([(step.start, value), (end, value)]);

@@ -1061,7 +1061,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.25 | todo |  |  |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |
-| 9.28 | todo |  |  |
+| 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |
 | 9.29 | todo |  |  |
 | 9.30 | todo |  |  |
 | 9.31 | todo |  |  |

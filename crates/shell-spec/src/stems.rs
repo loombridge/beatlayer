@@ -13,6 +13,8 @@
 use bl_commands::Context::{Arrangement, Global};
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
 use bl_model::{ClipId, TrackId};
+
+use crate::packages::PackageStatus;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -22,7 +24,8 @@ pub const OPEN: &str = "stems.open";
 pub const CLOSE: &str = "stems.close";
 /// `stems.status`: the packages, the download, and the separation.
 pub const STATUS: &str = "stems.status";
-/// `stems.install`: download and install the packages.
+/// `stems.install`: download and install the packages (runs
+/// `packages.install` for stem separation's).
 pub const INSTALL: &str = "stems.install";
 /// `stems.separate`: separate an audio clip into stems on new tracks.
 pub const SEPARATE: &str = "stems.separate";
@@ -115,23 +118,6 @@ pub struct SeparateArgs {
 
 fn every_stem() -> Vec<StemKind> {
     StemKind::ALL.to_vec()
-}
-
-/// A package the separation needs.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct PackageStatus {
-    /// Its name.
-    pub name: String,
-    /// What it does.
-    pub purpose: String,
-    /// Its version.
-    pub version: String,
-    /// Its project's page.
-    pub url: String,
-    /// The download's size in bytes.
-    pub size: u64,
-    /// Whether it's installed.
-    pub installed: bool,
 }
 
 /// Where a download or a separation is.
@@ -260,7 +246,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(INSTALL, "Download Required Packages Now")
             .description(
-                "Downloads and installs the open-source packages stem separation needs, ONNX \
+                "Runs `packages.install` for the open-source packages stem separation needs, ONNX \
                  Runtime and the Demucs model (about 350 MB together), into Beatlayer's \
                  application-data folder, checking each file's SHA-256. Returns at once; \
                  `stems.status` reports the progress. Installed packages aren't downloaded \

@@ -170,4 +170,5 @@ mod tunings;
 mod tunings_browser;
 mod undo_history;
 mod warping;
+mod wavetables;
 mod whole_tracks;

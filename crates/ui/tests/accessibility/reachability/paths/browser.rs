@@ -35,6 +35,15 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             main(nothing, browser_search, "Search Field", Key::K),
         ),
         ("browser.state", Exception(Query)),
+        ("browser.analysis_state", Exception(Query)),
+        // Sound analysis's Pause and Resume (sound-similarity R6).
+        (
+            "browser.set_analysis_paused",
+            Exception(Gap(
+                "the Status Bar's Pause button is a pointer button outside the Tab order; it \
+                 joins the Status Bar's order in the work that gives the bar one",
+            )),
+        ),
         ("browser.tags", Exception(Query)),
         // The File Manager (WP-6.63): its own rows and buttons reach
         // these, and its views open from the File and View menus.

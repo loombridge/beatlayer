@@ -14,6 +14,7 @@
 //! | [`onsets`] | Transient times | Spectral flux with adaptive peak picking (after Böck, Krebs and Schedl, 2012), refined in the waveform |
 //! | [`tempo`] | Tempo (BPM) | The onset function's autocorrelation, weighted towards 120 BPM (after Ellis, 2007), refined by a line through the transients |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
+//! | [`similarity`] | A sound's descriptor, for finding sounds that sound alike (sound-similarity R3) | Log-mel and cepstral statistics, spectral shape envelopes, onset density, length and pitchedness, compared by cosine distance |
 //! | [`loops`] | The span of a sample that repeats, for the autosampler | Rising zero crossings of the left channel, matched over 10 ms |
 //!
 //! [`stems`] separates a mix into drums, bass, others, and vocals with a
@@ -32,6 +33,7 @@ pub mod loops;
 pub mod loudness;
 pub mod measure;
 pub mod onsets;
+pub mod similarity;
 pub mod spectrum;
 pub mod stems;
 pub mod tempo;

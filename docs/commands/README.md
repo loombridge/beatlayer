@@ -363,6 +363,83 @@ Two parameters that share one control, which a switch turns between: while `swit
 
 </details>
 
+### `AnalysisState`
+
+How far sound analysis has got (spec: sound-similarity R6, R7).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `analysed` | integer, at least 0 | yes | The audio files and presets that have a descriptor. |
+| `waiting` | integer, at least 0 | yes | The audio files and presets waiting to be analysed, the one under way included. |
+| `skipped` | integer, at least 0 | yes | The files that couldn't be analysed, and aren't tried again until they change. |
+| `paused` | boolean | yes | Whether analysis is paused: the file under way is finished, and no other is begun until it resumes. |
+| `computed` | integer, at least 0 | yes | The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it. |
+| `current` | string or null | no | The path of the file under way. |
+| `share` | number or null | no | The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far sound analysis has got (spec: sound-similarity R6, R7).",
+  "properties": {
+    "analysed": {
+      "description": "The audio files and presets that have a descriptor.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "computed": {
+      "description": "The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "current": {
+      "description": "The path of the file under way.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paused": {
+      "description": "Whether analysis is paused: the file under way is finished, and no other is begun until it resumes.",
+      "type": "boolean"
+    },
+    "share": {
+      "description": "The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "description": "The files that couldn't be analysed, and aren't tried again until they change.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "waiting": {
+      "description": "The audio files and presets waiting to be analysed, the one under way included.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "analysed",
+    "waiting",
+    "skipped",
+    "paused",
+    "computed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AnalyzeResult`
 
 What `perception.analyze` returns. A measure not asked for is null.
@@ -10649,6 +10726,46 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 
 </details>
 
+### `DisplayHandle`
+
+What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
+  "properties": {
+    "x": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter its horizontal place is."
+    },
+    "y": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter its vertical place is, if it has one."
+    }
+  },
+  "required": [
+    "x"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DisplayInputSettings`
 
 The Display & Input page's settings.
@@ -10726,6 +10843,7 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 | `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
 | `y` | number | yes | Its value, in the series' `unit`. |
 | `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+| `handle` | [`DisplayHandle`](#displayhandle) or null | no | The parameters dragging it sets, for a marker that is a handle. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10733,6 +10851,17 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 {
   "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
   "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisplayHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameters dragging it sets, for a marker that is a handle."
+    },
     "name": {
       "description": "What it is, such as `A1`.",
       "type": "string"

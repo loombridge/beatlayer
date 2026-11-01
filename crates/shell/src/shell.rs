@@ -1254,6 +1254,7 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        browser_view.set_analysis_media(Arc::clone(&media));
         let analysis_slot = crate::analysed_media::AnalysisSlot::default();
         audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.

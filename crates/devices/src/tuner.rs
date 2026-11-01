@@ -677,6 +677,7 @@ pub fn display_in(
                 });
 
                 markers.push(DisplayMarker {
+                    handle: None,
                     name: "Pitch".to_owned(),
                     series: "Histogram".to_owned(),
                     x: HIST_LEN as f32,
@@ -722,6 +723,7 @@ pub fn display_in(
                 });
 
                 markers.push(DisplayMarker {
+                    handle: None,
                     name: "Strobe".to_owned(),
                     series: "Strobe".to_owned(),
                     x: strobe_phase * 32.0,
@@ -742,6 +744,7 @@ pub fn display_in(
                 });
 
                 markers.push(DisplayMarker {
+                    handle: None,
                     name: "Needle".to_owned(),
                     series: "Tuning".to_owned(),
                     x: cents,

@@ -360,6 +360,7 @@ pub fn display(
         if input > LEVEL_FLOOR_DB {
             let x = (db_to_gain(f64::from(input)) as f32).min(1.0);
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: "Level".to_owned(),
                 series: "Tube Curve".to_owned(),
                 x,

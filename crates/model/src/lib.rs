@@ -144,7 +144,7 @@ pub use device::{
     PluginFormat, PluginState, Sidechain, WindowFrame,
 };
 pub use device_display::{
-    DeviceDisplay, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
+    DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
     SpectrogramGrid,
 };
 pub use device_layout::{DeviceLayout, DevicePages, PageChoice};

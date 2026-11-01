@@ -969,7 +969,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
 | 7.21 | done | 1 November 2026 | [#563](https://github.com/loombridge/beatlayer/pull/563): Note Mode on Push 2 arms the selected track and plays its drum rack through the Loop Selector, 16 Velocities and 64 Pads layouts tied to the pad view, with pad options, step sequencing with loop pads and pages, and `push.state` reading it back |
-| 7.22 | todo |  |  |
+| 7.22 | done | 1 November 2026 | [#696](https://github.com/loombridge/beatlayer/pull/696): Melodies on Push 2 with pad pressure as polyphonic key pressure, the touch strip's bend and modulation, 64 Notes, In Key and Chromatic in every layout saved with the set (`song.set_pad_layout`), the Scale menu, the Melodic Sequencer and its + 32 Notes variant, Note Mode navigation, and `session.launch` taking `legato` |
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
 | 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
@@ -1013,14 +1013,14 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.29 | todo |  |  |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
-| 8.32 | todo |  |  |
+| 8.32 | done | 1 November 2026 | [#697](https://github.com/loombridge/beatlayer/pull/697): `bl_dsp::pitch` has a streaming tracker (the Tuner's detector moved out, with confidence, voiced and onset every hop) and a PSOLA voice shifter that keeps or moves formants; a quiet reading in the shifter dated one interval early is a follow-up |
 | 8.33 | done | 31 October 2026 | [#650](https://github.com/loombridge/beatlayer/pull/650): Delay has 12.4's LFO with six rate modes, seven waves and Morph in its expanded part, and Limiter has Maximize with Threshold and Output; saving Delay's expanded part with the set (R13) is a follow-up |
 | 8.34 | todo |  |  |
 | 8.35 | todo |  |  |
 | 8.36 | todo |  |  |
 | 8.37 | done | 1 November 2026 | [#649](https://github.com/loombridge/beatlayer/pull/649): Echo has its two lines with their time and channel modes, input drive and inverted feedback, filters, the Modulation and Character tabs, its reverb, the global controls and the tunnel display on its pages |
 | 8.38 | done | 31 October 2026 | [#651](https://github.com/loombridge/beatlayer/pull/651): Roar has its input section, three stages with twelve shapers and nine filters, seven routing modes, 4× oversampling, Output, Color compensation, Dry/Wet and the shaper display, with the Auto Filter's filters moved to a shared module; R11's aliasing level at 4× (8×, ADAA or the narrower test) and Mid Side's Blend are follow-ups |
-| 8.39 | todo |  |  |
+| 8.39 | done | 1 November 2026 | [#673](https://github.com/loombridge/beatlayer/pull/673): Roar has its modulation matrix (LFO 1, LFO 2, the envelope follower and Noise to 31 targets on the 32-frame grid), the feedback section with Note mode and octave keys, the compressor, both sidechains (R38) and the modulation displays, using the MIDI tapping point R39 from #659; the single matrix view with its lamps, Input Listen as view state, loops past 4 s and a linked compressor detector are follow-ups |
 | 8.40 | todo |  |  |
 | 8.41 | todo |  |  |
 | 8.42 | todo |  |  |

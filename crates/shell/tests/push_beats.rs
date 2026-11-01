@@ -11,18 +11,18 @@ use bl_push::sim::Simulated;
 use bl_shell::{Shell, testing};
 use serde_json::{Value, json};
 
-struct Rig {
-    shell: Shell,
-    control: NullControl,
-    sim: Simulated,
-    track: TrackId,
-    rack: DeviceId,
+pub(crate) struct Rig {
+    pub(crate) shell: Shell,
+    pub(crate) control: NullControl,
+    pub(crate) sim: Simulated,
+    pub(crate) track: TrackId,
+    pub(crate) rack: DeviceId,
 }
 
 impl Rig {
     /// The default set with a drum rack on its MIDI track, which is
     /// selected, pads 36 to 38 holding a chain each, and a Push 2 running.
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let (mut shell, control) = testing::rig();
         let test = TestBackend::new();
         shell.use_midi_backend(Box::new(test.clone()));
@@ -82,13 +82,13 @@ impl Rig {
         rig
     }
 
-    fn run(&mut self, id: &str, args: Value) -> Value {
+    pub(crate) fn run(&mut self, id: &str, args: Value) -> Value {
         self.shell
             .run(id, args)
             .unwrap_or_else(|error| panic!("{id}: {error}"))
     }
 
-    fn settle(&mut self) {
+    pub(crate) fn settle(&mut self) {
         loop {
             self.shell.midi().surfaces().settle();
             if self.sim.pump() == 0 {
@@ -97,31 +97,31 @@ impl Rig {
         }
     }
 
-    fn step(&mut self) {
+    pub(crate) fn step(&mut self) {
         self.shell.poll();
         self.shell.midi().surfaces().tick();
         self.settle();
         self.shell.poll();
     }
 
-    fn pass(&mut self, millis: u64) {
+    pub(crate) fn pass(&mut self, millis: u64) {
         testing::advance(&self.control, &mut self.shell, millis);
         self.step();
     }
 
-    fn state(&mut self) -> Value {
+    pub(crate) fn state(&mut self) -> Value {
         self.run("push.state", json!({}))["pushes"][0].clone()
     }
 
-    fn note(&mut self) -> Value {
+    pub(crate) fn note(&mut self) -> Value {
         self.state()["note"].clone()
     }
 
-    fn steps(&self) -> usize {
+    pub(crate) fn steps(&self) -> usize {
         self.shell.editor().undo_history().count()
     }
 
-    fn tap_pad(&mut self, row: u8, column: u8) {
+    pub(crate) fn tap_pad(&mut self, row: u8, column: u8) {
         assert!(self.sim.press_pad(row, column, 100));
         self.pass(20);
         assert!(self.sim.release_pad(row, column));
@@ -129,7 +129,7 @@ impl Rig {
         self.pass(20);
     }
 
-    fn tap(&mut self, name: &str) {
+    pub(crate) fn tap(&mut self, name: &str) {
         assert!(self.sim.press(name));
         self.pass(50);
         assert!(self.sim.let_go(name));
@@ -137,18 +137,18 @@ impl Rig {
         self.pass(20);
     }
 
-    fn hold(&mut self, name: &str) {
+    pub(crate) fn hold(&mut self, name: &str) {
         assert!(self.sim.press(name));
         self.pass(400);
     }
 
-    fn release(&mut self, name: &str) {
+    pub(crate) fn release(&mut self, name: &str) {
         assert!(self.sim.let_go(name));
         self.pass(20);
     }
 
     /// The clip in the first MIDI track's slot at the first scene.
-    fn clip(&self) -> Option<(ClipId, bl_model::MidiData)> {
+    pub(crate) fn clip(&self) -> Option<(ClipId, bl_model::MidiData)> {
         let doc = self.shell.editor().document();
         let scene: SceneId = doc.scenes().next()?.id;
         let clip = doc.slot(self.track, scene)?;
@@ -159,7 +159,7 @@ impl Rig {
     }
 
     /// The text the display shows, line by line.
-    fn sim_text(&mut self) -> Vec<String> {
+    pub(crate) fn sim_text(&mut self) -> Vec<String> {
         self.state()["display"]["text"]
             .as_array()
             .unwrap()
@@ -168,7 +168,7 @@ impl Rig {
             .collect()
     }
 
-    fn led(&self, name: &str) -> bl_push::leds::Led {
+    pub(crate) fn led(&self, name: &str) -> bl_push::leds::Led {
         self.sim.led(name).unwrap()
     }
 }
@@ -215,7 +215,7 @@ fn a_first_step_makes_a_clip_and_launches_it_and_tapping_again_deletes_the_note(
 }
 
 /// A new MIDI track, which is selected as the app selects a new track.
-fn new_track(rig: &mut Rig, name: &str) -> TrackId {
+pub(crate) fn new_track(rig: &mut Rig, name: &str) -> TrackId {
     rig.shell
         .invoke("track.create", json!({ "kind": "midi", "name": name }))
         .unwrap();
@@ -319,8 +319,8 @@ fn the_layout_follows_the_selected_tracks_instrument() {
     assert!(!dark(&rig));
 
     let keys = new_track(&mut rig, "Keys");
-    assert_eq!(rig.note()["layout"], "Melodic", "WP-7.22 lays the pads out");
-    assert!(dark(&rig));
+    assert_eq!(rig.note()["layout"], "64 Notes");
+    assert!(!dark(&rig), "a melodic track plays notes on its pads");
     rig.shell
         .invoke(
             "device.add",

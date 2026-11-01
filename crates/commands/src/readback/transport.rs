@@ -5,12 +5,16 @@ use super::{Readback, read};
 /// The readback of this area's commands, one line each, so a command's entry is easy to find.
 #[rustfmt::skip]
 pub(super) const ROWS: &[(&str, Readback)] = &[
+    ("link.set_audio", read("link.state", "audio.enabled")),
+    ("link.set_audio_latency", read("link.state", "audio.latency_ms")),
+    ("link.set_audio_name", read("link.state", "audio.name")),
     ("link.set_enabled", read("link.state", "enabled")),
     ("link.set_show_toggle", read("link.state", "show_toggle")),
     ("link.set_start_stop_sync", read("link.state", "start_stop_sync")),
     ("tempo_follower.set_enabled", read("tempo_follower.state", "on")),
     ("settings.set_show_tempo_follower_toggle", read("tempo_follower.state", "show_toggle")),
     ("settings.set_tempo_follower_input", read("tempo_follower.state", "input")),
+    ("link.set_sync_to_incoming_audio", read("link.state", "audio.sync_to_incoming_audio")),
     ("transport.set_external_sync", read("transport.state", "external_sync")),
     ("transport.set_loop", read("transport.state", "loop_start")),
     ("transport.set_loop_enabled", read("transport.state", "loop_on")),

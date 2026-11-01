@@ -5,6 +5,7 @@ use bl_model::ParamId;
 
 use crate::follower::Follower;
 use crate::gc::{Owned, Program};
+use crate::link_audio::LinkAudio;
 use crate::node::{NodeData, NodeKey, ParamValue};
 use crate::recording::RecordingPlan;
 use crate::render::RenderPlan;
@@ -287,6 +288,9 @@ pub(crate) enum Message {
     /// Tempo Follower, which listens to the device's input and leads the
     /// song's tempo (the Tempo Follower spec, R6), or `None` for none.
     Leader(Option<Owned<Box<dyn Leader>>>),
+    /// The Link Audio the engine reads peers' channels from and offers its
+    /// tracks through, or `None` for none (the Link Audio spec, R4 to R6).
+    LinkAudio(Option<Owned<Box<dyn LinkAudio>>>),
     /// Output `index` of the `count` output ports with Sync on and their
     /// options (midi-clock R3); a `count` of 0 clears the list.
     SyncOutput {

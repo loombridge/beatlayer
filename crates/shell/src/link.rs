@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use bl_engine::Session;
 
+use crate::link_audio::{AudioSettings, LinkAudioHost};
+
 /// A peer's tempo, as often as the main thread writes it into the set while
 /// it moves (the Link spec, R3): Beatlayer's own rate.
 pub const WRITE_EVERY: Duration = Duration::from_millis(100);
@@ -41,14 +43,44 @@ impl PeerTempo {
 pub struct LinkSession {
     audio: bl_link::Audio,
     peer: Arc<PeerTempo>,
+    settings: Arc<AudioSettings>,
 }
 
 impl LinkSession {
-    /// A session over `audio`, reporting peers' tempos to `peer`.
+    /// A session over `audio`, reporting peers' tempos to `peer`, with
+    /// Sync to Incoming Audio off.
     #[must_use]
     pub fn new(audio: bl_link::Audio, peer: Arc<PeerTempo>) -> Self {
-        Self { audio, peer }
+        Self::with_settings(audio, peer, Arc::default())
     }
+
+    /// A session that also delays the song by what `settings` say (the Link
+    /// Audio spec, R8).
+    #[must_use]
+    pub fn with_settings(
+        audio: bl_link::Audio,
+        peer: Arc<PeerTempo>,
+        settings: Arc<AudioSettings>,
+    ) -> Self {
+        Self {
+            audio,
+            peer,
+            settings,
+        }
+    }
+}
+
+/// What the audio host needs of Link to give an engine its follower and its
+/// Link Audio: the instance's handle, and what the audio thread shares with
+/// the main thread.
+#[derive(Clone)]
+pub struct LinkHandles {
+    /// Makes the audio thread's handles.
+    pub link: bl_link::Handle,
+    /// Where the follower leaves a peer's tempo.
+    pub peer: Arc<PeerTempo>,
+    /// The Latency and Sync to Incoming Audio.
+    pub settings: Arc<AudioSettings>,
 }
 
 impl Session for LinkSession {
@@ -115,6 +147,14 @@ impl Session for LinkSession {
     fn peer_tempo(&mut self, bpm: f64) {
         self.peer.set(bpm);
     }
+
+    fn audio_delay(&self) -> i64 {
+        if self.audio.audio_enabled() {
+            self.settings.delay_micros()
+        } else {
+            0
+        }
+    }
 }
 
 /// A tempo the audio thread leaves for the main thread, taken as often as
@@ -156,6 +196,8 @@ impl TempoWrites {
 pub struct LinkHost {
     link: Option<bl_link::Link>,
     peer: Arc<PeerTempo>,
+    /// Link Audio's sinks and sources, and the channels the peers offer.
+    pub(crate) audio: LinkAudioHost,
     writes: TempoWrites,
 }
 
@@ -170,10 +212,52 @@ impl std::fmt::Debug for LinkHost {
 impl LinkHost {
     /// The instance's handle, for the audio host, once there is one.
     #[must_use]
-    pub fn handle(&self) -> Option<(bl_link::Handle, Arc<PeerTempo>)> {
-        self.link
-            .as_ref()
-            .map(|link| (link.handle(), Arc::clone(&self.peer)))
+    pub fn handle(&self) -> Option<LinkHandles> {
+        self.link.as_ref().map(|link| LinkHandles {
+            link: link.handle(),
+            peer: Arc::clone(&self.peer),
+            settings: Arc::clone(self.audio.settings()),
+        })
+    }
+
+    /// The Link instance, once there is one.
+    #[must_use]
+    pub fn instance(&self) -> Option<&bl_link::Link> {
+        self.link.as_ref()
+    }
+
+    /// Whether Link Audio is switched on in the instance.
+    #[must_use]
+    pub fn audio_enabled(&self) -> bool {
+        self.link.as_ref().is_some_and(bl_link::Link::audio_enabled)
+    }
+
+    /// Switches Link Audio and gives it the name other peers see.
+    pub fn set_audio(&self, on: bool, name: &str) {
+        if let Some(link) = &self.link {
+            link.set_audio_name(name);
+            link.set_audio_enabled(on);
+        }
+    }
+
+    /// Sets the name other peers see the app by.
+    pub fn set_audio_name(&self, name: &str) {
+        if let Some(link) = &self.link {
+            link.set_audio_name(name);
+        }
+    }
+
+    /// Brings Link Audio's sinks and sources to `wanted` (made when
+    /// `fingerprint` was told of the set), returning the plan the audio
+    /// thread should have now if it changed.
+    pub fn update_audio(
+        &mut self,
+        fingerprint: u64,
+        wanted: &crate::link_audio::Wanted,
+    ) -> Option<Arc<crate::link_audio::Plan>> {
+        let Self { link, audio, .. } = self;
+        link.as_ref()
+            .and_then(|link| audio.update(link, fingerprint, wanted))
     }
 
     /// Whether Link is on.
@@ -229,8 +313,13 @@ impl LinkHost {
     pub fn hear(&mut self, now: Instant) -> Option<f64> {
         if let Some(link) = &self.link {
             // The notifications only wake the main thread: the peer count
-            // and tempo are read when they're wanted.
-            for _ in link.events() {}
+            // and tempo are read when they're wanted; a change of the
+            // channels is noted for Link Audio's next update.
+            for event in link.events() {
+                if event == bl_link::Event::Channels {
+                    self.audio.channels_changed();
+                }
+            }
         }
         self.writes.hear(&self.peer, now)
     }

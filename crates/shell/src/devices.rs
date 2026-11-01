@@ -18,8 +18,9 @@ use bl_media::MediaStore;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
 use bl_model::{
     Chain, ChainId, Command, Device, DeviceDescription, DeviceId, DeviceKind, DeviceLayout,
-    DevicePlace, DeviceRole, DeviceWindows, Document, Editor, LayerId, MultisamplerView,
-    MultisamplerViews, ParamId, RackKind, RackViewMap, RackViews, TrackId, TrackKind,
+    DevicePages, DevicePlace, DeviceRole, DeviceWindows, Document, Editor, LayerId,
+    MultisamplerView, MultisamplerViews, PageChoice, ParamId, RackKind, RackViewMap, RackViews,
+    TrackId, TrackKind,
 };
 use bl_project::preset::{self, Preset};
 use bl_project::rack_preset::Saved;
@@ -31,7 +32,7 @@ use bl_shell_spec::devices::{
     DeviceListEntry, DevicePanel, DeviceParameters, DeviceViewState, DropChainOnTrackArgs,
     ExpandDeviceArgs, ExternalSection, FloatingWindow, FloatingWindows, FoldDeviceArgs, GroupArgs,
     Grouped, HotSwap, HotSwapArgs, HotSwapChainArgs, LoadChainPresetArgs, LoadPresetArgs,
-    MapModeArgs, MidiSidechainSection, ParameterState, PasteChainArgs, PasteDeviceArgs,
+    MapModeArgs, MidiSidechainSection, PagesFrame, ParameterState, PasteChainArgs, PasteDeviceArgs,
     PresetResult, RackFrame, RackMacrosArgs, SaveChainPresetArgs, SavePresetArgs,
     ScrollDeviceViewArgs, SelectChainArgs, SelectDeviceArgs, SelectMacroArgs, SelectSlotArgs,
     SelectVariationArgs, SetAutoSelectArgs, SetMacroCountArgs, SetRackViewArgs, SetWindowArgs,
@@ -117,6 +118,11 @@ pub struct DeviceView {
     /// The view each device's display shows, where it has chosen one
     /// (WP-5.43).
     display_views: std::collections::BTreeMap<DeviceId, String>,
+    /// The page each device's pages nodes show, where it has chosen one
+    /// (WP-8.1): saved with the set but not part of the document, so
+    /// switching pages is no undo step. A multisampler's `Tabs` node is not
+    /// here: its page is its saved view's tab.
+    pages: DevicePages,
     /// The display data the engine's nodes last published (WP-5.43).
     displays: std::collections::BTreeMap<DeviceId, bl_engine::DisplayData>,
     types: Vec<DeviceType>,
@@ -412,21 +418,32 @@ impl DeviceView {
         if let Some(key) = Self::plugin_key(&device.kind) {
             return Some(self.plugin_panel(device, description, &device.params, &key));
         }
-        let mut shown = description.clone();
-        if Self::is_multisampler(device) {
-            // Spec: multisampler R1. The tab that shows has its controls.
-            shown.layout = bl_shell_spec::multisampler::tab_layout(
-                &shown.layout,
-                self.multisampler_view(device.id).tab,
-            );
-        }
+        let choice = self.page_choice(device);
         Some(DevicePanel {
+            pages: description
+                .layout
+                .pages()
+                .into_iter()
+                .filter(|node| !node.pages.is_empty())
+                .map(|node| {
+                    let page = choice
+                        .get(&node.name)
+                        .and_then(|name| node.pages.iter().find(|p| &p.name == name))
+                        .unwrap_or(&node.pages[0]);
+                    PagesFrame {
+                        node: node.name.clone(),
+                        style: node.style,
+                        pages: node.pages.iter().map(|p| p.name.clone()).collect(),
+                        shown: page.name.clone(),
+                    }
+                })
+                .collect(),
             values: description
                 .params
                 .iter()
                 .map(|p| description.value(&device.params, p.id).unwrap_or(p.default))
                 .collect(),
-            description: shown,
+            description: description.clone(),
             plugin: false,
             configured: Vec::new(),
             knobs: Vec::new(),
@@ -444,6 +461,30 @@ impl DeviceView {
             learning: self.learning.get(&device.id).map(|learn| learn.row),
             locked: Vec::new(),
         })
+    }
+
+    /// The page each of `device`'s pages nodes shows, where it isn't the
+    /// first: those chosen, and a multisampler's tab (multisampler R75).
+    fn page_choice(&self, device: &Device) -> PageChoice {
+        let mut choice = self.pages.get(&device.id).cloned().unwrap_or_default();
+        if Self::is_multisampler(device) {
+            choice.insert(
+                bl_model::SamplerTab::PAGES.to_owned(),
+                self.multisampler_view(device.id).tab.page_name().to_owned(),
+            );
+        }
+        choice
+    }
+
+    /// Which page each device's pages nodes show, for the next save.
+    #[must_use]
+    pub fn pages(&self) -> &DevicePages {
+        &self.pages
+    }
+
+    /// Takes the pages an opened set saved, or none for a new set.
+    pub fn set_pages(&mut self, pages: DevicePages) {
+        self.pages = pages;
     }
 
     /// How many sample slots devices of `kind` have: 0 for a type with
@@ -509,6 +550,7 @@ impl DeviceView {
             &controls,
         )));
         DevicePanel {
+            pages: Vec::new(),
             values: selected
                 .iter()
                 .map(|p| description.value(values, p.id).unwrap_or(p.default))
@@ -517,9 +559,11 @@ impl DeviceView {
                 params: selected,
                 layout,
                 views: Vec::new(),
+                display_drag: Vec::new(),
                 menu_options: Vec::new(),
                 title_switch: None,
                 banks: Vec::new(),
+                alternates: Vec::new(),
             },
             plugin: true,
             configured: knob_params,
@@ -623,6 +667,7 @@ impl DeviceView {
                             menu_option: description.menu_options.contains(&p.id),
                             title_switch: description.title_switch == Some(p.id),
                             configured: configured.contains(&p.id),
+                            shown: description.shown(&device.params, p.id),
                             other: device.can_compare().then(|| {
                                 description
                                     .value(device.other_params(), p.id)
@@ -687,6 +732,7 @@ impl DeviceView {
         self.layer_hot_swap = self.layer_hot_swap.filter(|(device, _)| exists(device));
         self.armed = self.armed.filter(|(d, _)| exists(d));
         self.display_views.retain(|d, _| exists(d));
+        self.pages.retain(|d, _| exists(d));
         self.displays.retain(|d, _| exists(d));
         self.pads_selected.retain(|d, _| exists(d));
         self.hot_swap_pad = self.hot_swap_pad.filter(|(d, _)| exists(d));
@@ -1763,7 +1809,7 @@ impl DeviceView {
                     })
             }
             ids::LOAD_PRESET => has_target() && args.get("path").is_some(),
-            ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW => has_target(),
+            ids::PARAMETERS | ids::DISPLAY | ids::SET_DISPLAY_VIEW | ids::SET_PAGE => has_target(),
             ids::ARM_MAP => self.target(doc, named).is_ok_and(|device| {
                 doc.device(device)
                     .is_some_and(|d| bl_model::modulator::is_modulator_kind(&d.kind))
@@ -2469,6 +2515,47 @@ impl DeviceView {
                     )));
                 }
                 self.display_views.insert(device, view);
+            }
+            ids::SET_PAGE => {
+                let ids::SetPageArgs { device, node, page } = parse(args)?;
+                let device = self.target(editor.document(), device)?;
+                let current = editor.document().device(device).expect("the target exists");
+                let nodes = self
+                    .description(&current.kind)
+                    .map_or_else(Vec::new, |d| d.layout.pages());
+                let Some(found) = nodes.into_iter().find(|n| n.name == node) else {
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{device} has no pages node {node:?}"
+                    )));
+                };
+                let chosen = match &page {
+                    ids::PageRef::Name(name) => found.pages.iter().find(|p| &p.name == name),
+                    ids::PageRef::Index(index) => found.pages.get(*index),
+                };
+                let Some(chosen) = chosen else {
+                    let names: Vec<_> = found.pages.iter().map(|p| &p.name).collect();
+                    return Err(DeviceError::InvalidArgs(format!(
+                        "{node:?} has no page {page:?}; it has {names:?}"
+                    )));
+                };
+                let name = chosen.name.clone();
+                let tab = bl_model::SamplerTab::ALL
+                    .into_iter()
+                    .find(|tab| tab.page_name() == name);
+                match tab.filter(|_| {
+                    Self::is_multisampler(current) && node == bl_model::SamplerTab::PAGES
+                }) {
+                    Some(tab) => {
+                        let view = MultisamplerView {
+                            tab,
+                            ..self.multisampler_view(device)
+                        };
+                        self.set_multisampler_view(device, view);
+                    }
+                    None => {
+                        self.pages.entry(device).or_default().insert(node, name);
+                    }
+                }
             }
             ids::PARAMETERS => {
                 let DeviceArgs { device } = parse(args)?;

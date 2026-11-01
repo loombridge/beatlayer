@@ -48,8 +48,10 @@ pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
 mod dynamics;
+pub mod echo;
 pub mod eq;
 pub mod filter_delay;
+mod filters;
 mod framework;
 pub mod gate;
 pub mod gate_mod;
@@ -80,6 +82,7 @@ pub mod play_mod;
 pub mod polysynth;
 pub mod remap;
 pub mod reverb;
+pub mod roar;
 pub mod sampler;
 pub mod saturator;
 mod sections;
@@ -119,6 +122,7 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_bus::{DRUM_BUSS, drum_buss_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
+pub use echo::{ECHO, echo_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
@@ -145,6 +149,7 @@ pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
+pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
@@ -202,6 +207,7 @@ pub fn display_in(
 ) -> Option<DeviceDisplay> {
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
+        ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
@@ -214,6 +220,7 @@ pub fn display_in(
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
+        ROAR => Some(roar::display(device, description, values, data, view)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
         bl_model::modulator::STRIKE_MOD => {
@@ -278,6 +285,7 @@ pub fn register(registry: &mut Registry) {
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);
+    echo::register(registry);
     grain_delay::register(registry);
     alignment_delay::register(registry);
     reverb::register(registry);
@@ -326,6 +334,7 @@ pub fn register(registry: &mut Registry) {
     drum_bus::register(registry);
     overdrive::register(registry);
     tube::register(registry);
+    roar::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     shifter::register(registry);

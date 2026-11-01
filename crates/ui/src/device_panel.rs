@@ -20,7 +20,7 @@
 
 use std::f32::consts::PI;
 
-use bl_model::device_layout::{Size, Widget};
+use bl_model::device_layout::{PlacedPages, Size, Widget};
 use bl_model::modulator::ModTarget;
 use bl_model::{DeviceDisplay, DeviceId, ParamDescriptor, ParamId, ParamKind};
 use bl_shell::Invocation;
@@ -87,6 +87,12 @@ pub fn param_control_id(device: DeviceId, param: ParamId) -> Id {
     Id::new(("device-param", device, param))
 }
 
+/// The ID of a page's tab or section button in a device's panel.
+#[must_use]
+pub fn page_button_id(device: DeviceId, node: &str, page: &str) -> Id {
+    Id::new(("device-page", device, node.to_owned(), page.to_owned()))
+}
+
 /// The ID of a display cell in a device's panel.
 #[must_use]
 pub fn cell_id(device: DeviceId, index: usize) -> Id {
@@ -121,6 +127,18 @@ pub fn place(panel: &DevicePanel, body: Rect) -> (ControlRects, CellRects) {
 /// (WP-5.42).
 #[must_use]
 pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlRects, CellRects) {
+    let (controls, cells, _) = place_with_pages(panel, expanded, body);
+    (controls, cells)
+}
+
+/// The same, and each pages node's buttons placed in `body` (device
+/// framework R41).
+#[must_use]
+pub fn place_with_pages(
+    panel: &DevicePanel,
+    expanded: bool,
+    body: Rect,
+) -> (ControlRects, CellRects, Vec<PlacedPages>) {
     let placed = panel
         .layout(expanded)
         .place_for(Size::new(body.width(), body.height()), panel.selected_slot);
@@ -131,14 +149,188 @@ pub fn place_shown(panel: &DevicePanel, expanded: bool, body: Rect) -> (ControlR
         placed
             .controls
             .iter()
-            .map(|c| (c.param, c.widget, at(c.rect)))
+            .map(|c| (panel.drawn(c.param), c.widget, at(c.rect)))
             .collect(),
         placed
             .cells
             .iter()
             .map(|c| (c.name.clone(), at(c.rect), c.slot))
             .collect(),
+        placed
+            .pages
+            .into_iter()
+            .map(|mut pages| {
+                for rect in &mut pages.buttons {
+                    *rect = bl_model::device_layout::Rect::new(
+                        body.min.x + rect.x,
+                        body.min.y + rect.y,
+                        rect.width,
+                        rect.height,
+                    );
+                }
+                pages
+            })
+            .collect(),
     )
+}
+
+/// Whether a modulated parameter has its control on page `page` of pages
+/// node `node` (device framework R44): its tab's indicator is lit. `played`
+/// is the panel's lookup of the parameters a clip modulates.
+fn page_is_modulated(
+    panel: &DevicePanel,
+    node: &str,
+    page: usize,
+    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
+) -> bool {
+    panel
+        .description
+        .layout
+        .pages()
+        .into_iter()
+        .find(|n| n.name == node)
+        .and_then(|n| n.pages.get(page))
+        .is_some_and(|page| {
+            page.params()
+                .into_iter()
+                .any(|param| played(param).is_some())
+        })
+}
+
+/// One tab or section button of a pages node: lit while its page shows,
+/// with the modulation indicator at its top-right corner while `modulated`.
+/// Returns whether it was chosen, by a click or Enter.
+fn page_tab(
+    ui: &mut Ui,
+    theme: &Theme,
+    (id, rect): (Id, Rect),
+    (name, selected, modulated): (&str, bool, bool),
+) -> bool {
+    let response = ui.interact(rect, id, Sense::click());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let pressed =
+        response.clicked() || (response.has_focus() && ui.input(|i| i.key_pressed(Key::Enter)));
+    let c = &theme.colors;
+    let face = if selected {
+        c.accent.0
+    } else if response.hovered() {
+        c.control_hover.0
+    } else {
+        c.control.0
+    };
+    let painter = ui.painter_at(rect.expand(1.0));
+    painter.rect_filled(rect.shrink(0.5), theme.sizes.corner, face);
+    painter.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        name,
+        theme.small_font(),
+        if selected { c.accent_text.0 } else { c.text.0 },
+    );
+    if modulated {
+        painter.circle_filled(
+            rect.right_top() + vec2(-4.0, 4.0),
+            2.5,
+            if selected {
+                c.accent_text.0
+            } else {
+                c.accent.0
+            },
+        );
+    }
+    if response.has_focus() && crate::focus::outlined(ui.ctx()) {
+        painter.rect_stroke(
+            rect.expand(1.5),
+            theme.sizes.corner,
+            Stroke::new(1.0, c.focus.0),
+            StrokeKind::Outside,
+        );
+    }
+    crate::clip_panels::tab(ui, &response, name, selected);
+    pressed
+}
+
+/// The tab row or shell strip of every pages node placed in the body, and
+/// the title bar's tabs of those in that style (device framework R41, R44).
+fn page_row(
+    ui: &mut Ui,
+    theme: &Theme,
+    (frame, panel): (&DeviceFrame, &DevicePanel),
+    (node, rects): (&str, &[Rect]),
+    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
+    events: &mut Vec<UiEvent>,
+) {
+    let Some(frame_of) = panel.pages.iter().find(|p| p.node == node) else {
+        return;
+    };
+    let ids: Vec<Id> = frame_of
+        .pages
+        .iter()
+        .map(|page| page_button_id(frame.id, node, page))
+        .collect();
+    if let Some(span) = rects.iter().copied().reduce(|a, b| a.union(b)) {
+        crate::clip_panels::tab_list(ui, Id::new(("device-pages", frame.id, node)), span, node);
+    }
+    for (index, (page, rect)) in frame_of.pages.iter().zip(rects).enumerate() {
+        let selected = *page == frame_of.shown;
+        let modulated = page_is_modulated(panel, node, index, played);
+        if page_tab(ui, theme, (ids[index], *rect), (page, selected, modulated)) && !selected {
+            events.push(UiEvent::Invoke(Invocation::new(
+                ids::SET_PAGE,
+                json!({ "device": frame.id, "node": node, "page": page }),
+            )));
+        }
+    }
+    crate::clip_panels::selector_keys(ui, &ids);
+}
+
+/// The tabs of the pages nodes in the title-bar style, in a run at the right
+/// of the title (L-DEV-017), except a multisampler's, which its own title-bar
+/// tabs draw (device framework R41; multisampler R75).
+pub fn title_tabs(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    title: Rect,
+    played: &dyn Fn(ParamId) -> Option<(f64, f64)>,
+    events: &mut Vec<UiEvent>,
+) {
+    let Some(panel) = frame
+        .panel
+        .as_ref()
+        .filter(|_| frame.multisampler.is_none())
+    else {
+        return;
+    };
+    for node in panel
+        .pages
+        .iter()
+        .filter(|p| p.style == bl_model::device_layout::PageStyle::TitleBar)
+    {
+        let width = |name: &str| name.chars().count() as f32 * 6.0 + 16.0;
+        let total: f32 = node.pages.iter().map(|p| width(p) + 2.0).sum();
+        let mut x = (title.right() - total).max(title.left() + 70.0);
+        let rects: Vec<Rect> = node
+            .pages
+            .iter()
+            .map(|page| {
+                let rect = Rect::from_min_size(
+                    pos2(x, title.top() + 1.0),
+                    vec2(width(page), title.height() - 2.0),
+                );
+                x += width(page) + 2.0;
+                rect
+            })
+            .collect();
+        page_row(
+            ui,
+            theme,
+            (frame, panel),
+            (&node.node, &rects),
+            played,
+            events,
+        );
+    }
 }
 
 /// A drag under way: where the value started on its travel, and how far
@@ -169,7 +361,22 @@ pub fn show(
         return;
     };
     let c = &theme.colors;
-    let (controls, cells) = place_shown(panel, frame.expanded, body);
+    let (controls, cells, pages) = place_with_pages(panel, frame.expanded, body);
+    for placed in pages.iter().filter(|p| !p.buttons.is_empty()) {
+        let rects: Vec<Rect> = placed
+            .buttons
+            .iter()
+            .map(|r| Rect::from_min_size(pos2(r.x, r.y), vec2(r.width, r.height)))
+            .collect();
+        page_row(
+            ui,
+            theme,
+            (frame, panel),
+            (&placed.name, &rects),
+            played,
+            events,
+        );
+    }
     for (index, (name, rect, slot)) in cells.into_iter().enumerate() {
         // A display cell: black, with a thin border (observed). What it
         // shows is the device's own to draw.
@@ -235,16 +442,10 @@ pub fn show(
             _ => None,
         };
         if let Some(display) = shown {
-            crate::device_display::draw(
-                ui,
-                theme,
-                rect,
-                id,
-                frame.enabled,
-                display,
-                &panel.description.views,
-                events,
-            );
+            // The drag goes under the display, so its view buttons stay on
+            // top and take their clicks.
+            display_drag(ui, frame, panel, display, rect, id, events);
+            crate::device_display::draw(ui, theme, rect, id, frame.enabled, display, panel, events);
         }
         // Spec: articulation-map R15. The Articulation Map's list shows
         // every articulation, the current one lit.
@@ -397,6 +598,47 @@ pub fn show(
                 });
         }
     }
+}
+
+/// Spec: roar R12. A vertical drag on a display that names parameters to drag
+/// (the description's `display_drag`, one for each view) changes the shown
+/// view's, as a drag on its knob does: one undo step named for the parameter.
+fn display_drag(
+    ui: &mut Ui,
+    frame: &DeviceFrame,
+    panel: &DevicePanel,
+    display: &DeviceDisplay,
+    rect: Rect,
+    id: Id,
+    events: &mut Vec<UiEvent>,
+) {
+    let description = &panel.description;
+    let view = description
+        .views
+        .iter()
+        .position(|v| Some(v.as_str()) == display.view.as_deref())
+        .unwrap_or(0);
+    let Some(param) = description.display_drag.get(view) else {
+        return;
+    };
+    let Some(index) = description.params.iter().position(|p| p.id == *param) else {
+        return;
+    };
+    let control = Control {
+        device: frame.id,
+        enabled: frame.enabled,
+        descriptor: &description.params[index],
+        value: panel.value(index),
+        modulated: None,
+        rect,
+        stops: &[],
+        knob: None,
+        configured: &[],
+        text: None,
+        automation: None,
+    };
+    let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
+    control.value_input(ui, &response, events);
 }
 
 /// What a control's name above it reads: a sample slot's parameter drops the
@@ -915,7 +1157,7 @@ impl Control<'_> {
 
 /// The value `steps` key presses from `value`: one step of a stepped
 /// parameter, or 1% of the travel.
-fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
+pub(crate) fn step(param: &ParamDescriptor, value: f64, steps: i32) -> f64 {
     if param.is_stepped() {
         param.clamp(value + f64::from(steps))
     } else {

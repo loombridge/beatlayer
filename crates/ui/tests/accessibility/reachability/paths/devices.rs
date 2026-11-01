@@ -773,6 +773,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.set_display_view",
             main(a_squeeze, device_view, "Activity view", Key::Enter),
         ),
+        // A pages node's tabs and section buttons (device framework R44):
+        // Enter on one.
+        (
+            "device.set_page",
+            main(a_paged_device, device_view, "Filter", Key::Enter),
+        ),
         // Floating device windows (WP-2.5b): Float and Dock are
         // `device.set_floating`, on a key and in the device's menu.
         ("device.windows", Exception(Query)),

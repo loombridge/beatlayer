@@ -4,10 +4,11 @@
 //! crossfade, and cut.
 
 use crate::common;
-use bl_core::time::{Bpm, Frames, TempoMap, Ticks};
+use bl_core::time::{Bpm, Frames, TempoMap, TempoSegment, Ticks};
 use bl_devices::delay::{
-    DRY_WET, FEEDBACK, FILTER, FREEZE, FREQ, L_OFFSET, L_SYNC, L_TIME, LINK, PING_PONG, R_SYNC,
-    SYNC, TIME_MODE, delay_type,
+    DRY_WET, FEEDBACK, FILTER, FREEZE, FREQ, L_OFFSET, L_SYNC, L_TIME, LFO_DELAY, LFO_DOTTED,
+    LFO_FILTER, LFO_MORPH, LFO_RATE, LFO_RATE_MODE, LFO_SIXTEENTH, LFO_SYNCED, LFO_TIME,
+    LFO_TRIPLET, LFO_WAVE, LINK, PING_PONG, R_SYNC, SYNC, TIME_MODE, delay_type,
 };
 use bl_engine::{Registry, TransportInfo};
 use common::{device, node, noise, run_at, run_blocks, set};
@@ -501,5 +502,292 @@ fn freeze_keeps_the_dry_signal_and_ignores_new_input() {
             channel.iter().all(|s| (s - 0.5).abs() < 1e-6),
             "half dry, nothing frozen in"
         );
+    }
+}
+
+// The LFO's modulation read back: a ramp (x[n] = n / RAMP) through a delay
+// with no feedback and no time change comes out as n - d[n], so the delay
+// time d[n] in frames is n - RAMP * y[n], and the LFO's value is how far d
+// is from the base time, in units of the full modulation depth.
+const RAMP: f32 = 200_000.0;
+/// The base time in Time mode, in frames at 48 kHz (100 ms), and the
+/// modulation's depth at 100 % (20 ms).
+const BASE: f64 = 4_800.0;
+const DEPTH: f64 = 960.0;
+
+/// The LFO's value at each frame from `from` on, as read back from the
+/// delay, with the song playing from its start at `tempo`.
+fn lfo_values(
+    params: &[(bl_model::ParamId, f64)],
+    frames: usize,
+    block: usize,
+    tempo: &TempoMap,
+    from: usize,
+) -> Vec<f64> {
+    let mut all = vec![
+        (SYNC, 0.0),
+        (LINK, 1.0),
+        (L_TIME, 100.0),
+        (TIME_MODE, 2.0),
+        (FEEDBACK, 0.0),
+        (DRY_WET, 100.0),
+        (LFO_DELAY, 100.0),
+    ];
+    all.extend_from_slice(params);
+    let mut delay = node(&registry(), &device(&delay_type(), &all), block);
+    let ramp: Vec<f32> = (0..frames).map(|n| n as f32 / RAMP).collect();
+    let out = run_blocks(delay.as_mut(), &[ramp.clone(), ramp], block, &[], tempo);
+    (from..frames)
+        .map(|n| (n as f64 - f64::from(out[0][n]) * f64::from(RAMP) - BASE) / DEPTH)
+        .collect()
+}
+
+/// A tempo that changes from 120 to 90 BPM at the fourth beat.
+fn changing() -> TempoMap {
+    TempoMap::new([
+        TempoSegment::Constant {
+            start: Ticks::ZERO,
+            bpm: Bpm::new(120.0).unwrap(),
+        },
+        TempoSegment::Constant {
+            start: Ticks::from_quarters(4),
+            bpm: Bpm::new(90.0).unwrap(),
+        },
+    ])
+    .unwrap()
+}
+
+// Spec: delay R10
+#[test]
+fn the_beat_modes_land_their_cycles_on_the_beat_and_across_a_tempo_change() {
+    // Ramp Up: a cycle's start reads -1 and its middle 0. Each mode's cycle in
+    // quarter notes: Synced 1/4, Triplet 1/8 (a third of a beat), Dotted 1/8
+    // (three quarters of one) and Sixteenth 4 (one beat).
+    let modes = [
+        (2.0, LFO_SYNCED, 4.0, 1.0),
+        (3.0, LFO_TRIPLET, 3.0, 1.0 / 3.0),
+        (4.0, LFO_DOTTED, 3.0, 0.75),
+        (5.0, LFO_SIXTEENTH, 4.0, 1.0),
+    ];
+    let frames = 192_000;
+    let from = 6_000;
+    for tempo in [tempo(120.0), tempo(75.0), changing()] {
+        for (mode, param, value, beats) in modes {
+            let params = [(LFO_WAVE, 2.0), (LFO_RATE_MODE, mode), (param, value)];
+            let values = lfo_values(&params, frames, 4_096, &tempo, from);
+            for (i, read) in values.iter().enumerate().step_by(250) {
+                let quarters = tempo
+                    .frames_to_ticks(Frames((from + i) as i64), common::RATE)
+                    .as_quarters();
+                let expected = (quarters / beats).rem_euclid(1.0) * 2.0 - 1.0;
+                // A cycle's end and start are the same place on the circle.
+                let apart = (read - expected).abs();
+                assert!(
+                    apart < 0.002 || (apart - 2.0).abs() < 0.002,
+                    "mode {mode} at frame {}: {read} for {expected}",
+                    from + i
+                );
+            }
+        }
+    }
+}
+
+// Spec: delay R10
+#[test]
+fn the_lfo_is_the_same_at_any_block_size() {
+    let params = [(LFO_WAVE, 2.0), (LFO_RATE_MODE, 2.0), (LFO_SYNCED, 3.0)];
+    let tempo = changing();
+    let reference = lfo_values(&params, 96_000, 4_096, &tempo, 6_000);
+    for block in [1, 64] {
+        assert_eq!(
+            lfo_values(&params, 96_000, block, &tempo, 6_000),
+            reference,
+            "block size {block}"
+        );
+    }
+}
+
+// Spec: delay R10
+#[test]
+fn rate_and_time_free_run_and_each_mode_keeps_its_own_amount() {
+    let tempo = tempo(120.0);
+    // 2 Hz is half a second a cycle, and 1.5 Hz is 4/3 of a beat at 120 BPM:
+    // a triplet of a half note.
+    let rate = lfo_values(
+        &[(LFO_RATE_MODE, 0.0), (LFO_RATE, 2.0)],
+        96_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    let time = lfo_values(
+        &[(LFO_RATE_MODE, 1.0), (LFO_TIME, 0.5)],
+        96_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    assert_eq!(rate, time, "Time is the length of a cycle in seconds");
+    let triplet = lfo_values(
+        &[(LFO_RATE_MODE, 3.0), (LFO_TRIPLET, 5.0)],
+        96_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    let hertz = lfo_values(
+        &[(LFO_RATE_MODE, 0.0), (LFO_RATE, 1.5)],
+        96_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    for (a, b) in triplet.iter().zip(&hertz) {
+        assert!(
+            (a - b).abs() < 0.002,
+            "a triplet half note is 1.5 Hz at 120 BPM"
+        );
+    }
+    // A dotted quarter is a Sixteenth of six.
+    let dotted = lfo_values(
+        &[(LFO_RATE_MODE, 4.0), (LFO_DOTTED, 4.0)],
+        96_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    let sixteenth = lfo_values(
+        &[(LFO_RATE_MODE, 5.0), (LFO_SIXTEENTH, 6.0)],
+        96_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    assert_eq!(dotted, sixteenth);
+    // The modes not chosen keep their values: they don't move the LFO.
+    let others = [
+        (LFO_RATE_MODE, 0.0),
+        (LFO_RATE, 2.0),
+        (LFO_TIME, 7.0),
+        (LFO_SYNCED, 9.0),
+        (LFO_TRIPLET, 0.0),
+        (LFO_DOTTED, 0.0),
+        (LFO_SIXTEENTH, 16.0),
+    ];
+    assert_eq!(lfo_values(&others, 96_000, 512, &tempo, 6_000), rate);
+}
+
+// Spec: delay R11
+#[test]
+fn morph_reaches_the_lfo_and_the_random_waves_ignore_it() {
+    let tempo = tempo(120.0);
+    // A 1 Hz Ramp Up with Morph at 100 % has finished its rise in the first
+    // tenth of the cycle and holds its end value after it.
+    let base = [(LFO_RATE_MODE, 0.0), (LFO_RATE, 1.0), (LFO_WAVE, 2.0)];
+    let at = |morph: f64| {
+        let mut params = base.to_vec();
+        params.push((LFO_MORPH, morph));
+        lfo_values(&params, 60_000, 512, &tempo, 6_000)
+    };
+    let (flat, half, full) = (at(0.0), at(50.0), at(100.0));
+    // The values start at frame 6,000. Frame 24,000 is the middle of the
+    // cycle: a plain ramp reads 0 there.
+    assert!(flat[18_000].abs() < 0.01);
+    // Frame 30,000 is 62 % through: a half-morphed ramp (a 55 % cycle) and a
+    // fully morphed one (10 %) have both finished their rise.
+    assert!(half[24_000] > 0.99 && full[24_000] > 0.99);
+    // Frame 20,000 is 42 % through: the half-morphed ramp is still rising
+    // and the fully morphed one has long finished.
+    assert!(half[14_000] < 0.99 && full[14_000] > 0.99);
+    // S&H and Wander ignore it.
+    for wave in [5.0, 6.0] {
+        let run = |morph: f64| {
+            let params = [
+                (LFO_RATE_MODE, 0.0),
+                (LFO_RATE, 4.0),
+                (LFO_WAVE, wave),
+                (LFO_MORPH, morph),
+            ];
+            lfo_values(&params, 48_000, 512, &tempo, 6_000)
+        };
+        assert_eq!(run(0.0), run(100.0), "wave {wave}");
+    }
+}
+
+// Spec: delay R12
+#[test]
+fn a_delay_saved_before_the_rate_modes_opens_in_rate_mode_and_plays_as_it_did() {
+    // The 21 parameters a delay had: no mode, no other amounts.
+    let old = [(LFO_WAVE, 1.0), (LFO_RATE, 3.0), (LFO_DELAY, 100.0)];
+    let tempo = tempo(120.0);
+    let render = |params: &[(bl_model::ParamId, f64)]| {
+        let mut all = vec![
+            (SYNC, 1.0),
+            (L_SYNC, 2.0),
+            (FEEDBACK, 40.0),
+            (DRY_WET, 70.0),
+        ];
+        all.extend_from_slice(params);
+        let mut delay = node(&registry(), &device(&delay_type(), &all), 4_096);
+        let input = vec![noise(48_000), noise(48_000)];
+        run_blocks(delay.as_mut(), &input, 4_096, &[], &tempo)
+    };
+    let new = {
+        let mut params = old.to_vec();
+        params.push((LFO_RATE_MODE, 0.0));
+        params.push((LFO_TIME, 1.0));
+        render(&params)
+    };
+    assert_eq!(
+        render(&old),
+        new,
+        "the defaults of the new parameters change nothing"
+    );
+    // The old Rate parameter keeps its number and is the Rate mode's amount.
+    assert_eq!(LFO_RATE.0, 16);
+    let period = lfo_values(
+        &[(LFO_RATE, 3.0), (LFO_WAVE, 0.0)],
+        48_000,
+        512,
+        &tempo,
+        6_000,
+    );
+    // A sine at 3 Hz rises through zero every 16,000 frames.
+    let rising = period
+        .windows(2)
+        .enumerate()
+        .filter(|(_, w)| w[0] < 0.0 && w[1] >= 0.0)
+        .map(|(i, _)| i + 6_000)
+        .collect::<Vec<_>>();
+    assert!(rising.iter().any(|&i| i.abs_diff(16_000) < 3), "{rising:?}");
+}
+
+// Spec: delay R10, R11
+#[test]
+fn a_render_is_the_same_at_block_sizes_1_64_and_4096() {
+    let params = [
+        (SYNC, 1.0),
+        (L_SYNC, 3.0),
+        (R_SYNC, 5.0),
+        (FEEDBACK, 60.0),
+        (DRY_WET, 60.0),
+        (FILTER, 1.0),
+        (LFO_DELAY, 70.0),
+        (LFO_FILTER, 50.0),
+        (LFO_WAVE, 1.0),
+        (LFO_MORPH, 40.0),
+        (LFO_RATE_MODE, 3.0),
+        (LFO_TRIPLET, 4.0),
+    ];
+    let tempo = changing();
+    let input = vec![noise(48_000), noise(48_000)];
+    let render = |block: usize| {
+        let mut delay = node(&registry(), &device(&delay_type(), &params), block);
+        run_blocks(delay.as_mut(), &input, block, &[], &tempo)
+    };
+    let reference = render(4_096);
+    assert!(reference[0].iter().any(|s| s.abs() > 0.01));
+    for block in [1, 64] {
+        assert_eq!(render(block), reference, "block size {block}");
     }
 }

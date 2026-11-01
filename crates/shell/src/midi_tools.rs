@@ -808,8 +808,13 @@ fn target(
 ) -> Result<Target, EditFailure> {
     let ordered = notes_in_order(midi);
     let shown = view.shown_clip(doc, arrangement) == Some(clip.id);
+    // A selection can outlive the notes it named, after an undo or a replaced set.
     let selected = if shown {
-        view.selected_notes(doc, arrangement).to_vec()
+        view.selected_notes(doc, arrangement)
+            .iter()
+            .copied()
+            .filter(|place| (*place as usize) < ordered.len())
+            .collect()
     } else {
         Vec::new()
     };

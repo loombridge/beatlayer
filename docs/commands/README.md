@@ -323,6 +323,123 @@ An allowed agent as the agent server's commands report it: without its token.
 
 </details>
 
+### `Alternate`
+
+Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `switch` | [`ParamId`](#paramid) | yes | The switch. |
+| `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
+| `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
+  "properties": {
+    "off": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is off."
+    },
+    "on": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is on."
+    },
+    "switch": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The switch."
+    }
+  },
+  "required": [
+    "switch",
+    "off",
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AnalysisState`
+
+How far sound analysis has got (spec: sound-similarity R6, R7).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `analysed` | integer, at least 0 | yes | The audio files and presets that have a descriptor. |
+| `waiting` | integer, at least 0 | yes | The audio files and presets waiting to be analysed, the one under way included. |
+| `skipped` | integer, at least 0 | yes | The files that couldn't be analysed, and aren't tried again until they change. |
+| `paused` | boolean | yes | Whether analysis is paused: the file under way is finished, and no other is begun until it resumes. |
+| `computed` | integer, at least 0 | yes | The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it. |
+| `current` | string or null | no | The path of the file under way. |
+| `share` | number or null | no | The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far sound analysis has got (spec: sound-similarity R6, R7).",
+  "properties": {
+    "analysed": {
+      "description": "The audio files and presets that have a descriptor.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "computed": {
+      "description": "The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "current": {
+      "description": "The path of the file under way.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paused": {
+      "description": "Whether analysis is paused: the file under way is finished, and no other is begun until it resumes.",
+      "type": "boolean"
+    },
+    "share": {
+      "description": "The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "description": "The files that couldn't be analysed, and aren't tried again until they change.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "waiting": {
+      "description": "The audio files and presets waiting to be analysed, the one under way included.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "analysed",
+    "waiting",
+    "skipped",
+    "paused",
+    "computed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AnalyzeResult`
 
 What `perception.analyze` returns. A measure not asked for is null.
@@ -9004,7 +9121,9 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
+| `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
@@ -9015,10 +9134,24 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 {
   "description": "What a kind of device is to the framework: its parameters' descriptors, in the order its generic UI and agents list them, and its layout.",
   "properties": {
+    "alternates": {
+      "description": "The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown.",
+      "items": {
+        "$ref": "#/$defs/Alternate"
+      },
+      "type": "array"
+    },
     "banks": {
       "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
       "items": {
         "$ref": "#/$defs/Bank"
+      },
+      "type": "array"
+    },
+    "display_drag": {
+      "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
       },
       "type": "array"
     },
@@ -9875,6 +10008,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
 <details><summary>JSON Schema</summary>
@@ -9931,6 +10065,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "pages": {
+      "description": "Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none.",
+      "items": {
+        "$ref": "#/$defs/PagesFrame"
       },
       "type": "array"
     },
@@ -10580,6 +10721,46 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 
 </details>
 
+### `DisplayHandle`
+
+What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
+  "properties": {
+    "x": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter its horizontal place is."
+    },
+    "y": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter its vertical place is, if it has one."
+    }
+  },
+  "required": [
+    "x"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DisplayInputSettings`
 
 The Display & Input page's settings.
@@ -10657,6 +10838,7 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 | `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
 | `y` | number | yes | Its value, in the series' `unit`. |
 | `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+| `handle` | [`DisplayHandle`](#displayhandle) or null | no | The parameters dragging it sets, for a marker that is a handle. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10664,6 +10846,17 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 {
   "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
   "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisplayHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameters dragging it sets, for a marker that is a handle."
+    },
     "name": {
       "description": "What it is, such as `A1`.",
       "type": "string"
@@ -17752,6 +17945,7 @@ One of:
 - an object with `cell` ([`DisplayCell`](#displaycell)): A display cell, which grows.
 - an object with `row` (array of [`LayoutNode`](#layoutnode)): Parts left to right.
 - an object with `column` (array of [`LayoutNode`](#layoutnode)): Parts top to bottom.
+- an object with `pages` ([`PagesNode`](#pagesnode)): Named pages, one of which shows at a time (WP-8.1).
 
 <details><summary>JSON Schema</summary>
 
@@ -17814,6 +18008,19 @@ One of:
       },
       "required": [
         "column"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "description": "Named pages, one of which shows at a time (WP-8.1).",
+      "properties": {
+        "pages": {
+          "$ref": "#/$defs/PagesNode"
+        }
+      },
+      "required": [
+        "pages"
       ],
       "type": "object"
     }
@@ -22595,6 +22802,219 @@ One of:
 
 </details>
 
+### `Page`
+
+One page of a pages node.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name, which its tab or section button shows and a command names. |
+| `node` | [`LayoutNode`](#layoutnode) | yes | What fills the node's area while it shows: the display area of a shell. |
+| `section` | [`LayoutNode`](#layoutnode) or null | no | In the shell style, the page's section of the strip: its main controls, which show whichever page does. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One page of a pages node.",
+  "properties": {
+    "name": {
+      "description": "Its name, which its tab or section button shows and a command names.",
+      "type": "string"
+    },
+    "node": {
+      "$ref": "#/$defs/LayoutNode",
+      "description": "What fills the node's area while it shows: the display area of a shell."
+    },
+    "section": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LayoutNode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "In the shell style, the page's section of the strip: its main controls, which show whichever page does."
+    }
+  },
+  "required": [
+    "name",
+    "node"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PageRef`
+
+A page of a pages node: its name, or its place in the node's list from 0.
+
+One of:
+
+- string: By name.
+- integer, at least 0: By index.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "anyOf": [
+    {
+      "description": "By name.",
+      "type": "string"
+    },
+    {
+      "description": "By index.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  ],
+  "description": "A page of a pages node: its name, or its place in the node's list from 0."
+}
+```
+
+</details>
+
+### `PageStyle`
+
+How a pages node shows its pages (device framework R41).
+
+One of:
+
+- `"tabs"`: A row of tabs along the top of the node's area.
+- `"title_bar"`: Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.
+- `"shell"`: A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How a pages node shows its pages (device framework R41).",
+  "oneOf": [
+    {
+      "const": "tabs",
+      "description": "A row of tabs along the top of the node's area.",
+      "type": "string"
+    },
+    {
+      "const": "title_bar",
+      "description": "Tabs in the device's title bar, after its name, that the device's title bar draws: the node's area is the shown page's alone.",
+      "type": "string"
+    },
+    {
+      "const": "shell",
+      "description": "A strip of sections, each its page's main controls under a section button, beside a display area the shown page fills.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PagesFrame`
+
+A pages node of a device's layout as the panel shows it (device framework R41, R43).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `node` | string | yes | The node's name. |
+| `style` | [`PageStyle`](#pagestyle) | yes | How its pages show. |
+| `pages` | array of string | yes | The pages' names, in order. |
+| `shown` | string | yes | The name of the page shown. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pages node of a device's layout as the panel shows it (device framework R41, R43).",
+  "properties": {
+    "node": {
+      "description": "The node's name.",
+      "type": "string"
+    },
+    "pages": {
+      "description": "The pages' names, in order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "The name of the page shown.",
+      "type": "string"
+    },
+    "style": {
+      "$ref": "#/$defs/PageStyle",
+      "description": "How its pages show."
+    }
+  },
+  "required": [
+    "node",
+    "style",
+    "pages",
+    "shown"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PagesNode`
+
+Pages of a device's body, one shown at a time (device framework R41).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | The node's name, which `device.set_page` and the page choice use; it is unique in the layout. |
+| `style` | [`PageStyle`](#pagestyle) | yes | How the pages show. |
+| `pages` | array of [`Page`](#page) | yes | The pages, in order; the first shows in a new device. |
+| `shown` | integer, at least 0 | no | The page shown, as an index; [`DeviceLayout::with_pages`] sets it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Pages of a device's body, one shown at a time (device framework R41).",
+  "properties": {
+    "name": {
+      "description": "The node's name, which `device.set_page` and the page choice use; it is unique in the layout.",
+      "type": "string"
+    },
+    "pages": {
+      "description": "The pages, in order; the first shows in a new device.",
+      "items": {
+        "$ref": "#/$defs/Page"
+      },
+      "type": "array"
+    },
+    "shown": {
+      "description": "The page shown, as an index; [`DeviceLayout::with_pages`] sets it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "style": {
+      "$ref": "#/$defs/PageStyle",
+      "description": "How the pages show."
+    }
+  },
+  "required": [
+    "name",
+    "style",
+    "pages"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PanMode`
 
 A track's pan mode: `stereo` (the default) balances both channels with one control, `split` places the left and right channels with two controls.
@@ -23145,6 +23565,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `title_switch` | boolean | yes | Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale. |
 | `configured` | boolean | yes | Whether it's one of the parameters the device's panel is configured to show (clap-hosting R5, configure mode). True for every parameter of a device that isn't a plug-in, since its panel shows them all. |
+| `shown` | boolean | yes | Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 | `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
 
@@ -23197,6 +23618,11 @@ One of a device's parameters as `device.parameters` reports it.
         "null"
       ]
     },
+    "shown": {
+      "default": true,
+      "description": "Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays.",
+      "type": "boolean"
+    },
     "text": {
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
       "type": "string"
@@ -23222,7 +23648,8 @@ One of a device's parameters as `device.parameters` reports it.
     "text",
     "menu_option",
     "title_switch",
-    "configured"
+    "configured",
+    "shown"
   ],
   "type": "object"
 }
@@ -24804,6 +25231,7 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 
 <details><summary>JSON Schema</summary>
@@ -24933,6 +25361,17 @@ One connected Push 2.
       "minimum": 0,
       "type": "integer"
     },
+    "session": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushSession"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Session Mode shows, while it is the pad mode."
+    },
     "setup": {
       "$ref": "#/$defs/PushSetup",
       "description": "The Setup menu's values."
@@ -24962,6 +25401,7 @@ One connected Push 2.
     "setup",
     "display",
     "browse",
+    "session",
     "mix_mode"
   ],
   "type": "object"
@@ -25367,6 +25807,167 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushSession`
+
+What Session Mode shows (push-2-tracks R73).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `first_track` | [`TrackId`](#trackid) or null | yes | The ring's first track. |
+| `first_scene` | [`SceneId`](#sceneid) or null | yes | The ring's first scene. |
+| `tracks` | integer, at least 0 | yes | How many tracks the ring covers. |
+| `scenes` | integer, at least 0 | yes | How many scenes the ring covers. |
+| `overview` | boolean | yes | Whether Session Overview is shown. |
+| `overview_locked` | boolean | yes | Whether Session Overview is locked on. |
+| `overview_part` | integer, at least 0 | yes | The part of 64 scenes the overview shows, from 0. |
+| `stop_clip_locked` | boolean | yes | Whether Stop Clip is locked. |
+| `pads` | array of [`PushSessionLook`](#pushsessionlook) | yes | The 64 pads, the top row first and each row from the left. |
+| `scene_buttons` | array of [`PushSessionLook`](#pushsessionlook) | yes | The eight Scene/Grid buttons, top to bottom. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Session Mode shows (push-2-tracks R73).",
+  "properties": {
+    "first_scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The ring's first scene."
+    },
+    "first_track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The ring's first track."
+    },
+    "overview": {
+      "description": "Whether Session Overview is shown.",
+      "type": "boolean"
+    },
+    "overview_locked": {
+      "description": "Whether Session Overview is locked on.",
+      "type": "boolean"
+    },
+    "overview_part": {
+      "description": "The part of 64 scenes the overview shows, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "pads": {
+      "description": "The 64 pads, the top row first and each row from the left.",
+      "items": {
+        "$ref": "#/$defs/PushSessionLook"
+      },
+      "type": "array"
+    },
+    "scene_buttons": {
+      "description": "The eight Scene/Grid buttons, top to bottom.",
+      "items": {
+        "$ref": "#/$defs/PushSessionLook"
+      },
+      "type": "array"
+    },
+    "scenes": {
+      "description": "How many scenes the ring covers.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "stop_clip_locked": {
+      "description": "Whether Stop Clip is locked.",
+      "type": "boolean"
+    },
+    "tracks": {
+      "description": "How many tracks the ring covers.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "first_track",
+    "first_scene",
+    "tracks",
+    "scenes",
+    "overview",
+    "overview_locked",
+    "overview_part",
+    "stop_clip_locked",
+    "pads",
+    "scene_buttons"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSessionLook`
+
+What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `shows` | string | yes | Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`. |
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip in the pad's slot. |
+| `colour` | integer or null | yes | The swatch of the clip's colour, or of the scene's. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks R73).",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip in the pad's slot."
+    },
+    "colour": {
+      "description": "The swatch of the clip's colour, or of the scene's.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shows": {
+      "description": "Of a pad in the slots: `none` (no track or scene), `empty`, `stopped`, `queued`, `playing`, `stopping` or `recording`. Of a pad in Session Overview: `none`, `ring`, `playing` or `block`. Of a Scene/Grid button: `none`, `empty` or `clip`; in the overview, `none`, `part` or `shown`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "shows",
+    "clip",
+    "colour"
+  ],
+  "type": "object"
 }
 ```
 

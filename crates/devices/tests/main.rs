@@ -48,6 +48,7 @@ mod grain_delay;
 mod hardware;
 mod hold;
 mod instrument_filter;
+mod instrument_matrix;
 mod instrument_voices;
 mod kit;
 mod kitbag;

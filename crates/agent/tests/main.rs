@@ -12,6 +12,7 @@ mod fades;
 mod grooves;
 mod http;
 mod instrument_filter;
+mod instrument_matrix;
 mod kit_devices;
 mod link;
 mod linked_tracks;

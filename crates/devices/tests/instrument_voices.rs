@@ -29,12 +29,12 @@ use bl_model::{DeviceKind, ParamId, Scale, ScaleName, Tuning};
 use common::{CHANNELS, RATE, device, node};
 
 /// The sample rate, in hertz.
-const HZ: f64 = 48_000.0;
+pub(crate) const HZ: f64 = 48_000.0;
 
 /// The block sizes every render is checked at.
-const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
+pub(crate) const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
 
-fn registry() -> Registry {
+pub(crate) fn registry() -> Registry {
     let mut registry = Registry::empty();
     bl_devices::register(&mut registry);
     registry
@@ -46,7 +46,13 @@ fn nineteen() -> Tuning {
     Tuning::new("19 equal".into(), String::new(), cents).unwrap()
 }
 
-fn event(offset: usize, kind: NoteKind, key: u8, velocity: f32, channel: u8) -> NoteEvent {
+pub(crate) fn event(
+    offset: usize,
+    kind: NoteKind,
+    key: u8,
+    velocity: f32,
+    channel: u8,
+) -> NoteEvent {
     NoteEvent {
         offset: offset as u32,
         kind,
@@ -57,23 +63,28 @@ fn event(offset: usize, kind: NoteKind, key: u8, velocity: f32, channel: u8) -> 
     }
 }
 
-fn on(frame: usize, key: u8) -> NoteEvent {
+pub(crate) fn on(frame: usize, key: u8) -> NoteEvent {
     event(frame, NoteKind::On, key, 1.0, 0)
 }
 
-fn on_at(frame: usize, key: u8, velocity: f32) -> NoteEvent {
+pub(crate) fn on_at(frame: usize, key: u8, velocity: f32) -> NoteEvent {
     event(frame, NoteKind::On, key, velocity, 0)
 }
 
-fn off(frame: usize, key: u8) -> NoteEvent {
+pub(crate) fn off(frame: usize, key: u8) -> NoteEvent {
     event(frame, NoteKind::Off, key, 0.0, 0)
 }
 
-fn off_at(frame: usize, key: u8, velocity: f32) -> NoteEvent {
+pub(crate) fn off_at(frame: usize, key: u8, velocity: f32) -> NoteEvent {
     event(frame, NoteKind::Off, key, velocity, 0)
 }
 
-fn expression(frame: usize, key: u8, expression: NoteExpression, value: f32) -> NoteEvent {
+pub(crate) fn expression(
+    frame: usize,
+    key: u8,
+    expression: NoteExpression,
+    value: f32,
+) -> NoteEvent {
     event(
         frame,
         NoteKind::Expression { expression, value },
@@ -83,20 +94,20 @@ fn expression(frame: usize, key: u8, expression: NoteExpression, value: f32) -> 
     )
 }
 
-fn message(frame: usize, kind: NoteKind) -> NoteEvent {
+pub(crate) fn message(frame: usize, kind: NoteKind) -> NoteEvent {
     event(frame, kind, 0, 0.0, 0)
 }
 
 /// What a render plays through: the tuning and scale a block carries.
 #[derive(Clone, Default)]
-struct Setting {
+pub(crate) struct Setting {
     tuning: Option<Tuning>,
     scale: Option<Scale>,
 }
 
 /// Plays `notes` (frames counted from the start) through `node` for
 /// `frames`, in blocks of `block`, and returns both channels.
-fn render_node(
+pub(crate) fn render_node(
     node: &mut dyn Node,
     block: usize,
     frames: usize,
@@ -147,7 +158,7 @@ fn render_node(
 }
 
 /// A test instrument with `params` set, rendered at block size `block`.
-fn play(
+pub(crate) fn play(
     params: &[(ParamId, f64)],
     block: usize,
     frames: usize,
@@ -163,7 +174,7 @@ fn play(
 }
 
 /// As [`play`] at 512 frames a block, with nothing special in the set.
-fn run(params: &[(ParamId, f64)], frames: usize, notes: &[NoteEvent]) -> [Vec<f32>; 2] {
+pub(crate) fn run(params: &[(ParamId, f64)], frames: usize, notes: &[NoteEvent]) -> [Vec<f32>; 2] {
     play(params, 512, frames, notes, &Setting::default())
 }
 
@@ -176,12 +187,12 @@ fn output(index: f64) -> (ParamId, f64) {
 }
 
 /// The frequency of a pitch in semitones, A4 at 440 Hz.
-fn hz(pitch: f64) -> f64 {
+pub(crate) fn hz(pitch: f64) -> f64 {
     440.0 * ((pitch - 69.0) / 12.0).exp2()
 }
 
 /// The power of `signal` at `hz`, through a Hann window.
-fn power_at(signal: &[f32], hz: f64) -> f64 {
+pub(crate) fn power_at(signal: &[f32], hz: f64) -> f64 {
     let n = signal.len() as f64;
     let (mut re, mut im) = (0.0, 0.0);
     for (i, &x) in signal.iter().enumerate() {
@@ -218,21 +229,21 @@ fn crossing_hz(signal: &[f32]) -> f64 {
 }
 
 /// The distance in cents between two frequencies.
-fn cents(a: f64, b: f64) -> f64 {
+pub(crate) fn cents(a: f64, b: f64) -> f64 {
     1200.0 * (a / b).log2()
 }
 
-fn rms(signal: &[f32]) -> f64 {
+pub(crate) fn rms(signal: &[f32]) -> f64 {
     (signal.iter().map(|&x| f64::from(x).powi(2)).sum::<f64>() / signal.len() as f64).sqrt()
 }
 
-fn peak(signal: &[f32]) -> f32 {
+pub(crate) fn peak(signal: &[f32]) -> f32 {
     signal.iter().fold(0.0, |m, x| m.max(x.abs()))
 }
 
 /// Asserts that two renders are the same bits, naming the first sample
 /// that differs.
-fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
+pub(crate) fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
     assert_eq!(actual.len(), expected.len(), "{what}: length");
     if let Some(i) = (0..actual.len()).find(|&i| actual[i].to_bits() != expected[i].to_bits()) {
         panic!(
@@ -245,7 +256,7 @@ fn assert_same(actual: &[f32], expected: &[f32], what: &str) {
 /// Asserts that two renders differ nowhere by more than `tolerance`: the
 /// kit moves a voice's pitch between control points in `f32`, so a render
 /// whose pitch moves can differ in the last bit between block sizes.
-fn assert_near(actual: &[f32], expected: &[f32], tolerance: f32, what: &str) {
+pub(crate) fn assert_near(actual: &[f32], expected: &[f32], tolerance: f32, what: &str) {
     assert_eq!(actual.len(), expected.len(), "{what}: length");
     let worst = (0..actual.len())
         .max_by(|&a, &b| {
@@ -269,7 +280,7 @@ fn assert_close(actual: f64, expected: f64, tolerance: f64, what: &str) {
     );
 }
 
-fn drift_type() -> DeviceType {
+pub(crate) fn drift_type() -> DeviceType {
     bl_devices::device_types()
         .into_iter()
         .find(|t| matches!(&t.kind, DeviceKind::Native { device_type } if device_type == POLYSYNTH))
@@ -277,7 +288,7 @@ fn drift_type() -> DeviceType {
 }
 
 /// FNV-1a over the samples' bits: what a golden render compares.
-fn digest(signal: &[f32]) -> u64 {
+pub(crate) fn digest(signal: &[f32]) -> u64 {
     signal.iter().fold(0xcbf2_9ce4_8422_2325, |hash, sample| {
         (hash ^ u64::from(sample.to_bits())).wrapping_mul(0x0100_0000_01b3)
     })
@@ -889,11 +900,11 @@ fn a_stacked_voice_keeps_the_level_of_one() {
     }
 }
 
-fn bend(frame: usize, key: u8, value: f32) -> NoteEvent {
+pub(crate) fn bend(frame: usize, key: u8, value: f32) -> NoteEvent {
     expression(frame, key, NoteExpression::Bend, value)
 }
 
-fn wheel(frame: usize, value: f32) -> NoteEvent {
+pub(crate) fn wheel(frame: usize, value: f32) -> NoteEvent {
     message(frame, NoteKind::PitchBend { value })
 }
 

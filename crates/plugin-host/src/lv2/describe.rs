@@ -220,6 +220,7 @@ pub(crate) fn device_type(info: &PluginInfo) -> (DeviceType, Vec<Parameter>) {
         midi_tap: false,
         note_output: note_output(info),
         outputs: Vec::new(),
+        matrix: None,
     };
     (device_type, params)
 }

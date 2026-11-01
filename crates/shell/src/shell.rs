@@ -116,6 +116,7 @@ mod plugin_list;
 mod processed_files;
 mod sample_edits;
 mod sample_keys;
+mod sample_swap;
 mod save_history;
 pub use sample_keys::TransientList;
 mod agent_server;

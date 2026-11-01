@@ -801,6 +801,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("device.parameters", Exception(Query)),
         ("device.display", Exception(Query)),
+        ("device.similar", Exception(Query)),
         // A display's view buttons (device framework R38): Enter on one.
         (
             "device.set_display_view",

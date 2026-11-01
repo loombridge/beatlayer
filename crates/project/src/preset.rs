@@ -70,6 +70,10 @@ pub struct Preset {
     /// A plug-in's MPE Mode and settings (the MPE spec, R14); `None` for
     /// the default, off, and for any other device.
     pub mpe: Option<bl_model::PluginMpe>,
+    /// A sampler's similarity reference, when one was saved or a swap began
+    /// from another sample (sound similarity R23); `None` for the sample the
+    /// device holds, and for any other device.
+    pub similarity_reference: Option<bl_model::ContentHash>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -88,6 +92,8 @@ struct File {
     routes: Vec<bl_model::ModRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mpe: Option<bl_model::PluginMpe>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    similarity_reference: Option<bl_model::ContentHash>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -156,6 +162,7 @@ impl Preset {
             articulations: (!device.articulations.is_empty()).then(|| device.articulations.clone()),
             routes: (!device.routes.is_empty()).then(|| device.routes.clone()),
             mpe: matches!(device.kind, DeviceKind::Plugin { .. }).then_some(device.mpe),
+            similarity_reference: device.similarity_reference,
         }
     }
 
@@ -198,6 +205,7 @@ impl Preset {
             articulations: self.articulations.clone().unwrap_or_default(),
             routes: self.routes.clone().unwrap_or_default(),
             mpe: self.mpe,
+            similarity_reference: self.similarity_reference,
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
         bytes.push(b'\n');
@@ -279,6 +287,7 @@ impl Preset {
                 Some(mpe) if mpe.settings.check().is_ok() => Some(mpe),
                 _ => None,
             },
+            similarity_reference: file.similarity_reference,
         })
     }
 

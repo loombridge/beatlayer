@@ -38,6 +38,7 @@ pub mod listing;
 pub mod places;
 pub mod preview;
 mod similar;
+pub mod swap;
 pub mod tags;
 pub mod tunings;
 
@@ -375,6 +376,9 @@ pub struct BrowserView {
     /// The tags some item under a label carries, worked out for one
     /// generation and label.
     available: Mutex<Option<AvailableTags>>,
+    /// The similar list sample swapping goes by, worked out for one
+    /// reference, index and analysis (spec: sound-similarity R21).
+    swaps: Mutex<swap::SwapCache>,
     /// What was read from disk about files for the columns.
     details: Mutex<DetailsCache>,
     /// The thread that probes audio files for the sort.
@@ -625,6 +629,7 @@ impl BrowserView {
             }),
             generation: 0,
             available: Mutex::new(None),
+            swaps: Mutex::default(),
             details: Mutex::new(DetailsCache::default()),
             prober: columns::Prober::default(),
             full_height: prefs.full_height,

@@ -336,6 +336,12 @@ impl Shell {
         if id == device_ids::LOAD_SAMPLE {
             return self.load_sample(id, args);
         }
+        if matches!(
+            id,
+            device_ids::SWAP_SIMILAR | device_ids::RETURN_TO_REFERENCE | device_ids::SIMILAR
+        ) {
+            return self.run_sample_swap(id, args);
+        }
         if id == device_ids::LOAD_WAVETABLE {
             return self.load_wavetable(id, args);
         }

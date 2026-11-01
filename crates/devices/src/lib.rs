@@ -60,6 +60,7 @@ pub mod grain_delay;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod instrument_filter;
 pub mod kit;
 pub mod kitbag;
 pub mod level_mod;

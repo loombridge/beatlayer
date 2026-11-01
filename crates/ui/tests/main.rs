@@ -68,6 +68,7 @@ mod mpe_tab;
 mod multi_clip;
 mod multisampler_sample_tab;
 mod multisampler_tabs;
+mod operator;
 mod plugin_list;
 mod plugin_panel;
 mod rack_presets;

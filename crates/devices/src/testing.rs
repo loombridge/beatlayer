@@ -1231,6 +1231,7 @@ struct FmVoices {
     envelopes: EnvelopeBank,
     levels: Vec<f32>,
     out: Vec<f32>,
+    out_right: Vec<f32>,
 }
 
 impl FmInstrument {
@@ -1253,6 +1254,7 @@ impl FmInstrument {
                 envelopes: EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate)),
                 levels: vec![0.0; frames * STRIDE],
                 out: vec![0.0; frames],
+                out_right: vec![0.0; frames],
             },
         }
     }
@@ -1286,11 +1288,17 @@ impl NativeDevice for FmInstrument {
         }
         self.voices.core.begin(frames);
         self.section.process(audio, params, &mut self.voices);
-        self.voices.core.finish(frames, &mut self.voices.out);
+        let voices = &mut self.voices;
+        voices
+            .core
+            .finish(frames, &mut voices.out, &mut voices.out_right);
         for channel in 0..audio.channels() {
-            audio
-                .channel_mut(channel)
-                .copy_from_slice(&self.voices.out[..frames]);
+            let out = if channel == 1 {
+                &voices.out_right
+            } else {
+                &voices.out
+            };
+            audio.channel_mut(channel).copy_from_slice(&out[..frames]);
         }
     }
 
@@ -1343,9 +1351,13 @@ impl Instrument for FmVoices {
         }
         self.envelopes.process(&mut self.levels[..count * STRIDE]);
         let levels = &self.levels;
-        self.core.render(voices, state, frames, |voice, _, frame| {
-            levels[frame * STRIDE + voice]
-        });
+        self.core.render(
+            voices,
+            state,
+            frames,
+            |voice, _, frame| fm::Moves::gain(levels[frame * STRIDE + voice]),
+            |_, _| [1.0, 1.0],
+        );
         let mut mask = voices.active_mask();
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;

@@ -1724,6 +1724,31 @@ impl MainWindowUi {
                 )));
             }
         }
+        // Spec: sound-similarity R6 (L-STAT-002). While files wait to be
+        // analysed, Pause and Resume sit at the right end of the message
+        // area, left of the mapping mode chooser when that shows.
+        let analysis = shell.browser_view().analysis_state();
+        if analysis.waiting > 0
+            && let Some(message) = message
+        {
+            let right = message.right()
+                - if shell.map_controller_mapping().is_some() {
+                    156.0
+                } else {
+                    4.0
+                };
+            let rect = Rect::from_min_size(
+                pos2(right - 64.0, message.top() + 2.0),
+                egui::vec2(64.0, message.height() - 4.0),
+            );
+            let label = if analysis.paused { "Resume" } else { "Pause" };
+            if ui.put(rect, egui::Button::new(label)).clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    bl_shell::browser_commands::SET_ANALYSIS_PAUSED,
+                    json!({ "paused": !analysis.paused }),
+                )));
+            }
+        }
         // Spec: macros R11. The macro that holds the parameter under the
         // pointer is named here.
         let hint = crate::mapping::hover_hold(ui.ctx())
@@ -2450,6 +2475,22 @@ fn look(element: Element, shell: &Shell, window: WindowKind) -> Look {
                 text: shell.note_group_status(),
                 ..Look::default()
             },
+            // Spec: sound-similarity R6. The progress of sound analysis, while
+            // files wait and nothing more urgent is said.
+            (None, None)
+                if shell.missing_files() == 0
+                    && shell.browser_view().analysis_state().waiting > 0 =>
+            {
+                let state = shell.browser_view().analysis_state();
+                Look {
+                    text: Some(format!(
+                        "Analyzing Sounds {:.0} %{}",
+                        state.share.unwrap_or(0.0) * 100.0,
+                        if state.paused { " (paused)" } else { "" }
+                    )),
+                    ..Look::default()
+                }
+            }
             (None, None) => {
                 let missing = shell.missing_files();
                 Look {

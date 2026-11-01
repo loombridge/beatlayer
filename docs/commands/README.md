@@ -324,6 +324,123 @@ An allowed agent as the agent server's commands report it: without its token.
 
 </details>
 
+### `Alternate`
+
+Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `switch` | [`ParamId`](#paramid) | yes | The switch. |
+| `off` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is off. |
+| `on` | [`ParamId`](#paramid) | yes | The parameter the control is while the switch is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Two parameters that share one control, which a switch turns between: while `switch` is on the control is `on`'s, and otherwise `off`'s. The layout places `off`'s control only (Limiter's Maximize turns Ceiling into Threshold).",
+  "properties": {
+    "off": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is off."
+    },
+    "on": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter the control is while the switch is on."
+    },
+    "switch": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The switch."
+    }
+  },
+  "required": [
+    "switch",
+    "off",
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `AnalysisState`
+
+How far sound analysis has got (spec: sound-similarity R6, R7).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `analysed` | integer, at least 0 | yes | The audio files and presets that have a descriptor. |
+| `waiting` | integer, at least 0 | yes | The audio files and presets waiting to be analysed, the one under way included. |
+| `skipped` | integer, at least 0 | yes | The files that couldn't be analysed, and aren't tried again until they change. |
+| `paused` | boolean | yes | Whether analysis is paused: the file under way is finished, and no other is begun until it resumes. |
+| `computed` | integer, at least 0 | yes | The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it. |
+| `current` | string or null | no | The path of the file under way. |
+| `share` | number or null | no | The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "How far sound analysis has got (spec: sound-similarity R6, R7).",
+  "properties": {
+    "analysed": {
+      "description": "The audio files and presets that have a descriptor.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "computed": {
+      "description": "The descriptors computed since Beatlayer started: a file whose content already had one, such as a moved copy, doesn't add to it.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "current": {
+      "description": "The path of the file under way.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "paused": {
+      "description": "Whether analysis is paused: the file under way is finished, and no other is begun until it resumes.",
+      "type": "boolean"
+    },
+    "share": {
+      "description": "The share of the files that were waiting when this run began that are done, from 0 to 1; left out when nothing waits.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "skipped": {
+      "description": "The files that couldn't be analysed, and aren't tried again until they change.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "waiting": {
+      "description": "The audio files and presets waiting to be analysed, the one under way included.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "analysed",
+    "waiting",
+    "skipped",
+    "paused",
+    "computed"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `AnalyzeResult`
 
 What `perception.analyze` returns. A measure not asked for is null.
@@ -8990,7 +9107,9 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 |---|---|---|---|
 | `params` | array of [`ParamDescriptor`](#paramdescriptor) | yes | Its parameters. |
 | `layout` | [`DeviceLayout`](#devicelayout) | yes | Where its controls and display cells sit (IMP-14). |
+| `alternates` | array of [`Alternate`](#alternate) | no | The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown. |
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
+| `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
@@ -9001,10 +9120,24 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 {
   "description": "What a kind of device is to the framework: its parameters' descriptors, in the order its generic UI and agents list them, and its layout.",
   "properties": {
+    "alternates": {
+      "description": "The controls that show one of two parameters, as a switch says. Both parameters keep their values and their lanes whichever is shown.",
+      "items": {
+        "$ref": "#/$defs/Alternate"
+      },
+      "type": "array"
+    },
     "banks": {
       "description": "The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch.",
       "items": {
         "$ref": "#/$defs/Bank"
+      },
+      "type": "array"
+    },
+    "display_drag": {
+      "description": "The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged.",
+      "items": {
+        "$ref": "#/$defs/ParamId"
       },
       "type": "array"
     },
@@ -10574,6 +10707,46 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 
 </details>
 
+### `DisplayHandle`
+
+What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
+  "properties": {
+    "x": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter its horizontal place is."
+    },
+    "y": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter its vertical place is, if it has one."
+    }
+  },
+  "required": [
+    "x"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DisplayInputSettings`
 
 The Display & Input page's settings.
@@ -10651,6 +10824,7 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 | `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
 | `y` | number | yes | Its value, in the series' `unit`. |
 | `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+| `handle` | [`DisplayHandle`](#displayhandle) or null | no | The parameters dragging it sets, for a marker that is a handle. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10658,6 +10832,17 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 {
   "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
   "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisplayHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameters dragging it sets, for a marker that is a handle."
+    },
     "name": {
       "description": "What it is, such as `A1`.",
       "type": "string"
@@ -23438,6 +23623,7 @@ One of a device's parameters as `device.parameters` reports it.
 | `menu_option` | boolean | yes | Whether it's one of the device's own items in its Show Options menu rather than a control in its body (C-DEVICE-015). |
 | `title_switch` | boolean | yes | Whether it's the switch the device draws in its title bar rather than in its body (L-DEV-004), such as Use Current Scale. |
 | `configured` | boolean | yes | Whether it's one of the parameters the device's panel is configured to show (clap-hosting R5, configure mode). True for every parameter of a device that isn't a plug-in, since its panel shows them all. |
+| `shown` | boolean | yes | Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays. |
 | `description` | string | no | What it does, for the Info View (WP-2.24) and agents. |
 | `other` | number or null | no | Its value in the A and B state that isn't active (device compare R11); left out for a device without two states. |
 
@@ -23490,6 +23676,11 @@ One of a device's parameters as `device.parameters` reports it.
         "null"
       ]
     },
+    "shown": {
+      "default": true,
+      "description": "Whether its control is shown: false for the parameter a switch has put away, such as Limiter's Ceiling while Maximize is on (the control then is Threshold's). A parameter that isn't shown keeps its value, its lane and its place in its banks, and still plays.",
+      "type": "boolean"
+    },
     "text": {
       "description": "How the value reads, as its control shows it, such as `-6.0 dB`.",
       "type": "string"
@@ -23515,7 +23706,8 @@ One of a device's parameters as `device.parameters` reports it.
     "text",
     "menu_option",
     "title_switch",
-    "configured"
+    "configured",
+    "shown"
   ],
   "type": "object"
 }

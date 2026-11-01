@@ -54,8 +54,8 @@ pub const OUTPUT: ParamId = ParamId(8);
 pub const LOW: usize = 0;
 pub const MID: usize = 1;
 pub const HIGH: usize = 2;
-const BANDS: usize = 3;
-const BAND_NAMES: [&str; BANDS] = ["Low", "Mid", "High"];
+pub(crate) const BANDS: usize = 3;
+pub(crate) const BAND_NAMES: [&str; BANDS] = ["Low", "Mid", "High"];
 
 /// A band's parameters, as offsets from its first ([`band_param`]).
 pub const ACTIVE: u32 = 0;
@@ -416,13 +416,13 @@ impl Section {
 /// 24 dB per octave (two Butterworth sections each), which sum to an
 /// all-pass.
 #[derive(Clone, Copy, Default)]
-struct Split {
+pub(crate) struct Split {
     low: [Section; 2],
     high: [Section; 2],
 }
 
 impl Split {
-    fn set(&mut self, hz: f64, rate: f64) {
+    pub(crate) fn set(&mut self, hz: f64, rate: f64) {
         for section in &mut self.low {
             section.set(false, hz, rate);
         }
@@ -432,7 +432,7 @@ impl Split {
     }
 
     /// The low and the high part of `x`.
-    fn process(&mut self, x: f64) -> (f64, f64) {
+    pub(crate) fn process(&mut self, x: f64) -> (f64, f64) {
         let low = self.low[0].process(x);
         let high = self.high[0].process(x);
         (self.low[1].process(low), self.high[1].process(high))
@@ -442,7 +442,7 @@ impl Split {
 /// One channel's three-band split. All four splits run on every sample, so
 /// switching High or Low finds their states current.
 #[derive(Clone, Copy, Default)]
-struct Crossover {
+pub(crate) struct Crossover {
     /// The lower crossover on the input.
     lower: Split,
     /// The upper crossover on the input (High on, Low off).
@@ -455,7 +455,7 @@ struct Crossover {
 }
 
 impl Crossover {
-    fn set(&mut self, lower: f64, upper: f64, rate: f64) {
+    pub(crate) fn set(&mut self, lower: f64, upper: f64, rate: f64) {
         self.lower.set(lower, rate);
         for split in [
             &mut self.upper,
@@ -467,7 +467,7 @@ impl Crossover {
     }
 
     /// The low, mid and high bands of `x`; a band that doesn't exist is 0.
-    fn process(&mut self, x: f64, low_on: bool, high_on: bool) -> [f64; BANDS] {
+    pub(crate) fn process(&mut self, x: f64, low_on: bool, high_on: bool) -> [f64; BANDS] {
         let (below, above) = self.lower.process(x);
         let (upper_low, upper_high) = self.upper.process(x);
         let (mid, high) = self.upper_of_high.process(above);
@@ -866,6 +866,7 @@ pub fn display(
         });
         for (side, threshold) in [("Above", above.0), ("Below", below_threshold)] {
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: format!("{name} {side} Threshold"),
                 series: curve.clone(),
                 x: threshold as f32,

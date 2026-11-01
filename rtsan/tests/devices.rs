@@ -666,6 +666,40 @@ fn wax_passes_under_rtsan() {
     );
 }
 
+#[test]
+fn color_limiter_passes_under_rtsan() {
+    use bl_devices::color_limiter::*;
+    run_lo_fi_device(
+        COLOR_LIMITER,
+        &[
+            (LOUDNESS, &[1.0, 15.8, 0.0]),
+            (CEILING, &[-0.3, -12.0, -24.0]),
+            (LOOKAHEAD, &[0.0, 1.0, 2.0]),
+            (RELEASE, &[1.0, 100.0, 1_000.0]),
+            (SATURATION, &[0.0, 50.0, 100.0]),
+            (COLOR, &[-100.0, 0.0, 100.0]),
+        ],
+    );
+}
+
+#[test]
+fn re_enveloper_passes_under_rtsan() {
+    use bl_devices::re_enveloper::*;
+    run_lo_fi_device(
+        RE_ENVELOPER,
+        &[
+            (LOW_CROSSOVER, &[50.0, 200.0, 2_000.0]),
+            (HIGH_CROSSOVER, &[500.0, 2_500.0, 16_000.0]),
+            (factor(LOW), &[-100.0, 0.0, 100.0]),
+            (factor(MID), &[100.0, -100.0, 30.0]),
+            (factor(HIGH), &[-50.0, 100.0]),
+            (gain(LOW), &[1.0, 0.0, 2.0]),
+            (gain(MID), &[1.0, 0.5]),
+            (OUTPUT, &[1.0, 0.0, 2.0]),
+        ],
+    );
+}
+
 /// The three delays (WP-5.25) on a track that plays, while their times,
 /// pitch, spray, feedback and modes change mid-stream.
 #[test]
@@ -915,6 +949,41 @@ fn the_saturation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: roar R14
+#[test]
+fn roar_passes_under_rtsan() {
+    use bl_devices::roar::{
+        AMOUNT, COLOR_COMPENSATION, DRIVE, DRY_WET, FILTER, FREQUENCY, HIGH_CROSSOVER, LEVEL,
+        LOW_CROSSOVER, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE, SHAPER, TONE_AMOUNT,
+        stage_param,
+    };
+    run_lo_fi_device(
+        ROAR,
+        &[
+            (ROUTING_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (stage_param(0, SHAPER), &[0.0, 2.0, 4.0, 8.0, 10.0, 11.0]),
+            (stage_param(1, SHAPER), &[10.0, 3.0, 9.0, 5.0]),
+            (stage_param(2, SHAPER), &[7.0, 6.0, 1.0]),
+            (stage_param(0, FILTER), &[0.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+            (stage_param(1, FILTER), &[8.0, 6.0, 2.0, 3.0]),
+            (stage_param(2, FILTER), &[1.0, 4.0, 7.0]),
+            (stage_param(0, AMOUNT), &[0.0, 60.0, 100.0]),
+            (stage_param(1, AMOUNT), &[100.0, 20.0]),
+            (stage_param(0, FREQUENCY), &[20_000.0, 600.0, 90.0]),
+            (stage_param(1, RESONANCE), &[0.0, 80.0]),
+            (stage_param(2, LEVEL), &[1.0, 0.0, 2.0]),
+            (stage_param(0, PRE), &[1.0, 0.0]),
+            (DRIVE, &[0.0, 18.0, 36.0]),
+            (TONE_AMOUNT, &[-100.0, 100.0, 0.0]),
+            (COLOR_COMPENSATION, &[1.0, 0.0]),
+            (LOW_CROSSOVER, &[50.0, 2_000.0]),
+            (HIGH_CROSSOVER, &[500.0, 16_000.0]),
+            (OUTPUT_GAIN, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+        ],
+    );
+}
+
 // Spec: drum-bus R1, R15
 #[test]
 fn drum_buss_passes_under_rtsan() {
@@ -1083,6 +1152,50 @@ fn the_modulation_devices_pass_under_rtsan() {
             (chorus::CHORUS_TIME, &[0.0, 2.0, 4.0]),
             (chorus::CHORUS_TAPS, &[0.0, 1.0]),
             (chorus::VIBRATO_SHAPE, &[0.0, 100.0]),
+        ],
+    );
+}
+
+// Spec: echo R18
+#[test]
+fn echo_passes_under_rtsan() {
+    use bl_devices::echo::*;
+    run_lo_fi_device(
+        ECHO,
+        &[
+            (CHANNEL_MODE, &[0.0, 1.0, 2.0]),
+            (LINK, &[0.0, 1.0]),
+            (line_param(0, SYNC), &[0.0, 1.0]),
+            (line_param(0, SYNC_MODE), &[0.0, 1.0, 2.0, 3.0]),
+            (line_param(0, NOTES), &[0.0, 3.0, 10.0]),
+            (line_param(1, TIME), &[1.0, 100.0, 5_000.0]),
+            (line_param(1, OFFSET), &[-33.0, 0.0, 33.0]),
+            (INPUT, &[0.0, 1.0, 3.98]),
+            (DRIVE, &[0.0, 1.0]),
+            (FEEDBACK, &[0.0, 60.0, 100.0]),
+            (FEEDBACK_INVERT, &[0.0, 1.0]),
+            (FILTER, &[0.0, 1.0]),
+            (HP_FREQ, &[20.0, 500.0, 5_000.0]),
+            (LP_RES, &[0.0, 100.0]),
+            (WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+            (LFO_SYNC, &[0.0, 1.0]),
+            (LFO_RATE, &[0.0, 5.0, 9.0]),
+            (MOD_DELAY, &[0.0, 100.0]),
+            (MOD_X4, &[0.0, 1.0]),
+            (MOD_FILTER, &[0.0, 100.0]),
+            (ENV_MIX, &[0.0, 50.0, 100.0]),
+            (GATE, &[0.0, 1.0]),
+            (DUCKING, &[0.0, 1.0]),
+            (NOISE, &[0.0, 1.0]),
+            (NOISE_MORPH, &[0.0, 100.0]),
+            (WOBBLE, &[0.0, 1.0]),
+            (REPITCH, &[0.0, 1.0]),
+            (REVERB, &[0.0, 100.0]),
+            (REVERB_LOCATION, &[0.0, 1.0, 2.0]),
+            (DECAY, &[0.2, 10.0]),
+            (STEREO, &[0.0, 100.0, 200.0]),
+            (EQUAL_LOUDNESS, &[0.0, 1.0]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
         ],
     );
 }

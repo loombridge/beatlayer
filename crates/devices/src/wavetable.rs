@@ -1388,10 +1388,8 @@ impl Synth {
                         left += x * l;
                         right += x * r;
                     }
-                    sides[o] = [
-                        left * self.osc_gain[o][0][k],
-                        right * self.osc_gain[o][1][k],
-                    ];
+                    sides[0][o] = left * self.osc_gain[o][0][k];
+                    sides[1][o] = right * self.osc_gain[o][1][k];
                 }
                 let sub = if set.sub_on {
                     let tone = self.ramps[RAMP_SUB_TONE][at + k] / 100.0;
@@ -1405,13 +1403,13 @@ impl Synth {
                 // each oscillator with the whole sub into its own filter.
                 // Split: each with half the sub.
                 let share = if set.routing == 2 { 0.5 } else { 1.0 };
-                for ch in 0..2 {
+                for (ch, [first, second]) in sides.into_iter().enumerate() {
                     let at = (k * 2 + ch) * stride + voice;
                     if set.routing == 0 {
-                        self.sig[0][at] = sides[0][ch] + sides[1][ch] + sub;
+                        self.sig[0][at] = first + second + sub;
                     } else {
-                        self.sig[0][at] = sides[0][ch] + sub * share;
-                        self.sig[1][at] = sides[1][ch] + sub * share;
+                        self.sig[0][at] = first + sub * share;
+                        self.sig[1][at] = second + sub * share;
                     }
                 }
             }

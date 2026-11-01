@@ -596,3 +596,97 @@ fn a_bend_reaches_the_chain_the_note_reached_at_its_played_key_only() {
         );
     }
 }
+
+/// A MIDI track holding a drum rack of two pads, each a Drum Synth of the
+/// given type with Volume at 1 and Decay at 4 s, in one choke group when
+/// `choked`, and a clip that plays the first pad at the start and the second
+/// a beat later. `second_volume` is the second pad's Volume.
+fn synth_kit(size: usize, types: [&str; 2], choked: bool, second_volume: f64) -> Rig {
+    use bl_devices::drum_synth::{DECAY, VOLUME};
+    let mut rig = Rig::with_registry(size.max(256), bl_devices::register);
+    let midi = track(&mut rig.editor, TrackKind::Midi, None);
+    let (_, chains, _) = drum_rack(&mut rig.editor, midi, 2, 0);
+    for (n, chain) in chains.iter().enumerate() {
+        let volume = if n == 0 { 1.0 } else { second_volume };
+        in_chain(
+            &mut rig.editor,
+            *chain,
+            types[n],
+            DeviceRole::Instrument,
+            &[(VOLUME, volume), (DECAY, 4_000.0)],
+        );
+        set(
+            &mut rig,
+            Command::SetChainReceive {
+                chain: *chain,
+                receive: Receive::Note(36 + 2 * n as u8),
+            },
+        );
+        set(
+            &mut rig,
+            Command::SetChainChoke {
+                chain: *chain,
+                choke: choked.then_some(1),
+            },
+        );
+    }
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let clip = rig.editor.new_id();
+    let notes = vec![
+        bl_model::Note::new(36, Ticks::ZERO, beat, 100),
+        bl_model::Note::new(38, beat, beat, 100),
+    ];
+    rig.editor
+        .apply(Command::CreateClip {
+            track: midi,
+            clip: bl_model::Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 8,
+                bl_model::ClipData::Midi(bl_model::MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    rig.sync();
+    rig
+}
+
+// Spec: drum-synths R9. Each Drum Synth plays the notes its pad receives, and
+// is cut by its choke group: with the second pad (silent, so that only the
+// first is heard) in the first's group, the first falls silent a beat in, and
+// without the group it rings on.
+#[test]
+fn a_drum_synth_plays_from_its_pad_and_its_choke_group_cuts_it() {
+    use bl_devices::{ds_clap, ds_kick, ds_snare, ds_tom};
+    let types = [
+        ds_kick::DS_KICK,
+        ds_snare::DS_SNARE,
+        ds_tom::DS_TOM,
+        ds_clap::DS_CLAP,
+    ];
+    for first in types {
+        let mut golden: Option<(Vec<f32>, Vec<f32>)> = None;
+        for size in SIZES {
+            let mut ringing = synth_kit(size, [first, ds_snare::DS_SNARE], false, 0.0);
+            ringing.sender.transport(TransportCommand::Play);
+            let open = ringing.render(2 * BEAT as usize, size);
+            let mut choked = synth_kit(size, [first, ds_snare::DS_SNARE], true, 0.0);
+            choked.sender.transport(TransportCommand::Play);
+            let cut = choked.render(2 * BEAT as usize, size);
+            let beat = BEAT as usize;
+            let loud = |s: &[f32]| s.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+            assert!(loud(&open[..beat]) > 0.05, "{first}: the pad plays it");
+            assert_eq!(open[..beat], cut[..beat], "{first}: until the choke");
+            assert!(loud(&open[beat + 500..]) > 0.01, "{first}: it rings on");
+            // The choke's fade is 2 ms; after it nothing is left.
+            assert_eq!(loud(&cut[beat + 200..]), 0.0, "{first}: the group cuts it");
+            match &golden {
+                None => golden = Some((open, cut)),
+                Some((o, c)) => {
+                    assert_eq!(&open, o, "{first}: block size {size}");
+                    assert_eq!(&cut, c, "{first}: block size {size}");
+                }
+            }
+        }
+    }
+}

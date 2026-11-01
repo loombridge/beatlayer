@@ -292,6 +292,7 @@ pub fn display_in(
             values,
             data,
         )),
+        testing::SPECTROGRAM => Some(testing::spectrogram_display(device, description, data)),
         _ => None,
     }
 }

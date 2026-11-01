@@ -808,6 +808,7 @@ pub fn display(
     let amount = value(AMOUNT) * 0.01;
     let published = data.and_then(|d| <[f32; DISPLAY_VALUES]>::try_from(d).ok());
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

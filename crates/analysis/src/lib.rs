@@ -21,6 +21,9 @@
 //! [`stems`] separates a mix into drums, bass, others, and vocals with a
 //! Demucs network (IMP-11).
 //!
+//! [`transcribe`] finds the notes of pitched audio with basic-pitch's network
+//! (IMP-06).
+//!
 //! [`cache`] keeps what is found in each audio file, by the file's content
 //! hash (WP-4.3).
 //!
@@ -39,6 +42,7 @@ pub mod spectrum;
 pub mod stems;
 pub mod tempo;
 pub mod tempo_tracker;
+pub mod transcribe;
 
 #[cfg(test)]
 bl_rt::install_trap!();

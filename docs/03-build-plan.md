@@ -1009,7 +1009,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.25 | todo |  |  |
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |
-| 8.28 | todo |  |  |
+| 8.28 | done | 1 November 2026 | [#648](https://github.com/loombridge/beatlayer/pull/648): `bl_dsp::stft` gives a streaming STFT with exact overlap-add resynthesis, phase-vocoder helpers and a cepstral envelope, reporting `size - 1` frames of latency, and devices get a spectrogram display kind that reads back through `device.display`; Spectrum keeps its own FFT for now |
 | 8.29 | todo |  |  |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |

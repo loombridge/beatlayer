@@ -1622,3 +1622,55 @@ fn vector_delay_passes_under_rtsan() {
         ],
     );
 }
+
+// Spec: vocoder R16
+#[test]
+fn vocoder_passes_under_rtsan() {
+    use bl_devices::vocoder::*;
+    run_lo_fi_device(
+        VOCODER,
+        &[
+            (CARRIER, &[0.0, 1.0, 2.0, 3.0]),
+            (BANDS, &[9.0, 0.0, 4.0]),
+            (CHANNEL_MODE, &[2.0, 0.0, 1.0]),
+            (FORMANT, &[-12.0, 0.0, 12.0]),
+            (DEPTH, &[0.0, 100.0, 200.0]),
+            (ATTACK, &[1.0, 5.0, 300.0]),
+            (RELEASE, &[5.0, 100.0, 3_000.0]),
+            (UNVOICED, &[0.0, 100.0]),
+            (SENS, &[0.0, 50.0, 100.0]),
+            (FAST_SLOW, &[0.0, 1.0]),
+            (RANGE_LOW, &[20.0, 80.0, 500.0]),
+            (RANGE_HIGH, &[20_000.0, 12_000.0, 600.0]),
+            (BW, &[10.0, 100.0, 200.0]),
+            (FILTER_MODE, &[1.0, 0.0]),
+            (GATE, &[-80.0, -30.0, 0.0]),
+            (LEVEL, &[0.0, 1.0, 15.8]),
+            (ENHANCE, &[1.0, 0.0]),
+            (NOISE_X, &[0.0, 50.0, 100.0]),
+            (NOISE_Y, &[100.0, 0.0, 50.0]),
+            (PITCH_LOW, &[40.0, 50.0, 500.0]),
+            (PITCH_HIGH, &[2_000.0, 1_000.0, 100.0]),
+            (PITCH, &[-24.0, 0.0, 24.0]),
+            (WAVEFORM, &[0.0, 1.0, 2.0, 3.0]),
+        ],
+    );
+}
+
+// Spec: spectral-blur R8
+#[test]
+fn spectral_blur_passes_under_rtsan() {
+    use bl_devices::spectral_blur::*;
+    run_lo_fi_device(
+        SPECTRAL_BLUR,
+        &[
+            (LOW, &[20.0, 200.0, 4_000.0]),
+            (HIGH, &[20.0, 5_000.0, 20_000.0]),
+            (HALO, &[20.0, 1_000.0, 10_000.0]),
+            (RESIDUAL, &[0.0, 50.0, 100.0]),
+            (FREEZE, &[1.0, 0.0]),
+            (WET_GAIN, &[0.0, 1.0, 3.98]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+        ],
+    );
+}

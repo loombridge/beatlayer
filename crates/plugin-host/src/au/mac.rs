@@ -483,6 +483,7 @@ impl AuHost {
                 midi_tap: false,
                 note_output: has_note_output(&unit, role),
                 outputs: Vec::new(),
+                matrix: None,
             },
             vendor,
             version: has_version.then(|| version_text(version)),

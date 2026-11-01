@@ -1157,6 +1157,16 @@ impl AudioHost {
         }
     }
 
+    /// The parameters an instrument's matrix moved, as the engine last
+    /// published them (the instrument modulation spec, R12): what a knob's
+    /// ring draws for the newest voice. Empty while no engine runs.
+    pub fn matrix_played_into(&mut self, out: &mut Vec<bl_engine::PlayedParam>) {
+        out.clear();
+        if let Some(engine) = self.engine.as_mut() {
+            out.extend_from_slice(&engine.state().matrix_played);
+        }
+    }
+
     /// The rack chains the engine found processing in the last block
     /// (WP-5.3): what Auto Select follows. Empty while no engine runs.
     pub fn processing_into(&mut self, out: &mut Vec<bl_model::ChainId>) {

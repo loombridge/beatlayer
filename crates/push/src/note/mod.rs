@@ -9,13 +9,13 @@
 //! do reads the set from the read model and asks for the registered commands
 //! a person's editors run.
 
-mod clip;
+pub(crate) mod clip;
 pub mod grid;
 mod keys;
 mod melodic;
 mod menu;
 mod navigate;
-mod pads;
+pub(crate) mod pads;
 mod paint;
 mod steps;
 mod strip;
@@ -107,10 +107,38 @@ enum Down {
     Picked { key: u8, played: bool },
     /// It holds a step.
     Step(HeldStep),
+    /// It holds a step whose note a tap toggles when it is let go; a hold
+    /// edits the step's notes instead (push-2-tracks R55, R57).
+    Tap(HeldStep, Tap),
     /// It holds a loop length pad.
     Loop(u8),
     /// It did something that ends with the press.
     Done,
+}
+
+/// A tap on a step pad toggles the note when the pad comes up within this
+/// long; a pad held longer leaves it (push-2 R7).
+const TAP: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// What a step pad pressed with no modifier does when it is let go in time.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Tap {
+    /// The pitch of the note the step toggles.
+    key: u8,
+    /// The velocity a note added takes.
+    velocity: u8,
+    /// When the pad went down.
+    at: Instant,
+}
+
+impl Down {
+    /// The step the pad holds, if it holds one.
+    fn step(&self) -> Option<HeldStep> {
+        match self {
+            Self::Step(step) | Self::Tap(step, _) => Some(*step),
+            _ => None,
+        }
+    }
 }
 
 /// What Duplicate copies from, after its first tap (R17, R30).
@@ -165,8 +193,44 @@ pub struct State {
     pub velocity: Option<u8>,
     /// The steps held now.
     pub held_steps: Vec<HeldStep>,
+    /// What the layout lets the display show of the clip (push-2-tracks
+    /// R50 to R54).
+    pub area: Option<Area>,
     /// What a melodic layout shows, on a melodic track.
     pub melody: Option<Melody>,
+}
+
+/// How the display fits the clip to the layout (push-2-tracks R50 to R54).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    /// A real-time layout: only the pitches that hold notes, every note
+    /// fitting.
+    Folded,
+    /// The Melodic Sequencer: one page of eight pitches.
+    Sequencer,
+    /// The Melodic Sequencer + 32 Notes: every note, and the area of the
+    /// selected notes that the clip holds.
+    SequencerNotes,
+    /// A drum or Slicing layout's step sequencer: the selected pad's notes.
+    Pad,
+}
+
+/// The part of the clip the step pads edit: a span of time and a range of
+/// pitches (push-2-tracks R51).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Area {
+    /// How the display fits the clip.
+    pub fit: Fit,
+    /// Where the page, or pair of pages, of steps starts.
+    pub from: Ticks,
+    /// Where it ends.
+    pub to: Ticks,
+    /// The lowest pitch of the range.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+    /// How long one step is.
+    pub step: Ticks,
 }
 
 /// What Note Mode shows of a melodic track's layouts and scale options
@@ -222,6 +286,8 @@ pub struct Note {
     /// Whether Shift was held when an Octave button went down.
     octave_shift: bool,
     pending: Option<Pending>,
+    /// Set while a tap on a step pad is carried out as it is let go.
+    tapping: bool,
     /// The pad each track's slicing Simpler's steps edit (R75).
     picked: BTreeMap<TrackId, u8>,
     /// The slice that started playing last, for Pad Slicing (R74).
@@ -261,6 +327,7 @@ impl Note {
             source: None,
             octave_shift: false,
             pending: None,
+            tapping: false,
             picked: BTreeMap::new(),
             sounding: None,
             summary: State::default(),
@@ -446,19 +513,21 @@ impl Content for Note {
         self.paint_pads(paint);
     }
 
+    fn keep_steps(&mut self) {
+        for down in self.down.values_mut() {
+            if let Down::Tap(step, _) = *down {
+                *down = Down::Step(step);
+            }
+        }
+    }
+
     fn picked_slice(&self, model: &ReadModel) -> Option<u8> {
         let track = clip::selected_track(model)?;
         matches!(clip::classify(model, track), Kind::Slices { .. }).then(|| self.picked_key(track))
     }
 
     fn held_steps(&self) -> Vec<HeldStep> {
-        self.down
-            .values()
-            .filter_map(|down| match down {
-                Down::Step(step) => Some(*step),
-                _ => None,
-            })
-            .collect()
+        self.down.values().filter_map(Down::step).collect()
     }
 
     fn strip_use(&self) -> Option<StripUse> {

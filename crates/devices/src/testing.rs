@@ -9,6 +9,7 @@
 //! | [`SPECTROGRAM`] | Framework Test Spectrogram | passes audio through; a display cell that draws a spectrogram of it from `bl_dsp::stft` | its own |
 //! | [`EFFECTS`] | Framework Test Effects | the effects' shared parts: an LFO tremolo, or the LFO's or the envelope follower's value as the output; a menu option and an expanded part | its own |
 //! | [`INSTRUMENT`] | Framework Test Instrument | the instruments' shared parts: sine voices with every part of the voice section, or a source as the output; a menu option | generic |
+//! | [`FM`] | Framework Test FM | the FM core's four operators on the voice section, each operator's controls as parameters | generic |
 //! | [`PAGES`] | Framework Test Pages | passes audio through; tabs of three pages in the body beside a shell of three sections and its display | its own |
 //!
 //! Between them they have a parameter of every kind: gains, continuous
@@ -32,7 +33,12 @@ use core::f64::consts::TAU;
 use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, Timing};
 use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
 
+use crate::fm;
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument::matrix::{
+    DestDef, Kind as MatrixKind, Matrix, MatrixLayout, Pick, Range as MatrixRange,
+    Rate as MatrixRate, Scope as MatrixScope, SlotDef, SourceDef,
+};
 use crate::instrument::{self, Instrument, NoteRange, Parts, Section, Sources, State};
 use crate::lfo::{Lfo, Rate, Shape, Stereo, Wave};
 
@@ -50,6 +56,8 @@ pub const SPECTROGRAM: &str = "test.framework.spectrogram";
 pub const EFFECTS: &str = "test.framework.effects";
 /// The test instrument's device type.
 pub const INSTRUMENT: &str = "test.framework.instrument";
+/// The test FM device's type.
+pub const FM: &str = "test.framework.fm";
 /// The test pages' device type.
 pub const PAGES: &str = "test.framework.pages";
 
@@ -164,10 +172,41 @@ pub const INSTRUMENT_OUTPUT: ParamId = ParamId(23);
 /// rate Hi-Quality sets.
 pub const INSTRUMENT_PRESSURE_LEVEL: ParamId = ParamId(24);
 
+/// Spec: instrument modulation R1, R2. The test instrument's matrix: the
+/// level of each note (per voice, control rate, additive), a fine tuning in
+/// semitones (per voice, audio rate), a master level (global, control rate,
+/// multiplicative) and the matrix's Amount. Four free slots, one chosen and
+/// one fixed.
+pub const INSTRUMENT_NOTE_LEVEL: ParamId = ParamId(25);
+pub const INSTRUMENT_FINE_TUNE: ParamId = ParamId(26);
+pub const INSTRUMENT_MASTER: ParamId = ParamId(27);
+pub const INSTRUMENT_MATRIX_AMOUNT: ParamId = ParamId(28);
+/// The four free slots' amounts, in per cent, 0 by default.
+pub const INSTRUMENT_FREE_AMOUNTS: [ParamId; 4] =
+    [ParamId(29), ParamId(30), ParamId(31), ParamId(32)];
+/// The chosen slot's source and destination choosers and its amount.
+pub const INSTRUMENT_CHOSEN_SOURCE: ParamId = ParamId(33);
+pub const INSTRUMENT_CHOSEN_DEST: ParamId = ParamId(34);
+pub const INSTRUMENT_CHOSEN_AMOUNT: ParamId = ParamId(35);
+/// The fixed slot's source chooser (Pressure into Fine Tune by default
+/// would be a chooser's: it is fixed here, so only its amount) and amount.
+pub const INSTRUMENT_FIXED_AMOUNT: ParamId = ParamId(36);
+/// The matrix's sources, in the order the chosen slot's chooser lists them
+/// after Off.
+pub const INSTRUMENT_SOURCES: [&str; 5] =
+    ["Velocity", "Key", "Pressure", "Mod Wheel", "Pitch Bend"];
+/// The matrix's destinations, in the order the chosen slot's chooser lists
+/// them after Off.
+pub const INSTRUMENT_DESTINATIONS: [&str; 3] = ["Note Level", "Fine Tune", "Master"];
+/// The fine tuning's reach: ±12 semitones.
+pub const INSTRUMENT_FINE_RANGE: f64 = 12.0;
+
 /// What [`INSTRUMENT_OUTPUT`] chooses between, after the audio: a source of
 /// the lowest sounding voice, or a global one; or the pitch in semitones of
-/// the lowest or the highest sounding voice, frame by frame.
-pub const INSTRUMENT_OUTPUTS: [&str; 13] = [
+/// the lowest or the highest sounding voice, frame by frame; or the position
+/// on its travel that a matrix destination plays for the lowest sounding
+/// voice, after every route, frame by frame.
+pub const INSTRUMENT_OUTPUTS: [&str; 16] = [
     "Audio",
     "Velocity",
     "Release Velocity",
@@ -181,6 +220,9 @@ pub const INSTRUMENT_OUTPUTS: [&str; 13] = [
     "Aftertouch",
     "Pitch",
     "Pitch (Last)",
+    "Note Level",
+    "Fine Tune",
+    "Master",
 ];
 
 /// The most voices and the most unison copies the test instrument has.
@@ -558,6 +600,48 @@ pub fn instrument_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far a note's pressure lowers its level, read on the control rate."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_NOTE_LEVEL,
+            "Note Level",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("Each note's level, which matrix routes move per voice."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_FINE_TUNE,
+            "Fine Tune",
+            (-INSTRUMENT_FINE_RANGE, INSTRUMENT_FINE_RANGE),
+            0.0,
+            ParamUnit::Semitones,
+        )
+        .describe("Each note's pitch, which matrix routes move per voice every frame."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_MASTER,
+            "Master",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("The device's level, which matrix routes scale as a global destination."),
+        ParamDescriptor::continuous(
+            INSTRUMENT_MATRIX_AMOUNT,
+            "Matrix Amount",
+            (0.0, 100.0),
+            100.0,
+            ParamUnit::Percent,
+        )
+        .describe("Scales every route's amount."),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[0], "Slot 1 Amount"),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[1], "Slot 2 Amount"),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[2], "Slot 3 Amount"),
+        route_amount(INSTRUMENT_FREE_AMOUNTS[3], "Slot 4 Amount"),
+        ParamDescriptor::choice(INSTRUMENT_CHOSEN_SOURCE, "Mod Source", &CHOOSER_SOURCES, 0)
+            .describe("The chosen slot's modulation source."),
+        ParamDescriptor::choice(INSTRUMENT_CHOSEN_DEST, "Mod Dest", &CHOOSER_DESTINATIONS, 0)
+            .describe("The chosen slot's destination."),
+        route_amount(INSTRUMENT_CHOSEN_AMOUNT, "Mod Amount"),
+        route_amount(INSTRUMENT_FIXED_AMOUNT, "Pressure Tune Amount"),
     ];
     DeviceType::native(
         INSTRUMENT,
@@ -565,6 +649,209 @@ pub fn instrument_type() -> DeviceType {
         DeviceRole::Instrument,
     )
     .with_description(DeviceDescription::new(params).with_menu_options(&[INSTRUMENT_HI_QUALITY]))
+    .with_matrix(instrument_matrix())
+}
+
+const CHOOSER_SOURCES: [&str; 6] = [
+    "Off",
+    "Velocity",
+    "Key",
+    "Pressure",
+    "Mod Wheel",
+    "Pitch Bend",
+];
+const CHOOSER_DESTINATIONS: [&str; 4] = ["Off", "Note Level", "Fine Tune", "Master"];
+
+/// A route slot's amount: −100 % to 100 %, 0 % by default.
+fn route_amount(id: ParamId, name: &str) -> ParamDescriptor {
+    ParamDescriptor::continuous(id, name, (-100.0, 100.0), 0.0, ParamUnit::Percent)
+        .describe("How far the route's source moves its destination, in per cent of its travel.")
+}
+
+/// The test instrument's matrix (spec: instrument modulation R1, R2): the
+/// sources and destinations above, slots 0 to 3 free, slot 4 chosen and
+/// slot 5 fixed (Pressure into Fine Tune). Key into Master is refused.
+#[must_use]
+pub fn instrument_matrix() -> MatrixLayout {
+    let source = |name, range, scope| SourceDef { name, range, scope };
+    let dest = |name, param, scope, rate, kind| DestDef {
+        name,
+        param: Some(param),
+        scope,
+        rate,
+        kind,
+    };
+    let mut slots: Vec<SlotDef> = INSTRUMENT_FREE_AMOUNTS
+        .iter()
+        .map(|&amount| SlotDef {
+            source: Pick::Free,
+            dest: Pick::Free,
+            amount,
+        })
+        .collect();
+    slots.push(SlotDef {
+        source: Pick::Chosen(INSTRUMENT_CHOSEN_SOURCE),
+        dest: Pick::Chosen(INSTRUMENT_CHOSEN_DEST),
+        amount: INSTRUMENT_CHOSEN_AMOUNT,
+    });
+    slots.push(SlotDef {
+        source: Pick::Fixed(2),
+        dest: Pick::Fixed(1),
+        amount: INSTRUMENT_FIXED_AMOUNT,
+    });
+    MatrixLayout {
+        sources: vec![
+            source("Velocity", MatrixRange::Unipolar, MatrixScope::Voice),
+            source("Key", MatrixRange::Bipolar, MatrixScope::Voice),
+            source("Pressure", MatrixRange::Unipolar, MatrixScope::Voice),
+            source("Mod Wheel", MatrixRange::Unipolar, MatrixScope::Global),
+            source("Pitch Bend", MatrixRange::Bipolar, MatrixScope::Global),
+        ],
+        dests: vec![
+            dest(
+                "Note Level",
+                INSTRUMENT_NOTE_LEVEL,
+                MatrixScope::Voice,
+                MatrixRate::Control,
+                MatrixKind::Additive,
+            ),
+            dest(
+                "Fine Tune",
+                INSTRUMENT_FINE_TUNE,
+                MatrixScope::Voice,
+                MatrixRate::Audio,
+                MatrixKind::Additive,
+            ),
+            dest(
+                "Master",
+                INSTRUMENT_MASTER,
+                MatrixScope::Global,
+                MatrixRate::Control,
+                MatrixKind::Multiplicative,
+            ),
+        ],
+        slots,
+        forbidden: vec![(1, 2)],
+    }
+}
+
+/// The test FM device's global parameters: Algorithm (1 to 11), Antialias,
+/// Interpolation, Tone and Voices.
+pub const FM_ALGORITHM: ParamId = ParamId(0);
+pub const FM_ANTIALIAS: ParamId = ParamId(1);
+pub const FM_INTERPOLATION: ParamId = ParamId(2);
+pub const FM_TONE: ParamId = ParamId(3);
+pub const FM_VOICES: ParamId = ParamId(4);
+
+/// An operator's controls, by the offset [`fm_param`] adds to its first.
+pub const FM_ON: u32 = 0;
+pub const FM_COARSE: u32 = 1;
+pub const FM_FINE: u32 = 2;
+pub const FM_FIXED: u32 = 3;
+pub const FM_FREQ: u32 = 4;
+pub const FM_MULTI: u32 = 5;
+pub const FM_VEL: u32 = 6;
+pub const FM_Q: u32 = 7;
+pub const FM_LEVEL: u32 = 8;
+pub const FM_WAVE: u32 = 9;
+pub const FM_FEEDBACK: u32 = 10;
+pub const FM_PHASE: u32 = 11;
+pub const FM_RETRIGGER: u32 = 12;
+
+/// The parameter of operator `op` (0 for A to 3 for D) holding `control`.
+#[must_use]
+pub const fn fm_param(op: usize, control: u32) -> ParamId {
+    ParamId(16 + 16 * op as u32 + control)
+}
+
+/// What Multi chooses between, in hertz.
+pub const FM_MULTIS: [f64; 6] = [0.1, 1.0, 10.0, 100.0, 1_000.0, 10_000.0];
+
+/// The test FM device's type: the FM core's every control, one parameter
+/// each, on voices that play at full level with a 1 ms attack and a 15 ms
+/// release.
+#[must_use]
+pub fn fm_type() -> DeviceType {
+    let mut params = vec![
+        ParamDescriptor::integer(FM_ALGORITHM, "Algorithm", (1, 11), 1, ParamUnit::None)
+            .describe("Which operators modulate which, of the eleven graphs."),
+        ParamDescriptor::toggle(FM_ANTIALIAS, "Antialias", true)
+            .describe("Runs the operators at twice the sample rate."),
+        ParamDescriptor::toggle(FM_INTERPOLATION, "Interpolation", true)
+            .describe("Reads the tables with interpolation."),
+        ParamDescriptor::continuous(FM_TONE, "Tone", (0.0, 100.0), 70.0, ParamUnit::Percent)
+            .describe("Limits the partials the tables play."),
+        instrument::voices(FM_VOICES, INSTRUMENT_MAX_VOICES as i64, 8),
+    ];
+    for (op, letter) in ["A", "B", "C", "D"].into_iter().enumerate() {
+        let name = |what: &str| format!("{letter} {what}");
+        let id = |control| fm_param(op, control);
+        params.extend([
+            ParamDescriptor::toggle(id(FM_ON), &name("On"), true)
+                .describe("Takes the operator out of the graph when off."),
+            // 0 reads as a ratio of 0.5.
+            ParamDescriptor::integer(id(FM_COARSE), &name("Coarse"), (0, 48), 1, ParamUnit::None)
+                .describe("The whole-number ratio of the note's frequency; 0 is a half."),
+            ParamDescriptor::integer(id(FM_FINE), &name("Fine"), (0, 1000), 0, ParamUnit::None)
+                .describe("Thousandths of a ratio added to Coarse."),
+            ParamDescriptor::toggle(id(FM_FIXED), &name("Fixed"), false)
+                .describe("Plays Freq times Multi whatever the key."),
+            ParamDescriptor::continuous(
+                id(FM_FREQ),
+                &name("Freq"),
+                (1.0, 1000.0),
+                100.0,
+                ParamUnit::Hertz,
+            )
+            .describe("The fixed frequency before Multi."),
+            ParamDescriptor::choice(
+                id(FM_MULTI),
+                &name("Multi"),
+                &["0.1", "1", "10", "100", "1000", "10000"],
+                1,
+            )
+            .describe("What Freq is multiplied by."),
+            ParamDescriptor::continuous(
+                id(FM_VEL),
+                &name("Osc < Vel"),
+                (-100.0, 100.0),
+                0.0,
+                ParamUnit::Percent,
+            )
+            .describe("How far velocity moves the ratio, up to an octave."),
+            ParamDescriptor::toggle(id(FM_Q), &name("Q"), true)
+                .describe("Rounds the velocity-shifted Coarse to a whole step."),
+            ParamDescriptor::gain(
+                id(FM_LEVEL),
+                &name("Level"),
+                0.0,
+                if op == 0 { 0.0 } else { f64::NEG_INFINITY },
+            )
+            .describe("The operator's output level."),
+            ParamDescriptor::choice(id(FM_WAVE), &name("Wave"), &fm::WAVES, 0)
+                .describe("The waveform the operator plays."),
+            ParamDescriptor::continuous(
+                id(FM_FEEDBACK),
+                &name("Feedback"),
+                (0.0, 100.0),
+                0.0,
+                ParamUnit::Percent,
+            )
+            .describe("How far the operator modulates itself, if nothing modulates it."),
+            ParamDescriptor::continuous(
+                id(FM_PHASE),
+                &name("Phase"),
+                (0.0, 360.0),
+                0.0,
+                ParamUnit::None,
+            )
+            .describe("Where in its cycle the operator starts, in degrees."),
+            ParamDescriptor::toggle(id(FM_RETRIGGER), &name("Retrigger"), true)
+                .describe("Starts the operator at Phase with each note."),
+        ]);
+    }
+    DeviceType::native(FM, "Framework Test FM", DeviceRole::Instrument)
+        .with_description(DeviceDescription::new(params))
 }
 
 /// Every test device type.
@@ -577,6 +864,7 @@ pub fn device_types() -> Vec<DeviceType> {
         spectrogram_type(),
         effects_type(),
         instrument_type(),
+        fm_type(),
         pages_type(),
     ]
 }
@@ -590,9 +878,8 @@ pub fn register(registry: &mut Registry) {
         Spectrogram::new(config)
     });
     add(registry, effects_type(), Effects::new);
-    add(registry, instrument_type(), |_, config| {
-        TestInstrument::new(config)
-    });
+    add(registry, instrument_type(), TestInstrument::new);
+    add(registry, fm_type(), |_, config| FmInstrument::new(config));
     add(registry, pages_type(), |_, _| Scope);
 }
 
@@ -861,13 +1148,20 @@ struct Voices {
     pressure_level: f32,
     velocity_curve: f64,
     key_curve: f64,
+    /// The modulation matrix, and the knobs its destinations move.
+    matrix: Matrix,
+    /// The values those knobs play, frame by frame (spec: instrument
+    /// modulation R5): automation and modulators already applied.
+    note_level: Vec<f32>,
+    fine_tune: Vec<f32>,
+    master: Vec<f32>,
 }
 
 /// The envelope's lanes per frame.
 const STRIDE: usize = MAX_VOICES.next_multiple_of(16);
 
 impl TestInstrument {
-    fn new(config: &NodeConfig) -> Self {
+    fn new(device: &Device, config: &NodeConfig) -> Self {
         let rate = config.sample_rate.as_f64();
         let frames = config.max_frames.max(1);
         let params = EnvelopeParams {
@@ -921,6 +1215,15 @@ impl TestInstrument {
                 pressure_level: 0.0,
                 velocity_curve: 0.0,
                 key_curve: 0.0,
+                matrix: Matrix::of(
+                    instrument_type()
+                        .matrix
+                        .expect("the test instrument has a matrix"),
+                    device,
+                ),
+                note_level: vec![100.0; frames],
+                fine_tune: vec![0.0; frames],
+                master: vec![100.0; frames],
             },
         }
     }
@@ -935,6 +1238,14 @@ impl NativeDevice for TestInstrument {
         engine.pressure_level = (value(INSTRUMENT_PRESSURE_LEVEL) / 100.0) as f32;
         engine.velocity_curve = value(INSTRUMENT_VELOCITY_CURVE) / 100.0;
         engine.key_curve = value(INSTRUMENT_KEY_CURVE) / 100.0;
+        let ramp = |id: ParamId| params.ramp(params.index(id).expect("the description lists it"));
+        engine.note_level[..frames].copy_from_slice(ramp(INSTRUMENT_NOTE_LEVEL));
+        engine.fine_tune[..frames].copy_from_slice(ramp(INSTRUMENT_FINE_TUNE));
+        engine.master[..frames].copy_from_slice(ramp(INSTRUMENT_MASTER));
+        engine
+            .matrix
+            .set_amount(value(INSTRUMENT_MATRIX_AMOUNT) / 100.0);
+        engine.matrix.begin(params);
         engine.out[0][..frames].fill(0.0);
         engine.out[1][..frames].fill(0.0);
         self.section.process(audio, params, engine);
@@ -952,8 +1263,24 @@ impl NativeDevice for TestInstrument {
         }
     }
 
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let reach = INSTRUMENT_FINE_RANGE;
+        for (dest, param, low, high) in [
+            (0, INSTRUMENT_NOTE_LEVEL, 0.0, 100.0),
+            (1, INSTRUMENT_FINE_TUNE, -reach, reach),
+            (2, INSTRUMENT_MASTER, 0.0, 100.0),
+        ] {
+            if let Some(position) = self.voices.matrix.shown(dest) {
+                report(param, low + position * (high - low));
+            }
+        }
+    }
+
     fn receive_data(&mut self, data: NodeData) {
         self.section.receive_data(&data);
+        if let Some(routes) = data.downcast_ref::<bl_engine::ModRoutes>() {
+            self.voices.matrix.set_free(routes.0);
+        }
     }
 }
 
@@ -963,6 +1290,7 @@ impl Instrument for Voices {
         match event.kind {
             VoiceEventKind::Start { start, .. } => {
                 let sources = Sources::of(voices);
+                self.matrix.start(voice);
                 self.held[voice] = 1.0 - self.pressure_level * sources.pressure(voice) as f32;
                 match start {
                     Start::Fresh => {
@@ -1011,8 +1339,25 @@ impl Instrument for Voices {
     }
 }
 
+/// What the matrix's sources read: the voices' (spec: instrument voices
+/// R15), in the order of [`INSTRUMENT_SOURCES`].
+fn reader<'a>(
+    sources: &'a Sources<'a>,
+    curves: (f64, f64),
+) -> impl Fn(usize, usize, usize) -> f64 + 'a {
+    move |source, voice, _frame| match source {
+        0 => instrument::curve(sources.velocity(voice), curves.0),
+        1 => 2.0 * instrument::curve((sources.key(voice) + 1.0) / 2.0, curves.1) - 1.0,
+        2 => sources.pressure(voice),
+        3 => sources.mod_wheel(),
+        _ => sources.pitch_bend(),
+    }
+}
+
 impl Voices {
-    /// Every active voice's copies as sines, mixed into the two outputs.
+    /// Every active voice's copies as sines, mixed into the two outputs,
+    /// each voice's level and pitch moved by the matrix's routes (spec:
+    /// instrument modulation R3 to R7).
     fn sound(
         &mut self,
         voices: &VoiceBlock,
@@ -1022,14 +1367,51 @@ impl Voices {
     ) {
         let config = *state.config();
         let copies = config.copies;
+        let read = reader(sources, (self.velocity_curve, self.key_curve));
+        self.matrix.set_oldest(state.oldest(voices));
+        self.matrix.set_newest(state.newest(voices));
         for voice in voices.active_voices() {
             let gain = INSTRUMENT_LEVEL * sources.velocity(voice) as f32;
             for frame in 0..frames.len() {
-                if state.control_due(frames.start + frame) {
+                let at = frames.start + frame;
+                let due = state.control_due(at);
+                if due {
                     self.held[voice] = 1.0 - self.pressure_level * sources.pressure(voice) as f32;
                 }
-                let level = self.levels[frame * STRIDE + voice] * gain * self.held[voice];
-                let pitch = state.pitch(voices, voice, frames, frame);
+                let travel =
+                    |value: f32, low: f64, high: f64| (f64::from(value) - low) / (high - low);
+                let note_level = self.matrix.position(
+                    0,
+                    travel(self.note_level[at], 0.0, 100.0),
+                    voice,
+                    at,
+                    due,
+                    &read,
+                );
+                let reach = INSTRUMENT_FINE_RANGE;
+                let fine = self.matrix.position(
+                    1,
+                    travel(self.fine_tune[at], -reach, reach),
+                    voice,
+                    at,
+                    due,
+                    &read,
+                );
+                let fine = (fine * 2.0 - 1.0) * reach;
+                let master = self.matrix.position(
+                    2,
+                    travel(self.master[at], 0.0, 100.0),
+                    voice,
+                    at,
+                    due,
+                    &read,
+                );
+                let level = self.levels[frame * STRIDE + voice]
+                    * gain
+                    * self.held[voice]
+                    * note_level as f32
+                    * master as f32;
+                let pitch = state.pitch(voices, voice, frames, frame) + fine;
                 let age = state.frames_since_start(voice, frames.start + frame);
                 for copy in 0..copies {
                     let phase = &mut self.phases[voice * INSTRUMENT_MAX_COPIES + copy];
@@ -1065,6 +1447,32 @@ impl Voices {
             (mask != 0).then(|| mask.trailing_zeros() as usize),
             (mask != 0).then(|| 31 - mask.leading_zeros() as usize),
         );
+        if self.output >= 13 {
+            let read = reader(sources, (self.velocity_curve, self.key_curve));
+            self.matrix.set_oldest(state.oldest(voices));
+            self.matrix.set_newest(state.newest(voices));
+            let dest = self.output - 13;
+            for frame in 0..frames.len() {
+                let at = frames.start + frame;
+                let value = lowest.map_or(0.0, |voice| {
+                    let (knob, low, high) = match dest {
+                        0 => (self.note_level[at], 0.0, 100.0),
+                        1 => (
+                            self.fine_tune[at],
+                            -INSTRUMENT_FINE_RANGE,
+                            INSTRUMENT_FINE_RANGE,
+                        ),
+                        _ => (self.master[at], 0.0, 100.0),
+                    };
+                    let base = (f64::from(knob) - low) / (high - low);
+                    self.matrix
+                        .position(dest, base, voice, at, state.control_due(at), &read)
+                });
+                self.out[0][at] = value as f32;
+                self.out[1][at] = value as f32;
+            }
+            return;
+        }
         if self.output >= 11 {
             let voice = if self.output == 11 { lowest } else { highest };
             for frame in 0..frames.len() {
@@ -1091,5 +1499,143 @@ impl Voices {
         } as f32;
         self.out[0][frames.clone()].fill(value);
         self.out[1][frames.clone()].fill(value);
+    }
+}
+
+/// The FM core's four operators on the voice section, under an amplifier
+/// envelope: what the core's rules are tested through.
+struct FmInstrument {
+    section: Section,
+    voices: FmVoices,
+}
+
+struct FmVoices {
+    core: fm::Core,
+    envelopes: EnvelopeBank,
+    levels: Vec<f32>,
+    out: Vec<f32>,
+}
+
+impl FmInstrument {
+    fn new(config: &NodeConfig) -> Self {
+        let rate = config.sample_rate.as_f64();
+        let frames = config.max_frames.max(1);
+        Self {
+            section: Section::new(
+                Parts {
+                    voices: Some(FM_VOICES),
+                    ..Parts::default()
+                },
+                INSTRUMENT_MAX_VOICES,
+                1,
+                rate,
+                0xF3,
+            ),
+            voices: FmVoices {
+                core: fm::Core::new(rate, frames, 0xF3),
+                envelopes: EnvelopeBank::new(MAX_VOICES, EnvelopeParams::AMP, Timing::new(rate)),
+                levels: vec![0.0; frames * STRIDE],
+                out: vec![0.0; frames],
+            },
+        }
+    }
+}
+
+impl NativeDevice for FmInstrument {
+    fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
+        let frames = audio.frames();
+        let value = |id: ParamId| params.value(params.index(id).expect("the description lists it"));
+        let settings = &mut self.voices.core.settings;
+        settings.algorithm = value(FM_ALGORITHM) as usize - 1;
+        settings.antialias = value(FM_ANTIALIAS) >= 0.5;
+        settings.interpolation = value(FM_INTERPOLATION) >= 0.5;
+        settings.tone = (value(FM_TONE) / 100.0) as f32;
+        for (op, s) in settings.ops.iter_mut().enumerate() {
+            let control = |c| value(fm_param(op, c));
+            s.on = control(FM_ON) >= 0.5;
+            let coarse = control(FM_COARSE);
+            s.coarse = if coarse < 1.0 { 0.5 } else { coarse as f32 };
+            s.fine = control(FM_FINE) as f32;
+            s.fixed = control(FM_FIXED) >= 0.5;
+            s.freq = control(FM_FREQ) as f32;
+            s.multi = FM_MULTIS[control(FM_MULTI) as usize] as f32;
+            s.vel = (control(FM_VEL) / 100.0) as f32;
+            s.quantise = control(FM_Q) >= 0.5;
+            s.level = control(FM_LEVEL) as f32;
+            s.wave = control(FM_WAVE) as usize;
+            s.feedback = (control(FM_FEEDBACK) / 100.0) as f32;
+            s.phase = (control(FM_PHASE) / 360.0) as f32;
+            s.retrigger = control(FM_RETRIGGER) >= 0.5;
+        }
+        self.voices.core.begin(frames);
+        self.section.process(audio, params, &mut self.voices);
+        self.voices.core.finish(frames, &mut self.voices.out);
+        for channel in 0..audio.channels() {
+            audio
+                .channel_mut(channel)
+                .copy_from_slice(&self.voices.out[..frames]);
+        }
+    }
+
+    fn flush(&mut self, _events: &[bl_engine::NodeEvent], _params: &ParamBank) {
+        self.section.reset();
+        self.voices.core.reset();
+        for voice in 0..MAX_VOICES {
+            self.voices.envelopes.reset(voice);
+        }
+    }
+
+    fn receive_data(&mut self, data: NodeData) {
+        self.voices.core.receive_data(&data);
+        self.section.receive_data(&data);
+    }
+
+    fn latency(&self) -> u32 {
+        self.voices.core.latency()
+    }
+}
+
+impl Instrument for FmVoices {
+    fn voice_event(&mut self, _voices: &mut VoiceBlock, _state: &State, event: VoiceEvent) {
+        let voice = event.voice;
+        match event.kind {
+            VoiceEventKind::Start { start, .. } => {
+                self.core.start(voice, start);
+                match start {
+                    Start::Fresh => self
+                        .envelopes
+                        .trigger(voice, lspk_dsp::envelope::Trigger::New),
+                    Start::Steal | Start::Retrigger => self
+                        .envelopes
+                        .trigger(voice, lspk_dsp::envelope::Trigger::Retrigger),
+                    Start::Legato => self
+                        .envelopes
+                        .trigger(voice, lspk_dsp::envelope::Trigger::Legato),
+                    Start::Join { leader } => self.envelopes.join(voice, leader),
+                }
+            }
+            VoiceEventKind::Release => self.envelopes.release(voice),
+            VoiceEventKind::End { .. } => self.envelopes.reset(voice),
+        }
+    }
+
+    fn render(&mut self, voices: &mut VoiceBlock, state: &State, frames: core::ops::Range<usize>) {
+        let count = frames.len();
+        if count == 0 {
+            return;
+        }
+        self.envelopes.process(&mut self.levels[..count * STRIDE]);
+        let levels = &self.levels;
+        self.core.render(voices, state, frames, |voice, _, frame| {
+            levels[frame * STRIDE + voice]
+        });
+        let mut mask = voices.active_mask();
+        while mask != 0 {
+            let voice = mask.trailing_zeros() as usize;
+            mask &= mask - 1;
+            if self.envelopes.is_idle(voice) {
+                voices.end(voice);
+            }
+        }
     }
 }

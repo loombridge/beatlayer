@@ -5,6 +5,7 @@
 bl_rt::install_trap!();
 
 mod browse;
+mod clip;
 mod connect;
 mod controls;
 mod devices;

@@ -95,6 +95,7 @@ pub mod saturator;
 mod sections;
 pub mod shifter;
 mod signal_mod;
+pub mod spectral_resonator;
 pub mod spectrum_analyser;
 pub mod stack;
 pub mod strike_mod;
@@ -164,6 +165,7 @@ pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
+pub use spectral_resonator::{SPECTRAL_RESONATOR, spectral_resonator_type};
 pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
@@ -236,6 +238,7 @@ pub fn display_in(
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
         ROAR => Some(roar::display(device, description, values, data, view)),
+        SPECTRAL_RESONATOR => Some(spectral_resonator::display(device, description, data)),
         bl_model::modulator::WAVE_MOD => Some(modulator::wave_display(device, description, values)),
         bl_model::modulator::PLAY_MOD => Some(play_mod::display(device, description, values, data)),
         bl_model::modulator::STRIKE_MOD => {
@@ -354,6 +357,7 @@ pub fn register(registry: &mut Registry) {
     tube::register(registry);
     roar::register(registry);
     resonators::register(registry);
+    spectral_resonator::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
     color_limiter::register(registry);

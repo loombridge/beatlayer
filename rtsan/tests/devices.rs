@@ -488,6 +488,154 @@ fn corpus_passes_under_rtsan() {
     );
 }
 
+// Spec: spectral-resonator R12
+#[test]
+fn spectral_resonator_passes_under_rtsan() {
+    use bl_core::time::{TICKS_PER_QUARTER, Ticks};
+    use bl_devices::spectral_resonator::{
+        DECAY, GLIDE, HARMONICS, MIDI_GATE, MODULATION, MONO_POLY, PB, PITCH_MODE, POLYPHONY,
+        QUANTIZE, SPECTRAL_RESONATOR, STRETCH, UNISON, USE_SCALE,
+    };
+    use bl_model::{Clip, ClipData, MidiData, Note};
+
+    let config = EngineConfig::new(SampleRate::HZ_48000, 256);
+    let mut collector = Collector::new();
+    let mut registry = testing::registry();
+    bl_devices::register(&mut registry);
+    let mut compiler = Compiler::new(config, registry, collector.handle());
+    let (mut sender, mut processor, mut monitor) = channel(&config);
+
+    let mut editor = Editor::new();
+    let new_track = |editor: &mut Editor, kind| {
+        let id = editor.new_id();
+        editor
+            .apply(Command::CreateTrack {
+                id,
+                kind,
+                name: String::new(),
+                parent: None,
+                index: 0,
+            })
+            .unwrap();
+        id
+    };
+    let (audio, keys) = (
+        new_track(&mut editor, TrackKind::Audio),
+        new_track(&mut editor, TrackKind::Midi),
+    );
+    // Notes every half beat for the length of the run, overlapping so that
+    // Poly takes voices from one another: ten seconds at 120 BPM.
+    let beat = Ticks(TICKS_PER_QUARTER);
+    let notes = (0..40).map(|n| Note::new(36 + (n * 5 % 36) as u8, beat * n / 2, beat * 3, 100));
+    let clip = editor.new_id();
+    editor
+        .apply(Command::CreateClip {
+            track: keys,
+            clip: Clip::new(
+                clip,
+                Ticks::ZERO,
+                beat * 20,
+                ClipData::Midi(MidiData::new(notes)),
+            ),
+        })
+        .unwrap();
+    let mut tone = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: TEST_TONE.to_owned(),
+        },
+    );
+    tone.params.insert(test_tone::LEVEL, -20.0);
+    let mut resonator = Device::new(
+        editor.new_id(),
+        "",
+        DeviceKind::Native {
+            device_type: SPECTRAL_RESONATOR.to_owned(),
+        },
+    )
+    .with_midi_sidechain_tap();
+    for (param, value) in [
+        (PITCH_MODE, 1.0),
+        (MONO_POLY, 1.0),
+        (POLYPHONY, 4.0),
+        (HARMONICS, 32.0),
+        (UNISON, 3.0),
+        (MODULATION, 2.0),
+        (DECAY, 2.0),
+    ] {
+        resonator.params.insert(param, value);
+    }
+    let resonator_id = resonator.id;
+    for (index, device) in [tone, resonator].into_iter().enumerate() {
+        editor
+            .apply(Command::InsertDevice {
+                track: audio,
+                index,
+                device,
+            })
+            .unwrap();
+    }
+    editor
+        .apply(Command::SetMidiSidechainSource {
+            device: resonator_id,
+            track: Some(keys),
+            tap: None,
+        })
+        .unwrap();
+    sender.send_update(compiler.sync(editor.document()));
+    sender.transport(TransportCommand::Play);
+
+    let set = |param: ParamId, value: f64| Command::SetDeviceParam {
+        device: resonator_id,
+        param,
+        value,
+    };
+    for round in 0..2_000u64 {
+        // A new setting every few blocks, so changes land mid-stream: the
+        // pitch mode and the voices, the modulation mode, Unison, Stretch,
+        // Quantize and Use Current Scale, Glide, PB and the gate.
+        let step = round / 12;
+        let command = match round % 12 {
+            0 => Some(set(MODULATION, (step % 4) as f64)),
+            1 => Some(set(UNISON, 1.0 + (step % 8) as f64)),
+            2 => Some(set(STRETCH, (step % 9) as f64 * 25.0 - 100.0)),
+            3 => Some(set(QUANTIZE, (step % 2) as f64)),
+            4 => Some(set(USE_SCALE, (step % 3 == 0) as u8 as f64)),
+            5 => Some(set(MONO_POLY, (step % 4 < 2) as u8 as f64)),
+            6 => Some(set(POLYPHONY, 2.0 + (step % 15) as f64)),
+            7 => Some(set(GLIDE, (step % 4) as f64 * 200.0)),
+            8 => Some(set(PB, (step % 25) as f64)),
+            9 => Some(set(MIDI_GATE, (step % 2) as f64)),
+            10 => Some(set(PITCH_MODE, (step % 5 != 0) as u8 as f64)),
+            _ => None,
+        };
+        if let Some(command) = command {
+            editor.apply(command).unwrap();
+            sender.send_update(compiler.sync(editor.document()));
+        }
+        assert!(sender.flush());
+
+        bl_rt::rt_test!({
+            processor.process(256);
+        });
+        if round % 50 == 0 {
+            collector.collect();
+        }
+    }
+
+    let state = monitor.state().clone();
+    assert_eq!(state.counters.events_overflowed, 0);
+    assert_eq!(state.counters.events_unrouted, 0);
+    assert!(state.counters.events_applied > 100);
+    eprintln!(
+        "2,000 blocks of Spectral Resonator under RealtimeSanitizer: {} parameter changes, \
+         peak engine load {:.1}%",
+        state.counters.events_applied,
+        state.cpu_load_max * 100.0
+    );
+}
+
 /// The channel EQ, the three-band EQ, the gate and the bus compressor on a
 /// track of a test tone, with the gate's and the compressor's sidechain
 /// keyed from a second track, while their parameters move between two

@@ -35,6 +35,7 @@ mod follow;
 mod grooves;
 mod grooves_audio;
 mod link;
+mod link_audio;
 mod live_complex;
 mod macros;
 mod metronome;

@@ -90,14 +90,15 @@ Beatlayer's factory wavetables are its own: made by a generator in the repositor
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-8.8 | unit (the generator twice; hashes compared in CI on each platform) |
-| R3, R10 | to be written in WP-8.8 | unit (shared through the cache; built off the audio thread) |
-| R4 | to be written in WP-8.8 | unit (fold-back at the top key) |
-| R5 | to be written in WP-8.8 | unit |
-| R6 | to be written in WP-8.8 | unit (generated WAVs from `tests/fixtures/gen/`, with and without `clm `) |
-| R7 | to be written in WP-8.8 | shell test (save, Collect All and Save, reopen identically) |
-| R8 | to be written in WP-8.8 | agent API (load by ID, read back); `cargo xtask commands` |
-| R9 | to be written in WP-8.8 | unit |
+| R1 | `crates/devices/tests/wavetables.rs` (`every_factory_table_is_in_a_category_and_draws_up_to_256_frames`, `no_table_is_stored_as_audio`) | unit |
+| R2 | `crates/devices/tests/wavetables.rs` (`the_generator_makes_the_same_tables_every_run_and_everywhere`) | unit (the generator twice, and a golden hash per table that CI compares on each platform) |
+| R3, R10 | `crates/devices/tests/wavetables.rs` (`a_factory_table_is_shared_and_keeps_its_interpolation`, `a_table_is_built_off_the_audio_thread`) | unit (shared through the cache; built off the audio thread, collected under the allocation trap) |
+| R4 | `crates/devices/tests/wavetables.rs` (`every_frame_is_band_limited_at_the_top_key`) | unit (fold-back at the top key) |
+| R5 | `crates/devices/tests/wavetables.rs` (`the_arrows_step_through_the_tables_across_categories`) | unit |
+| R6 | `crates/devices/tests/wavetables.rs` (`a_wav_with_a_clm_chunk_is_cut_by_its_frame_size`, `a_plain_wav_or_aiff_is_cut_into_frames_of_2048_samples`, `a_short_file_is_resampled_into_one_frame`, `a_long_file_makes_256_frames`, `raw_skips_the_clean_up`, `an_unreadable_file_or_one_with_no_audio_makes_no_table`) | unit (generated WAVs and AIFF from `tests/fixtures/gen/gen_wavetables.py`, with and without `clm `) |
+| R7 | `crates/shell/tests/wavetables.rs` (`a_user_table_is_saved_collected_and_reopened_identically`); `crates/devices/tests/wavetables.rs` (`the_choosers_browse_the_files_folder`) | shell test (save, missing file, Collect All and Save, reopen identically) |
+| R8 | `crates/shell/tests/wavetables.rs` (`load_wavetable_gives_an_oscillator_a_table_as_one_undo_step`, `load_wavetable_refuses_what_it_cannot_load`); `crates/cli/tests/agent_wavetables.rs`; `crates/model/tests/device_media.rs` (`set_device_wavetable_keeps_a_user_table_in_its_oscillators_slot`); `cargo xtask commands` | agent API (load by ID, read back, undo); `cargo xtask commands` |
+| R9 | `crates/devices/tests/wavetables.rs` (`a_factory_table_is_shared_and_keeps_its_interpolation`, `a_wav_with_a_clm_chunk_is_cut_by_its_frame_size`) | unit |
 | R11, R12, R13, R14, R15, R16, R17 | to be written in WP-8.9 | render under the real-time trap (spectra by FFT; Position swept at audio rate; routings) |
 | R18, R19 | to be written in WP-8.9 | render |
 | R20 | to be written in WP-8.9 | benchmark against the device budget |

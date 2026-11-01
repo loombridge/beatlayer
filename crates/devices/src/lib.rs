@@ -62,6 +62,7 @@ pub mod grain_delay;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod instrument;
 pub mod instrument_filter;
 pub mod kit;
 pub mod kitbag;
@@ -111,6 +112,7 @@ pub mod tube;
 pub mod tuner;
 pub mod utility;
 pub mod vector_delay;
+pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};

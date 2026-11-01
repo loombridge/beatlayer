@@ -8878,6 +8878,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
 | `slices` | array of integer, at least 0 | no | Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty. |
 | `warp` | [`DeviceWarp`](#devicewarp) | no | Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default. |
+| `wavetables` | array of [`WavetableChoice`](#wavetablechoice) or null | no | What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7, R8): oscillator 1's choice first. A user table's file is the media in the oscillator's own sample slot, so the set's media table, missing files and Collect All and Save treat it as a sample. An oscillator with no choice plays the device's default table, and the list never ends in one. Left out of the saved set for a device that has none. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9112,6 +9113,20 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "warp": {
       "$ref": "#/$defs/DeviceWarp",
       "description": "Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default."
+    },
+    "wavetables": {
+      "description": "What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7, R8): oscillator 1's choice first. A user table's file is the media in the oscillator's own sample slot, so the set's media table, missing files and Collect All and Save treat it as a sample. An oscillator with no choice plays the device's default table, and the list never ends in one. Left out of the saved set for a device that has none.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WavetableChoice"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -18694,6 +18709,58 @@ What `device.load_sample` returns.
     "media",
     "slot",
     "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `LoadWavetableResult`
+
+What `device.load_wavetable` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device that took the table. |
+| `oscillator` | integer from 0 to 255 | yes | The oscillator that took it. |
+| `choice` | [`WavetableChoice`](#wavetablechoice) | yes | What the oscillator plays now. |
+| `frames` | integer from 0 to 65535 | yes | How many frames the table has. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.load_wavetable` returns.",
+  "properties": {
+    "choice": {
+      "$ref": "#/$defs/WavetableChoice",
+      "description": "What the oscillator plays now."
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device that took the table."
+    },
+    "frames": {
+      "description": "How many frames the table has.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "oscillator": {
+      "description": "The oscillator that took it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "oscillator",
+    "choice",
+    "frames"
   ],
   "type": "object"
 }
@@ -34366,6 +34433,7 @@ What `stems.status` returns.
 | `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
+| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
 
 <details><summary>JSON Schema</summary>
 
@@ -34409,6 +34477,10 @@ What `stems.status` returns.
         "$ref": "#/$defs/PackageStatus"
       },
       "type": "array"
+    },
+    "provider": {
+      "description": "What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
+      "type": "string"
     },
     "separation": {
       "$ref": "#/$defs/JobStatus",
@@ -39887,6 +39959,76 @@ Every mode's controls (R2). Re-Pitch and Complex have none.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `WavetableChoice`
+
+What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).
+
+One of:
+
+- an object with `kind` = `"factory"`, `category` (string), `name` (string): One of Beatlayer's factory tables, by category and name.
+- an object with `kind` = `"user"`, `raw` (boolean), `frames` (integer from 0 to 65535): A table made from the file in the oscillator's sample slot.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).",
+  "oneOf": [
+    {
+      "description": "One of Beatlayer's factory tables, by category and name.",
+      "properties": {
+        "category": {
+          "description": "The table's category.",
+          "type": "string"
+        },
+        "kind": {
+          "const": "factory",
+          "type": "string"
+        },
+        "name": {
+          "description": "The table's name in it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "category",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A table made from the file in the oscillator's sample slot.",
+      "properties": {
+        "frames": {
+          "description": "How many frames the file made.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "user",
+          "type": "string"
+        },
+        "raw": {
+          "description": "Whether the file's frames are used as they are, with no clean-up.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "raw",
+        "frames"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 

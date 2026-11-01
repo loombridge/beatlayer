@@ -720,6 +720,7 @@ dependencies = [
  "rayon",
  "realfft",
  "rtrb",
+ "sha2",
 ]
 
 [[package]]
@@ -845,6 +846,7 @@ dependencies = [
  "bl-midi-tools",
  "bl-model",
  "bl-rt",
+ "libm",
  "lspk-dsp",
  "lspk-example-gain",
  "lspk-example-sine",
@@ -865,6 +867,8 @@ dependencies = [
  "lspk-rt",
  "proptest",
  "realfft",
+ "rtrb",
+ "rustfft",
 ]
 
 [[package]]

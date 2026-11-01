@@ -116,7 +116,7 @@ pub struct Grid {
 }
 
 impl Grid {
-    fn nearest(self, time: f64) -> f64 {
+    pub(crate) fn nearest(self, time: f64) -> f64 {
         self.origin + ((time - self.origin) / self.period).round() * self.period
     }
 }

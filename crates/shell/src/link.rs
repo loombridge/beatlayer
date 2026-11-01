@@ -21,13 +21,13 @@ pub struct PeerTempo {
 }
 
 impl PeerTempo {
-    fn set(&self, bpm: f64) {
+    pub(crate) fn set(&self, bpm: f64) {
         self.bits.store(bpm.to_bits(), Ordering::Relaxed);
         self.generation.fetch_add(1, Ordering::Release);
     }
 
     /// How many times a peer set the tempo, and the last one.
-    fn read(&self) -> (u64, f64) {
+    pub(crate) fn read(&self) -> (u64, f64) {
         let generation = self.generation.load(Ordering::Acquire);
         (
             generation,
@@ -117,18 +117,46 @@ impl Session for LinkSession {
     }
 }
 
+/// A tempo the audio thread leaves for the main thread, taken as often as
+/// the main thread writes it into the set while it moves.
+#[derive(Debug, Default)]
+pub struct TempoWrites {
+    /// How many tempos the main thread has taken.
+    taken: u64,
+    /// The tempo that waits for the next write.
+    waiting: Option<f64>,
+    /// When the tempo was last written into the set.
+    written: Option<Instant>,
+}
+
+impl TempoWrites {
+    /// Takes the tempo `peer` last got, and returns the tempo to write into
+    /// the set now: at most once every [`WRITE_EVERY`] while it moves, the
+    /// last one after it stops.
+    pub fn hear(&mut self, peer: &PeerTempo, now: Instant) -> Option<f64> {
+        let (generation, bpm) = peer.read();
+        if generation != self.taken {
+            self.taken = generation;
+            self.waiting = Some(bpm);
+        }
+        let due = self
+            .written
+            .is_none_or(|at| now.saturating_duration_since(at) >= WRITE_EVERY);
+        if due && let Some(bpm) = self.waiting.take() {
+            self.written = Some(now);
+            return Some(bpm);
+        }
+        None
+    }
+}
+
 /// What the app holds of Link: the instance, once Link has been on, and what
 /// the engine tells the main thread of the session.
 #[derive(Default)]
 pub struct LinkHost {
     link: Option<bl_link::Link>,
     peer: Arc<PeerTempo>,
-    /// How many peer tempos the main thread has taken.
-    taken: u64,
-    /// The tempo a peer set that waits for the next write.
-    waiting: Option<f64>,
-    /// When the tempo was last written into the set.
-    written: Option<Instant>,
+    writes: TempoWrites,
 }
 
 impl std::fmt::Debug for LinkHost {
@@ -204,18 +232,6 @@ impl LinkHost {
             // and tempo are read when they're wanted.
             for _ in link.events() {}
         }
-        let (generation, bpm) = self.peer.read();
-        if generation != self.taken {
-            self.taken = generation;
-            self.waiting = Some(bpm);
-        }
-        let due = self
-            .written
-            .is_none_or(|at| now.saturating_duration_since(at) >= WRITE_EVERY);
-        if due && let Some(bpm) = self.waiting.take() {
-            self.written = Some(now);
-            return Some(bpm);
-        }
-        None
+        self.writes.hear(&self.peer, now)
     }
 }

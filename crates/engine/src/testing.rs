@@ -921,6 +921,99 @@ pub fn following(bpm: f64) -> impl crate::Follower {
     stand_in(move |_, answer| answer.tempo(bpm))
 }
 
+/// A stand-in for the tempo tracker (the Tempo Follower spec, R18): what it
+/// gave, as a list of the frame of the device's input it gave it at, the
+/// tempo and whether it was confident, which a test replays at any block
+/// size: a block hears what it gave from the frame its first frame is, so a
+/// change lands on the first block that starts at or after its frame.
+mod recorded_tracker {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed};
+
+    use crate::DeviceInput;
+    use crate::tempo_follower::{Heard, Tracker};
+
+    /// How many tempos told to the main thread a test can read.
+    const TOLD: usize = 256;
+
+    /// The tempos the follower told the main thread.
+    #[derive(Clone)]
+    pub struct Told(Arc<(Vec<AtomicU64>, AtomicUsize)>);
+
+    impl Told {
+        /// The tempos told so far, in order.
+        #[must_use]
+        pub fn all(&self) -> Vec<f64> {
+            let count = self.0.1.load(Relaxed).min(TOLD);
+            self.0.0[..count]
+                .iter()
+                .map(|bits| f64::from_bits(bits.load(Relaxed)))
+                .collect()
+        }
+    }
+
+    /// The tracker's recording: `(frame, bpm, confident)` from `frame` of
+    /// the input heard on.
+    pub struct RecordedTracker {
+        points: Vec<(u64, f64, bool)>,
+        /// The frames of input heard before this block, and with it.
+        heard: u64,
+        heard_to: u64,
+        told: Told,
+    }
+
+    /// A recorded tracker, and where it tells the tempos the song played.
+    #[must_use]
+    pub fn recorded_tracker(points: &[(u64, f64, bool)]) -> (RecordedTracker, Told) {
+        let told = Told(Arc::new((
+            (0..TOLD).map(|_| AtomicU64::new(0)).collect(),
+            AtomicUsize::new(0),
+        )));
+        (
+            RecordedTracker {
+                points: points.to_vec(),
+                heard: 0,
+                heard_to: 0,
+                told: told.clone(),
+            },
+            told,
+        )
+    }
+
+    impl Tracker for RecordedTracker {
+        fn listen(&mut self, input: &dyn DeviceInput, frames: usize) {
+            // The channel must be there, as the real tracker's is.
+            if input.channels() > 0 {
+                self.heard = self.heard_to;
+                self.heard_to += frames as u64;
+            }
+        }
+
+        fn heard(&self) -> Heard {
+            let point = self
+                .points
+                .iter()
+                .take_while(|(frame, ..)| *frame <= self.heard)
+                .last();
+            point.map_or(
+                Heard {
+                    bpm: 0.0,
+                    confident: false,
+                },
+                |&(_, bpm, confident)| Heard { bpm, confident },
+            )
+        }
+
+        fn given(&mut self, bpm: f64) {
+            let at = self.told.0.1.fetch_add(1, Relaxed);
+            if at < TOLD {
+                self.told.0.0[at].store(bpm.to_bits(), Relaxed);
+            }
+        }
+    }
+}
+pub use recorded_tracker::{RecordedTracker, Told, recorded_tracker};
+
 /// A stand-in for a Link session (the Link spec, R16): the timeline, the
 /// start and stop state and the peers of one session, which a test acts on
 /// through [`LinkPeers`] as another app in it would, and a

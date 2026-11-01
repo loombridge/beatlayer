@@ -117,6 +117,7 @@ pub mod settings;
 mod shell;
 pub mod stems;
 pub mod tap_tempo;
+pub mod tempo_follower;
 #[doc(hidden)]
 pub mod testing;
 pub mod tracks;
@@ -158,6 +159,9 @@ pub use bl_shell_spec::editing as editing_commands;
 /// The Link commands' IDs and their argument and result types (WP-7.14,
 /// WP-7.15).
 pub use bl_shell_spec::link as link_commands;
+/// The Tempo Follower commands' IDs and their argument and result types
+/// (WP-9.13).
+pub use bl_shell_spec::tempo_follower as tempo_follower_commands;
 
 /// The envelope keys' command IDs and their argument and result types
 /// (WP-6.26).

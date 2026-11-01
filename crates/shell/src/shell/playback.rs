@@ -483,15 +483,15 @@ impl Shell {
                 return Some("a recording is already under way or still being finished".to_owned());
             }
         }
-        // Spec: transport R29. A release is still accepted, so a held nudge
-        // can end.
+        // Spec: transport R29, tempo-follower R21. A release is still
+        // accepted, so a held nudge can end.
         (matches!(
             command,
             bl_engine::TransportCommand::PhaseNudge { held: true, .. }
         ) && self.audio.transport_state().following)
             .then(|| {
-                "an incoming clock or Link session leads the tempo and keeps the phase, so \
-                 Phase Nudge is refused"
+                "an incoming clock, a Link session or Tempo Follower leads the tempo and \
+                 keeps the phase, so Phase Nudge is refused"
                     .to_owned()
             })
     }

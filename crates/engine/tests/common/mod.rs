@@ -358,6 +358,21 @@ impl Rig {
         assert!(self.sender.flush(), "the queue is full");
     }
 
+    /// Has Tempo Follower lead the song's tempo from the next block on (the
+    /// Tempo Follower spec, R6).
+    pub fn lead(&mut self, leader: impl bl_engine::Leader + 'static) {
+        let leader: Box<dyn bl_engine::Leader> = Box::new(leader);
+        let leader = self.collector.handle().wrap(leader);
+        self.sender.leader(Some(leader));
+        assert!(self.sender.flush(), "the queue is full");
+    }
+
+    /// Takes Tempo Follower away.
+    pub fn lead_none(&mut self) {
+        self.sender.leader(None);
+        assert!(self.sender.flush(), "the queue is full");
+    }
+
     /// Syncs the document, sends the update, and says what it held.
     pub fn sync(&mut self) -> Synced {
         let update: Update = self.compiler.sync(self.editor.document());

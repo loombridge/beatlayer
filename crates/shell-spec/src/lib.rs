@@ -67,6 +67,7 @@
 //! - [`midi_io`]: MIDI ports and the computer MIDI keyboard (`midi.ports`,
 //!   `midi.set_port`, `midi.computer_keyboard_*`, WP-2.2).
 //! - [`link`]: Link's state and switches (`link.*`, WP-7.14).
+//! - [`tempo_follower`]: Tempo Follower's state, switch and settings (WP-9.13).
 //! - [`sync`]: the state of MIDI clock (`sync.state`, WP-7.11).
 //! - [`midi_tools`]: the MIDI Tools' commands (`midi_tool.*`, WP-6.11): the
 //!   Transform and Generate panels, choosing a tool, its settings, applying
@@ -154,6 +155,7 @@ pub mod settings;
 pub mod slice;
 pub mod stems;
 pub mod sync;
+pub mod tempo_follower;
 pub mod tracks;
 pub mod transport;
 pub mod tunings;
@@ -219,6 +221,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     tunings::register(registry)?;
     link::register(registry)?;
     sync::register(registry)?;
+    tempo_follower::register(registry)?;
     search::register(registry)
 }
 

@@ -73,6 +73,7 @@ mod sidechain;
 mod state;
 mod stress;
 mod swap;
+mod tempo_follower;
 mod timecode_in;
 mod transport;
 mod warp_modes;

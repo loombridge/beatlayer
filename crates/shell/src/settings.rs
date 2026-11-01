@@ -208,6 +208,31 @@ pub struct Preferences {
     pub midi: MidiPrefs,
     /// Link's switches (the Link spec, R1 and R8).
     pub link: LinkPrefs,
+    /// Tempo Follower's two settings (the Tempo Follower spec, R1).
+    pub tempo_follower: TempoFollowerPrefs,
+}
+
+/// What the app keeps of Tempo Follower between starts (the Tempo Follower
+/// spec, R1): the toggle hidden and the first mono channel in a new install.
+/// Follow itself isn't kept (R3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TempoFollowerPrefs {
+    /// Show Tempo Follower Toggle (Settings ▸ Tempo & MIDI): whether the
+    /// Control Bar shows the Follow toggle.
+    pub show_toggle: bool,
+    /// Input Channel (Settings ▸ Tempo & MIDI): the audio input it listens
+    /// to, counted from 1.
+    pub input: bl_model::Channel,
+}
+
+impl Default for TempoFollowerPrefs {
+    fn default() -> Self {
+        Self {
+            show_toggle: false,
+            input: bl_model::Channel::Mono(1),
+        }
+    }
 }
 
 /// What the app keeps of Link between starts (the Link spec, R1, R8 and

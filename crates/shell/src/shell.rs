@@ -156,6 +156,7 @@ mod slice;
 mod stems;
 mod step_input;
 mod tap_tempo;
+mod tempo_follower;
 mod track_commands;
 mod tunings;
 mod view_commands;
@@ -608,6 +609,9 @@ pub struct Shell {
     /// Whether a start waits for the Link session's phase, as the engine last
     /// published it (the Link spec, R22).
     link_waiting_view: bool,
+    /// Whether Follow is on (the Tempo Follower spec, R3): not kept, off
+    /// when the app starts.
+    tempo_follow_on: bool,
     /// When the MIDI ports were last listed, so [`Shell::poll`] lists them
     /// again every few seconds and a replugged device shows.
     midi_listed: std::time::Instant,
@@ -1336,6 +1340,7 @@ impl Shell {
             keep_tempo: false,
             tempo_override: false,
             link_waiting_view: false,
+            tempo_follow_on: false,
             midi_listed: std::time::Instant::now(),
             push_display,
             midi_seen: (0, 0),
@@ -1953,6 +1958,9 @@ impl Shell {
         }
         if bl_shell_spec::link::handles(id) {
             return self.run_link(id, args);
+        }
+        if bl_shell_spec::tempo_follower::handles(id) {
+            return self.run_tempo_follower(id, args);
         }
         if id == transport_ids::TAP_TEMPO {
             return self.run_tap_tempo(args);

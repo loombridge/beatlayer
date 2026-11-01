@@ -186,7 +186,7 @@ impl Shell {
     /// Writes a peer's tempo into the set when the set has one constant
     /// tempo. A tempo envelope stays as it is: the engine plays the
     /// session's tempo over it, until Re-Enable Automation (R4).
-    fn follow_session_tempo(&mut self, bpm: f64) -> bool {
+    pub(super) fn follow_session_tempo(&mut self, bpm: f64) -> bool {
         if !self.write_session_tempo(bpm) {
             return false;
         }

@@ -36,6 +36,9 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
         ),
         ("browser.state", Exception(Query)),
         ("browser.analysis_state", Exception(Query)),
+        // Show Similar Files' list, which `browser.show_similar` puts in the
+        // content pane (sound-similarity R16).
+        ("browser.similar", Exception(Query)),
         // Sound analysis's Pause and Resume (sound-similarity R6).
         (
             "browser.set_analysis_paused",

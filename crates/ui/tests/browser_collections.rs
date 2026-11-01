@@ -302,6 +302,46 @@ fn the_item_context_menu_has_its_items_and_acts_on_the_selection() {
     assert!(collections_of(&mut h, "Kick.wav").is_empty());
 }
 
+// Spec: stem-separation R22, R31. An audio file's menu offers Separate Stems
+// to New Audio Tracks after Show Similar Files, which opens the dialog on
+// the file; a folder's menu offers it disabled.
+#[test]
+fn separate_stems_in_an_audio_files_menu_opens_the_dialog_on_the_file() {
+    if bl_shell::stems::packages().is_empty() {
+        return;
+    }
+    let scratch = Scratch::new("stems");
+    let (mut h, root) = harness(&scratch);
+    let nodes = look(&mut h);
+    right_click(&mut h, centre_of(&nodes, Role::ListItem, "Pad.wav"));
+    let nodes = look(&mut h);
+    let stems = "Separate Stems to New Audio Tracks";
+    let top = |label: &str| {
+        let node = nodes
+            .iter()
+            .find(|n| n.role == Role::Button && n.label.starts_with(label))
+            .unwrap_or_else(|| panic!("no {label:?}"));
+        node.bounds.unwrap().y0
+    };
+    assert!(
+        top("Show Similar Files") < top(stems),
+        "after Show Similar Files"
+    );
+    assert!(
+        top(stems) < top("Clear All Colors"),
+        "before the collections"
+    );
+    assert_eq!(menu_buttons(&nodes, &[stems]), [(stems.to_owned(), false)]);
+    h.click(button(&nodes, stems));
+    let dialog = h.shell.stems_dialog().expect("the dialog is open");
+    assert_eq!(
+        dialog.source,
+        bl_shell::stems_commands::StemSource::File {
+            path: text(&root.join("Pad.wav"))
+        }
+    );
+}
+
 // Spec: browser R25. Under a collection the menu offers Show in Places, which
 // shows the item in its place, and Show in Finder asks the host to show it;
 // for a device, which lies in no place and is no file, both are drawn

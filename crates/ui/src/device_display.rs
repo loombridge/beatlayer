@@ -32,6 +32,8 @@ const COLLAPSED: &str = "Collapsed";
 const ACTIVITY: &str = "Activity";
 /// The series whose markers draw as rings, an echo each (Echo's tunnel).
 const TUNNEL: &str = "Tunnel";
+/// The series whose markers draw as bars, a band's level each (Vocoder).
+const BANDS: &str = "Bands";
 /// A handle's drawn radius, and the half side of what takes a press.
 const HANDLE_RADIUS: f32 = 4.5;
 const HANDLE_HIT: f32 = 8.0;
@@ -222,6 +224,7 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             .collect();
         painter.add(Shape::line(line, Stroke::new(1.5, colour)));
     }
+    let bar = band_spacing(area, display) * 0.8;
     // The particles of a particle field and the handles draw themselves.
     for marker in display
         .markers
@@ -235,8 +238,32 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             ring(painter, area, series, marker, ink);
             continue;
         }
+        if series.name == BANDS {
+            let top = point(area, series, marker.x, marker.y);
+            let wide = Rect::from_min_max(
+                pos2(top.x - bar / 2.0, top.y),
+                pos2(top.x + bar / 2.0, area.bottom()),
+            );
+            painter.rect_filled(wide, 0.0, ink.gamma_multiply(0.6));
+            continue;
+        }
         let at = point(area, series, marker.x, marker.y);
         painter.circle(at, 3.0, ink, Stroke::new(1.0, c.text.0));
+    }
+}
+
+/// How far apart, across `area`, the first two bands of a band display sit:
+/// the bands are evenly spaced, so a bar this wide leaves a gap between.
+fn band_spacing(area: Rect, display: &DeviceDisplay) -> f32 {
+    let mut bands = display
+        .markers
+        .iter()
+        .filter(|m| m.series == BANDS && m.handle.is_none());
+    match (bands.next(), bands.next(), display.series(BANDS)) {
+        (Some(a), Some(b), Some(series)) => {
+            (point(area, series, b.x, 0.0).x - point(area, series, a.x, 0.0).x).abs()
+        }
+        _ => 0.0,
     }
 }
 

@@ -3798,6 +3798,143 @@ fn an_agent_sets_pitchloop89_and_vector_delay_by_id_and_finds_them_after_a_reope
     }
 }
 
+// Spec: vocoder R13, R18, R20 (WP-8.45): an agent inserts Vocoder by command
+// ID, gives it a sidechain source, sets parameters by ID, reads them back with
+// their descriptors, reads the band display with `device.display` (Range's two
+// ends are handles on it), and finds every value and its sidechain after the
+// set is saved and reopened.
+#[test]
+fn an_agent_sets_the_vocoder_by_id_reads_its_bands_and_finds_it_after_a_reopen() {
+    use bl_devices::vocoder::{self, VOCODER};
+    use bl_model::DeviceId;
+
+    let dir = TempDir::new("vocoder");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("vocoder").unwrap();
+    let tracks = default_tracks(&mut client);
+    // The two audio tracks.
+    let (key, track) = (tracks[3], tracks[2]);
+    let inserted = call(
+        &mut client,
+        "run",
+        json!({ "commands": [
+            { "command": "device.insert", "args": { "track": track, "index": 0, "device": {
+                "id": {"$new": "voice"}, "name": "Vocoder", "enabled": true, "params": [],
+                "kind": { "native": { "device_type": VOCODER } },
+                "sidechain": {},
+            } } },
+        ] }),
+    );
+    let device = inserted["ids"]["voice"].as_u64().unwrap();
+    let sets = [
+        (vocoder::CARRIER, 3.0),
+        (vocoder::BANDS, 1.0),
+        (vocoder::FORMANT, 7.0),
+        (vocoder::DEPTH, 150.0),
+        (vocoder::ATTACK, 20.0),
+        (vocoder::RELEASE, 400.0),
+        (vocoder::UNVOICED, 60.0),
+        (vocoder::RANGE_LOW, 100.0),
+        (vocoder::RANGE_HIGH, 6_400.0),
+        (vocoder::BW, 140.0),
+        (vocoder::FILTER_MODE, 1.0),
+        (vocoder::GATE, -40.0),
+        (vocoder::ENHANCE, 1.0),
+        (vocoder::CHANNEL_MODE, 2.0),
+        (vocoder::NOISE_X, 20.0),
+        (vocoder::PITCH_HIGH, 800.0),
+        (vocoder::WAVEFORM, 2.0),
+        (vocoder::FAST_SLOW, 1.0),
+    ];
+    let mut commands: Vec<Value> = sets
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": device, "param": param.0, "value": value } })
+        })
+        .collect();
+    commands.push(json!({ "command": "device.set_sidechain_input",
+        "args": { "device": device,
+                  "input": { "type": "track", "track": key, "tap": "post_fx" } } }));
+    commands.push(json!({ "command": "device.set_sidechain_enabled",
+        "args": { "device": device, "enabled": true } }));
+    call(&mut client, "run", json!({ "commands": commands }));
+
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(params.len(), 24);
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    for (param, value) in &sets {
+        let found = params.iter().find(|p| p["id"] == param.0).unwrap();
+        assert_eq!(found["value"], json!(value), "parameter {}", param.0);
+    }
+
+    // The bands read back with `device.display`: eight from 100 Hz to
+    // 6.4 kHz moved up a fifth by Formant, the gate's line, and a handle on
+    // each end of Range.
+    let shown = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.display", "args": { "device": device } }] }),
+    );
+    let shown = &shown["results"][0]["result"];
+    let markers = shown["markers"].as_array().unwrap();
+    let bands: Vec<_> = markers.iter().filter(|m| m["handle"].is_null()).collect();
+    assert_eq!(bands.len(), 8);
+    let fifth = 2f64.powf(7.0 / 12.0);
+    assert!((bands[0]["x"].as_f64().unwrap() / (100.0 * fifth) - 1.0).abs() < 1e-5);
+    assert!(bands[3]["text"].as_str().unwrap().starts_with("Band 4 "));
+    let handle = |name: &str| {
+        markers
+            .iter()
+            .find(|m| m["name"] == name)
+            .unwrap_or_else(|| panic!("{name}"))["handle"]["x"]
+            .clone()
+    };
+    assert_eq!(handle("Low End"), json!(vocoder::RANGE_LOW.0));
+    assert_eq!(handle("High End"), json!(vocoder::RANGE_HIGH.0));
+    let gate = shown["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "Gate")
+        .unwrap();
+    assert_eq!(gate["values"], json!([-40.0, -40.0]));
+
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Vocoder.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let reopened = project
+        .document
+        .device(DeviceId(bl_core::id::Id::new(device).unwrap()))
+        .expect("the Vocoder is in the set");
+    for (param, value) in &sets {
+        assert_eq!(
+            reopened.params.get(param),
+            Some(value),
+            "parameter {}",
+            param.0
+        );
+    }
+    let sidechain = reopened.sidechain.as_ref().expect("its sidechain");
+    assert!(sidechain.enabled);
+    assert_eq!(
+        serde_json::to_value(&sidechain.input).unwrap(),
+        json!({ "type": "track", "track": key, "tap": "post_fx" })
+    );
+}
+
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
 // (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved

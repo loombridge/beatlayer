@@ -1,10 +1,13 @@
 //! R26: H.264, HEVC and ProRes through the platform's decoders, and through
 //! FFmpeg's libraries where they're installed.
 
+#[cfg(unix)]
 use std::path::Path;
 use std::sync::Arc;
 
-use bl_video::{CodedSample, Frame, FrameSource, Movie, VideoDecoder, VideoError};
+#[cfg(unix)]
+use bl_video::{CodedSample, Frame, VideoDecoder};
+use bl_video::{FrameSource, Movie, VideoError};
 
 use crate::common::*;
 
@@ -17,6 +20,7 @@ fn required(codec: &str) -> bool {
 
 /// Checks the frames decoded from stored frame `from` on; a leading picture
 /// of the group decoding started at may be missing, but none may be wrong.
+#[cfg(unix)]
 fn assert_frames(frames: &[Option<Frame>], movie: &Movie, from: usize) {
     let video = movie.video().expect("video");
     for (decode, frame) in frames.iter().enumerate().skip(from) {
@@ -73,6 +77,7 @@ fn the_platforms_decoders_decode_every_frame_exactly() {
 
 /// Decodes a movie's frames with `decoder`, in one call from stored frame
 /// `from` to the end, and returns them by stored index.
+#[cfg(unix)]
 fn decode_from(decoder: &mut dyn VideoDecoder, movie: &Movie, from: usize) -> Vec<Option<Frame>> {
     let video = movie.video().expect("video");
     let mut reader = movie.reader().expect("a reader");

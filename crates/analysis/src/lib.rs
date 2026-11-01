@@ -16,10 +16,14 @@
 //! | [`tempo_tracker`] | Tempo, beat phase and confidence in real time, for Tempo Follower (WP-9.12) | A comb-filter bank over the last 6 s of spectral-flux onset strength, a causal beat grid, and a lock-free copy of the input off the audio thread |
 //! | [`key`] | Key and mode | A chromagram correlated with Krumhansl and Kessler's key profiles (1982) |
 //! | [`similarity`] | A sound's descriptor, for finding sounds that sound alike (sound-similarity R3) | Log-mel and cepstral statistics, spectral shape envelopes, onset density, length and pitchedness, compared by cosine distance |
+//! | [`autotag`] | A sample's automatic tags, for the browser (browser-tags R53) | Loop by onsets and length; a class by a softmax regression over the descriptor, fitted from generated sounds |
 //! | [`loops`] | The span of a sample that repeats, for the autosampler | Rising zero crossings of the left channel, matched over 10 ms |
 //!
 //! [`stems`] separates a mix into drums, bass, others, and vocals with a
 //! Demucs network (IMP-11).
+//!
+//! [`transcribe`] finds the notes of pitched audio with basic-pitch's network
+//! (IMP-06).
 //!
 //! [`cache`] keeps what is found in each audio file, by the file's content
 //! hash (WP-4.3).
@@ -27,6 +31,7 @@
 //! Analysis runs offline, on whatever thread calls it, never on an audio
 //! thread: it allocates freely.
 
+pub mod autotag;
 pub mod cache;
 pub mod key;
 pub mod levels;
@@ -39,6 +44,7 @@ pub mod spectrum;
 pub mod stems;
 pub mod tempo;
 pub mod tempo_tracker;
+pub mod transcribe;
 
 #[cfg(test)]
 bl_rt::install_trap!();

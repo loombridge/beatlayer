@@ -393,6 +393,14 @@ pub fn show(
             slot_cell(ui, theme, frame, panel, (id, &name, slot, rect), events);
             continue;
         }
+        // Spec: corpus R1. Corpus's X–Y control is its display cell.
+        if matches!(&frame.kind, bl_model::DeviceKind::Native { device_type }
+            if device_type == bl_devices::corpus::CORPUS)
+            && name == bl_devices::corpus::XY_CELL
+        {
+            corpus_xy(ui, theme, frame, (panel, display), (id, rect), events);
+            continue;
+        }
         let _ = ui.interact(rect, id, Sense::hover());
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Shaper, its shape.
@@ -426,6 +434,7 @@ pub fn show(
         let shown = match display {
             Some(d) if d.series.iter().any(|s| s.name == name) => {
                 own = DeviceDisplay {
+                    spectrograms: Vec::new(),
                     series: d
                         .series
                         .iter()
@@ -438,7 +447,24 @@ pub fn show(
                 };
                 Some(&own)
             }
-            Some(d) if index == 0 && has_drawing(d) => Some(d),
+            // Spec: roar R31. Roar's source traces have cells of their own
+            // on their pages; the shaper's cell leaves them out.
+            Some(d) if index == 0 && has_drawing(d) => {
+                let roar = frame.kind
+                    == bl_model::DeviceKind::Native {
+                        device_type: bl_devices::roar::ROAR.to_owned(),
+                    };
+                own = DeviceDisplay {
+                    series: d
+                        .series
+                        .iter()
+                        .filter(|s| !(roar && bl_devices::roar::SOURCES.contains(&s.name.as_str())))
+                        .cloned()
+                        .collect(),
+                    ..d.clone()
+                };
+                Some(&own)
+            }
             _ => None,
         };
         if let Some(display) = shown {
@@ -513,6 +539,16 @@ pub fn show(
             })
             .flatten(),
             automation: menu(param),
+            coarse: if frame.kind
+                == (bl_model::DeviceKind::Native {
+                    device_type: bl_devices::roar::ROAR.to_owned(),
+                })
+                && param == bl_devices::roar::FB_NOTE
+            {
+                12
+            } else {
+                1
+            },
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
@@ -636,6 +672,7 @@ fn display_drag(
         configured: &[],
         text: None,
         automation: None,
+        coarse: 1,
     };
     let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
     control.value_input(ui, &response, events);
@@ -749,9 +786,100 @@ fn slot_cell(
     });
 }
 
+/// Corpus's X–Y control (the Corpus spec, R1): Decay across and Material up,
+/// or Radius up for a pipe and a tube, a dot where they stand and the
+/// limiter's lamp in a corner. A press or a drag sets both at the pointer, as
+/// one undo step.
+fn corpus_xy(
+    ui: &mut Ui,
+    theme: &Theme,
+    frame: &DeviceFrame,
+    (panel, display): (&DevicePanel, Option<&DeviceDisplay>),
+    (id, rect): (Id, Rect),
+    events: &mut Vec<UiEvent>,
+) {
+    use bl_devices::corpus::{DECAY, LAMP_DB, LIMITER, TYPE, xy_vertical};
+    let find = |param: ParamId| panel.description.params.iter().position(|p| p.id == param);
+    let (Some(x_at), Some(type_at)) = (find(DECAY), find(TYPE)) else {
+        return;
+    };
+    let Some(y_at) = find(xy_vertical(panel.value(type_at) as usize)) else {
+        return;
+    };
+    let (x, y) = (
+        &panel.description.params[x_at],
+        &panel.description.params[y_at],
+    );
+    let response = ui.interact(rect, id, Sense::click_and_drag());
+    crate::focus::register(ui.ctx(), id, bl_shell::Area::Detail, None);
+    let set = |param: &ParamDescriptor, value: f64| {
+        UiEvent::Invoke(Invocation::new(
+            "device.set_param",
+            json!({ "device": frame.id, "param": param.id, "value": value }),
+        ))
+    };
+    let at_pointer = |events: &mut Vec<UiEvent>| {
+        let Some(pointer) = response.interact_pointer_pos() else {
+            return;
+        };
+        let across = f64::from(((pointer.x - rect.left()) / rect.width()).clamp(0.0, 1.0));
+        let up = f64::from(((rect.bottom() - pointer.y) / rect.height()).clamp(0.0, 1.0));
+        events.push(set(x, x.denormalize(across)));
+        events.push(set(y, y.denormalize(up)));
+    };
+    let gesture =
+        || UiEvent::BeginNamedGesture(format!("Change \"{}\" and \"{}\"", x.name, y.name));
+    if response.drag_started() {
+        events.push(gesture());
+    }
+    if response.dragged() {
+        at_pointer(events);
+    }
+    if response.drag_stopped() {
+        events.push(UiEvent::EndGesture);
+    }
+    if response.clicked() {
+        events.push(gesture());
+        at_pointer(events);
+        events.push(UiEvent::EndGesture);
+    }
+    let ink = highlight(theme, frame.enabled);
+    let painter = ui.painter_at(rect);
+    let dot = pos2(
+        rect.left() + rect.width() * x.normalize(panel.value(x_at)) as f32,
+        rect.bottom() - rect.height() * y.normalize(panel.value(y_at)) as f32,
+    );
+    let line = Stroke::new(1.0, ink.gamma_multiply(0.4));
+    painter.hline(rect.x_range(), dot.y, line);
+    painter.vline(dot.x, rect.y_range(), line);
+    painter.circle_filled(dot, 4.0, ink);
+    let lamp = display
+        .and_then(|d| d.reading(LIMITER))
+        .is_some_and(|reading| reading.value < LAMP_DB);
+    painter.circle(
+        pos2(rect.right() - 7.0, rect.top() + 7.0),
+        3.0,
+        if lamp { ink } else { Color32::TRANSPARENT },
+        Stroke::new(1.0, theme.colors.separator.0),
+    );
+    focus_ring(ui, theme, rect, &response);
+    ui.ctx().accesskit_node_builder(id, |node| {
+        node.set_role(Role::Image);
+        node.set_label(bl_devices::corpus::XY_CELL.to_owned());
+        node.set_value(format!(
+            "{} {}, {} {}{}",
+            x.name,
+            x.format(panel.value(x_at)),
+            y.name,
+            y.format(panel.value(y_at)),
+            if lamp { ", limiter on" } else { "" }
+        ));
+    });
+}
+
 /// Whether a display has anything to draw.
 fn has_drawing(display: &DeviceDisplay) -> bool {
-    !(display.series.is_empty() && display.readings.is_empty())
+    !(display.series.is_empty() && display.readings.is_empty() && display.spectrograms.is_empty())
 }
 
 /// One control being drawn.
@@ -779,6 +907,9 @@ struct Control<'a> {
     text: Option<String>,
     /// The automation items of its context menu (the automation spec, R29).
     automation: Option<ParamMenu>,
+    /// How many steps Shift with Up or Down moves it: 12 for Roar's
+    /// Feedback Note, an octave (the roar spec, R26), else 1.
+    coarse: i32,
 }
 
 impl Control<'_> {
@@ -897,12 +1028,18 @@ impl Control<'_> {
             ui.input(|i| {
                 for event in &i.events {
                     if let Event::Key {
-                        key, pressed: true, ..
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
                     } = event
                     {
+                        // Spec: roar R26. Shift moves a coarse control by
+                        // its coarse step.
+                        let by = if modifiers.shift { self.coarse } else { 1 };
                         match key {
-                            Key::ArrowUp => steps += 1,
-                            Key::ArrowDown => steps -= 1,
+                            Key::ArrowUp => steps += by,
+                            Key::ArrowDown => steps -= by,
                             Key::Delete | Key::Backspace => reset = true,
                             _ => {}
                         }

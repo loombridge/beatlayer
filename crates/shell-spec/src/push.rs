@@ -397,6 +397,84 @@ pub struct PushInfo {
     pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix_mode: Option<PushMix>,
+    /// What Note Mode shows, while it is the pad mode.
+    pub note: Option<PushNote>,
+}
+
+/// A step held down in Note Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushHeldStep {
+    /// The clip the step belongs to, if the slot holds one.
+    pub clip: Option<bl_model::ClipId>,
+    /// The step's drum pad, as a MIDI note.
+    pub pad: u8,
+    /// Where the step starts in the clip's contents.
+    pub start: bl_core::time::Ticks,
+    /// How long the step is.
+    pub length: bl_core::time::Ticks,
+}
+
+/// What a melodic track's layouts show (the notes on Push 2 spec, R32 to
+/// R44).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushMelody {
+    /// In Key (true) or Chromatic.
+    pub in_key: bool,
+    /// Whether the bottom-left pad stays on C.
+    pub fixed: bool,
+    /// The interval between rows: `4ths`, `3rds` or `Sequent`.
+    pub layout: String,
+    /// `Vertical` or `Horizontal`.
+    pub direction: String,
+    /// 64 Notes' shift in octaves from where the pads start.
+    pub octave: i32,
+    /// The lowest note the pads, rows or 32 notes hold, as a MIDI note.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+    /// The range as the display notifies it, such as `C1 to C3`.
+    pub range: String,
+    /// The notes selected in the Melodic Sequencer + 32 Notes.
+    pub selected_notes: Vec<u8>,
+    /// Whether the touch strip is the modulation wheel rather than pitch
+    /// bend, in 64 Notes.
+    pub strip_modulation: bool,
+}
+
+/// What Note Mode shows (the notes on Push 2 spec, R1 to R47).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushNote {
+    /// The track the pads play: the first selected one.
+    pub track: Option<bl_model::TrackId>,
+    /// The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum
+    /// track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32
+    /// Notes` on another MIDI track, `None` on any other track.
+    pub layout: String,
+    /// What holding Layout, or Shift and Layout, shows in the lower-right
+    /// pads, if anything: `16 Velocities` or `Loop Length Pads`.
+    pub overlay: Option<String>,
+    /// Whether that stays in view after Layout is released.
+    pub overlay_locked: bool,
+    /// The first note of the drum rack's pad view, which the pads show.
+    pub bank: Option<u8>,
+    /// The drum pad the steps edit, as a MIDI note.
+    pub selected_pad: Option<u8>,
+    /// The step size, such as `1/16` or `1/8T`.
+    pub step_size: String,
+    /// The clip the steps edit, if the slot holds one.
+    pub edited_clip: Option<bl_model::ClipId>,
+    /// The scene whose slot holds it.
+    pub edited_scene: Option<bl_model::SceneId>,
+    /// The first of the two pages the step area shows, counting from 1.
+    pub page: u8,
+    /// Whether the step area follows the page that plays.
+    pub following: bool,
+    /// The velocity new steps take, once a velocity pad chose one.
+    pub velocity: Option<u8>,
+    /// The steps held down now.
+    pub held_steps: Vec<PushHeldStep>,
+    /// What a melodic layout shows, on a melodic track.
+    pub melody: Option<PushMelody>,
 }
 
 /// What `push.state` returns.

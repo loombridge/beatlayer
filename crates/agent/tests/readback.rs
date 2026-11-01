@@ -152,6 +152,12 @@ fn fixture() -> Project {
             channel: Channel::Pair(3),
         },
         Command::SetCueMode { enabled: true },
+        Command::SetPadLayout {
+            in_key: Some(false),
+            fixed: Some(true),
+            spacing: Some(bl_model::PadSpacing::Thirds),
+            direction: Some(bl_model::PadDirection::Horizontal),
+        },
         Command::SetCueVolume { volume: 0.5 },
         Command::SetReducedLatencyMonitoring { enabled: true },
         // Spec: tunings R2, R14. A tuning inside the set, with a track that
@@ -493,7 +499,10 @@ fn fixture() -> Project {
         mix: 0.25,
         listen: true,
     });
-    device.midi_sidechain = Some(bl_model::MidiSidechain { source: Some(keys) });
+    device.midi_sidechain = Some(bl_model::MidiSidechain {
+        source: Some(keys),
+        tap: None,
+    });
     apply(
         &mut editor,
         Command::InsertDevice {

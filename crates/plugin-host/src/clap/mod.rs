@@ -121,6 +121,8 @@ pub struct ClapType {
     pub vendor: Option<String>,
     /// Its version, if it gives one (the scanner's list, WP-2.9).
     pub version: Option<String>,
+    /// The features its descriptor declares (spec: browser-tags R49).
+    pub categories: Vec<String>,
 }
 
 /// A parameter change a plug-in made itself, such as from its editor: one
@@ -400,6 +402,11 @@ impl ClapHost {
                 .unwrap_or(id)
                 .to_owned();
             let role = describe::role(descriptor.features());
+            let categories: Vec<String> = descriptor
+                .features()
+                .filter_map(|feature| feature.to_str().ok())
+                .map(str::to_owned)
+                .collect();
             let vendor = descriptor
                 .vendor()
                 .and_then(|v| v.to_str().ok())
@@ -430,11 +437,13 @@ impl ClapHost {
                     sidechain: false,
                     external: false,
                     midi_sidechain: false,
+                    midi_tap: false,
                     note_output,
                     outputs,
                 },
                 vendor,
                 version,
+                categories,
             });
         }
         drop(guard);

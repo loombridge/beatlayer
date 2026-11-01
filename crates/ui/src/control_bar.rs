@@ -17,6 +17,7 @@
 use bl_engine::NudgeDirection;
 use bl_shell::arrangement_commands::{AUTOMATION_ARM, FOLLOW};
 use bl_shell::link_commands as link;
+use bl_shell::tempo_follower_commands as follow;
 use bl_shell::transport::{self, Field, Group};
 use bl_shell::transport_commands as ids;
 use bl_shell::{Invocation, Shell};
@@ -109,6 +110,7 @@ pub fn command(element: Element) -> Option<&'static str> {
         Element::TapTempo => Some(ids::TAP_TEMPO),
         Element::ExternalSync => Some(ids::SET_EXTERNAL_SYNC),
         Element::LinkToggle => Some(link::SET_ENABLED),
+        Element::TempoFollower => Some(follow::SET_ENABLED),
         element => Some(match field(element)?.group {
             Group::Position => ids::LOCATE,
             Group::LoopStart | Group::LoopLength => ids::SET_LOOP,
@@ -134,6 +136,10 @@ pub fn click(element: Element, shell: &Shell) -> Option<Invocation> {
         Element::LinkToggle => Some(Invocation::new(
             link::SET_ENABLED,
             json!({ "on": !shell.link_enabled() }),
+        )),
+        Element::TempoFollower => Some(Invocation::new(
+            follow::SET_ENABLED,
+            json!({ "on": !shell.tempo_follower_on() }),
         )),
         Element::Play => Some(Invocation::new(ids::PLAY, json!({}))),
         Element::Stop => Some(Invocation::new(ids::STOP, json!({}))),
@@ -356,15 +362,21 @@ impl TransportFields {
                 // Spec: midi-clock R15, R27. The song follows the incoming
                 // clock while it is on.
                 let on = shell.external_sync();
+                // Spec: tempo-follower R5. Disabled while Tempo Follower is
+                // on.
+                let following = shell.tempo_follower_on();
                 return Some(Look {
                     on,
+                    disabled: following,
                     text: Some("EXT".to_owned()),
                     value: Some(if on { "on" } else { "off" }.to_owned()),
-                    description: Some(
+                    description: Some(if following {
+                        "Tempo Follower is on, so the song can't follow a MIDI clock.".to_owned()
+                    } else {
                         "Makes the song follow the tempo, start, stop and position of the \
                          MIDI clock an input with Sync on receives."
-                            .to_owned(),
-                    ),
+                            .to_owned()
+                    }),
                     ..Look::default()
                 });
             }
@@ -382,6 +394,30 @@ impl TransportFields {
                          through Link."
                             .to_owned(),
                     ),
+                    ..Look::default()
+                });
+            }
+            Element::TempoFollower => {
+                // Spec: tempo-follower R4, R23; control-bar-transport R25,
+                // R26. Greyed out with its reason while the input can't be
+                // reached; its description is the followed tempo.
+                let on = shell.tempo_follower_on();
+                let unavailable = shell.tempo_follower_unavailable();
+                let description = match (&unavailable, shell.followed_tempo()) {
+                    (Some(reason), _) => format!("Tempo Follower is unavailable: {reason}."),
+                    (None, Some(tempo)) => format!("Following {tempo:.2} BPM."),
+                    (None, None) if on => "Listening for a tempo.".to_owned(),
+                    (None, None) => {
+                        "Makes the song's tempo follow the beat heard on the audio input."
+                            .to_owned()
+                    }
+                };
+                return Some(Look {
+                    on,
+                    disabled: unavailable.is_some(),
+                    text: Some("Follow".to_owned()),
+                    value: Some(if on { "on" } else { "off" }.to_owned()),
+                    description: Some(description),
                     ..Look::default()
                 });
             }
@@ -404,8 +440,14 @@ impl TransportFields {
             Element::TapTempo => {
                 // Spec: control-bar-transport R21, R23. It is disabled while
                 // the song has tempo changes, and describes the run's tempo.
-                let editable = transport::editable(shell, Group::Tempo);
+                // Spec: tempo-follower R21. It is refused while Tempo Follower
+                // is on.
+                let following = shell.tempo_follower_on();
+                let editable = transport::editable(shell, Group::Tempo) && !following;
                 let description = match (editable, shell.tap_tempo_tempo()) {
+                    (false, _) if following => {
+                        "Tempo Follower is on, so tapping can't set the tempo.".to_owned()
+                    }
                     (false, _) => {
                         "The song has tempo changes, so tapping can't set its tempo.".to_owned()
                     }

@@ -46,7 +46,7 @@ use crate::scale::{Scale, ScaleName};
 use crate::scene::{SCENE_TEMPO_MAX, SCENE_TEMPO_MIN, Scene};
 use crate::shared::Shared;
 use crate::track::{
-    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Track,
+    Channel, CrossfadeAssign, Input, MidiTo, Mixer, Monitor, Output, PanMode, SendTap, Tap, Track,
     TrackDelay, TrackKind,
 };
 use crate::tuning::{Tuning, TuningNote};
@@ -2273,6 +2273,11 @@ pub enum Command {
         /// hears (its own track too), or `None` for No Input.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackId>,
+        /// Where on that track the device takes the notes (the routing
+        /// spec, R39); left out, it stays as it is. Only a device whose
+        /// type gives its MIDI sidechain a tapping point has one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tap: Option<Tap>,
     },
     /// Sets a device's sidechain gain, as linear gain (finite, at least 0).
     SetSidechainGain {
@@ -2435,6 +2440,14 @@ pub enum Command {
     /// Colours a chain with a swatch of the palette of 5 rows of 14
     /// (0 to 69), or `null` to clear its colour.
     SetChainColour {
+        /// The chain.
+        chain: ChainId,
+        /// The swatch, or `null` for none.
+        colour: Option<u8>,
+    },
+    /// Gives a drum rack's chain the swatch Push 2 shows for its pad, from
+    /// 0 to 69, or `null` to show the track's colour again.
+    SetChainPushColour {
         /// The chain.
         chain: ChainId,
         /// The swatch, or `null` for none.
@@ -2730,6 +2743,22 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Sets how a note-playing controller lays the scale out on its pads
+    /// (the notes on Push 2 spec, R32 and R37). It is no undo step.
+    SetPadLayout {
+        /// In Key (true) or Chromatic.
+        #[serde(default)]
+        in_key: Option<bool>,
+        /// Whether the bottom-left pad stays on C.
+        #[serde(default)]
+        fixed: Option<bool>,
+        /// The interval between rows.
+        #[serde(default)]
+        spacing: Option<crate::PadSpacing>,
+        /// Which way the rows run.
+        #[serde(default)]
+        direction: Option<crate::PadDirection>,
+    },
     /// Makes a tuning the set's, in place of any other (the tunings spec,
     /// R2 and R15). With `retune`, every note of the MIDI clips on tracks
     /// that play the tuning moves to the key whose new pitch is nearest the
@@ -2962,6 +2991,7 @@ impl Command {
             Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
             Self::SetRemoteMappings { .. } => "Change MIDI and key mappings",
             Self::SetCueMode { .. } => "Switch Cue mode",
+            Self::SetPadLayout { .. } => "Change Pad Layout",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
@@ -3176,6 +3206,7 @@ impl Command {
             Self::MoveChain { .. } => "Move Chain",
             Self::RenameChain { .. } => "Change \"Chain Name\"",
             Self::SetChainColour { .. } => "Change Chain Color",
+            Self::SetChainPushColour { .. } => "Change Pad Color on Push",
             Self::SetChainInfo { .. } => "Change Chain Info Text",
             Self::SetChainVolume { .. } => "Change chain volume",
             Self::SetChainPan { .. } => "Change chain pan",
@@ -3235,9 +3266,10 @@ impl Command {
 
     /// Whether running the command outside a transaction is an undo step.
     /// Cue mode is not: Live's Solo/Cue button and Options items add none.
+    /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. })
+        !matches!(self, Self::SetCueMode { .. } | Self::SetPadLayout { .. })
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3931,6 +3963,21 @@ impl Document {
                     ));
                 }
                 self.settings.remote.clone_from(mappings);
+                Ok(())
+            }
+            Command::SetPadLayout {
+                in_key,
+                fixed,
+                spacing,
+                direction,
+            } => {
+                let now = self.settings.pad_layout;
+                self.settings.pad_layout = crate::PadLayout {
+                    in_key: in_key.unwrap_or(now.in_key),
+                    fixed: fixed.unwrap_or(now.fixed),
+                    spacing: spacing.unwrap_or(now.spacing),
+                    direction: direction.unwrap_or(now.direction),
+                };
                 Ok(())
             }
             Command::SetCueMode { enabled } => {
@@ -5142,13 +5189,19 @@ impl Document {
                 self.edit_sidechain(*device, |s| s.input = input)?;
                 self.check_routing(self.device_owner(*device)?)
             }
-            Command::SetMidiSidechainSource { device, track } => {
+            Command::SetMidiSidechainSource { device, track, tap } => {
                 let mut sidechain = self
                     .device_ref(*device)?
                     .midi_sidechain
                     .clone()
                     .ok_or(ModelError::NoMidiSidechain(*device))?;
                 sidechain.source = *track;
+                if let Some(tap) = tap {
+                    if sidechain.tap.is_none() {
+                        return Err(ModelError::NoMidiTap(*device));
+                    }
+                    sidechain.tap = Some(*tap);
+                }
                 self.device_mut(*device)?.midi_sidechain = Some(sidechain);
                 self.check_routing(self.device_owner(*device)?)
             }
@@ -5327,6 +5380,12 @@ impl Document {
                     self.chain_mut(*chain)?.colour = *colour;
                 }
                 Ok(())
+            }
+            Command::SetChainPushColour { chain, colour } => {
+                if let Some(colour) = colour {
+                    check_value("pad colour", f64::from(*colour), *colour < CHAIN_COLOURS)?;
+                }
+                self.edit_drum_chain(*chain, false, |c| c.push_colour = *colour)
             }
             Command::SetChainInfo { chain, info } => {
                 if self.chain_ref(*chain)?.info != *info {
@@ -8710,6 +8769,16 @@ impl Document {
         Ok(())
     }
 
+    /// Arms or disarms a track outside the command system:
+    /// [`Editor::follow_arm`](crate::Editor::follow_arm) calls it.
+    pub(crate) fn follow_arm(&mut self, track: TrackId, arm: bool) -> Result<(), ModelError> {
+        check_kind(self.track_ref(track)?, TrackKind::has_arm, AUDIO_OR_MIDI)?;
+        if self.track_ref(track)?.mixer.arm != arm {
+            self.track_mut(track)?.mixer.arm = arm;
+        }
+        Ok(())
+    }
+
     /// Sets the name of the preset a device holds (the plug-in list spec,
     /// R5), outside the command system:
     /// [`Editor::amend_device_preset_name`](crate::Editor::amend_device_preset_name)
@@ -9616,6 +9685,7 @@ mod tests {
         song.apply(Command::SetMidiSidechainSource {
             device: listener,
             track: Some(source),
+            tap: None,
         })
         .unwrap();
         let tapping = song.track(TrackKind::Audio, None);

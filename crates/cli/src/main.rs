@@ -82,6 +82,15 @@ enum Command {
     /// --update, remakes the references whose renders changed: say why in
     /// the pull request.
     Golden(bl_cli::golden::GoldenArgs),
+    /// Measure how accurately Convert Melody and Convert Harmony find notes.
+    ///
+    /// Seeded phrases with known notes are played through Drift and Simpler,
+    /// clean, with a room and with noise, transcribed, and scored by
+    /// mir_eval's note definitions. Prints a table of precision, recall and
+    /// F-measure, and exits with status 1 if an onset F-measure is under its
+    /// target. `BL_TRANSCRIBE_CORPUS` names the folder of an open labelled
+    /// set to report on as well.
+    TranscribeBench(bl_cli::transcribe_bench::BenchArgs),
     /// Serve the agent API (MCP) on standard input and output, with no
     /// window.
     ///
@@ -114,6 +123,7 @@ fn main() -> ExitCode {
         Command::Render(args) => bl_cli::render::run(args),
         Command::Export(args) => export::run(args),
         Command::Golden(args) => bl_cli::golden::run(args),
+        Command::TranscribeBench(args) => bl_cli::transcribe_bench::run(args),
         Command::Mcp(args) => mcp::run(args),
         Command::Assistant(args) => bl_cli::assistant::run(args),
         Command::Bench(args) => bench::run(args),

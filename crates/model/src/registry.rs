@@ -505,6 +505,21 @@ const ENTRIES: &[Entry] = &[
             \"Change Scale\", and the set is saved with it.",
     },
     Entry {
+        id: "song.set_pad_layout",
+        action: Action::Apply("set_pad_layout"),
+        label: "Set Pad Layout",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets how a note-playing controller such as Push 2 lays the set's scale out \
+            on its pads: `in_key` (the pads play the scale's notes; false is Chromatic), \
+            `fixed` (the bottom-left pad stays on C whatever the scale's root), `spacing` \
+            (`fourths`, `thirds` or `sequent`, the interval between rows) and `direction` \
+            (`vertical` or `horizontal`). It leaves the values it isn't given as they were. A \
+            new set is In Key, fourths, vertical, Fixed off. The layout is saved with the set \
+            and is no undo step.",
+    },
+    Entry {
         id: "tuning.set",
         action: Action::Apply("set_tuning"),
         label: "Set Tuning",
@@ -3427,8 +3442,13 @@ const ENTRIES: &[Entry] = &[
             source chooser in its sidechain parameters does: `track` is a MIDI track (the \
             device's own track too), or left out for No Input, a new device's. The device \
             hears the notes and channel messages that track's clips and input play, before \
-            its own devices change them; the track still plays as before. Only devices that \
-            declare a MIDI sidechain input have one. Deleting the track leaves No Input.",
+            its own devices change them (`pre_fx`); the track still plays as before. A \
+            device whose MIDI sidechain has a tapping point (Corpus) takes `tap`: `pre_fx` \
+            as above, `post_fx` (a new device's) for the notes leaving the track's MIDI \
+            effects, or `post_mixer`, the same; left out, it stays. Only devices that \
+            declare a MIDI sidechain input have one. Deleting the track leaves No Input. \
+            Read back in the query tool's `device` result, under `midi_sidechain`: its \
+            `source` and `tap`.",
     },
     Entry {
         id: "device.set_sidechain_enabled",
@@ -3548,6 +3568,15 @@ const ENTRIES: &[Entry] = &[
         contexts: &[DeviceView],
         keys: &[],
         description: "Colours a chain with swatch `colour` of the palette of 5 rows of 14 (0 to 69), or clears its colour with null.",
+    },
+    Entry {
+        id: "chain.set_push_colour",
+        action: Action::Apply("set_chain_push_colour"),
+        label: "Set Chain Colour on Push",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Gives a drum rack's drum chain swatch `colour` of the palette of 5 rows of 14 (0 to 69) as the colour its pad shows on Push 2, in place of its track's, or clears it with null. `pad.set_push_colour` sets it for every chain of a pad.",
     },
     Entry {
         id: "chain.set_info",

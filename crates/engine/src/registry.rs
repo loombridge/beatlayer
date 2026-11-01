@@ -91,6 +91,9 @@ pub struct DeviceType {
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
     pub midi_sidechain: bool,
+    /// Whether that MIDI sidechain has a tapping point, Pre FX, Post FX or
+    /// Post Mixer, Post FX in a new device (the routing spec, R39).
+    pub midi_tap: bool,
     /// Whether its devices send notes on from a note output (IMP-24): a CLAP
     /// plug-in's note output port, a VST3 class's event output bus, or an
     /// Audio Unit's MIDI output. A device whose type has one can sit in the
@@ -123,6 +126,7 @@ impl DeviceType {
             cv_outputs: Vec::new(),
             cv_inputs: Vec::new(),
             midi_sidechain: false,
+            midi_tap: false,
             note_output: role == DeviceRole::MidiEffect,
             outputs: Vec::new(),
         }
@@ -188,6 +192,15 @@ impl DeviceType {
         self
     }
 
+    /// The same device type, declaring a MIDI sidechain input with a
+    /// tapping point (the routing spec, R39).
+    #[must_use]
+    pub fn with_midi_sidechain_tap(mut self) -> Self {
+        self.midi_sidechain = true;
+        self.midi_tap = true;
+        self
+    }
+
     /// The same device type, declaring a note output (IMP-24): its devices
     /// send notes on, so they can sit in the MIDI-effect position of a MIDI
     /// track's chain.
@@ -223,7 +236,9 @@ impl DeviceType {
         if !self.cv_outputs.is_empty() || !self.cv_inputs.is_empty() {
             device = device.with_cv(&self.cv_outputs, &self.cv_inputs);
         }
-        if self.midi_sidechain {
+        if self.midi_tap {
+            device = device.with_midi_sidechain_tap();
+        } else if self.midi_sidechain {
             device = device.with_midi_sidechain();
         }
         device

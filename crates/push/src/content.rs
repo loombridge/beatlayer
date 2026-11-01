@@ -285,6 +285,20 @@ impl StripUse {
     }
 }
 
+/// A step of Note Mode that is held down: the display modes act on it while
+/// it is (notes R25).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeldStep {
+    /// The clip the step belongs to, if the slot holds one.
+    pub clip: Option<bl_model::ClipId>,
+    /// The step's drum pad: its note.
+    pub key: u8,
+    /// Where the step starts in the clip's contents.
+    pub start: bl_core::time::Ticks,
+    /// How long the step is.
+    pub length: bl_core::time::Ticks,
+}
+
 /// What a content hears of the world and asks of it while it handles an
 /// event.
 pub struct Ctx<'a> {
@@ -296,8 +310,14 @@ pub struct Ctx<'a> {
     pub modifiers: &'a Modifiers,
     /// The Setup values.
     pub setup: Setup,
+    /// When Push 2 sent what the content is handling, on the host's clock.
+    pub at: std::time::Instant,
+    /// The steps held in Note Mode.
+    pub held_steps: &'a [HeldStep],
     /// Mix's page, for Mix Mode (R22).
     pub mix_page: MixPage,
+    /// The display mode, for a pad mode whose buttons it shares (notes R45).
+    pub display: DisplayMode,
     pub(crate) actions: &'a mut Vec<Action>,
 }
 
@@ -414,6 +434,8 @@ pub struct Paint<'a> {
     pub row: usize,
     /// The 14 track colours the swatches are made from.
     pub colours: &'a [[u8; 3]],
+    /// The steps held in Note Mode.
+    pub held_steps: &'a [HeldStep],
 }
 
 /// The content of one pad mode or display mode.
@@ -434,6 +456,10 @@ pub trait Content: Send {
 
     /// The touch strip (R11).
     fn strip(&mut self, _event: StripEvent, _ctx: &mut Ctx<'_>) {}
+
+    /// Each tick of the surface, before the modes are drawn, for a mode that
+    /// has something to ask for that no control asked for.
+    fn tick(&mut self, _ctx: &mut Ctx<'_>) {}
 
     /// The display mode is entered afresh, by its button or by another
     /// control that leads to it.
@@ -474,6 +500,15 @@ pub trait Content: Send {
     /// buttons it owns.
     fn paint(&mut self, _paint: &mut Paint<'_>) {}
 
+    /// A display button pressed while the Scale menu is open (notes R35).
+    fn scale_button(&mut self, _button: u8, _ctx: &mut Ctx<'_>) {}
+
+    /// An encoder turned while the Scale menu is open (notes R35).
+    fn scale_turn(&mut self, _column: u8, _steps: i32, _ctx: &mut Ctx<'_>) {}
+
+    /// Draws the Scale menu over the display (notes R35).
+    fn paint_scale(&mut self, _paint: &mut Paint<'_>) {}
+
     /// Whether the mode uses the lower display buttons itself rather than
     /// leaving them to the ring's tracks (R26).
     fn claims_lower(&self) -> bool {
@@ -483,6 +518,29 @@ pub trait Content: Send {
     /// Whether Scale opens its menu: Note Mode with a melodic layout (R23).
     fn scale_available(&self) -> bool {
         false
+    }
+
+    /// The steps held down now: only Note Mode has any (notes R25).
+    fn held_steps(&self) -> Vec<HeldStep> {
+        Vec::new()
+    }
+
+    /// How the touch strip should be configured while this pad mode shows,
+    /// if it has a use for it (R11).
+    fn strip_use(&self) -> Option<StripUse> {
+        None
+    }
+
+    /// What Note Mode shows, for `push.state` (notes R5 to R31).
+    fn note_state(&self) -> Option<crate::note::State> {
+        None
+    }
+
+    /// The pads, as a bit per row from the bottom times 8 plus column, that
+    /// should have reduced sensitivity: the surface selects Pad Settings 1
+    /// for them and regular for the rest (notes R31).
+    fn reduced_pads(&self) -> u64 {
+        0
     }
 }
 

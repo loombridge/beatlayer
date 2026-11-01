@@ -70,17 +70,31 @@ pub(super) fn show(ui: &mut Ui, shell: &Shell, item: &Item, events: &mut Vec<UiE
         invoke(events, ids::REVEAL, json!({}));
         ui.close();
     }
-    // C-BROWSER-003. Similarity search is milestone M9.
+    // C-BROWSER-003 (spec: sound-similarity R11). Disabled for an item that
+    // can't be a reference, with the reason in its description.
     let similar = if cfg!(target_os = "macos") {
         "\u{21e7}\u{2318}F"
     } else {
         "Ctrl+Shift+F"
     };
-    add(
+    let reference = view.selected_reference();
+    let response = add(
         ui,
         Button::new("Show Similar Files").shortcut_text(similar),
-        false,
+        reference.is_ok(),
     );
+    match reference {
+        Ok(_) if response.clicked() => {
+            invoke(events, ids::SHOW_SIMILAR, json!({}));
+            ui.close();
+        }
+        Ok(_) => {}
+        Err(reason) => {
+            ui.ctx().accesskit_node_builder(response.id, |node| {
+                node.set_description(format!("Not available: {reason}"));
+            });
+        }
+    }
     ui.separator();
     // C-BROWSER-004 to 011.
     if add(ui, Button::new("Clear All Colors").shortcut_text("0"), true).clicked() {

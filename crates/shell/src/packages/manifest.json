@@ -4,6 +4,11 @@
       "id": "stems",
       "name": "Stem separation",
       "roles": ["onnx-runtime", "stems-model"]
+    },
+    {
+      "id": "audio-to-midi",
+      "name": "Audio to MIDI",
+      "roles": ["onnx-runtime", "pitch-model"]
     }
   ],
   "packages": [
@@ -113,6 +118,21 @@
       "unpack": "file",
       "folder": "demucs-4.1.0",
       "files": [{ "name": "htdemucs.onnx" }]
+    },
+    {
+      "id": "basic-pitch",
+      "name": "basic-pitch",
+      "version": "0.4.0",
+      "project": "https://github.com/spotify/basic-pitch",
+      "purpose": "The model that finds the notes in melodies and chords",
+      "platform": "any",
+      "role": "pitch-model",
+      "url": "https://raw.githubusercontent.com/spotify/basic-pitch/v0.4.0/basic_pitch/saved_models/icassp_2022/nmp.onnx",
+      "size": 230444,
+      "sha256": "2c3c1d144bfa61ad236e92e169c13535c880469a12a047d4e73451f2c059a0ec",
+      "unpack": "file",
+      "folder": "basic-pitch-0.4.0",
+      "files": [{ "name": "nmp.onnx" }]
     }
   ]
 }

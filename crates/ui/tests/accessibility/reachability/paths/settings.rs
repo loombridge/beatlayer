@@ -101,6 +101,32 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "push.set_setup",
             Exception(Equivalent("Push 2's Setup menu, set with its own encoders")),
         ),
+        // Push 2's Note Mode (WP-7.21): the pad colour shows only on Push 2,
+        // and Duplicate with two pads is its own gesture.
+        (
+            "pad.copy",
+            Exception(Equivalent("Push 2's Duplicate button with two pads")),
+        ),
+        (
+            "pad.set_push_colour",
+            Exception(Equivalent(
+                "Push 2's Shift button with a pad, which opens its colour picker",
+            )),
+        ),
+        // Push 2's Scale menu (WP-7.22): the options belong to a controller's
+        // pads, and the app has no control for them.
+        (
+            "song.set_pad_layout",
+            Exception(Equivalent(
+                "Push 2's Scale menu, which sets them on its display",
+            )),
+        ),
+        (
+            "chain.set_push_colour",
+            Exception(Equivalent(
+                "`pad.set_push_colour`, which sets the colour of every chain on a pad",
+            )),
+        ),
         // The Automation Arm button's context menu (the automation spec,
         // R18), opened from the focused button as the tempo field's is.
         (

@@ -866,6 +866,7 @@ pub fn display(
         });
         for (side, threshold) in [("Above", above.0), ("Below", below_threshold)] {
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: format!("{name} {side} Threshold"),
                 series: curve.clone(),
                 x: threshold as f32,

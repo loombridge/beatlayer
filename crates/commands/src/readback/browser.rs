@@ -1,7 +1,7 @@
 //! The Browser and the File Manager.
 
 use super::Object::{Clip, Track};
-use super::{BROWSER, Readback, nothing, query};
+use super::{BROWSER, Readback, nothing, query, read};
 
 /// Why the browser's tag commands read back through nothing a read command
 /// gives.
@@ -21,6 +21,7 @@ const FILE_MANAGER: &str = "the File Manager's state is read with `file_manager.
 pub(super) const ROWS: &[(&str, Readback)] = &[
     ("browser.add_folder", nothing(BROWSER)),
     ("browser.add_label", nothing(BROWSER)),
+    ("browser.set_analysis_paused", read("browser.analysis_state", "paused")),
     ("browser.add_tag", nothing(TAGS)),
     ("browser.add_tag_group", nothing(TAGS)),
     ("browser.add_to_arrangement", query(Track, "clips")),

@@ -324,6 +324,11 @@ impl ClipSources {
         self.ready.retain(|&clip, _| keep_clip(clip));
     }
 
+    /// Whether the loader still owes an answer for some clip.
+    pub(crate) fn loading(&self) -> bool {
+        !self.opening.is_empty()
+    }
+
     /// Starts a list for `track`'s player.
     pub(crate) fn begin(&mut self) {
         self.building.clear();

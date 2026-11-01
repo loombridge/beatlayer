@@ -1156,6 +1156,50 @@ fn the_modulation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: echo R18
+#[test]
+fn echo_passes_under_rtsan() {
+    use bl_devices::echo::*;
+    run_lo_fi_device(
+        ECHO,
+        &[
+            (CHANNEL_MODE, &[0.0, 1.0, 2.0]),
+            (LINK, &[0.0, 1.0]),
+            (line_param(0, SYNC), &[0.0, 1.0]),
+            (line_param(0, SYNC_MODE), &[0.0, 1.0, 2.0, 3.0]),
+            (line_param(0, NOTES), &[0.0, 3.0, 10.0]),
+            (line_param(1, TIME), &[1.0, 100.0, 5_000.0]),
+            (line_param(1, OFFSET), &[-33.0, 0.0, 33.0]),
+            (INPUT, &[0.0, 1.0, 3.98]),
+            (DRIVE, &[0.0, 1.0]),
+            (FEEDBACK, &[0.0, 60.0, 100.0]),
+            (FEEDBACK_INVERT, &[0.0, 1.0]),
+            (FILTER, &[0.0, 1.0]),
+            (HP_FREQ, &[20.0, 500.0, 5_000.0]),
+            (LP_RES, &[0.0, 100.0]),
+            (WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0]),
+            (LFO_SYNC, &[0.0, 1.0]),
+            (LFO_RATE, &[0.0, 5.0, 9.0]),
+            (MOD_DELAY, &[0.0, 100.0]),
+            (MOD_X4, &[0.0, 1.0]),
+            (MOD_FILTER, &[0.0, 100.0]),
+            (ENV_MIX, &[0.0, 50.0, 100.0]),
+            (GATE, &[0.0, 1.0]),
+            (DUCKING, &[0.0, 1.0]),
+            (NOISE, &[0.0, 1.0]),
+            (NOISE_MORPH, &[0.0, 100.0]),
+            (WOBBLE, &[0.0, 1.0]),
+            (REPITCH, &[0.0, 1.0]),
+            (REVERB, &[0.0, 100.0]),
+            (REVERB_LOCATION, &[0.0, 1.0, 2.0]),
+            (DECAY, &[0.2, 10.0]),
+            (STEREO, &[0.0, 100.0, 200.0]),
+            (EQUAL_LOUDNESS, &[0.0, 1.0]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+        ],
+    );
+}
+
 // Spec: auto-pan-tremolo R15
 #[test]
 fn auto_pan_tremolo_passes_under_rtsan() {

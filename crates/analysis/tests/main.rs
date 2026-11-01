@@ -5,6 +5,7 @@
 
 mod cache;
 mod common;
+mod similarity;
 mod stems_model;
 mod tempo;
 mod transients;

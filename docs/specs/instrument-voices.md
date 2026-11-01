@@ -1,6 +1,6 @@
 # The instruments' voice section: voices, Poly and Mono, Legato, Glide, Unison, pitch bend, the MPE sources, the tuning path and Hi-Quality
 
-- **Status:** draft
+- **Status:** built (R1 to R22: the voice section in `bl_devices::instrument`, the framework's test instrument on it, and Drift moved onto it; each instrument's own package adds its device)
 - **Work packages:** WP-8.2 (this spec: R1 to R22, with Drift moved onto it). Each Phase 8 instrument's own voice controls, ranges and defaults are in its spec: [Drift](polysynth.md), [Wavetable](wavetable.md), [Operator](operator.md), [Analog](analog.md), [Bass and Poli](bass-and-poli.md), [Meld](meld.md), [Collision](collision.md), [Tension](tension.md), [Electric](electric.md), [the Drum Synths](drum-synths.md) and [Granulator III](granulator-iii.md). The filter they share is [the instruments' filter](instrument-filter.md); the routes from the sources below to parameters are [the instruments' modulation matrix](instrument-modulation.md); per-note expression reaching a device from clips and controllers is [MPE](mpe.md)'s; the pitch a key plays under a tuning is [tunings](tunings.md)'
 - **Parity-matrix row:** Instruments: Analog, Operator, Wavetable, Meld, Collision, Tension, Electric, Drum Synths, Granulator III, Bass and Poli (the parts every one of them shares); Drift
 - **Checked against:** the Live 12 reference manual (online edition), read 30 October 2026 (chapter 31, sections 31.1.8 and 31.1.9, 31.2.6.1, 31.3.7, 31.5.5, 31.8.8 and 31.8.11, 31.9.6, 31.9.7 and 31.9.10.1 to 31.9.10.3, 31.12.3, 31.13.8 and 31.13.9); the Live 12 release notes, 12.0 (every Live instrument plays MPE; Operator's per-note pitch bend) and 12.2 (Drift's Hi-Quality in its title bar's menu; Operator's 32 voices); the UI parity reference row C-DEVICE-015
@@ -84,16 +84,16 @@ This spec covers what the instruments share. The plug-in kit's voices themselves
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1 | to be written in WP-8.2 | unit (a test instrument's descriptors) |
-| R2 | to be written in WP-8.2 | real-time trap; RealtimeSanitizer (`rtsan/tests`) |
-| R3, R4, R5 | to be written in WP-8.2 | render under the allocation trap (32 voices stolen; a click detector on the steal frames) |
-| R6, R7 | to be written in WP-8.2 | render under the allocation trap |
-| R8, R9, R10 | to be written in WP-8.2 | render under the allocation trap (the glide's pitch measured per frame; Glissando's steps) |
-| R11, R12, R13 | to be written in WP-8.2 | render under the allocation trap (copies' pitches by FFT; level of a stacked voice) |
-| R14 | to be written in WP-8.2 | render under the allocation trap (a per-note bend of ±1 moves only its note) |
-| R15, R16 | to be written in WP-8.2 | unit (source values per frame) |
-| R17 | to be written in WP-8.2 | unit; render |
-| R18 | to be written in WP-8.2 | render (every key of a 19-step tuning within 0.1 cent) |
-| R19, R20 | to be written in WP-8.2 | unit; agent API (`device.set_param`, `device.parameters`) |
-| R21 | to be written in WP-8.2 | render at block sizes 1, 64, 512 and 4,096 |
-| R22 | to be written in WP-8.2 | golden render (Drift before and after, sample for sample) |
+| R1 | `crates/devices/tests/instrument_voices.rs`, `the_parts_read_alike_and_hi_quality_is_a_menu_option` | unit (a test instrument's descriptors) |
+| R2 | `crates/devices/tests/instrument_voices.rs`, `voices_times_copies_fit_the_lanes_in_sixteens`; `rtsan/tests/instrument_voices.rs`, `the_test_instrument_stealing_gliding_and_stacking_passes_under_rtsan` | real-time trap; RealtimeSanitizer (`rtsan/tests`) |
+| R3, R4, R5 | `crates/devices/tests/instrument_voices.rs`, `thirty_two_voices_are_played_and_stolen_without_a_click`, `priority_high_and_low_keep_the_right_notes`, `retrigger_restarts_a_sounding_key_instead_of_taking_a_voice` | render under the allocation trap (32 voices stolen; a click detector on the steal frames) |
+| R6, R7 | `crates/devices/tests/instrument_voices.rs`, `mono_returns_to_a_held_key_and_releases_with_the_last`, `legato_keeps_the_envelopes_where_they_are` | render under the allocation trap |
+| R8, R9, R10 | `crates/devices/tests/instrument_voices.rs`, `a_glide_is_a_straight_line_that_reaches_the_note_at_glide_time`, `polyphonic_glide_starts_from_the_note_before_and_not_after_silence`, `prop_scales_the_time_with_the_interval_and_legato_glides_only_into_held_notes`, `glissando_steps_through_semitones_in_equal_shares`, `glissando_steps_through_the_current_scales_degrees`, `glissando_under_a_tuning_steps_through_the_tunings_keys` | render under the allocation trap (the glide's pitch measured per frame; Glissando's steps) |
+| R11, R12, R13 | `crates/devices/tests/instrument_voices.rs`, `unison_copies_sit_at_their_detunes`, `unison_copies_pan_alternately_and_start_over_the_delay`, `a_stacked_voice_keeps_the_level_of_one` | render under the allocation trap (copies' pitches by FFT; level of a stacked voice) |
+| R14 | `crates/devices/tests/instrument_voices.rs`, `a_per_note_bend_moves_only_its_note_and_the_wheel_moves_all` | render under the allocation trap (a per-note bend of ±1 moves only its note) |
+| R15, R16 | `crates/devices/tests/instrument_voices.rs`, `the_sources_read_on_the_frame_their_message_lands_at_any_block_size`, `a_curve_bows_the_source_by_four_to_the_minus_its_amount` | unit (source values per frame) |
+| R17 | `crates/devices/tests/instrument_voices.rs`, `transpose_stretch_and_error_move_a_voices_pitch` | unit; render |
+| R18 | `crates/devices/tests/instrument_voices.rs`, `every_key_of_a_nineteen_step_tuning_sounds_within_a_tenth_of_a_cent` | render (every key of a 19-step tuning within 0.1 cent) |
+| R19, R20 | `crates/devices/tests/instrument_voices.rs`, `hi_quality_is_a_switch_parameter_off_in_a_new_device`, `modulation_runs_every_frame_in_hi_quality_and_on_a_grid_of_32_off`; `crates/shell/tests/effect_parts.rs`, `an_instruments_hi_quality_is_a_menu_option_that_one_undo_step_switches_and_agents_read_back` | unit; agent API (`device.set_param`, `device.parameters`) |
+| R21 | `crates/devices/tests/instrument_voices.rs`, `a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096`, `drift_renders_the_same_at_any_block_size` | render at block sizes 1, 64, 512 and 4,096 |
+| R22 | `crates/devices/tests/instrument_voices.rs`, `drift_plays_through_the_section_sample_for_sample` | golden render (Drift before and after, sample for sample) |

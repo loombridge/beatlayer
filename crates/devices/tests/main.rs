@@ -100,3 +100,4 @@ mod utility;
 mod vector_delay;
 mod vinyl_distortion;
 mod wave_mod;
+mod wavetables;

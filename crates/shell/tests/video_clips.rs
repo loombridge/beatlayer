@@ -306,3 +306,57 @@ fn the_movies_markers_are_cues() {
     shell.run("clip.reverse", json!({ "clip": other })).unwrap();
     assert!(shell.clip_cues(other).is_empty());
 }
+
+fn hash_of(path: &Path) -> String {
+    bl_media::ContentHash::of_file(path)
+        .unwrap()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+// Spec: video R14.
+#[test]
+fn a_video_clips_movie_is_a_file_the_file_manager_lists_and_replaces() {
+    let scratch = Scratch::new("files");
+    let movie = scratch.movie("mjpeg-24f.mov");
+    let other = scratch.movie("mjpeg-chapters.mov");
+    let sound = scratch.movie("mjpeg-24f.wav");
+    let mut shell = new_shell(&scratch);
+    let track = audio_track(&shell);
+    let clip = drop_in(&mut shell, track, &movie, 0);
+    shell
+        .run(
+            "set.save_as",
+            json!({ "path": scratch.path("Song.blset").display().to_string() }),
+        )
+        .unwrap();
+
+    // The movie is listed, with the clip that uses it.
+    let state = shell.run("file_manager.state", json!({})).unwrap();
+    let row = state["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|file| file["name"] == "mjpeg-24f.mov")
+        .expect("the movie is listed");
+    assert!(!row["used_by"].as_array().unwrap().is_empty(), "{row}");
+
+    // Another movie in its place keeps the clip a video clip; a sound makes
+    // it an audio clip.
+    shell
+        .run(
+            "file_manager.replace_file",
+            json!({ "hash": hash_of(&movie), "path": other.display().to_string() }),
+        )
+        .unwrap();
+    assert!(audio(&shell, clip).video);
+    shell
+        .run(
+            "file_manager.replace_file",
+            json!({ "hash": hash_of(&other), "path": sound.display().to_string() }),
+        )
+        .unwrap();
+    assert!(!audio(&shell, clip).video);
+}

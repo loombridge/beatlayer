@@ -17,7 +17,7 @@ use bl_shell_spec::browser::{AddResult, AddToArrangementArgs, ItemKind, PlacedCl
 
 use super::listing::{self, stem};
 use crate::arrangement::placing;
-use crate::auto_warp::{Warping, new_clip};
+use crate::auto_warp::{Warping, new_clip, new_video_clip};
 use crate::clip_files::{self, Lane, Spot};
 
 /// The undo step a drop makes. Live's name for it isn't observed yet
@@ -50,10 +50,29 @@ struct Prepared {
     path: String,
     name: String,
     seconds: f64,
+    /// Whether it is a movie with a picture, which the Arrangement takes as a
+    /// video clip (spec: video R5).
+    video: bool,
 }
 
-fn prepare(media: &MediaStore, path: &Path) -> Result<Prepared, AddError> {
+/// Whether `path` names a QuickTime movie, by its extension.
+fn is_movie(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("mov"))
+}
+
+/// Reads one file. A movie's picture is read too, with `video`, which
+/// refuses one no decoder here takes (video R1).
+fn prepare(media: &MediaStore, path: &Path, video: bool) -> Result<Prepared, AddError> {
     let failed = |e: &dyn std::fmt::Display| AddError::Failed(format!("{}: {e}", path.display()));
+    let video = if video && is_movie(path) {
+        bl_video::Movie::open(path)
+            .map_err(|e| failed(&e))?
+            .video()
+            .is_some()
+    } else {
+        false
+    };
     let hash = media.import(path).map_err(|e| failed(&e))?;
     let entry = media
         .entry(hash)
@@ -76,6 +95,7 @@ fn prepare(media: &MediaStore, path: &Path) -> Result<Prepared, AddError> {
         path: path.to_string_lossy().into_owned(),
         name: stem(path),
         seconds: frames as f64 / f64::from(info.sample_rate.max(1)),
+        video,
     })
 }
 
@@ -109,7 +129,7 @@ pub(crate) fn prepare_for_slot(
     media: &MediaStore,
     path: &Path,
 ) -> Result<(MediaFile, String, f64), AddError> {
-    let prepared = prepare(media, path)?;
+    let prepared = prepare(media, path, false)?;
     Ok((prepared.media, prepared.name, prepared.seconds))
 }
 
@@ -292,7 +312,7 @@ pub fn add_files(
     let files = args
         .paths
         .iter()
-        .map(|path| prepare(media, Path::new(path)))
+        .map(|path| prepare(media, Path::new(path), true))
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut result = AddResult::default();
@@ -343,8 +363,13 @@ pub fn add_files(
                 }
                 _ => (current.expect("a track is chosen or made above"), None),
             };
-            // Spec: warping R33. The warp settings come from the file.
-            let new = new_clip(&file.media, file.seconds, editor.document(), at, warping);
+            // Spec: warping R33. The warp settings come from the file; a
+            // movie's picture makes a video clip (video R5, R9).
+            let new = if file.video {
+                new_video_clip(&file.media, file.seconds, editor.document(), at, warping)
+            } else {
+                new_clip(&file.media, file.seconds, editor.document(), at, warping)
+            };
             let length = new.length;
             let id = editor.new_id();
             // Spec: audio-clips R7. With Create Fades on Clip Edges on, a

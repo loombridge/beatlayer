@@ -90,6 +90,7 @@
 //! - [`clip_properties`]: the Clip View's Main Properties panel
 //!   (`clip_view.show_properties`, `clip_view.show_marker`,
 //!   `clip.set_marker_at_playhead`, WP-6.55).
+//! - [`video`]: video clips for agents (`video.frame_at`, WP-9.25).
 //! - [`tunings`]: tuning systems (`tuning.load`, `tuning.state`, WP-6.9).
 //! - [`search`]: the search field's commands (`search.*`, WP-6.42): command
 //!   search and track search.
@@ -158,6 +159,7 @@ pub mod sync;
 pub mod tracks;
 pub mod transport;
 pub mod tunings;
+pub mod video;
 pub mod warping;
 
 use bl_commands::{RegisterError, Registry};
@@ -216,6 +218,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     bounce::register(registry)?;
     comping::register(registry)?;
     slice::register(registry)?;
+    video::register(registry)?;
     warping::register(registry)?;
     scales::register(registry)?;
     tunings::register(registry)?;

@@ -720,10 +720,11 @@ fn unison_stacks_copies_that_detune_with_amount() {
     );
 }
 
-// Spec: wavetable R20 (the same at any block size)
-#[test]
-fn a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096() {
-    let phrase = [
+/// A phrase that uses what part 1 has: two notes overlapping and a third,
+/// Classic on Oscillator 1, FM on Oscillator 2, the sub, unison, both
+/// filters in parallel, rendered `block` frames at a time.
+fn phrase(block: usize) -> Vec<Vec<f32>> {
+    let notes = [
         on(0, 45, 1.0),
         on(3_000, 52, 0.8),
         off(20_000, 45),
@@ -750,16 +751,17 @@ fn a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096() {
         (filter(2, FILTER_FREQ), 5_000.0),
         (ROUTING, 1.0),
     ];
-    let registry = registry();
-    let at = |block: usize| {
-        let mut node = node(&registry, &wavetable_with(&params), 4_096);
-        play_blocks(node.as_mut(), 40_000, block, &phrase, &[])
-    };
-    let reference = at(4_096);
+    let mut node = node(&registry(), &wavetable_with(&params), 4_096);
+    play_blocks(node.as_mut(), 40_000, block, &notes, &[])
+}
+
+// Spec: wavetable R20 (the same at any block size)
+#[test]
+fn a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096() {
+    let reference = phrase(4_096);
     assert!(rms(&reference[0]) > 0.01, "the phrase sounds");
     for block in BLOCKS {
-        let signal = at(block);
-        for (channel, want) in signal.iter().zip(&reference) {
+        for (channel, want) in phrase(block).iter().zip(&reference) {
             let worst = channel
                 .iter()
                 .zip(want)
@@ -768,6 +770,26 @@ fn a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096() {
             assert!(worst < 1e-3, "block size {block}: {worst}");
         }
     }
+}
+
+/// FNV-1a over the samples' bits: what a golden render compares.
+fn digest(signal: &[f32]) -> u64 {
+    signal.iter().fold(0xcbf2_9ce4_8422_2325, |hash, sample| {
+        (hash ^ u64::from(sample.to_bits())).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
+// Spec: wavetable R20 (a golden render, and run after run)
+#[test]
+fn the_phrase_renders_to_its_golden_digest_run_after_run() {
+    let signal = phrase(512);
+    assert_eq!(phrase(512), signal, "run after run");
+    let both: Vec<f32> = signal.concat();
+    // A vector unit of another architecture rounds some samples
+    // differently, so only the one the digest was taken on compares it.
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    assert_eq!(digest(&both), 0x268c_d2e2_e4fb_cd32);
+    let _ = digest(&both);
 }
 
 /// Whether the tests run at full depth.

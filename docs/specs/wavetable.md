@@ -106,7 +106,7 @@ Beatlayer's factory wavetables are its own: made by a generator in the repositor
 | R16 | `crates/devices/tests/wavetable.rs` (`each_filter_routing_reaches_the_output_as_the_spec_says`, `the_sub_goes_through_the_filters`) | render under the real-time trap (each routing's spectrum) |
 | R17 | `crates/devices/tests/wavetable.rs` (`the_amp_envelope_shapes_each_voice_and_it_ends_when_silent`) | render |
 | R18, R19 | `crates/devices/tests/wavetable.rs` (`poly_plays_polyvoices_notes_mono_glides_and_transpose_and_volume_act`, `unison_stacks_copies_that_detune_with_amount`) | render |
-| R20 | `crates/devices/tests/wavetable.rs` (`sixteen_voices_with_eight_unison_copies_render_inside_the_device_budget`, `a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096`) | benchmark against the device budget (judged at full depth); render at block sizes 1, 64, 512 and 4,096 |
+| R20 | `crates/devices/tests/wavetable.rs` (`sixteen_voices_with_eight_unison_copies_render_inside_the_device_budget`, `a_phrase_renders_the_same_at_block_sizes_1_64_512_and_4096`, `the_phrase_renders_to_its_golden_digest_run_after_run`) | benchmark against the device budget (judged at full depth); render at block sizes 1, 64, 512 and 4,096; golden render |
 | R21 | `crates/devices/tests/banks.rs`; `crates/devices/tests/rules.rs` | unit |
 | R23, R24 | `crates/devices/tests/wavetable.rs` (`only_fm_classic_and_modern_are_offered`, `position_swept_at_audio_rate_scans_the_frames_without_clicks`, `each_filter_routing_reaches_the_output_as_the_spec_says`) | unit; render |
 | R25, R26, R34 | to be written in WP-8.10 | render under the allocation trap (each source reaching its destination per voice) |

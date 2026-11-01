@@ -541,6 +541,7 @@ pub fn display(
                 .collect(),
         }],
         markers: vec![DisplayMarker {
+            handle: None,
             name: "Threshold".to_owned(),
             series: "Transfer Curve".to_owned(),
             x: threshold as f32,
@@ -564,6 +565,7 @@ pub fn display(
         ];
         if input > CURVE_FROM_DB {
             out.markers.push(DisplayMarker {
+                handle: None,
                 name: "Level".to_owned(),
                 series: "Transfer Curve".to_owned(),
                 x: input,

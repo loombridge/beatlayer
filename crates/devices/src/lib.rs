@@ -48,6 +48,7 @@ pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
 mod dynamics;
+pub mod echo;
 pub mod eq;
 pub mod filter_delay;
 mod filters;
@@ -120,6 +121,7 @@ pub use delay::{DELAY, delay_type};
 pub use dice::{DICE, dice_type};
 pub use drum_bus::{DRUM_BUSS, drum_buss_type};
 pub use drum_sampler::{DRUM_SAMPLER, DrumSampler, drum_sampler_type};
+pub use echo::{ECHO, echo_type};
 pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
@@ -204,6 +206,7 @@ pub fn display_in(
 ) -> Option<DeviceDisplay> {
     match device_type {
         EQ => Some(eq::display(device, description, values, data)),
+        ECHO => Some(echo::display(device, description, values, data, view)),
         COMPRESSOR => Some(compressor::display(device, description, values, data)),
         CHANNEL_EQ => Some(channel_eq::display(device, description, values, data)),
         BUS_COMPRESSOR => Some(bus_compressor::display(device, description, values, data)),
@@ -281,6 +284,7 @@ pub fn register(registry: &mut Registry) {
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);
+    echo::register(registry);
     grain_delay::register(registry);
     alignment_delay::register(registry);
     reverb::register(registry);

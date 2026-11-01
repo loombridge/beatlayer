@@ -23,13 +23,19 @@ pub fn handles(id: &str) -> bool {
 }
 
 /// Arguments of `video.frame_at`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FrameAtArgs {
-    /// The song position, in ticks.
-    pub at: Ticks,
-    /// The video clip. Left out, the one whose picture shows at `at`: the
-    /// playing video clip on the bottom-most track.
+    /// The song position, in ticks. Give this or `movie_time`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<Ticks>,
+    /// A time in the movie, in seconds, as a warp marker's `time` is: the
+    /// frame there, whichever song position plays it. Give this or `at`; it
+    /// needs `clip`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub movie_time: Option<f64>,
+    /// The video clip. Left out with `at`, the one whose picture shows
+    /// there: the playing video clip on the bottom-most track.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<ClipId>,
 }
@@ -40,7 +46,8 @@ pub struct FrameAt {
     /// The video clip, or `null` where none plays: the picture is black.
     pub clip: Option<ClipId>,
     /// The time in the movie, in seconds, the clip plays at `at`, through
-    /// its warp map; `null` outside the clip or before the movie.
+    /// its warp map, or the `movie_time` asked for; `null` outside the clip
+    /// or before the movie.
     pub movie_time: Option<f64>,
     /// The index of the movie's frame shown then, counting from 0 in the
     /// order they show; `null` where the movie has no picture: black.
@@ -64,8 +71,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  `frame_time`. Without `clip` it asks the video clip whose picture shows at \
                  `at`, the playing one on the bottom-most track; with none playing every field \
                  but `clip` is `null` and the picture is black. Moving a warp marker changes \
-                 which frame plays when. Fails if the clip isn't a video clip or its movie \
-                 can't be read. Changes nothing.",
+                 which frame plays when. With `movie_time` and a `clip` instead of `at` it \
+                 gives the frame at that time in the movie, as for a warp marker being dragged. \
+                 Fails if the clip isn't a video clip or its movie can't be read. Changes \
+                 nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

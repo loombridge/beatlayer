@@ -219,6 +219,12 @@ fn a_warp_marker_moves_which_frame_plays_when() {
     // frame 7.
     let at = start + Ticks::QUARTER.get() / 2;
     let before = frame_at(&mut shell, json!({ "at": at }));
+    // A time in the movie asks for its frame directly, as a dragged warp
+    // marker does (warping R58): 0.45 s is frame 13.
+    let marker = frame_at(&mut shell, json!({ "movie_time": 0.45, "clip": clip }));
+    assert_eq!((marker.frame, marker.movie_time), (Some(13), Some(0.45)));
+    assert!(shell.run("video.frame_at", json!({ "movie_time": 0.45 })).is_err());
+    assert!(shell.run("video.frame_at", json!({})).is_err());
     assert_eq!(before.clip, Some(clip));
     assert_eq!(before.frame, Some(7));
     assert!((before.movie_time.unwrap() - 0.25).abs() < 1e-6);

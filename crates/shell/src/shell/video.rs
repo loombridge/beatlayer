@@ -76,19 +76,32 @@ impl Shell {
     /// Runs `video.frame_at` (R13).
     pub(super) fn run_video(&mut self, id: &str, args: Value) -> Result<Value, ShellError> {
         debug_assert_eq!(id, FRAME_AT);
-        let FrameAtArgs { at, clip } = Self::args(id, args)?;
+        let FrameAtArgs {
+            at,
+            movie_time: asked,
+            clip,
+        } = Self::args(id, args)?;
         let failed = |message: String| ShellError::Failed {
             command: id.to_owned(),
             message,
         };
+        let invalid = |message: &str| ShellError::InvalidArgs {
+            command: id.to_owned(),
+            message: message.to_owned(),
+        };
         let doc = self.editor.document();
-        let found: Option<&Clip> = match clip {
-            Some(clip) => Some(
-                doc.clip(clip)
-                    .filter(|c| matches!(&c.data, ClipData::Audio(audio) if audio.video))
-                    .ok_or_else(|| failed(format!("clip {} isn't a video clip", clip.0)))?,
-            ),
-            None => doc.video_clip_at(at),
+        let video_clip = |clip: ClipId| {
+            doc.clip(clip)
+                .filter(|c| matches!(&c.data, ClipData::Audio(audio) if audio.video))
+                .ok_or_else(|| failed(format!("clip {} isn't a video clip", clip.0)))
+        };
+        let found: Option<&Clip> = match (at, asked, clip) {
+            (Some(_), Some(_), _) | (None, None, _) => {
+                return Err(invalid("give `at` or `movie_time`, not both or neither"));
+            }
+            (None, Some(_), None) => return Err(invalid("`movie_time` needs a `clip`")),
+            (_, _, Some(clip)) => Some(video_clip(clip)?),
+            (Some(at), None, None) => doc.video_clip_at(at),
         };
         let Some(found) = found else {
             return Ok(to_value(&FrameAt::default()));
@@ -96,7 +109,12 @@ impl Shell {
         let movie = self
             .clip_movie(found.id)
             .ok_or_else(|| failed("the clip's movie can't be read".to_owned()))?;
-        let movie_time = found.movie_time_at(at, &doc.tempo_map(), movie.duration().seconds());
+        let movie_time = match (at, asked) {
+            (Some(at), _) => {
+                found.movie_time_at(at, &doc.tempo_map(), movie.duration().seconds())
+            }
+            (None, time) => time.filter(|seconds| seconds.is_finite() && *seconds >= 0.0),
+        };
         // Nanoseconds, so a time between two frames' starts, which is what a
         // warp map gives, lands on the frame it is in.
         let frame = movie_time

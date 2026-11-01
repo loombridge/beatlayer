@@ -25,6 +25,9 @@ use realfft::RealFftPlanner;
 /// The sample rate the tests run at, in hertz.
 const HZ: f64 = 48_000.0;
 
+/// A device's parameters, each with its value.
+type Params = Vec<(ParamId, f64)>;
+
 /// The block sizes every render is checked at.
 const BLOCKS: [usize; 4] = [1, 64, 512, 4096];
 
@@ -693,7 +696,7 @@ fn aliasing_db(signal: &[f32], fundamentals: &[f64]) -> f64 {
 fn no_type_folds_back_more_than_minus_80_db_at_the_top_key() {
     for key in [127u8, 96, 84, 72, 60] {
         let f0 = hz(f64::from(key));
-        let mut cases: Vec<(String, Vec<(ParamId, f64)>, Vec<f64>)> = Vec::new();
+        let mut cases: Vec<(String, Params, Vec<f64>)> = Vec::new();
         for kind in 0..3u32 {
             for shape in [0.0, 20.0, 50.0, 80.0, 100.0] {
                 // Dual Basic Shapes' second macro past 50 % goes up the
@@ -1223,7 +1226,7 @@ fn phrase() -> Vec<NoteEvent> {
 // Spec: meld R23
 #[test]
 fn every_type_renders_the_same_at_block_sizes_1_64_512_and_4096_and_run_after_run() {
-    let variants: Vec<(&str, Vec<(ParamId, f64)>, Setting)> = vec![
+    let variants: Vec<(&str, Params, Setting)> = vec![
         ("plain", vec![], Setting::default()),
         (
             "filtered and stacked",

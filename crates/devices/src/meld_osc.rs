@@ -371,12 +371,12 @@ pub fn lanes(index: usize, m1: f32, m2: f32, cx: &Context<'_>) -> Lanes {
         // chord (or every second degree of the scale) as Spacing rises.
         _ => {
             let gain = (MAX_LANES as f32).sqrt().recip();
-            for i in 0..MAX_LANES {
+            for (i, fifth) in CHORD.iter().enumerate() {
                 let unison = (2.0 * i as f32 / (MAX_LANES - 1) as f32 - 1.0) * SWARM_CENTS / 100.0;
                 let chord = if cx.scale.enabled {
                     degrees(cx.scale, cx.key, 2 * i as i32)
                 } else {
-                    CHORD[i]
+                    *fifth
                 };
                 out.lane[i] = Lane {
                     semitones: unison + (chord - unison) * m2 + cx.drift[i] * MOTION_CENTS / 100.0,

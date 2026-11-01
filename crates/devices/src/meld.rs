@@ -1161,7 +1161,7 @@ impl Voices {
         } else {
             Scale::default()
         };
-        let on_grid = state.clock(frames.start + at) % CHUNK as u64 == 0;
+        let on_grid = state.clock(frames.start + at).is_multiple_of(CHUNK as u64);
         let noisy = self.current == 2;
         let config = state.config();
         let stepping = config.glissando && config.glide_secs > 0.0;

@@ -332,16 +332,17 @@ fn the_filter_view_menu_lists_the_groups_and_its_items() {
             .unwrap_or_else(|| panic!("no menu item {label:?}"))
     };
     // A group for each the chosen label can show, ticked while it shows.
-    for group in ["Content", "Format", "Creator", "Devices", "Mine", "Feel"] {
+    for group in [
+        "Content", "Format", "Creator", "Devices", "Function", "Mine", "Feel",
+    ] {
         item(group);
     }
     assert!(item("Content").label.starts_with('\u{2714}'));
     item("Show All Filter Groups");
     item("Reset Filter Groups to Default");
-    assert!(
-        item("Include Auto Tags").disabled,
-        "waits for automatic tagging"
-    );
+    // Spec: browser-tags R55. Include Auto Tags is on in a new install.
+    let include = item("Include Auto Tags");
+    assert!(!include.disabled && include.label.starts_with('\u{2714}'));
     item("Tag Editor");
     assert!(item("Show Quick Tags").label.starts_with('\u{2714}'));
     // Choosing a group hides it under the chosen label.
@@ -351,6 +352,39 @@ fn the_filter_view_menu_lists_the_groups_and_its_items() {
     let after = h.shell.browser_view().filter_view();
     assert_eq!(after.groups.len(), before - 1);
     assert!(after.menu.iter().any(|g| g.name == "Mine" && !g.shown));
+}
+
+// Spec: browser-tags R55, R57. Include Auto Tags switches automatic tags on
+// and off, and shows its state ticked; it keeps its place in the menu.
+#[test]
+fn include_auto_tags_in_the_menu_switches_automatic_tags() {
+    let scratch = Scratch::new("include-auto");
+    let mut h = harness(&scratch);
+    assert!(h.shell.browser_view().filter_view().include_auto_tags);
+    let open = |h: &mut Harness| {
+        let nodes = look(h);
+        h.click(centre_of(&nodes, Role::Button, "Filter View Menu"));
+        look(h)
+    };
+    let nodes = open(&mut h);
+    h.click(centre_of(
+        &nodes,
+        Role::Button,
+        "\u{2714} Include Auto Tags",
+    ));
+    assert!(invoked(&mut h, ids::SET_INCLUDE_AUTO_TAGS));
+    assert!(!h.shell.browser_view().filter_view().include_auto_tags);
+    // Off, the item is there without its tick, and choosing it turns it on.
+    let nodes = open(&mut h);
+    assert!(
+        nodes
+            .iter()
+            .any(|n| n.role == Role::Button && n.label == "Include Auto Tags"),
+        "unticked while off"
+    );
+    h.click(centre_of(&nodes, Role::Button, "Include Auto Tags"));
+    assert!(invoked(&mut h, ids::SET_INCLUDE_AUTO_TAGS));
+    assert!(h.shell.browser_view().filter_view().include_auto_tags);
 }
 
 // Spec: browser-tags R21.

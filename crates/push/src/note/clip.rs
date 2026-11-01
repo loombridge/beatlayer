@@ -69,6 +69,11 @@ pub fn midi_clip(model: &ReadModel, track: TrackId, scene: SceneId) -> Option<Cl
     matches!(clip.data, ClipData::Midi(_)).then_some(clip.id)
 }
 
+/// Whether `track`'s slot at `scene` holds a clip.
+pub fn slot_holds(model: &ReadModel, track: TrackId, scene: SceneId) -> bool {
+    model.document.slot(track, scene).is_some()
+}
+
 /// The clip `id` and its MIDI data.
 pub fn midi(model: &ReadModel, id: ClipId) -> Option<(&Clip, &MidiData)> {
     let clip = model.document.clip(id)?;

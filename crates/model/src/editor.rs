@@ -575,6 +575,8 @@ impl Editor {
         let mut document = *document;
         // Cue mode is no undo step, so undoing keeps it as it is.
         document.settings.cue_mode = self.document.settings.cue_mode;
+        // Nor is the pad layout.
+        document.settings.pad_layout = self.document.settings.pad_layout;
         // The current scale follows a selection or a clip that starts, and
         // that is no undo step either, so a step that didn't change the
         // scale leaves it as it is.
@@ -624,6 +626,7 @@ impl Editor {
         } = self.redo.pop().ok_or(EditError::NothingToRedo)?;
         let mut document = *document;
         document.settings.cue_mode = self.document.settings.cue_mode;
+        document.settings.pad_layout = self.document.settings.pad_layout;
         // A step that changed the scale brings it back; one that didn't
         // leaves it as it is.
         match scale {
@@ -1405,6 +1408,46 @@ mod tests {
         editor.follow_tempo(Bpm::new(140.0).unwrap());
         editor.redo().unwrap();
         assert_eq!(bpm(&editor), 140.0);
+    }
+
+    // Spec: push-2-notes R37. The pad layout is no undo step, undoing and
+    // redoing leave it as it is, and a set at the default doesn't write it.
+    #[test]
+    fn the_pad_layout_is_no_undo_step_and_survives_undo() {
+        use crate::{PadDirection, PadSpacing};
+        let mut editor = Editor::new();
+        let track = midi_track(&mut editor);
+        let steps = editor.undo_history().len();
+        editor
+            .apply(Command::SetPadLayout {
+                in_key: Some(false),
+                fixed: Some(true),
+                spacing: Some(PadSpacing::Sequent),
+                direction: Some(PadDirection::Horizontal),
+            })
+            .unwrap();
+        assert_eq!(editor.undo_history().len(), steps, "no undo step");
+        let saved = serde_json::to_value(editor.document().settings()).unwrap();
+        assert_eq!(saved["pad_layout"]["spacing"], "sequent");
+        editor
+            .apply(Command::SetVolume { track, volume: 0.5 })
+            .unwrap();
+        editor.undo().unwrap();
+        editor.undo().unwrap();
+        editor.redo().unwrap();
+        let layout = editor.document().settings().pad_layout;
+        assert!(!layout.in_key && layout.fixed);
+        assert_eq!(layout.spacing, PadSpacing::Sequent);
+        editor
+            .apply(Command::SetPadLayout {
+                in_key: Some(true),
+                fixed: Some(false),
+                spacing: Some(PadSpacing::Fourths),
+                direction: Some(PadDirection::Vertical),
+            })
+            .unwrap();
+        let saved = serde_json::to_value(editor.document().settings()).unwrap();
+        assert!(saved.get("pad_layout").is_none());
     }
 
     #[test]

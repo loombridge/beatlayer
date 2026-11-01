@@ -170,6 +170,9 @@ pub struct PluginInfo {
     pub vendor: Option<String>,
     /// It is an `lv2:InstrumentPlugin`.
     pub instrument: bool,
+    /// The plug-in classes it declares, by their names in LV2's core
+    /// vocabulary, such as `ReverbPlugin`.
+    pub classes: Vec<String>,
     /// The bundle folder it's in.
     pub bundle: PathBuf,
     /// Its X11 UI, if it has one.
@@ -409,7 +412,19 @@ impl Shared {
             let types = (api.lilv_plugin_get_value)(plugin, self.nodes.rdf_type);
             let instrument =
                 !types.is_null() && (api.lilv_nodes_contains)(types, self.nodes.instrument);
+            let mut classes = Vec::new();
             if !types.is_null() {
+                let mut at = (api.lilv_nodes_begin)(types);
+                while !(api.lilv_nodes_is_end)(types, at) {
+                    let uri = self.string((api.lilv_nodes_get)(types, at));
+                    if let Some(class) = uri.strip_prefix(CORE)
+                        && class.ends_with("Plugin")
+                        && class != "Plugin"
+                    {
+                        classes.push(class.to_owned());
+                    }
+                    at = (api.lilv_nodes_next)(types, at);
+                }
                 (api.lilv_nodes_free)(types);
             }
             PluginInfo {
@@ -426,6 +441,7 @@ impl Shared {
                     .collect(),
                 vendor: Some(vendor).filter(|v| !v.is_empty()),
                 instrument,
+                classes,
                 bundle: self
                     .path((api.lilv_plugin_get_bundle_uri)(plugin))
                     .unwrap_or_default(),

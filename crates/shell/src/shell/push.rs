@@ -269,6 +269,18 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                     length: step.length,
                 })
                 .collect(),
+            melody: note.melody.map(|melody| ids::PushMelody {
+                in_key: melody.in_key,
+                fixed: melody.fixed,
+                layout: melody.spacing,
+                direction: melody.direction,
+                octave: melody.octave,
+                low: melody.low,
+                high: melody.high,
+                range: melody.range,
+                selected_notes: melody.selected_notes,
+                strip_modulation: melody.modulation,
+            }),
         }),
     }
 }

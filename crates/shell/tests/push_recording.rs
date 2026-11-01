@@ -676,3 +676,51 @@ fn held_steps_and_a_turn_write_the_value_over_their_spans() {
     assert!(points[0].1 < 1.0, "the turn lowered it: {points:?}");
     assert_eq!(rig.steps() - steps, 1 + 2, "the clip's notes aside, one undo step for the touch: {}", rig.steps());
 }
+
+// Spec: push-2-notes R59. The count-in's bar shows while it runs, and a
+// progress bar under the lower button of a track whose clip plays.
+#[test]
+fn the_display_shows_the_count_in_and_the_playing_clips_progress() {
+    let mut rig = session_rig();
+    let scene = rig.scenes()[0];
+    rig.clip_in(scene);
+    rig.run("session.launch", json!({ "track": rig.track, "scene": scene }));
+    rig.pass(300);
+    assert!(rig.text_has("progress"), "{:?}", rig.sim_text());
+    rig.run("transport.stop", json!({}));
+    rig.pass(300);
+    rig.run("transport.set_metronome_count_in", json!({ "count_in": "1_bar" }));
+    rig.tap("record");
+    let mut counted = false;
+    for _ in 0..100 {
+        rig.pass(10);
+        counted |= rig.text_has("count-in");
+    }
+    assert!(counted, "the count-in's bar showed");
+}
+
+// Spec: push-2-notes R51. With Phrase Sync on, a take started at bar 6 of a
+// 4-bar phrase starts at bar 2 of the clip, and ends with the phrase.
+#[test]
+fn phrase_sync_starts_the_take_part_way_into_the_clip() {
+    let mut rig = session_rig();
+    rig.run("push.set_fixed_length", json!({ "enabled": true, "length": "4 bars", "phrase_sync": true }));
+    rig.run("transport.locate", json!({ "position": 5 * BAR }));
+    rig.run("transport.play", json!({}));
+    rig.pass(100);
+    rig.tap("record");
+    rig.wait("the recording", |rig| rig.record() == "session");
+    assert!(rig.sim.press_pad(0, 0, 100));
+    rig.pass(100);
+    assert!(rig.sim.release_pad(0, 0));
+    rig.wait("it to end", |rig| rig.record() == "off");
+    let doc = rig.shell.editor().document();
+    let scene = doc.scenes().next().unwrap().id;
+    let clip = doc.slot(rig.track, scene).unwrap();
+    assert_eq!(clip.length.get(), 4 * BAR);
+    let ClipData::Midi(midi) = &clip.data else {
+        panic!("a MIDI clip")
+    };
+    let start = midi.notes.iter().next().expect("the note").start.get();
+    assert!(start >= BAR && start < BAR + BAR / 2, "the note is at bar 2 of the clip: {start}");
+}

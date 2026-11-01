@@ -19,6 +19,7 @@ use crate::display::Displays;
 use crate::drum::ChainHits;
 use crate::follower::Follower;
 use crate::gc::{Collector, DROP_PERIOD, DropThread, GcHandle, Owned};
+use crate::link_audio::LinkAudio;
 use crate::message::{Message, ParamEvent, Report, ScheduledCommand, TransportCommand, When};
 use crate::node::{NodeData, NodeKey};
 use crate::processor::{Carry, Processor, starts_playback};
@@ -109,6 +110,12 @@ impl Sender {
     /// `None` to follow none (the transport spec, R24).
     pub fn follower(&mut self, follower: Option<Owned<Box<dyn Follower>>>) {
         self.push(Message::Follower(follower));
+    }
+
+    /// Sends the Link Audio to read and offer through from the next block
+    /// on, or `None` for none (the Link Audio spec, R4 to R6).
+    pub fn link_audio(&mut self, link_audio: Option<Owned<Box<dyn LinkAudio>>>) {
+        self.push(Message::LinkAudio(link_audio));
     }
 
     /// Sends the output ports with Sync on and their options, which clock
@@ -327,6 +334,8 @@ enum Request {
     Render(Box<Owned<crate::render::RenderPlan>>),
     /// The outside tempo the song follows (the transport spec, R24).
     Follower(Box<Option<Owned<Box<dyn Follower>>>>),
+    /// The Link Audio the engine reads and offers through.
+    LinkAudio(Box<Option<Owned<Box<dyn LinkAudio>>>>),
     /// No processor runs any more: stop sending to it.
     Detach,
     /// Make a processor for these settings.
@@ -434,6 +443,7 @@ impl std::fmt::Debug for Request {
             Self::Record(_) => "Record",
             Self::Render(_) => "Render",
             Self::Follower(_) => "Follower",
+            Self::LinkAudio(_) => "LinkAudio",
             Self::Detach => "Detach",
             Self::Restart(_) => "Restart",
             Self::Loaded(_) => "Loaded",
@@ -633,6 +643,16 @@ impl Engine {
     pub fn set_follower(&self, follower: Option<Box<dyn Follower>>) {
         let follower = follower.map(|follower| self.gc.wrap(follower));
         self.request(Request::Follower(Box::new(follower)));
+    }
+
+    /// Sets the Link Audio the engine reads peers' channels from and offers
+    /// its tracks through (the Link Audio spec, R4 to R6, R11), or with
+    /// `None` stops. A new one replaces the old, which the drop thread frees;
+    /// the audio thread never drops what Link Audio holds. An engine
+    /// restarted on another device starts with none.
+    pub fn set_link_audio(&self, link_audio: Option<Box<dyn LinkAudio>>) {
+        let link_audio = link_audio.map(|link_audio| self.gc.wrap(link_audio));
+        self.request(Request::LinkAudio(Box::new(link_audio)));
     }
 
     /// Reports `device`'s node's latency now, as a plug-in that restarted
@@ -1030,6 +1050,13 @@ fn compile_loop(
                     // takes over starts with none.
                     if let Some(sender) = sender.as_mut() {
                         sender.follower(*follower);
+                    }
+                }
+                Request::LinkAudio(link_audio) => {
+                    // As the follower: the one that takes over starts with
+                    // none.
+                    if let Some(sender) = sender.as_mut() {
+                        sender.link_audio(*link_audio);
                     }
                 }
                 Request::Detach => {

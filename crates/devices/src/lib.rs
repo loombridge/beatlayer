@@ -32,6 +32,7 @@ pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
 pub mod chorus_ensemble;
+pub mod color_limiter;
 pub mod compressor;
 pub mod crusher;
 mod cv;
@@ -59,6 +60,7 @@ pub mod grain_delay;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod instrument_filter;
 pub mod kit;
 pub mod kitbag;
 pub mod level_mod;
@@ -78,10 +80,13 @@ pub mod note_echo;
 pub mod oscilloscope;
 pub mod overdrive;
 pub mod phaser_flanger;
+pub mod pitchloop89;
 pub mod play_mod;
 pub mod polysynth;
+pub mod re_enveloper;
 pub mod remap;
 pub mod reverb;
+mod ring;
 pub mod roar;
 pub mod sampler;
 pub mod saturator;
@@ -97,6 +102,7 @@ pub mod touch;
 pub mod tube;
 pub mod tuner;
 pub mod utility;
+pub mod vector_delay;
 pub mod wavetables;
 pub mod wax;
 
@@ -108,6 +114,7 @@ pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
 pub use chorus_ensemble::{CHORUS_ENSEMBLE, chorus_ensemble_type};
+pub use color_limiter::{COLOR_LIMITER, ColorLimiter, color_limiter_type};
 pub use compressor::{COMPRESSOR, Squeeze, compressor_type};
 pub use crusher::{CRUSHER, crusher_type};
 pub use cv_clock_in::{CV_CLOCK_IN, cv_clock_in_type};
@@ -146,7 +153,9 @@ pub use note_echo::{NOTE_ECHO, note_echo_type};
 pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
+pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
+pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
 pub use reverb::{REVERB, reverb_type};
 pub use roar::{ROAR, roar_type};
@@ -159,6 +168,7 @@ pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
 pub use touch::{TOUCH, touch_type};
 pub use tube::{TUBE, tube_type};
 pub use tuner::{TUNER, Tuner, tuner_type};
+pub use vector_delay::{VECTOR_DELAY, vector_delay_type};
 pub use wax::{WAX, wax_type};
 
 use bl_engine::{DeviceType, Registry};
@@ -214,6 +224,8 @@ pub fn display_in(
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        COLOR_LIMITER => Some(color_limiter::display(device, data)),
+        RE_ENVELOPER => Some(re_enveloper::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
@@ -255,6 +267,7 @@ pub fn display_in(
         )),
         OSCILLOSCOPE => Some(oscilloscope::display(device, description, values, data)),
         LOOPER => Some(looper::display(device, description, values, data)),
+        VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
         CV_CLOCK_OUT => Some(cv_clock_out::display(device, data)),
@@ -337,6 +350,8 @@ pub fn register(registry: &mut Registry) {
     roar::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);
+    color_limiter::register(registry);
+    re_enveloper::register(registry);
     shifter::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);
@@ -344,6 +359,8 @@ pub fn register(registry: &mut Registry) {
     tuner::register(registry);
     oscilloscope::register(registry);
     looper::register(registry);
+    pitchloop89::register(registry);
+    vector_delay::register(registry);
 }
 
 /// The native device types Beatlayer ships, for the browser and the shell.

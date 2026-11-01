@@ -666,6 +666,40 @@ fn wax_passes_under_rtsan() {
     );
 }
 
+#[test]
+fn color_limiter_passes_under_rtsan() {
+    use bl_devices::color_limiter::*;
+    run_lo_fi_device(
+        COLOR_LIMITER,
+        &[
+            (LOUDNESS, &[1.0, 15.8, 0.0]),
+            (CEILING, &[-0.3, -12.0, -24.0]),
+            (LOOKAHEAD, &[0.0, 1.0, 2.0]),
+            (RELEASE, &[1.0, 100.0, 1_000.0]),
+            (SATURATION, &[0.0, 50.0, 100.0]),
+            (COLOR, &[-100.0, 0.0, 100.0]),
+        ],
+    );
+}
+
+#[test]
+fn re_enveloper_passes_under_rtsan() {
+    use bl_devices::re_enveloper::*;
+    run_lo_fi_device(
+        RE_ENVELOPER,
+        &[
+            (LOW_CROSSOVER, &[50.0, 200.0, 2_000.0]),
+            (HIGH_CROSSOVER, &[500.0, 2_500.0, 16_000.0]),
+            (factor(LOW), &[-100.0, 0.0, 100.0]),
+            (factor(MID), &[100.0, -100.0, 30.0]),
+            (factor(HIGH), &[-50.0, 100.0]),
+            (gain(LOW), &[1.0, 0.0, 2.0]),
+            (gain(MID), &[1.0, 0.5]),
+            (OUTPUT, &[1.0, 0.0, 2.0]),
+        ],
+    );
+}
+
 /// The three delays (WP-5.25) on a track that plays, while their times,
 /// pitch, spray, feedback and modes change mid-stream.
 #[test]
@@ -1242,6 +1276,57 @@ fn oscilloscope_passes_under_rtsan() {
             (FREEZE, &[0.0, 1.0]),
             (DIVISIONS, &[2.0, 4.0, 8.0]),
             (TRIGGER, &[-50.0, 0.0, 50.0]),
+        ],
+    );
+}
+
+// Spec: pitchloop89 R9
+#[test]
+fn pitchloop89_passes_under_rtsan() {
+    use bl_devices::pitchloop89::*;
+    run_lo_fi_device(
+        PITCHLOOP89,
+        &[
+            (BANDWIDTH_A, &[0.0, 2.0, 5.0]),
+            (BANDWIDTH_B, &[1.0, 3.0, 4.0]),
+            (SPEED_A, &[-200.0, -100.0, 50.0, 100.0, 200.0]),
+            (SPEED_B, &[200.0, 100.0, -50.0]),
+            (DELAY_A, &[0.0, 50.0, 100.0]),
+            (HOLD_A, &[0.0, 1.0]),
+            (HOLD_B, &[1.0, 0.0]),
+            (FEEDBACK_A, &[0.0, 60.0, 100.0]),
+            (LOW_PASS_A, &[200.0, 4_000.0, 20_000.0]),
+            (HIGH_PASS_B, &[20.0, 500.0, 5_000.0]),
+            (ROUTING, &[0.0, 1.0, 2.0]),
+            (VIBRATO_DEPTH, &[0.0, 50.0, 100.0]),
+            (POSITION_WAVE, &[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]),
+            (POSITION_DEPTH, &[0.0, 40.0, 100.0]),
+            (RANDOM, &[1.0, 0.0]),
+            (INPUT, &[0.0, 1.0, 3.98]),
+        ],
+    );
+}
+
+// Spec: vector-delay R7
+#[test]
+fn vector_delay_passes_under_rtsan() {
+    use bl_devices::vector_delay::*;
+    run_lo_fi_device(
+        VECTOR_DELAY,
+        &[
+            (TAPS, &[1.0, 8.0, 4.0]),
+            (GRAVITY, &[-100.0, 0.0, 100.0]),
+            (MAGNET, &[100.0, 0.0, -100.0]),
+            (FLOW, &[0.0, 100.0]),
+            (SPEED, &[0.0, 100.0, 400.0]),
+            (FRICTION, &[0.0, 20.0, 100.0]),
+            (FEEDBACK, &[0.0, 30.0, 100.0]),
+            (SYNC, &[0.0, 1.0]),
+            (DIVISION, &[0.0, 4.0, 12.0]),
+            (MAX_TIME, &[50.0, 1_000.0, 4_000.0]),
+            (RESET, &[1.0, 0.0]),
+            (tap_x(0), &[0.0, 0.5, 1.0]),
+            (tap_y(3), &[1.0, 0.0, 0.5]),
         ],
     );
 }

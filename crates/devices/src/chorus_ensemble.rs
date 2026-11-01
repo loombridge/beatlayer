@@ -476,7 +476,7 @@ impl NativeDevice for ChorusEnsemble {
     }
 }
 
-fn highpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
+pub(crate) fn highpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
     let w0 = (TAU * freq / sample_rate).clamp(1e-5, PI * 0.98);
     let alpha = (w0.sin() / (2.0 * q)).max(1e-6);
     let a0 = 1.0 + alpha;
@@ -489,7 +489,7 @@ fn highpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
     }
 }
 
-fn lowpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
+pub(crate) fn lowpass_coeffs(freq: f64, q: f64, sample_rate: f64) -> Coeffs {
     let w0 = (TAU * freq / sample_rate).clamp(1e-5, PI * 0.98);
     let alpha = (w0.sin() / (2.0 * q)).max(1e-6);
     let a0 = 1.0 + alpha;

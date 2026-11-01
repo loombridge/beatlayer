@@ -43,7 +43,7 @@ Result: [`StemsStatus`](#stemsstatus).
 
 **Download Required Packages Now**. Permission: `external`. Contexts: `global`.
 
-Downloads and installs the open-source packages stem separation needs, ONNX Runtime and the Demucs model (about 350 MB together), into Beatlayer's application-data folder, checking each file's SHA-256. Returns at once; `stems.status` reports the progress. Installed packages aren't downloaded again. Changes nothing in the set.
+Runs `packages.install` for the open-source packages stem separation needs, ONNX Runtime and the Demucs model (about 350 MB together), into Beatlayer's application-data folder, checking each file's SHA-256. Returns at once; `stems.status` reports the progress. Installed packages aren't downloaded again. Changes nothing in the set.
 
 Default keys: none.
 

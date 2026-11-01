@@ -77,6 +77,16 @@ fn every_gain_parameter_reaches_minus_infinity() {
                     .filter(same)
                     .map(|p| p.id)
                     .collect()
+            } else if device_type.name == "Resonators" && param.name != "Gain" {
+                // Each resonator's gain acts on one of five.
+                let resonator = |p: &&bl_model::ParamDescriptor| p.is_gain() && p.name != "Gain";
+                device_type
+                    .description
+                    .params
+                    .iter()
+                    .filter(resonator)
+                    .map(|p| p.id)
+                    .collect()
             } else {
                 vec![param.id]
             };

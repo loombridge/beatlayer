@@ -122,6 +122,7 @@ pub fn draw(
         activity(ui, &painter, area, id, ink, display);
     } else if !collapsed {
         plot(&painter, theme, area, ink, display);
+        crate::particles::draw(ui, theme, area, (id, enabled), display, panel, events);
         handles(ui, theme, area, (id, enabled), display, panel, events);
     }
     if let Some(reading) = meter {
@@ -194,7 +195,7 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
     for spectrogram in &display.spectrograms {
         spectrogram_image(painter, theme, area, ink, spectrogram);
     }
-    for series in &display.series {
+    for series in display.series.iter().filter(|s| !s.values.is_empty()) {
         let at = |i: usize, v: f32| point(area, series, series.x_at(i), v);
         if series.name == SPECTRUM {
             let wide = area.width() / series.values.len().max(1) as f32;
@@ -221,7 +222,12 @@ fn plot(painter: &Painter, theme: &Theme, area: Rect, ink: Color32, display: &De
             .collect();
         painter.add(Shape::line(line, Stroke::new(1.5, colour)));
     }
-    for marker in display.markers.iter().filter(|m| m.handle.is_none()) {
+    // The particles of a particle field and the handles draw themselves.
+    for marker in display
+        .markers
+        .iter()
+        .filter(|m| m.handle.is_none() && m.series != crate::particles::PARTICLES)
+    {
         let Some(series) = display.series(&marker.series) else {
             continue;
         };

@@ -440,6 +440,7 @@ impl ClapHost {
                     midi_tap: false,
                     note_output,
                     outputs,
+                    matrix: None,
                 },
                 vendor,
                 version,

@@ -138,6 +138,11 @@ pub struct DeviceType {
     /// ([`Block::outputs_mut`](crate::Block::outputs_mut)). Empty for a
     /// device that offers none.
     pub outputs: Vec<String>,
+    /// Its instrument modulation matrix (the instrument modulation spec,
+    /// R1, R2): the sources, destinations and slots its devices have, which
+    /// the route commands, the readback and the compiler read. `None` for a
+    /// type that has none.
+    pub matrix: Option<Arc<bl_model::matrix::MatrixLayout>>,
 }
 
 impl DeviceType {
@@ -160,7 +165,23 @@ impl DeviceType {
             midi_tap: false,
             note_output: role == DeviceRole::MidiEffect,
             outputs: Vec::new(),
+            matrix: None,
         }
+    }
+
+    /// The same type, with its instrument modulation matrix.
+    ///
+    /// # Panics
+    ///
+    /// If the layout has more than [`bl_model::matrix::MAX_SLOTS`] slots.
+    #[must_use]
+    pub fn with_matrix(mut self, layout: bl_model::matrix::MatrixLayout) -> Self {
+        assert!(
+            layout.slots.len() <= bl_model::matrix::MAX_SLOTS,
+            "too many route slots"
+        );
+        self.matrix = Some(Arc::new(layout));
+        self
     }
 
     /// The same type, with its parameters described.

@@ -689,6 +689,25 @@ impl Compiler {
                 ));
             }
         }
+        // Spec: instrument modulation R10. An instrument's free routes,
+        // set or cleared, reach its node as node data, resolved here on the
+        // main thread, with no new program.
+        for (&id, &change) in &changes.devices {
+            if let (Change::Modified, Some(before), Some(after)) =
+                (change, old.device(id), document.device(id))
+                && before.routes != after.routes
+                && let Some(layout) = self
+                    .registry
+                    .device_type(&after.kind)
+                    .and_then(|device_type| device_type.matrix)
+            {
+                update.data.push((
+                    NodeKey::Device(id),
+                    self.gc
+                        .data(crate::node::ModRoutes(layout.free_routes(after))),
+                ));
+            }
+        }
         // Spec: tunings R18. A tuning loaded, changed or removed, a new
         // reference pitch or range, or a track's Bypass Tuning changed
         // reaches the track's instruments as node data, with no new

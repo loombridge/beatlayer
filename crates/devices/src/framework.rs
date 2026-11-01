@@ -52,6 +52,14 @@ pub trait NativeDevice: Send + 'static {
         let _ = (events, params);
     }
 
+    /// Calls `report` with the value each parameter its instrument modulation
+    /// matrix moves played for the newest sounding voice in the last stretch,
+    /// matrix included, in the parameter's own units (the instrument
+    /// modulation spec, R12; modulation R31). The default reports none.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let _ = report;
+    }
+
     /// Takes data the compiler made for the device off the audio thread:
     /// the decoded audio of a device that plays media (a sampler's sample,
     /// WP-2.16). The default drops it. Dropping a [`NodeData`] here is
@@ -686,6 +694,17 @@ impl ParamBank {
         }
     }
 
+    /// Parameter `id`'s base in the last stretch: what a clip's modulation
+    /// moved it from, else the value it played.
+    #[must_use]
+    pub fn base(&self, id: ParamId) -> Option<f64> {
+        let slot = &self.slots[self.index(id)?];
+        Some(slot.modulated.map_or_else(
+            || slot.played_last.unwrap_or_else(|| slot.smoother.value()),
+            |(base, _)| base,
+        ))
+    }
+
     /// The parameter at `index`'s value at each frame of the stretch being
     /// processed.
     ///
@@ -954,6 +973,14 @@ impl<D: NativeDevice> Node for NativeNode<D> {
 
     fn modulated(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
         self.params.modulated(report);
+    }
+
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        self.device.matrix_played(&mut |param, played| {
+            if let Some(base) = self.params.base(param) {
+                report(param, base, played);
+            }
+        });
     }
 
     fn latency(&self) -> u32 {

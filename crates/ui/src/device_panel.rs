@@ -524,6 +524,11 @@ pub fn show(
             descriptor: &descriptor,
             value,
             modulated: played(param),
+            routes: panel
+                .matrix_routes
+                .iter()
+                .find(|routes| routes.param == param)
+                .map_or(&[][..], |routes| &routes.sources),
             rect,
             stops: if frame.multisampler.is_some()
                 && param == bl_devices::multisampler::FILTER_MORPH
@@ -677,6 +682,7 @@ fn display_drag(
         descriptor: &description.params[index],
         value: panel.value(index),
         modulated: None,
+        routes: &[],
         rect,
         stops: &[],
         knob: None,
@@ -901,6 +907,9 @@ struct Control<'a> {
     value: f64,
     /// Its base and what it plays while a clip modulates it.
     modulated: Option<(f64, f64)>,
+    /// The sources an instrument's matrix routes into it, read beside its
+    /// value (instrument modulation R12).
+    routes: &'a [String],
     rect: Rect,
     /// For a knob whose context menu snaps it to a stop: the stops' names
     /// and values (the multisampler's Morph, spec R37).
@@ -1072,9 +1081,12 @@ impl Control<'_> {
 
     fn describe(&self, ui: &Ui, response: &Response, role: Role) {
         let d = self.descriptor;
-        let text = modulated_text(
-            self.text.clone().unwrap_or_else(|| d.format(self.shown())),
-            self.modulated.map(|(_, played)| d.format(played)),
+        let text = crate::widgets::routed_text(
+            modulated_text(
+                self.text.clone().unwrap_or_else(|| d.format(self.shown())),
+                self.modulated.map(|(_, played)| d.format(played)),
+            ),
+            self.routes,
         );
         response.widget_info(|| WidgetInfo::slider(true, self.value, &d.name));
         ui.ctx().accesskit_node_builder(response.id, |node| {

@@ -63,6 +63,10 @@ pub struct Preset {
     /// An Articulation Map's articulations (the articulation map spec, R16),
     /// in order; `None` for any other device.
     pub articulations: Option<Vec<bl_model::Articulation>>,
+    /// The routes an instrument's modulation matrix holds in its free slots
+    /// (the instrument modulation spec, R10); `None` for a device with none.
+    /// A route's amount is a parameter, so the preset's parameters hold it.
+    pub routes: Option<Vec<bl_model::ModRoute>>,
     /// A plug-in's MPE Mode and settings (the MPE spec, R14); `None` for
     /// the default, off, and for any other device.
     pub mpe: Option<bl_model::PluginMpe>,
@@ -80,6 +84,8 @@ struct File {
     shape: Option<Vec<bl_model::modulator::ShapePoint>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     articulations: Vec<bl_model::Articulation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    routes: Vec<bl_model::ModRoute>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mpe: Option<bl_model::PluginMpe>,
 }
@@ -148,6 +154,7 @@ impl Preset {
             params: device.params.clone(),
             shape: device.shape.clone(),
             articulations: (!device.articulations.is_empty()).then(|| device.articulations.clone()),
+            routes: (!device.routes.is_empty()).then(|| device.routes.clone()),
             mpe: matches!(device.kind, DeviceKind::Plugin { .. }).then_some(device.mpe),
         }
     }
@@ -189,6 +196,7 @@ impl Preset {
             params: self.params.iter().map(|(&p, &v)| (p, v)).collect(),
             shape: self.shape.clone(),
             articulations: self.articulations.clone().unwrap_or_default(),
+            routes: self.routes.clone().unwrap_or_default(),
             mpe: self.mpe,
         };
         let mut bytes = serde_json::to_vec_pretty(&file).unwrap_or_default();
@@ -255,6 +263,10 @@ impl Preset {
         {
             return Err(PresetError::Invalid(why.to_owned()));
         }
+        // Spec: instrument modulation R10. A preset whose routes break the
+        // rules doesn't load.
+        bl_model::matrix::check_routes(&file.routes)
+            .map_err(|why| PresetError::Invalid(why.to_string()))?;
         Ok(Self {
             kind: file.device.kind,
             role: file.device.role,
@@ -262,6 +274,7 @@ impl Preset {
             params,
             shape: file.shape,
             articulations: (!file.articulations.is_empty()).then_some(file.articulations),
+            routes: (!file.routes.is_empty()).then_some(file.routes),
             mpe: match file.mpe {
                 Some(mpe) if mpe.settings.check().is_ok() => Some(mpe),
                 _ => None,
@@ -515,6 +528,34 @@ mod tests {
             { "name": "A", "trigger": { "kind": "key", "key": 36 } },
             { "name": "B", "trigger": { "kind": "key", "key": 36 } },
         ]);
+        assert!(matches!(
+            Preset::decode(&serde_json::to_vec(&value).unwrap()),
+            Err(PresetError::Invalid(_))
+        ));
+    }
+
+    // Spec: instrument modulation R10. A preset keeps an instrument's free
+    // routes, and one that repeats a slot doesn't load.
+    #[test]
+    fn a_preset_keeps_an_instruments_routes() {
+        let mut device = Device::new(
+            DeviceId(Id::new(9).unwrap()),
+            "Instrument",
+            DeviceKind::Native {
+                device_type: "test.framework.instrument".to_owned(),
+            },
+        );
+        device.routes = vec![bl_model::ModRoute {
+            slot: 1,
+            source: "Velocity".to_owned(),
+            destination: "Note Level".to_owned(),
+        }];
+        let preset = Preset::of(&device);
+        let loaded = Preset::decode(&preset.encode()).unwrap();
+        assert_eq!(loaded.routes, Some(device.routes.clone()));
+        let mut value: serde_json::Value = serde_json::from_slice(&preset.encode()).unwrap();
+        let route = value["routes"][0].clone();
+        value["routes"] = serde_json::json!([route, route]);
         assert!(matches!(
             Preset::decode(&serde_json::to_vec(&value).unwrap()),
             Err(PresetError::Invalid(_))

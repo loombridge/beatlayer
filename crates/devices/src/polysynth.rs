@@ -35,6 +35,9 @@ use lspk_wavetable::osc::{
 use lspk_wavetable::{Cache, FRAME_SIZE, SharedTable, Wavetable};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument::matrix::{
+    DestDef, Kind, Matrix, MatrixLayout, Pick, Range, Rate, Scope, SlotDef, SourceDef,
+};
 use crate::instrument::{self, Instrument, NoteRange, Parts, Section, Sources, State};
 
 /// Drift's device type.
@@ -272,29 +275,31 @@ const LFO_RATE_OCTAVES: f64 = 4.0;
 /// cycle: Beatlayer's own reading.
 const EXPONENTIAL_DECAY: f64 = 5.0;
 
-/// The modulation sources by index, after Off.
-const SRC_ENV1: usize = 1;
-const SRC_ENV2: usize = 2;
-const SRC_LFO: usize = 3;
-const SRC_KEY: usize = 4;
-const SRC_VELOCITY: usize = 5;
-const SRC_MODWHEEL: usize = 6;
-const SRC_PRESSURE: usize = 7;
-const SRC_SLIDE: usize = 8;
-/// The Mod destinations by index, after Off.
-const DEST_OSC1_GAIN: usize = 1;
-const DEST_OSC1_SHAPE: usize = 2;
-const DEST_OSC2_GAIN: usize = 3;
-const DEST_OSC2_DETUNE: usize = 4;
-const DEST_NOISE_GAIN: usize = 5;
-const DEST_LP_FREQ: usize = 6;
-const DEST_LP_RES: usize = 7;
-const DEST_HP_FREQ: usize = 8;
-const DEST_LFO_RATE: usize = 9;
-const DEST_VOLUME: usize = 10;
-/// Pitch is no Mod destination: the Pitch Mod slots carry it, and their
-/// routes share this destination so the others never pick them up.
-const DEST_PITCH: usize = 0;
+/// The modulation sources by place in the matrix's list: one less than the
+/// choosers' value, which counts Off as 0.
+const SRC_ENV1: usize = 0;
+const SRC_ENV2: usize = 1;
+const SRC_LFO: usize = 2;
+const SRC_KEY: usize = 3;
+const SRC_VELOCITY: usize = 4;
+const SRC_MODWHEEL: usize = 5;
+const SRC_PRESSURE: usize = 6;
+const SRC_SLIDE: usize = 7;
+/// The Mod destinations by place in the matrix's list, as the choosers'
+/// value less one.
+const DEST_OSC1_GAIN: usize = 0;
+const DEST_OSC1_SHAPE: usize = 1;
+const DEST_OSC2_GAIN: usize = 2;
+const DEST_OSC2_DETUNE: usize = 3;
+const DEST_NOISE_GAIN: usize = 4;
+const DEST_LP_FREQ: usize = 5;
+const DEST_LP_RES: usize = 6;
+const DEST_HP_FREQ: usize = 7;
+const DEST_LFO_RATE: usize = 8;
+const DEST_VOLUME: usize = 9;
+/// Pitch is no Mod destination: the Pitch Mod slots carry it, and no chooser
+/// reaches it.
+const DEST_PITCH: usize = 10;
 /// The LFO's waveforms by index.
 const LFO_SINE: usize = 0;
 const LFO_TRIANGLE: usize = 1;
@@ -587,98 +592,175 @@ pub fn polysynth_type() -> DeviceType {
             ],
         )),
     ]));
-    DeviceType::native(POLYSYNTH, "Drift", DeviceRole::Instrument).with_description(
-        DeviceDescription::new(params)
-            .with_layout(layout)
-            .with_banks(&[
-                (
-                    "Oscillators",
-                    &[
-                        "Osc 1",
-                        "Osc 1 Wave",
-                        "Osc 1 Oct",
-                        "Osc 1 Gain",
-                        "Osc 2",
-                        "Osc 2 Wave",
-                        "Osc 2 Oct",
-                        "Osc 2 Gain",
-                    ],
-                ),
-                (
-                    "Osc Detail",
-                    &["Osc 1 Shape", "Osc 2 Detune", "Noise", "Noise Gain"],
-                ),
-                ("Filter", &["Filter", "Type", "Freq", "Res", "HP", "Key"]),
-                (
-                    "Envelope 1",
-                    &[
-                        "Env 1 Attack",
-                        "Env 1 Decay",
-                        "Env 1 Sustain",
-                        "Env 1 Release",
-                    ],
-                ),
-                (
-                    "Envelope 2",
-                    &[
-                        "Env 2 Attack",
-                        "Env 2 Decay",
-                        "Env 2 Sustain",
-                        "Env 2 Release",
-                    ],
-                ),
-                (
-                    "Global",
-                    &[
-                        "Volume",
-                        "Voices",
-                        "Transpose",
-                        "Vel > Vol",
-                        "Retrigger",
-                        "Note PB",
-                        "PB Range",
-                    ],
-                ),
-                (
-                    "LFO",
-                    &[
-                        "LFO Mode",
-                        "LFO Rate",
-                        "LFO Ratio",
-                        "LFO Time",
-                        "LFO Sync",
-                        "LFO Shape",
-                        "LFO R",
-                        "LFO Amount",
-                    ],
-                ),
-                (
-                    "LFO Mod",
-                    &["LFO Mod", "LFO Mod Amount", "Shape Mod", "Shape Mod Amount"],
-                ),
-                ("Mod 1", &["Mod 1 Source", "Mod 1 Dest", "Mod 1 Amount"]),
-                ("Mod 2", &["Mod 2 Source", "Mod 2 Dest", "Mod 2 Amount"]),
-                ("Mod 3", &["Mod 3 Source", "Mod 3 Dest", "Mod 3 Amount"]),
-                (
-                    "Pitch Mod",
-                    &[
-                        "Pitch Mod 1",
-                        "Pitch Mod 1 Amount",
-                        "Pitch Mod 2",
-                        "Pitch Mod 2 Amount",
-                    ],
-                ),
-                (
-                    "Freq Mod",
-                    &[
-                        "Freq Mod 1",
-                        "Freq Mod 1 Amount",
-                        "Freq Mod 2",
-                        "Freq Mod 2 Amount",
-                    ],
-                ),
-            ]),
-    )
+    DeviceType::native(POLYSYNTH, "Drift", DeviceRole::Instrument)
+        .with_description(
+            DeviceDescription::new(params)
+                .with_layout(layout)
+                .with_banks(&[
+                    (
+                        "Oscillators",
+                        &[
+                            "Osc 1",
+                            "Osc 1 Wave",
+                            "Osc 1 Oct",
+                            "Osc 1 Gain",
+                            "Osc 2",
+                            "Osc 2 Wave",
+                            "Osc 2 Oct",
+                            "Osc 2 Gain",
+                        ],
+                    ),
+                    (
+                        "Osc Detail",
+                        &["Osc 1 Shape", "Osc 2 Detune", "Noise", "Noise Gain"],
+                    ),
+                    ("Filter", &["Filter", "Type", "Freq", "Res", "HP", "Key"]),
+                    (
+                        "Envelope 1",
+                        &[
+                            "Env 1 Attack",
+                            "Env 1 Decay",
+                            "Env 1 Sustain",
+                            "Env 1 Release",
+                        ],
+                    ),
+                    (
+                        "Envelope 2",
+                        &[
+                            "Env 2 Attack",
+                            "Env 2 Decay",
+                            "Env 2 Sustain",
+                            "Env 2 Release",
+                        ],
+                    ),
+                    (
+                        "Global",
+                        &[
+                            "Volume",
+                            "Voices",
+                            "Transpose",
+                            "Vel > Vol",
+                            "Retrigger",
+                            "Note PB",
+                            "PB Range",
+                        ],
+                    ),
+                    (
+                        "LFO",
+                        &[
+                            "LFO Mode",
+                            "LFO Rate",
+                            "LFO Ratio",
+                            "LFO Time",
+                            "LFO Sync",
+                            "LFO Shape",
+                            "LFO R",
+                            "LFO Amount",
+                        ],
+                    ),
+                    (
+                        "LFO Mod",
+                        &["LFO Mod", "LFO Mod Amount", "Shape Mod", "Shape Mod Amount"],
+                    ),
+                    ("Mod 1", &["Mod 1 Source", "Mod 1 Dest", "Mod 1 Amount"]),
+                    ("Mod 2", &["Mod 2 Source", "Mod 2 Dest", "Mod 2 Amount"]),
+                    ("Mod 3", &["Mod 3 Source", "Mod 3 Dest", "Mod 3 Amount"]),
+                    (
+                        "Pitch Mod",
+                        &[
+                            "Pitch Mod 1",
+                            "Pitch Mod 1 Amount",
+                            "Pitch Mod 2",
+                            "Pitch Mod 2 Amount",
+                        ],
+                    ),
+                    (
+                        "Freq Mod",
+                        &[
+                            "Freq Mod 1",
+                            "Freq Mod 1 Amount",
+                            "Freq Mod 2",
+                            "Freq Mod 2 Amount",
+                        ],
+                    ),
+                ]),
+        )
+        .with_matrix(polysynth_matrix())
+}
+
+/// Spec: instrument modulation R17. Drift's matrix: the sources and
+/// destinations the choosers list after Off (and Pitch, which only the Pitch
+/// Mod slots reach), the three Mod slots as chosen slots and the dedicated
+/// Shape, Pitch, Freq and LFO slots as fixed ones, in the order their routes
+/// have always been summed in. Every destination is worked out every frame
+/// (Drift has no Hi-Quality), per voice and additive.
+#[must_use]
+pub fn polysynth_matrix() -> MatrixLayout {
+    let source = |which: usize, range, scope| SourceDef {
+        name: MOD_SOURCES[which + 1],
+        range,
+        scope,
+    };
+    let dest = |which: usize, param| DestDef {
+        name: MOD_DESTINATIONS[which + 1],
+        param: Some(param),
+        scope: Scope::Voice,
+        rate: Rate::Audio,
+        kind: Kind::Additive,
+    };
+    let chosen = |source, dest, amount| SlotDef {
+        source: Pick::Chosen(source),
+        dest: Pick::Chosen(dest),
+        amount,
+    };
+    let fixed = |source, dest: usize, amount| SlotDef {
+        source: Pick::Chosen(source),
+        dest: Pick::Fixed(dest as u8),
+        amount,
+    };
+    MatrixLayout {
+        sources: vec![
+            source(SRC_ENV1, Range::Unipolar, Scope::Voice),
+            source(SRC_ENV2, Range::Unipolar, Scope::Voice),
+            source(SRC_LFO, Range::Bipolar, Scope::Voice),
+            source(SRC_KEY, Range::Bipolar, Scope::Voice),
+            source(SRC_VELOCITY, Range::Unipolar, Scope::Voice),
+            source(SRC_MODWHEEL, Range::Unipolar, Scope::Global),
+            source(SRC_PRESSURE, Range::Unipolar, Scope::Voice),
+            source(SRC_SLIDE, Range::Unipolar, Scope::Voice),
+        ],
+        dests: vec![
+            dest(DEST_OSC1_GAIN, OSC1_GAIN),
+            dest(DEST_OSC1_SHAPE, OSC1_SHAPE),
+            dest(DEST_OSC2_GAIN, OSC2_GAIN),
+            dest(DEST_OSC2_DETUNE, OSC2_DETUNE),
+            dest(DEST_NOISE_GAIN, NOISE_GAIN),
+            dest(DEST_LP_FREQ, FREQ),
+            dest(DEST_LP_RES, RES),
+            dest(DEST_HP_FREQ, HP),
+            dest(DEST_LFO_RATE, LFO_RATE),
+            dest(DEST_VOLUME, VOLUME),
+            DestDef {
+                name: "Pitch",
+                param: None,
+                scope: Scope::Voice,
+                rate: Rate::Audio,
+                kind: Kind::Additive,
+            },
+        ],
+        slots: vec![
+            chosen(MOD1_SOURCE, MOD1_DEST, MOD1_AMOUNT),
+            chosen(MOD2_SOURCE, MOD2_DEST, MOD2_AMOUNT),
+            chosen(MOD3_SOURCE, MOD3_DEST, MOD3_AMOUNT),
+            fixed(SHAPE_MOD_SOURCE, DEST_OSC1_SHAPE, SHAPE_MOD_AMOUNT),
+            fixed(PITCH_MOD1_SOURCE, DEST_PITCH, PITCH_MOD1_AMOUNT),
+            fixed(PITCH_MOD2_SOURCE, DEST_PITCH, PITCH_MOD2_AMOUNT),
+            fixed(FREQ_MOD1_SOURCE, DEST_LP_FREQ, FREQ_MOD1_AMOUNT),
+            fixed(FREQ_MOD2_SOURCE, DEST_LP_FREQ, FREQ_MOD2_AMOUNT),
+            fixed(LFO_MOD_SOURCE, DEST_LFO_RATE, LFO_MOD_AMOUNT),
+        ],
+        forbidden: Vec::new(),
+    }
 }
 
 /// Adds Drift to `registry`.
@@ -818,74 +900,6 @@ fn lfo_wave(shape: usize, phase: f64, held: f64, drawn: f64) -> f64 {
         LFO_LINEAR => 1.0 - phase,
         LFO_EXPONENTIAL => (-EXPONENTIAL_DECAY * phase).exp(),
         _ => 0.0,
-    }
-}
-
-/// One modulation route: a source into a destination, with its amount,
-/// from −100 % to +100 % of the destination's travel.
-#[derive(Clone, Copy)]
-struct Route {
-    /// The source, one of the `SRC_*` values.
-    source: usize,
-    /// The destination, one of the `DEST_*` values.
-    dest: usize,
-    /// −1 to +1.
-    amount: f64,
-}
-
-/// The modulation routes of a stretch: the Mod section's three slots and
-/// the dedicated Shape, Pitch, Freq and LFO slots. A slot whose source is
-/// Off, or whose amount is zero, is absent, so a fresh Drift is inert.
-#[derive(Clone, Copy, Default)]
-struct Routes {
-    all: [Option<Route>; 9],
-}
-
-impl Routes {
-    /// A Mod slot: its source chooser and destination chooser decide.
-    fn slot(source: f64, dest: f64, amount: f64) -> Option<Route> {
-        let (source, dest) = (source as usize, dest as usize);
-        (source > 0 && source < MOD_SOURCES.len() && dest > 0 && dest < MOD_DESTINATIONS.len())
-            .then(|| Route {
-                source,
-                dest,
-                amount: (amount / 100.0).clamp(-1.0, 1.0),
-            })
-            .filter(|route| route.amount != 0.0)
-    }
-
-    /// A dedicated slot: its source chooser decides, and its destination
-    /// is the one it belongs to.
-    fn fixed(source: f64, dest: usize, amount: f64) -> Option<Route> {
-        let source = source as usize;
-        (source > 0 && source < MOD_SOURCES.len())
-            .then(|| Route {
-                source,
-                dest,
-                amount: (amount / 100.0).clamp(-1.0, 1.0),
-            })
-            .filter(|route| route.amount != 0.0)
-    }
-
-    /// Every route into `dest`, in the order they're evaluated.
-    fn into_dest(self, dest: usize) -> impl Iterator<Item = Route> {
-        self.all
-            .into_iter()
-            .flatten()
-            .filter(move |route| route.dest == dest)
-    }
-
-    /// Whether any route is into `dest`.
-    fn has(self, dest: usize) -> bool {
-        self.into_dest(dest).next().is_some()
-    }
-
-    /// Whether the LFO drives a route, so its values are needed.
-    fn uses_lfo(self) -> bool {
-        self.all
-            .into_iter()
-            .flatten()
-            .any(|route| route.source == SRC_LFO)
     }
 }
 
@@ -1045,6 +1059,17 @@ impl NativeDevice for PolySynth {
         }
     }
 
+    /// Spec: instrument modulation R12; modulation R31. What the newest
+    /// voice plays for each parameter the matrix moves.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64)) {
+        let matrix = &self.synth.matrix;
+        for (dest, def) in matrix.layout().dests.iter().enumerate() {
+            if let (Some(param), Some(position)) = (def.param, matrix.shown(dest)) {
+                report(param, self.synth.value_of(dest, position));
+            }
+        }
+    }
+
     fn flush(&mut self, _events: &[NodeEvent], _params: &ParamBank) {
         // A switched-off instrument is silent and holds no notes, so it
         // doesn't carry one over to the moment it comes back on.
@@ -1112,9 +1137,13 @@ struct Synth {
     wave1: usize,
     wave2: usize,
     filter_type: usize,
-    /// The LFO's settings and the routes of the stretch.
+    /// The LFO's settings, and the modulation matrix whose routes the
+    /// stretch reads.
     lfos: Lfos,
-    routes: Routes,
+    matrix: Matrix,
+    /// Oscillator 1's Shape as a position on its travel, for the control
+    /// to show the matrix's movement of it.
+    shape: f64,
     /// The filter's settings and the envelopes', kept so a change is
     /// applied once; and whether a route moved the resonance, so the
     /// voices come back to the base settings.
@@ -1169,8 +1198,6 @@ impl Synth {
                 .clone()
         };
         let destinations = vec![
-            // Index 0 is Off, which no route reads.
-            destination(OSC1_GAIN),
             destination(OSC1_GAIN),
             destination(OSC1_SHAPE),
             destination(OSC2_GAIN),
@@ -1234,7 +1261,12 @@ impl Synth {
                 hz: 1.0,
                 ratio: 1.0,
             },
-            routes: Routes::default(),
+            shape: 0.0,
+            matrix: Matrix::new(
+                polysynth_type()
+                    .matrix
+                    .expect("Drift's type has its matrix"),
+            ),
             filter_params: VoiceParams::default(),
             env1_params: EnvelopeParams::AMP,
             env2_params: EnvelopeParams::MODULATION,
@@ -1284,6 +1316,7 @@ impl Synth {
         }
         let transpose = params.value(at(TRANSPOSE)) as f32;
         let shape1 = params.value(at(OSC1_SHAPE)) as f32 / 100.0;
+        self.shape = f64::from(shape1);
         let phase_mode = if self.retrigger {
             PhaseMode::NoteStart
         } else {
@@ -1399,55 +1432,7 @@ impl Synth {
             },
             ratio: params.value(at(LFO_RATIO)).max(0.0),
         };
-        self.routes = Routes {
-            all: [
-                Routes::slot(
-                    params.value(at(MOD1_SOURCE)),
-                    params.value(at(MOD1_DEST)),
-                    params.value(at(MOD1_AMOUNT)),
-                ),
-                Routes::slot(
-                    params.value(at(MOD2_SOURCE)),
-                    params.value(at(MOD2_DEST)),
-                    params.value(at(MOD2_AMOUNT)),
-                ),
-                Routes::slot(
-                    params.value(at(MOD3_SOURCE)),
-                    params.value(at(MOD3_DEST)),
-                    params.value(at(MOD3_AMOUNT)),
-                ),
-                Routes::fixed(
-                    params.value(at(SHAPE_MOD_SOURCE)),
-                    DEST_OSC1_SHAPE,
-                    params.value(at(SHAPE_MOD_AMOUNT)),
-                ),
-                Routes::fixed(
-                    params.value(at(PITCH_MOD1_SOURCE)),
-                    DEST_PITCH,
-                    params.value(at(PITCH_MOD1_AMOUNT)),
-                ),
-                Routes::fixed(
-                    params.value(at(PITCH_MOD2_SOURCE)),
-                    DEST_PITCH,
-                    params.value(at(PITCH_MOD2_AMOUNT)),
-                ),
-                Routes::fixed(
-                    params.value(at(FREQ_MOD1_SOURCE)),
-                    DEST_LP_FREQ,
-                    params.value(at(FREQ_MOD1_AMOUNT)),
-                ),
-                Routes::fixed(
-                    params.value(at(FREQ_MOD2_SOURCE)),
-                    DEST_LP_FREQ,
-                    params.value(at(FREQ_MOD2_AMOUNT)),
-                ),
-                Routes::fixed(
-                    params.value(at(LFO_MOD_SOURCE)),
-                    DEST_LFO_RATE,
-                    params.value(at(LFO_MOD_AMOUNT)),
-                ),
-            ],
-        };
+        self.matrix.begin(params);
     }
 
     /// The loudest enabled source's gain, in dB: what the manual's two
@@ -1499,11 +1484,10 @@ impl Synth {
         frame: usize,
         voices: &VoiceBlock,
     ) -> f64 {
-        let mut position = base;
-        for route in self.routes.into_dest(dest) {
-            position += route.amount * self.source(route.source, voice, frame, voices);
-        }
-        position.clamp(0.0, 1.0)
+        self.matrix
+            .position(dest, base, voice, frame, true, &|source, voice, frame| {
+                self.source(source, voice, frame, voices)
+            })
     }
 
     /// The travel position of destination `dest`'s parameter at `value`.
@@ -1531,7 +1515,7 @@ impl Synth {
         if !on {
             return 0.0;
         }
-        if !self.routes.has(dest) {
+        if !self.matrix.has(dest) {
             return value;
         }
         let position = self.modulated(self.position_of(dest, value), dest, voice, frame, voices);
@@ -1543,10 +1527,11 @@ impl Synth {
     /// own reading. In the Ratio mode the speed follows the note, and
     /// elsewhere it is the mode's own rate.
     fn lfo_rate(&self, voice: usize, frame: usize, voices: &VoiceBlock) -> f64 {
-        let mut delta = 0.0;
-        for route in self.routes.into_dest(DEST_LFO_RATE) {
-            delta += route.amount * self.source(route.source, voice, frame, voices);
-        }
+        let delta = self
+            .matrix
+            .add(DEST_LFO_RATE, 0.0, voice, frame, &|source, voice, frame| {
+                self.source(source, voice, frame, voices)
+            });
         let base = if self.lfos.mode == MODE_RATIO {
             let note = f64::from(voices.pitch()[voice] + voices.pitch_step()[voice] * frame as f32);
             self.lfos.ratio * 440.0 * ((note - 69.0) / 12.0).exp2()
@@ -1721,13 +1706,16 @@ impl Instrument for Synth {
         if span == 0 {
             return;
         }
+        // Spec: modulation R31. The controls show what the newest voice plays.
+        let newest = state.newest(voices);
+        self.matrix.set_newest(newest);
 
         // 1. The envelopes and the LFO: the modulation sources of the
         //    stretch, before the routes that read them.
         self.env1.process(&mut self.env1_out[..count * stride]);
         self.env2.process(&mut self.env2_out[..count * stride]);
         self.lfo_out[..count * stride].fill(0.0);
-        if self.routes.uses_lfo() {
+        if self.matrix.uses(SRC_LFO) {
             self.render_lfo(voices, count);
         }
 
@@ -1735,8 +1723,8 @@ impl Instrument for Synth {
         //    knob's frequency, its Freq Mod and Mod routes, and the played
         //    note through Key. The high-pass takes its Mod routes and
         //    doesn't key-track.
-        let freq_moved = self.routes.has(DEST_LP_FREQ);
-        let hp_moved = self.routes.has(DEST_HP_FREQ);
+        let freq_moved = self.matrix.has(DEST_LP_FREQ);
+        let hp_moved = self.matrix.has(DEST_HP_FREQ);
         {
             let pitch = voices.pitch();
             let step = voices.pitch_step();
@@ -1776,9 +1764,9 @@ impl Instrument for Synth {
         // Spec: polysynth R24. A tuned voice's offset from its key's pitch
         // rides on Pitch Mod, so the oscillators play the tuned pitch.
         let tuned = state.any_tuned();
-        let pitch_moved = self.routes.has(DEST_PITCH) || tuned;
-        let shape_moved = self.routes.has(DEST_OSC1_SHAPE);
-        let detune_moved = self.routes.has(DEST_OSC2_DETUNE);
+        let pitch_moved = self.matrix.has(DEST_PITCH) || tuned;
+        let shape_moved = self.matrix.has(DEST_OSC1_SHAPE);
+        let detune_moved = self.matrix.has(DEST_OSC2_DETUNE);
         if pitch_moved {
             self.pitch_mod[..count * stride].fill(0.0);
             for frame in 0..count {
@@ -1810,10 +1798,13 @@ impl Instrument for Synth {
             self.frame_mod[..count * stride].fill(0.0);
             for frame in 0..count {
                 for voice in 0..span {
-                    let mut moved = 0.0;
-                    for route in self.routes.into_dest(DEST_OSC1_SHAPE) {
-                        moved += route.amount * self.source(route.source, voice, frame, voices);
-                    }
+                    let moved = self.matrix.add(
+                        DEST_OSC1_SHAPE,
+                        0.0,
+                        voice,
+                        frame,
+                        &|source, voice, frame| self.source(source, voice, frame, voices),
+                    );
                     self.frame_mod[frame * stride + voice] =
                         (moved * (SHAPE_FRAMES - 1) as f64) as f32;
                 }
@@ -1845,9 +1836,9 @@ impl Instrument for Synth {
         //    gains take their Mod routes, per voice.
         let pre = self.pre;
         let noise_on = self.noise_on;
-        let gains_moved = self.routes.has(DEST_OSC1_GAIN)
-            || self.routes.has(DEST_OSC2_GAIN)
-            || self.routes.has(DEST_NOISE_GAIN);
+        let gains_moved = self.matrix.has(DEST_OSC1_GAIN)
+            || self.matrix.has(DEST_OSC2_GAIN)
+            || self.matrix.has(DEST_NOISE_GAIN);
         for frame in 0..count {
             let at = from + frame;
             for voice in 0..span {
@@ -1902,7 +1893,7 @@ impl Instrument for Synth {
         //    set per voice for the stretch when a route reaches it, which
         //    the filter then glides to, as it does for automation.
         if self.filter_on {
-            if self.routes.has(DEST_LP_RES) {
+            if self.matrix.has(DEST_LP_RES) {
                 for voice in 0..span {
                     let value = self.destination(
                         DEST_LP_RES,
@@ -1941,7 +1932,7 @@ impl Instrument for Synth {
 
         // 7. The voices mixed to one mono signal, under Envelope 1, the
         //    velocity, and the Main Volume and its Mod routes.
-        let volume_moved = self.routes.has(DEST_VOLUME);
+        let volume_moved = self.matrix.has(DEST_VOLUME);
         let mut mask = voices.active_mask();
         while mask != 0 {
             let voice = mask.trailing_zeros() as usize;
@@ -1972,6 +1963,30 @@ impl Instrument for Synth {
             }
         }
 
+        // Spec: modulation R31. The controls of Shape and LFO Rate show the
+        // newest voice's movement at the stretch's last frame, as the others
+        // do (the rest are shown as they are worked out).
+        if let Some(voice) = newest {
+            let last = count - 1;
+            if self.matrix.has(DEST_OSC1_SHAPE) {
+                let moved = self.matrix.add(
+                    DEST_OSC1_SHAPE,
+                    self.shape,
+                    voice,
+                    last,
+                    &|source, voice, frame| self.source(source, voice, frame, voices),
+                );
+                self.matrix.show(DEST_OSC1_SHAPE, moved.clamp(0.0, 1.0));
+            }
+            if self.matrix.has(DEST_LFO_RATE) && self.lfos.mode == MODE_RATE {
+                let hz = self.lfo_rate(voice, last, voices);
+                self.matrix.show(
+                    DEST_LFO_RATE,
+                    self.position_of(DEST_LFO_RATE, hz).clamp(0.0, 1.0),
+                );
+            }
+        }
+
         // 8. A voice whose amplifier envelope has ended is silent.
         let mut mask = voices.active_mask();
         while mask != 0 {
@@ -1987,10 +2002,11 @@ impl Instrument for Synth {
 impl Synth {
     /// Voice `voice`'s Pitch Mod value at `frame`, in semitones.
     fn pitch_semitones(&self, voice: usize, frame: usize, voices: &VoiceBlock) -> f64 {
-        let mut semitones = 0.0;
-        for route in self.routes.into_dest(DEST_PITCH) {
-            semitones += route.amount * self.source(route.source, voice, frame, voices);
-        }
+        let semitones = self
+            .matrix
+            .add(DEST_PITCH, 0.0, voice, frame, &|source, voice, frame| {
+                self.source(source, voice, frame, voices)
+            });
         semitones * PITCH_MOD_SEMITONES
     }
 }
@@ -2049,41 +2065,65 @@ mod tests {
         );
     }
 
-    // Spec: polysynth R20 (the routes)
+    // Spec: polysynth R20 (the routes); instrument modulation R2, R17.
     #[test]
     fn a_route_reads_its_choosers_and_its_amount() {
-        // Off on either side, or a zero amount, leaves no route.
-        assert!(Routes::slot(0.0, DEST_LP_FREQ as f64, 50.0).is_none());
-        assert!(Routes::slot(SRC_LFO as f64, 0.0, 50.0).is_none());
-        assert!(Routes::slot(SRC_LFO as f64, DEST_LP_FREQ as f64, 0.0).is_none());
-        let route = Routes::slot(SRC_LFO as f64, DEST_LP_FREQ as f64, 50.0).unwrap();
-        assert_eq!(route.source, SRC_LFO);
-        assert_eq!(route.dest, DEST_LP_FREQ);
-        assert!((route.amount - 0.5).abs() < 1e-9);
-        // A dedicated slot's destination is its own.
-        let shape = Routes::fixed(SRC_ENV1 as f64, DEST_OSC1_SHAPE, -25.0).unwrap();
-        assert_eq!(shape.dest, DEST_OSC1_SHAPE);
-        assert!((shape.amount + 0.25).abs() < 1e-9);
-        // And the routes are found by destination, the LFO's own included.
-        let routes = Routes {
-            all: [
-                Some(route),
-                Some(shape),
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-                Routes::fixed(SRC_ENV2 as f64, DEST_LFO_RATE, 100.0),
-            ],
+        let description = polysynth_type().description;
+        let config = NodeConfig {
+            sample_rate: bl_core::time::SampleRate::HZ_48000,
+            max_frames: 64,
+            channels: 2,
+            round_trip_latency: 0,
         };
-        assert!(routes.has(DEST_LP_FREQ));
-        assert!(routes.has(DEST_OSC1_SHAPE));
-        assert_eq!(routes.into_dest(DEST_LP_FREQ).count(), 1);
-        assert_eq!(routes.into_dest(DEST_OSC1_SHAPE).count(), 1);
-        assert!(routes.uses_lfo());
-        assert!(!Routes::default().has(DEST_LP_FREQ));
-        assert!(!Routes::default().uses_lfo());
+        let layout = polysynth_matrix();
+        let routes = |params: &[(ParamId, f64)]| {
+            let mut device =
+                polysynth_type().device(bl_model::DeviceId(bl_core::id::Id::new(1).unwrap()));
+            for &(id, value) in params {
+                device.params.insert(id, value);
+            }
+            let bank = ParamBank::new(&description, &device, &config);
+            let mut matrix = Matrix::new(std::sync::Arc::new(layout.clone()));
+            matrix.begin(&bank);
+            matrix
+        };
+        // The choosers count Off as 0, so the first source is 1.
+        let (lfo, freq) = ((SRC_LFO + 1) as f64, (DEST_LP_FREQ + 1) as f64);
+        // Off on either side, or a zero amount, leaves no route.
+        for params in [
+            [(MOD1_SOURCE, 0.0), (MOD1_DEST, freq), (MOD1_AMOUNT, 50.0)],
+            [(MOD1_SOURCE, lfo), (MOD1_DEST, 0.0), (MOD1_AMOUNT, 50.0)],
+            [(MOD1_SOURCE, lfo), (MOD1_DEST, freq), (MOD1_AMOUNT, 0.0)],
+        ] {
+            let matrix = routes(&params);
+            assert!(
+                !matrix.has(DEST_LP_FREQ) && !matrix.uses(SRC_LFO),
+                "{params:?}"
+            );
+        }
+        let one = routes(&[(MOD1_SOURCE, lfo), (MOD1_DEST, freq), (MOD1_AMOUNT, 50.0)]);
+        // The amount is a fraction of the travel: 50 % of a source at 1.
+        let read = |_: usize, _: usize, _: usize| 1.0;
+        assert!((one.add(DEST_LP_FREQ, 0.0, 0, 0, &read) - 0.5).abs() < 1e-9);
+        // A dedicated slot's destination is its own.
+        let shape = routes(&[
+            (SHAPE_MOD_SOURCE, (SRC_ENV1 + 1) as f64),
+            (SHAPE_MOD_AMOUNT, -25.0),
+        ]);
+        assert!(shape.has(DEST_OSC1_SHAPE) && !shape.has(DEST_LP_FREQ));
+        assert!((shape.add(DEST_OSC1_SHAPE, 0.0, 0, 0, &read) + 0.25).abs() < 1e-9);
+        // And the routes are found by destination, the LFO's own included.
+        let all = routes(&[
+            (MOD1_SOURCE, lfo),
+            (MOD1_DEST, freq),
+            (MOD1_AMOUNT, 50.0),
+            (SHAPE_MOD_SOURCE, (SRC_ENV1 + 1) as f64),
+            (SHAPE_MOD_AMOUNT, -25.0),
+            (LFO_MOD_SOURCE, (SRC_ENV2 + 1) as f64),
+            (LFO_MOD_AMOUNT, 100.0),
+        ]);
+        assert!(all.has(DEST_LP_FREQ) && all.has(DEST_OSC1_SHAPE) && all.has(DEST_LFO_RATE));
+        assert!(all.uses(SRC_LFO));
+        assert!(!routes(&[]).has(DEST_LP_FREQ) && !routes(&[]).uses(SRC_LFO));
     }
 }

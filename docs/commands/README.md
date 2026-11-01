@@ -8872,6 +8872,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `preset_name` | string or null | no | The name of the preset the device holds (the plug-in list spec, R5): the Beatlayer device preset last loaded into it or saved from it, or else the program name the plug-in's format reported. Left out of the saved set while there is none, so a device saved before this package loads with none. |
 | `region` | [`SampleRegion`](#sampleregion) or null | no | The part of slot 0's sample a Simpler plays, between its Start and End flags (the sampler spec, R22): `None` for the whole sample. Loading another sample clears it; an edit that changes the sample's length moves it. Left out of the saved set while it is the whole sample. |
 | `role` | [`DeviceRole`](#devicerole) | no | Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set. |
+| `routes` | array of [`ModRoute`](#modroute) | no | The routes an instrument's modulation matrix holds in its free slots (the instrument modulation spec, R8 to R10), by slot number. A route's amount is the slot's parameter. Empty for a device without free slots or with none set, and left out of the saved set then. |
 | `sample_edits` | array of [`SampleEdit`](#sampleedit) | no | The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none. |
 | `shape` | array or null | no | The breakpoints of a Shaper's shape (R23); `None` plays the default shape. Left out of the saved set while it is the default. |
 | `show_preset_name` | boolean | no | Whether the title bar shows the preset's or the given name (on, as a new device is) or the device's own name: the context menu's Show Preset Name. Left out of the saved set while on. |
@@ -9068,6 +9069,13 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "role": {
       "$ref": "#/$defs/DeviceRole",
       "description": "Where it goes in a chain: MIDI effects, then the instrument, then audio effects. Audio effects aren't marked in the saved set."
+    },
+    "routes": {
+      "description": "The routes an instrument's modulation matrix holds in its free slots (the instrument modulation spec, R8 to R10), by slot number. A route's amount is the slot's parameter. Empty for a device without free slots or with none set, and left out of the saved set then.",
+      "items": {
+        "$ref": "#/$defs/ModRoute"
+      },
+      "type": "array"
     },
     "sample_edits": {
       "description": "The edits made to the sample in slot 0 (WP-5.15, IMP-28; the multisampler spec, R55): applied in order to the media, which the file is never written for. A multisampler's layers hold their own. Loading another sample clears them. Left out of the saved set while there are none.",
@@ -10114,6 +10122,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `matrix_routes` | array of [`MatrixRoutes`](#matrixroutes) | no | For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route. |
 | `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -10171,6 +10180,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "matrix_routes": {
+      "description": "For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route.",
+      "items": {
+        "$ref": "#/$defs/MatrixRoutes"
       },
       "type": "array"
     },
@@ -19909,6 +19925,43 @@ One of:
 
 </details>
 
+### `MatrixRoutes`
+
+The sources routed into one parameter of an instrument's matrix.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter. |
+| `sources` | array of string | yes | The names of the sources routed into it, in slot order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sources routed into one parameter of an instrument's matrix.",
+  "properties": {
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter."
+    },
+    "sources": {
+      "description": "The names of the sources routed into it, in slot order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "param",
+    "sources"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Measure`
 
 One kind of analysis.
@@ -20898,6 +20951,49 @@ What `mixer_view.state` and the other view commands return.
     "meters",
     "peaks",
     "column_widths"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `ModRoute`
+
+A route a device holds in a free slot: saved with the set and with the device's presets (R10). Its amount is the slot's parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+| `source` | string | yes | The source's name. |
+| `destination` | string | yes | The destination's name. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A route a device holds in a free slot: saved with the set and with the device's presets (R10). Its amount is the slot's parameter.",
+  "properties": {
+    "destination": {
+      "description": "The destination's name.",
+      "type": "string"
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source": {
+      "description": "The source's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "slot",
+    "source",
+    "destination"
   ],
   "type": "object"
 }
@@ -30954,6 +31050,43 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `RouteChanged`
+
+What `device.set_route` and `device.clear_route` return: the slot they changed.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `slot` | integer from 0 to 255 | yes | The slot's number. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.set_route` and `device.clear_route` return: the slot they changed.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "slot": {
+      "description": "The slot's number.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "slot"
+  ],
+  "type": "object"
 }
 ```
 

@@ -1004,7 +1004,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.20 | todo |  |  |
 | 8.21 | todo |  |  |
 | 8.22 | todo |  |  |
-| 8.23 | todo |  |  |
+| 8.23 | done | 1 November 2026 | [#739](https://github.com/loombridge/beatlayer/pull/739): Electric (`beatlayer.electric`) plays an electric piano on the physical models, with the hammer's stiffness, force and noise, the tine and tone bar, the damper, a 4x oversampled pickup with symmetry and distance, and the Global section, listed under Instruments with banks holding every parameter; its four presets exist as code with no loader yet |
 | 8.24 | done | 1 November 2026 | [#734](https://github.com/loombridge/beatlayer/pull/734): DS Kick, DS Snare, DS Tom and DS Clap, drum voices on a shared drum-synth core with the manual's controls and an envelope display, playing from a Drum Rack pad and choking with its group, listed under Instruments with banks holding every parameter; their presets exist as code with no loader yet |
 | 8.25 | todo |  |  |
 | 8.26 | done | 1 November 2026 | [#738](https://github.com/loombridge/beatlayer/pull/738): Granulator III part 1, grains from a loaded sample in Classic, Loop and Cloud modes with seeded randomness, a 64-grain pool per voice, its envelope, the instruments' filter and volume, per-note MPE pressure, slide and pitch, and a waveform display with grain positions that reads headless, listed under Instruments with banks holding every parameter; no factory presets yet |

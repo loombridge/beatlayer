@@ -165,7 +165,9 @@ fn tags_and_the_index_survive_a_restart() {
     let tags: TagsState = run(&mut relaunched, ids::TAGS, json!({}));
     assert_eq!(
         groups(&tags),
-        ["Content", "Format", "Creator", "Devices", "Mine"]
+        [
+            "Content", "Format", "Creator", "Devices", "Function", "Mine"
+        ]
     );
     assert_eq!(group_tags(&tags, "Mine"), ["Mine|Favourite"]);
     // The file still carries the tag.
@@ -226,7 +228,9 @@ fn a_damaged_database_is_set_aside_and_built_again() {
     let tags: TagsState = run(&mut again, ids::TAGS, json!({}));
     assert_eq!(
         groups(&tags),
-        ["Content", "Format", "Creator", "Devices", "Mine"]
+        [
+            "Content", "Format", "Creator", "Devices", "Function", "Mine"
+        ]
     );
 }
 
@@ -252,7 +256,7 @@ fn a_newer_database_is_left_alone() {
     let tags: TagsState = run(&mut shell, ids::TAGS, json!({}));
     assert_eq!(
         groups(&tags),
-        ["Content", "Format", "Creator", "Devices"],
+        ["Content", "Format", "Creator", "Devices", "Function"],
         "the file's tags aren't read"
     );
     // The file isn't written to.
@@ -572,7 +576,10 @@ fn beatlayers_groups_cant_be_renamed_or_deleted() {
     let config = scratch.path("config");
     let mut shell = shell_on(&config);
     let tags: TagsState = run(&mut shell, ids::TAGS, json!({}));
-    assert_eq!(groups(&tags), ["Content", "Format", "Creator", "Devices"]);
+    assert_eq!(
+        groups(&tags),
+        ["Content", "Format", "Creator", "Devices", "Function"]
+    );
     assert_eq!(
         group_tags(&tags, "Content"),
         [
@@ -669,6 +676,7 @@ fn a_folders_tag_reaches_a_file_two_folders_down() {
             bl_shell::browser_commands::TagSource::Own => "own",
             bl_shell::browser_commands::TagSource::Folder => "folder",
             bl_shell::browser_commands::TagSource::Beatlayer => "beatlayer",
+            bl_shell::browser_commands::TagSource::Auto => "auto",
         })
         .collect();
     assert!(sources.contains(&"folder"), "{sources:?}");
@@ -768,7 +776,9 @@ fn every_tag_command_runs_by_id_and_reads_back() {
     let tags: TagsState = run(&mut shell, ids::ADD_TAG_GROUP, json!({ "name": "Mine" }));
     assert_eq!(
         groups(&tags),
-        ["Content", "Format", "Creator", "Devices", "Mine"]
+        [
+            "Content", "Format", "Creator", "Devices", "Function", "Mine"
+        ]
     );
     let tags: TagsState = run(
         &mut shell,
@@ -844,7 +854,9 @@ fn every_tag_command_runs_by_id_and_reads_back() {
     let tags: TagsState = run(&mut shell, ids::RESET_TAG_ORDER, json!({}));
     assert_eq!(
         groups(&tags),
-        ["Content", "Format", "Creator", "Devices", "Mine"]
+        [
+            "Content", "Format", "Creator", "Devices", "Function", "Mine"
+        ]
     );
     // A tag is deleted.
     let tags: TagsState = run(&mut shell, ids::DELETE_TAG, json!({ "tag": "Mine|Faves" }));
@@ -926,7 +938,9 @@ fn the_order_of_the_groups_survives_a_restart() {
     );
     assert_eq!(
         groups(&tags),
-        ["Mine", "Content", "Format", "Creator", "Devices"]
+        [
+            "Mine", "Content", "Format", "Creator", "Devices", "Function"
+        ]
     );
     shell.browser_view().flush_database();
     // A new shell keeps that order.
@@ -934,7 +948,9 @@ fn the_order_of_the_groups_survives_a_restart() {
     let tags: TagsState = run(&mut again, ids::TAGS, json!({}));
     assert_eq!(
         groups(&tags),
-        ["Mine", "Content", "Format", "Creator", "Devices"],
+        [
+            "Mine", "Content", "Format", "Creator", "Devices", "Function"
+        ],
         "the order is kept between launches"
     );
 }

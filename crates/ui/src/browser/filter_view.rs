@@ -471,8 +471,8 @@ impl BrowserUi {
 
     /// The Filter View Menu (C-FILTER; spec: browser-tags R21): the groups
     /// the chosen label can show, ticked while they show, Show All Filter
-    /// Groups, Reset Filter Groups to Default, Include Auto Tags (disabled
-    /// until automatic tagging), the Tag Editor and Show Quick Tags.
+    /// Groups, Reset Filter Groups to Default, Include Auto Tags, the Tag
+    /// Editor and Show Quick Tags.
     pub(super) fn filter_view_menu(
         &mut self,
         ui: &mut Ui,
@@ -512,8 +512,18 @@ impl BrowserUi {
             ui.close();
         }
         ui.separator();
-        // Include Auto Tags waits for automatic tagging (milestone M9).
-        let _ = item(ui, "Include Auto Tags".to_owned(), false);
+        // Spec: browser-tags R55. Ticked while automatic tags show, filter
+        // and answer `#` search.
+        let include = state.include_auto_tags;
+        let mark = if include { "\u{2714} " } else { "" };
+        if item(ui, format!("{mark}Include Auto Tags"), true).clicked() {
+            invoke(
+                events,
+                ids::SET_INCLUDE_AUTO_TAGS,
+                json!({ "include": !include }),
+            );
+            ui.close();
+        }
         let tag_editor = view.tag_editor();
         let mark = if tag_editor { "\u{2714} " } else { "" };
         if item(ui, format!("{mark}Tag Editor"), true).clicked() {

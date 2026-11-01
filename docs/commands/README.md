@@ -13634,6 +13634,7 @@ The Filter View (spec: browser-tags R18 to R22).
 | `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
 | `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
 | `selected` | array of string | yes | The selected tags' full names. |
+| `include_auto_tags` | boolean | yes | Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55). |
 
 <details><summary>JSON Schema</summary>
 
@@ -13647,6 +13648,10 @@ The Filter View (spec: browser-tags R18 to R22).
         "$ref": "#/$defs/FilterGroup"
       },
       "type": "array"
+    },
+    "include_auto_tags": {
+      "description": "Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55).",
+      "type": "boolean"
     },
     "menu": {
       "description": "Every group the chosen label can show, with whether it shows.",
@@ -13671,7 +13676,8 @@ The Filter View (spec: browser-tags R18 to R22).
     "shown",
     "groups",
     "menu",
-    "selected"
+    "selected",
+    "include_auto_tags"
   ],
   "type": "object"
 }
@@ -16251,6 +16257,7 @@ A tag on an item, and where it comes from.
 |---|---|---|---|
 | `tag` | string | yes | The tag's full name. |
 | `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+| `origin` | string or null | no | For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16258,6 +16265,13 @@ A tag on an item, and where it comes from.
 {
   "description": "A tag on an item, and where it comes from.",
   "properties": {
+    "origin": {
+      "description": "For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source": {
       "$ref": "#/$defs/TagSource",
       "description": "Where it comes from."
@@ -22963,6 +22977,37 @@ What `packages.list` and the other commands return.
 
 </details>
 
+### `PadDirection`
+
+A pad layout's direction: `vertical` or `horizontal`.
+
+One of:
+
+- `"vertical"`: Moving right is one step, moving up a row is the interval.
+- `"horizontal"`: Rows and columns swap.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pad layout's direction: `vertical` or `horizontal`.",
+  "oneOf": [
+    {
+      "const": "vertical",
+      "description": "Moving right is one step, moving up a row is the interval.",
+      "type": "string"
+    },
+    {
+      "const": "horizontal",
+      "description": "Rows and columns swap.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PadDropped`
 
 What `pad.drop` returns.
@@ -23111,6 +23156,43 @@ One of:
     {
       "const": "multi",
       "description": "Several chains on its note: it reads `Multi`.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PadSpacing`
+
+A pad layout's row interval: `fourths`, `thirds` or `sequent`.
+
+One of:
+
+- `"fourths"`: 3 scale degrees (In Key) or 5 semitones (Chromatic).
+- `"thirds"`: 2 scale degrees or 4 semitones.
+- `"sequent"`: 8 steps: each row starts where the one below ends.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pad layout's row interval: `fourths`, `thirds` or `sequent`.",
+  "oneOf": [
+    {
+      "const": "fourths",
+      "description": "3 scale degrees (In Key) or 5 semitones (Chromatic).",
+      "type": "string"
+    },
+    {
+      "const": "thirds",
+      "description": "2 scale degrees or 4 semitones.",
+      "type": "string"
+    },
+    {
+      "const": "sequent",
+      "description": "8 steps: each row starts where the one below ends.",
       "type": "string"
     }
   ]
@@ -26296,6 +26378,101 @@ What an LED does besides showing its colour (R13).
 
 </details>
 
+### `PushMelody`
+
+What a melodic track's layouts show (the notes on Push 2 spec, R32 to R44).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `in_key` | boolean | yes | In Key (true) or Chromatic. |
+| `fixed` | boolean | yes | Whether the bottom-left pad stays on C. |
+| `layout` | string | yes | The interval between rows: `4ths`, `3rds` or `Sequent`. |
+| `direction` | string | yes | `Vertical` or `Horizontal`. |
+| `octave` | integer | yes | 64 Notes' shift in octaves from where the pads start. |
+| `low` | integer from 0 to 255 | yes | The lowest note the pads, rows or 32 notes hold, as a MIDI note. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+| `range` | string | yes | The range as the display notifies it, such as `C1 to C3`. |
+| `selected_notes` | array of integer from 0 to 255 | yes | The notes selected in the Melodic Sequencer + 32 Notes. |
+| `strip_modulation` | boolean | yes | Whether the touch strip is the modulation wheel rather than pitch bend, in 64 Notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a melodic track's layouts show (the notes on Push 2 spec, R32 to R44).",
+  "properties": {
+    "direction": {
+      "description": "`Vertical` or `Horizontal`.",
+      "type": "string"
+    },
+    "fixed": {
+      "description": "Whether the bottom-left pad stays on C.",
+      "type": "boolean"
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "in_key": {
+      "description": "In Key (true) or Chromatic.",
+      "type": "boolean"
+    },
+    "layout": {
+      "description": "The interval between rows: `4ths`, `3rds` or `Sequent`.",
+      "type": "string"
+    },
+    "low": {
+      "description": "The lowest note the pads, rows or 32 notes hold, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "octave": {
+      "description": "64 Notes' shift in octaves from where the pads start.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "range": {
+      "description": "The range as the display notifies it, such as `C1 to C3`.",
+      "type": "string"
+    },
+    "selected_notes": {
+      "description": "The notes selected in the Melodic Sequencer + 32 Notes.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "strip_modulation": {
+      "description": "Whether the touch strip is the modulation wheel rather than pitch bend, in 64 Notes.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "in_key",
+    "fixed",
+    "layout",
+    "direction",
+    "octave",
+    "low",
+    "high",
+    "range",
+    "selected_notes",
+    "strip_modulation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushMenu`
 
 A menu over the display mode (R23).
@@ -26579,12 +26756,12 @@ One of the eight places Mix Mode shows: a track, or a chain of an unfolded rack 
 
 ### `PushNote`
 
-What Note Mode shows (the notes on Push 2 spec, R1 to R31).
+What Note Mode shows (the notes on Push 2 spec, R1 to R47).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) or null | yes | The track the pads play: the first selected one. |
-| `layout` | string | yes | The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `Melodic` on another MIDI track, `None` on any other track. |
+| `layout` | string | yes | The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32 Notes` on another MIDI track, `None` on any other track. |
 | `overlay` | string or null | yes | What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`. |
 | `overlay_locked` | boolean | yes | Whether that stays in view after Layout is released. |
 | `bank` | integer or null | yes | The first note of the drum rack's pad view, which the pads show. |
@@ -26596,12 +26773,13 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R31).
 | `following` | boolean | yes | Whether the step area follows the page that plays. |
 | `velocity` | integer or null | yes | The velocity new steps take, once a velocity pad chose one. |
 | `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held down now. |
+| `melody` | [`PushMelody`](#pushmelody) or null | yes | What a melodic layout shows, on a melodic track. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R31).",
+  "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R47).",
   "properties": {
     "bank": {
       "description": "The first note of the drum rack's pad view, which the pads show.",
@@ -26647,8 +26825,19 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R31).
       "type": "array"
     },
     "layout": {
-      "description": "The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `Melodic` on another MIDI track, `None` on any other track.",
+      "description": "The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32 Notes` on another MIDI track, `None` on any other track.",
       "type": "string"
+    },
+    "melody": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushMelody"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a melodic layout shows, on a melodic track."
     },
     "overlay": {
       "description": "What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`.",
@@ -26717,7 +26906,8 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R31).
     "page",
     "following",
     "velocity",
-    "held_steps"
+    "held_steps",
+    "melody"
   ],
   "type": "object"
 }
@@ -35015,6 +35205,7 @@ One of:
 - `"own"`: The item carries it in its own right.
 - `"folder"`: A folder it lies in carries it.
 - `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+- `"auto"`: Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.
 
 <details><summary>JSON Schema</summary>
 
@@ -35035,6 +35226,11 @@ One of:
     {
       "const": "beatlayer",
       "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.",
       "type": "string"
     }
   ]

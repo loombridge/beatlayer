@@ -506,9 +506,10 @@ impl Shell {
             return false;
         }
         // Spec: midi-clock R15. Options ▸ External Sync is enabled while an
-        // input has Sync on.
+        // input has Sync on, and disabled while Tempo Follower is on
+        // (tempo-follower R5, midi-clock R28).
         if id == transport_ids::SET_EXTERNAL_SYNC {
-            return self.sync_lamps_shown();
+            return self.sync_lamps_shown() && !self.tempo_follow_on;
         }
         // Spec: recording R21. The submenu's items are disabled while a
         // recording holds the value.

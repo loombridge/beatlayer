@@ -78,6 +78,7 @@ The commands, by the part of their ID before its first dot:
 - [`stems`](stems.md)
 - [`sync`](sync.md)
 - [`take_lane`](take_lane.md)
+- [`tempo_follower`](tempo_follower.md)
 - [`track`](track.md)
 - [`transport`](transport.md)
 - [`tuning`](tuning.md)
@@ -13932,6 +13933,34 @@ On a scene, `linked` is the Longest button: the time is the multiplier times the
 
 </details>
 
+### `FollowSwitched`
+
+What `tempo_follower.set_enabled` and `settings.set_show_tempo_follower_toggle` return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether it's on now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `tempo_follower.set_enabled` and `settings.set_show_tempo_follower_toggle` return.",
+  "properties": {
+    "on": {
+      "description": "Whether it's on now.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "on"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FreezeResult`
 
 What a freeze did.
@@ -15695,6 +15724,40 @@ What `remote.input` returns.
   },
   "required": [
     "taken"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `InputSet`
+
+What `settings.set_tempo_follower_input` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `label` | string | yes | The input channel now, as the Input Channel chooser shows it. |
+| `channel` | [`Channel`](#channel) | yes | The input channel now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `settings.set_tempo_follower_input` returns.",
+  "properties": {
+    "channel": {
+      "$ref": "#/$defs/Channel",
+      "description": "The input channel now."
+    },
+    "label": {
+      "description": "The input channel now, as the Input Channel chooser shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "label",
+    "channel"
   ],
   "type": "object"
 }
@@ -35578,6 +35641,99 @@ What `control_surface.templates` returns.
   },
   "required": [
     "templates"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `TempoFollowerState`
+
+What `tempo_follower.state` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `on` | boolean | yes | Whether Follow is on: the tracker listens and the song's tempo follows it. |
+| `show_toggle` | boolean | yes | Whether the Control Bar shows the Follow toggle (Show Tempo Follower Toggle). |
+| `input` | [`Channel`](#channel) | yes | The audio input it listens to (Input Channel). |
+| `input_label` | string | yes | The input channel as the Input Channel chooser shows it. |
+| `can_run` | boolean | yes | Whether Follow can run: the audio device's input can be reached. |
+| `unavailable` | string or null | yes | Why it can't, when it can't. |
+| `tempo` | number or null | yes | The tempo the song follows now, in BPM; null while Follow is off or the tracker hasn't been confident yet. |
+| `confidence` | number | yes | The tracker's confidence, from 0 to 1; 0 while Follow is off. |
+| `phase` | number | yes | The beat's phase the tracker hears, from 0 to 1; 0 while Follow is off. |
+| `blocks_dropped` | integer, at least 0 | yes | How many blocks of input the copy dropped because the tracker fell behind, since Follow went on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `tempo_follower.state` returns.",
+  "properties": {
+    "blocks_dropped": {
+      "description": "How many blocks of input the copy dropped because the tracker fell behind, since Follow went on.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "can_run": {
+      "description": "Whether Follow can run: the audio device's input can be reached.",
+      "type": "boolean"
+    },
+    "confidence": {
+      "description": "The tracker's confidence, from 0 to 1; 0 while Follow is off.",
+      "format": "double",
+      "type": "number"
+    },
+    "input": {
+      "$ref": "#/$defs/Channel",
+      "description": "The audio input it listens to (Input Channel)."
+    },
+    "input_label": {
+      "description": "The input channel as the Input Channel chooser shows it.",
+      "type": "string"
+    },
+    "on": {
+      "description": "Whether Follow is on: the tracker listens and the song's tempo follows it.",
+      "type": "boolean"
+    },
+    "phase": {
+      "description": "The beat's phase the tracker hears, from 0 to 1; 0 while Follow is off.",
+      "format": "double",
+      "type": "number"
+    },
+    "show_toggle": {
+      "description": "Whether the Control Bar shows the Follow toggle (Show Tempo Follower Toggle).",
+      "type": "boolean"
+    },
+    "tempo": {
+      "description": "The tempo the song follows now, in BPM; null while Follow is off or the tracker hasn't been confident yet.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "unavailable": {
+      "description": "Why it can't, when it can't.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "on",
+    "show_toggle",
+    "input",
+    "input_label",
+    "can_run",
+    "unavailable",
+    "tempo",
+    "confidence",
+    "phase",
+    "blocks_dropped"
   ],
   "type": "object"
 }

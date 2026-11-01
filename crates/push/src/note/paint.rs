@@ -75,11 +75,11 @@ impl Note {
     /// What `push.state` and the surface read of Note Mode: its summary, and
     /// the pads with reduced sensitivity (R31).
     pub(super) fn summarise(&mut self, frame: &Frame) {
-        let drum = matches!(frame.kind, Kind::Rack { .. } | Kind::Slices);
+        let drum = matches!(frame.kind, Kind::Rack { .. } | Kind::Slices { .. });
         let melodic = matches!(frame.kind, Kind::Melodic);
         let (layout, bank) = match frame.kind {
             Kind::Rack { first, .. } => (frame.layout.name(), Some(first)),
-            Kind::Slices => (frame.layout.name(), None),
+            Kind::Slices { .. } => (frame.layout.name(), None),
             Kind::Melodic => (frame.melodic.name(), None),
             Kind::Silent => ("None", None),
         };
@@ -310,8 +310,13 @@ impl Note {
                     !chains.is_empty() && chains.iter().all(|c| !c.mixer.enabled),
                 )
             }
+            Kind::Slices { filled, .. } => (filled >> note & 1 == 1, None, false, false),
             _ => (true, None, false, false),
         };
+        // A pad past the last slice is dark (R75).
+        if matches!(frame.kind, Kind::Slices { .. }) && !filled {
+            return Shade::Fixed(fixed::BLACK);
+        }
         let base = own.map_or(track_colour, swatch);
         if sound.contains(&note) {
             Shade::Fixed(fixed::GREEN)

@@ -43,6 +43,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("remote.set_mode", read("remote.mappings", "mappings[].mode")),
     ("remote.input", nothing("its effect is the mapped control's own and reads back as that control's command does (remote mapping R14); an unmapped message does nothing")),
     ("control_surface.set", read("control_surface.list", "rows")),
+    ("push.convert", query(Song, "tracks")),
     ("push.set_setup", read("push.state", "pushes[].setup")),
     ("push.set_fixed_length", read("push.state", "pushes[].recording.fixed_length")),
     ("push.set_swing", read("push.state", "pushes[].recording.swing")),

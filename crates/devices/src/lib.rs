@@ -57,10 +57,12 @@ mod filters;
 mod framework;
 pub mod gate;
 pub mod gate_mod;
+pub mod gated_delay;
 pub mod grain_delay;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
+pub mod instrument;
 pub mod instrument_filter;
 pub mod kit;
 pub mod kitbag;
@@ -82,6 +84,7 @@ pub mod oscilloscope;
 pub mod overdrive;
 pub mod pedal;
 pub mod phaser_flanger;
+pub mod pitch_hack;
 pub mod pitchloop89;
 pub mod play_mod;
 pub mod polysynth;
@@ -97,6 +100,7 @@ pub mod saturator;
 mod sections;
 pub mod shifter;
 mod signal_mod;
+pub mod spectral_time;
 pub mod spectrum_analyser;
 pub mod stack;
 pub mod strike_mod;
@@ -107,6 +111,7 @@ pub mod tube;
 pub mod tuner;
 pub mod utility;
 pub mod vector_delay;
+pub mod wavetables;
 pub mod wax;
 
 pub use alignment_delay::{ALIGNMENT_DELAY, alignment_delay_type};
@@ -137,6 +142,7 @@ pub use eq::{Contour, EQ, eq_type};
 pub use filter_delay::{FILTER_DELAY, filter_delay_type};
 pub use framework::{Audio, Modulation, NativeDevice, NativeNode, ParamBank, add};
 pub use gate::{GATE, Shutter, gate_type};
+pub use gated_delay::{GATED_DELAY, gated_delay_type};
 pub use grain_delay::{GRAIN_DELAY, grain_delay_type};
 pub use hardware::{HARDWARE_INSTRUMENT, hardware_instrument_type};
 pub use hardware_effect::{HARDWARE_EFFECT, hardware_effect_type};
@@ -157,6 +163,7 @@ pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
 pub use pedal::{PEDAL, pedal_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
+pub use pitch_hack::{PITCH_HACK, pitch_hack_type};
 pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
@@ -167,6 +174,7 @@ pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
+pub use spectral_time::{SPECTRAL_TIME, spectral_time_type};
 pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
@@ -230,6 +238,7 @@ pub fn display_in(
         GATE => Some(gate::display(device, description, values, data)),
         THREE_BAND_EQ => Some(three_band_eq::display(device, description, values, data)),
         DEGRADE => Some(degrade::display(device, data)),
+        GATED_DELAY => Some(gated_delay::display(device, description, values, data)),
         COLOR_LIMITER => Some(color_limiter::display(device, data)),
         RE_ENVELOPER => Some(re_enveloper::display(device, data)),
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
@@ -263,6 +272,7 @@ pub fn display_in(
             values,
             data,
         )),
+        SPECTRAL_TIME => Some(spectral_time::display(device, description, data)),
         TUNER => Some(tuner::display_in(
             device,
             description,
@@ -363,9 +373,12 @@ pub fn register(registry: &mut Registry) {
     color_limiter::register(registry);
     re_enveloper::register(registry);
     shifter::register(registry);
+    gated_delay::register(registry);
+    pitch_hack::register(registry);
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);
     spectrum_analyser::register(registry);
+    spectral_time::register(registry);
     tuner::register(registry);
     oscilloscope::register(registry);
     looper::register(registry);

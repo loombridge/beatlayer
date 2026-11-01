@@ -151,6 +151,7 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             bl_push::state::Menu::Scale => ids::PushMenu::Scale,
             bl_push::state::Menu::Quantize => ids::PushMenu::Quantize,
             bl_push::state::Menu::FixedLength => ids::PushMenu::FixedLength,
+            bl_push::state::Menu::Convert => ids::PushMenu::Convert,
         }),
         recording: ids::PushRecording {
             record: snapshot.record.to_owned(),
@@ -246,6 +247,27 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 })
                 .collect(),
             mute_locked: snapshot.locked.contains(&"mute"),
+            simpler: device.simpler.as_ref().map(|simpler| ids::PushSimpler {
+                empty: simpler.empty,
+                mode: simpler.mode.to_owned(),
+                main_bank: simpler.main,
+                zoom: format!("×{:.1}", simpler.zoom),
+                zoom_around: simpler.around.to_owned(),
+                region: simpler.region,
+                slices: simpler.slices,
+                selected_slice: simpler.selected,
+                pad_slicing: simpler.pad_slicing,
+                edit_buttons: simpler
+                    .buttons
+                    .iter()
+                    .map(|button| ids::PushSimplerButton {
+                        button: button.button,
+                        name: button.name.to_owned(),
+                        text: button.text.clone(),
+                        on: button.on,
+                    })
+                    .collect(),
+            }),
         }),
         session: snapshot.session.as_ref().map(|session| {
             let look = |look: &bl_push::session::Look| ids::PushSessionLook {
@@ -473,6 +495,10 @@ impl Shell {
             ids::DUPLICATE => {
                 let args = Self::args::<ids::PushSessionArgs>(id, args)?;
                 self.push_duplicate(id, args)
+            }
+            ids::CONVERT => {
+                let args = Self::args::<ids::PushConvertArgs>(id, args)?;
+                self.push_convert(id, args.to)
             }
             ids::DISPLAY_FRAME => {
                 let args = Self::args::<ids::PushDisplayFrameArgs>(id, args)?;

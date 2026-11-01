@@ -38,6 +38,9 @@ const DOUBLE_TAP: Duration = Duration::from_millis(300);
 const CLOCK_AHEAD: Duration = Duration::from_millis(60);
 /// The gesture key of encoder `n` is this plus `n`.
 pub(crate) const ENCODER_GESTURE: u32 = 0x5000;
+/// The control change that silences every voice.
+const ALL_SOUND_OFF: u8 = 120;
+
 /// What the aftertouch thresholds are (R30).
 const AFTERTOUCH: (u16, u16) = (1220, 1570);
 
@@ -237,6 +240,18 @@ impl Push {
         }
     }
 
+    /// The key of the slice picked on a slicing Simpler's pads, for the
+    /// display modes (notes R73).
+    fn picked_slice(&self) -> Option<u8> {
+        match self.pad_mode {
+            PadMode::Note => self
+                .model
+                .as_ref()
+                .and_then(|model| self.contents.pads[0].picked_slice(model)),
+            PadMode::Session => None,
+        }
+    }
+
     fn display_content(&mut self) -> &mut dyn Content {
         self.contents.display[self.display_mode.index()].as_mut()
     }
@@ -415,6 +430,8 @@ impl Push {
         let setup = self.shared.setup();
         let swing = self.shared.swing();
         let held_steps = self.held_steps();
+        let slice = self.picked_slice();
+        let pad_slicing = self.contents.display[DisplayMode::Device.index()].pad_slicing();
         let mix_page = self.mix_page;
         let mut actions = std::mem::take(&mut self.actions);
         {
@@ -440,6 +457,8 @@ impl Push {
                     held_steps: &held_steps,
                     mix_page,
                     display: self.display_mode,
+                    slice,
+                    pad_slicing,
                     actions: &mut actions,
                 };
                 f(content, &mut ctx);
@@ -559,6 +578,16 @@ impl Push {
             self.buttons.mark_used(button);
             return;
         }
+        // Convert's choices for an audio clip are on the upper display
+        // buttons; any other button closes them (notes R76).
+        if self.menu == Some(Menu::Convert) {
+            self.buttons.mark_used(button);
+            if let Some(column) = controls::upper_column(button) {
+                self.convert_choice(column, cx);
+            }
+            self.menu = None;
+            return;
+        }
         // The Scale menu's keys, scales and switches are on the display
         // buttons (notes R35).
         if self.menu == Some(Menu::Scale)
@@ -603,6 +632,34 @@ impl Push {
         self.with_contents(cx, Who::Both, |content, ctx| {
             content.button(button, Gesture::Press, ctx)
         });
+        if button == cc::CONVERT {
+            self.convert(cx);
+        }
+    }
+
+    /// Convert acts on what is selected: the shell works out what that is and
+    /// makes it, one undo step; an audio clip offers its choices first
+    /// (notes R76).
+    fn convert(&mut self, cx: &mut Cx) {
+        match self.model.as_ref().map(|model| model.convert) {
+            Some(
+                bl_control::Convert::Simpler
+                | bl_control::Convert::Slices
+                | bl_control::Convert::Pad,
+            ) => Self::run(cx, "push.convert", json!({})),
+            Some(bl_control::Convert::Clip) => self.menu = Some(Menu::Convert),
+            _ => {}
+        }
+    }
+
+    /// An audio clip's choice on upper button `column`: the first two make
+    /// a Simpler and a Drum Rack; the rest are listed but not built.
+    fn convert_choice(&mut self, column: u8, cx: &mut Cx) {
+        match column {
+            0 => Self::run(cx, "push.convert", json!({ "to": "simpler" })),
+            1 => Self::run(cx, "push.convert", json!({ "to": "drum_rack" })),
+            _ => {}
+        }
     }
 
     /// What a core button does with a modifier held: the combination the
@@ -621,6 +678,7 @@ impl Push {
         }
         match button {
             cc::PLAY => {
+                self.silence_simpler(cx);
                 let playing = self.model.as_ref().is_some_and(|m| m.transport.playing);
                 if playing {
                     Self::run(cx, "transport.play_stop", json!({}));
@@ -638,6 +696,22 @@ impl Push {
                     self.open_picker(Target::Track(track));
                 }
             }
+        }
+    }
+
+    /// Shift with Play/Stop silences the selected track's Simpler at once, a
+    /// One-Shot's voice included, with All Sound Off (notes R71).
+    fn silence_simpler(&self, cx: &mut Cx) {
+        let simpler = self.model.as_ref().is_some_and(|model| {
+            model
+                .selection
+                .tracks
+                .first()
+                .and_then(|track| model.document.track(*track))
+                .is_some_and(|track| track.devices().any(crate::simpler::is_simpler))
+        });
+        if simpler && let Some(off) = MidiMessage::from_bytes(&[0xB0, ALL_SOUND_OFF, 0]) {
+            cx.play(off);
         }
     }
 
@@ -1411,6 +1485,7 @@ impl Push {
 
         // The modes draw the pads, the buttons they own and the display.
         let held_steps = self.held_steps();
+        let slice = self.picked_slice();
         {
             let (pad, display) = match (self.pad_mode, self.display_mode) {
                 (PadMode::Note, mode) => (0, mode.index()),
@@ -1429,6 +1504,7 @@ impl Push {
                     model,
                     modifiers: &modifiers,
                     held_steps: &held_steps,
+                    slice,
                     mix_page: self.mix_page,
                     row: cx.row(),
                     colours: &colours,
@@ -1499,6 +1575,13 @@ impl Push {
         }]
         .scale_available();
         lights.button(cc::SCALE, Led::level(scale, self.menu == Some(Menu::Scale)));
+        // Convert is lit while it has something selected to act on.
+        if model.convert != bl_control::Convert::Nothing {
+            lights.button(
+                cc::CONVERT,
+                Led::level(true, self.menu == Some(Menu::Convert)),
+            );
+        }
         lights.button(cc::USER, Led::level(true, false));
         lights.button(cc::SHIFT, Led::level(true, false));
         let main_selected = model.selection.tracks.first() == Some(&model.document.main_id());
@@ -1540,6 +1623,7 @@ impl Push {
             Some(Menu::Setup) => self.paint_setup(),
             Some(Menu::Quantize) => self.paint_quantize(),
             Some(Menu::FixedLength) => self.paint_fixed_length(),
+            Some(Menu::Convert) => self.paint_convert(),
             Some(Menu::Scale) => {
                 let mut paint = Paint {
                     screen: &mut self.screen,
@@ -1550,6 +1634,7 @@ impl Push {
                     model,
                     modifiers: &modifiers,
                     held_steps: &held_steps,
+                    slice,
                     mix_page: self.mix_page,
                     row: cx.row(),
                     colours: &colours,
@@ -1598,6 +1683,28 @@ impl Push {
                 Addr::Button(cc::USER),
                 Led::steady(crate::leds::white::FULL),
             );
+        }
+    }
+
+    /// An audio clip's Convert choices on the upper buttons, the ones that
+    /// aren't built grey (notes R76).
+    fn paint_convert(&mut self) {
+        const GREY: [u8; 3] = [110, 110, 110];
+        const WHITE: [u8; 3] = [230, 230, 230];
+        self.screen.columns = Default::default();
+        self.screen.upper = Default::default();
+        self.screen.title = Some("Convert to a new MIDI track".to_owned());
+        for (column, (text, built)) in [
+            ("Simpler", true),
+            ("Drum Rack", true),
+            ("Convert Harmony", false),
+            ("Convert Melody", false),
+            ("Convert Drums", false),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            self.screen.upper[column] = Label::new(text, if built { WHITE } else { GREY }, false);
         }
     }
 
@@ -1813,6 +1920,10 @@ impl ControlSurface for Push {
             self.with_contents(cx, Who::Pads, |content, ctx| content.tick(ctx));
             // The Scale menu closes where Scale has nothing to open (R23).
             if self.menu == Some(Menu::Scale) && !self.pad_content().scale_available() {
+                self.menu = None;
+            }
+            // Convert's choices close when no audio clip is selected (R76).
+            if self.menu == Some(Menu::Convert) && model.convert != bl_control::Convert::Clip {
                 self.menu = None;
             }
             self.pad_settings(cx);

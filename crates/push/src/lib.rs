@@ -29,6 +29,7 @@ pub mod recording;
 pub mod screen;
 pub mod session;
 pub mod sim;
+pub mod simpler;
 pub mod state;
 mod surface;
 pub mod sysex;

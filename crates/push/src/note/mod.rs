@@ -57,11 +57,22 @@ pub(crate) enum Kind {
         filled: u128,
     },
     /// A Simpler slicing a sample: its slices are the pads (R1, R75).
-    Slices,
+    Slices {
+        device: DeviceId,
+        /// The keys whose pad holds a slice: bit n is key n.
+        filled: u128,
+    },
     /// Any other MIDI track: it plays notes of the scale (R32 to R44).
     Melodic,
     /// An audio track, a return or the Main track: the pads are dark (R1).
     Silent,
+}
+
+/// A slice that a pad started, and when (R74).
+#[derive(Clone, Copy, Debug)]
+struct Sounding {
+    at: Instant,
+    played: crate::simpler::Played,
 }
 
 /// What the surface keeps for each track (R5).
@@ -220,6 +231,8 @@ pub struct Note {
     pending: Option<Pending>,
     /// The pad each track's slicing Simpler's steps edit (R75).
     picked: BTreeMap<TrackId, u8>,
+    /// The slice that started playing last, for Pad Slicing (R74).
+    sounding: Option<Sounding>,
     summary: State,
     reduced: u64,
     /// The Scale menu's encoders' leftover steps.
@@ -260,6 +273,7 @@ impl Note {
             octave_shift: false,
             pending: None,
             picked: BTreeMap::new(),
+            sounding: None,
             summary: State::default(),
             reduced: 0,
             menu_counts: Default::default(),
@@ -268,6 +282,15 @@ impl Note {
             accent: repeat::Switch::default(),
             repeat: repeat::Repeat::default(),
         }
+    }
+
+    /// The key of the slice picked on `track`'s pads: the first until a pad
+    /// is tapped (R73).
+    fn picked_key(&self, track: TrackId) -> u8 {
+        self.picked
+            .get(&track)
+            .copied()
+            .unwrap_or(crate::simpler::FIRST_KEY)
     }
 
     fn memory(&mut self, track: TrackId) -> &mut Memory {
@@ -298,7 +321,7 @@ impl Note {
         let clip = scene.and_then(|scene| clip::midi_clip(model, track, scene));
         let memory = *self.memory(track);
         let layout = memory.layout.unwrap_or(match kind {
-            Kind::Slices => Layout::Pads,
+            Kind::Slices { .. } => Layout::Pads,
             _ => Layout::LoopSelector,
         });
         let settings = model.document.settings();
@@ -312,7 +335,7 @@ impl Note {
             Kind::Rack {
                 first, selected, ..
             } => Some(selected.unwrap_or(*first)),
-            Kind::Slices => Some(self.picked.get(&track).copied().unwrap_or(36)),
+            Kind::Slices { .. } => Some(self.picked_key(track)),
             _ => None,
         };
         Some(Frame {
@@ -339,7 +362,7 @@ impl Note {
     fn role(frame: &Frame, row: u8, column: u8) -> Role {
         let first = match frame.kind {
             Kind::Rack { first, .. } => first,
-            Kind::Slices => 36,
+            Kind::Slices { .. } => crate::simpler::FIRST_KEY,
             Kind::Melodic => return frame.view().role(row, column),
             Kind::Silent => return Role::Off,
         };
@@ -435,6 +458,11 @@ impl Content for Note {
 
     fn paint(&mut self, paint: &mut Paint<'_>) {
         self.paint_pads(paint);
+    }
+
+    fn picked_slice(&self, model: &ReadModel) -> Option<u8> {
+        let track = clip::selected_track(model)?;
+        matches!(clip::classify(model, track), Kind::Slices { .. }).then(|| self.picked_key(track))
     }
 
     fn held_steps(&self) -> Vec<HeldStep> {

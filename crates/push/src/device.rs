@@ -19,6 +19,7 @@ use crate::content::{Content, Ctx, Gesture, HeldStep, Paint, Turn};
 use crate::controls::{self, cc};
 use crate::encoder::{Counting, LIST_STEPS, Moving};
 use crate::screen::{Column, Dot, Graphic, Icon, Label, Shade};
+use crate::simpler::{self, Simpler};
 
 /// The gesture key of encoder `n`'s changes is this plus `n`, so a touch is
 /// one undo step (R1).
@@ -262,6 +263,9 @@ pub struct State {
     pub params: Vec<ParamState>,
     /// The chains the lower buttons show while a rack's button is held.
     pub chains: Vec<ChainState>,
+    /// A Simpler's main bank and Edit Mode, when it is the device in focus
+    /// (push-2-notes R67 to R76).
+    pub simpler: Option<simpler::State>,
 }
 
 /// One device on an upper button, as `push.state` reads it.
@@ -337,6 +341,8 @@ pub struct DeviceMode {
     /// The value each stepped parameter was last set to, until the set shows
     /// it.
     sent: [Option<(f64, Instant)>; 8],
+    /// What Simpler adds to its banks (push-2-notes R67 to R74).
+    simpler: Simpler,
     state: State,
 }
 
@@ -362,6 +368,7 @@ impl DeviceMode {
             counts: Default::default(),
             moving: Default::default(),
             sent: [None; 8],
+            simpler: Simpler::new(),
             state: State::default(),
         }
     }
@@ -386,6 +393,14 @@ impl DeviceMode {
             // The leftmost button goes back to the top level (R16).
             if column == 0 && gesture == Gesture::Tap {
                 self.edit = None;
+            } else if column > 0
+                && gesture == Gesture::Press
+                && let Some(focus) = focus
+                && let Some(view) = simpler::View::of(model, focus)
+            {
+                // Simpler's Edit Mode runs its own buttons (push-2-notes R70).
+                let bpm = model.tempo.get();
+                self.simpler.press(column, &view, ctx.slice, bpm, ctx);
             }
             return;
         }
@@ -524,14 +539,57 @@ impl DeviceMode {
         }
     }
 
-    /// Sets the parameter on encoder `column` by `steps` (R18).
-    fn set_param(&mut self, column: u8, steps: i32, model: &ReadModel, ctx: &mut Ctx<'_>) {
+    /// A finger came on encoder `column`: Simpler's main bank remembers it
+    /// for Zoom (push-2-notes R69).
+    fn touch_simpler(&mut self, column: u8, ctx: &Ctx<'_>) {
+        let Some(model) = ctx.model else {
+            return;
+        };
+        if let Some(focus) = Self::focus(model, ctx.cx.row())
+            && focus.bank == 0
+            && let Some(view) = simpler::View::of(model, focus.device)
+        {
+            self.simpler.touch(column, &view);
+        }
+    }
+
+    /// Turns encoder `column` by `steps`: Simpler's main bank, or the
+    /// parameter the bank puts there (R18).
+    fn turn(&mut self, column: u8, steps: i32, model: &ReadModel, ctx: &mut Ctx<'_>) {
         let Some(focus) = Self::focus(model, ctx.cx.row()) else {
             return;
         };
-        let Some(param) = focus.params.get(usize::from(column)) else {
+        if focus.bank == 0
+            && let Some(view) = simpler::View::of(model, focus.device)
+        {
+            if !view.has_sample() {
+                return;
+            }
+            match simpler::control_param(&view, column) {
+                Some(Some(id)) => {
+                    if let Some(param) = view.param(id) {
+                        self.set_param(column, steps, &param, focus.device, ctx);
+                    }
+                }
+                Some(None) => {}
+                None => self.simpler.turn(column, steps, &view, ctx.slice, ctx),
+            }
             return;
-        };
+        }
+        if let Some(param) = focus.params.get(usize::from(column)) {
+            self.set_param(column, steps, param, focus.device, ctx);
+        }
+    }
+
+    /// Sets `param` of `device` on encoder `column` by `steps` (R18).
+    fn set_param(
+        &mut self,
+        column: u8,
+        steps: i32,
+        param: &ParamView,
+        device: DeviceId,
+        ctx: &mut Ctx<'_>,
+    ) {
         // A parameter a macro holds doesn't move (R18).
         if param.held {
             return;
@@ -542,12 +600,13 @@ impl DeviceMode {
         // Spec: push-2-notes R66. With steps held, the turn is the value at
         // the first held step.
         let target = AutomationTarget::Device {
-            device: focus.device,
+            device,
             param: param.param,
         };
-        let steps_value = (!ctx.held_steps.is_empty())
-            .then(|| crate::automation::value_at_first_step(model, ctx.held_steps, &target))
-            .flatten();
+        let steps_value = ctx
+            .model
+            .filter(|_| !ctx.held_steps.is_empty())
+            .and_then(|m| crate::automation::value_at_first_step(m, ctx.held_steps, &target));
         let current = steps_value.unwrap_or(param.value);
         let value = if descriptor.is_stepped() {
             let by = self.counts[n].take(steps, LIST_STEPS);
@@ -567,7 +626,11 @@ impl DeviceMode {
             descriptor.denormalize(to)
         };
         if !ctx.held_steps.is_empty() {
-            if let Some(clip) = crate::automation::edited_clip(model).map(|c| c.id) {
+            if let Some(clip) = ctx
+                .model
+                .and_then(crate::automation::edited_clip)
+                .map(|c| c.id)
+            {
                 crate::automation::write_steps(
                     ctx,
                     PARAM_GESTURE + u32::from(column),
@@ -581,7 +644,7 @@ impl DeviceMode {
         ctx.cx.run_held(
             PARAM_GESTURE + u32::from(column),
             "device.set_param",
-            json!({ "device": focus.device, "param": param.param, "value": value }),
+            json!({ "device": device, "param": param.param, "value": value }),
         );
     }
 
@@ -733,6 +796,7 @@ impl Content for DeviceMode {
                 if ctx.modifiers.has(cc::DELETE) {
                     self.delete_automation(column, ctx);
                 }
+                self.touch_simpler(column, ctx);
             }
             // From touch to release is one undo step (R1).
             Turn::Release => ctx.cx.end_gesture(PARAM_GESTURE + u32::from(column)),
@@ -742,7 +806,7 @@ impl Content for DeviceMode {
                 };
                 match self.held {
                     Some(held) => self.move_held(held, steps, ctx, &model.document),
-                    None => self.set_param(column, steps, model, ctx),
+                    None => self.turn(column, steps, model, ctx),
                 }
             }
         }
@@ -783,9 +847,23 @@ impl Content for DeviceMode {
         };
 
         // The upper buttons.
+        let simpler = focus_id.and_then(|device| simpler::View::of(model, device));
         if self.edit.is_some() {
             paint.screen.upper[0] = Label::new("Back", colour, false).with_icon(Icon::Left);
             state.edit = true;
+            // Simpler's Edit Mode has buttons of its own after Back (R70).
+            if let Some(view) = &simpler {
+                let buttons = self.simpler.paint_edit(
+                    view,
+                    model.tempo.get(),
+                    colour,
+                    &mut paint.screen.upper,
+                );
+                state.simpler = Some(simpler::State {
+                    buttons,
+                    ..simpler::State::default()
+                });
+            }
         } else {
             for column in 0..8 {
                 match window.at(column) {
@@ -842,17 +920,30 @@ impl Content for DeviceMode {
             .is_none_or(|d| d.enabled);
         if let Some(focus) = focus {
             let shade = if enabled { Shade::Normal } else { Shade::Grey };
-            for (column, param) in focus.params.iter().take(8).enumerate() {
-                paint.screen.columns[column] = Self::column(model, focus, param, paint.held_steps);
-                paint.screen.shades[column] = match (shade, param.held) {
-                    (Shade::Normal, true) => Shade::Dimmed,
-                    (shade, _) => shade,
-                };
-                state.params.push(ParamState {
-                    name: param.name.clone(),
-                    value: param.text.clone(),
-                    held: param.held,
-                });
+            let main = focus.bank == 0;
+            if let Some(view) = simpler.as_ref().filter(|_| main) {
+                // Simpler's main bank is drawn over its waveform (R67).
+                self.simpler.settle(view);
+                let buttons = state.simpler.take().map(|s| s.buttons);
+                let mut drawn = self.simpler.paint(view, paint.slice, paint);
+                if let Some(buttons) = buttons {
+                    drawn.buttons = buttons;
+                }
+                state.simpler = Some(drawn);
+            } else {
+                for (column, param) in focus.params.iter().take(8).enumerate() {
+                    paint.screen.columns[column] =
+                        Self::column(model, focus, param, paint.held_steps);
+                    paint.screen.shades[column] = match (shade, param.held) {
+                        (Shade::Normal, true) => Shade::Dimmed,
+                        (shade, _) => shade,
+                    };
+                    state.params.push(ParamState {
+                        name: param.name.clone(),
+                        value: param.text.clone(),
+                        held: param.held,
+                    });
+                }
             }
             state.bank = focus.bank;
             state.banks.clone_from(&focus.banks);
@@ -914,6 +1005,10 @@ impl Content for DeviceMode {
 
     fn claims_lower(&self) -> bool {
         self.edit.is_some() || self.held.is_some_and(|h| h.rack)
+    }
+
+    fn pad_slicing(&self) -> bool {
+        self.simpler.pad_slicing()
     }
 
     fn device_state(&self) -> Option<State> {

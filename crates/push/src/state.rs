@@ -114,6 +114,8 @@ pub enum Menu {
     Quantize,
     /// Fixed Length (notes R50).
     FixedLength,
+    /// The choices Convert offers for an audio clip (push-2-notes R76).
+    Convert,
 }
 
 impl Menu {
@@ -125,6 +127,7 @@ impl Menu {
             Self::Scale => "Scale",
             Self::Quantize => "Quantize",
             Self::FixedLength => "Fixed Length",
+            Self::Convert => "Convert",
         }
     }
 }

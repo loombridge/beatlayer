@@ -20,7 +20,10 @@ use super::*;
 /// couldn't be read is remembered too, so a frame that asks again doesn't
 /// read the file again; it is tried again when the file is somewhere else.
 #[derive(Default)]
-pub(super) struct Movies(Mutex<HashMap<ContentHash, (PathBuf, Option<Arc<Movie>>)>>);
+pub(super) struct Movies(Mutex<HashMap<ContentHash, Read>>);
+
+/// A movie read from a path, or the failure to.
+type Read = (PathBuf, Option<Arc<Movie>>);
 
 impl Shell {
     /// The movie a clip plays, if it is a video clip whose file can be read.

@@ -970,7 +970,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
 | 7.21 | done | 1 November 2026 | [#563](https://github.com/loombridge/beatlayer/pull/563): Note Mode on Push 2 arms the selected track and plays its drum rack through the Loop Selector, 16 Velocities and 64 Pads layouts tied to the pad view, with pad options, step sequencing with loop pads and pages, and `push.state` reading it back |
 | 7.22 | done | 1 November 2026 | [#696](https://github.com/loombridge/beatlayer/pull/696): Melodies on Push 2 with pad pressure as polyphonic key pressure, the touch strip's bend and modulation, 64 Notes, In Key and Chromatic in every layout saved with the set (`song.set_pad_layout`), the Scale menu, the Melodic Sequencer and its + 32 Notes variant, Note Mode navigation, and `session.launch` taking `legato` |
-| 7.23 | todo |  |  |
+| 7.23 | done | 1 November 2026 | [#723](https://github.com/loombridge/beatlayer/pull/723): Recording on Push 2 with Record's Session cycle and Arrangement recording, Fixed Length with Phrase Sync (engine `RecordFixed`), New and Duplicate, Accent, Repeat with pressure and swing, Quantize and its menu, Automate as Automation Arm, deleting automation, and step automation in Device and Mix modes; audio takes don't yet follow Fixed Length |
 | 7.24 | done | 1 November 2026 | [#711](https://github.com/loombridge/beatlayer/pull/711): Simpler on Push 2 with its main bank over the waveform in Classic, One-Shot and Slice, Edit Mode's buttons, slicing from the pads and Convert, read back in `push.state` |
 | 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
@@ -997,7 +997,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.13 | todo |  |  |
 | 8.14 | done | 1 November 2026 | [#731](https://github.com/loombridge/beatlayer/pull/731): Analog has two band-limited oscillators (sine, saw, rectangle with pulse width, noise) with sub, sync and a pitch envelope, the noise generator with Color, two filters with ten modes, Drive, key tracking and serial or parallel routing, two amplifiers with pan, and four envelopes with their loop modes, on the shell-and-display pages; the LFO amounts act on nothing until part 2, and factory presets wait on a preset mechanism |
 | 8.15 | todo |  |  |
-| 8.16 | todo |  |  |
+| 8.16 | done | 1 November 2026 | [#729](https://github.com/loombridge/beatlayer/pull/729): Bass, a monophonic synthesiser with legato glide and no retrigger, and Poli, a polyphonic one with detunable oscillators, its modulation section and the Chorus-Ensemble core as its chorus, on the instruments' voice section and filter, listed under Instruments with banks holding every parameter; their presets exist as code with no loader yet, and exact block-size identity while pitch moves waits on the kit as for Drift |
 | 8.17 | todo |  |  |
 | 8.18 | todo |  |  |
 | 8.19 | todo |  |  |
@@ -1058,7 +1058,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.22 | todo |  |  |
 | 9.23 | todo |  |  |
 | 9.24 | done | 1 November 2026 | [#665](https://github.com/loombridge/beatlayer/pull/665): a new `bl-video` crate reads QuickTime movies with exact frame times and edit lists, decodes frames ahead of the playhead on a video thread through VideoToolbox, Media Foundation, FFmpeg or its own MJPEG decoder, decodes the movie's audio through `bl-media`, and gives black and silence in gaps |
-| 9.25 | todo |  |  |
+| 9.25 | done | 1 November 2026 | [#689](https://github.com/loombridge/beatlayer/pull/689): a movie dropped on an audio track in the Arrangement becomes a video clip (an audio clip with a video flag, schema 14) with warp and Lead on, sprocket holes and the movie's chapter markers as cues; Session slots, Reverse, Crop, Consolidate and stems give audio clips and leave the movie untouched; DAWproject video timelines import as video clips; `video.frame_at` reads the frame through the warp map, the bottom-most leader leading; Live set video clips (R66) wait on the Live set importer |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |
 | 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |

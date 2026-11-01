@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::boxes::{Be, MOOV_LIMIT, boxes, child, malformed};
 use crate::edits::EditList;
 use crate::error::VideoError;
+use crate::markers::{self, Marker};
 use crate::rational::Rational;
 
 /// Anything a movie can be read from.
@@ -25,7 +26,7 @@ pub const MAX_PIXELS: u64 = 1 << 26;
 /// The largest coded frame read into memory.
 const MAX_SAMPLE_BYTES: u32 = 256 << 20;
 
-type Opener = Arc<dyn Fn() -> io::Result<Box<dyn ReadSeek>> + Send + Sync>;
+pub(crate) type Opener = Arc<dyn Fn() -> io::Result<Box<dyn ReadSeek>> + Send + Sync>;
 
 /// One coded frame in the movie's file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +73,7 @@ pub struct Movie {
     duration: u64,
     video: Option<VideoTrack>,
     audio: Option<AudioTrack>,
+    markers: Vec<Marker>,
 }
 
 impl std::fmt::Debug for Movie {
@@ -81,6 +83,7 @@ impl std::fmt::Debug for Movie {
             .field("duration", &self.duration)
             .field("video", &self.video)
             .field("audio", &self.audio)
+            .field("markers", &self.markers)
             .finish_non_exhaustive()
     }
 }
@@ -128,6 +131,7 @@ impl Movie {
 
         let mut video = None;
         let mut audio = None;
+        let mut chapters = None;
         for (kind, trak) in boxes(&moov) {
             if &kind != b"trak" {
                 continue;
@@ -138,6 +142,9 @@ impl Movie {
             let handler = child(mdia, b"hdlr")
                 .and_then(|h| h.get(8..12))
                 .unwrap_or_default();
+            if matches!(handler, b"vide" | b"soun") && chapters.is_none() {
+                chapters = markers::chapter_track(trak);
+            }
             match handler {
                 b"vide" if video.is_none() => video = Some(video_track(trak, mdia, time_scale)?),
                 b"soun" if audio.is_none() => {
@@ -152,12 +159,17 @@ impl Movie {
                 _ => {}
             }
         }
+        // Damaged markers cost the movie its cues, not the movie.
+        let markers = chapters
+            .and_then(|id| markers::read(&moov, id, time_scale, &opener).ok())
+            .unwrap_or_default();
         Ok(Self {
             opener,
             time_scale,
             duration,
             video,
             audio,
+            markers,
         })
     }
 
@@ -177,6 +189,12 @@ impl Movie {
     #[must_use]
     pub fn audio(&self) -> Option<&AudioTrack> {
         self.audio.as_ref()
+    }
+
+    /// The markers the movie carries in its chapter track (R12), by time.
+    #[must_use]
+    pub fn markers(&self) -> &[Marker] {
+        &self.markers
     }
 
     /// The index of the frame shown at time `t`, through the edit list: the
@@ -403,7 +421,7 @@ fn read_moov(reader: &mut dyn ReadSeek) -> Result<Vec<u8>, VideoError> {
 }
 
 /// The time scale and duration of an `mvhd` or `mdhd` body.
-fn media_header(body: &[u8]) -> Result<(u32, u64), VideoError> {
+pub(crate) fn media_header(body: &[u8]) -> Result<(u32, u64), VideoError> {
     let mut be = Be::new(body);
     let version = be.u8()?;
     be.skip(3)?;
@@ -535,7 +553,7 @@ fn be32(bytes: &[u8]) -> u32 {
     u32::from_be_bytes(bytes[..4].try_into().unwrap_or_default())
 }
 
-fn sample_sizes(stsz: &[u8]) -> Result<Vec<u32>, VideoError> {
+pub(crate) fn sample_sizes(stsz: &[u8]) -> Result<Vec<u32>, VideoError> {
     let mut be = Be::new(stsz);
     be.skip(4)?;
     let constant = be.u32()?;
@@ -560,7 +578,7 @@ fn sample_sizes(stsz: &[u8]) -> Result<Vec<u32>, VideoError> {
 }
 
 /// Each sample's duration from `stts`, `count` of them.
-fn decode_times(stts: &[u8], count: usize) -> Result<Vec<u32>, VideoError> {
+pub(crate) fn decode_times(stts: &[u8], count: usize) -> Result<Vec<u32>, VideoError> {
     let mut durations = Vec::with_capacity(count);
     for entry in entries(stts, 8)? {
         let repeat = be32(entry) as usize;
@@ -602,7 +620,10 @@ fn sync_samples(stss: Option<&[u8]>, count: usize) -> Result<Option<Vec<usize>>,
     Ok(Some(sync))
 }
 
-fn chunk_offsets(stco: Option<&[u8]>, co64: Option<&[u8]>) -> Result<Vec<u64>, VideoError> {
+pub(crate) fn chunk_offsets(
+    stco: Option<&[u8]>,
+    co64: Option<&[u8]>,
+) -> Result<Vec<u64>, VideoError> {
     if let Some(co64) = co64 {
         Ok(entries(co64, 8)?
             .map(|e| u64::from_be_bytes(e.try_into().unwrap_or_default()))
@@ -616,7 +637,11 @@ fn chunk_offsets(stco: Option<&[u8]>, co64: Option<&[u8]>) -> Result<Vec<u64>, V
 
 /// Each sample's file offset, from the chunks' offsets, how many samples
 /// each chunk holds (`stsc`), and the samples' sizes.
-fn sample_offsets(stsc: &[u8], chunks: &[u64], sizes: &[u32]) -> Result<Vec<u64>, VideoError> {
+pub(crate) fn sample_offsets(
+    stsc: &[u8],
+    chunks: &[u64],
+    sizes: &[u32],
+) -> Result<Vec<u64>, VideoError> {
     let runs: Vec<(u32, u32)> = entries(stsc, 12)?
         .map(|e| (be32(e), be32(&e[4..])))
         .collect();

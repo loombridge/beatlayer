@@ -25,10 +25,12 @@
 
 pub mod alignment_delay;
 pub mod analog;
+mod analogue;
 pub mod arpeggiator;
 pub mod articulation_map;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
+pub mod bass;
 pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
@@ -96,6 +98,7 @@ pub mod phaser_flanger;
 pub mod pitch_hack;
 pub mod pitchloop89;
 pub mod play_mod;
+pub mod poli;
 pub mod polysynth;
 pub mod re_enveloper;
 pub mod remap;
@@ -131,6 +134,7 @@ pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
+pub use bass::{BASS, bass_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
@@ -179,6 +183,7 @@ pub use pedal::{PEDAL, pedal_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use pitch_hack::{PITCH_HACK, pitch_hack_type};
 pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
+pub use poli::{POLI, poli_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
@@ -416,6 +421,8 @@ pub fn register(registry: &mut Registry) {
     pitchloop89::register(registry);
     vector_delay::register(registry);
     vocoder::register(registry);
+    bass::register(registry);
+    poli::register(registry);
     spectral_blur::register(registry);
 }
 

@@ -1390,6 +1390,7 @@ pub(super) fn consolidated_audio(
         warp_mode: bl_model::WarpMode::Beats,
         warp_settings: bl_model::WarpSettings::default(),
         tempo_leader: false,
+        video: false,
         ram: false,
         high_quality: true,
         transpose: 0,

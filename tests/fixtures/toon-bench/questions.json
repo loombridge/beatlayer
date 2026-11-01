@@ -204,7 +204,7 @@
     "question": "How many commands have the permission destructive?"
   },
   {
-    "answer": "clip.cut_envelope, clip.delete, clip.delete_envelope, clip.delete_envelope_range, clip.edit_sample, clip.save_default, clip.save_file",
+    "answer": "clip.cut_envelope, clip.delete, clip.delete_envelope, clip.delete_envelope_range, clip.edit_sample, clip.replace_sample, clip.save_default, clip.save_file",
     "fixture": "commands_clip",
     "id": "commands-refused",
     "question": "Which commands are refused to agents? Give their ids, in the order they are listed."

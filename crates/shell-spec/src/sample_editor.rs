@@ -184,6 +184,16 @@ pub struct SamplePoint {
     pub beat: Option<Ticks>,
 }
 
+/// A cue the Sample Editor shows (the video spec, R12): a marker embedded in
+/// a video clip's movie.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Cue {
+    /// Where it is in the movie, in seconds.
+    pub time: f64,
+    /// The name the movie gives it.
+    pub name: String,
+}
+
 /// What the Sample Editor shows and has selected, for the clip it shows.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SampleEditorState {
@@ -207,6 +217,10 @@ pub struct SampleEditorState {
     pub view: Option<(f64, f64)>,
     /// Whether the waveform is fitted to the editor's height.
     pub fit_height: bool,
+    /// The markers embedded in a video clip's movie, shown as cues that
+    /// can't be moved (the video spec, R12); none for any other clip.
+    #[serde(default)]
+    pub cues: Vec<Cue>,
 }
 
 /// Adds the Sample Editor's view commands to a registry.
@@ -237,8 +251,8 @@ fn specs() -> Vec<CommandSpec> {
             "Reports what the Clip View's Sample Editor shows for the audio clip it shows: \
              whether the clip is warped, the selected warp markers (by their place in the \
              clip's warp map), whether the Start marker is selected, the selected transients \
-             (by their times in the file), the insert marker, the time selection, and the span \
-             shown. Changes nothing.",
+             (by their times in the file), the insert marker, the time selection, the span \
+             shown, and a video clip's `cues`. Changes nothing.",
         )
         .args::<bl_commands::NoArgs>(),
         view(

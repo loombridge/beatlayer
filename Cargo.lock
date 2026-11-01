@@ -720,6 +720,7 @@ dependencies = [
  "rayon",
  "realfft",
  "rtrb",
+ "sha2",
 ]
 
 [[package]]
@@ -865,6 +866,8 @@ dependencies = [
  "lspk-rt",
  "proptest",
  "realfft",
+ "rtrb",
+ "rustfft",
 ]
 
 [[package]]

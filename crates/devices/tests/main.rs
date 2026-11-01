@@ -84,6 +84,7 @@ mod scales_tuning;
 mod session_automation;
 mod shifter;
 mod signal_modulation;
+mod spectral_blur;
 mod spectral_time;
 mod spectrogram;
 mod spectrum_analyser;

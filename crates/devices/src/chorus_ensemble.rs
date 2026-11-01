@@ -199,8 +199,10 @@ impl ModDelayLine {
     }
 }
 
-pub struct ChorusEnsemble {
-    sample_rate: SampleRate,
+/// The chorus's own state: the delay lines, the wet path's filters, the
+/// LFO and the feedback. [`ChorusEnsemble`] runs one over its input, and Poli
+/// runs one in its Chorus mode (bass and Poli spec R14).
+pub(crate) struct Chorus {
     phase: f64,
     delays: [[ModDelayLine; 3]; 2],
     hp_filter: [Biquad; 2],
@@ -210,6 +212,231 @@ pub struct ChorusEnsemble {
     /// the block size.
     frames_done: u64,
     feedback_state: [f32; 2],
+}
+
+/// The controls of one frame, in the parameters' own units; the chorus
+/// clamps them to their ranges.
+#[derive(Clone, Copy)]
+pub(crate) struct Controls {
+    pub mode: usize,
+    pub time: usize,
+    pub taps: usize,
+    pub feedback_invert: bool,
+    pub rate: f32,
+    pub amount: f32,
+    pub feedback: f32,
+    pub high_pass: f32,
+    pub width: f32,
+    pub warmth: f32,
+    pub dry_wet: f32,
+    pub vibrato_offset: f32,
+    pub vibrato_shape: f32,
+}
+
+impl Chorus {
+    /// A chorus for `rate`. Allocates, so make it off the audio thread.
+    pub(crate) fn new(rate: f64) -> Self {
+        let max_len = (MAX_DELAY_SECS * rate) as usize + 32;
+        let lines = || {
+            [
+                ModDelayLine::new(max_len),
+                ModDelayLine::new(max_len),
+                ModDelayLine::new(max_len),
+            ]
+        };
+        Self {
+            phase: 0.0,
+            delays: [lines(), lines()],
+            hp_filter: [Biquad::default(); 2],
+            warmth_filter: [Biquad::default(); 2],
+            frames_done: 0,
+            feedback_state: [0.0; 2],
+        }
+    }
+
+    /// One frame: the dry and wet signals mixed, before the output gain.
+    /// `channels` is how many of `input` the device has; a vibrato's second
+    /// channel is its wet signal alone.
+    #[expect(
+        clippy::needless_range_loop,
+        reason = "the channel indexes several arrays at once, the input and the per-channel filters and lines, not one slice"
+    )]
+    pub(crate) fn frame(&mut self, rate: f64, c: &Controls, input: [f32; 2]) -> [f32; 2] {
+        let lfo_rate = f64::from(c.rate).clamp(0.01, 20.0);
+        let amount = (f64::from(c.amount) / 100.0).clamp(0.0, 1.0);
+        let feedback = (c.feedback / 100.0).clamp(0.0, 0.99);
+        let fb_coeff = if c.feedback_invert {
+            -feedback
+        } else {
+            feedback
+        };
+        let width_val = (c.width / 100.0).clamp(0.0, 2.0);
+        let warmth_val = (c.warmth / 100.0).clamp(0.0, 1.0);
+        let dry_wet_val = (c.dry_wet / 100.0).clamp(0.0, 1.0);
+        let vibrato_offset_deg = f64::from(c.vibrato_offset).clamp(0.0, 180.0);
+        let vibrato_shape_val = (f64::from(c.vibrato_shape) / 100.0).clamp(0.0, 1.0);
+        // The filters' coefficients follow every 32nd frame of the song's
+        // run, wherever the blocks fall.
+        if self.frames_done.is_multiple_of(COEFF_GRID) {
+            let hp_freq = f64::from(c.high_pass).clamp(20.0, 2000.0);
+            let hp_coeffs = highpass_coeffs(hp_freq, core::f64::consts::FRAC_1_SQRT_2, rate);
+            for hp in &mut self.hp_filter {
+                hp.set(hp_coeffs);
+            }
+            let warmth_cutoff =
+                (20_000.0 - f64::from(warmth_val) * 12_000.0).clamp(2000.0, 20_000.0);
+            let warmth_coeffs = lowpass_coeffs(warmth_cutoff, 0.707, rate);
+            for wf in &mut self.warmth_filter {
+                wf.set(warmth_coeffs);
+            }
+        }
+        self.frames_done += 1;
+        // Base delay time for Chorus mode in ms
+        let chorus_base_ms = match c.time {
+            1 => 7.0,
+            2 => 10.0,
+            3 => 20.0,
+            4 => 35.0,
+            5 => 50.0,
+            _ => 5.0 + 15.0 * amount, // Auto: scales dynamically with amount
+        };
+        self.phase = (self.phase + lfo_rate / rate).rem_euclid(1.0);
+        let current_phase = self.phase;
+        let mode_idx = c.mode;
+        let in_samples = input;
+        let mut wet_channels = [0.0f32; 2];
+
+        match mode_idx {
+            0 => {
+                // Chorus mode: 1 or 2 taps
+                let tap_count = if c.taps == 0 { 1 } else { 2 };
+                let mod_depth_ms = amount * 3.0;
+
+                for ch in 0..2 {
+                    let ch_phase = if ch == 0 {
+                        current_phase
+                    } else {
+                        (current_phase + 0.25).rem_euclid(1.0)
+                    };
+
+                    let fb_in = in_samples[ch] + fb_coeff * self.feedback_state[ch];
+                    // Every line stays current, so a switch to 2 taps or
+                    // Ensemble reads no stale audio.
+                    for tap in 0..3 {
+                        self.delays[ch][tap].write(fb_in);
+                    }
+
+                    let lfo1 = (TAU * ch_phase).sin();
+                    let delay1_ms = (chorus_base_ms + lfo1 * mod_depth_ms).max(0.5);
+                    let s1 = self.delays[ch][0].read(delay1_ms * rate / 1000.0);
+
+                    let wet_sample = if tap_count == 2 {
+                        let lfo2 = (TAU * (ch_phase + 0.5)).sin();
+                        let delay2_ms = (chorus_base_ms + lfo2 * mod_depth_ms).max(0.5);
+                        let s2 = self.delays[ch][1].read(delay2_ms * rate / 1000.0);
+                        0.5 * (s1 + s2)
+                    } else {
+                        s1
+                    };
+
+                    wet_channels[ch] = wet_sample;
+                }
+            }
+            1 => {
+                // Ensemble mode: 3 delay lines with phases 120 deg apart
+                let base_ms = 10.0;
+                let mod_depth_ms = amount * 3.5;
+
+                for ch in 0..2 {
+                    let ch_offset = if ch == 0 { 0.0 } else { 0.1 };
+                    let fb_in = in_samples[ch] + fb_coeff * self.feedback_state[ch];
+
+                    for tap in 0..3 {
+                        self.delays[ch][tap].write(fb_in);
+                    }
+
+                    let mut sum = 0.0f32;
+                    for tap in 0..3 {
+                        let tap_phase =
+                            (current_phase + ch_offset + (tap as f64) / 3.0).rem_euclid(1.0);
+                        let lfo_val = (TAU * tap_phase).sin();
+                        let delay_ms = (base_ms + lfo_val * mod_depth_ms).max(0.5);
+                        sum += self.delays[ch][tap].read(delay_ms * rate / 1000.0);
+                    }
+
+                    wet_channels[ch] = sum / 3.0;
+                }
+            }
+            _ => {
+                // Vibrato mode: pitch modulation, no dry layer, ignores feedback & dry_wet
+                let base_ms = 5.0;
+                let mod_depth_ms = amount * 4.0;
+                let offset_frac = vibrato_offset_deg / 360.0;
+
+                for ch in 0..2 {
+                    let ch_phase = if ch == 0 {
+                        current_phase
+                    } else {
+                        (current_phase + offset_frac).rem_euclid(1.0)
+                    };
+
+                    // Shape: sine (0%) to triangle (100%)
+                    let sine_val = (TAU * ch_phase).sin();
+                    let tri_val = 1.0 - 4.0 * (ch_phase - 0.5).abs();
+                    let mod_val =
+                        (1.0 - vibrato_shape_val) * sine_val + vibrato_shape_val * tri_val;
+
+                    for tap in 0..3 {
+                        self.delays[ch][tap].write(in_samples[ch]);
+                    }
+                    let delay_ms = (base_ms + mod_val * mod_depth_ms).max(0.5);
+                    wet_channels[ch] = self.delays[ch][0].read(delay_ms * rate / 1000.0);
+                }
+            }
+        }
+
+        // Warmth saturation
+        for ch in 0..2 {
+            let w = wet_channels[ch];
+            let warmed = if warmth_val > 0.0 {
+                let driven = w * (1.0 + warmth_val * 1.5);
+                let sat = driven - (warmth_val * 0.3) * (driven * driven * driven) / 3.0;
+                self.warmth_filter[ch].process(sat)
+            } else {
+                w
+            };
+            wet_channels[ch] = warmed;
+            self.feedback_state[ch] = warmed;
+        }
+
+        // High-pass filter on wet channels
+        for ch in 0..2 {
+            wet_channels[ch] = self.hp_filter[ch].process(wet_channels[ch]);
+        }
+
+        // Stereo Width control in Chorus and Ensemble modes
+        if mode_idx < 2 {
+            let mid = 0.5 * (wet_channels[0] + wet_channels[1]);
+            let side = 0.5 * (wet_channels[0] - wet_channels[1]);
+            wet_channels[0] = mid + width_val * side;
+            wet_channels[1] = mid - width_val * side;
+        }
+
+        if mode_idx == 2 {
+            // Vibrato mode: wet only (passes no dry layer and ignores dry/wet and feedback)
+            wet_channels
+        } else {
+            [
+                (1.0 - dry_wet_val) * in_samples[0] + dry_wet_val * wet_channels[0],
+                (1.0 - dry_wet_val) * in_samples[1] + dry_wet_val * wet_channels[1],
+            ]
+        }
+    }
+}
+
+pub struct ChorusEnsemble {
+    sample_rate: SampleRate,
+    chorus: Chorus,
     input: [Vec<f32>; 2],
     output: [Vec<f32>; 2],
 }
@@ -217,29 +444,11 @@ pub struct ChorusEnsemble {
 impl ChorusEnsemble {
     #[must_use]
     pub fn new(_device: &Device, config: &NodeConfig) -> Self {
-        let rate = config.sample_rate.as_f64();
-        let max_len = (MAX_DELAY_SECS * rate) as usize + 32;
         let frames = config.max_frames.max(1);
 
         Self {
             sample_rate: config.sample_rate,
-            phase: 0.0,
-            delays: [
-                [
-                    ModDelayLine::new(max_len),
-                    ModDelayLine::new(max_len),
-                    ModDelayLine::new(max_len),
-                ],
-                [
-                    ModDelayLine::new(max_len),
-                    ModDelayLine::new(max_len),
-                    ModDelayLine::new(max_len),
-                ],
-            ],
-            hp_filter: [Biquad::default(); 2],
-            warmth_filter: [Biquad::default(); 2],
-            frames_done: 0,
-            feedback_state: [0.0; 2],
+            chorus: Chorus::new(config.sample_rate.as_f64()),
             input: [vec![0.0; frames], vec![0.0; frames]],
             output: [vec![0.0; frames], vec![0.0; frames]],
         }
@@ -247,10 +456,6 @@ impl ChorusEnsemble {
 }
 
 impl NativeDevice for ChorusEnsemble {
-    #[expect(
-        clippy::needless_range_loop,
-        reason = "the frame and the channel index several arrays at once, the input and output and the per-channel filters, not one slice"
-    )]
     fn process(&mut self, audio: &mut Audio<'_, '_>, params: &ParamBank) {
         let frames = audio.frames();
         let channels = audio.channels().min(2);
@@ -264,10 +469,10 @@ impl NativeDevice for ChorusEnsemble {
 
         let rate_f64 = self.sample_rate.as_f64();
 
-        let mode_idx = val(MODE).round() as usize;
-        let fb_invert = val(FEEDBACK_INVERT) >= 0.5;
-        let chorus_time_idx = val(CHORUS_TIME).round() as usize;
-        let chorus_taps_idx = val(CHORUS_TAPS).round() as usize;
+        let mode = val(MODE).round() as usize;
+        let feedback_invert = val(FEEDBACK_INVERT) >= 0.5;
+        let time = val(CHORUS_TIME).round() as usize;
+        let taps = val(CHORUS_TAPS).round() as usize;
 
         // The continuous controls are read on each frame, so a move glides
         // the same at any block size.
@@ -287,184 +492,31 @@ impl NativeDevice for ChorusEnsemble {
         }
 
         for frame in 0..frames {
-            let lfo_rate = f64::from(rate_ramp[frame]).clamp(0.01, 20.0);
-            let amount = (f64::from(amount_ramp[frame]) / 100.0).clamp(0.0, 1.0);
-            let feedback = (feedback_ramp[frame] / 100.0).clamp(0.0, 0.99);
-            let fb_coeff = if fb_invert { -feedback } else { feedback };
-            let width_val = (width_ramp[frame] / 100.0).clamp(0.0, 2.0);
-            let warmth_val = (warmth_ramp[frame] / 100.0).clamp(0.0, 1.0);
-            let dry_wet_val = (dry_wet_ramp[frame] / 100.0).clamp(0.0, 1.0);
-            let vibrato_offset_deg = f64::from(vibrato_offset_ramp[frame]).clamp(0.0, 180.0);
-            let vibrato_shape_val = (f64::from(vibrato_shape_ramp[frame]) / 100.0).clamp(0.0, 1.0);
-            // The filters' coefficients follow every 32nd frame of the song's
-            // run, wherever the blocks fall.
-            if self.frames_done.is_multiple_of(COEFF_GRID) {
-                let hp_freq = f64::from(hp_freq_ramp[frame]).clamp(20.0, 2000.0);
-                let hp_coeffs =
-                    highpass_coeffs(hp_freq, core::f64::consts::FRAC_1_SQRT_2, rate_f64);
-                for hp in &mut self.hp_filter {
-                    hp.set(hp_coeffs);
-                }
-                let warmth_cutoff =
-                    (20_000.0 - f64::from(warmth_val) * 12_000.0).clamp(2000.0, 20_000.0);
-                let warmth_coeffs = lowpass_coeffs(warmth_cutoff, 0.707, rate_f64);
-                for wf in &mut self.warmth_filter {
-                    wf.set(warmth_coeffs);
-                }
-            }
-            self.frames_done += 1;
-            // Base delay time for Chorus mode in ms
-            let chorus_base_ms = match chorus_time_idx {
-                1 => 7.0,
-                2 => 10.0,
-                3 => 20.0,
-                4 => 35.0,
-                5 => 50.0,
-                _ => 5.0 + 15.0 * amount, // Auto: scales dynamically with amount
+            let controls = Controls {
+                mode,
+                time,
+                taps,
+                feedback_invert,
+                rate: rate_ramp[frame],
+                amount: amount_ramp[frame],
+                feedback: feedback_ramp[frame],
+                high_pass: hp_freq_ramp[frame],
+                width: width_ramp[frame],
+                warmth: warmth_ramp[frame],
+                dry_wet: dry_wet_ramp[frame],
+                vibrato_offset: vibrato_offset_ramp[frame],
+                vibrato_shape: vibrato_shape_ramp[frame],
             };
-            self.phase = (self.phase + lfo_rate / rate_f64).rem_euclid(1.0);
-            let current_phase = self.phase;
-
             let in_l = self.input[0][frame];
             let in_r = if channels > 1 {
                 self.input[1][frame]
             } else {
                 in_l
             };
-
-            let in_samples = [in_l, in_r];
-            let mut wet_channels = [0.0f32; 2];
-
-            match mode_idx {
-                0 => {
-                    // Chorus mode: 1 or 2 taps
-                    let tap_count = if chorus_taps_idx == 0 { 1 } else { 2 };
-                    let mod_depth_ms = amount * 3.0;
-
-                    for ch in 0..2 {
-                        let ch_phase = if ch == 0 {
-                            current_phase
-                        } else {
-                            (current_phase + 0.25).rem_euclid(1.0)
-                        };
-
-                        let fb_in = in_samples[ch] + fb_coeff * self.feedback_state[ch];
-                        // Every line stays current, so a switch to 2 taps or
-                        // Ensemble reads no stale audio.
-                        for tap in 0..3 {
-                            self.delays[ch][tap].write(fb_in);
-                        }
-
-                        let lfo1 = (TAU * ch_phase).sin();
-                        let delay1_ms = (chorus_base_ms + lfo1 * mod_depth_ms).max(0.5);
-                        let s1 = self.delays[ch][0].read(delay1_ms * rate_f64 / 1000.0);
-
-                        let wet_sample = if tap_count == 2 {
-                            let lfo2 = (TAU * (ch_phase + 0.5)).sin();
-                            let delay2_ms = (chorus_base_ms + lfo2 * mod_depth_ms).max(0.5);
-                            let s2 = self.delays[ch][1].read(delay2_ms * rate_f64 / 1000.0);
-                            0.5 * (s1 + s2)
-                        } else {
-                            s1
-                        };
-
-                        wet_channels[ch] = wet_sample;
-                    }
-                }
-                1 => {
-                    // Ensemble mode: 3 delay lines with phases 120 deg apart
-                    let base_ms = 10.0;
-                    let mod_depth_ms = amount * 3.5;
-
-                    for ch in 0..2 {
-                        let ch_offset = if ch == 0 { 0.0 } else { 0.1 };
-                        let fb_in = in_samples[ch] + fb_coeff * self.feedback_state[ch];
-
-                        for tap in 0..3 {
-                            self.delays[ch][tap].write(fb_in);
-                        }
-
-                        let mut sum = 0.0f32;
-                        for tap in 0..3 {
-                            let tap_phase =
-                                (current_phase + ch_offset + (tap as f64) / 3.0).rem_euclid(1.0);
-                            let lfo_val = (TAU * tap_phase).sin();
-                            let delay_ms = (base_ms + lfo_val * mod_depth_ms).max(0.5);
-                            sum += self.delays[ch][tap].read(delay_ms * rate_f64 / 1000.0);
-                        }
-
-                        wet_channels[ch] = sum / 3.0;
-                    }
-                }
-                _ => {
-                    // Vibrato mode: pitch modulation, no dry layer, ignores feedback & dry_wet
-                    let base_ms = 5.0;
-                    let mod_depth_ms = amount * 4.0;
-                    let offset_frac = vibrato_offset_deg / 360.0;
-
-                    for ch in 0..2 {
-                        let ch_phase = if ch == 0 {
-                            current_phase
-                        } else {
-                            (current_phase + offset_frac).rem_euclid(1.0)
-                        };
-
-                        // Shape: sine (0%) to triangle (100%)
-                        let sine_val = (TAU * ch_phase).sin();
-                        let tri_val = 1.0 - 4.0 * (ch_phase - 0.5).abs();
-                        let mod_val =
-                            (1.0 - vibrato_shape_val) * sine_val + vibrato_shape_val * tri_val;
-
-                        for tap in 0..3 {
-                            self.delays[ch][tap].write(in_samples[ch]);
-                        }
-                        let delay_ms = (base_ms + mod_val * mod_depth_ms).max(0.5);
-                        wet_channels[ch] = self.delays[ch][0].read(delay_ms * rate_f64 / 1000.0);
-                    }
-                }
-            }
-
-            // Warmth saturation
-            for ch in 0..2 {
-                let w = wet_channels[ch];
-                let warmed = if warmth_val > 0.0 {
-                    let driven = w * (1.0 + warmth_val * 1.5);
-                    let sat = driven - (warmth_val * 0.3) * (driven * driven * driven) / 3.0;
-                    self.warmth_filter[ch].process(sat)
-                } else {
-                    w
-                };
-                wet_channels[ch] = warmed;
-                self.feedback_state[ch] = warmed;
-            }
-
-            // High-pass filter on wet channels
-            for ch in 0..2 {
-                wet_channels[ch] = self.hp_filter[ch].process(wet_channels[ch]);
-            }
-
-            // Stereo Width control in Chorus and Ensemble modes
-            if mode_idx < 2 {
-                let mid = 0.5 * (wet_channels[0] + wet_channels[1]);
-                let side = 0.5 * (wet_channels[0] - wet_channels[1]);
-                wet_channels[0] = mid + width_val * side;
-                wet_channels[1] = mid - width_val * side;
-            }
-
+            let mixed = self.chorus.frame(rate_f64, &controls, [in_l, in_r]);
             let out_gain = output_ramp[frame];
-
-            if mode_idx == 2 {
-                // Vibrato mode: wet only (passes no dry layer and ignores dry/wet and feedback)
-                self.output[0][frame] = wet_channels[0] * out_gain;
-                if channels > 1 {
-                    self.output[1][frame] = wet_channels[1] * out_gain;
-                }
-            } else {
-                for ch in 0..channels {
-                    let mixed =
-                        (1.0 - dry_wet_val) * in_samples[ch] + dry_wet_val * wet_channels[ch];
-                    self.output[ch][frame] = mixed * out_gain;
-                }
+            for (output, mixed) in self.output.iter_mut().zip(mixed).take(channels) {
+                output[frame] = mixed * out_gain;
             }
         }
 

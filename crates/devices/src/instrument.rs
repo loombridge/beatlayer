@@ -85,6 +85,8 @@ pub struct Parts {
     pub glide_prop: Option<ParamId>,
     /// Glide's Legato option ([`glide_legato`]).
     pub glide_legato: Option<ParamId>,
+    /// A device whose Glide always works as with Legato on (Bass).
+    pub glide_only_held: bool,
     /// Whether Glide works in Poly, each note from the one before (R8).
     pub poly_glide: bool,
     /// Glissando's Use Current Scale switch (R10).
@@ -388,7 +390,7 @@ impl Config {
             glide_secs: (get(parts.glide_time, 0.0) * 1e-3) as f32,
             glide_prop: get(parts.glide_prop, 0.0) >= 0.5,
             glissando: get(parts.glide_mode, 0.0) >= 0.5,
-            glide_always: get(parts.glide_legato, 0.0) < 0.5,
+            glide_always: !parts.glide_only_held && get(parts.glide_legato, 0.0) < 0.5,
             poly_glide: parts.poly_glide,
             scale_aware: get(parts.use_scale, 0.0) >= 0.5,
             copies: (get(parts.unison_voices, 1.0) as usize).clamp(1, copies_max),
@@ -986,7 +988,7 @@ impl Section {
         // per-note bend over its own range.
         settings.mpe.enabled = cfg.note_pb;
         settings.mpe.bend_range = cfg.note_range.clamp(1.0, 96.0);
-        let wheel = cfg.pb_range.clamp(1.0, 96.0);
+        let wheel = cfg.pb_range.clamp(0.0, 96.0);
         settings.bend_up = wheel;
         settings.bend_down = -wheel;
     }

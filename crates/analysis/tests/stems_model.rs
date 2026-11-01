@@ -9,7 +9,9 @@
 use std::path::PathBuf;
 
 use bl_analysis::stems::generated::{self, Generated};
-use bl_analysis::stems::onnx::{Demucs, Options, Provider};
+#[cfg(target_os = "macos")]
+use bl_analysis::stems::onnx::Provider;
+use bl_analysis::stems::onnx::{Demucs, Options};
 use bl_analysis::stems::{Quality, RATE, Stem, separate};
 
 fn path(name: &str) -> Option<PathBuf> {

@@ -30,6 +30,7 @@ mod events;
 mod ext_out;
 mod external_devices;
 mod external_effect;
+mod flush;
 mod follow;
 mod grooves;
 mod grooves_audio;

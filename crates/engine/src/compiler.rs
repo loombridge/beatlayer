@@ -375,6 +375,11 @@ impl Compiler {
         Ok(())
     }
 
+    /// Whether the loader still owes an answer for some clip's source.
+    pub(crate) fn loading(&self) -> bool {
+        self.sources.loading()
+    }
+
     /// What the audio thread needs now that the loader has answered: the
     /// clips of the track whose clip's source is open, or the media it
     /// couldn't open. Nothing if the answer is stale, or no document has

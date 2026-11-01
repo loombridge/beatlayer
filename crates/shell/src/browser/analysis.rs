@@ -7,6 +7,12 @@
 //! descriptor yet; [`Analysis::poll`], called each frame, gives the worker
 //! thread one file at a time.
 //!
+//! A sample's descriptor also gives it its automatic tags
+//! ([`bl_analysis::autotag`]; spec: browser-tags R49, R53). They are kept with
+//! the descriptor, by the content's key, so a moved or renamed file has them
+//! without being analysed again, and [`Analysis::take_tagged`] hands the
+//! browser each file's tags as they come.
+//!
 //! The worker runs at the lowest priority, so analysis takes no more than
 //! one core and the interface, search and previews never wait for it. It is
 //! given one file and answers before it is given the next, so pausing is
@@ -19,6 +25,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
+use bl_analysis::autotag;
 use bl_analysis::similarity::{self, Descriptor};
 use bl_media::{ContentHash, MediaStore};
 use bl_project::rack_preset::Saved;
@@ -56,19 +63,21 @@ pub struct Item {
 /// What the worker made of an item.
 #[derive(Debug)]
 enum Outcome {
-    /// The content has this descriptor already; nothing was computed.
-    Known(String),
-    /// A descriptor, newly computed, for this content.
-    Computed(String, Descriptor),
+    /// The content has this descriptor already, with these sound tags (names
+    /// joined by `|`); nothing was computed.
+    Known(String, String),
+    /// A descriptor, newly computed, for this content, and its sound tags.
+    Computed(String, Descriptor, String),
     /// It couldn't be analysed.
     Skipped,
     /// It isn't a sound that is analysed.
     Ignored,
 }
 
-/// The content keys that have a descriptor, shared with the worker so it
-/// doesn't compute one twice.
-type Keys = Arc<Mutex<HashSet<String>>>;
+/// The content keys that have a descriptor, each with the sound tags it
+/// gives (names joined by `|`), shared with the worker so it doesn't compute
+/// one twice.
+type Keys = Arc<Mutex<HashMap<String, String>>>;
 
 /// The thread, and how to reach it.
 struct Worker {
@@ -96,6 +105,9 @@ pub struct Analysis {
     batch: usize,
     /// Descriptors computed since Beatlayer started.
     computed: usize,
+    /// The sound tags of files the worker has finished, by path, which the
+    /// browser hasn't taken yet.
+    tagged: Vec<(String, Vec<String>)>,
     /// How many known files have a descriptor, and how many were skipped.
     analysed: usize,
     skipped: usize,
@@ -134,6 +146,7 @@ impl Analysis {
             finished: 0,
             batch: 0,
             computed: 0,
+            tagged: Vec::new(),
             analysed: 0,
             skipped: 0,
             descriptors: HashMap::new(),
@@ -142,16 +155,35 @@ impl Analysis {
     }
 
     /// Takes what the database holds.
-    pub fn load(&mut self, rows: Vec<AnalysedRow>, keys: Vec<(String, u32)>) {
+    pub fn load(&mut self, rows: Vec<AnalysedRow>, keys: Vec<(String, u32, Option<String>)>) {
         self.known = rows.into_iter().map(|r| (r.path.clone(), r)).collect();
         self.count();
         if let Ok(mut have) = self.keys.lock() {
+            // A descriptor counts only with the tags of this version of the
+            // classifier; one without them is made again.
+            let prefix = tags_prefix();
             *have = keys
                 .into_iter()
-                .filter(|(_, version)| *version == similarity::VERSION)
-                .map(|(key, _)| key)
+                .filter(|(_, version, _)| *version == similarity::VERSION)
+                .filter_map(|(key, _, tags)| {
+                    let tags = tags?;
+                    Some((key, tags.strip_prefix(&prefix)?.to_owned()))
+                })
                 .collect();
         }
+    }
+
+    /// Takes the sound tags of the files the worker has finished since the
+    /// last call, each file's path with the names of its tags.
+    pub fn take_tagged(&mut self) -> Vec<(String, Vec<String>)> {
+        std::mem::take(&mut self.tagged)
+    }
+
+    /// Whether the worker has nothing more to do for now: nothing waits, or
+    /// analysis is paused.
+    #[must_use]
+    pub fn idle(&self) -> bool {
+        self.current.is_none() && (self.queue.is_empty() || self.paused)
     }
 
     /// The media store whose decoded audio the worker reuses.
@@ -163,7 +195,11 @@ impl Analysis {
     /// one, as what's waiting: what was waiting and has gone from the
     /// places leaves the list.
     pub fn enqueue(&mut self, files: Vec<Item>) {
-        let keys = self.keys.lock().map(|k| k.clone()).unwrap_or_default();
+        let keys: HashSet<String> = self
+            .keys
+            .lock()
+            .map(|k| k.keys().cloned().collect())
+            .unwrap_or_default();
         let current = self.current.as_ref().map(|c| c.path.clone());
         // A file that has left the places leaves the count.
         let present: HashSet<String> = files
@@ -269,23 +305,38 @@ impl Analysis {
     fn finish(&mut self, item: &Item, outcome: Outcome) -> Option<AnalysisOp> {
         self.current = None;
         self.finished += 1;
-        let (status, key, descriptor) = match outcome {
-            Outcome::Known(key) => (DONE, Some(key), None),
-            Outcome::Computed(key, descriptor) => {
+        let (status, key, descriptor, tags) = match outcome {
+            Outcome::Known(key, tags) => (DONE, Some(key), None, tags),
+            Outcome::Computed(key, descriptor, tags) => {
                 self.computed += 1;
                 if let Ok(mut keys) = self.keys.lock() {
-                    keys.insert(key.clone());
+                    keys.insert(key.clone(), tags.clone());
                 }
                 self.descriptors.insert(key.clone(), descriptor.clone());
                 (
                     DONE,
                     Some(key),
-                    Some((similarity::VERSION, descriptor.to_bytes())),
+                    Some((
+                        similarity::VERSION,
+                        descriptor.to_bytes(),
+                        format!("{}{tags}", tags_prefix()),
+                    )),
+                    tags,
                 )
             }
-            Outcome::Skipped => (SKIPPED, None, None),
-            Outcome::Ignored => (IGNORED, None, None),
+            Outcome::Skipped => (SKIPPED, None, None, String::new()),
+            Outcome::Ignored => (IGNORED, None, None, String::new()),
         };
+        // A sample that has no descriptor now has no sound tags.
+        if !item.preset {
+            self.tagged.push((
+                item.path.to_string_lossy().into_owned(),
+                tags.split('|')
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .collect(),
+            ));
+        }
         let row = AnalysedRow {
             path: item.path.to_string_lossy().into_owned(),
             size: item.size,
@@ -423,6 +474,11 @@ impl Analysis {
     }
 }
 
+/// What a descriptor's stored tags begin with: the classifier's version.
+fn tags_prefix() -> String {
+    format!("v{}:", autotag::VERSION)
+}
+
 /// Whether an item of the index is analysed, and if so whether it's a
 /// preset: audio files and presets are, nothing else.
 #[must_use]
@@ -436,7 +492,7 @@ pub fn analysed_kind(kind: ItemKind) -> Option<bool> {
 
 /// Analyses one item on the worker thread.
 fn analyse(item: &Item, keys: &Keys, media: Option<&MediaStore>) -> Outcome {
-    let known = |key: &str| keys.lock().is_ok_and(|keys| keys.contains(key));
+    let known = |key: &str| keys.lock().ok().and_then(|keys| keys.get(key).cloned());
     if item.preset {
         analyse_preset(&item.path, &known)
     } else {
@@ -446,7 +502,11 @@ fn analyse(item: &Item, keys: &Keys, media: Option<&MediaStore>) -> Outcome {
 
 /// An audio file's descriptor, unless it's too long or can't be decoded
 /// (R1, R8).
-fn analyse_audio(path: &Path, known: &dyn Fn(&str) -> bool, media: Option<&MediaStore>) -> Outcome {
+fn analyse_audio(
+    path: &Path,
+    known: &dyn Fn(&str) -> Option<String>,
+    media: Option<&MediaStore>,
+) -> Outcome {
     let info = match bl_media::probe(path) {
         Ok(info) => info,
         Err(_) => return Outcome::Skipped,
@@ -465,8 +525,8 @@ fn analyse_audio(path: &Path, known: &dyn Fn(&str) -> bool, media: Option<&Media
         Err(_) => return Outcome::Skipped,
     };
     let key = hash.to_string();
-    if known(&key) {
-        return Outcome::Known(key);
+    if let Some(tags) = known(&key) {
+        return Outcome::Known(key, tags);
     }
     // Audio the media store holds decoded is shared, not decoded again.
     let reused = media
@@ -480,14 +540,17 @@ fn analyse_audio(path: &Path, known: &dyn Fn(&str) -> bool, media: Option<&Media
         },
     };
     match Descriptor::of_sample(&data) {
-        Ok(descriptor) => Outcome::Computed(key, descriptor),
+        Ok(descriptor) => {
+            let tags = autotag::sound_tags(&descriptor).join("|");
+            Outcome::Computed(key, descriptor, tags)
+        }
         Err(_) => Outcome::Skipped,
     }
 }
 
 /// An instrument's or a drum preset's descriptor, from the render the
 /// browser previews it with (R2). Other presets aren't analysed (R1).
-fn analyse_preset(path: &Path, known: &dyn Fn(&str) -> bool) -> Outcome {
+fn analyse_preset(path: &Path, known: &dyn Fn(&str) -> Option<String>) -> Outcome {
     use bl_model::DeviceRole;
     let saved = match Saved::load(path) {
         Ok(saved) => saved,
@@ -517,8 +580,8 @@ fn analyse_preset(path: &Path, known: &dyn Fn(&str) -> bool) -> Outcome {
         .as_bytes(),
     )
     .to_string();
-    if known(&key) {
-        return Outcome::Known(key);
+    if let Some(tags) = known(&key) {
+        return Outcome::Known(key, tags);
     }
     let cancel = AtomicBool::new(false);
     let data = match super::preview::render_preset(path, similarity::RATE, PRESET_BPM, &cancel) {
@@ -534,7 +597,7 @@ fn analyse_preset(path: &Path, known: &dyn Fn(&str) -> bool) -> Outcome {
         return Outcome::Skipped;
     };
     match Descriptor::of_sample(&data) {
-        Ok(descriptor) => Outcome::Computed(key, descriptor),
+        Ok(descriptor) => Outcome::Computed(key, descriptor, String::new()),
         Err(_) => Outcome::Skipped,
     }
 }
@@ -601,7 +664,12 @@ mod tests {
                 row("/b.wav", SKIPPED, None),
                 row("/c.wav", DONE, Some("old")),
             ],
-            vec![("k".to_owned(), similarity::VERSION), ("old".to_owned(), 0)],
+            vec![
+                ("k".to_owned(), similarity::VERSION, Some(tags_prefix())),
+                ("old".to_owned(), 0, Some(tags_prefix())),
+                // A descriptor kept without tags is made again.
+                ("bare".to_owned(), similarity::VERSION, None),
+            ],
         );
         analysis.enqueue(vec![
             item("/a.wav", 10),

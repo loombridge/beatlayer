@@ -687,10 +687,14 @@ fn command(modifiers: egui::Modifiers) -> bool {
 }
 
 impl BrowserUi {
-    /// A browser scrolled to the top.
+    /// A browser scrolled to the top, its Tag Editor showing the Function
+    /// group folded: the group is long, and the person's own groups come
+    /// after it (spec: browser-tags R11, R49).
     #[must_use]
     pub fn new() -> Self {
-        Self::default()
+        let mut ui = Self::default();
+        ui.folded_groups.insert("Function".to_owned());
+        ui
     }
 
     /// What the last frame built.
@@ -1640,6 +1644,17 @@ impl BrowserUi {
                     theme.small_font(),
                     colour,
                 );
+                // Spec: browser-tags R51. A tag some selected item carries
+                // automatically is marked.
+                if row.auto {
+                    painter.text(
+                        pos2(rect.right() - 6.0, rect.center().y),
+                        Align2::RIGHT_CENTER,
+                        "auto",
+                        theme.small_font(),
+                        theme.colors.text_dim.0,
+                    );
+                }
                 if row.kind == TagEditorRowKind::Group {
                     // The group folds and unfolds on a click.
                     if response.clicked() {
@@ -1724,7 +1739,9 @@ impl BrowserUi {
                         TagState::Fixed => "fixed",
                         TagState::None => "empty",
                     });
-                    node.set_description(if row.marked {
+                    node.set_description(if row.auto {
+                        "automatic tag".to_owned()
+                    } else if row.marked {
                         "the selection carries one of its tags".to_owned()
                     } else {
                         String::new()
@@ -1888,7 +1905,18 @@ impl BrowserUi {
                 theme.small_font(),
                 theme.colors.text.0,
             );
-            // A person's own tag shows an X that takes it off.
+            // Spec: browser-tags R51. An automatic tag is marked.
+            if tag.auto {
+                painter.text(
+                    pos2(row.right() - 24.0, row.center().y),
+                    Align2::RIGHT_CENTER,
+                    "auto",
+                    theme.small_font(),
+                    theme.colors.text_dim.0,
+                );
+            }
+            // A person's own tag or an automatic one shows an X that takes
+            // it off.
             if tag.removable {
                 let cross = Rect::from_center_size(
                     pos2(row.right() - 10.0, row.center().y),

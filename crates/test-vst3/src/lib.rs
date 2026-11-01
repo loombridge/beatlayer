@@ -1643,7 +1643,7 @@ impl IPluginFactory2Trait for Factory {
             return kInvalidArgument;
         }
         info.classFlags = 0;
-        copy_cstring("Fx", &mut info.subCategories);
+        copy_cstring("Fx|Delay", &mut info.subCategories);
         copy_cstring("Beatlayer tests", &mut info.vendor);
         copy_cstring("1.0.0", &mut info.version);
         copy_cstring("VST 3.7.0", &mut info.sdkVersion);

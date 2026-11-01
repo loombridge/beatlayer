@@ -2743,6 +2743,22 @@ pub enum Command {
         #[serde(default)]
         name: Option<String>,
     },
+    /// Sets how a note-playing controller lays the scale out on its pads
+    /// (the notes on Push 2 spec, R32 and R37). It is no undo step.
+    SetPadLayout {
+        /// In Key (true) or Chromatic.
+        #[serde(default)]
+        in_key: Option<bool>,
+        /// Whether the bottom-left pad stays on C.
+        #[serde(default)]
+        fixed: Option<bool>,
+        /// The interval between rows.
+        #[serde(default)]
+        spacing: Option<crate::PadSpacing>,
+        /// Which way the rows run.
+        #[serde(default)]
+        direction: Option<crate::PadDirection>,
+    },
     /// Makes a tuning the set's, in place of any other (the tunings spec,
     /// R2 and R15). With `retune`, every note of the MIDI clips on tracks
     /// that play the tuning moves to the key whose new pitch is nearest the
@@ -2975,6 +2991,7 @@ impl Command {
             Self::SetLockEnvelopes { .. } => "Switch Lock Envelopes",
             Self::SetRemoteMappings { .. } => "Change MIDI and key mappings",
             Self::SetCueMode { .. } => "Switch Cue mode",
+            Self::SetPadLayout { .. } => "Change Pad Layout",
             Self::SetCueVolume { .. } => "Change \"Preview Volume\"",
             Self::SetInput { .. }
             | Self::SetOutput { .. }
@@ -3249,9 +3266,10 @@ impl Command {
 
     /// Whether running the command outside a transaction is an undo step.
     /// Cue mode is not: Live's Solo/Cue button and Options items add none.
+    /// Nor is the pad layout a controller plays the scale in.
     #[must_use]
     pub fn records_undo(&self) -> bool {
-        !matches!(self, Self::SetCueMode { .. })
+        !matches!(self, Self::SetCueMode { .. } | Self::SetPadLayout { .. })
     }
 
     /// The undo step's name for this command run on `before`: the same as
@@ -3945,6 +3963,21 @@ impl Document {
                     ));
                 }
                 self.settings.remote.clone_from(mappings);
+                Ok(())
+            }
+            Command::SetPadLayout {
+                in_key,
+                fixed,
+                spacing,
+                direction,
+            } => {
+                let now = self.settings.pad_layout;
+                self.settings.pad_layout = crate::PadLayout {
+                    in_key: in_key.unwrap_or(now.in_key),
+                    fixed: fixed.unwrap_or(now.fixed),
+                    spacing: spacing.unwrap_or(now.spacing),
+                    direction: direction.unwrap_or(now.direction),
+                };
                 Ok(())
             }
             Command::SetCueMode { enabled } => {

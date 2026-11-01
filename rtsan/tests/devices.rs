@@ -1156,6 +1156,29 @@ fn roar_passes_under_rtsan() {
     );
 }
 
+// Spec: pedal R9
+#[test]
+fn pedal_passes_under_rtsan() {
+    use bl_devices::pedal::{
+        BASS, DRY_WET, GAIN, HI_QUALITY, MID, MID_FREQUENCY, OUTPUT, PEDAL, SUB, TREBLE, TYPE,
+    };
+    run_lo_fi_device(
+        PEDAL,
+        &[
+            (TYPE, &[0.0, 1.0, 2.0]),
+            (GAIN, &[0.0, 50.0, 100.0]),
+            (BASS, &[-15.0, 15.0, 0.0]),
+            (MID, &[15.0, -15.0]),
+            (MID_FREQUENCY, &[0.0, 2.0, 1.0]),
+            (TREBLE, &[-15.0, 15.0]),
+            (SUB, &[15.0, 0.0]),
+            (OUTPUT, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+            (HI_QUALITY, &[1.0, 0.0]),
+        ],
+    );
+}
+
 // Spec: drum-bus R1, R15
 #[test]
 fn drum_buss_passes_under_rtsan() {

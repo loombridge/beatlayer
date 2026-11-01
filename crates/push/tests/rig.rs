@@ -153,6 +153,7 @@ enum Contents {
     Session,
     Mix,
     Placeholders,
+    Note,
 }
 
 pub struct Rig {
@@ -202,6 +203,13 @@ impl Rig {
         Self::build(Contents::Mix)
     }
 
+    /// A rig whose Note Mode is the real one, with the other modes recording.
+    pub fn noting() -> Self {
+        let mut rig = Self::build(Contents::Note);
+        rig.ring_at(0, 0);
+        rig
+    }
+
     /// A rig whose modes have no content of their own yet: the placeholders.
     pub fn placeholders() -> Self {
         Self::build(Contents::Placeholders)
@@ -232,7 +240,11 @@ impl Rig {
                 };
                 bl_push::Contents {
                     pads: [
-                        recorder("Note"),
+                        if which == Contents::Note {
+                            Box::new(bl_push::note::Note::new())
+                        } else {
+                            recorder("Note")
+                        },
                         if which == Contents::Session {
                             Box::new(bl_push::session::Session::new())
                         } else {

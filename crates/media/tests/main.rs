@@ -8,6 +8,7 @@
 bl_rt::install_trap!();
 
 mod common;
+mod convolution_rate;
 mod decode;
 mod limits;
 mod peaks;

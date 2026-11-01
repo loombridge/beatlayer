@@ -57,6 +57,9 @@ pub struct Colours {
     pub accent: Colour,
     pub accent_text: Colour,
     pub record: Colour,
+    /// The Arm switch of a track a control surface armed by selection
+    /// (L-MIX-012); an arm by hand is `record`.
+    pub arm_selection: Colour,
     pub error_text: Colour,
     pub text: Colour,
     pub text_dim: Colour,

@@ -437,6 +437,7 @@ impl ClapHost {
                     sidechain: false,
                     external: false,
                     midi_sidechain: false,
+                    midi_tap: false,
                     note_output,
                     outputs,
                 },

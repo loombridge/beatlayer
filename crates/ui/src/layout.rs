@@ -293,6 +293,7 @@ pub enum Element {
     ResyncExternalHardware,
     LinkToggle,
     LinkMenu,
+    TempoFollower,
     TapTempo,
     Tempo,
     NudgeDown,
@@ -420,8 +421,8 @@ pub const D24: &str = "D24";
 /// the right group, the view selector included, sits 20 points (the toggle's
 /// width and a gap) left of Live's measurements. The
 /// Tempo Follower toggle and the Global Groove Amount (L-CTRL-003, 008) are
-/// hidden in Live's default state and come with the packages that build
-/// them. Widths not measured in layout.md run to the
+/// hidden in Live's default state and show when their settings say so.
+/// Widths not measured in layout.md run to the
 /// next element's left edge, less a 2-point gap. The transport section
 /// (Tempo, the time signature, the Arrangement Position, Play, Stop, the
 /// loop fields, and the Loop switch) works from WP-1.18
@@ -436,6 +437,7 @@ pub const ELEMENTS: &[Placement] = &[
     p(E::ResyncExternalHardware, "L-CTRL-029", "Resync External Hardware", CB, 54.0, RESYNC_WIDTH, Left, Button, None),
     p(E::LinkToggle, "L-CTRL-002", "Link", CB, 54.0, LINK_WIDTH, Left, Switch, None),
     p(E::LinkMenu, "L-CTRL-002", "Link Options", CB, 54.0, LINK_MENU_WIDTH, Left, MenuArrow, None),
+    p(E::TempoFollower, "L-CTRL-003", "Tempo Follower", CB, 54.0, FOLLOW_WIDTH, Left, Switch, None),
     p(E::TapTempo, "L-CTRL-004", "Tap Tempo", CB, 54.0, 28.0, Left, Button, None),
     p(E::Tempo, "L-CTRL-005", "Tempo", CB, 82.0, 44.0, Left, Value, None),
     p(E::NudgeDown, "L-CTRL-006", "Phase Nudge Down", CB, 126.0, 18.0, Left, Switch, None),
@@ -526,6 +528,10 @@ pub const LINK_WIDTH: f32 = 44.0;
 /// Metronome Settings arrow's.
 pub const LINK_MENU_WIDTH: f32 = 10.0;
 
+/// The width of the Tempo Follower toggle (L-CTRL-003), when it shows:
+/// Beatlayer's own, as Live's isn't measured. It holds "Follow".
+pub const FOLLOW_WIDTH: f32 = 36.0;
+
 /// The width of the New button (L-CTRL-031), when it shows.
 pub const NEW_WIDTH: f32 = 28.0;
 
@@ -575,6 +581,11 @@ pub struct DetailViews {
     /// it by default; a layout built without it has Live's measured
     /// positions, as with the other optional items.
     pub link: bool,
+    /// Whether the Control Bar shows the Tempo Follower toggle (L-CTRL-003,
+    /// the Tempo Follower spec R2), which sits after the Link toggle, before
+    /// Tap, and moves what is to its right right by its width. The window
+    /// shows it while Show Tempo Follower Toggle is Show.
+    pub follow: bool,
     /// Whether the Control Bar shows the New button (L-CTRL-031), which a
     /// map mode shows just before Session Record and which moves it, and
     /// what follows in the middle group, right (map modes R20).
@@ -595,6 +606,7 @@ impl DetailViews {
             global_amount: false,
             sync: (false, false),
             link: false,
+            follow: false,
             new_button: false,
         }
     }
@@ -611,6 +623,13 @@ impl DetailViews {
     #[must_use]
     pub const fn with_link(mut self, on: bool) -> Self {
         self.link = on;
+        self
+    }
+
+    /// The same, with the Tempo Follower toggle showing or not.
+    #[must_use]
+    pub const fn with_follow(mut self, on: bool) -> Self {
+        self.follow = on;
         self
     }
 
@@ -657,6 +676,7 @@ impl Default for DetailViews {
             global_amount: false,
             sync: (false, false),
             link: false,
+            follow: false,
             new_button: false,
         }
     }
@@ -965,6 +985,14 @@ impl ShellLayout {
         let link_shown =
             detail_views.link && !second && w >= MINIMUM.x + groove_shift + wanted + link_width;
         let link_shift = if link_shown { link_width } else { 0.0 };
+        // Spec: tempo-follower R2, control-bar-transport R24. The Tempo
+        // Follower toggle follows the Link toggle, before Tap, in the same
+        // room; a narrower window, and the second window, hide it.
+        let follow_width = FOLLOW_WIDTH + SYNC_GAP;
+        let follow_shown = detail_views.follow
+            && !second
+            && w >= MINIMUM.x + groove_shift + wanted + link_shift + follow_width;
+        let follow_shift = if follow_shown { follow_width } else { 0.0 };
         let sync_at = placement(Element::TapTempo).x;
         // Spec: map-modes R20. The New button shows in a map mode, before
         // Session Record, out of the room the middle group's gap has; a
@@ -977,8 +1005,13 @@ impl ShellLayout {
             let left_end = placement(Element::ScaleName);
             let middle = placement(Element::Follow);
             let gap = (middle.x + controls_extra * MIDDLE_SHARE)
-                - (left_end.x + left_end.width + groove_shift + sync_shift + link_shift);
-            (-gap).clamp(0.0, groove_shift + sync_shift + link_shift)
+                - (left_end.x
+                    + left_end.width
+                    + groove_shift
+                    + sync_shift
+                    + link_shift
+                    + follow_shift);
+            (-gap).clamp(0.0, groove_shift + sync_shift + link_shift + follow_shift)
         };
         let elements = ELEMENTS
             .iter()
@@ -996,6 +1029,7 @@ impl ShellLayout {
                         | Element::ResyncExternalHardware
                         | Element::LinkToggle
                         | Element::LinkMenu
+                        | Element::TempoFollower
                 );
                 let shift = match placement.anchor {
                     Left if control_bar && !own_sync => {
@@ -1009,7 +1043,7 @@ impl ShellLayout {
                             0.0
                         };
                         let sync = if placement.x >= sync_at {
-                            sync_shift + link_shift
+                            sync_shift + link_shift + follow_shift
                         } else {
                             0.0
                         };
@@ -1048,6 +1082,9 @@ impl ShellLayout {
                 {
                     width = 0.0;
                 }
+                if placement.element == Element::TempoFollower && !follow_shown {
+                    width = 0.0;
+                }
                 if placement.element == Element::New && !new_shown {
                     width = 0.0;
                 }
@@ -1065,6 +1102,11 @@ impl ShellLayout {
                 }
                 if placement.element == Element::LinkMenu && link_shown {
                     x += LINK_WIDTH + SYNC_GAP;
+                }
+                // The Tempo Follower toggle follows the Link toggle and its
+                // arrow.
+                if placement.element == Element::TempoFollower {
+                    x += sync_shift + link_shift;
                 }
                 // The lamps sit beside the EXT switch, one above the other.
                 if matches!(placement.element, Element::SyncInput | Element::SyncOutput)

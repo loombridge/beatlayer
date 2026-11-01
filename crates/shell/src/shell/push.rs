@@ -246,12 +246,36 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             error: snapshot.display.error.clone(),
             frames: snapshot.display.frames,
         },
+        note: snapshot.note.map(|note| ids::PushNote {
+            track: note.track,
+            layout: note.layout,
+            overlay: note.overlay,
+            overlay_locked: note.overlay_locked,
+            bank: note.bank,
+            selected_pad: note.selected_pad,
+            step_size: note.step_size,
+            edited_clip: note.edited_clip,
+            edited_scene: note.edited_scene,
+            page: note.page,
+            following: note.following,
+            velocity: note.velocity,
+            held_steps: note
+                .held_steps
+                .into_iter()
+                .map(|step| ids::PushHeldStep {
+                    clip: step.clip,
+                    pad: step.key,
+                    start: step.start,
+                    length: step.length,
+                })
+                .collect(),
+        }),
     }
 }
 
 impl Shell {
     /// The Push 2 surfaces that run: their rows, from 0, and their handles.
-    fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
+    pub(super) fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
         let surfaces = self.midi.surfaces();
         let report = self.midi.surface_rows();
         (0..bl_control::ROWS)

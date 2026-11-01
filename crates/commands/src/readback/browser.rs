@@ -65,6 +65,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("browser.set_raw", nothing(BROWSER)),
     ("browser.show_file", nothing(BROWSER)),
     ("browser.show_quick_tags", nothing(BROWSER)),
+    ("browser.show_similar", nothing(BROWSER)),
     ("browser.tag_items", nothing(TAGS)),
     (
         "browser.tags",

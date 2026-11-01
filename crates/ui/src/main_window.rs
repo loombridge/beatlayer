@@ -593,6 +593,7 @@ impl MainWindowUi {
                 .with_global_amount(shell.global_amount_shown())
                 .with_sync(shell.sync_lamps_shown(), shell.resync_button_shown())
                 .with_link(shell.link_toggle_shown())
+                .with_follow(shell.tempo_follower_toggle_shown())
                 .with_new_button(shell.map_mode() != MapMode::Off);
             let layout = if second {
                 // Spec: second-window R2, R12, R17. No Info View, assistant
@@ -1230,7 +1231,9 @@ impl MainWindowUi {
             // Spec: midi-clock R10, R15. EXT and the sync lamps show while an
             // input has Sync on, the Resync button while Show Resync Button
             // is on. Spec: link R17. The Link toggle and its arrow show
-            // while Show Link Toggle is Show.
+            // while Show Link Toggle is Show. Spec: tempo-follower R2. The
+            // Tempo Follower toggle shows while Show Tempo Follower Toggle is
+            // Show.
             if matches!(
                 el,
                 Element::ExternalSync
@@ -1239,6 +1242,7 @@ impl MainWindowUi {
                     | Element::ResyncExternalHardware
                     | Element::LinkToggle
                     | Element::LinkMenu
+                    | Element::TempoFollower
             ) && rect.width() <= 0.0
             {
                 continue;

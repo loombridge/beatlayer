@@ -111,6 +111,13 @@ pub struct Analysis {
     /// How many known files have a descriptor, and how many were skipped.
     analysed: usize,
     skipped: usize,
+    /// The descriptors by content key, read from the database the first
+    /// time a similarity search needs them, then kept up to date.
+    // shortcut: every descriptor is held in memory (about 800 bytes each), so
+    // 100,000 sounds take about 80 MB; page them from the database if that
+    // becomes too much.
+    descriptors: HashMap<String, Descriptor>,
+    descriptors_loaded: bool,
 }
 
 impl std::fmt::Debug for Analysis {
@@ -142,6 +149,8 @@ impl Analysis {
             tagged: Vec::new(),
             analysed: 0,
             skipped: 0,
+            descriptors: HashMap::new(),
+            descriptors_loaded: false,
         }
     }
 
@@ -303,6 +312,7 @@ impl Analysis {
                 if let Ok(mut keys) = self.keys.lock() {
                     keys.insert(key.clone(), tags.clone());
                 }
+                self.descriptors.insert(key.clone(), descriptor.clone());
                 (
                     DONE,
                     Some(key),
@@ -373,6 +383,75 @@ impl Analysis {
         self.worker
             .as_ref()
             .is_some_and(|worker| worker.jobs.send(item.clone()).is_ok())
+    }
+
+    /// Whether `path` has a descriptor: it can be a similarity reference
+    /// (spec: sound-similarity R11).
+    #[must_use]
+    pub fn is_analysed(&self, path: &Path) -> bool {
+        self.key_of(path).is_some()
+    }
+
+    /// The content key of an analysed file's descriptor.
+    fn key_of(&self, path: &Path) -> Option<&str> {
+        let row = self.known.get(path.to_string_lossy().as_ref())?;
+        if row.status != DONE {
+            return None;
+        }
+        row.key.as_deref()
+    }
+
+    /// Whether `path` was looked at and can't be analysed, as opposed to
+    /// not being looked at yet.
+    #[must_use]
+    pub fn is_settled(&self, path: &Path) -> bool {
+        self.known
+            .get(path.to_string_lossy().as_ref())
+            .is_some_and(|row| row.status != DONE)
+    }
+
+    /// The items of `candidates` nearest `reference`, most similar first,
+    /// with their distances: the reference first, then those under
+    /// `within`, at most `limit` (spec: sound-similarity R12, R13, R19).
+    /// Descriptors are scaled over the candidates', so kinds stay apart
+    /// when the caller passes one kind. `None` when the reference has no
+    /// descriptor.
+    pub fn nearest<K: Copy>(
+        &mut self,
+        db: Option<&Db>,
+        reference: &Path,
+        candidates: &[(K, PathBuf)],
+        within: f32,
+        limit: usize,
+    ) -> Option<Vec<(K, f32)>> {
+        if !self.descriptors_loaded
+            && let Some(db) = db
+        {
+            for (key, version, bytes) in db.descriptors() {
+                if version == similarity::VERSION
+                    && let Some(descriptor) = Descriptor::from_bytes(&bytes)
+                {
+                    self.descriptors.entry(key).or_insert(descriptor);
+                }
+            }
+            self.descriptors_loaded = true;
+        }
+        let of = |path: &Path| self.key_of(path).and_then(|key| self.descriptors.get(key));
+        let reference = of(reference)?;
+        let found: Vec<(K, &Descriptor)> = candidates
+            .iter()
+            .filter_map(|(id, path)| Some((*id, of(path)?)))
+            .collect();
+        let normaliser = similarity::Normaliser::fit(found.iter().map(|(_, d)| *d));
+        let reference = normaliser.apply(reference);
+        let mut near: Vec<(K, f32)> = found
+            .iter()
+            .map(|(id, d)| (*id, similarity::distance(&reference, &normaliser.apply(d))))
+            .filter(|(_, distance)| *distance < within)
+            .collect();
+        near.sort_by(|a, b| a.1.total_cmp(&b.1));
+        near.truncate(limit);
+        Some(near)
     }
 
     /// What the Status Bar and `browser.analysis_state` say.

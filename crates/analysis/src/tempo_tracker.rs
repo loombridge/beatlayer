@@ -513,6 +513,37 @@ impl Copier {
             None => frame[first],
         }));
     }
+
+    /// As [`copy`](Self::copy) for input held as one slice a channel, as the
+    /// audio device gives it: `channel(c)` is channel `c` of `channels`, and
+    /// the first `frames` frames are copied.
+    pub fn copy_planar<'a>(
+        &mut self,
+        channels: usize,
+        frames: usize,
+        channel: impl Fn(usize) -> &'a [f32],
+    ) {
+        let (first, second) = match self.channel {
+            Channel::Mono(c) => (c, None),
+            Channel::Pair(c) => (c, Some(c + 1)),
+        };
+        if frames == 0 || first >= channels || second.is_some_and(|c| c >= channels) {
+            return;
+        }
+        let one = channel(first);
+        let two = second.map(&channel);
+        let frames = frames
+            .min(one.len())
+            .min(two.map_or(usize::MAX, <[f32]>::len));
+        let Ok(chunk) = self.producer.write_chunk_uninit(frames) else {
+            self.shared.dropped.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        chunk.fill_from_iter((0..frames).map(|i| match two {
+            Some(two) => 0.5 * (one[i] + two[i]),
+            None => one[i],
+        }));
+    }
 }
 
 /// The tracker thread's end of the ring: reads what the audio thread copied
@@ -953,6 +984,30 @@ mod tests {
             copier.copy(&block, 3);
             assert!(ring_holds(&mut tracker).is_empty(), "{channel:?}");
             assert_eq!(tracker.shared().dropped(), 0);
+        }
+    }
+
+    // Spec: tempo-follower R11
+    #[test]
+    fn the_planar_copy_gives_what_the_interleaved_copy_does() {
+        let planes = [vec![1.0, 3.0], vec![2.0, 4.0], vec![10.0, 20.0]];
+        for channel in [
+            Channel::Mono(0),
+            Channel::Mono(2),
+            Channel::Pair(0),
+            Channel::Pair(1),
+            Channel::Mono(3),
+            Channel::Pair(2),
+        ] {
+            let (mut planar, mut tracker) = small(channel);
+            planar.copy_planar(3, 2, |c| &planes[c]);
+            let (mut interleaved, mut other) = small(channel);
+            interleaved.copy(&[1.0, 2.0, 10.0, 3.0, 4.0, 20.0], 3);
+            assert_eq!(
+                ring_holds(&mut tracker),
+                ring_holds(&mut other),
+                "{channel:?}"
+            );
         }
     }
 

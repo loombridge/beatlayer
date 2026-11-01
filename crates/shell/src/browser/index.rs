@@ -276,6 +276,13 @@ impl Snapshot {
             .collect()
     }
 
+    /// Whether an item's name holds every one of `words`, in lower case.
+    #[must_use]
+    pub fn matches(&self, index: u32, words: &[String]) -> bool {
+        let lower = &self.entries[index as usize].lower;
+        words.iter().all(|word| lower.contains(word.as_str()))
+    }
+
     /// The items whose length is `size`, for finding a file that moved
     /// (spec: browser-tags R5).
     #[must_use]

@@ -215,6 +215,9 @@ pub const MAX_VOICES: usize = 16;
 /// The most slices Slicing mode makes (the manual's maximum).
 pub const MAX_SLICES: usize = 64;
 
+/// The control change that silences every voice: All Sound Off.
+const ALL_SOUND_OFF: u8 = 120;
+
 /// The slots a voice can sound in: [`MAX_VOICES`] sounding voices and room
 /// for the ones being stolen while they fade out. A note that finds every
 /// slot busy takes the oldest fading one, which is nearly silent, so a
@@ -588,36 +591,37 @@ pub fn sampler_type() -> DeviceType {
         DeviceDescription::new(params)
             .with_layout(layout())
             .with_banks(&[
+                // The first bank holds the main controls (control surfaces
+                // R19): Push 2 draws it from the region and the mode (push 2
+                // notes R68); the second is its Global bank (R72).
                 (
-                    "Playback",
+                    "Simpler",
                     &[
                         "Mode",
+                        "S Start",
+                        "S Length",
+                        "Loop",
+                        "S Loop Length",
+                        "Fade",
                         "Gain",
                         "Transpose",
-                        "Detune",
+                    ],
+                ),
+                (
+                    "Global",
+                    &[
+                        "Glide Mode",
                         "Voices",
+                        "Glide",
+                        "Glide Time",
+                        "Detune",
+                        "Retrig",
                         "Volume",
                         "Pan",
-                        "Velocity",
                     ],
-                ),
-                (
-                    "Region",
-                    &["S Start", "S Length", "Loop", "S Loop Length", "Fade"],
                 ),
                 ("Envelope", &["Attack", "Decay", "Sustain", "Release"]),
-                (
-                    "Voice",
-                    &[
-                        "Retrig",
-                        "Trigger",
-                        "Fade In",
-                        "Fade Out",
-                        "Glide",
-                        "Glide Mode",
-                        "Glide Time",
-                    ],
-                ),
+                ("Voice", &["Trigger", "Fade In", "Fade Out", "Velocity"]),
                 (
                     "Slicing",
                     &["Slice By", "Playback", "Sensitivity", "Division", "Regions"],
@@ -1090,8 +1094,18 @@ impl Sampler {
             NoteKind::On => self.note_on(note, settings, None),
             NoteKind::Off => self.note_off(note.key, settings),
             NoteKind::Choke => self.choke(note.key, settings),
+            // All Sound Off fades every voice out over the steal fade, a
+            // One-Shot's included (push 2 notes R71).
+            NoteKind::Control {
+                controller: ALL_SOUND_OFF,
+                ..
+            } => {
+                for voice in self.playing() {
+                    voice.fade(settings);
+                }
+            }
             // The sampler plays no per-note expression (MPE): today only
-            // Drift does. Nor does it answer a channel message yet.
+            // Drift does. Nor does it answer another channel message yet.
             NoteKind::Expression { .. }
             | NoteKind::Control { .. }
             | NoteKind::PitchBend { .. }

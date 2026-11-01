@@ -1099,9 +1099,11 @@ fn the_saturation_devices_pass_under_rtsan() {
 #[test]
 fn roar_passes_under_rtsan() {
     use bl_devices::roar::{
-        AMOUNT, COLOR_COMPENSATION, DRIVE, DRY_WET, FILTER, FREQUENCY, HIGH_CROSSOVER, LEVEL,
-        LOW_CROSSOVER, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE, SHAPER, TONE_AMOUNT,
-        stage_param,
+        AMOUNT, COLOR_COMPENSATION, COMPRESSION, DRIVE, DRY_WET, ENV_ATTACK, ENV_THRESHOLD,
+        FB_AMOUNT, FB_GATE, FB_INVERT, FB_MODE, FB_NOTE, FB_SYNCED, FB_TIME, FILTER, FREQUENCY,
+        GLOBAL_MODULATION, HIGH_CROSSOVER, INPUT_LISTEN, LEVEL, LFO_MODE, LFO_RATE, LFO_WAVE,
+        LOW_CROSSOVER, MIDI_FB_NOTE, NOISE_TYPE, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE,
+        SHAPER, SIDECHAIN_HP, TONE_AMOUNT, lfo_param, matrix_param, stage_param,
     };
     run_lo_fi_device(
         ROAR,
@@ -1126,6 +1128,53 @@ fn roar_passes_under_rtsan() {
             (HIGH_CROSSOVER, &[500.0, 16_000.0]),
             (OUTPUT_GAIN, &[0.0, 1.0, 3.9]),
             (DRY_WET, &[100.0, 40.0]),
+            // Part 2 (WP-8.39): the feedback section in each mode, the
+            // compressor, the sources and the matrix.
+            (FB_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (FB_TIME, &[1.0, 100.0, 2_000.0]),
+            (FB_SYNCED, &[0.0, 4.0, 8.0]),
+            (FB_NOTE, &[0.0, 69.0, 127.0]),
+            (FB_AMOUNT, &[0.0, 80.0, 100.0]),
+            (FB_INVERT, &[1.0, 0.0]),
+            (FB_GATE, &[1.0, 0.0]),
+            (MIDI_FB_NOTE, &[1.0, 0.0]),
+            (COMPRESSION, &[0.0, 50.0, 100.0]),
+            (SIDECHAIN_HP, &[1.0, 0.0]),
+            (GLOBAL_MODULATION, &[100.0, 30.0]),
+            (lfo_param(0, LFO_WAVE), &[0.0, 2.0, 4.0]),
+            (lfo_param(0, LFO_MODE), &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (lfo_param(1, LFO_RATE), &[0.01, 5.0, 40.0]),
+            (ENV_ATTACK, &[0.1, 20.0]),
+            (ENV_THRESHOLD, &[-60.0, -20.0]),
+            (INPUT_LISTEN, &[0.0, 1.0, 0.0]),
+            (NOISE_TYPE, &[0.0, 1.0, 2.0, 3.0]),
+            (matrix_param(0, 0), &[0.0, 70.0, -40.0]),
+            (matrix_param(1, 8), &[50.0, 0.0]),
+            (matrix_param(2, 27), &[-60.0, 60.0]),
+            (matrix_param(3, 28), &[40.0, 0.0]),
+        ],
+    );
+}
+
+// Spec: pedal R9
+#[test]
+fn pedal_passes_under_rtsan() {
+    use bl_devices::pedal::{
+        BASS, DRY_WET, GAIN, HI_QUALITY, MID, MID_FREQUENCY, OUTPUT, PEDAL, SUB, TREBLE, TYPE,
+    };
+    run_lo_fi_device(
+        PEDAL,
+        &[
+            (TYPE, &[0.0, 1.0, 2.0]),
+            (GAIN, &[0.0, 50.0, 100.0]),
+            (BASS, &[-15.0, 15.0, 0.0]),
+            (MID, &[15.0, -15.0]),
+            (MID_FREQUENCY, &[0.0, 2.0, 1.0]),
+            (TREBLE, &[-15.0, 15.0]),
+            (SUB, &[15.0, 0.0]),
+            (OUTPUT, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+            (HI_QUALITY, &[1.0, 0.0]),
         ],
     );
 }
@@ -1302,6 +1351,42 @@ fn the_modulation_devices_pass_under_rtsan() {
     );
 }
 
+// Spec: gated-delay R8, pitch-hack R8
+#[test]
+fn gated_delay_and_pitch_hack_pass_under_rtsan() {
+    use bl_devices::{gated_delay as gated, pitch_hack as hack};
+    run_lo_fi_device(
+        gated::GATED_DELAY,
+        &[
+            (gated::step(1), &[0.0, 1.0]),
+            (gated::step(7), &[1.0, 0.0]),
+            (gated::STEPS, &[3.0, 16.0, 11.0]),
+            (gated::RATE, &[0.0, 4.0, 11.0]),
+            (gated::DELAY_STEPS, &[1.0, 16.0]),
+            (gated::FEEDBACK, &[0.0, 90.0]),
+            (gated::RANDOM, &[0.0, 50.0, 100.0]),
+            (gated::DRY_ON_RESTS, &[0.0, 1.0]),
+            (gated::INPUT, &[0.0, 1.0, 3.98]),
+            (gated::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+    run_lo_fi_device(
+        hack::PITCH_HACK,
+        &[
+            (hack::SYNC, &[0.0, 1.0]),
+            (hack::DIVISION, &[0.0, 5.0, 13.0]),
+            (hack::TIME, &[10.0, 250.0, 2_000.0]),
+            (hack::TRANSPOSE, &[-24.0, 7.0, 24.0]),
+            (hack::CENTS, &[-50.0, 50.0]),
+            (hack::REVERSE, &[0.0, 50.0, 100.0]),
+            (hack::RANDOM, &[0.0, 50.0, 100.0]),
+            (hack::FEEDBACK, &[0.0, 100.0]),
+            (hack::INPUT, &[0.0, 1.0]),
+            (hack::DRY_WET, &[0.0, 100.0]),
+        ],
+    );
+}
+
 // Spec: echo R18
 #[test]
 fn echo_passes_under_rtsan() {
@@ -1415,6 +1500,40 @@ fn spectrum_passes_under_rtsan() {
             (MAX, &[0.0, 1.0]),
             (GRAPH, &[0.0, 1.0]),
             (SCALE_X, &[0.0, 1.0, 2.0]),
+        ],
+    );
+}
+
+// Spec: device-framework R46
+#[test]
+fn the_test_spectrogram_passes_under_rtsan() {
+    use bl_devices::testing::{SPECTROGRAM, SPECTROGRAM_FREEZE};
+    run_lo_fi_device(SPECTROGRAM, &[(SPECTROGRAM_FREEZE, &[0.0, 1.0])]);
+}
+
+// Spec: spectral-time R17
+#[test]
+fn spectral_time_passes_under_rtsan() {
+    use bl_devices::spectral_time::*;
+    run_lo_fi_device(
+        SPECTRAL_TIME,
+        &[
+            (RESOLUTION, &[3.0, 0.0, 4.0, 1.0, 2.0]),
+            (FREEZE, &[1.0, 0.0, 1.0]),
+            (FREEZER_MODE, &[0.0, 1.0]),
+            (TRIGGER, &[0.0, 1.0]),
+            (FADE_SHAPE, &[0.0, 1.0]),
+            (INTERVAL_MODE, &[1.0, 0.0]),
+            (DELAY_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (TIME, &[10.0, 250.0, 5_000.0]),
+            (TILT, &[-100.0, 0.0, 100.0]),
+            (SPRAY, &[0.0, 50.0, 100.0]),
+            (MASK, &[-50.0, 0.0, 50.0]),
+            (FEEDBACK, &[0.0, 50.0, 100.0]),
+            (SHIFT, &[-12.0, 0.0, 12.0]),
+            (STEREO, &[0.0, 100.0]),
+            (ORDER, &[0.0, 1.0]),
+            (ZERO_DRY_LATENCY, &[0.0, 1.0]),
         ],
     );
 }

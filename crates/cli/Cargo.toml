@@ -31,11 +31,15 @@ bl-model.workspace = true
 # fixtures decode the files they make (WP-1.4).
 bl-media.workspace = true
 bl-rt.workspace = true
+# `transcribe-bench` runs the pitch network (WP-9.5), `bench stems` the stem
+# separation network and its generated mixes, and the sweeps' spectral
+# centroids come from the octave bands.
+bl-analysis = { workspace = true, features = ["stems"] }
 # The golden fixtures' audio files are sine chirps from libm's pure-Rust
 # sine, so they're the same to the bit on every platform (WP-1.4), as the
 # engine's test tone is.
 libm = { version = "0.2.16", default-features = false }
-clap = { version = "4.6.7", features = ["derive"] }
+clap = { version = "4.6.7", features = ["derive", "env"] }
 # Hands `engine-smoke`'s engine to the stream's callback once the stream has
 # opened at the device's rate.
 rtrb = "0.4.0"
@@ -61,8 +65,6 @@ bl-test-clap = { path = "../test-clap" }
 # MIDI backend as the keyboard, and decodes the audio it exports.
 bl-test-vst3 = { path = "../test-vst3" }
 bl-midi-io.workspace = true
-# The sweeps' spectral centroids come from the octave bands.
-bl-analysis.workspace = true
 # The agent API's MIDI file tests write and read Standard MIDI Files
 # (WP-2.21).
 bl-interop.workspace = true

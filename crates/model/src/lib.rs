@@ -95,6 +95,7 @@ mod mpe_settings;
 mod mpe_view;
 pub mod note_expression;
 pub mod note_ops;
+mod pad_layout;
 pub mod param;
 pub mod rack;
 mod record_quantization;
@@ -140,11 +141,12 @@ pub use clip_param::ClipParam;
 pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
 pub use command::{Command, tempo_shape, write_tempo_shape};
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
-    PluginFormat, PluginState, Sidechain, WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MAX_WAVETABLES,
+    MidiSidechain, PluginFormat, PluginState, Sidechain, WavetableChoice, WindowFrame,
 };
 pub use device_display::{
-    DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries,
+    DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,
+    SpectrogramGrid,
 };
 pub use device_layout::{DeviceLayout, DevicePages, PageChoice};
 pub use document::{ArrangementLoop, Document, MAX_CUE_VOLUME, Settings};
@@ -184,6 +186,7 @@ pub use layers::{
 };
 pub use locator::{Locator, SongStart};
 pub use metronome::{CountIn, MetronomeRhythm, MetronomeSettings, MetronomeSound};
+pub use pad_layout::{PadDirection, PadLayout, PadSpacing};
 pub use param::{
     BANK_SIZE, Bank, DeviceDescription, ParamDescriptor, ParamKind, ParamUnit, numbered,
 };

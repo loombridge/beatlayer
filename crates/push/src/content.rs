@@ -316,6 +316,12 @@ pub struct Ctx<'a> {
     pub held_steps: &'a [HeldStep],
     /// Mix's page, for Mix Mode (R22).
     pub mix_page: MixPage,
+    /// The display mode, for a pad mode whose buttons it shares (notes R45).
+    pub display: DisplayMode,
+    /// The key of the slice picked on a slicing Simpler's pads (notes R73).
+    pub slice: Option<u8>,
+    /// Whether Simpler's Pad Slicing is on (notes R74).
+    pub pad_slicing: bool,
     pub(crate) actions: &'a mut Vec<Action>,
 }
 
@@ -434,6 +440,8 @@ pub struct Paint<'a> {
     pub colours: &'a [[u8; 3]],
     /// The steps held in Note Mode.
     pub held_steps: &'a [HeldStep],
+    /// The key of the slice picked on a slicing Simpler's pads (notes R73).
+    pub slice: Option<u8>,
 }
 
 /// The content of one pad mode or display mode.
@@ -498,6 +506,15 @@ pub trait Content: Send {
     /// buttons it owns.
     fn paint(&mut self, _paint: &mut Paint<'_>) {}
 
+    /// A display button pressed while the Scale menu is open (notes R35).
+    fn scale_button(&mut self, _button: u8, _ctx: &mut Ctx<'_>) {}
+
+    /// An encoder turned while the Scale menu is open (notes R35).
+    fn scale_turn(&mut self, _column: u8, _steps: i32, _ctx: &mut Ctx<'_>) {}
+
+    /// Draws the Scale menu over the display (notes R35).
+    fn paint_scale(&mut self, _paint: &mut Paint<'_>) {}
+
     /// Whether the mode uses the lower display buttons itself rather than
     /// leaving them to the ring's tracks (R26).
     fn claims_lower(&self) -> bool {
@@ -518,6 +535,17 @@ pub trait Content: Send {
     /// if it has a use for it (R11).
     fn strip_use(&self) -> Option<StripUse> {
         None
+    }
+
+    /// The key of the slice picked on the pads, if they play a slicing
+    /// Simpler's slices (notes R73).
+    fn picked_slice(&self, _model: &ReadModel) -> Option<u8> {
+        None
+    }
+
+    /// Whether Simpler's Pad Slicing is on, which the pads read (notes R74).
+    fn pad_slicing(&self) -> bool {
+        false
     }
 
     /// What Note Mode shows, for `push.state` (notes R5 to R31).

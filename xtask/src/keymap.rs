@@ -85,6 +85,14 @@ const DECLINING_COMMANDS: &[&str] = &[
 /// its key means.
 const WIDGET: &[(&str, &str)] = &[
     (
+        "S-DEV-016",
+        "Roar's Feedback Note control steps its key by a semitone, as a device control's own keys do (the roar spec R26)",
+    ),
+    (
+        "S-DEV-017",
+        "Roar's Feedback Note control steps its key by an octave, its coarse step (the roar spec R26)",
+    ),
+    (
         "S-EDIT-014",
         "the Session View: Shift with Cut, Copy, Paste or Duplicate is S-SES-029 to S-SES-032, \
          which run `session.cut`, `session.copy`, `session.paste` and `session.duplicate` with \

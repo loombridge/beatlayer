@@ -6,9 +6,10 @@ use bl_core::midi::MidiMessage;
 use bl_model::{Chain, DeviceId, Receive};
 use serde_json::json;
 
-use super::{Down, Frame, Kind, Note, Source, clip, grid::Role};
+use super::{Down, Frame, Kind, Note, Sounding, Source, clip, grid::Role};
 use crate::content::{Ctx, Pad, Target};
 use crate::controls::cc;
+use crate::simpler::{self, FIRST_KEY};
 
 /// The chains of `rack` that receive `note`: the pad's.
 pub(super) fn pad_chains(model: &ReadModel, rack: DeviceId, note: u8) -> Vec<&Chain> {
@@ -45,7 +46,13 @@ impl Note {
             Role::Drum(note) => self.drum(&frame, note, velocity, ctx, model),
             Role::Velocity(velocity) => self.velocity_pad(&frame, velocity, ctx),
             Role::Loop(page) => self.loop_pad(&frame, page, ctx, model),
+            Role::Step(index) if matches!(frame.kind, Kind::Melodic) => {
+                self.notes_step(&frame, index, ctx, model)
+            }
             Role::Step(index) => self.step_pad(&frame, index, ctx, model),
+            Role::Key(note) => self.key_pad(&frame, note, velocity, ctx, model),
+            Role::Pick(note) => self.pick_pad(&frame, note, velocity, ctx, model),
+            Role::Cell { key, step } => self.cell_pad(&frame, key, step, ctx, model),
             Role::Off => Down::Done,
         };
         self.down.insert((pad.row, pad.column), down);
@@ -54,7 +61,14 @@ impl Note {
     /// Releasing a pad ends the note it played, whatever the layout has
     /// become since (R2).
     pub(super) fn pad_off(&mut self, pad: Pad, ctx: &mut Ctx<'_>) {
-        if let Some(Down::Played(note)) = self.down.remove(&(pad.row, pad.column)) {
+        if let Some(
+            Down::Played(note)
+            | Down::Picked {
+                key: note,
+                played: true,
+            },
+        ) = self.down.remove(&(pad.row, pad.column))
+        {
             ctx.cx.play_at(ctx.at, MidiMessage::note_off(0, note));
         }
     }
@@ -65,7 +79,7 @@ impl Note {
             Kind::Rack { rack, .. } => ctx
                 .cx
                 .run("pad.select", json!({ "rack": rack, "note": note })),
-            Kind::Slices => {
+            Kind::Slices { .. } => {
                 self.picked.insert(frame.track, note);
             }
             Kind::Melodic | Kind::Silent => {}
@@ -83,8 +97,19 @@ impl Note {
         let modifiers = ctx.modifiers;
         let (rack, filled) = match frame.kind {
             Kind::Rack { rack, filled, .. } => (Some(rack), filled >> note & 1 == 1),
+            Kind::Slices { filled, .. } => (None, filled >> note & 1 == 1),
             _ => (None, true),
         };
+        if let Kind::Slices { device, .. } = frame.kind
+            && !filled
+        {
+            // A pad past the last slice does nothing, unless Pad Slicing
+            // makes a slice of it (R74).
+            if ctx.pad_slicing && !ctx.modifiers.any() {
+                self.slice_here(device, ctx, model);
+            }
+            return Down::Done;
+        }
         if modifiers.shift() {
             // The colour picker for the pad (R19).
             if let Some(rack) = rack
@@ -125,8 +150,32 @@ impl Note {
             return Down::Done;
         }
         self.pick(frame, note, ctx);
+        if let Kind::Slices { device, .. } = frame.kind {
+            self.sounding = simpler::View::of(model, device)
+                .and_then(|view| view.played(usize::from(note - FIRST_KEY)))
+                .map(|played| Sounding { at: ctx.at, played });
+        }
         ctx.cx.play_at(ctx.at, note_on(note, velocity));
         Down::Played(note)
+    }
+
+    /// Pad Slicing: a slice where the sample plays now, as far on as the
+    /// pad that started it has played (R74).
+    fn slice_here(&mut self, device: DeviceId, ctx: &mut Ctx<'_>, model: &ReadModel) {
+        let Some(Sounding { at, played }) = self.sounding else {
+            return;
+        };
+        if !simpler::View::of(model, device).is_some_and(|view| view.manual()) {
+            return;
+        }
+        let elapsed = ctx.at.saturating_duration_since(at).as_secs_f64();
+        let frame = played.start + (elapsed * played.per_second) as u64;
+        if frame > played.start && frame < played.end {
+            ctx.cx.run(
+                "device.add_slice",
+                json!({ "device": device, "frame": frame }),
+            );
+        }
     }
 
     /// Delete and a pad: its notes in the clip the steps edit, or its chains
@@ -159,6 +208,17 @@ impl Note {
         {
             ctx.cx
                 .run("pad.delete", json!({ "rack": rack, "note": note }));
+        }
+        // A slice placed by hand goes with its pad (R73).
+        if let Kind::Slices { device, .. } = frame.kind
+            && filled
+            && let Some(frame) = simpler::View::of(model, device)
+                .and_then(|view| view.manual_start(usize::from(note - FIRST_KEY)))
+        {
+            ctx.cx.run(
+                "device.delete_slice",
+                json!({ "device": device, "frame": frame }),
+            );
         }
     }
 

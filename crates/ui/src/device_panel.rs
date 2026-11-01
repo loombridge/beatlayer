@@ -434,6 +434,7 @@ pub fn show(
         let shown = match display {
             Some(d) if d.series.iter().any(|s| s.name == name) => {
                 own = DeviceDisplay {
+                    spectrograms: Vec::new(),
                     series: d
                         .series
                         .iter()
@@ -446,7 +447,24 @@ pub fn show(
                 };
                 Some(&own)
             }
-            Some(d) if index == 0 && has_drawing(d) => Some(d),
+            // Spec: roar R31. Roar's source traces have cells of their own
+            // on their pages; the shaper's cell leaves them out.
+            Some(d) if index == 0 && has_drawing(d) => {
+                let roar = frame.kind
+                    == bl_model::DeviceKind::Native {
+                        device_type: bl_devices::roar::ROAR.to_owned(),
+                    };
+                own = DeviceDisplay {
+                    series: d
+                        .series
+                        .iter()
+                        .filter(|s| !(roar && bl_devices::roar::SOURCES.contains(&s.name.as_str())))
+                        .cloned()
+                        .collect(),
+                    ..d.clone()
+                };
+                Some(&own)
+            }
             _ => None,
         };
         if let Some(display) = shown {
@@ -521,6 +539,16 @@ pub fn show(
             })
             .flatten(),
             automation: menu(param),
+            coarse: if frame.kind
+                == (bl_model::DeviceKind::Native {
+                    device_type: bl_devices::roar::ROAR.to_owned(),
+                })
+                && param == bl_devices::roar::FB_NOTE
+            {
+                12
+            } else {
+                1
+            },
         };
         // Spec: scales R16. A parameter the device takes from its current
         // scale is drawn disabled.
@@ -644,6 +672,7 @@ fn display_drag(
         configured: &[],
         text: None,
         automation: None,
+        coarse: 1,
     };
     let response = ui.interact(rect, id.with("drag"), Sense::click_and_drag());
     control.value_input(ui, &response, events);
@@ -850,7 +879,7 @@ fn corpus_xy(
 
 /// Whether a display has anything to draw.
 fn has_drawing(display: &DeviceDisplay) -> bool {
-    !(display.series.is_empty() && display.readings.is_empty())
+    !(display.series.is_empty() && display.readings.is_empty() && display.spectrograms.is_empty())
 }
 
 /// One control being drawn.
@@ -878,6 +907,9 @@ struct Control<'a> {
     text: Option<String>,
     /// The automation items of its context menu (the automation spec, R29).
     automation: Option<ParamMenu>,
+    /// How many steps Shift with Up or Down moves it: 12 for Roar's
+    /// Feedback Note, an octave (the roar spec, R26), else 1.
+    coarse: i32,
 }
 
 impl Control<'_> {
@@ -996,12 +1028,18 @@ impl Control<'_> {
             ui.input(|i| {
                 for event in &i.events {
                     if let Event::Key {
-                        key, pressed: true, ..
+                        key,
+                        pressed: true,
+                        modifiers,
+                        ..
                     } = event
                     {
+                        // Spec: roar R26. Shift moves a coarse control by
+                        // its coarse step.
+                        let by = if modifiers.shift { self.coarse } else { 1 };
                         match key {
-                            Key::ArrowUp => steps += 1,
-                            Key::ArrowDown => steps -= 1,
+                            Key::ArrowUp => steps += by,
+                            Key::ArrowDown => steps -= by,
                             Key::Delete | Key::Backspace => reset = true,
                             _ => {}
                         }

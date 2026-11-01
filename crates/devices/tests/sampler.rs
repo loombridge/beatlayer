@@ -640,6 +640,36 @@ fn one_shot_ignores_a_note_off_with_trigger_on_and_fades_with_it_off() {
     assert!(left[960..1440].iter().all(|s| (0.0..=1.0).contains(s)));
 }
 
+// Spec: push-2-notes R71. All Sound Off fades every voice out over the steal
+// fade, a One-Shot's included, whatever its Trigger says.
+#[test]
+fn all_sound_off_silences_a_one_shot_at_once() {
+    let flat = sample(4800, |_| 1.0);
+    let collector = Collector::new();
+    let mut node = sampler(&[(MODE, 1.0)], 9600);
+    give(node.as_mut(), &collector, &flat);
+    let out = run_notes(
+        node.as_mut(),
+        9600,
+        &[
+            note(0, NoteKind::On, 60, 1.0),
+            note(
+                960,
+                NoteKind::Control {
+                    controller: 120,
+                    value: 0.0,
+                },
+                0,
+                0.0,
+            ),
+        ],
+    );
+    let left = &out[0];
+    assert!(left[..960].iter().all(|s| (s - 1.0).abs() < 1e-6));
+    // The 5 ms steal fade, 240 frames, and then nothing.
+    assert!(left[1200..].iter().all(|s| s.abs() < 1e-6));
+}
+
 // Spec: sampler R11
 #[test]
 fn the_engine_plays_the_sample_the_set_names() {

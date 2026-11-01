@@ -265,8 +265,8 @@ fn play_works_while_mute_is_locked() {
 }
 
 // Spec: push-2 R26. The lower display buttons stand for the ring's tracks: a
-// press selects the track with `session.select`, and each is labelled with the
-// track's name.
+// press selects the track with `session.select` and in the Arrangement, and
+// each is labelled with the track's name.
 #[test]
 fn the_lower_buttons_select_the_rings_tracks() {
     let mut rig = started();
@@ -277,18 +277,24 @@ fn the_lower_buttons_select_the_rings_tracks() {
     rig.tap("lower_3");
     assert_eq!(
         rig.commands(),
-        [format!(
-            "session.select {}",
-            json!({ "track": rig.tracks[2] })
-        )]
+        [
+            format!("session.select {}", json!({ "track": rig.tracks[2] })),
+            format!(
+                "arrangement.select_tracks {}",
+                json!({ "tracks": [rig.tracks[2]] })
+            ),
+        ]
     );
     rig.tap("lower_8");
     assert_eq!(
         rig.commands(),
-        [format!(
-            "session.select {}",
-            json!({ "track": rig.tracks[7] })
-        )]
+        [
+            format!("session.select {}", json!({ "track": rig.tracks[7] })),
+            format!(
+                "arrangement.select_tracks {}",
+                json!({ "tracks": [rig.tracks[7]] })
+            ),
+        ]
     );
 
     // A mode that uses them itself gets them instead.

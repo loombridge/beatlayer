@@ -837,6 +837,11 @@ pub struct Chain {
     /// swatches, from 0 to 69, or none.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub colour: Option<u8>,
+    /// The swatch a drum rack's chain shows on Push 2 in place of its
+    /// track's colour (the notes on Push 2 spec, R19), from 0 to 69, or
+    /// none. Only a drum rack's chains have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_colour: Option<u8>,
     /// The info text the user gave the chain (Edit Info Text).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub info: String,
@@ -1068,6 +1073,7 @@ impl Chain {
         self.receive.is_default()
             && self.play == DEFAULT_PLAY
             && self.choke.is_none()
+            && self.push_colour.is_none()
             && self.sends.is_empty()
             && !self.is_return
             && self.audio_to.is_none()
@@ -1089,6 +1095,7 @@ impl Chain {
             self.receive = Receive::default();
             self.play = DEFAULT_PLAY;
             self.choke = None;
+            self.push_colour = None;
             self.sends.clear();
             self.is_return = false;
         }
@@ -1119,6 +1126,7 @@ impl Chain {
             id,
             name: name.into(),
             colour: None,
+            push_colour: None,
             info: String::new(),
             mixer: ChainMixer::default(),
             zones: ChainZones::default(),

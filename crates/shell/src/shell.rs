@@ -145,6 +145,7 @@ mod plugin_commands;
 mod plugin_scan;
 mod plugin_windows;
 mod push;
+mod push_session;
 mod recording_takes;
 mod recovery;
 mod remote;

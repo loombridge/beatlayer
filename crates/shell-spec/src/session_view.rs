@@ -279,6 +279,15 @@ pub struct CopyClipArgs {
     pub scene: SceneId,
 }
 
+/// Arguments of `session.capture_and_insert_scene`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CaptureArgs {
+    /// Tracks whose playing clips aren't copied into the new scene.
+    #[serde(default)]
+    pub except: Vec<TrackId>,
+}
+
 /// Arguments of `session.drop_files`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]

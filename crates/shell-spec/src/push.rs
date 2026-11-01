@@ -21,11 +21,29 @@ pub const SET_MODE: &str = "push.set_mode";
 pub const SET_SETUP: &str = "push.set_setup";
 /// `push.display_frame`: the latest display frame as a PNG.
 pub const DISPLAY_FRAME: &str = "push.display_frame";
+/// `push.set_fixed_length`: Fixed Length's switch, length and Phrase Sync.
+pub const SET_FIXED_LENGTH: &str = "push.set_fixed_length";
+/// `push.set_swing`: the swing amount.
+pub const SET_SWING: &str = "push.set_swing";
+/// `push.new`: Push 2's New button.
+pub const NEW: &str = "push.new";
+/// `push.duplicate`: Push 2's Duplicate button pressed alone.
+pub const DUPLICATE: &str = "push.duplicate";
 /// `push.convert`: what Convert makes of what is selected.
 pub const CONVERT: &str = "push.convert";
 
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[STATE, SET_MODE, SET_SETUP, DISPLAY_FRAME, CONVERT];
+pub const IDS: &[&str] = &[
+    STATE,
+    SET_MODE,
+    SET_SETUP,
+    DISPLAY_FRAME,
+    CONVERT,
+    SET_FIXED_LENGTH,
+    SET_SWING,
+    NEW,
+    DUPLICATE,
+];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -75,6 +93,10 @@ pub enum PushMenu {
     Setup,
     /// Scale.
     Scale,
+    /// Quantize (the notes on Push 2 spec, R58).
+    Quantize,
+    /// Fixed Length (the notes on Push 2 spec, R50).
+    FixedLength,
     /// The choices Convert offers for an audio clip.
     Convert,
 }
@@ -539,6 +561,95 @@ pub struct PushInfo {
     pub mix_mode: Option<PushMix>,
     /// What Note Mode shows, while it is the pad mode.
     pub note: Option<PushNote>,
+    /// Recording, Fixed Length and the swing amount (the notes on Push 2
+    /// spec, R48 to R63).
+    pub recording: PushRecording,
+}
+
+/// What `push.state` reports of recording on Push 2.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushRecording {
+    /// What Record shows: `off`, `session` (a Session recording or an
+    /// overdub) or `arrangement`.
+    pub record: String,
+    /// Fixed Length's settings.
+    pub fixed_length: PushFixedLength,
+    /// The swing amount, 0 to 100 %.
+    pub swing: u8,
+    /// Whether Automation Arm is on (Automate).
+    pub automation_arm: bool,
+    /// What the Quantize menu shows while it is open.
+    pub quantize_menu: Option<PushQuantizeMenu>,
+}
+
+/// Fixed Length's settings (the notes on Push 2 spec, R50).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushFixedLength {
+    /// Whether it is on.
+    pub on: bool,
+    /// The length of the clip a recording makes.
+    pub length: PushFixedLengthValue,
+    /// Whether Phrase Sync is on.
+    pub phrase_sync: bool,
+}
+
+/// The lengths Fixed Length offers (the notes on Push 2 spec, R50).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub enum PushFixedLengthValue {
+    /// 1 beat.
+    #[serde(rename = "1 beat")]
+    Beat1,
+    /// 2 beats.
+    #[serde(rename = "2 beats")]
+    Beats2,
+    /// 1 bar.
+    #[serde(rename = "1 bar")]
+    Bar1,
+    /// 2 bars.
+    #[serde(rename = "2 bars")]
+    Bars2,
+    /// 4 bars.
+    #[serde(rename = "4 bars")]
+    Bars4,
+    /// 8 bars.
+    #[serde(rename = "8 bars")]
+    Bars8,
+    /// 16 bars.
+    #[serde(rename = "16 bars")]
+    Bars16,
+    /// 32 bars.
+    #[serde(rename = "32 bars")]
+    Bars32,
+}
+
+impl PushFixedLengthValue {
+    /// Every length, shortest first.
+    pub const ALL: [Self; 8] = [
+        Self::Beat1,
+        Self::Beats2,
+        Self::Bar1,
+        Self::Bars2,
+        Self::Bars4,
+        Self::Bars8,
+        Self::Bars16,
+        Self::Bars32,
+    ];
+}
+
+/// The Quantize menu (the notes on Push 2 spec, R58).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushQuantizeMenu {
+    /// Swing Amount, 0 to 100 %.
+    pub swing: u8,
+    /// Quantize To, as the grid's note value, such as `1/16`.
+    pub quantize_to: String,
+    /// Quantize Amount, 0 to 100 %.
+    pub amount: u8,
+    /// Record Quantize's value, as `transport.set_record_quantization`
+    /// names it.
+    pub record_quantize: String,
+    /// Whether the menu stays after Quantize is released.
+    pub stays: bool,
 }
 
 /// A step held down in Note Mode.
@@ -613,6 +724,10 @@ pub struct PushNote {
     pub velocity: Option<u8>,
     /// The steps held down now.
     pub held_steps: Vec<PushHeldStep>,
+    /// Whether Accent is on, tapped or held (the notes on Push 2 spec, R54).
+    pub accent: bool,
+    /// Whether Repeat is on for the track, tapped or held (R55).
+    pub repeat: bool,
     /// What a melodic layout shows, on a melodic track.
     pub melody: Option<PushMelody>,
 }
@@ -677,6 +792,43 @@ pub struct PushSetSetupArgs {
     /// Workflow.
     #[serde(default)]
     pub workflow: Option<PushWorkflow>,
+}
+
+/// Arguments of `push.set_fixed_length`. Fields left out stay.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushSetFixedLengthArgs {
+    /// Whether Fixed Length is on.
+    #[serde(default)]
+    pub enabled: Option<bool>,
+    /// The length of the clip a recording makes.
+    #[serde(default)]
+    pub length: Option<PushFixedLengthValue>,
+    /// Whether Phrase Sync is on.
+    #[serde(default)]
+    pub phrase_sync: Option<bool>,
+}
+
+/// Arguments of `push.set_swing`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushSetSwingArgs {
+    /// The swing amount, 0 to 100 %.
+    #[schemars(range(min = 0, max = 100))]
+    pub amount: u8,
+}
+
+/// Arguments of `push.new` and `push.duplicate`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushSessionArgs {
+    /// The Workflow to act as. Left out, the Setup menu's.
+    #[serde(default)]
+    pub workflow: Option<PushWorkflow>,
+    /// For `push.duplicate`: capture a scene, as Shift with Duplicate does,
+    /// whatever the Workflow.
+    #[serde(default)]
+    pub scene: bool,
 }
 
 /// Arguments of `push.display_frame`.
@@ -759,6 +911,63 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<PushSetSetupArgs>()
             .result::<PushSetup>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_FIXED_LENGTH, "Set Push 2 Fixed Length")
+            .description(
+                "Sets Fixed Length on Push 2: whether it is on, the length of the clip a Session \
+                 recording makes (1 beat, 2 beats, 1 bar, 2 bars, 4 bars, 8 bars, 16 bars or \
+                 32 bars) and Phrase Sync. They are preferences, kept between launches and the \
+                 same for every set. With Fixed Length on, `session.record` makes an empty clip \
+                 of the length and ends by itself at its end. Read back by `push.state` \
+                 (`recording.fixed_length`).",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSetFixedLengthArgs>()
+            .result::<PushFixedLength>(),
+    )?;
+    registry.register(
+        CommandSpec::new(SET_SWING, "Set Push 2 Swing Amount")
+            .description(
+                "Sets the swing amount, 0 to 100 %: the share of half a step by which Repeat and \
+                 Quantize delay every second note. A preference, the same as Push 2's swing \
+                 encoder and its Quantize menu set. Read back by `push.state` \
+                 (`recording.swing`).",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSetSwingArgs>()
+            .result::<u8>(),
+    )?;
+    registry.register(
+        CommandSpec::new(NEW, "Push 2 New")
+            .description(
+                "Push 2's New button: stops the selected track's clip and selects an empty slot \
+                 on it to record into. With Workflow Scene it inserts a scene after the selected \
+                 one holding copies of the clips playing on the other tracks, which carry on \
+                 from it, and selects the track's empty slot there; with Workflow Clip it \
+                 selects the next empty slot below on the track, inserting a scene if there is \
+                 none. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSessionArgs>()
+            .result::<()>(),
+    )?;
+    registry.register(
+        CommandSpec::new(DUPLICATE, "Push 2 Duplicate")
+            .description(
+                "Push 2's Duplicate button pressed alone. With Workflow Scene (or `scene`) it \
+                 runs Capture and Insert Scene, so the new scene plays without a break. With \
+                 Workflow Clip it copies the selected clip into the slot below, inserting a \
+                 scene if that slot holds a clip, and launches the copy as a Legato launch, \
+                 leaving the other tracks playing. One undo step.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushSessionArgs>()
+            .result::<()>(),
     )?;
     registry.register(
         CommandSpec::new(CONVERT, "Push 2 Convert")

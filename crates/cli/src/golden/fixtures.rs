@@ -263,6 +263,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: echo,
     },
     Fixture {
+        name: "operator",
+        about: "A phrase through Operator in algorithm 4: a looped modulator whose envelope \
+                restarts on every beat and a pitch envelope that restarts on the song's \
+                sixteenths, Time and Time < Key stretching the envelopes, and velocity and key \
+                moving the levels and the pan.",
+        build: operator,
+    },
+    Fixture {
         name: "resonators",
         about: "A drum loop of two bars through Resonators in Mode B with four resonators on, \
                 a band-pass filter, Const, a brighter Color and a shorter Decay.",
@@ -1069,6 +1077,96 @@ fn echo() -> Scene {
         track,
         index: 0,
         device,
+    });
+    song.finish(3.0)
+}
+
+/// Spec: operator R11 to R17. A phrase through Operator with Beat and Sync
+/// envelopes on the song's grid.
+fn operator() -> Scene {
+    use bl_devices::operator::{self as op, OPERATOR, osc, shaped};
+    use bl_devices::operator_envelope::Loop;
+
+    let mut song = Song::new();
+    let beat = Ticks::QUARTER.0;
+    let keys = song.track(TrackKind::Midi, "Operator", None);
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Operator",
+        DeviceKind::Native {
+            device_type: OPERATOR.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (op::ALGORITHM, 4.0),
+        (op::ANTIALIAS, 0.0),
+        (op::TONE, 80.0),
+        (op::TIME, 15.0),
+        (op::TIME_KEY, 20.0),
+        (op::PAN_KEY, 35.0),
+        (op::PAN_RANDOM, 25.0),
+        (op::VOICES, 4.0),
+        (osc(0, op::OSC_LEVEL_VEL), 50.0),
+        (osc(0, op::OSC_LEVEL_KEY), 20.0),
+        (osc(0, op::ENV_SUSTAIN), 0.5),
+        (osc(0, op::ENV_RELEASE), 400.0),
+        (osc(1, op::OSC_LEVEL), 0.3),
+        (osc(1, op::OSC_COARSE), 2.0),
+        (osc(1, op::OSC_FEEDBACK), 25.0),
+        (osc(1, op::ENV_LOOP), Loop::Beat as usize as f64),
+        (osc(1, op::ENV_REPEAT), 4.0),
+        (osc(1, op::ENV_DECAY), 250.0),
+        (osc(1, op::ENV_SUSTAIN), 0.05),
+        (osc(2, op::OSC_LEVEL), 0.2),
+        (osc(2, op::OSC_COARSE), 3.0),
+        (osc(2, op::OSC_FINE), 20.0),
+        (osc(2, op::ENV_SUSTAIN), 0.1),
+        (osc(2, op::ENV_DECAY), 500.0),
+        (op::PITCH_ON, 1.0),
+        (op::PITCH_AMOUNT, 15.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_INITIAL), 100.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_PEAK), 100.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_SUSTAIN), 0.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_DECAY), 300.0),
+        (shaped(op::PITCH_ENV, op::SHAPED_DECAY_SLOPE), 0.5),
+        (
+            shaped(op::PITCH_ENV, op::SHAPED_LOOP),
+            Loop::Sync as usize as f64,
+        ),
+        (shaped(op::PITCH_ENV, op::SHAPED_REPEAT), 3.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track: keys,
+        index: 0,
+        device,
+    });
+    let notes: Vec<bl_model::Note> = [
+        (48u8, 0i64, 6i64, 110u8),
+        (55, 5, 5, 60),
+        (60, 10, 6, 90),
+        (64, 14, 4, 127),
+    ]
+    .iter()
+    .map(|&(key, start, length, velocity)| {
+        bl_model::Note::new(
+            key,
+            Ticks(start * beat / 4),
+            Ticks(length * beat / 4),
+            velocity,
+        )
+    })
+    .collect();
+    let clip = song.editor.new_id();
+    song.apply(Command::CreateClip {
+        track: keys,
+        clip: Clip::new(
+            clip,
+            Ticks::ZERO,
+            Ticks::QUARTER * 6,
+            ClipData::Midi(bl_model::MidiData::new(notes)),
+        ),
     });
     song.finish(3.0)
 }

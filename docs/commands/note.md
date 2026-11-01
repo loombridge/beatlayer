@@ -496,7 +496,7 @@ Result: [`ClipViewState`](README.md#clipviewstate).
 
 **Quantize**. Permission: `edit`. Contexts: `note-editor`, `note-selection`.
 
-Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (with `target` `note_start`), or its end (`note_end`), or its start and then its end (`both`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. With `both`, an end whose nearest line is at or before the note's start goes toward the first line after the start instead. `grid`, `target`, and `amount` left out use the Quantize tool's settings (`clip_view.quantize_settings`, `midi_tool.state`), whose grid follows the note editor's editing grid until a note division is chosen and is a triplet of it with Triplets on. Quantising is one undo step, and the quantised notes stay selected.
+Quantises notes (`notes`, or the selected notes) to `grid`: each note moves `amount` percent of the way from its start (with `target` `note_start`), or its end (`note_end`), or its start and then its end (`both`) to the nearest grid line, so 100 percent lands it on the line and 50 percent halves its distance to it. The lines are laid out from each bar's start, as the note editor's grid is, and a spacing of whole bars counts bars from 1.1.1. With `both`, an end whose nearest line is at or before the note's start goes toward the first line after the start instead. `grid`, `target`, and `amount` left out use the Quantize tool's settings (`clip_view.quantize_settings`, `midi_tool.state`), whose grid follows the note editor's editing grid until a note division is chosen and is a triplet of it with Triplets on. `swing`, from 0 to 100, delays every second line of the grid by that share of half a step; `pitch` quantises only the notes of that pitch; `or_all` quantises every note when none is selected. Quantising is one undo step, and the quantised notes stay selected.
 
 Default keys:
 
@@ -513,6 +513,9 @@ Arguments:
 | `clips` | array or null | no | The clips, each with its notes, in place of `clip` and `notes` (Spec: multi-clip-editing R18). Left out with `clip` and `notes`, the selected notes of every clip shown, or of the active clip alone in Focus Mode. |
 | `grid` | [`Ticks`](README.md#ticks) or null | no | The grid line spacing in ticks, over the Quantize settings. Lines are laid out from each bar's start, as the editing grid's are; a spacing of whole bars counts bars from 1.1.1. |
 | `notes` | array or null | no | The notes, by their place in the clip's notes in order (by start, then pitch). Left out, the selected notes. |
+| `or_all` | boolean | no | With no `notes` and none selected, quantise every note of the clip rather than refusing. |
+| `pitch` | integer or null | no | Only the notes of this pitch, in place of `notes` and the selection. |
+| `swing` | integer or null | no | How much every second grid line is delayed, from 0 to 100 percent of half a step. Left out, none. |
 | `target` | [`QuantizeTarget`](README.md#quantizetarget) or null | no | What to move toward the grid. |
 
 Result: [`NoteEditResult`](README.md#noteeditresult).

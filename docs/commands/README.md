@@ -20345,7 +20345,7 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
 
 ### `MidiSidechainSection`
 
-A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -20357,7 +20357,7 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
 
 ```json
 {
-  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).",
   "properties": {
     "shown": {
       "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",

@@ -57,6 +57,11 @@ impl ScaleRuns {
             .map_or(self.first, |(_, scale)| *scale)
     }
 
+    /// The frames within the block where the scale changes.
+    pub fn change_frames(&self) -> impl Iterator<Item = u32> + '_ {
+        self.changes[..self.len].iter().map(|(frame, _)| *frame)
+    }
+
     /// The scale at the block's last frame, which the next block starts
     /// from.
     #[must_use]

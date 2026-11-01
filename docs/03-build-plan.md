@@ -1046,7 +1046,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |
 | 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
-| 9.13 | todo |  |  |
+| 9.13 | done | 1 November 2026 | [#672](https://github.com/loombridge/beatlayer/pull/672): Tempo Follower follows the tracker in the engine before Link, with Settings ▸ Tempo & MIDI's section, the Control Bar's Follow toggle, EXT and Tap off while it follows, Link peers taking the followed tempo, and the `tempo_follower.*` commands |
 | 9.14 | todo |  |  |
 | 9.15 | todo |  |  |
 | 9.16 | todo |  |  |

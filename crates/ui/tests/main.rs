@@ -106,5 +106,6 @@ mod tuning_section;
 mod undo_history;
 mod user_keymap;
 mod vector_delay;
+mod vocoder;
 mod zone_editor;
 mod zoom;

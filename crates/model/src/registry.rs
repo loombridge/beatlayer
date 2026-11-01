@@ -505,6 +505,21 @@ const ENTRIES: &[Entry] = &[
             \"Change Scale\", and the set is saved with it.",
     },
     Entry {
+        id: "song.set_pad_layout",
+        action: Action::Apply("set_pad_layout"),
+        label: "Set Pad Layout",
+        permission: Permission::Edit,
+        contexts: &[Global],
+        keys: &[],
+        description: "Sets how a note-playing controller such as Push 2 lays the set's scale out \
+            on its pads: `in_key` (the pads play the scale's notes; false is Chromatic), \
+            `fixed` (the bottom-left pad stays on C whatever the scale's root), `spacing` \
+            (`fourths`, `thirds` or `sequent`, the interval between rows) and `direction` \
+            (`vertical` or `horizontal`). It leaves the values it isn't given as they were. A \
+            new set is In Key, fourths, vertical, Fixed off. The layout is saved with the set \
+            and is no undo step.",
+    },
+    Entry {
         id: "tuning.set",
         action: Action::Apply("set_tuning"),
         label: "Set Tuning",

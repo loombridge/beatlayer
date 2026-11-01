@@ -414,13 +414,41 @@ pub struct PushHeldStep {
     pub length: bl_core::time::Ticks,
 }
 
-/// What Note Mode shows (the notes on Push 2 spec, R1 to R31).
+/// What a melodic track's layouts show (the notes on Push 2 spec, R32 to
+/// R44).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushMelody {
+    /// In Key (true) or Chromatic.
+    pub in_key: bool,
+    /// Whether the bottom-left pad stays on C.
+    pub fixed: bool,
+    /// The interval between rows: `4ths`, `3rds` or `Sequent`.
+    pub layout: String,
+    /// `Vertical` or `Horizontal`.
+    pub direction: String,
+    /// 64 Notes' shift in octaves from where the pads start.
+    pub octave: i32,
+    /// The lowest note the pads, rows or 32 notes hold, as a MIDI note.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+    /// The range as the display notifies it, such as `C1 to C3`.
+    pub range: String,
+    /// The notes selected in the Melodic Sequencer + 32 Notes.
+    pub selected_notes: Vec<u8>,
+    /// Whether the touch strip is the modulation wheel rather than pitch
+    /// bend, in 64 Notes.
+    pub strip_modulation: bool,
+}
+
+/// What Note Mode shows (the notes on Push 2 spec, R1 to R47).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PushNote {
     /// The track the pads play: the first selected one.
     pub track: Option<bl_model::TrackId>,
     /// The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum
-    /// track, `Melodic` on another MIDI track, `None` on any other track.
+    /// track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32
+    /// Notes` on another MIDI track, `None` on any other track.
     pub layout: String,
     /// What holding Layout, or Shift and Layout, shows in the lower-right
     /// pads, if anything: `16 Velocities` or `Loop Length Pads`.
@@ -445,6 +473,8 @@ pub struct PushNote {
     pub velocity: Option<u8>,
     /// The steps held down now.
     pub held_steps: Vec<PushHeldStep>,
+    /// What a melodic layout shows, on a melodic track.
+    pub melody: Option<PushMelody>,
 }
 
 /// What `push.state` returns.

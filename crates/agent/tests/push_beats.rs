@@ -127,3 +127,70 @@ fn an_agent_reads_note_mode_and_reads_back_pad_copy_and_pad_colours() {
     assert_eq!(on(40)[0]["push_colour"], 11, "the copy keeps the colour");
     assert_eq!(on(37)[0]["push_colour"], Value::Null);
 }
+
+// Spec: push-2-notes R32, R37, R43. An agent sets the pad layout and reads it,
+// and the selected notes, in `push.state`, and the song query reads the saved
+// option.
+#[test]
+fn an_agent_sets_the_pad_layout_and_reads_the_melodic_state() {
+    let test = TestBackend::new();
+    let clock = TestClock::new();
+    let mut sim = Simulated::new(&test, &clock);
+    let mut shell = Shell::headless();
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell.use_test_clock(clock.clone());
+    shell.use_push_display(sim.frames().claim());
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    sim.plug_in();
+    shell.refresh_midi();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    let settle = |client: &mut Client<InProcess>, sim: &mut Simulated| {
+        for _ in 0..6 {
+            client.transport().shell.poll();
+            client.transport().shell.midi().surfaces().tick();
+            loop {
+                run(client, "control_surface.list", json!({}));
+                if sim.pump() == 0 {
+                    break;
+                }
+            }
+            clock.advance(std::time::Duration::from_millis(30));
+        }
+    };
+    settle(&mut client, &mut sim);
+
+    let note = run(&mut client, "push.state", json!({}))["pushes"][0]["note"].clone();
+    assert_eq!(note["layout"], "64 Notes", "{note}");
+    assert_eq!(note["melody"]["in_key"], true);
+    assert_eq!(note["melody"]["layout"], "4ths");
+    assert_eq!(note["melody"]["selected_notes"], json!([]));
+
+    run(
+        &mut client,
+        "song.set_pad_layout",
+        json!({ "in_key": false, "spacing": "sequent", "direction": "horizontal" }),
+    );
+    settle(&mut client, &mut sim);
+    let note = run(&mut client, "push.state", json!({}))["pushes"][0]["note"].clone();
+    let melody = &note["melody"];
+    assert_eq!(melody["in_key"], false, "{note}");
+    assert_eq!(melody["layout"], "Sequent");
+    assert_eq!(melody["direction"], "Horizontal");
+
+    // The song query reads the saved option.
+    let read = query(&mut client, json!({ "path": "song", "detail": "full" }));
+    assert_eq!(
+        read["saved"]["settings"]["pad_layout"]["spacing"], "sequent",
+        "{read}"
+    );
+}

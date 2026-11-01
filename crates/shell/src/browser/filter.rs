@@ -31,6 +31,10 @@ pub struct FilterPrefs {
     pub shown: bool,
     /// What the person changed for each label, by [`Label::key`].
     pub groups: BTreeMap<String, GroupChoice>,
+    /// Whether the Filter View Menu's Include Auto Tags is on: automatic
+    /// tags show in the Filter View, filter and answer `#` search (spec:
+    /// browser-tags R55). On in a new install.
+    pub include_auto_tags: bool,
 }
 
 impl Default for FilterPrefs {
@@ -38,6 +42,7 @@ impl Default for FilterPrefs {
         Self {
             shown: true,
             groups: BTreeMap::new(),
+            include_auto_tags: true,
         }
     }
 }
@@ -250,6 +255,13 @@ impl BrowserView {
             _ => None,
         };
         ids.extend(given);
+        // Spec: browser-tags R55. A sample's automatic tags, while Include
+        // Auto Tags is on.
+        if self.filter_prefs.include_auto_tags
+            && let Some(auto) = self.tags.auto_tags_ref(&path.to_string_lossy())
+        {
+            ids.extend(auto.keys().copied());
+        }
         ids
     }
 
@@ -265,7 +277,7 @@ impl BrowserView {
         }
         let carried: Vec<i64> = match item.kind {
             ItemKind::Plugin | ItemKind::Device => self
-                .carried_tags(&self.tag_key(&item.path))
+                .searchable_tags(&self.tag_key(&item.path))
                 .into_iter()
                 .map(|(id, _)| id)
                 .collect(),
@@ -299,12 +311,16 @@ impl BrowserView {
         let devices = label_devices(base);
         if !devices.is_empty() {
             for device in devices {
-                found.extend(self.carried_tags(&device.id).into_iter().map(|(id, _)| id));
+                found.extend(
+                    self.searchable_tags(&device.id)
+                        .into_iter()
+                        .map(|(id, _)| id),
+                );
             }
         } else if *base == Label::PlugIns {
             for plugin in &self.plugins {
                 found.extend(
-                    self.carried_tags(&plugin.key())
+                    self.searchable_tags(&plugin.key())
                         .into_iter()
                         .map(|(id, _)| id),
                 );
@@ -400,6 +416,7 @@ impl BrowserView {
             groups: shown_groups,
             menu,
             selected: self.filter_tags(),
+            include_auto_tags: self.filter_prefs.include_auto_tags,
         }
     }
 
@@ -513,10 +530,11 @@ mod tests {
     fn labels_show_the_groups_the_spec_gives_them() {
         let prefs = FilterPrefs::default();
         let shown = |label: &Label, group: &str| prefs.group_shown(label, group, true);
-        for group in ["Content", "Format", "Creator", "Devices"] {
+        for group in ["Content", "Format", "Creator", "Devices", "Function"] {
             assert!(shown(&Label::All, group), "{group} under All");
         }
         assert!(shown(&Label::PlugIns, "Devices"));
+        assert!(!shown(&Label::PlugIns, "Function"), "R19 doesn't list it");
         assert!(shown(&Label::PlugIns, "Format"));
         assert!(shown(&Label::PlugIns, "Creator"));
         assert!(!shown(&Label::PlugIns, "Content"));

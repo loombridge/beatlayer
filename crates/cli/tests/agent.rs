@@ -4058,9 +4058,17 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
     );
     let track = {
         let document = client.transport().shell.editor().document();
-        document.tracks().find(|t| t.name() == "Grains").unwrap().id()
+        document
+            .tracks()
+            .find(|t| t.name() == "Grains")
+            .unwrap()
+            .id()
     };
-    one(&mut client, "arrangement.select_tracks", json!({ "tracks": [track] }));
+    one(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
     one(
         &mut client,
         "device.add",
@@ -4110,7 +4118,11 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
     data[3] = 0.25;
     data[4] = 0.75;
     for (n, peak) in data[3 + granulator_iii::POOL..].iter_mut().enumerate() {
-        *peak = if n < granulator_iii::PEAKS / 2 { 1.0 } else { 0.1 };
+        *peak = if n < granulator_iii::PEAKS / 2 {
+            1.0
+        } else {
+            0.1
+        };
     }
     client.transport().shell.set_device_display_data(id, &data);
     let shown = one(&mut client, "device.display", json!({ "device": id }));
@@ -4120,9 +4132,15 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
         .iter()
         .find(|s| s["name"] == "Waveform")
         .unwrap();
-    assert_eq!(waveform["values"].as_array().unwrap().len(), granulator_iii::PEAKS);
+    assert_eq!(
+        waveform["values"].as_array().unwrap().len(),
+        granulator_iii::PEAKS
+    );
     let markers = shown["markers"].as_array().unwrap();
-    let names: Vec<_> = markers.iter().map(|m| m["name"].as_str().unwrap()).collect();
+    let names: Vec<_> = markers
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
     assert_eq!(names[0], "Position");
     assert!(names.contains(&"Spray End"));
     assert_eq!(names.iter().filter(|n| n.starts_with("Grain")).count(), 2);
@@ -4145,9 +4163,17 @@ fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_af
         .document
         .device(id)
         .expect("Granulator III is in the set");
-    assert!(reopened.media_at(0).is_some(), "the set references the sample");
+    assert!(
+        reopened.media_at(0).is_some(),
+        "the set references the sample"
+    );
     for (param, value) in &sets {
-        assert_eq!(reopened.params.get(param), Some(value), "parameter {}", param.0);
+        assert_eq!(
+            reopened.params.get(param),
+            Some(value),
+            "parameter {}",
+            param.0
+        );
     }
 }
 

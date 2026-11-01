@@ -291,7 +291,9 @@ pub fn display_in(
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
         VOCODER => Some(vocoder::display(device, description, values, data)),
-        granulator_iii::GRANULATOR_III => Some(granulator_iii::display(device, description, values, data)),
+        granulator_iii::GRANULATOR_III => {
+            Some(granulator_iii::display(device, description, values, data))
+        }
         SPECTRAL_BLUR => Some(spectral_blur::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),

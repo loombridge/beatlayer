@@ -3891,7 +3891,8 @@ fn load_preset(
             name: preset::preset_name(path),
             shape: loaded.shape,
             articulations: loaded.articulations,
-            routes: loaded.routes,
+            // A preset with no routes leaves the device with none.
+            routes: Some(loaded.routes.unwrap_or_default()),
             mpe: loaded.mpe,
         })
         .map(|_| ())

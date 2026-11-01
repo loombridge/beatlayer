@@ -10099,6 +10099,7 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
 | `learning` | integer or null | no | The articulation whose Learn button is lit, counted from 0: the panel's state, not the set's. |
 | `loaded_slots` | array of boolean | no | For a device with sample slots: whether each slot holds a sample. |
 | `locked` | array of [`ParamId`](#paramid) | no | The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16). |
+| `matrix_routes` | array of [`MatrixRoutes`](#matrixroutes) | no | For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route. |
 | `pages` | array of [`PagesFrame`](#pagesframe) | no | Each pages node of the device's layout with its pages and the one shown (device framework R43): view state, saved with the set but no undo step. Empty for a device with none. |
 | `slot_keys` | array of string | no | For a device with sample slots: the key each slot plays, as Live names notes (`C3`). |
 
@@ -10156,6 +10157,13 @@ What the generic UI needs to draw a device (WP-2.5): its type's description and 
       "description": "The parameters drawn disabled because the device takes them from its current scale: Scale's Base and Scale Name and Arpeggiator's Root and Scale, while Use Current Scale is on (the scales spec, R16).",
       "items": {
         "$ref": "#/$defs/ParamId"
+      },
+      "type": "array"
+    },
+    "matrix_routes": {
+      "description": "For each parameter an instrument's modulation matrix moves, the sources routed into it, in slot order (the instrument modulation spec, R12): what assistive technology reads beside the control's value. Empty for a device without a matrix or with no route.",
+      "items": {
+        "$ref": "#/$defs/MatrixRoutes"
       },
       "type": "array"
     },
@@ -19837,6 +19845,43 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `MatrixRoutes`
+
+The sources routed into one parameter of an instrument's matrix.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter. |
+| `sources` | array of string | yes | The names of the sources routed into it, in slot order. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sources routed into one parameter of an instrument's matrix.",
+  "properties": {
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter."
+    },
+    "sources": {
+      "description": "The names of the sources routed into it, in slot order.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "param",
+    "sources"
+  ],
+  "type": "object"
 }
 ```
 

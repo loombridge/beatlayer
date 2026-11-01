@@ -328,3 +328,41 @@ fn a_device_without_a_matrix_refuses_the_route_commands() {
     .unwrap_err();
     assert!(error.contains("no modulation matrix"), "{error}");
 }
+
+// Spec: instrument modulation R10
+#[test]
+fn a_preset_brings_its_routes_and_one_without_leaves_none() {
+    let (mut shell, device) = shell();
+    set(
+        &mut shell,
+        device,
+        json!({ "source": "Velocity", "destination": "Note Level", "amount": 30.0 }),
+    )
+    .unwrap();
+    let with = bl_project::preset::Preset::of(shell.editor().document().device(device).unwrap());
+    let mut bare = shell.editor().document().device(device).unwrap().clone();
+    bare.routes.clear();
+    let without = bl_project::preset::Preset::of(&bare);
+    let folder = std::env::temp_dir().join(format!("bl-matrix-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let load = |shell: &mut Shell, preset: &bl_project::preset::Preset, name: &str| {
+        let path = folder.join(format!("{name}.blpreset"));
+        std::fs::write(&path, preset.encode()).unwrap();
+        shell
+            .invoke(
+                "device.load_preset",
+                json!({ "device": device, "path": path.to_string_lossy() }),
+            )
+            .unwrap();
+    };
+    // A preset with no routes empties the device's.
+    load(&mut shell, &without, "without");
+    assert!(routes(&shell, device).is_empty());
+    // And one with routes brings them back.
+    load(&mut shell, &with, "with");
+    assert_eq!(routes(&shell, device), [route(0, "Velocity", "Note Level")]);
+    assert_eq!(amount(&shell, device, INSTRUMENT_FREE_AMOUNTS[0]), 30.0);
+    std::fs::remove_file(folder.join("without.blpreset")).unwrap();
+    std::fs::remove_file(folder.join("with.blpreset")).unwrap();
+    std::fs::remove_dir(&folder).unwrap();
+}

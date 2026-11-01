@@ -26,7 +26,8 @@ impl Note {
             return Down::Done;
         };
         let start = frame.pages.step_start(self.pair, index);
-        let velocity = self.velocity.unwrap_or(VELOCITY);
+        // Spec: push-2-notes R54. Accent overrides the velocity pads' choice.
+        let velocity = self.accented(self.velocity.unwrap_or(VELOCITY));
         self.toggle_note(frame, key, start, velocity, ctx, model)
     }
 

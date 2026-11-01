@@ -57,6 +57,23 @@ pub(super) struct RunSlot {
 /// The Session recording under way.
 pub(super) struct SessionRun {
     slots: Vec<RunSlot>,
+    /// With Fixed Length on, how long the clips are, and whether the take
+    /// starts where the song position falls in a phrase of that length
+    /// (the notes on Push 2 spec, R51).
+    fixed: Option<(Ticks, bool)>,
+    /// Fixed Length was switched on during the recording: the clips loop
+    /// their last stretch of this length (R51).
+    last_stretch: Option<Ticks>,
+}
+
+/// Where a take that began at `start` lies in the clip: where the song
+/// position falls in a phrase of `length`, with Phrase Sync on (R51).
+fn phrase_offset(start: Ticks, length: Ticks, phrase_sync: bool) -> Ticks {
+    if phrase_sync && length.get() > 0 {
+        Ticks(start.get().rem_euclid(length.get()))
+    } else {
+        Ticks::ZERO
+    }
 }
 
 /// Whether the engine is playing a slot's clip.
@@ -211,6 +228,19 @@ impl Shell {
                 Ok(Value::Null)
             }
             _ => Err(ShellError::UnknownCommand(id.to_owned())),
+        }
+    }
+
+    /// Fixed Length was switched on during a recording: it ends and its new
+    /// clips loop the last stretch of `length` (the notes on Push 2 spec,
+    /// R51).
+    pub(super) fn loop_last_stretch(&mut self, length: Ticks) {
+        if let Some(run) = self.session_run.as_mut()
+            && run.fixed.is_none()
+            && run.slots.iter().any(|slot| !slot.slot.overdub)
+        {
+            run.last_stretch = Some(length);
+            let _ = self.audio.send_session(SessionCommand::StopRecording);
         }
     }
 
@@ -402,12 +432,29 @@ impl Shell {
         recording.delay = delay;
         recording.began_on(&mut self.audio);
         self.audio.record(plan)?;
-        self.audio.send_session(SessionCommand::Record)?;
+        // Spec: push-2-notes R51. With Fixed Length on, new clips have the
+        // length and the take ends by itself.
+        let fixed = self.midi.push().fixed_length();
+        let fixed = (fixed.on && slots.iter().any(|run| !run.slot.overdub)).then(|| {
+            let signatures = &self.editor.document().settings().time_signatures;
+            let at = self.arrangement.transport().position;
+            (fixed.value().ticks(signatures.signature_at(at)), fixed.phrase_sync)
+        });
+        match fixed {
+            Some((length, phrase_sync)) => self
+                .audio
+                .send_session(SessionCommand::RecordFixed { length, phrase_sync })?,
+            None => self.audio.send_session(SessionCommand::Record)?,
+        }
         let started = RecordingStarted {
             slots: slots.iter().map(|run| run.slot).collect(),
         };
         self.recording = Some(recording);
-        self.session_run = Some(SessionRun { slots });
+        self.session_run = Some(SessionRun {
+            slots,
+            fixed,
+            last_stretch: None,
+        });
         self.session_automation = crate::automation_record::SessionTake::default();
         self.session_take_start = None;
         self.document_changed();
@@ -469,6 +516,15 @@ impl Shell {
             - tempo.frames_to_ticks(so_far.start, rate))
         .max(MIN_LENGTH);
         let length = Ticks((raw.0 + MIN_LENGTH.0 - 1) / MIN_LENGTH.0 * MIN_LENGTH.0);
+        // Spec: push-2-notes R51. A fixed-length clip has its length from the
+        // start, and a phrase-synced take starts part-way in.
+        let (length, offset) = match run.fixed {
+            Some((fixed, phrase)) => (
+                fixed,
+                phrase_offset(tempo.frames_to_ticks(so_far.start, rate), fixed, phrase),
+            ),
+            None => (length, Ticks::ZERO),
+        };
         let mut changed = false;
         let mut failure = None;
         for slot in run
@@ -485,6 +541,7 @@ impl Shell {
             }
             let notes =
                 crate::recording::session_notes(messages, so_far.start, so_far.end, &tempo, rate);
+            let notes = shifted(notes, offset);
             // Spec: recording R20. The clip's end isn't known yet, so no note
             // wraps to the start while it grows.
             let notes = quantized_session_notes(notes, &signatures, value, Ticks(i64::MAX / 2));
@@ -570,6 +627,12 @@ impl Shell {
         };
         let ticks = |frames: Frames| tempo.frames_to_ticks(frames, rate);
         let length = (ticks(take.end) - ticks(take.start)).max(MIN_LENGTH);
+        // Spec: push-2-notes R51. Fixed Length makes the clip its length,
+        // from the place in it a phrase-synced take starts at.
+        let (length, offset) = match run.fixed {
+            Some((fixed, phrase)) => (fixed, phrase_offset(ticks(take.start), fixed, phrase)),
+            None => (length, Ticks::ZERO),
+        };
         let edge_fades = self.create_fades_on_clip_edges();
         let warp_recorded = self.warp_recorded_audio();
         let warp_mode = crate::auto_warp::warp_mode(self.prefs.warp.default_warp_mode);
@@ -607,10 +670,20 @@ impl Shell {
                         let notes = crate::recording::session_notes(
                             messages, take.start, take.end, &tempo, rate,
                         );
+                        let notes = shifted(notes, offset);
                         // Spec: recording R20. The notes join the clip on the
                         // clip's own bars, inside the recording's step.
                         let notes = quantized_session_notes(notes, &signatures, value, length);
-                        let data = ClipData::Midi(new_midi(notes));
+                        let mut midi = new_midi(notes);
+                        // Spec: push-2-notes R51. Fixed Length switched on
+                        // mid-recording loops the last stretch of its length.
+                        if let Some(stretch) = run.last_stretch {
+                            let from = (length - stretch).max(Ticks::ZERO);
+                            midi.start = from;
+                            midi.loop_start = from;
+                            midi.loop_end = Some(length);
+                        }
+                        let data = ClipData::Midi(midi);
                         let clip = match slot.clip {
                             Some(clip) => {
                                 self.editor.apply(Command::SetClipLength { clip, length })?;
@@ -966,6 +1039,14 @@ fn quantized_session_notes(
 }
 
 /// A new recording's MIDI data: the notes in a clip that loops.
+/// `notes` moved `by` later.
+fn shifted(mut notes: Vec<bl_model::Note>, by: Ticks) -> Vec<bl_model::Note> {
+    for note in &mut notes {
+        note.start += by;
+    }
+    notes
+}
+
 fn new_midi(notes: Vec<bl_model::Note>) -> MidiData {
     MidiData {
         looping: true,

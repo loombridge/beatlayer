@@ -9,6 +9,7 @@ use crate::content::{DisplayMode, MixPage, PadMode, StripUse};
 use crate::curve::Setup;
 use crate::display::Status;
 use crate::leds::{Addr, Led};
+use crate::recording::FixedLength;
 use crate::screen::Screen;
 use crate::sysex::MidiMode;
 
@@ -22,23 +23,26 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 pub struct Shared {
     setup: Mutex<Setup>,
     swing: Mutex<f64>,
+    fixed: Mutex<FixedLength>,
     palette: Mutex<Vec<[u8; 3]>>,
     revision: AtomicU64,
 }
 
 impl Default for Shared {
     fn default() -> Self {
-        Self::new(Setup::default(), 0.0)
+        Self::new(Setup::default(), 0.0, FixedLength::default())
     }
 }
 
 impl Shared {
-    /// Shared state starting from the preferences' `setup` and `swing`.
+    /// Shared state starting from the preferences' `setup`, `swing` and
+    /// `fixed` Fixed Length.
     #[must_use]
-    pub fn new(setup: Setup, swing: f64) -> Self {
+    pub fn new(setup: Setup, swing: f64, fixed: FixedLength) -> Self {
         Self {
             setup: Mutex::new(setup.clamped()),
             swing: Mutex::new(swing.clamp(0.0, 1.0)),
+            fixed: Mutex::new(fixed.clamped()),
             palette: Mutex::new(bl_model::DEFAULT_TRACK_PALETTE.to_vec()),
             revision: AtomicU64::new(0),
         }
@@ -68,6 +72,18 @@ impl Shared {
         self.revision.fetch_add(1, Ordering::AcqRel);
     }
 
+    /// Fixed Length's settings (R50).
+    #[must_use]
+    pub fn fixed_length(&self) -> FixedLength {
+        *lock(&self.fixed)
+    }
+
+    /// Sets Fixed Length's settings.
+    pub fn set_fixed_length(&self, fixed: FixedLength) {
+        *lock(&self.fixed) = fixed.clamped();
+        self.revision.fetch_add(1, Ordering::AcqRel);
+    }
+
     /// The 14 track colours the swatches are made from.
     #[must_use]
     pub fn track_colours(&self) -> Vec<[u8; 3]> {
@@ -94,6 +110,10 @@ pub enum Menu {
     Setup,
     /// Scale.
     Scale,
+    /// Quantize (notes R58).
+    Quantize,
+    /// Fixed Length (notes R50).
+    FixedLength,
 }
 
 impl Menu {
@@ -103,6 +123,8 @@ impl Menu {
         match self {
             Self::Setup => "Setup",
             Self::Scale => "Scale",
+            Self::Quantize => "Quantize",
+            Self::FixedLength => "Fixed Length",
         }
     }
 }
@@ -154,6 +176,31 @@ pub struct Snapshot {
     pub mix: Option<crate::mix::State>,
     /// What the display's thread is doing.
     pub display: Status,
+    /// What the Quantize menu shows while it is open (notes R58).
+    pub quantize_menu: Option<QuantizeMenu>,
+    /// What Record shows: `off`, `session` or `arrangement` (notes R48).
+    pub record: &'static str,
+    /// Fixed Length's settings (notes R50).
+    pub fixed_length: FixedLength,
+    /// The swing amount, 0 to 1 (notes R56).
+    pub swing: f64,
+    /// Whether Automation Arm is on (notes R61).
+    pub automation_arm: bool,
+}
+
+/// The Quantize menu's values (notes R58).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuantizeMenu {
+    /// Swing Amount, 0 to 100 %.
+    pub swing: u8,
+    /// Quantize To, as the grid's note value.
+    pub quantize_to: String,
+    /// Quantize Amount, 0 to 100 %.
+    pub amount: u8,
+    /// Record Quantize's value.
+    pub record_quantize: String,
+    /// Whether the menu stays after Quantize is released.
+    pub stays: bool,
 }
 
 impl Snapshot {
@@ -181,6 +228,11 @@ impl Snapshot {
             session: None,
             mix: None,
             display: Status::default(),
+            quantize_menu: None,
+            record: "off",
+            fixed_length: FixedLength::default(),
+            swing: 0.0,
+            automation_arm: false,
         }
     }
 

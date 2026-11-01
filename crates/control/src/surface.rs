@@ -110,6 +110,23 @@ pub struct ReadModel {
     /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
     /// R37).
     pub mix: crate::mix::Mix,
+    /// The Clip View's Quantize settings, for Push 2's Quantize menu
+    /// (push-2-notes R58).
+    pub quantize: QuantizeView,
+    /// Whether Automation Arm is on (push-2-notes R61).
+    pub automation_arm: bool,
+}
+
+/// The Quantize tool's grid and amount, as the Clip View keeps them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuantizeView {
+    /// The spacing of the grid's lines, before triplets: the division
+    /// chosen, else the editing grid's step.
+    pub grid: Ticks,
+    /// Whether the lines are triplets of the division.
+    pub triplets: bool,
+    /// How far notes move toward the lines, 0 to 100 %.
+    pub amount: u8,
 }
 
 /// What the Device View keeps beside the set, for a surface that follows it:
@@ -159,6 +176,12 @@ impl ReadModel {
             selection_armed: Vec::new(),
             devices: DeviceViews::default(),
             mix: crate::mix::Mix::default(),
+            quantize: QuantizeView {
+                grid: Ticks::SIXTEENTH,
+                triplets: false,
+                amount: 100,
+            },
+            automation_arm: false,
         }
     }
 

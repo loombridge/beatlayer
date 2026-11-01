@@ -41,6 +41,8 @@ impl Note {
         let Some(frame) = self.frame(model) else {
             return;
         };
+        // Spec: push-2-notes R54. Accent overrides the velocity the pad gave.
+        let velocity = self.accented(velocity);
         let down = match Self::role(&frame, pad.row, pad.column) {
             Role::Drum(note) => self.drum(&frame, note, velocity, ctx, model),
             Role::Velocity(velocity) => self.velocity_pad(&frame, velocity, ctx),
@@ -54,12 +56,14 @@ impl Note {
             Role::Cell { key, step } => self.cell_pad(&frame, key, step, ctx, model),
             Role::Off => Down::Done,
         };
+        self.repeat_pad(frame.track, (pad.row, pad.column), down, velocity);
         self.down.insert((pad.row, pad.column), down);
     }
 
     /// Releasing a pad ends the note it played, whatever the layout has
     /// become since (R2).
     pub(super) fn pad_off(&mut self, pad: Pad, ctx: &mut Ctx<'_>) {
+        self.repeat_release((pad.row, pad.column));
         if let Some(
             Down::Played(note)
             | Down::Picked {
@@ -137,8 +141,19 @@ impl Note {
             self.duplicate_pad(frame, note, filled, ctx);
             return Down::Done;
         }
+        if modifiers.has(cc::QUANTIZE) {
+            // Spec: push-2-notes R57. Only this pad's notes.
+            if let Some(clip) = frame.clip {
+                let swing = (ctx.swing * 100.0).round() as u8;
+                ctx.cx.run(
+                    "note.quantize",
+                    json!({ "clip": clip, "pitch": note, "swing": swing }),
+                );
+            }
+            return Down::Done;
+        }
         self.pick(frame, note, ctx);
-        ctx.cx.play_at(ctx.at, note_on(note, velocity));
+        self.voice(frame.track, ctx, note, velocity);
         Down::Played(note)
     }
 
@@ -206,7 +221,7 @@ impl Note {
         let Some(note) = frame.selected else {
             return Down::Done;
         };
-        ctx.cx.play_at(ctx.at, note_on(note, velocity));
+        self.voice(frame.track, ctx, note, self.accented(velocity));
         Down::Played(note)
     }
 }

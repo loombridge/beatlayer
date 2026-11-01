@@ -310,6 +310,8 @@ pub struct Ctx<'a> {
     pub modifiers: &'a Modifiers,
     /// The Setup values.
     pub setup: Setup,
+    /// The swing amount, 0 to 1.
+    pub swing: f64,
     /// When Push 2 sent what the content is handling, on the host's clock.
     pub at: std::time::Instant,
     /// The steps held in Note Mode.

@@ -17,6 +17,7 @@ mod menu;
 mod navigate;
 mod pads;
 mod paint;
+mod repeat;
 mod steps;
 mod strip;
 
@@ -84,6 +85,8 @@ struct Memory {
     keys: u128,
     /// Whether the touch strip is the modulation wheel (R7).
     modulation: bool,
+    /// Whether Repeat is on (R55).
+    repeat: bool,
 }
 
 /// What a pad that is down does until it is released.
@@ -154,6 +157,10 @@ pub struct State {
     pub velocity: Option<u8>,
     /// The steps held now.
     pub held_steps: Vec<HeldStep>,
+    /// Whether Accent is on, tapped or held (R54).
+    pub accent: bool,
+    /// Whether Repeat is on for the track, tapped or held (R55).
+    pub repeat: bool,
     /// What a melodic layout shows, on a melodic track.
     pub melody: Option<Melody>,
 }
@@ -222,6 +229,10 @@ pub struct Note {
     strip_taken: bool,
     /// What the strip is for.
     strip: Option<StripUse>,
+    /// Accent (R54).
+    accent: repeat::Switch,
+    /// Repeat's held pads and notes (R55).
+    repeat: repeat::Repeat,
 }
 
 impl Default for Note {
@@ -254,6 +265,8 @@ impl Note {
             menu_counts: Default::default(),
             strip_taken: false,
             strip: None,
+            accent: repeat::Switch::default(),
+            repeat: repeat::Repeat::default(),
         }
     }
 
@@ -417,6 +430,7 @@ impl Content for Note {
 
     fn tick(&mut self, ctx: &mut Ctx<'_>) {
         self.tick_steps(ctx);
+        self.tick_repeat(ctx);
     }
 
     fn paint(&mut self, paint: &mut Paint<'_>) {
@@ -474,6 +488,7 @@ impl Note {
         };
         match (button, gesture) {
             (cc::LAYOUT, _) => self.layout_button(gesture, ctx),
+            (cc::ACCENT | cc::REPEAT, _) => self.repeat_button(button, gesture, ctx),
             (cc::DELETE, Gesture::Tap) => {
                 if let Some(frame) = self.frame(model)
                     && let Some(clip) = frame.clip

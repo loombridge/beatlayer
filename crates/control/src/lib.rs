@@ -37,7 +37,7 @@ pub use bl_engine::{SlotState, SlotStatus};
 pub use host::{CommandRequest, ROWS, RowConfig, RowReport, RunState, Surfaces, Traffic};
 pub use surface::{
     Ask, Control, ControlSurface, Cx, DeviceViews, DrumView, Focus, Gesture, Kind, Lock, Moves,
-    Out, ParamView, ReadModel, Recognise, Request, Ring, RingStep, RingView, Role, RowView,
+    Out, ParamView, QuantizeView, ReadModel, Recognise, Request, Ring, RingStep, RingView, Role, RowView,
     Selection, SurfaceState, TICK, Transport, kind, kinds,
 };
 

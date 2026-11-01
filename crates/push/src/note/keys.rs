@@ -8,7 +8,7 @@ use bl_core::time::Ticks;
 use serde_json::json;
 
 use super::steps::VELOCITY;
-use super::{Down, Frame, Note, Pending, Source, clip, pads};
+use super::{Down, Frame, Note, Pending, Source, clip};
 use crate::content::{Ctx, HeldStep, Pad};
 use crate::controls::cc;
 
@@ -27,6 +27,7 @@ impl Note {
             Some(Down::Picked { key, played: true }) => *key,
             _ => return,
         };
+        self.repeat_pressure((pad.row, pad.column), pressure);
         if let Some(message) = MidiMessage::from_bytes(&[0xA0, note, pressure.min(127)]) {
             ctx.cx.play_at(ctx.at, message);
         }
@@ -55,7 +56,7 @@ impl Note {
             }
             return Down::Done;
         }
-        ctx.cx.play_at(ctx.at, pads::note_on(note, velocity));
+        self.voice(frame.track, ctx, note, velocity);
         Down::Played(note)
     }
 
@@ -95,7 +96,7 @@ impl Note {
         if ctx.modifiers.has(cc::SELECT) {
             return Down::Picked { key, played: false };
         }
-        ctx.cx.play_at(ctx.at, pads::note_on(key, velocity));
+        self.voice(frame.track, ctx, key, velocity);
         Down::Picked { key, played: true }
     }
 
@@ -196,7 +197,7 @@ impl Note {
                             "key": key,
                             "start": start,
                             "length": length,
-                            "velocity": VELOCITY,
+                            "velocity": self.accented(VELOCITY),
                         }),
                     )
                 })

@@ -24,6 +24,7 @@ pub mod mix;
 pub mod note;
 pub mod paint;
 pub mod ports;
+pub mod recording;
 pub mod screen;
 pub mod session;
 pub mod sim;

@@ -21,7 +21,7 @@ use bl_model::{
     TrackId,
 };
 use bl_shell_spec::session_view::{
-    self as ids, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
+    self as ids, CaptureArgs, CopyClipArgs, DropFilesArgs, DuplicateSceneArgs, InsertClipArgs, InsertSceneArgs,
     ScrollArgs, SelectArgs, SelectEdge, SelectEdgeArgs, SessionSelectMode, SessionViewState,
     SlotRef,
 };
@@ -333,7 +333,7 @@ impl SessionView {
                 Ok(edit_outcome(changes))
             }
             ids::CAPTURE_AND_INSERT_SCENE => {
-                no_args(args)?;
+                let CaptureArgs { except } = serde_json::from_value(args).map_err(parse)?;
                 // Spec: session-view R24. After the scene launched last, or
                 // else the selected one; a set with no scenes left gets it
                 // first.
@@ -349,7 +349,7 @@ impl SessionView {
                 let id: SceneId = ctx.editor.new_id();
                 // A copy of each playing clip, in track order.
                 let mut copies = Vec::new();
-                for &track in ctx.doc_tracks {
+                for &track in ctx.doc_tracks.iter().filter(|t| !except.contains(t)) {
                     let playing = ctx
                         .capture
                         .playing

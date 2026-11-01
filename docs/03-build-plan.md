@@ -1018,7 +1018,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.34 | todo |  |  |
 | 8.35 | todo |  |  |
 | 8.36 | todo |  |  |
-| 8.37 | todo |  |  |
+| 8.37 | done | 1 November 2026 | [#649](https://github.com/loombridge/beatlayer/pull/649): Echo has its two lines with their time and channel modes, input drive and inverted feedback, filters, the Modulation and Character tabs, its reverb, the global controls and the tunnel display on its pages |
 | 8.38 | done | 31 October 2026 | [#651](https://github.com/loombridge/beatlayer/pull/651): Roar has its input section, three stages with twelve shapers and nine filters, seven routing modes, 4× oversampling, Output, Color compensation, Dry/Wet and the shaper display, with the Auto Filter's filters moved to a shared module; R11's aliasing level at 4× (8×, ADAA or the narrower test) and Mid Side's Blend are follow-ups |
 | 8.39 | todo |  |  |
 | 8.40 | todo |  |  |

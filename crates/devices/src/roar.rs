@@ -2034,6 +2034,7 @@ pub fn display(
         series: vec![series],
         markers: Vec::new(),
         readings: Vec::new(),
+        spectrograms: Vec::new(),
     };
     // Spec: roar R31. Each source's last two seconds, once an engine
     // publishes.

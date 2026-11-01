@@ -349,33 +349,30 @@ impl Default for Sidechain {
 }
 
 /// A device's MIDI sidechain input (the routing spec, R32): the MIDI track
-/// whose notes and channel messages the device hears, played before that
-/// track's own devices unless its tapping point says otherwise. A new device
-/// has none.
+/// whose notes and channel messages the device hears, and where on that
+/// track it takes them (R39). A new device has none.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(
     description = "A device's MIDI sidechain input: `source`, the MIDI track whose notes and \
-                   channel messages the device hears, or absent for No Input; and `tap`, for \
-                   a device with a tapping point, where on that track they are taken: \
-                   `pre_fx`, `post_fx` (a new device's) or `post_mixer` (the same as \
-                   `post_fx`). A device without a `tap` hears them `pre_fx`."
+                   channel messages the device hears, or absent for No Input; and, on a device \
+                   whose type gives its MIDI sidechain a tapping point, `tap`: `pre_fx` for \
+                   what the track's clips and input played, `post_fx` (a new device's) for what \
+                   leaves its MIDI effects, or `post_mixer`, the same as `post_fx`."
 )]
 pub struct MidiSidechain {
     /// The MIDI track it listens to, or `None` (No Input), as on a new
     /// device.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<TrackId>,
-    /// Where on the source track its notes are taken (the routing spec,
-    /// R39), for a device whose type gives its MIDI sidechain a tapping
-    /// point; `None` for one that hears Pre FX only, as a set saved before
-    /// the tapping point has it.
+    /// Where the device takes the source's notes, for a device type that
+    /// gives its MIDI sidechain a tapping point; `None` for one that
+    /// doesn't, which hears them [`Tap::PreFx`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tap: Option<Tap>,
 }
 
 impl MidiSidechain {
-    /// Where the device's notes are taken: Pre FX where it has no tapping
-    /// point.
+    /// Where the device takes its source's notes.
     #[must_use]
     pub fn tapped(&self) -> Tap {
         self.tap.unwrap_or(Tap::PreFx)
@@ -670,8 +667,8 @@ impl Device {
         self
     }
 
-    /// The same device with a MIDI sidechain input that has a tapping point,
-    /// Post FX as a new device has it (the routing spec, R39).
+    /// The same, with a tapping point on its MIDI sidechain, Post FX in a
+    /// new device (the routing spec, R39).
     #[must_use]
     pub fn with_midi_sidechain_tap(mut self) -> Self {
         self.midi_sidechain = Some(MidiSidechain {

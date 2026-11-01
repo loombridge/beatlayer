@@ -479,7 +479,7 @@ pub fn draw_midi(
     if !section.shown {
         return;
     }
-    let [label, source, ..] = rows(frame);
+    let [label, source, tap, ..] = rows(frame);
     ui.painter_at(label).text(
         label.left_center(),
         Align2::LEFT_CENTER,
@@ -493,6 +493,17 @@ pub fn draw_midi(
             theme,
             control_id(device, "midi-source"),
             source,
+            &chooser,
+            events,
+        );
+    }
+    // Spec: routing R39. The tapping point, under the source.
+    if let Some(chooser) = routing::midi_sidechain_tap(shell.editor().document(), device) {
+        draw_chooser(
+            ui,
+            theme,
+            control_id(device, "midi-tap"),
+            tap,
             &chooser,
             events,
         );

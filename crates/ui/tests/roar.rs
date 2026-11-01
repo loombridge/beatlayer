@@ -38,7 +38,7 @@ fn add_roar(h: &mut Harness) -> DeviceId {
         .iter()
         .find(|t| matches!(&t.kind, bl_model::DeviceKind::Native { device_type } if device_type == ROAR))
         .unwrap();
-    let device = json!({ "kind": t.kind, "name": t.name, "role": t.role });
+    let device = json!({ "kind": t.kind, "name": t.name, "role": t.role, "midi_sidechain": true });
     let added: DeviceAdded = serde_json::from_value(
         h.shell
             .run("device.add", json!({ "device": device }))
@@ -270,7 +270,7 @@ fn roars_strip_has_one_toggle_and_two_columns_the_audio_one_first() {
     let midi = [
         "MIDI > FB Note",
         "MIDI Sidechain Source",
-        "MIDI Sidechain Tap",
+        "MIDI Sidechain Tapping Point",
     ]
     .map(left);
     assert!(
@@ -287,7 +287,10 @@ fn roars_strip_has_one_toggle_and_two_columns_the_audio_one_first() {
 
     // The tapping point, Post FX in a new device, from its chooser.
     let nodes = Harness::nodes(&h.settle());
-    assert_eq!(Harness::node(&nodes, "MIDI Sidechain Tap").value, "Post FX");
+    assert_eq!(
+        Harness::node(&nodes, "MIDI Sidechain Tapping Point").value,
+        "Post FX"
+    );
     h.click(tap.center());
     let nodes = Harness::nodes(&h.settle());
     let entry = nodes
@@ -303,8 +306,8 @@ fn roars_strip_has_one_toggle_and_two_columns_the_audio_one_first() {
     let state = h.shell.device_view_state();
     let frame = state.devices.iter().find(|d| d.id == roar).unwrap();
     assert_eq!(
-        frame.midi_sidechain.as_ref().unwrap().tap,
-        Some(bl_model::Tap::PreFx)
+        frame.midi_sidechain.as_ref().unwrap().tap.as_deref(),
+        Some("Pre FX")
     );
     assert_eq!(last_step(&h), "Change \"Routing\"");
 }

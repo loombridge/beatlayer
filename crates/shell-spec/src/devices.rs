@@ -1085,10 +1085,11 @@ pub struct MidiSidechainSection {
     /// What the MIDI source chooser shows: a MIDI track's label (`1-MIDI`)
     /// or `No Input`.
     pub source: String,
-    /// What the tapping point chooser shows (the routing spec, R39), for a
-    /// device whose MIDI sidechain has one; left out for one that hasn't.
+    /// What the tapping point chooser under it shows (`Pre FX`, `Post FX`
+    /// or `Post Mixer`), for a device whose MIDI sidechain has one (the
+    /// routing spec, R39).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tap: Option<Tap>,
+    pub tap: Option<String>,
 }
 
 /// A floating device's window, as `device.windows` reports it (WP-2.5b).

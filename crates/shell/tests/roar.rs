@@ -174,7 +174,7 @@ fn the_device_views_state_reports_both_sidechain_sections() {
     let (audio, midi) = (frame.sidechain.unwrap(), frame.midi_sidechain.unwrap());
     assert!(!audio.shown && !midi.shown);
     assert_eq!(midi.source, "No Input");
-    assert_eq!(midi.tap, Some(Tap::PostFx));
+    assert_eq!(midi.tap.as_deref(), Some("Post FX"));
     shell.invoke("device.show_sidechain", json!({})).unwrap();
     let frame = shell.device_view_state().devices[0].clone();
     assert!(frame.sidechain.unwrap().shown && frame.midi_sidechain.unwrap().shown);

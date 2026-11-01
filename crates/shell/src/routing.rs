@@ -400,7 +400,7 @@ fn configure(page: &str) -> Entry {
     )
 }
 
-const fn tap_label(tap: Tap) -> &'static str {
+pub(crate) const fn tap_label(tap: Tap) -> &'static str {
     match tap {
         Tap::PreFx => "Pre FX",
         Tap::PostFx => "Post FX",
@@ -1476,15 +1476,46 @@ pub fn external_choosers(
     })
 }
 
-fn set_midi_sidechain_source(device: DeviceId, track: Value, tap: Option<Tap>) -> Invocation {
-    let mut args = json!({ "device": device });
-    if !track.is_null() {
-        args["track"] = track;
-    }
-    if let Some(tap) = tap {
-        args["tap"] = json!(tap_name(tap));
+fn set_midi_sidechain_source(device: DeviceId, track: Value) -> Invocation {
+    let args = if track.is_null() {
+        json!({ "device": device })
+    } else {
+        json!({ "device": device, "track": track })
+    };
+    Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// The same, taking the notes at `tap` (the routing spec, R39).
+fn set_midi_sidechain_tap(device: DeviceId, track: Option<TrackId>, tap: Tap) -> Invocation {
+    let mut args = json!({ "device": device, "tap": tap_name(tap) });
+    if let Some(track) = track {
+        args["track"] = json!(track);
     }
     Invocation::new("device.set_midi_sidechain_source", args)
+}
+
+/// A device's MIDI sidechain tapping point chooser (the routing spec, R39):
+/// Pre FX · Post FX · Post Mixer, under the source's. `None` for a device
+/// whose MIDI sidechain has no tapping point.
+#[must_use]
+pub fn midi_sidechain_tap(doc: &Document, device: DeviceId) -> Option<Chooser> {
+    let sidechain = doc.device(device)?.midi_sidechain.as_ref()?;
+    let current = sidechain.tap?;
+    Some(Chooser {
+        name: "MIDI Sidechain Tapping Point",
+        text: tap_label(current).to_owned(),
+        entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
+            .into_iter()
+            .map(|tap| {
+                Entry::choice(
+                    tap_label(tap),
+                    set_midi_sidechain_tap(device, sidechain.source, tap),
+                    tap == current,
+                )
+            })
+            .collect(),
+        pending: None,
+    })
 }
 
 /// A device's MIDI sidechain source chooser (WP-5.27; the routing spec,
@@ -1499,7 +1530,7 @@ pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser
         if doc.track(id).map(bl_model::Track::kind) == Some(TrackKind::Midi) {
             entries.push(Entry::choice(
                 label(&labels, id),
-                set_midi_sidechain_source(device, json!(id), None),
+                set_midi_sidechain_source(device, json!(id)),
                 current == Some(id),
             ));
         }
@@ -1507,7 +1538,7 @@ pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser
     entries.push(Entry::Separator);
     entries.push(Entry::choice(
         "No Input",
-        set_midi_sidechain_source(device, Value::Null, None),
+        set_midi_sidechain_source(device, Value::Null),
         current.is_none(),
     ));
     let mut chooser = chooser("MIDI Sidechain Source", entries);
@@ -1515,31 +1546,6 @@ pub fn midi_sidechain_source(doc: &Document, device: DeviceId) -> Option<Chooser
         "No Input".clone_into(&mut chooser.text);
     }
     Some(chooser)
-}
-
-/// A device's MIDI sidechain tapping point chooser (the routing spec, R39):
-/// Pre FX · Post FX · Post Mixer. `None` for a device whose MIDI sidechain
-/// has no tapping point. Choosing keeps the source.
-#[must_use]
-pub fn midi_sidechain_tap(doc: &Document, device: DeviceId) -> Option<Chooser> {
-    let sidechain = doc.device(device)?.midi_sidechain.as_ref()?;
-    let tap = sidechain.tap?;
-    let source = sidechain.source.map_or(Value::Null, |id| json!(id));
-    Some(Chooser {
-        name: "MIDI Sidechain Tap",
-        text: tap_label(tap).to_owned(),
-        entries: [Tap::PreFx, Tap::PostFx, Tap::PostMixer]
-            .into_iter()
-            .map(|t| {
-                Entry::choice(
-                    tap_label(t),
-                    set_midi_sidechain_source(device, source.clone(), Some(t)),
-                    t == tap,
-                )
-            })
-            .collect(),
-        pending: None,
-    })
 }
 
 /// A device's sidechain channel chooser: Pre FX · Post FX · Post Mixer with

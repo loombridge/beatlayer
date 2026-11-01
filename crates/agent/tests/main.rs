@@ -33,6 +33,7 @@ mod recording;
 mod recovery;
 mod save_history;
 mod stdio;
+mod tempo_follower;
 mod tools;
 mod tunings;
 mod undo_history;

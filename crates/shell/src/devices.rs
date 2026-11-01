@@ -243,6 +243,7 @@ pub struct Context<'a> {
 /// The display of a device whose type draws none.
 fn empty_display(device: DeviceId) -> bl_model::DeviceDisplay {
     bl_model::DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: false,
         view: None,
@@ -564,6 +565,7 @@ impl DeviceView {
                 menu_options: Vec::new(),
                 title_switch: None,
                 banks: Vec::new(),
+                spectrogram: None,
                 alternates: Vec::new(),
             },
             plugin: true,
@@ -1559,18 +1561,21 @@ impl DeviceView {
             hot_swap: self.hot_swap == Some(d.id),
             multisampler: self.multisampler_state(d),
             panel: self.panel(d).map(|panel| {
-                set_aside_reference(
-                    follow_current_scale(
-                        panel,
+                dim_unused(
+                    set_aside_reference(
+                        follow_current_scale(
+                            panel,
+                            d,
+                            doc.settings().scale,
+                            doc.settings()
+                                .tuning
+                                .as_ref()
+                                .is_some_and(bl_model::Tuning::hides_scales),
+                        ),
                         d,
-                        doc.settings().scale,
-                        doc.settings()
-                            .tuning
-                            .as_ref()
-                            .is_some_and(bl_model::Tuning::hides_scales),
+                        followed_tuning(doc, d.id).is_some(),
                     ),
                     d,
-                    followed_tuning(doc, d.id).is_some(),
                 )
             }),
             sidechain: d.sidechain.as_ref().map(|sidechain| {
@@ -1614,7 +1619,9 @@ impl DeviceView {
                         || "No Input".to_owned(),
                         |track| crate::routing::track_label(doc, track),
                     ),
-                    tap: sidechain.tap,
+                    tap: sidechain
+                        .tap
+                        .map(|tap| crate::routing::tap_label(tap).to_owned()),
                 }),
             display_view: self.display_view(d),
             rack: d.rack_kind().map(|kind| self.rack_frame(doc, d, kind)),
@@ -3679,12 +3686,12 @@ fn new_device(id: DeviceId, args: &AddDeviceArgs, types: &[DeviceType]) -> Devic
     if let Some(t) = known.filter(|t| !t.cv_outputs.is_empty() || !t.cv_inputs.is_empty()) {
         device = device.with_cv(&t.cv_outputs, &t.cv_inputs);
     }
-    // Spec: routing R39. A MIDI sidechain with a tapping point starts at
-    // Post FX.
-    if known.is_some_and(|t| t.midi_tap) {
-        device = device.with_midi_sidechain_tap();
-    } else if args.device.midi_sidechain {
-        device = device.with_midi_sidechain();
+    if args.device.midi_sidechain {
+        device = if known.is_some_and(|t| t.midi_tap) {
+            device.with_midi_sidechain_tap()
+        } else {
+            device.with_midi_sidechain()
+        };
     }
     device
 }
@@ -3813,6 +3820,24 @@ fn set_aside_reference(mut panel: DevicePanel, device: &Device, tuned: bool) -> 
         && matches!(&device.kind, DeviceKind::Native { device_type } if device_type == bl_devices::TUNER)
     {
         panel.locked.push(bl_devices::tuner::REFERENCE);
+    }
+    panel
+}
+
+/// A Corpus whose type doesn't use some controls draws them disabled; they
+/// keep their values (the Corpus spec, R2).
+fn dim_unused(mut panel: DevicePanel, device: &Device) -> DevicePanel {
+    use bl_devices::corpus;
+    if matches!(&device.kind, DeviceKind::Native { device_type } if device_type == corpus::CORPUS)
+        && let Some(at) = panel
+            .description
+            .params
+            .iter()
+            .position(|p| p.id == corpus::TYPE)
+    {
+        panel
+            .locked
+            .extend_from_slice(corpus::unused(panel.value(at) as usize));
     }
     panel
 }

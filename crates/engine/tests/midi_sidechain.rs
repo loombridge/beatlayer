@@ -34,6 +34,11 @@ fn run(editor: &mut Editor, id: &str, args: Value) {
 
 /// Puts the MIDI sidechain probe at the end of `track`'s chain.
 fn hear(editor: &mut Editor, track: TrackId) -> DeviceId {
+    hear_with(editor, track, false)
+}
+
+/// The same, with a tapping point on its MIDI sidechain if `tapped`.
+fn hear_with(editor: &mut Editor, track: TrackId, tapped: bool) -> DeviceId {
     let id = editor.new_id();
     let device = Device::new(
         id,
@@ -41,8 +46,12 @@ fn hear(editor: &mut Editor, track: TrackId) -> DeviceId {
         DeviceKind::Native {
             device_type: HEAR.to_owned(),
         },
-    )
-    .with_midi_sidechain();
+    );
+    let device = if tapped {
+        device.with_midi_sidechain_tap()
+    } else {
+        device.with_midi_sidechain()
+    };
     let index = editor.document().track(track).unwrap().devices().len();
     editor
         .apply(Command::InsertDevice {
@@ -86,14 +95,19 @@ fn play_keys(editor: &mut Editor, track: TrackId) {
 
 /// What the probe should write at `frame`: the key playing, over 127.
 fn expected(frame: usize) -> f32 {
+    expected_up(frame, 0)
+}
+
+/// The same, with every key `up` semitones higher.
+fn expected_up(frame: usize, up: u8) -> f32 {
     let third = BEAT_FRAMES / 3;
-    let key: i32 = match frame {
+    let key: u8 = match frame {
         f if f < BEAT_FRAMES => 60,
         f if f < 2 * BEAT_FRAMES => 72,
         f if f < 2 * BEAT_FRAMES + third => 72,
         _ => 64,
     };
-    f32::from(key as u8) / 127.0
+    f32::from(key + up) / 127.0
 }
 
 /// Plays three beats from the top in blocks of `block` and returns Main's
@@ -107,6 +121,11 @@ fn play(rig: &mut Rig, block: usize) -> Vec<f32> {
 /// playing the keys. `audio_first` puts the audio track first in display
 /// order, so the engine has to run the MIDI track before it.
 fn song(rig: &mut Rig, audio_first: bool) -> (TrackId, TrackId, DeviceId) {
+    song_with(rig, audio_first, false)
+}
+
+/// The same, the probe's MIDI sidechain having a tapping point if `tapped`.
+fn song_with(rig: &mut Rig, audio_first: bool, tapped: bool) -> (TrackId, TrackId, DeviceId) {
     let ed = &mut rig.editor;
     let (audio, midi) = if audio_first {
         let midi = track(ed, TrackKind::Midi, None);
@@ -118,7 +137,7 @@ fn song(rig: &mut Rig, audio_first: bool) -> (TrackId, TrackId, DeviceId) {
         (audio, midi)
     };
     play_keys(ed, midi);
-    let probe = hear(ed, audio);
+    let probe = hear_with(ed, audio, tapped);
     listen(ed, probe, Some(midi));
     rig.sync();
     (audio, midi, probe)
@@ -354,97 +373,63 @@ fn workers_hear_the_same_notes_on_the_same_frames_as_the_audio_thread_alone() {
     }
 }
 
-/// A song whose MIDI track plays a held C major chord through an
-/// Arpeggiator (Up, an eighth note a step: 12,000 frames), with a probe on
-/// an audio track listening to it at `tap`. The chord's notes all start on
-/// frame 0, so Pre FX hears them as the clip wrote them, and Post FX hears
-/// the arpeggio.
-fn arpeggiated(rig: &mut Rig, tap: &str) -> DeviceId {
-    let ed = &mut rig.editor;
-    let (audio, midi) = (
-        track(ed, TrackKind::Audio, None),
-        track(ed, TrackKind::Midi, None),
-    );
-    let id = ed.new_id();
-    let chord = [60, 64, 67].map(|key| Note::new(key, Ticks::ZERO, BEAT * 4, 100));
-    ed.apply(Command::CreateClip {
-        track: midi,
-        clip: Clip::new(
-            id,
-            Ticks::ZERO,
-            BEAT * 4,
-            ClipData::Midi(MidiData::new(chord)),
-        ),
-    })
-    .unwrap();
-    let arp = ed.new_id();
-    ed.apply(Command::InsertDevice {
-        track: midi,
-        index: 0,
-        device: Device::new(
-            arp,
-            "Arpeggiator",
-            DeviceKind::Native {
-                device_type: bl_devices::arpeggiator::ARPEGGIATOR.to_owned(),
-            },
-        )
-        .with_role(bl_model::DeviceRole::MidiEffect),
-    })
-    .unwrap();
-    let probe = ed.new_id();
-    ed.apply(Command::InsertDevice {
-        track: audio,
-        index: 0,
-        device: Device::new(
-            probe,
-            "Test MIDI Sidechain",
-            DeviceKind::Native {
-                device_type: HEAR.to_owned(),
-            },
-        )
-        .with_midi_sidechain_tap(),
-    })
-    .unwrap();
-    run(
-        ed,
-        "device.set_midi_sidechain_source",
-        json!({ "device": probe, "track": midi, "tap": tap }),
-    );
-    rig.sync();
-    probe
-}
-
-/// The key the probe wrote at `frame`.
-fn key_at(out: &[f32], frame: usize) -> u8 {
-    (out[frame] * 127.0).round() as u8
+/// Puts a MIDI effect that transposes by `up` semitones first in `track`'s
+/// chain.
+fn transpose(editor: &mut Editor, track: TrackId, up: f64) {
+    let id = editor.new_id();
+    editor
+        .apply(Command::InsertDevice {
+            track,
+            index: 0,
+            device: Device::new(
+                id,
+                "Up",
+                DeviceKind::Native {
+                    device_type: TRANSPOSE.to_owned(),
+                },
+            )
+            .with_role(bl_model::DeviceRole::MidiEffect),
+        })
+        .unwrap();
+    editor
+        .apply(Command::SetDeviceParam {
+            device: id,
+            param: SEMITONES,
+            value: up,
+        })
+        .unwrap();
 }
 
 // Spec: routing R39
 #[test]
-fn a_device_taps_the_notes_before_or_after_its_sources_midi_effects_at_any_block_size() {
-    let rig = || {
-        Rig::with_registry(4096, |registry| {
-            bl_devices::arpeggiator::register(registry);
-        })
-    };
-    for (tap, keys) in [
-        // The clip's notes, all on frame 0: the last on is G.
-        ("pre_fx", [67, 67, 67, 67]),
-        // The arpeggio: C, E, G, then C an octave up, a step each.
-        ("post_fx", [60, 64, 67, 72]),
-        ("post_mixer", [60, 64, 67, 72]),
+fn a_tapping_point_hands_the_device_the_notes_before_or_after_the_midi_effects_at_any_block_size() {
+    for (tap, instrument, up) in [
+        ("pre_fx", false, 0),
+        ("post_fx", false, 12),
+        ("post_mixer", false, 12),
+        ("post_fx", true, 12),
+        ("pre_fx", true, 0),
     ] {
         let mut first: Option<Vec<f32>> = None;
         for block in [1, 64, 512, 4096] {
-            let mut rig = rig();
-            arpeggiated(&mut rig, tap);
+            let mut rig = Rig::new(4096);
+            let (_, midi, probe) = song_with(&mut rig, true, true);
+            transpose(&mut rig.editor, midi, 12.0);
+            if instrument {
+                device(&mut rig.editor, midi, INSTRUMENT, &[]);
+            }
+            run(
+                &mut rig.editor,
+                "device.set_midi_sidechain_source",
+                json!({ "device": probe, "track": midi, "tap": tap }),
+            );
+            rig.sync();
             let out = play(&mut rig, block);
-            for (step, key) in keys.iter().enumerate() {
-                let frame = step * (BEAT_FRAMES / 2) + 6_000;
+            for frame in [0, BEAT_FRAMES, 2 * BEAT_FRAMES + 8_000, 3 * BEAT_FRAMES - 1] {
                 assert_eq!(
-                    key_at(&out, frame),
-                    *key,
-                    "{tap}, step {step}, blocks of {block}"
+                    out[frame],
+                    expected_up(frame, up),
+                    "{tap}, frame {frame}, blocks of {block}"
                 );
             }
             match &first {
@@ -457,44 +442,35 @@ fn a_device_taps_the_notes_before_or_after_its_sources_midi_effects_at_any_block
 
 // Spec: routing R39
 #[test]
-fn post_fx_on_its_own_track_carries_nothing_and_pre_fx_hears_it() {
+fn a_new_tapped_device_takes_post_fx_and_the_tap_reads_back() {
     let mut rig = Rig::new(512);
-    let midi = track(&mut rig.editor, TrackKind::Midi, None);
-    play_keys(&mut rig.editor, midi);
-    let probe = rig.editor.new_id();
-    rig.editor
-        .apply(Command::InsertDevice {
-            track: midi,
-            index: 0,
-            device: Device::new(
-                probe,
-                "Test MIDI Sidechain",
-                DeviceKind::Native {
-                    device_type: HEAR.to_owned(),
-                },
-            )
-            .with_midi_sidechain_tap(),
-        })
-        .unwrap();
-    for (tap, heard) in [("post_fx", false), ("pre_fx", true)] {
-        run(
+    let (_, midi, probe) = song(&mut rig, true);
+    let tap = |rig: &Rig| {
+        rig.editor
+            .document()
+            .device(probe)
+            .unwrap()
+            .midi_sidechain
+            .as_ref()
+            .unwrap()
+            .tap
+    };
+    assert_eq!(tap(&rig), None, "a device built without a tap has none");
+    let tapped = bl_engine::DeviceType::native(HEAR, "Tapped", bl_model::DeviceRole::AudioEffect)
+        .with_midi_sidechain_tap()
+        .device(rig.editor.new_id());
+    assert_eq!(
+        tapped.midi_sidechain.unwrap().tap,
+        Some(bl_model::Tap::PostFx)
+    );
+    transpose(&mut rig.editor, midi, 12.0);
+    assert!(
+        registry::run(
             &mut rig.editor,
             "device.set_midi_sidechain_source",
-            json!({ "device": probe, "track": midi, "tap": tap }),
-        );
-        rig.sync();
-        let out = play(&mut rig, 512);
-        assert_eq!(out[0] != 0.0, heard, "{tap}");
-        rig.sender.transport(TransportCommand::Stop);
-        rig.render(512, 512);
-    }
-    let tapped = rig
-        .editor
-        .document()
-        .device(probe)
-        .unwrap()
-        .midi_sidechain
-        .clone()
-        .unwrap();
-    assert_eq!(tapped.tap, Some(bl_model::Tap::PreFx));
+            json!({ "device": probe, "track": midi, "tap": "post_fx" }),
+        )
+        .is_err(),
+        "a MIDI sidechain without a tapping point refuses one"
+    );
 }

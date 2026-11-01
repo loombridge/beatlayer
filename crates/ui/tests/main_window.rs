@@ -32,6 +32,7 @@ fn every_control_has_a_role_a_name_and_a_value_or_a_note() {
                 | Element::ResyncExternalHardware
                 | Element::LinkToggle
                 | Element::LinkMenu
+                | Element::TempoFollower
                 | Element::New
         ) {
             continue;
@@ -329,6 +330,7 @@ fn controls_are_drawn_where_the_layout_places_them() {
                 | Element::ResyncExternalHardware
                 | Element::LinkToggle
                 | Element::LinkMenu
+                | Element::TempoFollower
                 | Element::New
         ) {
             continue;

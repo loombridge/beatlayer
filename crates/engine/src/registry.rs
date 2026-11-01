@@ -91,8 +91,8 @@ pub struct DeviceType {
     /// notes and channel messages of a MIDI track reach the device in its
     /// block's notes ([`Block::notes`](crate::Block::notes)).
     pub midi_sidechain: bool,
-    /// Whether the MIDI sidechain has a tapping point (the routing spec,
-    /// R39): Pre FX, Post FX or Post Mixer on the source track.
+    /// Whether that MIDI sidechain has a tapping point, Pre FX, Post FX or
+    /// Post Mixer, Post FX in a new device (the routing spec, R39).
     pub midi_tap: bool,
     /// Whether its devices send notes on from a note output (IMP-24): a CLAP
     /// plug-in's note output port, a VST3 class's event output bus, or an
@@ -193,7 +193,7 @@ impl DeviceType {
     }
 
     /// The same device type, declaring a MIDI sidechain input with a
-    /// tapping point, Post FX in a new device (the routing spec, R39).
+    /// tapping point (the routing spec, R39).
     #[must_use]
     pub fn with_midi_sidechain_tap(mut self) -> Self {
         self.midi_sidechain = true;

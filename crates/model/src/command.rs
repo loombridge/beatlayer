@@ -2273,9 +2273,9 @@ pub enum Command {
         /// hears (its own track too), or `None` for No Input.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track: Option<TrackId>,
-        /// Where on that track the notes are taken, for a device whose MIDI
-        /// sidechain has a tapping point (the routing spec, R39); left as it
-        /// is when absent.
+        /// Where on that track the device takes the notes (the routing
+        /// spec, R39); left out, it stays as it is. Only a device whose
+        /// type gives its MIDI sidechain a tapping point has one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         tap: Option<Tap>,
     },

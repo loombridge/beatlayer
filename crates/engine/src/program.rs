@@ -897,9 +897,8 @@ pub(crate) struct DeviceMidiSidechain {
     pub(crate) device: u32,
     /// The task whose notes it hears, or [`NO_TASK`].
     pub(crate) from: u32,
-    /// Whether it hears them where they leave the source's MIDI effects
-    /// (routing R39), rather than as the source's clips and input played them.
-    pub(crate) post: bool,
+    /// Where on the source it takes the notes.
+    pub(crate) tap: Tap,
     /// The source's notes in `midi_kept`, or [`NO_TASK`] with no source.
     pub(crate) kept: u32,
 }
@@ -928,9 +927,9 @@ pub(crate) struct Task {
     /// Where it keeps the notes it plays for the MIDI sidechains that
     /// listen to it, in `midi_kept`.
     pub(crate) midi_keep: Option<u32>,
-    /// Where it keeps the notes leaving its MIDI effects, for those that
-    /// listen Post FX, in `midi_kept`.
-    pub(crate) midi_keep_post: Option<u32>,
+    /// Where it keeps the notes that leave its MIDI effects, for the MIDI
+    /// sidechains that tap it Post FX (the routing spec, R39).
+    pub(crate) midi_post: Option<u32>,
     /// The slot of the track's mixer.
     pub(crate) mixer: u32,
     /// The delay line its clips are held back through so they line up with
@@ -2595,25 +2594,24 @@ impl EngineProgram {
                 point.measure_audio(turn.buffer(buffer), channels, stride, frames);
             }
         };
-        // Spec: routing R39. What the track's MIDI effects leave, the notes
-        // its instrument would play, kept once for the MIDI sidechains that
-        // listen Post FX: at the first step that isn't a MIDI effect, or at
-        // the chain's end.
-        let post = task.midi_keep_post.filter(|_| steps == task.chain);
-        let taken = core::cell::Cell::new(false);
+        // Spec: routing R39. The notes leaving a track's MIDI effects are
+        // the ones in front of the last point where the signal is still MIDI
+        // (the first device that isn't a MIDI effect, or the chain's end),
+        // kept for the MIDI sidechains that tap them Post FX. Only the
+        // track's own chain, in task `buffer`, keeps them.
+        let post = task
+            .midi_post
+            .filter(|_| buffer < self.tasks.len())
+            .and_then(|kept| Some((kept, points.iter().rposition(|p| p.midi)?)));
         let keep_post = |at: usize, note_idx: usize| {
-            let Some(kept) = post else {
-                return;
-            };
-            let ends = at == steps.range().len();
-            if taken.get() || !(ends || points.get(at).is_some_and(|p| !p.midi)) {
-                return;
-            }
-            taken.set(true);
-            let to = turn.keep_notes(kept);
-            to.clear();
-            for &note in turn.notes(pair + note_idx).notes() {
-                to.push(note);
+            if let Some((kept, post_at)) = post
+                && at == post_at
+            {
+                let to = turn.keep_notes(kept);
+                to.clear();
+                for &note in turn.notes(pair + note_idx).notes() {
+                    to.push(note);
+                }
             }
         };
         for step_at in steps.range() {

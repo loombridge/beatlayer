@@ -1059,12 +1059,14 @@ impl Fork {
             for f in 0..n {
                 let l = f * stride * 2 + v;
                 let mut x = self.tine_out[l] * voice.tine_gain + self.bar_out[l];
-                if let Some(r) = voice.released {
-                    x *= fade(r + f, voice.gone);
-                }
                 if voice.hammer.left > 0 {
                     let level = voice.hammer.next() * voice.hammer_gain;
                     x += voice.band.step(voice.rng.next_bipolar() as f32) * level;
+                }
+                // The hammer's noise fades with the fork, so a long burst
+                // isn't cut off when the voice ends.
+                if let Some(r) = voice.released {
+                    x *= fade(r + f, voice.gone);
                 }
                 fork[f] = x;
                 // shortcut: the damper's noise skips the oversampler, so it

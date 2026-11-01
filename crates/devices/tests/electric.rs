@@ -390,6 +390,23 @@ fn the_fork_falls_60_db_within_release_after_the_key_is_let_go() {
 
 // Spec: electric R7
 #[test]
+fn a_long_hammer_noise_fades_with_the_fork_on_release() {
+    let params = [
+        LINEAR[0],
+        LINEAR[1],
+        (NOISE, 100.0),
+        (NOISE_DECAY, 1_000.0),
+        (RELEASE, 10.0),
+    ];
+    let notes = [on(0, 60, 0.8), off(4_800, 60)];
+    let s = render(&params, &notes, 48_000);
+    // Release's tail is 18 ms; the voice itself lasts about 100 ms more.
+    let held = peak(&s[2_400..4_800]);
+    let late = peak(&s[4_800 + 2_000..4_800 + 4_000]);
+    assert!(late < held * 1e-2, "{late} after release against {held}");
+}
+
+#[test]
 fn symmetry_and_distance_shape_the_pickups_harmonics() {
     let hz = hz_of(60);
     let level = |params: &[(ParamId, f64)], harmonic: f64| {

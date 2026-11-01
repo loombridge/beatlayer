@@ -22,25 +22,20 @@
 
 use core::f64::consts::TAU;
 
-use bl_engine::{
-    DeviceType, KeyPitches, NodeConfig, NodeData, NodeEvent, NoteExpression, NoteKind, Registry,
-};
+use bl_engine::{DeviceType, NodeConfig, NodeData, NodeEvent, Registry};
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, DisplayCell, LayoutNode, Widget};
 use bl_model::param::gain_to_db;
 use bl_model::{DeviceDescription, DeviceLayout, DeviceRole, ParamDescriptor, ParamId, ParamUnit};
 use lspk_dsp::envelope::{EnvelopeBank, EnvelopeParams, StealRestart, TimeUnit, Timing, Trigger};
 use lspk_dsp::filter::{FilterBank, FilterType, VoiceParams, pitch_of};
-use lspk_plugin::{Event, Expression, Note};
-use lspk_voice::{
-    Layout as VoiceLayout, MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind, VoiceHandler,
-    Voices,
-};
+use lspk_voice::{MAX_VOICES, Start, VoiceBlock, VoiceEvent, VoiceEventKind};
 use lspk_wavetable::osc::{
     Inputs, Layout as OscLayout, Onset as OscOnset, Oscillator, Params as OscParams, PhaseMode,
 };
 use lspk_wavetable::{Cache, FRAME_SIZE, SharedTable, Wavetable};
 
 use crate::framework::{Audio, NativeDevice, ParamBank, add};
+use crate::instrument::{self, Instrument, NoteRange, Parts, Section, Sources, State};
 
 /// Drift's device type.
 pub const POLYSYNTH: &str = "beatlayer.cascade";
@@ -246,8 +241,6 @@ const REFERENCE: f32 = 440.0;
 /// The key the low-pass cutoff is quoted at: key tracking moves it from
 /// this note, which Live calls C3.
 const MIDDLE_C: f32 = 60.0;
-/// The most notes a stretch plays; more are dropped.
-const NOTES: usize = 512;
 /// The frames each shape's table holds: the Shape knob moves through them.
 const SHAPE_FRAMES: usize = 17;
 /// How narrow a shape's duty cycle gets at Shape 100 %.
@@ -275,10 +268,6 @@ const PITCH_MOD_SEMITONES: f64 = 24.0;
 /// How far a full LFO Rate route multiplies the LFO's speed: Beatlayer's
 /// own reading, four octaves.
 const LFO_RATE_OCTAVES: f64 = 4.0;
-/// The key the Key source is centred on, Live's C3, and the span either
-/// side that reads ±1: Beatlayer's own reading, in semitones.
-const KEY_SOURCE_CENTRE: f64 = 60.0;
-const KEY_SOURCE_SPAN: f64 = 48.0;
 /// How fast the Exponential Envelope waveform's decay falls over its
 /// cycle: Beatlayer's own reading.
 const EXPONENTIAL_DECAY: f64 = 5.0;
@@ -393,12 +382,8 @@ pub fn polysynth_type() -> DeviceType {
             .describe("How long Envelope 2 takes to fall to silence after a note ends."),
         ParamDescriptor::gain(VOLUME, "Volume", DRIVE_FULL_DB, 0.0)
             .describe("Sets the instrument's output level, down to silence."),
-        ParamDescriptor::integer(VOICES, "Voices", (1, MAX_VOICES as i64), 16, ParamUnit::None)
-            .decimals(0)
-            .describe("The most notes that sound at once."),
-        ParamDescriptor::integer(TRANSPOSE, "Transpose", (-48, 48), 0, ParamUnit::Semitones)
-            .decimals(0)
-            .describe("Transposes the instrument in semitones."),
+        instrument::voices(VOICES, MAX_VOICES as i64, 16),
+        instrument::transpose(TRANSPOSE, 48),
         ParamDescriptor::continuous(VEL_VOL, "Vel > Vol", (0.0, 100.0), 0.0, ParamUnit::Percent)
             .describe("How much the notes' velocity moves the volume."),
         ParamDescriptor::choice(LFO_MODE, "LFO Mode", &LFO_MODES, MODE_SYNC)
@@ -504,11 +489,8 @@ pub fn polysynth_type() -> DeviceType {
             ParamUnit::Percent,
         )
         .describe("How far the second Freq Mod source moves the low-pass cutoff, in per cent of its travel."),
-        ParamDescriptor::toggle(NOTE_PB, "Note PB", true)
-            .describe("Follows an MPE controller's per-note pitch bend; off ignores it."),
-        ParamDescriptor::integer(PB_RANGE, "PB Range", (1, 96), 48, ParamUnit::Semitones)
-            .decimals(0)
-            .describe("Sets the instrument's pitch bend range, in semitones."),
+        instrument::note_pb(NOTE_PB, true),
+        instrument::pb_range(PB_RANGE, 96, 48),
     ];
     let layout = DeviceLayout::new(LayoutNode::Row(vec![
         LayoutNode::Band(ControlBand::stacked(
@@ -930,12 +912,13 @@ fn source_value(
         SRC_ENV1 => f64::from(lanes.env1[frame * lanes.stride + voice]),
         SRC_ENV2 => f64::from(lanes.env2[frame * lanes.stride + voice]),
         SRC_LFO => f64::from(lanes.lfo[frame * lanes.stride + voice]),
-        SRC_KEY => ((f64::from(voices.info(voice).key) - KEY_SOURCE_CENTRE) / KEY_SOURCE_SPAN)
-            .clamp(-1.0, 1.0),
-        SRC_VELOCITY => f64::from(voices.velocity()[voice]),
-        SRC_MODWHEEL => f64::from(voices.controllers().cc(1)),
-        SRC_PRESSURE => f64::from(voices.pressure()[voice]),
-        SRC_SLIDE => f64::from(voices.timbre()[voice]),
+        // Spec: instrument voices R15 (polysynth R21): the voice section's
+        // sources.
+        SRC_KEY => Sources::of(voices).key(voice),
+        SRC_VELOCITY => Sources::of(voices).velocity(voice),
+        SRC_MODWHEEL => Sources::of(voices).mod_wheel(),
+        SRC_PRESSURE => Sources::of(voices).pressure(voice),
+        SRC_SLIDE => Sources::of(voices).slide(voice),
         _ => 0.0,
     }
 }
@@ -1018,24 +1001,31 @@ impl Lfo {
 
 /// Drift's audio-thread half.
 pub struct PolySynth {
-    voices: Voices,
+    section: Section,
     synth: Synth,
-    events: Vec<Event>,
 }
 
 impl PolySynth {
     fn new(config: &NodeConfig) -> Self {
-        let rate = config.sample_rate.as_f64() as f32;
+        let rate = config.sample_rate.as_f64();
         Self {
-            voices: Voices::new(
-                VoiceLayout {
-                    voices: MAX_VOICES,
-                    lanes_per_voice: 1,
+            // Spec: instrument voices R22. Drift's voices are the voice
+            // section's, with the parts Drift has.
+            section: Section::new(
+                Parts {
+                    voices: Some(VOICES),
+                    transpose: Some(TRANSPOSE),
+                    pb_range: Some(PB_RANGE),
+                    note_pb: Some(NOTE_PB),
+                    note_range: NoteRange::PbRange,
+                    ..Parts::default()
                 },
+                MAX_VOICES,
+                1,
                 rate,
+                0,
             ),
-            synth: Synth::new(config.sample_rate.as_f64(), config.max_frames),
-            events: Vec::with_capacity(NOTES),
+            synth: Synth::new(rate, config.max_frames),
         }
     }
 }
@@ -1047,107 +1037,7 @@ impl NativeDevice for PolySynth {
             return;
         }
         self.synth.snapshot(audio, params);
-        self.events.clear();
-        for note in audio.notes() {
-            if self.events.len() >= self.events.capacity() {
-                break;
-            }
-            // Spec: polysynth R24. A key past a tuning's range plays nothing;
-            // a note it already plays still gets its release.
-            if matches!(note.kind, NoteKind::On) && self.synth.keys.pitch(note.key).is_none() {
-                continue;
-            }
-            let which = Note {
-                port: Some(0),
-                channel: Some(note.channel),
-                key: Some(note.key),
-                id: note.note_id,
-            };
-            let kind = match note.kind {
-                NoteKind::On => Event::NoteOn {
-                    time: note.offset,
-                    note: which,
-                    velocity: note.velocity,
-                },
-                NoteKind::Off => Event::NoteOff {
-                    time: note.offset,
-                    note: which,
-                    velocity: note.velocity,
-                },
-                NoteKind::Choke => Event::NoteChoke {
-                    time: note.offset,
-                    note: which,
-                },
-                // The manual's Note PB switch: with it off, an MPE
-                // controller's per-note bend is ignored; pressure and slide
-                // stay, and are modulation sources.
-                NoteKind::Expression {
-                    expression: NoteExpression::Bend,
-                    ..
-                } if !self.synth.note_pb => continue,
-                // Spec: device-framework R39. The pitch wheel and the mod
-                // wheel reach the voice manager as the MIDI they are.
-                NoteKind::Control { .. }
-                | NoteKind::PitchBend { .. }
-                | NoteKind::ChannelPressure { .. } => {
-                    let Some(message) = note.message() else {
-                        continue;
-                    };
-                    Event::Midi {
-                        time: note.offset,
-                        port: 0,
-                        data: message.padded(),
-                    }
-                }
-                NoteKind::Expression { expression, value } => {
-                    let (expression, value) = match expression {
-                        // Beatlayer carries a bend as the kit's tuning
-                        // expression, in semitones over the instrument's
-                        // PB Range; the kit's voice manager keeps it on
-                        // the one note the event names.
-                        // Spec: polysynth R25. Under a tuning the bend
-                        // moves the note by steps of the tuning: the kit
-                        // adds it to the pitch the voice started at, which
-                        // is the key's tuned pitch.
-                        NoteExpression::Bend => {
-                            let steps = value * self.synth.pb_range;
-                            let keys = &self.synth.keys;
-                            let moved = if keys.is_tuned() {
-                                keys.bent(note.key, f64::from(steps))
-                                    .zip(keys.pitch(note.key))
-                                    .map_or(steps, |(bent, tuned)| (bent - tuned) as f32)
-                            } else {
-                                steps
-                            };
-                            (Expression::Tuning, moved)
-                        }
-                        NoteExpression::Pressure => (Expression::Pressure, value),
-                        NoteExpression::Slide => (Expression::Brightness, value),
-                    };
-                    Event::NoteExpression {
-                        time: note.offset,
-                        note: which,
-                        expression,
-                        value: f64::from(value),
-                    }
-                }
-            };
-            self.events.push(kind);
-        }
-        {
-            let settings = self.voices.settings_mut();
-            settings.voices = self.synth.polyphony;
-            // The manual's Note PB switch and PB Range: a per-note bend
-            // follows the instrument's range, and the pitch wheel will
-            // when an input path brings one.
-            settings.mpe.enabled = self.synth.note_pb;
-            settings.mpe.bend_range = self.synth.pb_range.clamp(1.0, 96.0);
-            // The pitch wheel moves every note by the same range.
-            settings.bend_up = settings.mpe.bend_range;
-            settings.bend_down = -settings.mpe.bend_range;
-        }
-        let (voices, synth) = (&mut self.voices, &mut self.synth);
-        voices.process(self.events.iter().copied(), frames, synth);
+        self.section.process(audio, params, &mut self.synth);
         for channel in 0..audio.channels() {
             audio
                 .channel_mut(channel)
@@ -1158,20 +1048,18 @@ impl NativeDevice for PolySynth {
     fn flush(&mut self, _events: &[NodeEvent], _params: &ParamBank) {
         // A switched-off instrument is silent and holds no notes, so it
         // doesn't carry one over to the moment it comes back on.
-        self.voices.reset();
+        self.section.reset();
         self.synth.silence();
     }
 
     /// The pitch of every key under the set's tuning (the tunings spec,
     /// R12, R18). Notes already sounding keep the pitch they started at.
     fn receive_data(&mut self, data: NodeData) {
-        if let Some(keys) = data.downcast_ref::<KeyPitches>() {
-            self.synth.keys = *keys;
-        }
+        self.section.receive_data(&data);
     }
 }
 
-/// Everything but the voice manager: the [`VoiceHandler`] the voices call.
+/// Everything but the voice section: the [`Instrument`] the voices play.
 struct Synth {
     rate: f64,
     stride: usize,
@@ -1224,20 +1112,9 @@ struct Synth {
     wave1: usize,
     wave2: usize,
     filter_type: usize,
-    /// The most notes at once.
-    polyphony: usize,
-    /// The pitch of every key under the set's tuning (the tunings spec,
-    /// R12), and how far above its key's twelve-step pitch each sounding
-    /// voice started, in semitones: set when the voice starts, so a tuning
-    /// that changes leaves sounding notes where they are (R18).
-    keys: KeyPitches,
-    tuned_by: [f32; MAX_VOICES],
-    /// The LFO's settings, the routes, and the per-note bend settings of
-    /// the stretch.
+    /// The LFO's settings and the routes of the stretch.
     lfos: Lfos,
     routes: Routes,
-    note_pb: bool,
-    pb_range: f32,
     /// The filter's settings and the envelopes', kept so a change is
     /// applied once; and whether a route moved the resonance, so the
     /// voices come back to the base settings.
@@ -1349,9 +1226,6 @@ impl Synth {
             wave1: SAW,
             wave2: 3,
             filter_type: 0,
-            polyphony: 16,
-            keys: KeyPitches::twelve(),
-            tuned_by: [0.0; MAX_VOICES],
             lfos: Lfos {
                 shape: LFO_SINE,
                 mode: MODE_SYNC,
@@ -1361,8 +1235,6 @@ impl Synth {
                 ratio: 1.0,
             },
             routes: Routes::default(),
-            note_pb: true,
-            pb_range: 48.0,
             filter_params: VoiceParams::default(),
             env1_params: EnvelopeParams::AMP,
             env2_params: EnvelopeParams::MODULATION,
@@ -1400,7 +1272,6 @@ impl Synth {
         self.noise_on = params.value(at(NOISE)) >= 0.5;
         self.filter_on = params.value(at(FILTER)) >= 0.5;
         self.retrigger = params.value(at(RETRIGGER)) >= 0.5;
-        self.polyphony = (params.value(at(VOICES)) as usize).clamp(1, MAX_VOICES);
         let wave1 = (params.value(at(OSC1_WAVE)) as usize).min(WAVES1.len() - 1);
         let wave2 = (params.value(at(OSC2_WAVE)) as usize).min(WAVES2.len() - 1);
         if wave1 != self.wave1 {
@@ -1577,8 +1448,6 @@ impl Synth {
                 ),
             ],
         };
-        self.note_pb = params.value(at(NOTE_PB)) >= 0.5;
-        self.pb_range = params.value(at(PB_RANGE)) as f32;
     }
 
     /// The loudest enabled source's gain, in dB: what the manual's two
@@ -1787,8 +1656,8 @@ fn envelope_params(
     }
 }
 
-impl VoiceHandler for Synth {
-    fn voice_event(&mut self, voices: &mut VoiceBlock, event: VoiceEvent) {
+impl Instrument for Synth {
+    fn voice_event(&mut self, voices: &mut VoiceBlock, _state: &State, event: VoiceEvent) {
         let voice = event.voice;
         let key = voices.pitch()[voice];
         match event.kind {
@@ -1800,10 +1669,6 @@ impl VoiceHandler for Synth {
                     Start::Legato => OscOnset::Legato,
                     Start::Join { .. } => OscOnset::Join,
                 };
-                self.tuned_by[voice] = self
-                    .keys
-                    .offset(voices.info(voice).key)
-                    .map_or(0.0, |offset| offset as f32);
                 self.osc1.start(voice, key, onset);
                 self.osc2.start(voice, key, onset);
                 // Retrigger starts the LFO's cycle over, and so does the
@@ -1839,14 +1704,13 @@ impl VoiceHandler for Synth {
                 self.env2.release(voice);
             }
             VoiceEventKind::End { .. } => {
-                self.tuned_by[voice] = 0.0;
                 self.env1.reset(voice);
                 self.env2.reset(voice);
             }
         }
     }
 
-    fn render(&mut self, voices: &mut VoiceBlock, frames: std::ops::Range<usize>) {
+    fn render(&mut self, voices: &mut VoiceBlock, state: &State, frames: std::ops::Range<usize>) {
         let (from, to) = (frames.start, frames.end);
         let count = to - from;
         if count == 0 {
@@ -1882,8 +1746,8 @@ impl VoiceHandler for Synth {
                 let key = self.key[from + frame];
                 for voice in 0..span {
                     // Spec: polysynth R24. Key follows the tuned pitch.
-                    let note =
-                        pitch[voice] + self.tuned_by[voice] + step[voice] * frame as f32 - MIDDLE_C;
+                    let note = pitch[voice] + state.tuned_by(voice) + step[voice] * frame as f32
+                        - MIDDLE_C;
                     let lp = if freq_moved {
                         let base =
                             self.position_of(DEST_LP_FREQ, f64::from(self.freq[from + frame]));
@@ -1911,7 +1775,7 @@ impl VoiceHandler for Synth {
         //    2's Detune is part of its own pitch.
         // Spec: polysynth R24. A tuned voice's offset from its key's pitch
         // rides on Pitch Mod, so the oscillators play the tuned pitch.
-        let tuned = self.tuned_by.iter().any(|&by| by != 0.0);
+        let tuned = state.any_tuned();
         let pitch_moved = self.routes.has(DEST_PITCH) || tuned;
         let shape_moved = self.routes.has(DEST_OSC1_SHAPE);
         let detune_moved = self.routes.has(DEST_OSC2_DETUNE);
@@ -1921,7 +1785,7 @@ impl VoiceHandler for Synth {
                 for voice in 0..span {
                     self.pitch_mod[frame * stride + voice] =
                         (self.pitch_semitones(voice, frame, voices)
-                            + f64::from(self.tuned_by[voice])) as f32;
+                            + f64::from(state.tuned_by(voice))) as f32;
                 }
             }
         }
@@ -1931,7 +1795,7 @@ impl VoiceHandler for Synth {
                 let base_value = f64::from(self.detune[from + frame]);
                 for voice in 0..span {
                     let semitones = self.pitch_semitones(voice, frame, voices)
-                        + f64::from(self.tuned_by[voice]);
+                        + f64::from(state.tuned_by(voice));
                     let base = self.position_of(DEST_OSC2_DETUNE, base_value);
                     let position = self.modulated(base, DEST_OSC2_DETUNE, voice, frame, voices);
                     let moved = self.value_of(DEST_OSC2_DETUNE, position);

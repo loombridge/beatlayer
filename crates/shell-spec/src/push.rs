@@ -21,9 +21,11 @@ pub const SET_MODE: &str = "push.set_mode";
 pub const SET_SETUP: &str = "push.set_setup";
 /// `push.display_frame`: the latest display frame as a PNG.
 pub const DISPLAY_FRAME: &str = "push.display_frame";
+/// `push.convert`: what Convert makes of what is selected.
+pub const CONVERT: &str = "push.convert";
 
 /// Every command [`register`] adds.
-pub const IDS: &[&str] = &[STATE, SET_MODE, SET_SETUP, DISPLAY_FRAME];
+pub const IDS: &[&str] = &[STATE, SET_MODE, SET_SETUP, DISPLAY_FRAME, CONVERT];
 
 /// Whether `id` is one of the commands [`register`] adds.
 #[must_use]
@@ -73,6 +75,8 @@ pub enum PushMenu {
     Setup,
     /// Scale.
     Scale,
+    /// The choices Convert offers for an audio clip.
+    Convert,
 }
 
 /// Workflow (R31).
@@ -256,6 +260,140 @@ pub struct PushDeviceMode {
     pub chains: Vec<PushChain>,
     /// Whether Mute is locked, so each device button switches its device.
     pub mute_locked: bool,
+    /// Simpler's main bank and Edit Mode, while a Simpler is in focus
+    /// (push-2-notes R67 to R76).
+    pub simpler: Option<PushSimpler>,
+}
+
+/// What Device Mode shows of a Simpler (push-2-notes R67 to R76).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushSimpler {
+    /// Whether it has no sample, which the display says.
+    pub empty: bool,
+    /// Its mode: `classic`, `one_shot` or `slice`.
+    pub mode: String,
+    /// Whether the main bank is on the encoders.
+    pub main_bank: bool,
+    /// How far the waveform is zoomed in, as `×1.0` for the whole sample.
+    pub zoom: String,
+    /// What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or
+    /// `slice`.
+    pub zoom_around: String,
+    /// The Start and End flags, in frames of the sample.
+    pub region: (u64, u64),
+    /// How many slices Slice mode has.
+    pub slices: usize,
+    /// The selected slice, from 0.
+    pub selected_slice: usize,
+    /// Whether Pad Slicing is on.
+    pub pad_slicing: bool,
+    /// Edit Mode's buttons after Back, with the upper button each is on.
+    pub edit_buttons: Vec<PushSimplerButton>,
+}
+
+/// One of Simpler's Edit Mode buttons.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushSimplerButton {
+    /// The upper button, from 1.
+    pub button: usize,
+    /// What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`,
+    /// `warp_as`, `half`, `double`, `crop` or `reverse`.
+    pub name: String,
+    /// Its text.
+    pub text: String,
+    /// Whether the setting it stands for is on.
+    pub on: bool,
+}
+
+/// What `push.convert` makes a new MIDI track or drum rack of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PushConvertTo {
+    /// A new MIDI track with a Simpler holding the audio clip's sample.
+    Simpler,
+    /// A new MIDI track with a drum rack holding the sample in a Simpler on
+    /// its first pad.
+    DrumRack,
+}
+
+/// Arguments of `push.convert`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PushConvertArgs {
+    /// For an audio clip: what to make of it. Left out, a Simpler.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<PushConvertTo>,
+}
+
+/// What `push.convert` made.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushConverted {
+    /// What was converted: `simpler` (a Classic or One-Shot Simpler made a
+    /// new track with a drum rack), `slices` (a slicing Simpler became a drum
+    /// rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio
+    /// clip made a new track).
+    pub from: String,
+    /// The new track, unless the Simpler became a drum rack in its place.
+    pub track: Option<TrackId>,
+    /// The device made: the drum rack, or the Simpler the track holds.
+    pub device: DeviceId,
+}
+
+/// One control on an encoder in Clip Mode (push-2-tracks R58).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipControl {
+    /// The encoder, from 1.
+    pub encoder: u8,
+    /// The control's name.
+    pub name: String,
+    /// Its value as the display shows it.
+    pub value: String,
+}
+
+/// The sequenceable area the pads edit in a step sequencing layout
+/// (push-2-tracks R51).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipArea {
+    /// How the display fits the clip: `folded`, `sequencer`,
+    /// `sequencer_notes` or `pad`.
+    pub fit: String,
+    /// Where the page of steps starts, in ticks.
+    pub from: bl_core::time::Ticks,
+    /// Where it ends.
+    pub to: bl_core::time::Ticks,
+    /// The lowest pitch the pads edit.
+    pub low: u8,
+    /// The highest.
+    pub high: u8,
+}
+
+/// What Clip Mode shows (push-2-tracks R58).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PushClipMode {
+    /// The clip shown.
+    pub clip: Option<bl_model::ClipId>,
+    /// What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or
+    /// `nothing`.
+    pub shows: String,
+    /// The clip's name.
+    pub name: String,
+    /// Whether the clip's Loop is on.
+    pub looping: Option<bool>,
+    /// The controls on the encoders, left to right.
+    pub controls: Vec<PushClipControl>,
+    /// The zoom: 1 shows the whole clip.
+    pub zoom: f64,
+    /// The span of beats of the clip's contents the display shows.
+    pub view: [f64; 2],
+    /// Whether the display is folded to the pitches that hold notes.
+    pub folded: bool,
+    /// The sequenceable area the pads edit.
+    pub area: Option<PushClipArea>,
+    /// The steps held, whose notes the encoders set.
+    pub held_steps: Vec<PushHeldStep>,
+    /// The drum pad whose every note the encoders set while Select holds it,
+    /// as a MIDI note.
+    pub select_pad: Option<u8>,
 }
 
 /// What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks
@@ -393,6 +531,8 @@ pub struct PushInfo {
     pub browse: Option<PushBrowse>,
     /// What Device Mode shows, while it is the display mode.
     pub device: Option<PushDeviceMode>,
+    /// What Clip Mode shows, while it is the display mode.
+    pub clip: Option<PushClipMode>,
     /// What Session Mode shows, while it is the pad mode.
     pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.
@@ -619,6 +759,27 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
             .context(Global)
             .args::<PushSetSetupArgs>()
             .result::<PushSetup>(),
+    )?;
+    registry.register(
+        CommandSpec::new(CONVERT, "Push 2 Convert")
+            .description(
+                "What Push 2's Convert button makes of what is selected, as one undo step: \
+                 with a Simpler in Classic or One-Shot mode, a new MIDI track after the \
+                 selected one with a drum rack holding a copy of the Simpler on the pad for \
+                 note 36 and copies of the track's other devices in their places; with a \
+                 Simpler in Slice mode, the Simpler replaced by a drum rack of its slices (the \
+                 same as `device.slice_to_drum_rack`); with a drum rack pad selected, a new \
+                 MIDI track holding copies of the pad's devices; with an audio clip selected, \
+                 a new MIDI track with a Simpler holding its sample (`to` `simpler`, the \
+                 default) or with a drum rack holding it in a Simpler on its first pad \
+                 (`drum_rack`), either way with the clip's warp settings and copies of the \
+                 track's devices. Refused when none of these is selected. Read back by \
+                 `song.query` of `tracks`.",
+            )
+            .permission(Permission::Edit)
+            .context(Global)
+            .args::<PushConvertArgs>()
+            .result::<PushConverted>(),
     )?;
     registry.register(
         CommandSpec::new(DISPLAY_FRAME, "Push 2 Display Frame")

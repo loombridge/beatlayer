@@ -10,12 +10,15 @@
 //!   and a compressor each.
 //! - [`transcribe_bench`]: how accurately Convert Melody and Convert Harmony
 //!   find notes, on generated phrases with known notes.
+//! - [`drum_bench`]: the same for Convert Drums, on generated breaks, and the
+//!   drum classifier's training set.
 //! - [`golden`]: songs built in code (the fixtures), rendered and
 //!   null-tested against reference renders stored as FLAC files in
 //!   `tests/golden/`.
 
 pub mod assistant;
 pub mod capacity;
+pub mod drum_bench;
 pub mod golden;
 pub mod render;
 pub mod transcribe_bench;

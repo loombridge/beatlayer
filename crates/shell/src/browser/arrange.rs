@@ -134,7 +134,11 @@ fn siblings(doc: &Document, track: TrackId) -> Vec<TrackId> {
 
 /// Where a new track goes: below `track` after the `n` tracks already made
 /// there, or below the last top-level track. Returns its parent and index.
-fn place_below(doc: &Document, track: Option<TrackId>, n: usize) -> (Option<TrackId>, usize) {
+pub(crate) fn place_below(
+    doc: &Document,
+    track: Option<TrackId>,
+    n: usize,
+) -> (Option<TrackId>, usize) {
     match track {
         Some(track) => {
             let parent = doc.parent(track);

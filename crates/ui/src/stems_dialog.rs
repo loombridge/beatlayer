@@ -13,7 +13,9 @@
 //! `stems.separate`.
 
 use bl_shell::Shell;
-use bl_shell::stems_commands::{self as ids, DialogStep, JobStatus, StemKind, StemQuality};
+use bl_shell::stems_commands::{
+    self as ids, DialogStep, JobStatus, StemKind, StemQuality, StemSource,
+};
 use egui::{Align2, Color32, Context, Id, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::json;
 
@@ -46,17 +48,12 @@ fn invoke(events: &mut Vec<UiEvent>, id: &str, args: serde_json::Value) {
     events.push(UiEvent::Invoke(bl_shell::Invocation::new(id, args)));
 }
 
-/// Each part's swatch: Beatlayer's own track colours.
+/// Each part's swatch: Beatlayer's own track colours, the ones its track
+/// takes (R26).
 fn swatch(theme: &Theme, kind: StemKind) -> Color32 {
     let palette = &theme.colors.track_palette;
-    let index = match kind {
-        StemKind::Vocals => 10,
-        StemKind::Drums => 2,
-        StemKind::Bass => 6,
-        StemKind::Others => 4,
-    };
     palette
-        .get(index % palette.len().max(1))
+        .get(usize::from(kind.swatch()) % palette.len().max(1))
         .map_or(theme.colors.accent.0, |c| c.0)
 }
 
@@ -101,7 +98,7 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
                 "Downloading and installing the packages",
                 events,
             ),
-            DialogStep::Options => options(ui, theme, dialog.clip, events),
+            DialogStep::Options => options(ui, theme, &dialog.source, events),
             DialogStep::Separating => progress(
                 ui,
                 theme,
@@ -168,7 +165,7 @@ fn bar(ui: &mut Ui, theme: &Theme, fraction: f32, name: &str) {
 }
 
 /// The parts and the quality (R5 to R7), as Live's dialog lays them out.
-fn options(ui: &mut Ui, theme: &Theme, clip: bl_model::ClipId, events: &mut Vec<UiEvent>) {
+fn options(ui: &mut Ui, theme: &Theme, source: &StemSource, events: &mut Vec<UiEvent>) {
     let mut choices: Choices = ui
         .ctx()
         .data(|d| d.get_temp(choices_id()))
@@ -217,7 +214,7 @@ fn options(ui: &mut Ui, theme: &Theme, clip: bl_model::ClipId, events: &mut Vec<
                 events,
                 ids::SEPARATE,
                 json!({
-                    "clip": clip,
+                    "source": source,
                     "stems": stems,
                     "quality": choices.quality,
                     "merge": choices.merge && can_merge,

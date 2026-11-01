@@ -3095,6 +3095,20 @@ const ENTRIES: &[Entry] = &[
             person does, use `device.load_sample`.",
     },
     Entry {
+        id: "device.set_wavetable",
+        action: Action::Apply("set_device_wavetable"),
+        label: "Set Wavetable",
+        permission: Permission::Edit,
+        contexts: &[DeviceView],
+        keys: &[],
+        description: "Gives a wavetable oscillator (`oscillator` 1 or 2) its table: `choice` is \
+            a factory table (`kind` factory, with its `category` and `name`) or a user table \
+            (`kind` user, with `raw` and its `frames`), whose file is `media`, a content hash \
+            the media store holds, as for `device.set_sample`. A factory table takes no \
+            `media`, and a user table needs it. One undo step, named Load Wavetable. To load \
+            a table by name or from a file as a person does, use `device.load_wavetable`.",
+    },
+    Entry {
         id: "device.set_warp",
         action: Action::Apply("set_device_warp"),
         label: "Device Warp On/Off",

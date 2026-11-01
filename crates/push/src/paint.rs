@@ -10,12 +10,19 @@ use skrifa::{FontRef, MetadataProvider};
 use tiny_skia::{FillRule, LineCap, Paint, Path, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use crate::frame::{HEIGHT, RGB_BYTES, WIDTH};
-use crate::screen::{Column, Dot, Graphic, Icon, Label, List, Screen, Shade};
+use crate::screen::{
+    ClipBody, ClipScreen, Column, Dot, Graphic, Icon, Label, List, Screen, Shade, Waveform,
+};
 
 /// The columns' width.
 const COLUMN: f32 = 120.0;
 /// The bands' height.
 const BAND: f32 = 24.0;
+/// Where a clip's graphic sits in the content band: its left edge, and its
+/// top and bottom, over the two lines of the columns' names and values.
+const CLIP_LEFT: f32 = 14.0;
+const CLIP_TOP: f32 = BAND + 22.0;
+const CLIP_BOTTOM: f32 = BAND + 72.0;
 /// The app's typeface (OFL-1.1): the UI crate's own file, which this crate
 /// reads without depending on it.
 const FONT: &[u8] = include_bytes!("../../ui/fonts/inter/Inter-Regular.ttf");
@@ -121,6 +128,20 @@ impl Painter<'_> {
         }
     }
 
+    /// A rectangle on whole pixels, not smoothed: what a clip's notes, markers
+    /// and boxes are drawn with, since the rasteriser's hairline path fails
+    /// on thin smoothed ones.
+    fn crisp(&mut self, x: f32, y: f32, w: f32, h: f32, colour: [u8; 3], alpha: u8) {
+        let (x, y) = (x.round(), y.round());
+        let (w, h) = (w.round().max(1.0), h.round().max(1.0));
+        if let Some(rect) = Rect::from_xywh(x, y, w, h) {
+            let mut paint = paint(colour, alpha);
+            paint.anti_alias = false;
+            self.pixmap
+                .fill_rect(rect, &paint, Transform::identity(), None);
+        }
+    }
+
     fn fill(&mut self, path: &Path, colour: [u8; 3]) {
         self.pixmap.fill_path(
             path,
@@ -223,8 +244,18 @@ impl Painter<'_> {
         for (n, label) in screen.lower.iter().enumerate() {
             self.label(label, n, lower);
         }
+        if let Some(clip) = &screen.clip {
+            self.clip(clip);
+        }
+        if let Some(wave) = &screen.waveform {
+            self.waveform(wave);
+        }
         for (n, column) in screen.columns.iter().enumerate() {
-            self.column(column, n, screen.shades[n]);
+            if screen.clip.is_some() {
+                self.compact(column, n);
+            } else {
+                self.column(column, n, screen.shades[n]);
+            }
         }
         for (n, list) in screen.lists.iter().enumerate() {
             if let Some(list) = list {
@@ -442,6 +473,201 @@ impl Painter<'_> {
             }
             Graphic::Fader(value) => self.fader(centre, value.clamp(0.0, 1.0)),
         }
+    }
+
+    /// A column under a clip's graphic: its name and its value in two lines
+    /// (push-2-tracks R44).
+    fn compact(&mut self, column: &Column, n: usize) {
+        if column.is_empty() {
+            return;
+        }
+        let centre = n as f32 * COLUMN + COLUMN / 2.0;
+        if column.touched {
+            self.rect(
+                n as f32 * COLUMN + 2.0,
+                CLIP_BOTTOM + 2.0,
+                COLUMN - 4.0,
+                HEIGHT as f32 - BAND - CLIP_BOTTOM - 4.0,
+                [50, 50, 50],
+                255,
+            );
+        }
+        self.centred(
+            &column.name,
+            centre,
+            CLIP_BOTTOM + 20.0,
+            13.0,
+            COLUMN - 10.0,
+            TEXT,
+        );
+        self.centred(
+            &column.value,
+            centre,
+            CLIP_BOTTOM + 38.0,
+            12.0,
+            COLUMN - 8.0,
+            DIM,
+        );
+    }
+
+    /// A clip over the content band: its name on a band of its colour, its
+    /// notes or waveform with the markers, the playhead and the sequencers'
+    /// boxes (push-2-tracks R44, R50 to R55).
+    fn clip(&mut self, clip: &ClipScreen) {
+        let (left, right) = (CLIP_LEFT, WIDTH as f32 - 12.0);
+        let (top, bottom) = (CLIP_TOP, CLIP_BOTTOM - 4.0);
+        let name = self.fit(&clip.name, 14.0, 360.0);
+        let width = self.width(&name, 14.0) + 16.0;
+        self.rect(left, BAND + 2.0, width, 17.0, clip.colour, 255);
+        self.text(&name, left + 8.0, BAND + 15.0, 14.0, [0, 0, 0]);
+        let (from, to) = clip.view;
+        let across = (to - from).max(1e-9);
+        let x = |beat: f64| left + (right - left) * ((beat - from) / across).clamp(0.0, 1.0) as f32;
+        match &clip.body {
+            ClipBody::Prompt(message) => {
+                self.centred(
+                    message,
+                    (left + right) / 2.0,
+                    (top + bottom) / 2.0 + 5.0,
+                    18.0,
+                    right - left,
+                    DIM,
+                );
+            }
+            ClipBody::Notes { rows, bars } => {
+                let height = (bottom - top) / rows.len().max(1) as f32;
+                if let Some(area) = &clip.area {
+                    let (first, last) = area.rows.unwrap_or((0, rows.len().saturating_sub(1)));
+                    let y = top + height * first as f32;
+                    let h = height * (last + 1 - first.min(last + 1)) as f32;
+                    self.crisp(x(area.from), y, x(area.to) - x(area.from), h, TEXT, 40);
+                }
+                for &(held_from, held_to) in &clip.held {
+                    self.crisp(
+                        x(held_from),
+                        top,
+                        x(held_to) - x(held_from),
+                        bottom - top,
+                        TEXT,
+                        60,
+                    );
+                }
+                for bar in bars {
+                    let y = top + height * bar.row as f32;
+                    let w = (x(bar.to) - x(bar.from)).max(2.0);
+                    self.crisp(
+                        x(bar.from),
+                        y + 0.5,
+                        w,
+                        (height - 1.0).max(1.0),
+                        bar.colour,
+                        (bar.opacity.clamp(0.0, 1.0) * 255.0).round() as u8,
+                    );
+                }
+            }
+            ClipBody::Waveform(peaks) => {
+                let mid = (top + bottom) / 2.0;
+                let half = (bottom - top) / 2.0;
+                let step = (right - left) / peaks.len().max(1) as f32;
+                for (n, [low, high]) in peaks.iter().enumerate() {
+                    let (a, b) = (mid - high * half, mid - low * half);
+                    self.crisp(
+                        left + step * n as f32,
+                        a,
+                        step.max(1.0),
+                        (b - a).max(1.0),
+                        clip.colour,
+                        255,
+                    );
+                }
+            }
+        }
+        for (name, at) in &clip.markers {
+            if *at >= from && *at <= to {
+                let loop_edge = name.starts_with("loop");
+                self.crisp(
+                    x(*at),
+                    top,
+                    1.5,
+                    bottom - top,
+                    TEXT,
+                    if loop_edge { 230 } else { 120 },
+                );
+            }
+        }
+        if let Some(at) = clip.playhead
+            && at >= from
+            && at <= to
+        {
+            self.crisp(x(at), top, 2.0, bottom - top, [255, 255, 255], 255);
+        }
+        // The pitch-range box and the note lines at the left edge.
+        for &(at, thickness) in &clip.lines {
+            let y = bottom - (bottom - top) * at;
+            self.crisp(
+                0.0,
+                y - 0.5,
+                2.0 * f32::from(thickness),
+                1.5,
+                clip.colour,
+                255,
+            );
+        }
+        if let Some((low, high)) = clip.range {
+            let (y_low, y_high) = (
+                bottom - (bottom - top) * low,
+                bottom - (bottom - top) * high,
+            );
+            self.crisp(1.0, y_high, 9.0, (y_low - y_high).max(2.0), TEXT, 90);
+        }
+    }
+
+    /// A Simpler's sample under the columns' names and values: the region
+    /// bright, the rest dimmed, the played part brighter still, the loop,
+    /// the slices and the selected slice marked (push-2-notes R67).
+    fn waveform(&mut self, wave: &Waveform) {
+        const TOP: f32 = BAND + 46.0;
+        const BOTTOM: f32 = HEIGHT as f32 - BAND - 2.0;
+        let (middle, half) = ((TOP + BOTTOM) / 2.0, (BOTTOM - TOP) / 2.0);
+        let inside = |x: f32, (from, to): (f32, f32)| x + 0.5 >= from && x + 0.5 < to;
+        if let Some(selected) = wave.selected {
+            self.rect(
+                selected.0.max(0.0),
+                BAND,
+                (selected.1.min(WIDTH as f32) - selected.0.max(0.0)).max(0.0),
+                HEIGHT as f32 - 2.0 * BAND,
+                [40, 40, 40],
+                255,
+            );
+        }
+        for (x, (low, high)) in wave.peaks.iter().enumerate() {
+            let x = x as f32;
+            let colour = if wave.played.is_some_and(|played| inside(x, played)) {
+                [255, 255, 255]
+            } else if inside(x, wave.region) {
+                [150, 150, 150]
+            } else {
+                [55, 55, 55]
+            };
+            let (top, bottom) = (
+                middle - f32::from(*high) / 127.0 * half,
+                middle - f32::from(*low) / 127.0 * half,
+            );
+            self.rect(x, top, 1.0, (bottom - top).max(1.0), colour, 255);
+        }
+        let line = |painter: &mut Self, x: f32, colour: [u8; 3]| {
+            if (0.0..WIDTH as f32).contains(&x) {
+                painter.rect(x, BAND, 1.0, HEIGHT as f32 - 2.0 * BAND, colour, 255);
+            }
+        };
+        for x in &wave.slices {
+            line(self, *x, [255, 170, 0]);
+        }
+        if let Some(x) = wave.looped {
+            line(self, x, [0, 200, 255]);
+        }
+        line(self, wave.region.0, [255, 255, 255]);
+        line(self, wave.region.1, [255, 255, 255]);
     }
 
     /// A browser column: eight rows, scrolled to keep the selected one in

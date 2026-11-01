@@ -3798,6 +3798,100 @@ fn an_agent_sets_pitchloop89_and_vector_delay_by_id_and_finds_them_after_a_reope
     }
 }
 
+// Spec: spectral-blur R9, R11, R12 (WP-8.49): an agent inserts Spectral Blur
+// by command ID, sets every parameter by ID, reads them back with their
+// descriptors, reads the range's edges with `device.display`, and finds every
+// value after the set is saved and reopened.
+#[test]
+fn an_agent_sets_spectral_blur_by_id_and_finds_it_after_a_reopen() {
+    use bl_devices::spectral_blur::{self, SPECTRAL_BLUR};
+    use bl_model::{DeviceId, ParamId};
+
+    let dir = TempDir::new("blur");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("blur").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let inserted = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.insert", "args": { "track": track, "index": 0, "device": {
+            "id": {"$new": "blur"}, "name": "blur", "enabled": true, "params": [],
+            "kind": { "native": { "device_type": SPECTRAL_BLUR } },
+        } } }] }),
+    );
+    let id = inserted["ids"]["blur"].as_u64().unwrap();
+    let sets: [(ParamId, f64); 7] = [
+        (spectral_blur::LOW, 300.0),
+        (spectral_blur::HIGH, 2_500.0),
+        (spectral_blur::HALO, 750.0),
+        (spectral_blur::RESIDUAL, 25.0),
+        (spectral_blur::FREEZE, 1.0),
+        (spectral_blur::WET_GAIN, 0.0),
+        (spectral_blur::DRY_WET, 60.0),
+    ];
+    let commands: Vec<Value> = sets
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": id, "param": param.0, "value": value } })
+        })
+        .collect();
+    call(&mut client, "run", json!({ "commands": commands }));
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": id } }] }),
+    );
+    let params = read["results"][0]["result"]["params"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(params.len(), 7);
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    for (param, value) in &sets {
+        let found = params.iter().find(|p| p["id"] == param.0).unwrap();
+        assert_eq!(found["value"], json!(value), "{}", param.0);
+    }
+    // The range's edges are handles on the display, where Low and High say.
+    let shown = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.display", "args": { "device": id } }] }),
+    );
+    let markers = shown["results"][0]["result"]["markers"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(markers.len(), 2);
+    assert_eq!(
+        (markers[0]["name"].as_str(), markers[0]["x"].as_f64()),
+        (Some("Low"), Some(300.0))
+    );
+    assert_eq!(
+        (markers[1]["name"].as_str(), markers[1]["x"].as_f64()),
+        (Some("High"), Some(2_500.0))
+    );
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Blur.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let device = project
+        .document
+        .device(DeviceId(bl_core::id::Id::new(id).unwrap()))
+        .expect("the device is in the set");
+    for (param, value) in &sets {
+        assert_eq!(
+            device.params.get(param).copied(),
+            Some(*value),
+            "{}",
+            param.0
+        );
+    }
+}
+
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
 // (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved
@@ -5868,6 +5962,143 @@ fn an_agent_adds_sets_and_reads_the_modulation_devices_by_id_and_reopens_them() 
     }
 }
 
+// Spec: gated-delay R9 to R12, pitch-hack R9 to R11: an agent adds Gated Delay and
+// Pitch Hack, sets every parameter by ID, reads each back with its
+// descriptor, reads the step row's display, and finds every value again when
+// the saved set reopens.
+#[test]
+fn an_agent_adds_sets_and_reads_gated_delay_and_pitch_hack_and_reopens_them() {
+    use bl_devices::{gated_delay, pitch_hack};
+
+    let dir = TempDir::new("gated-delay");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("gated-delay-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let types = [
+        (gated_delay::gated_delay_type(), 24),
+        (pitch_hack::pitch_hack_type(), 10),
+    ];
+    let mut added = Vec::new();
+    for (device_type, _) in &types {
+        let reply = call(
+            &mut client,
+            "run",
+            json!({ "commands": [{
+                "command": "device.add",
+                "args": { "track": track, "device": {
+                    "kind": device_type.kind, "name": device_type.name, "role": device_type.role,
+                } },
+            }] }),
+        );
+        added.push(reply["results"][0]["result"]["device"].clone());
+    }
+    let parameters = |client: &mut Client<InProcess>, device: &Value| {
+        let read = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+        );
+        read["results"][0]["result"]["params"].clone()
+    };
+    for ((_, count), device) in types.iter().zip(&added) {
+        assert_eq!(
+            parameters(&mut client, device).as_array().unwrap().len(),
+            *count
+        );
+    }
+    // Every parameter to the other end of its range.
+    for ((device_type, _), device) in types.iter().zip(&added) {
+        for param in &device_type.description.params {
+            let to = if param.default == param.max() {
+                param.min()
+            } else {
+                param.max()
+            };
+            call(
+                &mut client,
+                "run",
+                json!({ "commands": [{ "command": "device.set_param",
+                    "args": { "device": device, "param": param.id.0, "value": to } }] }),
+            );
+        }
+    }
+    let mut wanted = Vec::new();
+    for ((device_type, _), device) in types.iter().zip(&added) {
+        let read = parameters(&mut client, device);
+        let values: Vec<(bl_model::ParamId, f64)> = device_type
+            .description
+            .params
+            .iter()
+            .map(|param| {
+                let found = read
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|p| p["name"] == param.name)
+                    .unwrap_or_else(|| panic!("no {}", param.name));
+                assert_eq!(found["automatable"], json!(true), "{}", param.name);
+                (param.id, found["value"].as_f64().expect("a number"))
+            })
+            .collect();
+        wanted.push(values);
+    }
+    // Step 2 was off and is on now; Step 1 was on and is off.
+    let step = |n: usize| {
+        wanted[0]
+            .iter()
+            .find(|(id, _)| *id == gated_delay::step(n))
+            .unwrap()
+            .1
+    };
+    assert_eq!((step(1), step(2)), (0.0, 1.0));
+
+    // The step row reads back through the device's display.
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.display", "args": { "device": added[0] } }] }),
+    );
+    let display = &read["results"][0]["result"];
+    assert_eq!(display["live"], json!(false));
+    let steps = display["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == gated_delay::STEPS_SERIES)
+        .unwrap_or_else(|| panic!("no step row in {display}"));
+    let want: Vec<f64> = (1..=gated_delay::STEP_COUNT).map(step).collect();
+    assert_eq!(steps["values"], json!(want));
+
+    // Save and reopen.
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Gated.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let devices: Vec<_> = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .collect();
+    for (kind, values) in [
+        (gated_delay::GATED_DELAY, &wanted[0]),
+        (pitch_hack::PITCH_HACK, &wanted[1]),
+    ] {
+        let device = devices
+            .iter()
+            .find(|d| matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == kind))
+            .unwrap_or_else(|| panic!("no {kind} in the reopened set"));
+        for (param, value) in values {
+            assert_eq!(
+                device.params[param], *value,
+                "{kind}: parameter {param:?} reopened"
+            );
+        }
+    }
+}
+
 /// An agent reads a device's spectrogram through `device.display` as numbers
 /// in dB with its axes, as the engine published it, at any block size (the
 /// device framework spec, R46).
@@ -5950,6 +6181,186 @@ fn an_agent_reads_a_spectrograms_grid_and_axes_through_device_display() {
         );
         assert!((-9.0..=-5.0).contains(&level), "block {block}: {level} dB");
         assert_eq!(host.offline.heap_operations(), 0, "block {block}");
+    }
+}
+
+// Spec: spectral-time R16
+#[test]
+fn an_agent_reads_spectral_times_spectrogram_through_device_display() {
+    use bl_devices::spectral_time::{GRID, SPECTRAL_TIME};
+    for block in [64, 4_096] {
+        let mut registry = bl_engine::Registry::new();
+        bl_devices::register(&mut registry);
+        let mut host = EngineHost::with_registry(block, registry);
+        host.client
+            .transport()
+            .shell
+            .set_device_types(bl_devices::device_types());
+        let device = |index: u32, name: &str, device_type: &str| {
+            json!({ "command": "device.insert",
+                    "args": { "track": {"$ref": "Track"}, "index": index,
+                              "device": { "id": {"$new": name}, "name": name,
+                                          "kind": { "native": { "device_type": device_type } },
+                                          "enabled": true, "params": [] } } })
+        };
+        host.call(
+            "run",
+            json!({ "label": "Add devices", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+                device(0, "Tone", bl_engine::nodes::TEST_TONE),
+                device(1, "Spectral Time", SPECTRAL_TIME),
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+            ] }),
+        );
+        let spectral_time = {
+            let document = host.client.transport().shell.editor().document();
+            let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+            track.devices().nth(1).unwrap().id
+        };
+        host.play_to(131_072);
+        host.publish_displays();
+        let reply = host.call(
+            "run",
+            json!({ "label": "Read", "commands": [
+                { "command": "device.display", "args": { "device": spectral_time } },
+            ] }),
+        );
+        let shown = &reply["results"][0]["result"];
+        assert_eq!(shown["live"], true);
+        let grid = &shown["spectrograms"][0];
+        assert_eq!(grid["columns"], GRID.columns);
+        assert_eq!(grid["rows"], GRID.rows);
+        assert_eq!(grid["frequencies"], json!(GRID.frequencies));
+        assert_eq!(grid["log_frequency"], true);
+        let values: Vec<f64> = grid["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        assert_eq!(values.len(), GRID.columns * GRID.rows);
+        // The newest column peaks at the row of 1 kHz: the tone at -6 dB
+        // through the delay's echoes, which add to it by their phase.
+        let newest = &values[values.len() - GRID.rows..];
+        let (loudest, level) = newest
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        let [low, high] = GRID.frequencies.map(f64::from);
+        let hz = low * (high / low).powf(loudest as f64 / (GRID.rows - 1) as f64);
+        assert!(
+            (hz / 1_000.0).ln().abs() < 0.15,
+            "block {block}: {hz:.0} Hz"
+        );
+        assert!((-14.0..=0.0).contains(&level), "block {block}: {level} dB");
+        assert_eq!(host.offline.heap_operations(), 0, "block {block}");
+    }
+}
+
+// Spec: spectral-time R18, R20
+#[test]
+fn an_agent_adds_sets_and_reads_spectral_time_by_id_and_reopens_it() {
+    use bl_devices::spectral_time::{self, spectral_time_type};
+
+    let dir = TempDir::new("spectral-time");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("spectral-time-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        reply["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    let kind = spectral_time_type();
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "track": track,
+            "device": { "kind": kind.kind, "name": kind.name, "role": kind.role },
+        }),
+    );
+    let device = added["device"].clone();
+    let parameters = |client: &mut Client<InProcess>| {
+        run(client, "device.parameters", json!({ "device": device }))["params"].clone()
+    };
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 31);
+
+    // Every parameter moved to the other end of its range, and read back.
+    let mut wanted = Vec::new();
+    for param in &kind.description.params {
+        let to = if param.default == param.max() {
+            param.min()
+        } else {
+            param.max()
+        };
+        run(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": param.id.0, "value": to }),
+        );
+        wanted.push((param.id, param.name.clone(), to));
+    }
+    let read = parameters(&mut client);
+    for (_, name, to) in &wanted {
+        let found = read
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == *name)
+            .unwrap_or_else(|| panic!("no {name}"));
+        assert_eq!(found["value"].as_f64().unwrap(), *to, "{name}");
+    }
+    let zero = read
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Zero Dry Signal Latency")
+        .unwrap();
+    assert_eq!(
+        zero["menu_option"],
+        json!(true),
+        "it is in the context menu"
+    );
+    // Spec: spectral-time R12. At those settings the time is beyond the delay
+    // memory, and the parameter that sets it says so.
+    for p in read.as_array().unwrap() {
+        let held = p["text"].as_str().unwrap().contains("(held at 8 s)");
+        assert_eq!(held, p["name"] == "16th Dotted", "{}", p["name"]);
+    }
+
+    // Save and reopen.
+    let saved = run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": dir.0.join("SpectralTime.blset").to_string_lossy() }),
+    );
+    let (project, _) =
+        bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] }))).unwrap();
+    let reopened = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .find(|d| {
+            matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == spectral_time::SPECTRAL_TIME)
+        })
+        .expect("Spectral Time in the reopened set");
+    for (param, name, to) in &wanted {
+        assert_eq!(reopened.params[param], *to, "{name} reopened");
     }
 }
 

@@ -467,8 +467,8 @@ impl Editor {
             outer.keep |= open.keep;
             return Ok(false);
         }
-        // Cue mode and the pad layout are no undo step, so a batch that
-        // changed only them records none; undoing keeps them as they are.
+        // Cue mode and the pad layout are no undo step, so a transaction
+        // that changed only those records none: an agent's call runs in one.
         let mut start = open.start;
         start.settings.cue_mode = self.document.settings.cue_mode;
         start.settings.pad_layout = self.document.settings.pad_layout;
@@ -1455,24 +1455,27 @@ mod tests {
         assert!(saved.get("pad_layout").is_none());
     }
 
-    // Spec: push-2-notes R37. A batch that only sets the pad layout, as an
-    // agent's `run` does, records no undo step either.
+    // Spec: push-2-notes R37. A transaction, such as an agent's call, that
+    // sets only the pad layout or cue mode records no step either.
     #[test]
-    fn a_transaction_that_only_sets_the_pad_layout_records_no_step() {
+    fn a_transaction_that_sets_only_the_pad_layout_records_no_step() {
         use crate::PadDirection;
         let mut editor = Editor::new();
-        let steps = editor.undo_history().len();
-        editor.begin("run");
         editor
-            .apply(Command::SetPadLayout {
-                in_key: None,
-                fixed: None,
-                spacing: None,
-                direction: Some(PadDirection::Horizontal),
-            })
+            .transact_by(
+                Maker::Agent("a".to_owned()),
+                "a: Set Pad Layout",
+                |editor| {
+                    editor.apply(Command::SetPadLayout {
+                        in_key: None,
+                        fixed: None,
+                        spacing: None,
+                        direction: Some(PadDirection::Horizontal),
+                    })
+                },
+            )
             .unwrap();
-        assert!(!editor.commit().unwrap());
-        assert_eq!(editor.undo_history().len(), steps);
+        assert_eq!(editor.undo_history().len(), 0);
         assert_eq!(
             editor.document().settings().pad_layout.direction,
             PadDirection::Horizontal

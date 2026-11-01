@@ -5,13 +5,16 @@
 //! behaviour they follow is in the stem separation spec.
 //!
 //! A person reaches them from an audio clip's context menu in the
-//! Arrangement (C-CLIP-ARR-027) and the Create menu (M-CREATE-015), which
-//! run [`OPEN`]: the first time, its dialog lists the packages to download;
-//! after that, it offers the stems. An agent calls [`SEPARATE`] directly,
-//! after [`INSTALL`] if [`STATUS`] says the packages aren't installed.
+//! Arrangement (C-CLIP-ARR-027) or the Session View (C-CLIP-SES-020), a
+//! browser file's and an Arrangement time selection's menus, and the Create
+//! menu (M-CREATE-015), which run [`OPEN`]: the first time, its dialog lists
+//! the packages to download; after that, it offers the stems. An agent calls
+//! [`SEPARATE`] directly, after [`INSTALL`] if [`STATUS`] says the packages
+//! aren't installed. What is separated is a [`StemSource`].
 
-use bl_commands::Context::{Arrangement, Global};
+use bl_commands::Context::Global;
 use bl_commands::{CommandSpec, NoArgs, Permission, RegisterError, Registry};
+use bl_core::time::Ticks;
 use bl_model::{ClipId, TrackId};
 
 use crate::packages::PackageStatus;
@@ -77,6 +80,46 @@ impl StemKind {
     }
 }
 
+impl StemKind {
+    /// The swatch of Beatlayer's palette its track takes, and its icon in the
+    /// dialog (the stem separation spec, R26).
+    #[must_use]
+    pub const fn swatch(self) -> u8 {
+        match self {
+            Self::Vocals => 10,
+            Self::Drums => 2,
+            Self::Bass => 6,
+            Self::Others => 4,
+        }
+    }
+}
+
+/// What a separation works on (the stem separation spec, R22).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StemSource {
+    /// An audio clip in the Arrangement or in a Session slot.
+    Clip {
+        /// The clip.
+        clip: ClipId,
+    },
+    /// An audio file, separated whole: what the browser's menu runs.
+    File {
+        /// Its path.
+        path: String,
+    },
+    /// The audio the clips of audio tracks play inside the Arrangement's
+    /// time selection, each track on its own.
+    TimeSelection {
+        /// The tracks; those with no audio in the range are skipped.
+        tracks: Vec<TrackId>,
+        /// The range's start.
+        start: Ticks,
+        /// The range's end.
+        end: Ticks,
+    },
+}
+
 /// How hard the separation works (the dialog's High Speed / High Quality
 /// switch).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -93,17 +136,39 @@ pub enum StemQuality {
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OpenArgs {
-    /// The audio clip to separate; the selected clip if left out.
+    /// The audio clip to separate, in either view: shorthand for a `clip`
+    /// source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clip: Option<ClipId>,
+    /// What to separate. With neither it nor `clip`, what is selected: one
+    /// audio clip in the Arrangement, a time selection that holds audio, one
+    /// audio clip shown from the Session View, or one audio file in the
+    /// browser, in that order.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<StemSource>,
+}
+
+impl OpenArgs {
+    /// The source named, if any.
+    #[must_use]
+    pub fn source(self) -> Option<StemSource> {
+        self.source
+            .or(self.clip.map(|clip| StemSource::Clip { clip }))
+    }
 }
 
 /// Arguments of `stems.separate`.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SeparateArgs {
-    /// The audio clip in the Arrangement to separate.
-    pub clip: ClipId,
+    /// The audio clip, in the Arrangement or a Session slot, to separate:
+    /// shorthand for a `clip` source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip: Option<ClipId>,
+    /// What to separate: a clip by ID, a file by path, or a time selection
+    /// by its tracks and range. One of `source` and `clip` is needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<StemSource>,
     /// Which parts to put on new tracks, one or more; all four if left out.
     #[serde(default = "every_stem")]
     pub stems: Vec<StemKind>,
@@ -114,6 +179,16 @@ pub struct SeparateArgs {
     /// parts.
     #[serde(default)]
     pub merge: bool,
+}
+
+impl SeparateArgs {
+    /// The source named, if any.
+    #[must_use]
+    pub fn source(&self) -> Option<StemSource> {
+        self.source
+            .clone()
+            .or(self.clip.map(|clip| StemSource::Clip { clip }))
+    }
 }
 
 fn every_stem() -> Vec<StemKind> {
@@ -167,12 +242,12 @@ pub enum DialogStep {
 }
 
 /// The open dialog.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DialogStatus {
     /// What it shows.
     pub step: DialogStep,
-    /// The clip it separates.
-    pub clip: ClipId,
+    /// What it separates.
+    pub source: StemSource,
 }
 
 /// What `stems.status` returns.
@@ -188,10 +263,17 @@ pub struct StemsStatus {
     pub install: JobStatus,
     /// The separation.
     pub separation: JobStatus,
+    /// What the current or last separation ran on, such as `Core ML`, or
+    /// `CPU (not the GPU: ...)` with the reason a GPU wasn't used.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider: String,
     /// The tracks the last separation made, the group first if it made
     /// one.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created_tracks: Vec<TrackId>,
+    /// The clips the last separation made, in the order of their tracks.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_clips: Vec<ClipId>,
     /// The dialog, if it's open.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dialog: Option<DialogStatus>,
@@ -206,8 +288,10 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(OPEN, "Separate Stems to New Audio Tracks")
             .description(
-                "Opens the Separate Stems dialog for an audio clip in the Arrangement (`clip`, \
-                 or the selected clip). The first time, the dialog lists the packages stem \
+                "Opens the Separate Stems dialog for a source: `source` (an audio clip in the \
+                 Arrangement or a Session slot by ID, an audio file by path, or an Arrangement \
+                 time selection by its tracks and range), `clip` for a clip alone, or, with \
+                 neither, what is selected. The first time, the dialog lists the packages stem \
                  separation needs (ONNX Runtime and the Demucs model), their sizes and where \
                  they install, with Download Required Packages Now and Cancel; once they're \
                  installed it offers Vocals, Drums, Bass and Others, High Speed or High \
@@ -215,7 +299,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  `stems.separate` instead.",
             )
             .permission(Permission::Read)
-            .context(Arrangement)
+            .context(Global)
             .args::<OpenArgs>()
             .result::<StemsStatus>(),
     )?;
@@ -260,18 +344,28 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     registry.register(
         CommandSpec::new(SEPARATE, STEP)
             .description(
-                "Separates an audio clip in the Arrangement into stems on new audio tracks, \
-                 with a Demucs network running on this computer. `stems` chooses the parts \
-                 (`vocals`, `drums`, `bass`, `others`; all four if left out); `quality` is \
-                 `high_speed` (one pass) or `high_quality` (two passes averaged, about twice \
-                 as long); `merge` puts two or three parts together on one track. The audio \
-                 between the clip's Start and End markers, or through its loop, is separated \
-                 at 44.1 kHz and written to the project's Samples/Processed/Stems folder. \
-                 Each part gets a track below the clip's track, inside a new group track when \
-                 there's more than one, with a copy of the clip playing that part; the \
-                 original clip is deactivated. Playback stops first. Returns at once; \
-                 `stems.status` reports the progress and the new tracks, and the whole edit is \
-                 one undo step. Needs the packages `stems.install` downloads.",
+                "Separates audio into stems on new audio tracks, with a Demucs network running on \
+                 this computer. `source` is an audio clip in the Arrangement or a Session slot \
+                 (`{\"kind\":\"clip\",\"clip\":<ID>}`, or `clip` alone), an audio file \
+                 (`{\"kind\":\"file\",\"path\":...}`), or a time selection \
+                 (`{\"kind\":\"time_selection\",\"tracks\":[...],\"start\":...,\"end\":...}`, in \
+                 ticks). `stems` chooses the parts (`vocals`, `drums`, `bass`, `others`; all \
+                 four if left out); `quality` is `high_speed` (one pass) or `high_quality` (two \
+                 passes averaged, about twice as long); `merge` puts two or three parts \
+                 together on one track. The audio is written at 44.1 kHz to the project's \
+                 Samples/Processed/Stems folder: for a clip, between its Start and End \
+                 markers or through its loop; for a file, the whole file; for a time \
+                 selection, what each audio track's clips play inside the range, before the \
+                 track's devices and mixer. Each part gets a track after the source, inside \
+                 a new group track when there's more than one, coloured by its part; the \
+                 group (or the one new track) holds a copy of the source track's devices, \
+                 mixer settings and Arrangement automation. An Arrangement clip's parts are \
+                 copies of it, a Session clip's go in its scene's slots, a file's start at \
+                 the insert marker, and a time selection's span the range; the source clip \
+                 (or the part of a track's clips inside the range) is deactivated. Playback \
+                 stops first. Returns at once; `stems.status` reports the progress and the new \
+                 tracks and clips, and the whole edit is one undo step. Needs the packages \
+                 `stems.install` downloads.",
             )
             .permission(Permission::Edit)
             .context(Global)

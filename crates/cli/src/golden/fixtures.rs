@@ -989,7 +989,12 @@ fn electric() -> Scene {
     ]
     .iter()
     .map(|&(key, start, length, velocity)| {
-        bl_model::Note::new(key, Ticks(start * beat / 2), Ticks(length * beat / 2), velocity)
+        bl_model::Note::new(
+            key,
+            Ticks(start * beat / 2),
+            Ticks(length * beat / 2),
+            velocity,
+        )
     })
     .collect::<Vec<_>>();
     let clip = song.editor.new_id();

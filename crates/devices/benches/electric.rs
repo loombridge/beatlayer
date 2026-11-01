@@ -79,7 +79,10 @@ fn cost() -> f64 {
 
 fn main() -> ExitCode {
     let seconds = cost();
-    println!("Electric, sixteen voices: {:.1} % of real time", seconds * 100.0);
+    println!(
+        "Electric, sixteen voices: {:.1} % of real time",
+        seconds * 100.0
+    );
     if seconds > BUDGET {
         eprintln!("over the budget of {:.0} %", BUDGET * 100.0);
         return ExitCode::FAILURE;

@@ -11,7 +11,10 @@ use serde_json::{Value, json};
 
 fn run(client: &mut Client<InProcess>, command: &str, args: Value) -> Value {
     client
-        .call("run", json!({ "commands": [{ "command": command, "args": args }] }))
+        .call(
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )
         .unwrap()
         .ok()
         .unwrap_or_else(|error| panic!("{command} failed: {error}"))
@@ -74,7 +77,11 @@ fn an_agent_sets_every_electric_parameter_and_reads_it_back() {
         );
     }
     // The instrument describes every control to an agent.
-    let described = run(&mut client, "device.parameters", json!({ "device": device }));
+    let described = run(
+        &mut client,
+        "device.parameters",
+        json!({ "device": device }),
+    );
     let names: Vec<&str> = described["results"][0]["result"]["params"]
         .as_array()
         .expect("the params")
@@ -82,7 +89,11 @@ fn an_agent_sets_every_electric_parameter_and_reads_it_back() {
         .filter_map(|entry| entry["name"].as_str())
         .collect();
     for param in &params {
-        assert!(names.contains(&param.name.as_str()), "{} is described", param.name);
+        assert!(
+            names.contains(&param.name.as_str()),
+            "{} is described",
+            param.name
+        );
     }
     // And the section it shows is a command's too.
     let shown = run(

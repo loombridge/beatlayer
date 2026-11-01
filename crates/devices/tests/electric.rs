@@ -45,12 +45,7 @@ fn node(params: &[(ParamId, f64)]) -> Box<dyn Node> {
 
 /// Plays `notes` for `frames` frames in blocks of `block`, and returns the
 /// left channel.
-fn play_blocks(
-    node: &mut dyn Node,
-    frames: usize,
-    block: usize,
-    notes: &[NoteEvent],
-) -> Vec<f32> {
+fn play_blocks(node: &mut dyn Node, frames: usize, block: usize, notes: &[NoteEvent]) -> Vec<f32> {
     let mut signal = Vec::with_capacity(frames);
     let mut at = 0;
     let mut out = NoteBuffer::with_capacity(64);
@@ -168,7 +163,9 @@ fn the_factory_presets_set_parameters_in_range_and_sound() {
     let description = electric_type().description;
     for (name, settings) in PRESETS {
         for (id, value) in settings {
-            let param = description.param(*id).expect("the preset's parameter exists");
+            let param = description
+                .param(*id)
+                .expect("the preset's parameter exists");
             assert_eq!(param.clamp(*value), *value, "{name}: {}", param.name);
         }
         let s = render(settings, &[on(0, 48, 0.8), on(0, 64, 0.8)], 24_000);
@@ -222,7 +219,11 @@ fn velocity_moves_the_sound_only_through_the_amounts_and_otherwise_only_its_leve
         let top = peak(&s);
         s.iter().map(|x| x / top).collect::<Vec<f32>>()
     };
-    let distance = |a: &[f32], b: &[f32]| a.iter().zip(b).fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+    let distance = |a: &[f32], b: &[f32]| {
+        a.iter()
+            .zip(b)
+            .fold(0.0f32, |m, (x, y)| m.max((x - y).abs()))
+    };
     // At every amount 0, two velocities sound alike but for level, noise
     // and damper included.
     let (soft, loud) = (shape(0.3, &[]), shape(0.9, &[]));
@@ -254,7 +255,8 @@ fn the_noise_is_a_burst_by_its_level_decay_pitch_and_key() {
     let above = |s: &[f32]| {
         let sp = common::spectrum(&s[..8_192]);
         let bin = |hz: f64| (hz * 8_192.0 / HZ) as usize;
-        sp[bin(4_000.0)..].iter().map(|a| a * a).sum::<f64>() / sp.iter().map(|a| a * a).sum::<f64>()
+        sp[bin(4_000.0)..].iter().map(|a| a * a).sum::<f64>()
+            / sp.iter().map(|a| a * a).sum::<f64>()
     };
     let low = heard(&[(NOISE, 100.0), (NOISE_PITCH, 200.0)], 60);
     let high = heard(&[(NOISE, 100.0), (NOISE_PITCH, 8_000.0)], 60);
@@ -272,7 +274,11 @@ fn the_fork_rings_at_its_pitch_within_a_cent_across_the_keyboard() {
         let s = render(&LINEAR, &[on(0, key, 0.8)], 120_000);
         let hz = hz_of(key);
         let found = pitch_near(&s, hz, 9_600, 96_000);
-        assert!(cents(found, hz).abs() < 1.0, "key {key}: {} cents", cents(found, hz));
+        assert!(
+            cents(found, hz).abs() < 1.0,
+            "key {key}: {} cents",
+            cents(found, hz)
+        );
     }
 }
 
@@ -299,7 +305,12 @@ fn semi_detune_and_stretch_tune_the_fork() {
 fn the_tine_decays_as_its_decay_says() {
     for key in [48, 72] {
         let s = render(
-            &[LINEAR[0], LINEAR[1], (TINE_DECAY, 3_000.0), (TONE_DECAY, 100.0)],
+            &[
+                LINEAR[0],
+                LINEAR[1],
+                (TINE_DECAY, 3_000.0),
+                (TONE_DECAY, 100.0),
+            ],
             &[on(0, key, 0.8)],
             96_000,
         );
@@ -321,10 +332,18 @@ fn key_moves_the_tines_and_the_pickups_level_by_up_to_12_db_over_four_octaves() 
     };
     for key_param in [TINE_KEY, OUTPUT_KEY] {
         let moved = level(&[(key_param, 100.0)], 96) / level(&[], 96);
-        assert!((common::db(moved) - 9.0).abs() < 0.2, "{key_param:?}: {}", common::db(moved));
+        assert!(
+            (common::db(moved) - 9.0).abs() < 0.2,
+            "{key_param:?}: {}",
+            common::db(moved)
+        );
         // And C3 itself doesn't move.
         let centre = level(&[(key_param, 100.0)], 60) / level(&[], 60);
-        assert!((common::db(centre)).abs() < 0.1, "{key_param:?}: {}", common::db(centre));
+        assert!(
+            (common::db(centre)).abs() < 0.1,
+            "{key_param:?}: {}",
+            common::db(centre)
+        );
     }
 }
 
@@ -333,7 +352,12 @@ fn key_moves_the_tines_and_the_pickups_level_by_up_to_12_db_over_four_octaves() 
 fn the_tone_bar_rings_on_for_its_own_decay_after_the_tine_has_died() {
     for key in [48, 72] {
         let s = render(
-            &[LINEAR[0], LINEAR[1], (TINE_DECAY, 100.0), (TONE_DECAY, 3_000.0)],
+            &[
+                LINEAR[0],
+                LINEAR[1],
+                (TINE_DECAY, 100.0),
+                (TONE_DECAY, 3_000.0),
+            ],
             &[on(0, key, 0.8)],
             96_000,
         );
@@ -415,7 +439,10 @@ fn the_pickup_never_divides_by_zero_however_hard_it_is_driven() {
 // Spec: electric R8
 #[test]
 fn the_device_reports_the_oversamplers_latency() {
-    assert_eq!(node(&[]).latency(), bl_dsp::Oversampler::new(2, 1, 32).latency());
+    assert_eq!(
+        node(&[]).latency(),
+        bl_dsp::Oversampler::new(2, 1, 32).latency()
+    );
     assert_eq!(node(&[]).latency(), 48);
 }
 
@@ -450,12 +477,30 @@ fn the_damper_sounds_at_the_start_the_end_or_both_by_att_rel() {
 #[test]
 fn volume_scales_the_output_and_voices_limits_the_notes() {
     let full = render(&LINEAR, &[on(0, 60, 0.8)], 9_600);
-    let half = render(&[LINEAR[0], LINEAR[1], (VOLUME, 0.5)], &[on(0, 60, 0.8)], 9_600);
-    assert!(full.iter().zip(&half).all(|(f, h)| (f * 0.5 - h).abs() < 1e-6));
-    assert!(render(&[(VOLUME, 0.0)], &[on(0, 60, 0.8)], 9_600).iter().all(|s| *s == 0.0));
+    let half = render(
+        &[LINEAR[0], LINEAR[1], (VOLUME, 0.5)],
+        &[on(0, 60, 0.8)],
+        9_600,
+    );
+    assert!(
+        full.iter()
+            .zip(&half)
+            .all(|(f, h)| (f * 0.5 - h).abs() < 1e-6)
+    );
+    assert!(
+        render(&[(VOLUME, 0.0)], &[on(0, 60, 0.8)], 9_600)
+            .iter()
+            .all(|s| *s == 0.0)
+    );
     // One voice: the second note takes the first's place.
     let one = render(
-        &[LINEAR[0], LINEAR[1], (VOICES, 1.0), (TINE_DECAY, 20_000.0), (TONE_DECAY, 20_000.0)],
+        &[
+            LINEAR[0],
+            LINEAR[1],
+            (VOICES, 1.0),
+            (TINE_DECAY, 20_000.0),
+            (TONE_DECAY, 20_000.0),
+        ],
         &[on(0, 60, 0.8), on(4_800, 67, 0.8)],
         48_000,
     );

@@ -378,12 +378,15 @@ pub fn electric_type() -> DeviceType {
                 ),
                 (
                     "Fork",
-                    &["Tine Color", "Tine Decay", "Tine Key", "Tone Decay", "Release"],
+                    &[
+                        "Tine Color",
+                        "Tine Decay",
+                        "Tine Key",
+                        "Tone Decay",
+                        "Release",
+                    ],
                 ),
-                (
-                    "Damper",
-                    &["Damper Tone", "Damper Level", "Damper Att/Rel"],
-                ),
+                ("Damper", &["Damper Tone", "Damper Level", "Damper Att/Rel"]),
                 (
                     "Pickup",
                     &[
@@ -964,7 +967,8 @@ impl Fork {
         voice.rng = Random::seeded(seed);
         voice.damper_rng = Random::seeded(!seed);
         voice.field = Field::at_rest(&geometry);
-        voice.reference = (1.0 / (TAU * f64::from(hz.max(20.0)) / (rate * f64::from(1u32 << STAGES)))) as f32;
+        voice.reference =
+            (1.0 / (TAU * f64::from(hz.max(20.0)) / (rate * f64::from(1u32 << STAGES)))) as f32;
     }
 
     /// The key is let go on `v`: the fork falls within Release, and the
@@ -1030,15 +1034,19 @@ impl Fork {
                 self.exc[f * stride + v] = voice.amp * pulse(voice.age + f, voice.width);
             }
         }
-        self.tine
-            .process(&self.exc[..n * stride], &mut self.tine_out[..n * stride * 2]);
+        self.tine.process(
+            &self.exc[..n * stride],
+            &mut self.tine_out[..n * stride * 2],
+        );
         for f in 0..n {
             for (v, voice) in self.voices.iter().enumerate() {
                 self.bar_in[f * stride + v] = voice.drive * self.tine_out[f * stride * 2 + v];
             }
         }
-        self.bar
-            .process(&self.bar_in[..n * stride], &mut self.bar_out[..n * stride * 2]);
+        self.bar.process(
+            &self.bar_in[..n * stride],
+            &mut self.bar_out[..n * stride * 2],
+        );
         let pickup = Pickup::new(self.settings.electrostatic, &self.geometry);
         let mut mix = [0.0f32; CHUNK];
         let mut bits = mask;
@@ -1079,11 +1087,11 @@ impl Fork {
                 *r += n;
             }
         }
-        for f in 0..n {
-            let x = mix[f] * self.geometry.volume;
+        for (out, mixed) in self.out[at..at + n].iter_mut().zip(mix) {
+            let x = mixed * self.geometry.volume;
             let y = x - self.dc[0] + self.dc_pole * self.dc[1];
             self.dc = [x, y];
-            self.out[at + f] = y;
+            *out = y;
         }
     }
 }
@@ -1139,7 +1147,10 @@ impl Instrument for Fork {
         while bits != 0 {
             let v = bits.trailing_zeros() as usize;
             bits &= bits - 1;
-            if self.voices[v].released.is_some_and(|r| r >= self.voices[v].end) {
+            if self.voices[v]
+                .released
+                .is_some_and(|r| r >= self.voices[v].end)
+            {
                 voices.end(v);
             }
         }

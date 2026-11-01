@@ -1099,9 +1099,11 @@ fn the_saturation_devices_pass_under_rtsan() {
 #[test]
 fn roar_passes_under_rtsan() {
     use bl_devices::roar::{
-        AMOUNT, COLOR_COMPENSATION, DRIVE, DRY_WET, FILTER, FREQUENCY, HIGH_CROSSOVER, LEVEL,
-        LOW_CROSSOVER, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE, SHAPER, TONE_AMOUNT,
-        stage_param,
+        AMOUNT, COLOR_COMPENSATION, COMPRESSION, DRIVE, DRY_WET, ENV_ATTACK, ENV_THRESHOLD,
+        FB_AMOUNT, FB_GATE, FB_INVERT, FB_MODE, FB_NOTE, FB_SYNCED, FB_TIME, FILTER, FREQUENCY,
+        GLOBAL_MODULATION, HIGH_CROSSOVER, INPUT_LISTEN, LEVEL, LFO_MODE, LFO_RATE, LFO_WAVE,
+        LOW_CROSSOVER, MIDI_FB_NOTE, NOISE_TYPE, OUTPUT_GAIN, PRE, RESONANCE, ROAR, ROUTING_MODE,
+        SHAPER, SIDECHAIN_HP, TONE_AMOUNT, lfo_param, matrix_param, stage_param,
     };
     run_lo_fi_device(
         ROAR,
@@ -1126,6 +1128,53 @@ fn roar_passes_under_rtsan() {
             (HIGH_CROSSOVER, &[500.0, 16_000.0]),
             (OUTPUT_GAIN, &[0.0, 1.0, 3.9]),
             (DRY_WET, &[100.0, 40.0]),
+            // Part 2 (WP-8.39): the feedback section in each mode, the
+            // compressor, the sources and the matrix.
+            (FB_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (FB_TIME, &[1.0, 100.0, 2_000.0]),
+            (FB_SYNCED, &[0.0, 4.0, 8.0]),
+            (FB_NOTE, &[0.0, 69.0, 127.0]),
+            (FB_AMOUNT, &[0.0, 80.0, 100.0]),
+            (FB_INVERT, &[1.0, 0.0]),
+            (FB_GATE, &[1.0, 0.0]),
+            (MIDI_FB_NOTE, &[1.0, 0.0]),
+            (COMPRESSION, &[0.0, 50.0, 100.0]),
+            (SIDECHAIN_HP, &[1.0, 0.0]),
+            (GLOBAL_MODULATION, &[100.0, 30.0]),
+            (lfo_param(0, LFO_WAVE), &[0.0, 2.0, 4.0]),
+            (lfo_param(0, LFO_MODE), &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (lfo_param(1, LFO_RATE), &[0.01, 5.0, 40.0]),
+            (ENV_ATTACK, &[0.1, 20.0]),
+            (ENV_THRESHOLD, &[-60.0, -20.0]),
+            (INPUT_LISTEN, &[0.0, 1.0, 0.0]),
+            (NOISE_TYPE, &[0.0, 1.0, 2.0, 3.0]),
+            (matrix_param(0, 0), &[0.0, 70.0, -40.0]),
+            (matrix_param(1, 8), &[50.0, 0.0]),
+            (matrix_param(2, 27), &[-60.0, 60.0]),
+            (matrix_param(3, 28), &[40.0, 0.0]),
+        ],
+    );
+}
+
+// Spec: pedal R9
+#[test]
+fn pedal_passes_under_rtsan() {
+    use bl_devices::pedal::{
+        BASS, DRY_WET, GAIN, HI_QUALITY, MID, MID_FREQUENCY, OUTPUT, PEDAL, SUB, TREBLE, TYPE,
+    };
+    run_lo_fi_device(
+        PEDAL,
+        &[
+            (TYPE, &[0.0, 1.0, 2.0]),
+            (GAIN, &[0.0, 50.0, 100.0]),
+            (BASS, &[-15.0, 15.0, 0.0]),
+            (MID, &[15.0, -15.0]),
+            (MID_FREQUENCY, &[0.0, 2.0, 1.0]),
+            (TREBLE, &[-15.0, 15.0]),
+            (SUB, &[15.0, 0.0]),
+            (OUTPUT, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[100.0, 40.0]),
+            (HI_QUALITY, &[1.0, 0.0]),
         ],
     );
 }

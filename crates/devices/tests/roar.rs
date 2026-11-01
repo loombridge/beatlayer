@@ -14,8 +14,8 @@ use bl_core::time::{Bpm, SampleRate, TempoMap};
 use bl_devices::roar::{
     AMOUNT, BIAS, BLEND, COLOR_COMPENSATION, CURVE_POINTS, DRIVE, DRY_WET, FILTER, FILTERS,
     FREQUENCY, HIGH_CROSSOVER, LEVEL, LOW_CROSSOVER, MODES, MORPH, ON, OUTPUT_GAIN, PEAK_GAIN, PRE,
-    RESONANCE, ROAR, ROUTING_MODE, SHAPER, SHAPERS, STAGES, TONE_AMOUNT, TONE_FREQUENCY, roar_type,
-    stage_param,
+    RESONANCE, ROAR, ROUTING_MODE, SHAPER, SHAPERS, STAGES, TONE_AMOUNT, TONE_FREQUENCY,
+    TRACE_POINTS, roar_type, stage_param,
 };
 use bl_engine::{Block, DeviceType, Node, NodeConfig, Registry, TransportInfo};
 use bl_model::{DeviceId, ParamId};
@@ -156,8 +156,9 @@ fn roar_is_described_with_part_ones_parameters_and_defaults() {
             "the filter after the shaper"
         );
     }
-    // Part 1 describes only its own parameters, 10 and 11 for each stage.
-    assert_eq!(description.params.len(), 10 + 11 * STAGES);
+    // Part 1's parameters, 10 and 11 for each stage, keep their numbers; part
+    // 2's follow them (R20).
+    assert!(description.params.len() > 10 + 11 * STAGES);
     for (i, param) in description.params.iter().enumerate() {
         assert_eq!(param.id.0 as usize, i, "descriptor numbers run in order");
     }
@@ -820,26 +821,33 @@ fn the_delay_and_feedback_loops_are_a_fixed_number_of_frames_at_any_block_size()
             );
         }
         let (first, size) = peak_after(&reference, LATENCY + loop_frames - 50);
-        assert_eq!(
-            first,
-            LATENCY + loop_frames,
-            "{name}: a loop after the input"
-        );
         if name == "Delay" {
+            assert_eq!(
+                first,
+                LATENCY + loop_frames,
+                "{name}: a loop after the input"
+            );
             assert!(
                 (size / through - 1.0).abs() < 0.03,
                 "heard once at its level: {size}"
             );
+            // What returns passes the feedback band-pass (R24), which adds
+            // a few frames and takes some off.
             let (second, size) = peak_after(&reference, LATENCY + loop_frames + 50);
-            assert_eq!(
-                second,
-                LATENCY + 2 * loop_frames,
-                "then fed back round the loop"
+            let late = second - (LATENCY + 2 * loop_frames);
+            assert!(
+                (0..40).contains(&late),
+                "then fed back round the loop: {late}"
             );
-            assert!((size / through - 0.5).abs() < 0.03, "half as loud: {size}");
+            assert!((0.05..0.5).contains(&(size / through)), "{size}");
         } else {
-            // An equal-power half each way, and a half returning.
-            assert!((size / through - 0.25).abs() < 0.02, "{size}");
+            // The loop's length makes up for the band-pass's delay, so the
+            // first return lands within a few frames of the loop's time.
+            let late = first as i64 - (LATENCY + loop_frames) as i64;
+            assert!(late.abs() < 12, "{name}: a loop after the input: {late}");
+            // An equal-power half each way, and a half returning, less the
+            // band-pass's share.
+            assert!((0.02..0.25).contains(&(size / through)), "{size}");
         }
     }
 }
@@ -1034,7 +1042,7 @@ fn the_display_draws_each_stages_curve_with_its_bias_and_the_level_on_it() {
     run(node.as_mut(), &[0.25; 256], &[]);
     let data = reader.read();
     assert_eq!(data.published, 1);
-    assert_eq!(data.values.len(), STAGES);
+    assert_eq!(data.values.len(), STAGES + 4 * TRACE_POINTS);
     assert!((0.25..0.3).contains(&data.values[0]), "{:?}", data.values);
     let live = shown(&[], "Stage 1", Some(&data.values));
     assert!(live.live);

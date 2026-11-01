@@ -969,7 +969,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.19 | done | 30 October 2026 | [#546](https://github.com/loombridge/beatlayer/pull/546): `bl-push` detects Push 2 and runs it on the surface host with every control, LEDs, the 960 × 160 display over USB, the mode framework, the Setup menu, footswitches and User Mode, with a simulated Push 2 for the tests and `push.state`, `push.set_mode`, `push.set_setup` and `push.display_frame` |
 | 7.20 | done | 30 October 2026 | [#555](https://github.com/loombridge/beatlayer/pull/555): Push 2's Browse Mode browses the catalogue in columns from the read model without waiting on the index, with Load, Preview and Add Track, and `push.state` reads it back |
 | 7.21 | done | 1 November 2026 | [#563](https://github.com/loombridge/beatlayer/pull/563): Note Mode on Push 2 arms the selected track and plays its drum rack through the Loop Selector, 16 Velocities and 64 Pads layouts tied to the pad view, with pad options, step sequencing with loop pads and pages, and `push.state` reading it back |
-| 7.22 | todo |  |  |
+| 7.22 | done | 1 November 2026 | [#696](https://github.com/loombridge/beatlayer/pull/696): Melodies on Push 2 with pad pressure as polyphonic key pressure, the touch strip's bend and modulation, 64 Notes, In Key and Chromatic in every layout saved with the set (`song.set_pad_layout`), the Scale menu, the Melodic Sequencer and its + 32 Notes variant, Note Mode navigation, and `session.launch` taking `legato` |
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
 | 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
@@ -1013,16 +1013,16 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.29 | todo |  |  |
 | 8.30 | todo |  |  |
 | 8.31 | todo |  |  |
-| 8.32 | todo |  |  |
+| 8.32 | done | 1 November 2026 | [#697](https://github.com/loombridge/beatlayer/pull/697): `bl_dsp::pitch` has a streaming tracker (the Tuner's detector moved out, with confidence, voiced and onset every hop) and a PSOLA voice shifter that keeps or moves formants; a quiet reading in the shifter dated one interval early is a follow-up |
 | 8.33 | done | 31 October 2026 | [#650](https://github.com/loombridge/beatlayer/pull/650): Delay has 12.4's LFO with six rate modes, seven waves and Morph in its expanded part, and Limiter has Maximize with Threshold and Output; saving Delay's expanded part with the set (R13) is a follow-up |
 | 8.34 | todo |  |  |
 | 8.35 | todo |  |  |
 | 8.36 | todo |  |  |
 | 8.37 | done | 1 November 2026 | [#649](https://github.com/loombridge/beatlayer/pull/649): Echo has its two lines with their time and channel modes, input drive and inverted feedback, filters, the Modulation and Character tabs, its reverb, the global controls and the tunnel display on its pages |
 | 8.38 | done | 31 October 2026 | [#651](https://github.com/loombridge/beatlayer/pull/651): Roar has its input section, three stages with twelve shapers and nine filters, seven routing modes, 4× oversampling, Output, Color compensation, Dry/Wet and the shaper display, with the Auto Filter's filters moved to a shared module; R11's aliasing level at 4× (8×, ADAA or the narrower test) and Mid Side's Blend are follow-ups |
-| 8.39 | todo |  |  |
+| 8.39 | done | 1 November 2026 | [#673](https://github.com/loombridge/beatlayer/pull/673): Roar has its modulation matrix (LFO 1, LFO 2, the envelope follower and Noise to 31 targets on the 32-frame grid), the feedback section with Note mode and octave keys, the compressor, both sidechains (R38) and the modulation displays, using the MIDI tapping point R39 from #659; the single matrix view with its lamps, Input Listen as view state, loops past 4 s and a linked compressor detector are follow-ups |
 | 8.40 | todo |  |  |
-| 8.41 | todo |  |  |
+| 8.41 | done | 1 November 2026 | [#663](https://github.com/loombridge/beatlayer/pull/663): Pedal, with Overdrive, Distortion and Fuzz circuits oversampled 4x (8x with Hi-Quality), Bass, Mid at three positions, Treble and Sub, Output and Dry/Wet, and a 20 ms crossfade when the type changes; its aliasing target holds at −36 dBFS, not at full level, which is with the maintainer |
 | 8.42 | todo |  |  |
 | 8.43 | done | 1 November 2026 | [#670](https://github.com/loombridge/beatlayer/pull/670): Resonators is a native device with its input filter, five tuned comb resonators (I by note and fine, II to V by interval), Decay, Const, Color, Mode A and B, Width, Gain and Dry/Wet, following the current scale and the set's tuning |
 | 8.44 | done | 1 November 2026 | [#659](https://github.com/loombridge/beatlayer/pull/659): Corpus is a native device with its seven resonator types on the shared physical models, the LFO, the input filter, the global controls and Bleed, and its frequency set by notes from a MIDI sidechain (routing R39) |
@@ -1044,7 +1044,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |
 | 9.9 | done | 1 November 2026 | [#677](https://github.com/loombridge/beatlayer/pull/677): Show Similar Files from the icon beside a selected file, the item menu and the View menu (Cmd-Shift-F) puts the reference in the search field and lists its neighbours most similar first, with `browser.similar` for agents and saved labels keeping the reference first. |
 | 9.10 | todo |  |  |
-| 9.11 | todo |  |  |
+| 9.11 | done | 1 November 2026 | [#676](https://github.com/loombridge/beatlayer/pull/676): plug-ins get Function tags from the categories they declare (CLAP, VST3, AU, LV2) and samples get sound tags from a classifier, kept apart from a person's tags with removed ones remembered, and the Filter View Menu's Include Auto Tags works, with `browser.set_include_auto_tags` and `browser.tags` marking auto tags for agents |
 | 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
 | 9.13 | done | 1 November 2026 | [#672](https://github.com/loombridge/beatlayer/pull/672): Tempo Follower follows the tracker in the engine before Link, with Settings ▸ Tempo & MIDI's section, the Control Bar's Follow toggle, EXT and Tap off while it follows, Link peers taking the followed tempo, and the `tempo_follower.*` commands |
 | 9.14 | todo |  |  |
@@ -1061,7 +1061,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.25 | todo |  |  |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |
-| 9.28 | todo |  |  |
+| 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |
 | 9.29 | todo |  |  |
 | 9.30 | todo |  |  |
 | 9.31 | todo |  |  |

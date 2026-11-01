@@ -72,6 +72,18 @@ impl Descriptor {
         &self.0
     }
 
+    /// The sound's length in seconds.
+    #[must_use]
+    pub fn seconds(&self) -> f32 {
+        self.0[LENGTH].exp()
+    }
+
+    /// How many onsets the sound has in each second of its audible part.
+    #[must_use]
+    pub fn onsets_per_second(&self) -> f32 {
+        self.0[ONSETS]
+    }
+
     /// The descriptor as little-endian `f32`s, for the database.
     #[must_use]
     pub fn to_bytes(&self) -> Vec<u8> {

@@ -316,6 +316,8 @@ pub struct Ctx<'a> {
     pub held_steps: &'a [HeldStep],
     /// Mix's page, for Mix Mode (R22).
     pub mix_page: MixPage,
+    /// The display mode, for a pad mode whose buttons it shares (notes R45).
+    pub display: DisplayMode,
     pub(crate) actions: &'a mut Vec<Action>,
 }
 
@@ -497,6 +499,15 @@ pub trait Content: Send {
     /// Draws the mode: the display's columns and labels, the pads, the
     /// buttons it owns.
     fn paint(&mut self, _paint: &mut Paint<'_>) {}
+
+    /// A display button pressed while the Scale menu is open (notes R35).
+    fn scale_button(&mut self, _button: u8, _ctx: &mut Ctx<'_>) {}
+
+    /// An encoder turned while the Scale menu is open (notes R35).
+    fn scale_turn(&mut self, _column: u8, _steps: i32, _ctx: &mut Ctx<'_>) {}
+
+    /// Draws the Scale menu over the display (notes R35).
+    fn paint_scale(&mut self, _paint: &mut Paint<'_>) {}
 
     /// Whether the mode uses the lower display buttons itself rather than
     /// leaving them to the ring's tracks (R26).

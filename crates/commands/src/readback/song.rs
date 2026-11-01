@@ -71,6 +71,7 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("song.delete_time_signature_change", query(Song, "settings.time_signatures")),
     ("song.move_tempo_breakpoint", query(Song, "settings.tempo")),
     ("song.move_time_signature_change", query(Song, "settings.time_signatures")),
+    ("song.set_pad_layout", query(Song, "settings.pad_layout")),
     ("song.set_scale", query(Song, "scale")),
     ("tuning.load", read("tuning.state", "tuning")),
     ("tuning.remove", read("tuning.state", "tuning")),

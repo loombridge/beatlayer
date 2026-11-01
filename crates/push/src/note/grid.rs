@@ -57,6 +57,52 @@ impl Layout {
     }
 }
 
+/// The three melodic layouts (R39).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Melodic {
+    /// Every pad plays a note.
+    #[default]
+    Notes,
+    /// Each column a step, each row a pitch.
+    Sequencer,
+    /// 32 playable notes under 32 steps.
+    SequencerNotes,
+}
+
+impl Melodic {
+    /// The layout Layout steps to.
+    #[must_use]
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Notes => Self::Sequencer,
+            Self::Sequencer => Self::SequencerNotes,
+            Self::SequencerNotes => Self::Notes,
+        }
+    }
+
+    /// The layout's name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Notes => "64 Notes",
+            Self::Sequencer => "Melodic Sequencer",
+            Self::SequencerNotes => "Melodic Sequencer + 32 Notes",
+        }
+    }
+
+    /// The row the loop length pads take while they show (R39).
+    #[must_use]
+    pub const fn loop_row(self) -> u8 {
+        match self {
+            Self::Notes | Self::Sequencer => 7,
+            Self::SequencerNotes => 4,
+        }
+    }
+}
+
+/// How many loop length pads a melodic layout has: one row of eight.
+pub const MELODIC_PAGES: u8 = 8;
+
 /// What the lower-right 4 × 4 pads show besides their layout's own (R9).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -89,8 +135,103 @@ pub enum Role {
     /// A step pad, by its place in the step area counting each row from
     /// the left and the rows from the bottom.
     Step(u8),
+    /// A pad of 64 Notes: it plays this note (R32).
+    Key(u8),
+    /// One of the 32 notes of the Melodic Sequencer + 32 Notes: tapping it
+    /// plays and selects the note (R43).
+    Pick(u8),
+    /// A cell of the Melodic Sequencer: this pitch at this step of the page
+    /// (R40, R42).
+    Cell {
+        /// The row's note.
+        key: u8,
+        /// The step's place in the page.
+        step: u8,
+    },
     /// Nothing.
     Off,
+}
+
+/// How a layout counts pages: how many steps one holds, how many show at
+/// once, and how many loop length pads there are (R26).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Pages {
+    size: Size,
+    steps: i64,
+    shown: u8,
+    count: u8,
+}
+
+impl Pages {
+    /// A drum layout's: pages of sixteen steps, two at a time.
+    #[must_use]
+    pub const fn drum(size: Size) -> Self {
+        Self {
+            size,
+            steps: size.page_steps(),
+            shown: 2,
+            count: PAGES,
+        }
+    }
+
+    /// A melodic layout's: the Melodic Sequencer's page is a row of steps,
+    /// the Melodic Sequencer + 32 Notes' is four rows, one page at a time.
+    #[must_use]
+    pub const fn melodic(size: Size, layout: Melodic) -> Self {
+        let rows = match layout {
+            Melodic::SequencerNotes => 4,
+            _ => 1,
+        };
+        Self {
+            size,
+            steps: size.per_row() as i64 * rows,
+            shown: 1,
+            count: MELODIC_PAGES,
+        }
+    }
+
+    /// The step size.
+    #[must_use]
+    pub const fn size(self) -> Size {
+        self.size
+    }
+
+    /// How long a page is.
+    #[must_use]
+    pub const fn page(self) -> Ticks {
+        Ticks(self.size.ticks().0 * self.steps)
+    }
+
+    /// Where page `page` starts.
+    #[must_use]
+    pub const fn page_start(self, page: u8) -> Ticks {
+        Ticks(self.page().0 * page as i64)
+    }
+
+    /// Where step pad `index` of the step area starts, with the pages of
+    /// view `view` showing.
+    #[must_use]
+    pub const fn step_start(self, view: u8, index: u8) -> Ticks {
+        Ticks(self.page().0 * self.shown as i64 * view as i64 + self.size.ticks().0 * index as i64)
+    }
+
+    /// How many loop length pads there are.
+    #[must_use]
+    pub const fn count(self) -> u8 {
+        self.count
+    }
+
+    /// How many views of the pages there are.
+    #[must_use]
+    pub const fn views(self) -> u8 {
+        self.count / self.shown
+    }
+
+    /// The view that shows `page`.
+    #[must_use]
+    pub const fn view_of(self, page: u8) -> u8 {
+        page / self.shown
+    }
 }
 
 /// A step size (R21): the length of one step pad.

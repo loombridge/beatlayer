@@ -255,6 +255,12 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: echo,
     },
     Fixture {
+        name: "resonators",
+        about: "A drum loop of two bars through Resonators in Mode B with four resonators on, \
+                a band-pass filter, Const, a brighter Color and a shorter Decay.",
+        build: resonators,
+    },
+    Fixture {
         name: "clip-tempo-change",
         about: "An unwarped clip across a tempo ramp from 120 to 90 BPM, whose audio runs on \
                 unbroken while its end lands where the tempo map puts it, and a looped clip \
@@ -989,6 +995,45 @@ fn echo() -> Scene {
         device,
     });
     song.finish(3.0)
+}
+
+/// Spec: resonators R12. A drum loop through Resonators with four resonators on.
+fn resonators() -> Scene {
+    use bl_devices::resonators::{self, RESONATORS, voice_param};
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Resonators",
+        DeviceKind::Native {
+            device_type: RESONATORS.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (resonators::MODE, 1.0),
+        (resonators::DECAY, 0.8),
+        (resonators::CONST, 1.0),
+        (resonators::COLOR, 30.0),
+        (resonators::FILTER_FREQ, 2_000.0),
+        (voice_param(0, resonators::PITCH), 48.0),
+        (voice_param(0, resonators::FINE), 10.0),
+        (voice_param(3, resonators::ON), 1.0),
+        (resonators::GAIN, 0.5),
+        (resonators::DRY_WET, 60.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(1.5)
 }
 
 /// A phrase through CV Instrument and CV Triggers, captured on the device

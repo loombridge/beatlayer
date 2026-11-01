@@ -86,6 +86,8 @@ pub(super) const ROWS: &[(&str, Readback)] = &[
     ("song.set_tempo_breakpoint", query(Song, "settings.tempo")),
     ("song.set_time_signature_change", query(Song, "settings.time_signatures")),
     ("song.set_time_signatures", query(Song, "settings.time_signatures")),
+    ("packages.install", read("packages.list", "packages")),
+    ("packages.remove", read("packages.list", "packages")),
     ("stems.cancel", read("stems.status", "separation")),
     ("stems.install", read("stems.status", "install")),
     ("stems.separate", query(Song, "tracks")),

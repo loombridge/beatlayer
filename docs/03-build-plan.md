@@ -1020,7 +1020,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.36 | todo |  |  |
 | 8.37 | done | 1 November 2026 | [#649](https://github.com/loombridge/beatlayer/pull/649): Echo has its two lines with their time and channel modes, input drive and inverted feedback, filters, the Modulation and Character tabs, its reverb, the global controls and the tunnel display on its pages |
 | 8.38 | done | 31 October 2026 | [#651](https://github.com/loombridge/beatlayer/pull/651): Roar has its input section, three stages with twelve shapers and nine filters, seven routing modes, 4× oversampling, Output, Color compensation, Dry/Wet and the shaper display, with the Auto Filter's filters moved to a shared module; R11's aliasing level at 4× (8×, ADAA or the narrower test) and Mid Side's Blend are follow-ups |
-| 8.39 | todo |  |  |
+| 8.39 | done | 1 November 2026 | [#673](https://github.com/loombridge/beatlayer/pull/673): Roar has its modulation matrix (LFO 1, LFO 2, the envelope follower and Noise to 31 targets on the 32-frame grid), the feedback section with Note mode and octave keys, the compressor, both sidechains (R38) and the modulation displays, using the MIDI tapping point R39 from #659; the single matrix view with its lamps, Input Listen as view state, loops past 4 s and a linked compressor detector are follow-ups |
 | 8.40 | todo |  |  |
 | 8.41 | todo |  |  |
 | 8.42 | todo |  |  |
@@ -1038,7 +1038,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.2 | todo |  |  |
 | 9.3 | todo |  |  |
 | 9.4 | todo |  |  |
-| 9.5 | todo |  |  |
+| 9.5 | done | 1 November 2026 | [#684](https://github.com/loombridge/beatlayer/pull/684): basic-pitch's note step is ported in `bl_analysis::transcribe` with the Melody rule and the clean-up (weak re-onsets merged, confident onsets snapped, velocity from onset strength), its model is the `pitch-model` package, and `cargo xtask transcribe-bench` scores Melody and Harmony above the spec's F-measure targets |
 | 9.6 | todo |  |  |
 | 9.7 | todo |  |  |
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |

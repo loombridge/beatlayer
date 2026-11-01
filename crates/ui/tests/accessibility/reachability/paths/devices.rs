@@ -392,6 +392,17 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.set_sample",
             Exception(Equivalent("loading a sample (`device.load_sample`)")),
         ),
+        (
+            "device.load_wavetable",
+            Exception(LaterView(
+                "the Wavetable device's oscillator choosers and display, which take a table \
+                 (WP-8.9, WP-8.11)",
+            )),
+        ),
+        (
+            "device.set_wavetable",
+            Exception(Equivalent("loading a wavetable (`device.load_wavetable`)")),
+        ),
         // WP-5.10: a modulator's Map and Unmap buttons, the controls it
         // maps while Map is lit (Enter on one), and the Shaper's preset
         // buttons, which draw its shape.

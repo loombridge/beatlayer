@@ -643,7 +643,7 @@ const CLIP_SES_AUDIO: &[Row] = &[
     (
         "C-CLIP-SES-020",
         "Separate Stems to New Audio Tracks",
-        Pending(None),
+        Cmd(SEPARATE_STEMS),
     ),
 ];
 
@@ -926,7 +926,6 @@ pub fn pending_package(row: &str) -> Option<&'static str> {
         "C-CLIP-SES-019b" | "C-CLIP-SES-019c" | "C-CLIP-SES-019d" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
         }
-        "C-CLIP-SES-020" => Some("Phase 9 (stem separation of Session clips, IMP-11)"),
         "C-TRACK-013" | "C-TRACK-014" => Some("a package not planned yet"),
         "C-CLIP-ARR-027a" | "C-CLIP-ARR-027b" | "C-CLIP-ARR-027c" => {
             Some("Phase 9 (audio to MIDI, IMP-06)")
@@ -956,6 +955,9 @@ pub struct SelectionMenu {
     pub automation: bool,
     /// The selection is on a take lane.
     pub take_lane: bool,
+    /// A time selection holds clips on audio tracks, which brings Separate
+    /// Stems to New Audio Tracks after Crop Clip (stem separation R22).
+    pub audio: bool,
 }
 
 /// The row of Beatlayer's own Copy Selection to Main Lane in a take-lane
@@ -1039,6 +1041,14 @@ const TIME_SELECTION: &[Row] = &[
         Cmd(CONSOLIDATE_TO_SCENE),
     ),
 ];
+
+/// The row a time selection that holds clips on audio tracks adds after Crop
+/// Clip (C-TIME-019c), as C-TIME-028: Beatlayer's own place (stem separation R22).
+const TIME_STEMS: &[Row] = &[(
+    "C-TIME-028",
+    "Separate Stems to New Audio Tracks",
+    Cmd(SEPARATE_STEMS),
+)];
 
 /// The menu a clip in the Arrangement opens (C-CLIP-ARR), without the rows a
 /// selection adds.
@@ -1160,6 +1170,9 @@ pub fn arrangement_time_in(state: SelectionMenu) -> Vec<MenuItem> {
         rows.extend_from_slice(TIME_AUTOMATION);
     }
     let mut time = with_selection(TIME, TIME_SELECTION, "C-TIME-007", state);
+    if state.clips && state.audio {
+        time = insert_after(&time, TIME_STEMS, "C-TIME-019c");
+    }
     if state.time_commands {
         time = insert_after(&time, TIME_COMMANDS, "C-TIME-003");
     }
@@ -1599,13 +1612,30 @@ mod tests {
         // Only the items whose commands still wait for a package.
         assert_eq!(
             pending,
-            [
-                "C-CLIP-SES-019b",
-                "C-CLIP-SES-019c",
-                "C-CLIP-SES-019d",
-                "C-CLIP-SES-020",
-            ]
+            ["C-CLIP-SES-019b", "C-CLIP-SES-019c", "C-CLIP-SES-019d",]
         );
+    }
+
+    // Spec: stem-separation R22
+    #[test]
+    fn separate_stems_is_in_the_session_clips_and_the_time_selections_menus() {
+        let time = |audio| {
+            arrangement_time_in(SelectionMenu {
+                clips: true,
+                audio,
+                ..SelectionMenu::default()
+            })
+        };
+        let rows: Vec<_> = time(true).iter().map(|i| i.row).collect();
+        let crop = rows.iter().position(|r| *r == "C-TIME-019c").unwrap();
+        assert_eq!(rows[crop + 1], "C-TIME-028");
+        assert!(!time(false).iter().any(|i| i.row == "C-TIME-028"));
+        let session = session_clip(SessionClipMenu {
+            audio: true,
+            ..SessionClipMenu::default()
+        });
+        let stems = session.iter().find(|i| i.row == "C-CLIP-SES-020").unwrap();
+        assert_eq!(stems.command(), Some("stems.open"));
     }
 
     // Spec: session-context-menus R16
@@ -1652,6 +1682,7 @@ mod tests {
             time_commands: false,
             automation: false,
             take_lane: true,
+            audio: false,
         };
         for (menu, bounced, own) in [
             (arrangement_clip_in(on), "C-CLIP-ARR-016", R29_COPY_CLIP),

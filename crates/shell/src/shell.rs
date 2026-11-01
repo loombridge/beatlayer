@@ -125,6 +125,7 @@ mod audio_device;
 mod browser_commands;
 mod clip_scale;
 mod control_surface;
+mod convert;
 mod device_commands;
 mod document_edits;
 mod focus;

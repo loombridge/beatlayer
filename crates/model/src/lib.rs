@@ -142,8 +142,8 @@ pub use clip_param::ClipParam;
 pub use column_widths::{ColumnWidths, MAX_COLUMN_WIDTH, MIN_COLUMN_WIDTH, clamp_column_width};
 pub use command::{Command, tempo_shape, write_tempo_shape};
 pub use device::{
-    Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MidiSidechain,
-    PluginFormat, PluginState, Sidechain, WindowFrame,
+    Device, DeviceKind, DeviceRole, DeviceWarp, DeviceWindows, MAX_MEDIA_SLOTS, MAX_WAVETABLES,
+    MidiSidechain, PluginFormat, PluginState, Sidechain, WavetableChoice, WindowFrame,
 };
 pub use device_display::{
     DeviceDisplay, DisplayHandle, DisplayMarker, DisplayReading, DisplaySeries, DisplaySpectrogram,

@@ -326,6 +326,21 @@ impl ContextMenus {
                             .first()
                             .map(|clip| json!({ "clip": clip }))
                     }
+                    // Spec: stem-separation R22. The time selection's audio
+                    // tracks and range.
+                    (MenuKind::Time, Action::Command(id))
+                        if id == bl_shell::stems_commands::OPEN =>
+                    {
+                        let view = shell.arrangement();
+                        view.time_selection().map(|(start, end)| {
+                            json!({ "source": {
+                                "kind": "time_selection",
+                                "tracks": view.selected_tracks(),
+                                "start": start,
+                                "end": end,
+                            } })
+                        })
+                    }
                     _ => None,
                 };
                 let response = match args {
@@ -372,11 +387,25 @@ fn selection_menu(shell: &Shell) -> SelectionMenu {
             .time_selection_lanes()
             .iter()
             .any(|lane| lane.target().is_some());
+    // Spec: stem-separation R22. A time selection that holds audio on audio
+    // tracks brings Separate Stems to New Audio Tracks.
+    let audio = view.time_selection().is_some_and(|(start, end)| {
+        doc.track_order()
+            .into_iter()
+            .filter_map(|track| doc.track(track))
+            .filter(|track| track.kind() == bl_model::TrackKind::Audio)
+            .any(|track| {
+                track
+                    .clips()
+                    .any(|clip| clip.start < end && clip.end() > start)
+            })
+    });
     SelectionMenu {
         clips,
         automation,
         take_lane: view.take_lane_selected(),
         time_commands: true,
+        audio,
     }
 }
 

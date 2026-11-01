@@ -110,6 +110,11 @@ pub struct ReadModel {
     /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
     /// R37).
     pub mix: crate::mix::Mix,
+    /// The Clip View's Quantize settings, for Push 2's Quantize menu
+    /// (push-2-notes R58).
+    pub quantize: QuantizeView,
+    /// Whether Automation Arm is on (push-2-notes R61).
+    pub automation_arm: bool,
     /// The sample of each Simpler a row's device controls reach: what a
     /// surface that draws it needs (push-2-notes R67).
     pub samples: Arc<std::collections::BTreeMap<DeviceId, SampleView>>,
@@ -136,6 +141,18 @@ pub struct Waveform {
     pub to: f64,
     /// Each point's lowest and highest sample, from -1 to 1.
     pub peaks: Vec<[f32; 2]>,
+}
+
+/// The Quantize tool's grid and amount, as the Clip View keeps them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct QuantizeView {
+    /// The spacing of the grid's lines, before triplets: the division
+    /// chosen, else the editing grid's step.
+    pub grid: Ticks,
+    /// Whether the lines are triplets of the division.
+    pub triplets: bool,
+    /// How far notes move toward the lines, 0 to 100 %.
+    pub amount: u8,
 }
 
 /// What a surface's Convert acts on, by what is selected (push-2-notes R76).
@@ -215,6 +232,12 @@ impl ReadModel {
             selection_armed: Vec::new(),
             devices: DeviceViews::default(),
             mix: crate::mix::Mix::default(),
+            quantize: QuantizeView {
+                grid: Ticks::SIXTEENTH,
+                triplets: false,
+                amount: 100,
+            },
+            automation_arm: false,
             clip_view: None,
             waveform: None,
             samples: Arc::default(),

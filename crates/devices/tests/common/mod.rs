@@ -5,6 +5,7 @@
 
 pub mod chain;
 pub mod response;
+pub mod synth;
 
 use bl_core::id::Id;
 use bl_core::time::{Frames, SampleRate, TempoMap};

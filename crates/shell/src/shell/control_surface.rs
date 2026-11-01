@@ -552,6 +552,8 @@ impl Shell {
             selection_armed: self.surface.selection_armed.iter().copied().collect(),
             devices,
             mix,
+            quantize: self.surface_quantize(),
+            automation_arm: self.arrangement.automation_arm(),
             samples,
             convert: self.surface_convert(),
             clip_view,
@@ -621,6 +623,17 @@ impl Shell {
         });
         self.surface.waveform = Some((key, Arc::clone(&waveform)));
         Some(waveform)
+    }
+
+    /// The Clip View's Quantize settings (push-2-notes R58).
+    fn surface_quantize(&self) -> bl_control::QuantizeView {
+        let settings = self.clip_view.quantize();
+        let editing = self.arrangement.grid_ticks(self.editor.document());
+        bl_control::QuantizeView {
+            grid: settings.grid.unwrap_or(editing),
+            triplets: settings.triplets,
+            amount: settings.amount,
+        }
     }
 
     /// The sample of each Simpler the rows' device controls reach (push-2-notes

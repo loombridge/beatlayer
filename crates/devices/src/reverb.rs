@@ -382,7 +382,7 @@ pub fn register(registry: &mut Registry) {
 /// The tail's damping: the shelves' amounts and their one-poles'
 /// coefficients, fixed for one stretch.
 #[derive(Clone, Copy, Default)]
-struct Damping {
+pub(crate) struct Damping {
     high_on: bool,
     high: f32,
     low_on: bool,
@@ -785,7 +785,7 @@ impl Line {
 
 /// A comb filter with the tail's damping shelves: its output feeds back
 /// through a high-frequency and a low-frequency one-pole.
-struct Comb {
+pub(crate) struct Comb {
     buffer: Vec<f32>,
     write: usize,
     /// The high damping one-pole's state.
@@ -797,7 +797,7 @@ struct Comb {
 }
 
 impl Comb {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self {
             buffer: vec![0.0; len],
             write: 0,
@@ -809,7 +809,7 @@ impl Comb {
 
     /// One sample through it: the delayed output, and `x` plus the damped
     /// output at `feedback` written in.
-    fn process(&mut self, x: f32, delay: f64, feedback: f32, damping: Damping) -> f32 {
+    pub(crate) fn process(&mut self, x: f32, delay: f64, feedback: f32, damping: Damping) -> f32 {
         let delayed = self.read(delay);
         let mut sink = delayed;
         if damping.high_on {
@@ -853,7 +853,7 @@ impl Comb {
 }
 
 /// A Schroeder allpass stage: it diffuses without colouring the tail.
-struct Allpass {
+pub(crate) struct Allpass {
     buffer: Vec<f32>,
     write: usize,
     /// The fractional read's allpass state.
@@ -861,7 +861,7 @@ struct Allpass {
 }
 
 impl Allpass {
-    fn new(len: usize) -> Self {
+    pub(crate) fn new(len: usize) -> Self {
         Self {
             buffer: vec![0.0; len],
             write: 0,
@@ -869,7 +869,7 @@ impl Allpass {
         }
     }
 
-    fn process(&mut self, x: f32, delay: f64, g: f32) -> f32 {
+    pub(crate) fn process(&mut self, x: f32, delay: f64, g: f32) -> f32 {
         let delayed = self.read(delay);
         let out = delayed - g * x;
         let write = flush(x + g * out);

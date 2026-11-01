@@ -10706,6 +10706,46 @@ A display cell: a graph, a spectrum, a waveform, or an envelope editor, which gr
 
 </details>
 
+### `DisplayHandle`
+
+What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `x` | [`ParamId`](#paramid) | yes | The parameter its horizontal place is. |
+| `y` | [`ParamId`](#paramid) or null | no | The parameter its vertical place is, if it has one. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What dragging a marker sets: where the marker sits across the cell is the horizontal parameter's travel, and up the cell is the marker's place on its series (with a vertical parameter, a drag moves that too), so a drag is the parameters' own control at another place.",
+  "properties": {
+    "x": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter its horizontal place is."
+    },
+    "y": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ParamId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameter its vertical place is, if it has one."
+    }
+  },
+  "required": [
+    "x"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `DisplayInputSettings`
 
 The Display & Input page's settings.
@@ -10783,6 +10823,7 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 | `x` | number | yes | Its place along the axis, in the series' `x_unit`. |
 | `y` | number | yes | Its value, in the series' `unit`. |
 | `text` | string | yes | How it reads, such as `A1 Peak 1.00 kHz 3.0 dB`. |
+| `handle` | [`DisplayHandle`](#displayhandle) or null | no | The parameters dragging it sets, for a marker that is a handle. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10790,6 +10831,17 @@ A point on the display: a band's dot on an EQ's curve, or the level now on a com
 {
   "description": "A point on the display: a band's dot on an EQ's curve, or the level now on a compressor's transfer curve.",
   "properties": {
+    "handle": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DisplayHandle"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The parameters dragging it sets, for a marker that is a handle."
+    },
     "name": {
       "description": "What it is, such as `A1`.",
       "type": "string"

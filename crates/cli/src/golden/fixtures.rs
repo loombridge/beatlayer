@@ -247,6 +247,14 @@ pub(super) const FIXTURES: &[Fixture] = &[
         build: beat_repeat,
     },
     Fixture {
+        name: "echo",
+        about: "A drum loop of two bars through Echo in Ping Pong: a dotted eighth and a quarter \
+                note, the filters, a synced LFO and the envelope moving the times and the \
+                cutoffs, wobble and Repitch, a gate and ducking, and the reverb in the feedback \
+                loop, the wobble following the device's seed.",
+        build: echo,
+    },
+    Fixture {
         name: "clip-tempo-change",
         about: "An unwarped clip across a tempo ramp from 120 to 90 BPM, whose audio runs on \
                 unbroken while its end lands where the tempo map puts it, and a looped clip \
@@ -926,6 +934,61 @@ fn beat_repeat() -> Scene {
         device,
     });
     song.finish(4.25)
+}
+
+/// Spec: echo R19. A drum loop through Echo with every stage on.
+fn echo() -> Scene {
+    use bl_devices::echo::{self, ECHO, line_param};
+    let mut song = Song::new();
+    let bar = drum_bar();
+    let two_bars: Vec<f32> = bar.iter().chain(&bar).copied().collect();
+    let drums = song.file("drums.wav", 48_000, &[two_bars.clone(), two_bars]);
+    let track = song.track(TrackKind::Audio, "Drums", None);
+    let at = song.at("1.1.1");
+    song.audio_clip(track, at, Ticks::QUARTER * 8, AudioData::new(drums));
+    let mut device = Device::new(
+        song.editor.new_id(),
+        "Echo",
+        DeviceKind::Native {
+            device_type: ECHO.to_owned(),
+        },
+    );
+    for (param, value) in [
+        (echo::CHANNEL_MODE, 1.0),
+        (line_param(0, echo::SYNC_MODE), 2.0),
+        (line_param(0, echo::DOTTED), 3.0),
+        (line_param(1, echo::NOTES), 4.0),
+        (echo::FEEDBACK, 60.0),
+        (echo::FILTER, 1.0),
+        (echo::HP_FREQ, 250.0),
+        (echo::LP_FREQ, 5_000.0),
+        (echo::LP_RES, 40.0),
+        (echo::LFO_SYNC, 1.0),
+        (echo::LFO_RATE, 4.0),
+        (echo::MOD_DELAY, 40.0),
+        (echo::MOD_FILTER, 30.0),
+        (echo::ENV_MIX, 30.0),
+        (echo::GATE, 1.0),
+        (echo::GATE_THRESHOLD, -45.0),
+        (echo::DUCKING, 1.0),
+        (echo::WOBBLE, 1.0),
+        (echo::REPITCH, 1.0),
+        (echo::REVERB, 30.0),
+        (echo::REVERB_LOCATION, 2.0),
+        (echo::DECAY, 1.5),
+        (echo::STEREO, 130.0),
+        (echo::OUTPUT, 0.125),
+        (echo::DRY_WET, 45.0),
+        (echo::EQUAL_LOUDNESS, 1.0),
+    ] {
+        device.params.insert(param, value);
+    }
+    song.apply(Command::InsertDevice {
+        track,
+        index: 0,
+        device,
+    });
+    song.finish(3.0)
 }
 
 /// A phrase through CV Instrument and CV Triggers, captured on the device

@@ -110,6 +110,41 @@ pub struct ReadModel {
     /// The folds and the In/Out section Mix Mode acts on (push-2-tracks R31,
     /// R37).
     pub mix: crate::mix::Mix,
+    /// The sample of each Simpler a row's device controls reach: what a
+    /// surface that draws it needs (push-2-notes R67).
+    pub samples: Arc<std::collections::BTreeMap<DeviceId, SampleView>>,
+    /// What Convert would act on (push-2-notes R76).
+    pub convert: Convert,
+}
+
+/// What a surface's Convert acts on, by what is selected (push-2-notes R76).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Convert {
+    /// Nothing that can be converted is selected.
+    #[default]
+    Nothing,
+    /// A Simpler in Classic or One-Shot mode.
+    Simpler,
+    /// A Simpler in Slice mode.
+    Slices,
+    /// A pad of a drum rack.
+    Pad,
+    /// An audio clip, which offers its own choices.
+    Clip,
+}
+
+/// A Simpler's sample as a surface draws it (push-2-notes R67, R69).
+#[derive(Clone, Debug, PartialEq)]
+pub struct SampleView {
+    /// The edited sample's peaks.
+    pub peaks: Arc<bl_media::Peaks>,
+    /// The sample's length in frames.
+    pub frames: u64,
+    /// The sample's rate.
+    pub rate: u32,
+    /// Where the slices after the first start, in frames, in Slice mode;
+    /// empty otherwise.
+    pub slices: Arc<Vec<u64>>,
 }
 
 /// What the Device View keeps beside the set, for a surface that follows it:
@@ -159,6 +194,8 @@ impl ReadModel {
             selection_armed: Vec::new(),
             devices: DeviceViews::default(),
             mix: crate::mix::Mix::default(),
+            samples: Arc::default(),
+            convert: Convert::default(),
         }
     }
 

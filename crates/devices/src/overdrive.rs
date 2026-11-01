@@ -289,6 +289,7 @@ pub fn display(
 ) -> DeviceDisplay {
     let gain = drive_gain(description.value(values, DRIVE).unwrap_or(0.0) as f32);
     let mut out = DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: data.is_some(),
         view: None,

@@ -4238,6 +4238,32 @@ confirmed = true
 notes = "Beatlayer's own key for Float, its item after Fold in the device's context menu. Scoped by focus: only with the Device View or a floating device's window focused and a device selected. On Windows and Linux it's Ctrl+Alt+F, which with the Arrangement focused stays Create Fade/Crossfade (S-ARR-008); Alt+F alone opens the File menu there (S-MENU-001). On macOS Option+F, beside Cmd+Option+F for fades."
 
 [[shortcut]]
+id = "S-DEV-016"
+action = "Step Roar's Feedback Note by a semitone"
+context = "device-view"
+mac = ["Down", "Up"]
+win = ["Down", "Up"]
+kind = "key"
+trigger = "press"
+milestone = "M5"
+source = "manual 29.33.4; Live 12.4 release notes (Roar)"
+confirmed = false
+notes = "With the focus on the Note control while Roar's Feedback Mode is Note, Up and Down step the key by a semitone, as every focused value control's keys do (S-VAL-001). Whether Live steps a semitone is to observe."
+
+[[shortcut]]
+id = "S-DEV-017"
+action = "Step Roar's Feedback Note by an octave"
+context = "device-view"
+mac = ["Shift+Down", "Shift+Up"]
+win = ["Shift+Down", "Shift+Up"]
+kind = "key"
+trigger = "press"
+milestone = "M5"
+source = "Live 12.4 release notes (Roar)"
+confirmed = false
+notes = "With the focus on the Note control while Roar's Feedback Mode is Note, Shift with Up or Down moves the pitch by an octave: the note control's coarse step, where S-VAL-002 gives other value controls a fine step. Each press is one undo step."
+
+[[shortcut]]
 id = "S-SES-024"
 action = "Make launch quantisation smaller"
 context = "session"

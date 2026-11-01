@@ -80,6 +80,7 @@ mod multisampler_tabs;
 pub mod note_echo;
 pub mod oscilloscope;
 pub mod overdrive;
+pub mod pedal;
 pub mod phaser_flanger;
 pub mod pitchloop89;
 pub mod play_mod;
@@ -90,6 +91,7 @@ pub mod resonators;
 pub mod reverb;
 mod ring;
 pub mod roar;
+mod roar_parts;
 pub mod sampler;
 pub mod saturator;
 mod sections;
@@ -153,6 +155,7 @@ pub use multisampler::{MULTISAMPLER, Multisampler, multisampler_type};
 pub use note_echo::{NOTE_ECHO, note_echo_type};
 pub use oscilloscope::{OSCILLOSCOPE, Oscilloscope, oscilloscope_type};
 pub use overdrive::{OVERDRIVE, overdrive_type};
+pub use pedal::{PEDAL, pedal_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
@@ -290,6 +293,7 @@ pub fn display_in(
             values,
             data,
         )),
+        testing::SPECTROGRAM => Some(testing::spectrogram_display(device, description, data)),
         _ => None,
     }
 }
@@ -352,6 +356,7 @@ pub fn register(registry: &mut Registry) {
     overdrive::register(registry);
     tube::register(registry);
     roar::register(registry);
+    pedal::register(registry);
     resonators::register(registry);
     beat_repeat::register(registry);
     multiband_dynamics::register(registry);

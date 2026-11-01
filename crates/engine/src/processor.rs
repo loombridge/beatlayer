@@ -1700,7 +1700,10 @@ impl Processor {
         }
         match command {
             SessionCommand::Launch { track, scene } => {
-                self.launch_button(track, scene, Played::PLAIN);
+                self.launch_button(track, scene, Played::PLAIN, false);
+            }
+            SessionCommand::LaunchLegato { track, scene } => {
+                self.launch_button(track, scene, Played::PLAIN, true);
             }
             SessionCommand::LaunchAt {
                 track,
@@ -1714,6 +1717,7 @@ impl Processor {
                     velocity,
                     transpose,
                 },
+                false,
             ),
             SessionCommand::Release { track, scene } => self.release_slot(track, scene),
             SessionCommand::Nudge {
@@ -1758,7 +1762,9 @@ impl Processor {
     /// clip, or a Session recording (the launch quantisation spec, R5).
     fn session_starts_song(&self, command: SessionCommand) -> bool {
         match command {
-            SessionCommand::Launch { .. } | SessionCommand::Record => true,
+            SessionCommand::Launch { .. }
+            | SessionCommand::LaunchLegato { .. }
+            | SessionCommand::Record => true,
             SessionCommand::LaunchScene(scene) => self
                 .program
                 .as_ref()
@@ -1846,13 +1852,13 @@ impl Processor {
     }
 
     /// Presses a slot's launch button as `played` says.
-    fn launch_button(&mut self, track: TrackId, scene: SceneId, played: Played) {
+    fn launch_button(&mut self, track: TrackId, scene: SceneId, played: Played, legato: bool) {
         if self.is_recording_slot(track, scene) {
             // Spec: session-recording R4. The launch button of a recording
             // slot ends the recording and loops the clip.
             self.stop_session_take(true);
         } else {
-            self.launch_slot(track, scene, played);
+            self.launch_slot(track, scene, played, legato);
         }
     }
 
@@ -1860,7 +1866,7 @@ impl Processor {
     /// R16, R35): on the next grid line while the song plays, and at once from
     /// the Arrangement position while it's stopped, which also starts the
     /// transport (the launch quantisation spec, R5).
-    fn launch_slot(&mut self, track: TrackId, scene: SceneId, played: Played) {
+    fn launch_slot(&mut self, track: TrackId, scene: SceneId, played: Played, legato: bool) {
         let was_playing = self.playing;
         if !was_playing {
             // Spec: launch-quantisation R5. A launch with the transport
@@ -1876,7 +1882,12 @@ impl Processor {
             self.position,
             self.config.sample_rate,
         );
-        let button = self.slot_button(track, scene);
+        let mut button = self.slot_button(track, scene);
+        if legato {
+            // Spec: push-2-notes R46. Legato at once, whatever the clip says.
+            button.legato = true;
+            button.quantization = Some(bl_model::LaunchQuantization::None);
+        }
         self.session
             .press_with(track, scene, button, played, playhead);
     }

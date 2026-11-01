@@ -9188,6 +9188,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
 
@@ -9236,6 +9237,17 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
       },
       "type": "array"
     },
+    "spectrogram": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SpectrogramGrid"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46)."
+    },
     "title_switch": {
       "anyOf": [
         {
@@ -9276,6 +9288,7 @@ A device's display now, as `device.display` reports it.
 | `series` | array of [`DisplaySeries`](#displayseries) | yes | Its curves and spectra. |
 | `markers` | array of [`DisplayMarker`](#displaymarker) | yes | Its markers. |
 | `readings` | array of [`DisplayReading`](#displayreading) | yes | Its single readings. |
+| `spectrograms` | array of [`DisplaySpectrogram`](#displayspectrogram) | no | Its spectrograms. |
 | `view` | string or null | no | The view the display is showing, for a device whose display has views. |
 
 <details><summary>JSON Schema</summary>
@@ -9310,6 +9323,13 @@ A device's display now, as `device.display` reports it.
       "description": "Its curves and spectra.",
       "items": {
         "$ref": "#/$defs/DisplaySeries"
+      },
+      "type": "array"
+    },
+    "spectrograms": {
+      "description": "Its spectrograms.",
+      "items": {
+        "$ref": "#/$defs/DisplaySpectrogram"
       },
       "type": "array"
     },
@@ -11082,6 +11102,90 @@ A curve or a spectrum: values at evenly spaced places along an axis.
     "log_x",
     "y_range",
     "detail",
+    "values"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `DisplaySpectrogram`
+
+A spectrogram: magnitudes in dB over time and frequency.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | What it is, such as `Spectrogram`. |
+| `columns` | integer, at least 0 | yes | The columns over time, the newest on the right. |
+| `rows` | integer, at least 0 | yes | The rows over frequency, the lowest at the bottom. |
+| `frequencies` | array of number, at least 2 | yes | The lowest and highest frequency, in Hz, at the middle of the first and last row. |
+| `log_frequency` | boolean | yes | Whether the rows are spaced logarithmically in frequency (linearly if not). |
+| `levels` | array of number, at least 2 | yes | The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last. |
+| `values` | array of number | yes | The magnitudes in dB, a column after another from the oldest to the newest, each from its lowest row to its highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A spectrogram: magnitudes in dB over time and frequency.",
+  "properties": {
+    "columns": {
+      "description": "The columns over time, the newest on the right.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "frequencies": {
+      "description": "The lowest and highest frequency, in Hz, at the middle of the first and last row.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "levels": {
+      "description": "The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "log_frequency": {
+      "description": "Whether the rows are spaced logarithmically in frequency (linearly if not).",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "What it is, such as `Spectrogram`.",
+      "type": "string"
+    },
+    "rows": {
+      "description": "The rows over frequency, the lowest at the bottom.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "values": {
+      "description": "The magnitudes in dB, a column after another from the oldest to the newest, each from its lowest row to its highest.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "columns",
+    "rows",
+    "frequencies",
+    "log_frequency",
+    "levels",
     "values"
   ],
   "type": "object"
@@ -13530,6 +13634,7 @@ The Filter View (spec: browser-tags R18 to R22).
 | `groups` | array of [`FilterGroup`](#filtergroup) | yes | The groups it shows under the chosen label that have tags to show. |
 | `menu` | array of [`FilterGroupChoice`](#filtergroupchoice) | yes | Every group the chosen label can show, with whether it shows. |
 | `selected` | array of string | yes | The selected tags' full names. |
+| `include_auto_tags` | boolean | yes | Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55). |
 
 <details><summary>JSON Schema</summary>
 
@@ -13543,6 +13648,10 @@ The Filter View (spec: browser-tags R18 to R22).
         "$ref": "#/$defs/FilterGroup"
       },
       "type": "array"
+    },
+    "include_auto_tags": {
+      "description": "Whether the Filter View Menu's Include Auto Tags is on: automatic tags show in the Filter View, filter and answer `#` search (spec: browser-tags R55).",
+      "type": "boolean"
     },
     "menu": {
       "description": "Every group the chosen label can show, with whether it shows.",
@@ -13567,7 +13676,8 @@ The Filter View (spec: browser-tags R18 to R22).
     "shown",
     "groups",
     "menu",
-    "selected"
+    "selected",
+    "include_auto_tags"
   ],
   "type": "object"
 }
@@ -16147,6 +16257,7 @@ A tag on an item, and where it comes from.
 |---|---|---|---|
 | `tag` | string | yes | The tag's full name. |
 | `source` | [`TagSource`](#tagsource) | yes | Where it comes from. |
+| `origin` | string or null | no | For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound). |
 
 <details><summary>JSON Schema</summary>
 
@@ -16154,6 +16265,13 @@ A tag on an item, and where it comes from.
 {
   "description": "A tag on an item, and where it comes from.",
   "properties": {
+    "origin": {
+      "description": "For an automatic tag, what it was found from: `plugin` (its categories) or `sound` (the sample's sound).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source": {
       "$ref": "#/$defs/TagSource",
       "description": "Where it comes from."
@@ -20227,7 +20345,7 @@ A device's MIDI sidechain input: `source`, the MIDI track whose notes and channe
 
 ### `MidiSidechainSection`
 
-A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.
+A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -20239,7 +20357,7 @@ A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5
 
 ```json
 {
-  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser.",
+  "description": "A device's MIDI sidechain section, in the same left strip as a sidechain's (WP-5.27; the routing spec, R34): the toggle shows the section, which holds the MIDI source chooser and, where the device has one, the tapping point chooser (R39). A device with both sidechains reports both sections (R38).",
   "properties": {
     "shown": {
       "description": "Whether the section is shown, by the toggle at the top of the device's left strip. It changes only the view.",
@@ -22859,6 +22977,37 @@ What `packages.list` and the other commands return.
 
 </details>
 
+### `PadDirection`
+
+A pad layout's direction: `vertical` or `horizontal`.
+
+One of:
+
+- `"vertical"`: Moving right is one step, moving up a row is the interval.
+- `"horizontal"`: Rows and columns swap.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pad layout's direction: `vertical` or `horizontal`.",
+  "oneOf": [
+    {
+      "const": "vertical",
+      "description": "Moving right is one step, moving up a row is the interval.",
+      "type": "string"
+    },
+    {
+      "const": "horizontal",
+      "description": "Rows and columns swap.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PadDropped`
 
 What `pad.drop` returns.
@@ -23007,6 +23156,43 @@ One of:
     {
       "const": "multi",
       "description": "Several chains on its note: it reads `Multi`.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PadSpacing`
+
+A pad layout's row interval: `fourths`, `thirds` or `sequent`.
+
+One of:
+
+- `"fourths"`: 3 scale degrees (In Key) or 5 semitones (Chromatic).
+- `"thirds"`: 2 scale degrees or 4 semitones.
+- `"sequent"`: 8 steps: each row starts where the one below ends.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A pad layout's row interval: `fourths`, `thirds` or `sequent`.",
+  "oneOf": [
+    {
+      "const": "fourths",
+      "description": "3 scale degrees (In Key) or 5 semitones (Chromatic).",
+      "type": "string"
+    },
+    {
+      "const": "thirds",
+      "description": "2 scale degrees or 4 semitones.",
+      "type": "string"
+    },
+    {
+      "const": "sequent",
+      "description": "8 steps: each row starts where the one below ends.",
       "type": "string"
     }
   ]
@@ -26192,6 +26378,101 @@ What an LED does besides showing its colour (R13).
 
 </details>
 
+### `PushMelody`
+
+What a melodic track's layouts show (the notes on Push 2 spec, R32 to R44).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `in_key` | boolean | yes | In Key (true) or Chromatic. |
+| `fixed` | boolean | yes | Whether the bottom-left pad stays on C. |
+| `layout` | string | yes | The interval between rows: `4ths`, `3rds` or `Sequent`. |
+| `direction` | string | yes | `Vertical` or `Horizontal`. |
+| `octave` | integer | yes | 64 Notes' shift in octaves from where the pads start. |
+| `low` | integer from 0 to 255 | yes | The lowest note the pads, rows or 32 notes hold, as a MIDI note. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+| `range` | string | yes | The range as the display notifies it, such as `C1 to C3`. |
+| `selected_notes` | array of integer from 0 to 255 | yes | The notes selected in the Melodic Sequencer + 32 Notes. |
+| `strip_modulation` | boolean | yes | Whether the touch strip is the modulation wheel rather than pitch bend, in 64 Notes. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a melodic track's layouts show (the notes on Push 2 spec, R32 to R44).",
+  "properties": {
+    "direction": {
+      "description": "`Vertical` or `Horizontal`.",
+      "type": "string"
+    },
+    "fixed": {
+      "description": "Whether the bottom-left pad stays on C.",
+      "type": "boolean"
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "in_key": {
+      "description": "In Key (true) or Chromatic.",
+      "type": "boolean"
+    },
+    "layout": {
+      "description": "The interval between rows: `4ths`, `3rds` or `Sequent`.",
+      "type": "string"
+    },
+    "low": {
+      "description": "The lowest note the pads, rows or 32 notes hold, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "octave": {
+      "description": "64 Notes' shift in octaves from where the pads start.",
+      "format": "int32",
+      "type": "integer"
+    },
+    "range": {
+      "description": "The range as the display notifies it, such as `C1 to C3`.",
+      "type": "string"
+    },
+    "selected_notes": {
+      "description": "The notes selected in the Melodic Sequencer + 32 Notes.",
+      "items": {
+        "format": "uint8",
+        "maximum": 255,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "strip_modulation": {
+      "description": "Whether the touch strip is the modulation wheel rather than pitch bend, in 64 Notes.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "in_key",
+    "fixed",
+    "layout",
+    "direction",
+    "octave",
+    "low",
+    "high",
+    "range",
+    "selected_notes",
+    "strip_modulation"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushMenu`
 
 A menu over the display mode (R23).
@@ -26475,12 +26756,12 @@ One of the eight places Mix Mode shows: a track, or a chain of an unfolded rack 
 
 ### `PushNote`
 
-What Note Mode shows (the notes on Push 2 spec, R1 to R31).
+What Note Mode shows (the notes on Push 2 spec, R1 to R47).
 
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `track` | [`TrackId`](#trackid) or null | yes | The track the pads play: the first selected one. |
-| `layout` | string | yes | The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `Melodic` on another MIDI track, `None` on any other track. |
+| `layout` | string | yes | The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32 Notes` on another MIDI track, `None` on any other track. |
 | `overlay` | string or null | yes | What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`. |
 | `overlay_locked` | boolean | yes | Whether that stays in view after Layout is released. |
 | `bank` | integer or null | yes | The first note of the drum rack's pad view, which the pads show. |
@@ -26492,12 +26773,13 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R31).
 | `following` | boolean | yes | Whether the step area follows the page that plays. |
 | `velocity` | integer or null | yes | The velocity new steps take, once a velocity pad chose one. |
 | `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held down now. |
+| `melody` | [`PushMelody`](#pushmelody) or null | yes | What a melodic layout shows, on a melodic track. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R31).",
+  "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R47).",
   "properties": {
     "bank": {
       "description": "The first note of the drum rack's pad view, which the pads show.",
@@ -26543,8 +26825,19 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R31).
       "type": "array"
     },
     "layout": {
-      "description": "The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `Melodic` on another MIDI track, `None` on any other track.",
+      "description": "The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `64 Notes`, `Melodic Sequencer` or `Melodic Sequencer + 32 Notes` on another MIDI track, `None` on any other track.",
       "type": "string"
+    },
+    "melody": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushMelody"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What a melodic layout shows, on a melodic track."
     },
     "overlay": {
       "description": "What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`.",
@@ -26613,7 +26906,8 @@ What Note Mode shows (the notes on Push 2 spec, R1 to R31).
     "page",
     "following",
     "velocity",
-    "held_steps"
+    "held_steps",
+    "melody"
   ],
   "type": "object"
 }
@@ -33751,6 +34045,74 @@ One of:
 
 </details>
 
+### `SpectrogramGrid`
+
+The grid of a device's spectrogram, as its type's description gives it (R46): fixed for the type, never by the size of the cell or window it is drawn in.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `columns` | integer, at least 0 | yes | The columns over time, the newest on the right. |
+| `rows` | integer, at least 0 | yes | The rows over frequency, the lowest at the bottom. |
+| `frequencies` | array of number, at least 2 | yes | The lowest and highest frequency, in Hz, at the middle of the first and last row. |
+| `log_frequency` | boolean | yes | Whether the rows are spaced logarithmically in frequency (linearly if not). |
+| `levels` | array of number, at least 2 | yes | The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The grid of a device's spectrogram, as its type's description gives it (R46): fixed for the type, never by the size of the cell or window it is drawn in.",
+  "properties": {
+    "columns": {
+      "description": "The columns over time, the newest on the right.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "frequencies": {
+      "description": "The lowest and highest frequency, in Hz, at the middle of the first and last row.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "levels": {
+      "description": "The levels in dB that the colour ramp runs between: the floor, drawn as its first colour, and the ceiling, as its last.",
+      "items": {
+        "format": "float",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "log_frequency": {
+      "description": "Whether the rows are spaced logarithmically in frequency (linearly if not).",
+      "type": "boolean"
+    },
+    "rows": {
+      "description": "The rows over frequency, the lowest at the bottom.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "columns",
+    "rows",
+    "frequencies",
+    "log_frequency",
+    "levels"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `SpectrumResult`
 
 A coarse spectrum.
@@ -34940,6 +35302,7 @@ One of:
 - `"own"`: The item carries it in its own right.
 - `"folder"`: A folder it lies in carries it.
 - `"beatlayer"`: Beatlayer gave it, from what it knows of the item.
+- `"auto"`: Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.
 
 <details><summary>JSON Schema</summary>
 
@@ -34960,6 +35323,11 @@ One of:
     {
       "const": "beatlayer",
       "description": "Beatlayer gave it, from what it knows of the item.",
+      "type": "string"
+    },
+    {
+      "const": "auto",
+      "description": "Beatlayer gave it automatically, from a plug-in's categories or a sample's sound (spec: browser-tags R49); a person can take it off or make it their own.",
       "type": "string"
     }
   ]

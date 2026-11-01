@@ -904,7 +904,7 @@ Opened by the menu button beside the Filter View toggle on the browser's top row
 | C-FILTER-002 | Show All Filter Groups | manual 4.4.1 |
 | C-FILTER-003 | Reset Filter Groups to Default | manual 4.4.1 |
 | | — | |
-| C-FILTER-004 | Include Auto Tags, disabled until automatic tagging (WP-9.11), then on by default ([browser tags](../specs/browser-tags.md) R55); the online manual's 4.4.2 calls it Enable Auto Tags | release notes 12.2 |
+| C-FILTER-004 | Include Auto Tags, on by default and ticked while on ([browser tags](../specs/browser-tags.md) R55); the online manual's 4.4.2 calls it Enable Auto Tags | release notes 12.2 |
 | C-FILTER-005 | Tag Editor (S-BRW-014), ticked while it shows | release notes 12.2 |
 | C-FILTER-006 | Show Quick Tags, ticked while Quick Tags shows | release notes 12.2 |
 

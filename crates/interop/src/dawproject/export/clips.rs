@@ -393,6 +393,7 @@ impl Exporter<'_> {
                     algorithm: Some(algorithm(data.warp_mode).to_owned()),
                     ..file
                 }),
+                video: false,
                 warps,
             })
         } else {

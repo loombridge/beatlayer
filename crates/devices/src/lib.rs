@@ -91,6 +91,7 @@ pub mod resonators;
 pub mod reverb;
 mod ring;
 pub mod roar;
+mod roar_parts;
 pub mod sampler;
 pub mod saturator;
 mod sections;

@@ -943,6 +943,7 @@ pub fn display(device: DeviceId, data: Option<&[f32]>) -> DeviceDisplay {
         markers: Vec::new(),
         spectrograms: Vec::new(),
         readings,
+        spectrograms: Vec::new(),
     }
 }
 

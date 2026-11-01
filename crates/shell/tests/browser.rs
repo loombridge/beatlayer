@@ -1742,3 +1742,19 @@ fn a_warped_preview_plays_through_the_map_a_new_clip_would_get() {
     let preview = shell.browser_preview();
     assert!(preview.playing.is_some());
 }
+
+// Spec: drum-synths R1.
+#[test]
+fn the_instruments_label_lists_the_drum_synths() {
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let state: BrowserState = run(
+        &mut shell,
+        ids::OPEN_PLACE,
+        json!({ "label": "instruments" }),
+    );
+    let names = names(&state);
+    for name in ["DS Clap", "DS Kick", "DS Snare", "DS Tom"] {
+        assert!(names.iter().any(|n| n == name), "{name} in {names:?}");
+    }
+}

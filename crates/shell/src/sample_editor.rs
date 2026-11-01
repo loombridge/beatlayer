@@ -258,6 +258,7 @@ impl SampleView {
                 .map(|(from, to)| (Self::point(audio, from), Self::point(audio, to))),
             view: self.view,
             fit_height: self.fit_height,
+            cues: Vec::new(),
         }
     }
 

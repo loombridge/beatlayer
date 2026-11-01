@@ -77,6 +77,9 @@ pub const PARAMETERS: &str = "device.parameters";
 pub const SHOW_SIDECHAIN: &str = "device.show_sidechain";
 /// `device.display`: what a device's display shows now (WP-5.43).
 pub const DISPLAY: &str = "device.display";
+/// `device.preview_hit`: play a Drum Synth's hit through its track (the drum
+/// synths spec, R6).
+pub const PREVIEW_HIT: &str = "device.preview_hit";
 /// `device.set_display_view`: choose the view a device's display shows
 /// (WP-5.43).
 pub const SET_DISPLAY_VIEW: &str = "device.set_display_view";
@@ -198,6 +201,7 @@ pub const IDS: &[&str] = &[
     PARAMETERS,
     SHOW_SIDECHAIN,
     DISPLAY,
+    PREVIEW_HIT,
     SET_DISPLAY_VIEW,
     SET_PAGE,
     ARM_MAP,
@@ -627,6 +631,17 @@ impl DevicePanel {
                         .is_some_and(|i| self.value(i) >= 0.5)
             })
             .map_or(param, |a| a.on)
+    }
+
+    /// The value of the parameter `id`: what a relabelled parameter's label
+    /// follows.
+    #[must_use]
+    pub fn read(&self, id: bl_model::ParamId) -> f64 {
+        self.description
+            .params
+            .iter()
+            .position(|p| p.id == id)
+            .map_or(0.0, |index| self.value(index))
     }
 
     /// The value of the parameter at `index` in the description.
@@ -1259,6 +1274,14 @@ pub struct DeviceArgs {
     /// The device; the selected one if left out.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceId>,
+}
+
+/// What `device.preview_hit` returns.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct HitPreviewed {
+    /// Whether the audio engine took it: it is off, or has no such device,
+    /// when this is `false`, and nothing plays.
+    pub sent: bool,
 }
 
 /// Arguments of `articulation.list`.
@@ -2740,6 +2763,19 @@ fn specs() -> Vec<CommandSpec> {
             .context(DeviceView)
             .args::<DeviceArgs>()
             .result::<DeviceDisplay>(),
+        CommandSpec::new(PREVIEW_HIT, "Preview Hit")
+            .description(
+                "Plays a hit of a Drum Synth (DS Kick, DS Snare, DS Tom or DS Clap) at \
+                 velocity 100 through its track and the track's mixer, as a click in the \
+                 upper half of its display does, whether or not the song plays. The hit runs \
+                 its own length. It records nothing, changes nothing in the set and isn't an \
+                 undo step. It needs the audio engine on; `sent` says whether it was. A \
+                 device that isn't a Drum Synth is refused.",
+            )
+            .permission(Permission::Read)
+            .context(DeviceView)
+            .args::<DeviceArgs>()
+            .result::<HitPreviewed>(),
         CommandSpec::new(SET_DISPLAY_VIEW, "Set Display View")
             .description(
                 "Chooses the view a device's display shows, as its view buttons do: a \

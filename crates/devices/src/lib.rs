@@ -52,6 +52,11 @@ pub mod delay;
 pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
+pub mod drum_synth;
+pub mod ds_clap;
+pub mod ds_kick;
+pub mod ds_snare;
+pub mod ds_tom;
 mod dynamics;
 pub mod echo;
 pub mod eq;
@@ -76,6 +81,8 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 pub mod looper;
+pub mod meld;
+mod meld_osc;
 pub mod midi_cc;
 mod midi_fx;
 pub mod midi_monitor;
@@ -262,6 +269,10 @@ pub fn display_in(
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
+        ds_kick::DS_KICK => Some(ds_kick::display(device, description, values)),
+        ds_snare::DS_SNARE => Some(ds_snare::display(device, description, values)),
+        ds_tom::DS_TOM => Some(ds_tom::display(device, description, values)),
+        ds_clap::DS_CLAP => Some(ds_clap::display(device, description, values)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
@@ -337,6 +348,7 @@ pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     corpus::register(registry);
     polysynth::register(registry);
+    meld::register(registry);
     operator::register(registry);
     analog::register(registry);
     limiter::register(registry);
@@ -355,6 +367,10 @@ pub fn register(registry: &mut Registry) {
     sampler::register(registry);
     multisampler::register(registry);
     drum_sampler::register(registry);
+    ds_kick::register(registry);
+    ds_snare::register(registry);
+    ds_tom::register(registry);
+    ds_clap::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
     level_mod::register(registry);

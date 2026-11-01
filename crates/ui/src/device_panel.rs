@@ -402,6 +402,23 @@ pub fn show(
             continue;
         }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: drum-synths R6. A click in the upper half of a Drum Synth's
+        // display plays a hit.
+        if bl_devices::drum_synth::is_drum_synth(&frame.kind)
+            && name == bl_devices::drum_synth::ENVELOPE
+        {
+            let upper = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
+            let preview = id.with("preview");
+            let response = ui.interact(upper, preview, Sense::click());
+            crate::focus::register(ui.ctx(), preview, bl_shell::Area::Detail, None);
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Preview Hit"));
+            if response.clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "device.preview_hit",
+                    json!({ "device": frame.id }),
+                )));
+            }
+        }
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Shaper, its shape.
         if let Some(modulator) = &frame.modulator {
@@ -506,12 +523,22 @@ pub fn show(
             };
             found
         };
-        let descriptor = &panel.description.params[index];
+        // Spec: meld R3, R5. A relabelled parameter shows its label's name,
+        // and its number in the label's unit.
+        let read = |id| panel.read(id);
+        let descriptor = panel
+            .description
+            .described(&read, &panel.description.params[index]);
         let value = panel.value(index);
+        let relabelled_text = panel
+            .description
+            .label(&read, param)
+            .is_some_and(|label| label.unit.is_some())
+            .then(|| panel.description.text(&read, &descriptor, value));
         let control = Control {
             device: frame.id,
             enabled: frame.enabled,
-            descriptor,
+            descriptor: &descriptor,
             value,
             modulated: played(param),
             routes: panel
@@ -542,7 +569,8 @@ pub fn show(
                     .and_then(|display| display.reading("Name"))
                     .map(|reading| reading.text.clone())
             })
-            .flatten(),
+            .flatten()
+            .or(relabelled_text),
             automation: menu(param),
             coarse: if frame.kind
                 == (bl_model::DeviceKind::Native {

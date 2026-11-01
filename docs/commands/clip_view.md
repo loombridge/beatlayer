@@ -222,7 +222,7 @@ Result: [`QuantizeSettings`](README.md#quantizesettings).
 
 **Sample Editor State**. Permission: `read`. Contexts: `clip-view`, `sample-editor`.
 
-Reports what the Clip View's Sample Editor shows for the audio clip it shows: whether the clip is warped, the selected warp markers (by their place in the clip's warp map), whether the Start marker is selected, the selected transients (by their times in the file), the insert marker, the time selection, and the span shown. Changes nothing.
+Reports what the Clip View's Sample Editor shows for the audio clip it shows: whether the clip is warped, the selected warp markers (by their place in the clip's warp map), whether the Start marker is selected, the selected transients (by their times in the file), the insert marker, the time selection, the span shown, and a video clip's `cues`. Changes nothing.
 
 Default keys: none.
 

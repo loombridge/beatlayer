@@ -60,11 +60,11 @@ Live's Drum Synths are Max for Live devices; Beatlayer's are native, with Live's
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R7 | `crates/devices/tests/banks.rs`; `crates/devices/tests/rules.rs` | unit |
-| R2, R3, R4, R5 | to be written in WP-8.24 | render under the allocation trap |
-| R6 | to be written in WP-8.24 | UI script; agent API (`device.preview_hit`, `device.display`) |
-| R8, R10 | to be written in WP-8.24 | render at block sizes 1, 64, 512 and 4,096; repeated renders identical |
-| R9 | to be written in WP-8.24 | engine test (a Drum Rack with a choke group) |
-| R11, R12, R13, R14 | to be written in WP-8.24 | unit and golden render of each device (pitch sweep, click, noise filter types, bend, spread and tail) |
+| R1, R7 | `crates/devices/tests/banks.rs`; `crates/devices/tests/rules.rs`; `crates/devices/tests/drum_synths.rs` (`each_device_is_an_instrument_with_its_own_type_id_and_a_description_that_checks`, `each_device_has_factory_presets_within_its_ranges_that_all_sound`); `crates/shell/tests/browser.rs` (`the_instruments_label_lists_the_drum_synths`) | unit |
+| R2, R3, R4, R5 | `crates/devices/tests/drum_synths.rs` | render under the allocation trap |
+| R6 | `crates/ui/tests/drum_synths.rs`; `crates/cli/tests/agent_drum_synths.rs`; `crates/devices/tests/drum_synths.rs` (`the_display_draws_the_hits_envelope_from_its_parameters`, `a_preview_plays_a_hit_at_velocity_100`) | UI script; agent API (`device.preview_hit`, `device.display`) |
+| R8, R10 | `crates/devices/tests/drum_synths.rs`; `rtsan/tests/drum_synths.rs` | render at block sizes 1, 64, 512 and 4,096; repeated renders identical |
+| R9 | `crates/engine/tests/drum_racks.rs` (`a_drum_synth_plays_from_its_pad_and_its_choke_group_cuts_it`) | engine test (a Drum Rack with a choke group) |
+| R11, R12, R13, R14 | `crates/devices/tests/drum_synths.rs` | unit and golden render of each device (pitch sweep, click, noise filter types, bend, spread and tail) |
 | R15, R16, R17, R18, R19 | to be written in WP-8.25 | unit and golden render (noise colours and slopes; FM feedback and amount; the clave's repeats on their frames; fold-back) |
 | R20 | to be written in WP-8.25 | engine test |

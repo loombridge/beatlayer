@@ -1096,6 +1096,11 @@ impl<'a> Block<'a> {
         self.scale.at(offset)
     }
 
+    /// The frames within the block where the node's current scale changes.
+    pub fn scale_changes(&self) -> impl Iterator<Item = u32> + '_ {
+        self.scale.change_frames()
+    }
+
     /// The Session clip that sets `list`'s parameters in this block
     /// (WP-3.12): the one playing on the list's track, or holding where it
     /// stopped on a track that stays taken over.

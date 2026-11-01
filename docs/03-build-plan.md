@@ -993,7 +993,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.9 | todo |  |  |
 | 8.10 | todo |  |  |
 | 8.11 | todo |  |  |
-| 8.12 | todo |  |  |
+| 8.12 | done | 1 November 2026 | [#733](https://github.com/loombridge/beatlayer/pull/733): Operator (`beatlayer.operator`) plays four oscillators on the FM core with their envelopes and the pitch envelope, loop modes and slopes, Time, Tone, voices and transpose, with the Global, Osc A to D, LFO, Filter and Pitch pages; the LFO and filter themselves wait on part 2 (8.13) |
 | 8.13 | todo |  |  |
 | 8.14 | done | 1 November 2026 | [#731](https://github.com/loombridge/beatlayer/pull/731): Analog has two band-limited oscillators (sine, saw, rectangle with pulse width, noise) with sub, sync and a pitch envelope, the noise generator with Color, two filters with ten modes, Drive, key tracking and serial or parallel routing, two amplifiers with pan, and four envelopes with their loop modes, on the shell-and-display pages; the LFO amounts act on nothing until part 2, and factory presets wait on a preset mechanism |
 | 8.15 | todo |  |  |

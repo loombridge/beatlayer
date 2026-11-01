@@ -24,6 +24,9 @@
 //! [`transcribe`] finds the notes of pitched audio with basic-pitch's network
 //! (IMP-06).
 //!
+//! [`drums`] finds the kick, snare and hi-hat hits of drum audio with a
+//! classifier of Beatlayer's own (IMP-06).
+//!
 //! [`cache`] keeps what is found in each audio file, by the file's content
 //! hash (WP-4.3).
 //!
@@ -31,6 +34,7 @@
 //! thread: it allocates freely.
 
 pub mod cache;
+pub mod drums;
 pub mod key;
 pub mod levels;
 pub mod loops;

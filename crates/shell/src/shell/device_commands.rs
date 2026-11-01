@@ -5,6 +5,7 @@ use crate::browser;
 use crate::devices;
 use crate::devices::DeviceView;
 use bl_devices::KitHost;
+use bl_devices::drum_synth::PreviewHit;
 use bl_model::TrackId;
 use bl_model::registry as model;
 use bl_shell_spec::browser as browser_ids;
@@ -392,6 +393,16 @@ impl Shell {
                 bl_engine::drum::param::PREVIEW,
                 f64::from(u8::from(on)),
             );
+        }
+        // Spec: drum-synths R6. A click in a Drum Synth's display plays a hit.
+        if !outcome.hits.is_empty() {
+            let sent = outcome.hits.iter().fold(false, |sent, &device| {
+                self.audio
+                    .send_node_data(bl_engine::NodeKey::Device(device), PreviewHit)
+                    .is_ok()
+                    || sent
+            });
+            outcome.value = to_value(&device_ids::HitPreviewed { sent });
         }
         // Spec: racks R42. Samples a rack or chain preset brought in.
         for file in &outcome.media {

@@ -15343,6 +15343,34 @@ A row, as `set.save_history` reports it.
 
 </details>
 
+### `HitPreviewed`
+
+What `device.preview_hit` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | boolean | yes | Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.preview_hit` returns.",
+  "properties": {
+    "sent": {
+      "description": "Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sent"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `HotSwap`
 
 Hot-swapping, while it lasts.

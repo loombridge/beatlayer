@@ -165,6 +165,7 @@ mod tap_tempo;
 mod tempo_follower;
 mod track_commands;
 mod tunings;
+mod video;
 mod view_commands;
 mod warping;
 mod windows;
@@ -770,6 +771,8 @@ pub struct Shell {
     /// The media the set's clips play, which the browser fills and the
     /// Arrangement's waveforms read.
     media: Arc<MediaStore>,
+    /// The movies the set's video clips name (WP-9.25).
+    movies: video::Movies,
     /// Processed files being written, with the edits that land when each is
     /// whole (WP-4.20).
     processed: Vec<processed_files::Pending>,
@@ -1310,6 +1313,7 @@ impl Shell {
         let mut shell = Self {
             browser_view,
             media,
+            movies: video::Movies::default(),
             processed: Vec::new(),
             stems: stems::StemsState::default(),
             packages: packages::PackagesState::default(),
@@ -1930,7 +1934,7 @@ impl Shell {
         if sample_ids::handles(id) {
             // Spec: sample-editor R21. The Sample Editor's selections and
             // view are the shell's, and change nothing in the set.
-            let result = sample_editor::run(
+            let mut result = sample_editor::run(
                 id,
                 args,
                 self.editor.document(),
@@ -1938,6 +1942,10 @@ impl Shell {
                 &self.arrangement,
             )
             .map_err(|failure| edit_error(id, failure));
+            // Spec: video R12. A video clip's cues are its movie's markers.
+            if let Ok(state) = &mut result {
+                self.add_cues(state);
+            }
             self.touch();
             return result;
         }
@@ -2227,6 +2235,9 @@ impl Shell {
         }
         if bl_shell_spec::warping::handles(id) {
             return self.run_warping(id, args);
+        }
+        if bl_shell_spec::video::handles(id) {
+            return self.run_video(id, args);
         }
         if bl_shell_spec::groove::handles(id) {
             return self.run_grooves(id, args);

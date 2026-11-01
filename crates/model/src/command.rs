@@ -6905,6 +6905,11 @@ impl Document {
             clip.scale = self.settings.scale;
         }
         clip.colour.get_or_insert(target.colour);
+        // Spec: video R5, R8. A slot has no picture: a video clip put in one
+        // is an audio clip.
+        if let ClipData::Audio(audio) = &mut clip.data {
+            audio.video = false;
+        }
         let id = clip.id;
         self.track_mut(track)?
             .slots
@@ -6936,6 +6941,10 @@ impl Document {
             start: Ticks::ZERO,
             ..current
         };
+        // Spec: video R8. A video clip moved into a slot is an audio clip.
+        if let ClipData::Audio(audio) = &mut moved.data {
+            audio.video = false;
+        }
         // An envelope names a parameter of the track the clip is on, so one
         // moving to another track keeps only those its new track has
         // (WP-3.15).
@@ -7126,6 +7135,7 @@ impl Document {
                 };
                 let mut data = audio.cropped(from, to)?;
                 data.media = media;
+                data.video = false;
                 next.data = ClipData::Audio(data);
             }
             ClipData::Midi(midi) => {

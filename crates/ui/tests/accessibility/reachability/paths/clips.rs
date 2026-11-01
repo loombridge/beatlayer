@@ -244,6 +244,7 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             )),
         ),
         ("clip.transients", Exception(Query)),
+        ("video.frame_at", Exception(Query)),
         (
             "clip.shift_warp_marker",
             Exception(Live(

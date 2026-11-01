@@ -190,3 +190,24 @@ fn damaged_times_saturate_instead_of_overflowing() {
     let _ = huge.plus(tiny);
     let _ = tiny.minus(huge);
 }
+
+#[test]
+fn a_movies_chapter_track_gives_its_markers() {
+    // R12: the text track the video names as its chapters, by time.
+    let movie = movie("mjpeg-chapters.mov");
+    let markers: Vec<_> = movie
+        .markers()
+        .iter()
+        .map(|marker| (marker.time, marker.name.as_str()))
+        .collect();
+    assert_eq!(
+        markers,
+        [
+            (Rational::new(0, 1), "Intro"),
+            (Rational::new(15000, 30000), "Drop")
+        ]
+    );
+    // A movie without one has none, and the chapter track isn't a picture.
+    assert!(self::movie("mjpeg-24f.mov").markers().is_empty());
+    assert_eq!(movie.video().expect("video").frame_count(), 24);
+}

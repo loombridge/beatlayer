@@ -60,6 +60,7 @@ The commands, by the part of their ID before its first dot:
 - [`modulation`](modulation.md)
 - [`modulator`](modulator.md)
 - [`note`](note.md)
+- [`packages`](packages.md)
 - [`pad`](pad.md)
 - [`perception`](perception.md)
 - [`plugin`](plugin.md)
@@ -3973,6 +3974,7 @@ What the browser shows: most browser commands return it.
 | `note` | string or null | no | What the content pane says when it has no rows, such as which package fills an empty Library label. |
 | `renaming` | string or null | no | The file whose name is open for editing, after `clip.save_file` saved it: `browser.rename_file` gives it its new name. |
 | `renaming_label` | [`Label`](#label) or null | no | The label whose name is open for editing, after `browser.add_label` or `browser.rename_label` without a name. |
+| `similar` | string or null | no | The file the content pane lists the neighbours of, shown in the search field as a token (spec: sound-similarity R12). |
 
 <details><summary>JSON Schema</summary>
 
@@ -4075,6 +4077,13 @@ What the browser shows: most browser commands return it.
         "type": "string"
       },
       "type": "array"
+    },
+    "similar": {
+      "description": "The file the content pane lists the neighbours of, shown in the search field as a token (spec: sound-similarity R12).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "tag_editor": {
       "description": "Whether the Tag Editor is open beside the content pane.",
@@ -4394,6 +4403,7 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
 | `is_return` | boolean | no | Whether this is one of a drum rack's return chains, which sit after its drum chains (drum racks spec, R7). |
 | `mixer` | [`ChainMixer`](#chainmixer) | no | The chain's mixer. |
 | `play` | integer from 0 to 255 | no | The note a drum rack's chain passes on to its devices, from 0 to 127: C3 (60) in a new chain. |
+| `push_colour` | integer or null | no | The swatch a drum rack's chain shows on Push 2 in place of its track's colour (the notes on Push 2 spec, R19), from 0 to 69, or none. Only a drum rack's chains have one. |
 | `receive` | [`Receive`](#receive) | no | The note a drum rack's chain answers (drum racks spec, R1). Only a drum rack's chains have one; any other chain keeps the default. |
 | `sends` | array of [`ChainSend`](#chainsend) | no | A drum rack's drum chain's sends to its return chains, post-fader; a return chain without an entry gets none (−∞ dB). |
 | `zones` | [`ChainZones`](#chainzones) | no | The chain's zones. Left out of the saved set while they pass everything. |
@@ -4470,6 +4480,16 @@ One chain of a rack: its own name, colour, info text and mixer, and its devices 
       "maximum": 255,
       "minimum": 0,
       "type": "integer"
+    },
+    "push_colour": {
+      "description": "The swatch a drum rack's chain shows on Push 2 in place of its track's colour (the notes on Push 2 spec, R19), from 0 to 69, or none. Only a drum rack's chains have one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "receive": {
       "$ref": "#/$defs/Receive",
@@ -22596,25 +22616,95 @@ What `set.pack_status` returns.
 
 </details>
 
+### `PackageState`
+
+Where a package is.
+
+One of:
+
+- `"not_installed"`: Not on this computer.
+- `"queued"`: Waiting for the download before it.
+- `"downloading"`: Downloading: see `progress`.
+- `"installed"`: Installed.
+- `"removed_at_next_launch"`: Removed, but its library is loaded: its files go the next time Beatlayer starts.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "Where a package is.",
+  "oneOf": [
+    {
+      "const": "not_installed",
+      "description": "Not on this computer.",
+      "type": "string"
+    },
+    {
+      "const": "queued",
+      "description": "Waiting for the download before it.",
+      "type": "string"
+    },
+    {
+      "const": "downloading",
+      "description": "Downloading: see `progress`.",
+      "type": "string"
+    },
+    {
+      "const": "installed",
+      "description": "Installed.",
+      "type": "string"
+    },
+    {
+      "const": "removed_at_next_launch",
+      "description": "Removed, but its library is loaded: its files go the next time Beatlayer starts.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `PackageStatus`
 
-A package the separation needs.
+A package of the manifest, as `packages.list` and `stems.status` give it.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
+| `id` | string | yes | Its ID, which `packages.install` and `packages.remove` take. |
 | `name` | string | yes | Its name. |
 | `purpose` | string | yes | What it does. |
 | `version` | string | yes | Its version. |
 | `url` | string | yes | Its project's page. |
 | `size` | integer, at least 0 | yes | The download's size in bytes. |
 | `installed` | boolean | yes | Whether it's installed. |
+| `role` | string | yes | The role it fills: features share a package by role. |
+| `state` | [`PackageState`](#packagestate) | yes | Where it is. |
+| `features` | array of string | yes | The features that need it, by ID. |
+| `at_next_launch` | boolean | no | Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts. |
+| `progress` | number | no | While it downloads, how far it is, from 0 to 1. |
 
 <details><summary>JSON Schema</summary>
 
 ```json
 {
-  "description": "A package the separation needs.",
+  "description": "A package of the manifest, as `packages.list` and `stems.status` give it.",
   "properties": {
+    "at_next_launch": {
+      "description": "Installed, but a library in its role is already loaded, so it takes effect the next time Beatlayer starts.",
+      "type": "boolean"
+    },
+    "features": {
+      "description": "The features that need it, by ID.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "description": "Its ID, which `packages.install` and `packages.remove` take.",
+      "type": "string"
+    },
     "installed": {
       "description": "Whether it's installed.",
       "type": "boolean"
@@ -22623,8 +22713,17 @@ A package the separation needs.
       "description": "Its name.",
       "type": "string"
     },
+    "progress": {
+      "description": "While it downloads, how far it is, from 0 to 1.",
+      "format": "float",
+      "type": "number"
+    },
     "purpose": {
       "description": "What it does.",
+      "type": "string"
+    },
+    "role": {
+      "description": "The role it fills: features share a package by role.",
       "type": "string"
     },
     "size": {
@@ -22632,6 +22731,10 @@ A package the separation needs.
       "format": "uint64",
       "minimum": 0,
       "type": "integer"
+    },
+    "state": {
+      "$ref": "#/$defs/PackageState",
+      "description": "Where it is."
     },
     "url": {
       "description": "Its project's page.",
@@ -22643,12 +22746,53 @@ A package the separation needs.
     }
   },
   "required": [
+    "id",
     "name",
     "purpose",
     "version",
     "url",
     "size",
-    "installed"
+    "installed",
+    "role",
+    "state",
+    "features"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PackagesStatus`
+
+What `packages.list` and the other commands return.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `folder` | string | yes | Where the packages are installed. |
+| `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages of the manifest for this platform. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `packages.list` and the other commands return.",
+  "properties": {
+    "folder": {
+      "description": "Where the packages are installed.",
+      "type": "string"
+    },
+    "packages": {
+      "description": "The packages of the manifest for this platform.",
+      "items": {
+        "$ref": "#/$defs/PackageStatus"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "folder",
+    "packages"
   ],
   "type": "object"
 }
@@ -25237,6 +25381,232 @@ One column of Browse Mode (push-2-tracks R14).
 
 </details>
 
+### `PushChain`
+
+A chain on one of the lower buttons while a rack's button is held.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `chain` | [`ChainId`](#chainid) | yes | The chain. |
+| `name` | string | yes | Its name. |
+| `selected` | boolean | yes | Whether it is the selected chain. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A chain on one of the lower buttons while a rack's button is held.",
+  "properties": {
+    "chain": {
+      "$ref": "#/$defs/ChainId",
+      "description": "The chain."
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the selected chain.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "chain",
+    "name",
+    "selected"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDevice`
+
+A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper display button, from 1. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device. |
+| `name` | string | yes | Its name. |
+| `depth` | integer, at least 0 | yes | How deep it is inside racks: 0 on the track's own chain. |
+| `kind` | string | yes | What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`. |
+| `enabled` | boolean | yes | Whether it is switched on. |
+| `selected` | boolean | yes | Whether it is the device in focus, which is the window's selected one. |
+| `unfolded` | boolean | yes | For a rack, whether its devices follow it on the buttons. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A device on one of the upper buttons in Device Mode (push-2-tracks R27).",
+  "properties": {
+    "button": {
+      "description": "The upper display button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "depth": {
+      "description": "How deep it is inside racks: 0 on the track's own chain.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device."
+    },
+    "enabled": {
+      "description": "Whether it is switched on.",
+      "type": "boolean"
+    },
+    "kind": {
+      "description": "What it is: `instrument`, `audio_effect`, `midi_effect`, `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or `drum_rack`.",
+      "type": "string"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "selected": {
+      "description": "Whether it is the device in focus, which is the window's selected one.",
+      "type": "boolean"
+    },
+    "unfolded": {
+      "description": "For a rack, whether its devices follow it on the buttons.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "button",
+    "device",
+    "name",
+    "depth",
+    "kind",
+    "enabled",
+    "selected",
+    "unfolded"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushDeviceMode`
+
+What Device Mode shows (push-2-tracks R27).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `devices` | array of [`PushDevice`](#pushdevice) | yes | The devices on the upper buttons, in order. |
+| `left_arrow` | boolean | yes | Whether the first upper button is an arrow that moves the devices shown back. |
+| `right_arrow` | boolean | yes | Whether the last upper button is an arrow that moves them on. |
+| `empty` | boolean | yes | Whether the track has no devices. |
+| `edit` | boolean | yes | Whether Edit Mode is on. |
+| `bank` | integer, at least 0 | yes | The bank on the encoders, from 0. |
+| `banks` | array of string | yes | Every bank's name. |
+| `bank_page` | integer, at least 0 | yes | The page of banks the lower buttons show in Edit Mode, from 0. |
+| `bank_pages` | integer, at least 0 | yes | How many pages the banks make. |
+| `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
+| `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
+| `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows (push-2-tracks R27).",
+  "properties": {
+    "bank": {
+      "description": "The bank on the encoders, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_page": {
+      "description": "The page of banks the lower buttons show in Edit Mode, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "bank_pages": {
+      "description": "How many pages the banks make.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "banks": {
+      "description": "Every bank's name.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "chains": {
+      "description": "The chains the lower buttons show while a rack's button is held.",
+      "items": {
+        "$ref": "#/$defs/PushChain"
+      },
+      "type": "array"
+    },
+    "devices": {
+      "description": "The devices on the upper buttons, in order.",
+      "items": {
+        "$ref": "#/$defs/PushDevice"
+      },
+      "type": "array"
+    },
+    "edit": {
+      "description": "Whether Edit Mode is on.",
+      "type": "boolean"
+    },
+    "empty": {
+      "description": "Whether the track has no devices.",
+      "type": "boolean"
+    },
+    "left_arrow": {
+      "description": "Whether the first upper button is an arrow that moves the devices shown back.",
+      "type": "boolean"
+    },
+    "mute_locked": {
+      "description": "Whether Mute is locked, so each device button switches its device.",
+      "type": "boolean"
+    },
+    "params": {
+      "description": "The parameters on the eight encoders.",
+      "items": {
+        "$ref": "#/$defs/PushParam"
+      },
+      "type": "array"
+    },
+    "right_arrow": {
+      "description": "Whether the last upper button is an arrow that moves them on.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "devices",
+    "left_arrow",
+    "right_arrow",
+    "empty",
+    "edit",
+    "bank",
+    "banks",
+    "bank_page",
+    "bank_pages",
+    "params",
+    "chains",
+    "mute_locked"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDisplay`
 
 What the display shows (R17 to R20).
@@ -25387,6 +25757,62 @@ One of:
 
 </details>
 
+### `PushHeldStep`
+
+A step held down in Note Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip the step belongs to, if the slot holds one. |
+| `pad` | integer from 0 to 255 | yes | The step's drum pad, as a MIDI note. |
+| `start` | [`Ticks`](#ticks) | yes | Where the step starts in the clip's contents. |
+| `length` | [`Ticks`](#ticks) | yes | How long the step is. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A step held down in Note Mode.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the step belongs to, if the slot holds one."
+    },
+    "length": {
+      "$ref": "#/$defs/Ticks",
+      "description": "How long the step is."
+    },
+    "pad": {
+      "description": "The step's drum pad, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "start": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the step starts in the clip's contents."
+    }
+  },
+  "required": [
+    "clip",
+    "pad",
+    "start",
+    "length"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushInfo`
 
 One connected Push 2.
@@ -25412,8 +25838,10 @@ One connected Push 2.
 | `setup` | [`PushSetup`](#pushsetup) | yes | The Setup menu's values. |
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
+| `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
+| `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
 
 <details><summary>JSON Schema</summary>
 
@@ -25435,6 +25863,17 @@ One connected Push 2.
     "colour_picker": {
       "description": "Whether the colour picker is open.",
       "type": "boolean"
+    },
+    "device": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushDeviceMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Device Mode shows, while it is the display mode."
     },
     "display": {
       "$ref": "#/$defs/PushDisplay",
@@ -25527,6 +25966,17 @@ One connected Push 2.
       ],
       "description": "What Mix Mode shows, while it is the display mode."
     },
+    "note": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushNote"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Note Mode shows, while it is the pad mode."
+    },
     "output": {
       "description": "The output it is sent to.",
       "type": "string"
@@ -25582,8 +26032,10 @@ One connected Push 2.
     "setup",
     "display",
     "browse",
+    "device",
     "session",
-    "mix_mode"
+    "mix_mode",
+    "note"
   ],
   "type": "object"
 }
@@ -25962,6 +26414,154 @@ One of the eight places Mix Mode shows: a track, or a chain of an unfolded rack 
 
 </details>
 
+### `PushNote`
+
+What Note Mode shows (the notes on Push 2 spec, R1 to R31).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `track` | [`TrackId`](#trackid) or null | yes | The track the pads play: the first selected one. |
+| `layout` | string | yes | The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `Melodic` on another MIDI track, `None` on any other track. |
+| `overlay` | string or null | yes | What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`. |
+| `overlay_locked` | boolean | yes | Whether that stays in view after Layout is released. |
+| `bank` | integer or null | yes | The first note of the drum rack's pad view, which the pads show. |
+| `selected_pad` | integer or null | yes | The drum pad the steps edit, as a MIDI note. |
+| `step_size` | string | yes | The step size, such as `1/16` or `1/8T`. |
+| `edited_clip` | [`ClipId`](#clipid) or null | yes | The clip the steps edit, if the slot holds one. |
+| `edited_scene` | [`SceneId`](#sceneid) or null | yes | The scene whose slot holds it. |
+| `page` | integer from 0 to 255 | yes | The first of the two pages the step area shows, counting from 1. |
+| `following` | boolean | yes | Whether the step area follows the page that plays. |
+| `velocity` | integer or null | yes | The velocity new steps take, once a velocity pad chose one. |
+| `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held down now. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Note Mode shows (the notes on Push 2 spec, R1 to R31).",
+  "properties": {
+    "bank": {
+      "description": "The first note of the drum rack's pad view, which the pads show.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "edited_clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip the steps edit, if the slot holds one."
+    },
+    "edited_scene": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The scene whose slot holds it."
+    },
+    "following": {
+      "description": "Whether the step area follows the page that plays.",
+      "type": "boolean"
+    },
+    "held_steps": {
+      "description": "The steps held down now.",
+      "items": {
+        "$ref": "#/$defs/PushHeldStep"
+      },
+      "type": "array"
+    },
+    "layout": {
+      "description": "The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum track, `Melodic` on another MIDI track, `None` on any other track.",
+      "type": "string"
+    },
+    "overlay": {
+      "description": "What holding Layout, or Shift and Layout, shows in the lower-right pads, if anything: `16 Velocities` or `Loop Length Pads`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "overlay_locked": {
+      "description": "Whether that stays in view after Layout is released.",
+      "type": "boolean"
+    },
+    "page": {
+      "description": "The first of the two pages the step area shows, counting from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "selected_pad": {
+      "description": "The drum pad the steps edit, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "step_size": {
+      "description": "The step size, such as `1/16` or `1/8T`.",
+      "type": "string"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The track the pads play: the first selected one."
+    },
+    "velocity": {
+      "description": "The velocity new steps take, once a velocity pad chose one.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "track",
+    "layout",
+    "overlay",
+    "overlay_locked",
+    "bank",
+    "selected_pad",
+    "step_size",
+    "edited_clip",
+    "edited_scene",
+    "page",
+    "following",
+    "velocity",
+    "held_steps"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushPadMode`
 
 The pad mode (R21).
@@ -25988,6 +26588,46 @@ One of:
       "type": "string"
     }
   ]
+}
+```
+
+</details>
+
+### `PushParam`
+
+A parameter on one of the encoders in Device Mode.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `value` | string | yes | Its value as the device shows it. |
+| `held` | boolean | yes | Whether a macro holds it, so the encoder doesn't move it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter on one of the encoders in Device Mode.",
+  "properties": {
+    "held": {
+      "description": "Whether a macro holds it, so the encoder doesn't move it.",
+      "type": "boolean"
+    },
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the device shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "name",
+    "value",
+    "held"
+  ],
+  "type": "object"
 }
 ```
 
@@ -30448,6 +31088,7 @@ A saved label (spec: browser-tags R24).
 | `search` | string | yes | The search words it keeps. |
 | `tags` | array of string | yes | The tags it keeps, by their full names. |
 | `icon` | string or null | no | The icon it was given. |
+| `reference` | string or null | no | The file it lists the neighbours of, first (spec: sound-similarity R15). |
 
 <details><summary>JSON Schema</summary>
 
@@ -30473,6 +31114,13 @@ A saved label (spec: browser-tags R24).
     "name": {
       "description": "Its name.",
       "type": "string"
+    },
+    "reference": {
+      "description": "The file it lists the neighbours of, first (spec: sound-similarity R15).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "search": {
       "description": "The search words it keeps.",
@@ -32544,6 +33192,84 @@ What a time-signature command did: the marker selected afterwards, and whether i
   "required": [
     "selected",
     "undo_step"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SimilarItem`
+
+One item of `browser.similar`'s list.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Its path. |
+| `kind` | [`ItemKind`](#itemkind) | yes | What it is. |
+| `distance` | number | yes | Its distance from the reference: 0 for the reference, up to 0.35. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One item of `browser.similar`'s list.",
+  "properties": {
+    "distance": {
+      "description": "Its distance from the reference: 0 for the reference, up to 0.35.",
+      "format": "float",
+      "type": "number"
+    },
+    "kind": {
+      "$ref": "#/$defs/ItemKind",
+      "description": "What it is."
+    },
+    "path": {
+      "description": "Its path.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "kind",
+    "distance"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `SimilarList`
+
+What `browser.similar` gives (spec: sound-similarity R16).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `reference` | [`SimilarItem`](#similaritem) | yes | The reference. |
+| `items` | array of [`SimilarItem`](#similaritem) | yes | The reference first, then the nearest items of its own kind, most similar first. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `browser.similar` gives (spec: sound-similarity R16).",
+  "properties": {
+    "items": {
+      "description": "The reference first, then the nearest items of its own kind, most similar first.",
+      "items": {
+        "$ref": "#/$defs/SimilarItem"
+      },
+      "type": "array"
+    },
+    "reference": {
+      "$ref": "#/$defs/SimilarItem",
+      "description": "The reference."
+    }
+  },
+  "required": [
+    "reference",
+    "items"
   ],
   "type": "object"
 }

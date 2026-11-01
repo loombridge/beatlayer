@@ -126,6 +126,8 @@ pub struct Snapshot {
     pub mix_page: MixPage,
     /// The menu that is open.
     pub menu: Option<Menu>,
+    /// What Note Mode shows while it is the pad mode.
+    pub note: Option<crate::note::State>,
     /// The buttons held, by name.
     pub held: Vec<&'static str>,
     /// The buttons locked on, by name.
@@ -144,6 +146,8 @@ pub struct Snapshot {
     pub screen: Screen,
     /// What Browse Mode shows, while it is the display mode.
     pub browse: Option<crate::browse::State>,
+    /// What Device Mode shows, while it is the display mode.
+    pub device: Option<crate::device::State>,
     /// What Session Mode shows, while it is the pad mode.
     pub session: Option<crate::session::State>,
     /// What Mix Mode shows, while it is the display mode.
@@ -163,6 +167,7 @@ impl Snapshot {
             display_mode: DisplayMode::default(),
             mix_page: MixPage::default(),
             menu: None,
+            note: None,
             held: Vec::new(),
             locked: Vec::new(),
             picker: false,
@@ -172,6 +177,7 @@ impl Snapshot {
             setup: Setup::default(),
             screen: Screen::default(),
             browse: None,
+            device: None,
             session: None,
             mix: None,
             display: Status::default(),

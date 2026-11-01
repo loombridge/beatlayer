@@ -245,6 +245,20 @@ impl Shell {
             .collect()
     }
 
+    /// How long each track's playing Session clip has played, in ticks of
+    /// its own time (push-2-notes R20, R28).
+    pub(super) fn clip_time(&self) -> Vec<(TrackId, Ticks)> {
+        let doc = self.editor.document();
+        self.session_states
+            .iter()
+            .filter(|status| status.state == SlotState::Playing)
+            .filter_map(|status| {
+                let clip = doc.slot(status.track, status.scene)?;
+                Some((status.track, self.clip_played(clip)?.since))
+            })
+            .collect()
+    }
+
     /// `since`, rounded down to a step of the global launch quantisation
     /// (Spec: clip-properties R5): exactly as it is with quantisation off or
     /// None. A bar step is a bar of the clip's Signature, or the song's.

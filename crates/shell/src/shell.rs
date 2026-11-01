@@ -72,6 +72,7 @@ use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
+use bl_shell_spec::packages as packages_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::push as push_ids;
@@ -135,6 +136,7 @@ mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
+mod packages;
 mod packs;
 mod perception_commands;
 mod playback;
@@ -147,6 +149,7 @@ mod recovery;
 mod remote;
 mod remote_targets;
 mod search;
+mod selection_arm;
 mod session_launch;
 mod session_recording;
 mod session_strip;
@@ -765,6 +768,8 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Packages manager: the installer thread and its queue (WP-9.1).
+    packages: packages::PackagesState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
     packs: packs::PackState,
@@ -1241,6 +1246,9 @@ impl Shell {
             &prefs.midi,
             Arc::clone(&push_display),
         );
+        // Spec: stem-separation R19. A package removed while its library
+        // was loaded goes now.
+        crate::packages::sweep(&crate::packages::folder(config_dir.as_deref()));
         let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
         // Spec: browser-tags R1. The browser's database holds the index of
         // the places' files, the tags, and the items that carry them.
@@ -1296,6 +1304,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            packages: packages::PackagesState::default(),
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
@@ -1726,6 +1735,7 @@ impl Shell {
         let shown_scale = crate::scales::shown_scale(self.editor.document(), shown);
         let revision = self.document_revision;
         let generation = self.editor_generation;
+        let arm_args = matches!(id, "mixer.set_arm" | "mixer.arm_exclusive").then(|| args.clone());
         let result = self.run_command(id, args);
         self.rack_map_mode_ends_map_mode(id);
         self.sync_key_edit();
@@ -1738,6 +1748,9 @@ impl Shell {
             self.refresh_search();
         }
         if result.is_ok() {
+            if let Some(args) = &arm_args {
+                self.arm_taken_by_hand(args);
+            }
             self.follow_clip_selection(id, &arranged, slot, &slots);
             // Spec: scales R10. Selecting a clip makes its scale the
             // current scale, and a change to that clip's scale changes it
@@ -2223,6 +2236,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if packages_ids::handles(id) {
+            return self.run_packages(id, args);
         }
         if slice_ids::handles(id) {
             return self.run_slice(id, args);

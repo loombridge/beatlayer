@@ -137,6 +137,7 @@ pub mod modulation;
 pub mod multisampler;
 pub mod note_filters;
 pub mod notes;
+pub mod packages;
 pub mod pads;
 pub mod perception;
 pub mod plugins;
@@ -206,6 +207,7 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
     modulation::register(registry)?;
     perception::register(registry)?;
     stems::register(registry)?;
+    packages::register(registry)?;
     sample_editor::register(registry)?;
     audio_editing::register(registry)?;
     audio_panel::register(registry)?;
@@ -234,12 +236,14 @@ mod tests {
         // and asks the person first. `groove.to_clip` is external only when
         // given a `path`: the shell raises its class from its arguments.
         // `browser.remove_folder` names a Places entry, whose files it never
-        // touches. `midi_tool.load_bank` still reads its file as an edit: classing
-        // it external is not done yet.
+        // touches. `browser.similar` names a file the browser's index already
+        // holds and reads only the database. `midi_tool.load_bank` still reads
+        // its file as an edit: classing it external is not done yet.
         let exempt = [
             groove::TO_CLIP,
             midi_tools::LOAD_BANK,
             browser::REMOVE_FOLDER,
+            browser::SIMILAR,
         ];
         let mut registry = Registry::new();
         super::register(&mut registry).unwrap();

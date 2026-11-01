@@ -177,6 +177,49 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
                 .collect(),
             in_use: browse.in_use,
         }),
+        device: snapshot.device.as_ref().map(|device| ids::PushDeviceMode {
+            devices: device
+                .devices
+                .iter()
+                .map(|d| ids::PushDevice {
+                    button: d.button,
+                    device: d.device,
+                    name: d.name.clone(),
+                    depth: d.depth,
+                    kind: d.kind.to_owned(),
+                    enabled: d.enabled,
+                    selected: d.selected,
+                    unfolded: d.unfolded,
+                })
+                .collect(),
+            left_arrow: device.arrows.0,
+            right_arrow: device.arrows.1,
+            empty: device.empty,
+            edit: device.edit,
+            bank: device.bank,
+            banks: device.banks.clone(),
+            bank_page: device.page,
+            bank_pages: device.pages,
+            params: device
+                .params
+                .iter()
+                .map(|p| ids::PushParam {
+                    name: p.name.clone(),
+                    value: p.value.clone(),
+                    held: p.held,
+                })
+                .collect(),
+            chains: device
+                .chains
+                .iter()
+                .map(|c| ids::PushChain {
+                    chain: c.chain,
+                    name: c.name.clone(),
+                    selected: c.selected,
+                })
+                .collect(),
+            mute_locked: snapshot.locked.contains(&"mute"),
+        }),
         session: snapshot.session.as_ref().map(|session| {
             let look = |look: &bl_push::session::Look| ids::PushSessionLook {
                 shows: look.what.to_owned(),
@@ -203,12 +246,36 @@ fn info(row: usize, input: String, output: String, snapshot: Snapshot) -> ids::P
             error: snapshot.display.error.clone(),
             frames: snapshot.display.frames,
         },
+        note: snapshot.note.map(|note| ids::PushNote {
+            track: note.track,
+            layout: note.layout,
+            overlay: note.overlay,
+            overlay_locked: note.overlay_locked,
+            bank: note.bank,
+            selected_pad: note.selected_pad,
+            step_size: note.step_size,
+            edited_clip: note.edited_clip,
+            edited_scene: note.edited_scene,
+            page: note.page,
+            following: note.following,
+            velocity: note.velocity,
+            held_steps: note
+                .held_steps
+                .into_iter()
+                .map(|step| ids::PushHeldStep {
+                    clip: step.clip,
+                    pad: step.key,
+                    start: step.start,
+                    length: step.length,
+                })
+                .collect(),
+        }),
     }
 }
 
 impl Shell {
     /// The Push 2 surfaces that run: their rows, from 0, and their handles.
-    fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
+    pub(super) fn pushes(&self) -> Vec<(usize, Arc<Handle>)> {
         let surfaces = self.midi.surfaces();
         let report = self.midi.surface_rows();
         (0..bl_control::ROWS)

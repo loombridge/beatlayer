@@ -9,6 +9,7 @@ Fuzz targets for Beatlayer's file readers, run with [cargo-fuzz](https://github.
 | `dawproject` | Bytes as read from a `.dawproject` container, and `project.xml` alone: the ZIP reader, the XML reader and the import | No panic. Whatever the import makes obeys the document model's rules. |
 | `groove_file` | Bytes as read from a `.blgroove` file: JSON format header, schema version, notes, parameters, and the grooves spec's limits | No panic. Anything the decoder accepts saves again and decodes to the same groove. |
 | `midi_file` | Bytes as read from a `.mid` or RMID file: the size cap, header and track chunks, events, tempo and time signatures | No panic. Every note has a length, a key and velocity in range, ends within its track, and comes in order. |
+| `movie` | Bytes as read from a `.mov` file: the box reader, sample tables, edit lists and frame times, then the audio track on the movie's timeline | No panic. The presentation order is a permutation of the frames, and every frame a time maps to exists. |
 | `pack` | Bytes as read from a `.blpack` file: the ZIP records, the manifest, every entry's name, and the size and checksum of every file | No panic. Every entry of a pack the reader accepts goes inside the project folder, by normal path parts only. |
 | `peak_file` | Bytes as read from a `.blpeaks` file: magic, header, run table, data block, and BLAKE3 checksum | No panic. Anything the reader accepts saves again and loads back as the same peaks. |
 | `preset` | Bytes as read from a `.blpreset` file: JSON format header, schema version, device info, and parameters | No panic. Anything the decoder accepts saves again and decodes to the same preset. |
@@ -50,6 +51,8 @@ cargo +nightly fuzz run preset corpus/preset -- \
   -max_total_time=300
 cargo +nightly fuzz run sfz corpus/sfz -- \
   -max_total_time=300
+cargo +nightly fuzz run movie corpus/movie ../tests/fixtures/video -- \
+  -dict=dictionaries/movie.dict -max_total_time=300
 ```
 
 The first folder after the target is the working corpus, which libFuzzer grows; the fixtures are read-only seeds. Corpora, crash artefacts, and build output stay out of Git (`.gitignore`). A crash writes its input to `artifacts/<target>/`; turn it into a regression test in `crates/project` before fixing it.

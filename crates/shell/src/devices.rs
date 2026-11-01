@@ -12,6 +12,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use bl_engine::DeviceType;
 use bl_media::MediaStore;
@@ -999,6 +1000,27 @@ impl DeviceView {
                 });
                 Self::list_devices(chain.devices.iter(), depth + 2, list);
             }
+        }
+    }
+
+    /// What a surface that follows the Device View reads of it: each rack's
+    /// views, and the chain each rack on `track` shows the devices of
+    /// (`docs/specs/push-2-tracks.md` R22, R24).
+    #[must_use]
+    pub fn surface_views(&self, doc: &Document, track: Option<TrackId>) -> bl_control::DeviceViews {
+        let chains = track
+            .and_then(|track| doc.track(track))
+            .into_iter()
+            .flat_map(bl_model::Track::devices_deep)
+            .filter(|rack| rack.rack_kind().is_some())
+            .filter_map(|rack| match self.rack_selection(rack).as_slice() {
+                [one] => Some((rack.id, *one)),
+                _ => None,
+            })
+            .collect();
+        bl_control::DeviceViews {
+            racks: Arc::new(self.rack_views.clone()),
+            chains: Arc::new(chains),
         }
     }
 
@@ -2248,6 +2270,16 @@ impl DeviceView {
             pad_ids::PAD_SWAP => {
                 let args: pad_ids::PadSwapArgs = parse(args)?;
                 self.swap_pads(editor, args)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_COPY => {
+                let args: pad_ids::PadCopyArgs = parse(args)?;
+                self.copy_pad(editor, args)?;
+                outcome.document_changed = true;
+            }
+            pad_ids::PAD_SET_PUSH_COLOUR => {
+                let args: pad_ids::PadPushColourArgs = parse(args)?;
+                self.set_pad_push_colour(editor, args)?;
                 outcome.document_changed = true;
             }
             pad_ids::PAD_SAVE_DEFAULT => {
@@ -3808,12 +3840,13 @@ fn follow_current_scale(
     scale: bl_model::Scale,
     scales_hidden: bool,
 ) -> DevicePanel {
-    use bl_devices::{arpeggiator, dice, lift, remap, stack};
+    use bl_devices::{arpeggiator, dice, lift, remap, resonators, stack};
     let DeviceKind::Native { device_type } = &device.kind else {
         return panel;
     };
     if scales_hidden {
         let switch = match device_type.as_str() {
+            resonators::RESONATORS => resonators::USE_SCALE,
             remap::REMAP => remap::USE_SCALE,
             arpeggiator::ARPEGGIATOR => arpeggiator::USE_SCALE,
             lift::LIFT => lift::USE_SCALE,

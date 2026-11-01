@@ -51,6 +51,10 @@ pub(super) struct SurfaceHost {
     /// The revision of Push 2's shared Setup values and swing amount the
     /// preferences last kept.
     push_saved: u64,
+    /// The tracks armed by selection, not by hand (Push 2 notes R3).
+    pub(super) selection_armed: std::collections::BTreeSet<bl_model::TrackId>,
+    /// The track the selection last armed or found armed.
+    pub(super) armed_for: Option<bl_model::TrackId>,
     /// The browser's lists a surface that browses reads, what they were made
     /// from and their revision (push-2-tracks R13).
     catalogue: Option<CatalogueCopy>,
@@ -378,7 +382,7 @@ impl Shell {
     /// (R6, R7). Returns whether the set changed.
     pub(super) fn poll_surfaces(&mut self) -> bool {
         let revision = self.document_revision;
-        let changed = self.poll_push();
+        let changed = self.poll_push() | self.poll_selection_arm();
         self.sync_instant();
         // Spec: supported-controllers R2. A controller's answer to the
         // device inquiry fills its row, which the preferences keep.
@@ -465,8 +469,9 @@ impl Shell {
         let browse = self.surface_browse();
         let mix = self.surface_mix();
         let doc = self.editor.document();
-        let drum = crate::devices::shown_track(&self.arrangement, doc)
-            .and_then(|track| self.devices.drum_view(doc, track));
+        let shown = crate::devices::shown_track(&self.arrangement, doc);
+        let drum = shown.and_then(|track| self.devices.drum_view(doc, track));
+        let devices = self.devices.surface_views(doc, shown);
         ReadModel {
             document,
             slots: self.session_states().to_vec(),
@@ -488,6 +493,7 @@ impl Shell {
                 scenes: session.scenes,
             },
             progress: self.clip_progress(),
+            clip_time: self.clip_time(),
             rows,
             columns: self.ring_columns(),
             session_record: self.session_run.is_some(),
@@ -499,6 +505,8 @@ impl Shell {
                     .is_some_and(|place| self.arrangement.selected_tracks().contains(&place.track))
             }),
             session_view: self.main_view == MainView::Session,
+            selection_armed: self.surface.selection_armed.iter().copied().collect(),
+            devices,
             mix,
         }
     }

@@ -183,6 +183,81 @@ pub struct PushBrowse {
     pub in_use: usize,
 }
 
+/// A device on one of the upper buttons in Device Mode (push-2-tracks R27).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushDevice {
+    /// The upper display button, from 1.
+    pub button: usize,
+    /// The device.
+    pub device: bl_model::DeviceId,
+    /// Its name.
+    pub name: String,
+    /// How deep it is inside racks: 0 on the track's own chain.
+    pub depth: usize,
+    /// What it is: `instrument`, `audio_effect`, `midi_effect`,
+    /// `instrument_rack`, `audio_effect_rack`, `midi_effect_rack` or
+    /// `drum_rack`.
+    pub kind: String,
+    /// Whether it is switched on.
+    pub enabled: bool,
+    /// Whether it is the device in focus, which is the window's selected one.
+    pub selected: bool,
+    /// For a rack, whether its devices follow it on the buttons.
+    pub unfolded: bool,
+}
+
+/// A parameter on one of the encoders in Device Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushParam {
+    /// Its name.
+    pub name: String,
+    /// Its value as the device shows it.
+    pub value: String,
+    /// Whether a macro holds it, so the encoder doesn't move it.
+    pub held: bool,
+}
+
+/// A chain on one of the lower buttons while a rack's button is held.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushChain {
+    /// The chain.
+    pub chain: bl_model::ChainId,
+    /// Its name.
+    pub name: String,
+    /// Whether it is the selected chain.
+    pub selected: bool,
+}
+
+/// What Device Mode shows (push-2-tracks R27).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushDeviceMode {
+    /// The devices on the upper buttons, in order.
+    pub devices: Vec<PushDevice>,
+    /// Whether the first upper button is an arrow that moves the devices
+    /// shown back.
+    pub left_arrow: bool,
+    /// Whether the last upper button is an arrow that moves them on.
+    pub right_arrow: bool,
+    /// Whether the track has no devices.
+    pub empty: bool,
+    /// Whether Edit Mode is on.
+    pub edit: bool,
+    /// The bank on the encoders, from 0.
+    pub bank: usize,
+    /// Every bank's name.
+    pub banks: Vec<String>,
+    /// The page of banks the lower buttons show in Edit Mode, from 0.
+    pub bank_page: usize,
+    /// How many pages the banks make.
+    pub bank_pages: usize,
+    /// The parameters on the eight encoders.
+    pub params: Vec<PushParam>,
+    /// The chains the lower buttons show while a rack's button is held.
+    pub chains: Vec<PushChain>,
+    /// Whether Mute is locked, so each device button switches its device.
+    pub mute_locked: bool,
+}
+
 /// What a pad or a Scene/Grid button shows in Session Mode (push-2-tracks
 /// R73).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -316,10 +391,60 @@ pub struct PushInfo {
     pub display: PushDisplay,
     /// What Browse Mode shows, while it is the display mode.
     pub browse: Option<PushBrowse>,
+    /// What Device Mode shows, while it is the display mode.
+    pub device: Option<PushDeviceMode>,
     /// What Session Mode shows, while it is the pad mode.
     pub session: Option<PushSession>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix_mode: Option<PushMix>,
+    /// What Note Mode shows, while it is the pad mode.
+    pub note: Option<PushNote>,
+}
+
+/// A step held down in Note Mode.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushHeldStep {
+    /// The clip the step belongs to, if the slot holds one.
+    pub clip: Option<bl_model::ClipId>,
+    /// The step's drum pad, as a MIDI note.
+    pub pad: u8,
+    /// Where the step starts in the clip's contents.
+    pub start: bl_core::time::Ticks,
+    /// How long the step is.
+    pub length: bl_core::time::Ticks,
+}
+
+/// What Note Mode shows (the notes on Push 2 spec, R1 to R31).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PushNote {
+    /// The track the pads play: the first selected one.
+    pub track: Option<bl_model::TrackId>,
+    /// The layout: `Loop Selector`, `16 Velocities` or `64 Pads` on a drum
+    /// track, `Melodic` on another MIDI track, `None` on any other track.
+    pub layout: String,
+    /// What holding Layout, or Shift and Layout, shows in the lower-right
+    /// pads, if anything: `16 Velocities` or `Loop Length Pads`.
+    pub overlay: Option<String>,
+    /// Whether that stays in view after Layout is released.
+    pub overlay_locked: bool,
+    /// The first note of the drum rack's pad view, which the pads show.
+    pub bank: Option<u8>,
+    /// The drum pad the steps edit, as a MIDI note.
+    pub selected_pad: Option<u8>,
+    /// The step size, such as `1/16` or `1/8T`.
+    pub step_size: String,
+    /// The clip the steps edit, if the slot holds one.
+    pub edited_clip: Option<bl_model::ClipId>,
+    /// The scene whose slot holds it.
+    pub edited_scene: Option<bl_model::SceneId>,
+    /// The first of the two pages the step area shows, counting from 1.
+    pub page: u8,
+    /// Whether the step area follows the page that plays.
+    pub following: bool,
+    /// The velocity new steps take, once a velocity pad chose one.
+    pub velocity: Option<u8>,
+    /// The steps held down now.
+    pub held_steps: Vec<PushHeldStep>,
 }
 
 /// What `push.state` returns.
@@ -422,12 +547,15 @@ pub fn register(registry: &mut Registry) -> Result<(), RegisterError> {
                  strip's configuration and LEDs; the Setup menu's values; and the display's \
                  content as text, by band and column: labels, parameter names and values, \
                  dots, notifications; and, in Browse Mode, what Load does, its columns with their \
-                 entries and selection and the column in use; in Mix Mode, Track Mix's \
-                 view, what Global Mix sets, the sends' shift, the eight tracks or chains shown \
-                 with what each encoder sets and its value, and the groups and racks that are \
-                 unfolded; and, in Session Mode, the ring, what each pad and Scene/Grid button \
-                 shows, whether Session Overview is shown or locked and the Stop Clip lock. \
-                 Changes nothing.",
+                 entries and selection and the column in use; in Device Mode, the devices on \
+                 the upper buttons with their depth and which is selected, whether Edit Mode is \
+                 on, the bank and its page of banks, the parameters on the encoders, the chains \
+                 shown while a rack's button is held, and whether Mute is locked; in Mix Mode, \
+                 Track Mix's view, what Global Mix sets, the sends' shift, the eight tracks or \
+                 chains shown with what each encoder sets and its value, and the groups and \
+                 racks that are unfolded; and, in Session Mode, the ring, what each pad and \
+                 Scene/Grid button shows, whether Session Overview is shown or locked and the \
+                 Stop Clip lock. Changes nothing.",
             )
             .permission(Permission::Read)
             .context(Global)

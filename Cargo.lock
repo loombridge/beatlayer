@@ -1054,6 +1054,7 @@ version = "0.2.0"
 dependencies = [
  "bl-control",
  "bl-core",
+ "bl-devices",
  "bl-engine",
  "bl-midi-io",
  "bl-model",
@@ -1206,6 +1207,19 @@ dependencies = [
  "serde_json",
  "toml",
  "wgpu",
+]
+
+[[package]]
+name = "bl-video"
+version = "0.2.0"
+dependencies = [
+ "bl-media",
+ "core-foundation-sys",
+ "libloading 0.8.9",
+ "serde_json",
+ "windows",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]

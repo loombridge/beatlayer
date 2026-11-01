@@ -179,7 +179,7 @@ impl BrowserView {
     /// browser-tags R22).
     #[must_use]
     pub fn results_bar(&self) -> bool {
-        !self.search.trim().is_empty() || !self.filter.is_empty()
+        !self.search.trim().is_empty() || !self.filter.is_empty() || self.reference().is_some()
     }
 
     /// The tags selected in the groups the chosen label shows.

@@ -285,7 +285,7 @@ impl Stutter {
 
 /// The first point of the grid `offset + k × period` (k from 0) on song
 /// frame `from` or later: its tick and its frame.
-fn next_on_grid(
+pub(crate) fn next_on_grid(
     tempo: &TempoMap,
     rate: SampleRate,
     from: i64,

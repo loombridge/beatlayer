@@ -1475,6 +1475,33 @@ fn the_test_spectrogram_passes_under_rtsan() {
     run_lo_fi_device(SPECTROGRAM, &[(SPECTROGRAM_FREEZE, &[0.0, 1.0])]);
 }
 
+// Spec: spectral-time R17
+#[test]
+fn spectral_time_passes_under_rtsan() {
+    use bl_devices::spectral_time::*;
+    run_lo_fi_device(
+        SPECTRAL_TIME,
+        &[
+            (RESOLUTION, &[3.0, 0.0, 4.0, 1.0, 2.0]),
+            (FREEZE, &[1.0, 0.0, 1.0]),
+            (FREEZER_MODE, &[0.0, 1.0]),
+            (TRIGGER, &[0.0, 1.0]),
+            (FADE_SHAPE, &[0.0, 1.0]),
+            (INTERVAL_MODE, &[1.0, 0.0]),
+            (DELAY_MODE, &[0.0, 1.0, 2.0, 3.0, 4.0]),
+            (TIME, &[10.0, 250.0, 5_000.0]),
+            (TILT, &[-100.0, 0.0, 100.0]),
+            (SPRAY, &[0.0, 50.0, 100.0]),
+            (MASK, &[-50.0, 0.0, 50.0]),
+            (FEEDBACK, &[0.0, 50.0, 100.0]),
+            (SHIFT, &[-12.0, 0.0, 12.0]),
+            (STEREO, &[0.0, 100.0]),
+            (ORDER, &[0.0, 1.0]),
+            (ZERO_DRY_LATENCY, &[0.0, 1.0]),
+        ],
+    );
+}
+
 // Spec: tuner R8
 #[test]
 fn tuner_passes_under_rtsan() {

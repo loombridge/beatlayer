@@ -14,6 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use bl_core::time::Ticks;
 use bl_engine::DeviceType;
 use bl_media::MediaStore;
 use bl_model::device_layout::{BODY_HEIGHT, ControlBand, LayoutNode, Widget};
@@ -637,11 +638,11 @@ impl DeviceView {
     /// has that device.
     #[must_use]
     pub fn parameters_of(&self, doc: &Document, device: DeviceId) -> Option<DeviceParameters> {
-        doc.device(device).map(|d| self.parameters(d))
+        doc.device(device).map(|d| self.parameters(d, doc))
     }
 
     /// `device`'s parameters as `device.parameters` reports them.
-    fn parameters(&self, device: &Device) -> DeviceParameters {
+    fn parameters(&self, device: &Device, doc: &Document) -> DeviceParameters {
         // A plug-in's panel shows its configured parameters (WP-5.40); any
         // other device's panel shows them all.
         let configured: BTreeSet<ParamId> = self
@@ -658,15 +659,35 @@ impl DeviceView {
         let params = self
             .description(&device.kind)
             .map(|description| {
+                // Spec: spectral-time R12. A delay time the delay memory
+                // can't hold says so in its text.
+                let capped = matches!(
+                    &device.kind,
+                    DeviceKind::Native { device_type } if device_type == bl_devices::SPECTRAL_TIME
+                )
+                .then(|| {
+                    bl_devices::spectral_time::capped_time(
+                        |id| description.value(&device.params, id).unwrap_or_default(),
+                        doc.settings().tempo.bpm_at(Ticks::ZERO).get(),
+                    )
+                })
+                .flatten();
                 description
                     .params
                     .iter()
                     .map(|p| {
                         let value = description.value(&device.params, p.id).unwrap_or(p.default);
+                        let mut text = p.format(value);
+                        if capped == Some(p.id) {
+                            text.push_str(&format!(
+                                " (held at {} s)",
+                                bl_devices::spectral_time::CAP_SECONDS
+                            ));
+                        }
                         ParameterState {
                             descriptor: p.clone(),
                             value,
-                            text: p.format(value),
+                            text,
                             menu_option: description.menu_options.contains(&p.id),
                             title_switch: description.title_switch == Some(p.id),
                             configured: configured.contains(&p.id),
@@ -2601,7 +2622,7 @@ impl DeviceView {
                 let DeviceArgs { device } = parse(args)?;
                 let device = self.target(editor.document(), device)?;
                 let current = editor.document().device(device).expect("the target exists");
-                outcome.value = to_value(&self.parameters(current));
+                outcome.value = to_value(&self.parameters(current, editor.document()));
                 return Ok(outcome);
             }
             ids::ARTICULATION_LIST => {

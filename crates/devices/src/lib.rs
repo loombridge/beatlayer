@@ -97,6 +97,7 @@ pub mod saturator;
 mod sections;
 pub mod shifter;
 mod signal_mod;
+pub mod spectral_time;
 pub mod spectrum_analyser;
 pub mod stack;
 pub mod strike_mod;
@@ -167,6 +168,7 @@ pub use roar::{ROAR, roar_type};
 pub use sampler::{Sampler, sampler_type, slice_boundaries};
 pub use saturator::{SATURATOR, saturator_type};
 pub use shifter::{SHIFTER, shifter_type};
+pub use spectral_time::{SPECTRAL_TIME, spectral_time_type};
 pub use spectrum_analyser::{SPECTRUM, Spectrum, spectrum_type};
 pub use stack::{STACK, stack_type};
 pub use three_band_eq::{THREE_BAND_EQ, Triad, three_band_eq_type};
@@ -263,6 +265,7 @@ pub fn display_in(
             values,
             data,
         )),
+        SPECTRAL_TIME => Some(spectral_time::display(device, description, data)),
         TUNER => Some(tuner::display_in(
             device,
             description,
@@ -366,6 +369,7 @@ pub fn register(registry: &mut Registry) {
     phaser_flanger::register(registry);
     chorus_ensemble::register(registry);
     spectrum_analyser::register(registry);
+    spectral_time::register(registry);
     tuner::register(registry);
     oscilloscope::register(registry);
     looper::register(registry);

@@ -78,6 +78,7 @@ mod swap;
 mod tempo_follower;
 mod timecode_in;
 mod transport;
+mod vocoder_sidechain;
 mod warp_modes;
 mod warp_streaming;
 mod warping;

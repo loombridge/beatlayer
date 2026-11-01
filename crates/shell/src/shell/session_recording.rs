@@ -332,10 +332,17 @@ impl Shell {
             let kind = track.kind();
             match (kind, &track.routing().input) {
                 (TrackKind::Midi, _) => midi.push(pick.track),
-                (TrackKind::Audio, Input::External { channel }) if folder.is_some() => {
+                (TrackKind::Audio, Input::External { .. } | Input::LinkAudio { .. })
+                    if folder.is_some() =>
+                {
+                    // Spec: link-audio R5. A peer's channel records as stereo.
+                    let channel = match &track.routing().input {
+                        Input::External { channel } => *channel,
+                        _ => bl_model::Channel::Pair(1),
+                    };
                     audio.push(crate::recording::Track {
                         track: pick.track,
-                        channel: *channel,
+                        channel,
                         name: crate::recording::file_name(
                             &crate::routing::track_label(document, pick.track),
                             take,
@@ -343,7 +350,7 @@ impl Shell {
                         ),
                     });
                 }
-                (TrackKind::Audio, Input::External { .. }) => {
+                (TrackKind::Audio, Input::External { .. } | Input::LinkAudio { .. }) => {
                     skipped_audio = true;
                     continue;
                 }

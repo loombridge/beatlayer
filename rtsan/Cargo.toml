@@ -28,6 +28,8 @@ publish = false
 
 [dependencies]
 bl-rt = { path = "../crates/rt" }
+# Tempo Follower's copy of incoming audio off the audio thread (WP-9.12).
+bl-analysis = { path = "../crates/analysis" }
 bl-audio-io = { path = "../crates/audio-io" }
 bl-audio-engine = { path = "../crates/audio-engine" }
 bl-core = { path = "../crates/core" }

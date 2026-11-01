@@ -518,7 +518,7 @@ pub(crate) fn sixteenth_frames(audio: &Audio<'_, '_>) -> f64 {
 }
 
 /// [`sixteenth_frames`] at frame `frame` of the stretch.
-fn sixteenth_frames_at(audio: &Audio<'_, '_>, frame: usize) -> f64 {
+pub(crate) fn sixteenth_frames_at(audio: &Audio<'_, '_>, frame: usize) -> f64 {
     audio.sample_rate().as_f64() * 60.0 / audio.bpm_at(frame) / 4.0
 }
 

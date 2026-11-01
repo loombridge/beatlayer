@@ -72,6 +72,7 @@ use bl_shell_spec::midi_tools as tool_ids;
 use bl_shell_spec::mixer_view as mixer_ids;
 use bl_shell_spec::multisampler as multisampler_ids;
 use bl_shell_spec::notes::{self as note_ids};
+use bl_shell_spec::packages as packages_ids;
 use bl_shell_spec::perception as perception_ids;
 use bl_shell_spec::plugins as plugin_ids;
 use bl_shell_spec::push as push_ids;
@@ -135,6 +136,7 @@ mod map_mode;
 mod menus;
 mod midi_input;
 mod mixer;
+mod packages;
 mod packs;
 mod perception_commands;
 mod playback;
@@ -765,6 +767,8 @@ pub struct Shell {
     processed: Vec<processed_files::Pending>,
     /// Stem separation's download, separation, and dialog (IMP-11).
     stems: stems::StemsState,
+    /// The Packages manager: the installer thread and its queue (WP-9.1).
+    packages: packages::PackagesState,
     /// The Export Audio/Video dialog and the export under way (WP-6.71).
     export: export_dialog::ExportState,
     packs: packs::PackState,
@@ -1241,6 +1245,9 @@ impl Shell {
             &prefs.midi,
             Arc::clone(&push_display),
         );
+        // Spec: stem-separation R19. A package removed while its library
+        // was loaded goes now.
+        crate::packages::sweep(&crate::packages::folder(config_dir.as_deref()));
         let mut browser_view = BrowserView::new(&prefs.browser, Waker::default());
         // Spec: browser-tags R1. The browser's database holds the index of
         // the places' files, the tags, and the items that carry them.
@@ -1254,6 +1261,7 @@ impl Shell {
         // The engine's clips stream from the set's media (WP-1.4b).
         let media = Arc::new(MediaStore::new());
         audio.set_media(Arc::clone(&media));
+        browser_view.set_analysis_media(Arc::clone(&media));
         let analysis_slot = crate::analysed_media::AnalysisSlot::default();
         audio.set_analysis(analysis_slot.clone());
         // CLAP plug-ins (WP-2.6): this thread is their main thread.
@@ -1295,6 +1303,7 @@ impl Shell {
             media,
             processed: Vec::new(),
             stems: stems::StemsState::default(),
+            packages: packages::PackagesState::default(),
             export: export_dialog::ExportState::default(),
             packs: packs::PackState::default(),
             mpe_dialog: None,
@@ -2222,6 +2231,9 @@ impl Shell {
         }
         if stems_ids::handles(id) {
             return self.run_stems(id, args);
+        }
+        if packages_ids::handles(id) {
+            return self.run_packages(id, args);
         }
         if slice_ids::handles(id) {
             return self.run_slice(id, args);

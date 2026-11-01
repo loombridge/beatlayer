@@ -358,6 +358,15 @@ impl Rig {
         assert!(self.sender.flush(), "the queue is full");
     }
 
+    /// Has the engine read peers' channels and offer its tracks through
+    /// `link_audio` from the next block on (the Link Audio spec, R4 to R6).
+    pub fn link_audio(&mut self, link_audio: impl bl_engine::LinkAudio + 'static) {
+        let link_audio: Box<dyn bl_engine::LinkAudio> = Box::new(link_audio);
+        let link_audio = self.collector.handle().wrap(link_audio);
+        self.sender.link_audio(Some(link_audio));
+        assert!(self.sender.flush(), "the queue is full");
+    }
+
     /// Syncs the document, sends the update, and says what it held.
     pub fn sync(&mut self) -> Synced {
         let update: Update = self.compiler.sync(self.editor.document());

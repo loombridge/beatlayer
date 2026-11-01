@@ -113,6 +113,14 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                 "Push 2's Shift button with a pad, which opens its colour picker",
             )),
         ),
+        // Push 2's Scale menu (WP-7.22): the options belong to a controller's
+        // pads, and the app has no control for them.
+        (
+            "song.set_pad_layout",
+            Exception(Equivalent(
+                "Push 2's Scale menu, which sets them on its display",
+            )),
+        ),
         (
             "chain.set_push_colour",
             Exception(Equivalent(

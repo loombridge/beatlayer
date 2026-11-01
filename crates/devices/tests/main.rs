@@ -62,6 +62,7 @@ mod multisampler;
 mod note_echo;
 mod oscilloscope;
 mod overdrive;
+mod pedal;
 mod phaser_flanger;
 mod pitchloop89;
 mod play_mod;

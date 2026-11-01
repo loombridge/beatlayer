@@ -1,0 +1,58 @@
+[workspace]
+# A standalone workspace: the root workspace excludes spikes/, and this spike
+# keeps its own Cargo.lock, so its dependencies never touch the product's.
+
+[package]
+name = "ext-wasmtime-spike"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "GPL-3.0-or-later"
+publish = false
+description = "WP-9.28: WebAssembly components under wasmtime on a real-time thread (throwaway)"
+
+[features]
+# Builds measure what wasmtime adds to a binary: none (the baseline),
+# `runtime` (loads precompiled components), and with a compiler, as an
+# extension install would have: `cranelift`, `winch`, or the default, both.
+default = ["cranelift", "winch"]
+runtime = ["dep:wasmtime"]
+compile = ["runtime", "wasmtime/wat"]
+cranelift = ["compile", "wasmtime/cranelift"]
+winch = ["compile", "wasmtime/winch"]
+
+# The tests compile the guest, so they need a compiler.
+[[test]]
+name = "guest"
+required-features = ["compile"]
+
+[[test]]
+name = "realtime"
+required-features = ["compile"]
+
+[dependencies]
+# No default features: no async, GC, profiling, backtraces, debug support or
+# on-disk cache, none of which an audio thread wants. The pooling allocator is
+# the point of the spike.
+wasmtime = { version = "=50.0.1", default-features = false, features = [
+    "component-model",
+    "pooling-allocator",
+    "runtime",
+    "std",
+], optional = true }
+
+[lints.rust]
+rust_2018_idioms = { level = "warn", priority = -1 }
+unsafe_op_in_unsafe_fn = "deny"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(ext_rtsan)"] }
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+undocumented_unsafe_blocks = "warn"
+
+[profile.release]
+# What a shipped binary would use, so the size figures mean something.
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

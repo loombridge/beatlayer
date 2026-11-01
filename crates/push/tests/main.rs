@@ -10,6 +10,7 @@ mod controls;
 mod devices;
 mod display;
 mod leds;
+mod melodies;
 mod mix;
 mod modes;
 mod realtime;

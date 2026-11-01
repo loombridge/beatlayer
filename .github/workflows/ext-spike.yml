@@ -1,0 +1,161 @@
+# Runs the extension spike (spikes/ext-wasmtime, WP-9.28) on macOS (arm64),
+# Windows (x64) and Linux (x64): its tests, its measurements, RealtimeSanitizer
+# on macOS and Linux, binary sizes, and, on Linux, cargo-deny over wasmtime's
+# dependency tree. Starts when the spike or this file changes, and by hand
+# (`gh workflow run ext-spike.yml --ref <branch>`). The numbers are in each
+# job's summary and in the `report-*` artifacts.
+#
+# The spike is outside the workspace and nothing ships from it, so this is no
+# required check. Every third-party action is pinned to a full commit SHA, with
+# its version in a comment.
+
+name: Extension spike
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - spikes/ext-wasmtime/**
+      - .github/workflows/ext-spike.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ext-spike-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spike:
+    name: spike (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS arm64, os: macos-15 }
+          - { name: Windows x64, os: windows-2025 }
+          - { name: Linux x64, os: ubuntu-24.04 }
+    defaults:
+      run:
+        shell: bash
+        working-directory: spikes/ext-wasmtime
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: |
+          rustup toolchain install --no-self-update
+          rustup show active-toolchain
+
+      - name: Restore the dependency cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: spikes/ext-wasmtime -> target
+          cache-bin: false
+          save-if: false
+
+      - name: Tests
+        run: cargo test --release --locked
+
+      - name: Measurements
+        run: |
+          cargo run --release --locked | tee report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Binary sizes
+        run: |
+          {
+            echo
+            echo "### Binary size"
+            echo
+            scripts/sizes.sh
+          } | tee sizes.md
+          cat sizes.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Linux: LLVM 20's runtime from apt.llvm.org, as ci.yml's rtsan job
+      # installs it. macOS: Homebrew's llvm.
+      - name: Install LLVM's RealtimeSanitizer runtime (Linux)
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            --output llvm-snapshot.gpg.key https://apt.llvm.org/llvm-snapshot.gpg.key
+          expected=6084F3CF814B57C1CF12EFD515CF4D18AF4F7421
+          fingerprint=$(gpg --show-keys --with-colons llvm-snapshot.gpg.key | awk -F: '$1 == "fpr" { print $10; exit }')
+          if [ "$fingerprint" != "$expected" ]; then
+            echo "::error::apt.llvm.org's key has fingerprint ${fingerprint:-none}, not $expected"
+            exit 1
+          fi
+          sudo install -D --mode 0644 llvm-snapshot.gpg.key /etc/apt/keyrings/apt.llvm.org.asc
+          echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.asc] https://apt.llvm.org/noble/ llvm-toolchain-noble-20 main" \
+            | sudo tee /etc/apt/sources.list.d/llvm-20.list
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends libclang-rt-20-dev llvm-20
+          runtime=$(find /usr/lib/llvm-20 -name 'libclang_rt.rtsan*.a' -print -quit)
+          if [ -z "$runtime" ]; then
+            echo "::error::libclang-rt-20-dev has no RealtimeSanitizer runtime"
+            exit 1
+          fi
+          echo "RTSAN_LIB_PATH=$runtime" >> "$GITHUB_ENV"
+          symbolizer=/usr/lib/llvm-20/bin/llvm-symbolizer
+          echo "RTSAN_OPTIONS=external_symbolizer_path=$symbolizer" >> "$GITHUB_ENV"
+
+      - name: Install LLVM's RealtimeSanitizer runtime (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm
+          runtime=$(find "$(brew --prefix llvm)/lib/clang" -name libclang_rt.rtsan_osx_dynamic.dylib -print -quit)
+          if [ -z "$runtime" ]; then
+            echo "::error::Homebrew's llvm has no RealtimeSanitizer runtime"
+            exit 1
+          fi
+          echo "RTSAN_LIB_PATH=$runtime" >> "$GITHUB_ENV"
+
+      - name: Tests and measurements under RealtimeSanitizer
+        if: runner.os != 'Windows'
+        run: |
+          cargo test --release --locked --target-dir target/rtsan
+          {
+            echo
+            echo "### Under RealtimeSanitizer"
+            cargo run --release --locked --target-dir target/rtsan -- calls runaway traps
+          } | tee report-rtsan.md
+          cat report-rtsan.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install cargo-deny
+        if: runner.os == 'Linux'
+        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: cargo-deny@0.20.2
+          fallback: none
+
+      # The repository's own policy (deny.toml), over the spike's tree.
+      - name: cargo deny
+        if: runner.os == 'Linux'
+        run: |
+          cargo deny --locked --manifest-path Cargo.toml --all-features \
+            --config ../../deny.toml check | tee deny.txt
+          {
+            echo
+            echo "### cargo deny"
+            echo
+            echo "cargo deny check (advisories, bans, licenses, sources) passed over the spike's tree of $(cargo tree --prefix none --edges normal | sort -u | wc -l) crates."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the numbers
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: report-${{ runner.os }}
+          path: |
+            spikes/ext-wasmtime/report.md
+            spikes/ext-wasmtime/report-rtsan.md
+            spikes/ext-wasmtime/sizes.md
+            spikes/ext-wasmtime/deny.txt
+          if-no-files-found: ignore

@@ -6090,6 +6090,186 @@ fn an_agent_reads_a_spectrograms_grid_and_axes_through_device_display() {
     }
 }
 
+// Spec: spectral-time R16
+#[test]
+fn an_agent_reads_spectral_times_spectrogram_through_device_display() {
+    use bl_devices::spectral_time::{GRID, SPECTRAL_TIME};
+    for block in [64, 4_096] {
+        let mut registry = bl_engine::Registry::new();
+        bl_devices::register(&mut registry);
+        let mut host = EngineHost::with_registry(block, registry);
+        host.client
+            .transport()
+            .shell
+            .set_device_types(bl_devices::device_types());
+        let device = |index: u32, name: &str, device_type: &str| {
+            json!({ "command": "device.insert",
+                    "args": { "track": {"$ref": "Track"}, "index": index,
+                              "device": { "id": {"$new": name}, "name": name,
+                                          "kind": { "native": { "device_type": device_type } },
+                                          "enabled": true, "params": [] } } })
+        };
+        host.call(
+            "run",
+            json!({ "label": "Add devices", "commands": [
+                { "command": "track.create",
+                  "args": { "id": {"$new": "Track"}, "kind": "audio", "name": "Track", "index": 0 } },
+                device(0, "Tone", bl_engine::nodes::TEST_TONE),
+                device(1, "Spectral Time", SPECTRAL_TIME),
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 0, "value": 1000.0 } },
+                { "command": "device.set_param",
+                  "args": { "device": {"$ref": "Tone"}, "param": 1, "value": -6.0 } },
+            ] }),
+        );
+        let spectral_time = {
+            let document = host.client.transport().shell.editor().document();
+            let track = document.tracks().find(|t| t.name() == "Track").unwrap();
+            track.devices().nth(1).unwrap().id
+        };
+        host.play_to(131_072);
+        host.publish_displays();
+        let reply = host.call(
+            "run",
+            json!({ "label": "Read", "commands": [
+                { "command": "device.display", "args": { "device": spectral_time } },
+            ] }),
+        );
+        let shown = &reply["results"][0]["result"];
+        assert_eq!(shown["live"], true);
+        let grid = &shown["spectrograms"][0];
+        assert_eq!(grid["columns"], GRID.columns);
+        assert_eq!(grid["rows"], GRID.rows);
+        assert_eq!(grid["frequencies"], json!(GRID.frequencies));
+        assert_eq!(grid["log_frequency"], true);
+        let values: Vec<f64> = grid["values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap())
+            .collect();
+        assert_eq!(values.len(), GRID.columns * GRID.rows);
+        // The newest column peaks at the row of 1 kHz: the tone at -6 dB
+        // through the delay's echoes, which add to it by their phase.
+        let newest = &values[values.len() - GRID.rows..];
+        let (loudest, level) = newest
+            .iter()
+            .copied()
+            .enumerate()
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .unwrap();
+        let [low, high] = GRID.frequencies.map(f64::from);
+        let hz = low * (high / low).powf(loudest as f64 / (GRID.rows - 1) as f64);
+        assert!(
+            (hz / 1_000.0).ln().abs() < 0.15,
+            "block {block}: {hz:.0} Hz"
+        );
+        assert!((-14.0..=0.0).contains(&level), "block {block}: {level} dB");
+        assert_eq!(host.offline.heap_operations(), 0, "block {block}");
+    }
+}
+
+// Spec: spectral-time R18, R20
+#[test]
+fn an_agent_adds_sets_and_reads_spectral_time_by_id_and_reopens_it() {
+    use bl_devices::spectral_time::{self, spectral_time_type};
+
+    let dir = TempDir::new("spectral-time");
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("spectral-time-agent").unwrap();
+    let track = default_tracks(&mut client)[2];
+    let run = |client: &mut Client<InProcess>, command: &str, args: Value| {
+        let reply = call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        );
+        reply["results"][0]["result"].clone()
+    };
+    run(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    let kind = spectral_time_type();
+    let added = run(
+        &mut client,
+        "device.add",
+        json!({
+            "track": track,
+            "device": { "kind": kind.kind, "name": kind.name, "role": kind.role },
+        }),
+    );
+    let device = added["device"].clone();
+    let parameters = |client: &mut Client<InProcess>| {
+        run(client, "device.parameters", json!({ "device": device }))["params"].clone()
+    };
+    assert_eq!(parameters(&mut client).as_array().unwrap().len(), 31);
+
+    // Every parameter moved to the other end of its range, and read back.
+    let mut wanted = Vec::new();
+    for param in &kind.description.params {
+        let to = if param.default == param.max() {
+            param.min()
+        } else {
+            param.max()
+        };
+        run(
+            &mut client,
+            "device.set_param",
+            json!({ "device": device, "param": param.id.0, "value": to }),
+        );
+        wanted.push((param.id, param.name.clone(), to));
+    }
+    let read = parameters(&mut client);
+    for (_, name, to) in &wanted {
+        let found = read
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|p| p["name"] == *name)
+            .unwrap_or_else(|| panic!("no {name}"));
+        assert_eq!(found["value"].as_f64().unwrap(), *to, "{name}");
+    }
+    let zero = read
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "Zero Dry Signal Latency")
+        .unwrap();
+    assert_eq!(
+        zero["menu_option"],
+        json!(true),
+        "it is in the context menu"
+    );
+    // Spec: spectral-time R12. At those settings the time is beyond the delay
+    // memory, and the parameter that sets it says so.
+    for p in read.as_array().unwrap() {
+        let held = p["text"].as_str().unwrap().contains("(held at 8 s)");
+        assert_eq!(held, p["name"] == "16th Dotted", "{}", p["name"]);
+    }
+
+    // Save and reopen.
+    let saved = run(
+        &mut client,
+        "set.save_as",
+        json!({ "path": dir.0.join("SpectralTime.blset").to_string_lossy() }),
+    );
+    let (project, _) =
+        bl_project::load(saved_path(&json!({ "results": [{ "result": saved }] }))).unwrap();
+    let reopened = project
+        .document
+        .tracks()
+        .flat_map(|t| t.devices().cloned().collect::<Vec<_>>())
+        .find(|d| {
+            matches!(&d.kind, bl_model::DeviceKind::Native { device_type } if device_type == spectral_time::SPECTRAL_TIME)
+        })
+        .expect("Spectral Time in the reopened set");
+    for (param, name, to) in &wanted {
+        assert_eq!(reopened.params[param], *to, "{name} reopened");
+    }
+}
+
 // Spec: echo R8, R20, R23
 #[test]
 fn an_agent_adds_sets_and_reads_echo_by_id_reads_its_displays_and_reopens_it() {

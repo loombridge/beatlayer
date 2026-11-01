@@ -596,6 +596,38 @@ fn a_spectrograms_cell_draws_its_grid_as_one_image_whatever_the_size_of_the_cell
     assert_eq!(mesh_vertices(&grown, grown_cell), [4 * lit]);
 }
 
+// Spec: spectral-time R16
+#[test]
+fn spectral_times_cell_draws_its_spectrogram_as_one_image() {
+    use bl_devices::spectral_time::{GRID, SPECTRAL_TIME};
+    let mut h = display_harness();
+    let device = add_native(&mut h, SPECTRAL_TIME);
+    let mut values = vec![GRID.levels[0]; GRID.columns * GRID.rows];
+    for column in GRID.columns - 10..GRID.columns {
+        values[column * GRID.rows + 20..column * GRID.rows + 23].fill(-6.0);
+    }
+    h.shell.set_device_display_data(device, &values);
+
+    let output = h.frame(vec![]);
+    let nodes = Harness::nodes(&output);
+    let node = nodes
+        .iter()
+        .find(|n| n.label == "Spectrogram" && n.role == Role::Image)
+        .expect("the Spectrogram cell");
+    assert!(
+        node.value.contains("Spectrogram peak"),
+        "the cell says its loudest row: {}",
+        node.value
+    );
+    let frame = frame_of(&mut h, device);
+    let cell = cell_in(&h, device, frame);
+    assert_eq!(
+        mesh_vertices(&output, cell),
+        [4 * 30],
+        "one image, a quad for each cell above the floor"
+    );
+}
+
 // Spec: tuner R7, device-framework R36
 #[test]
 fn the_tuners_cell_draws_in_docked_and_floating_windows() {

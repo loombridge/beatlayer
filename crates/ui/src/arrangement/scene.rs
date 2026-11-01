@@ -47,6 +47,9 @@ pub struct ClipSpan {
     pub colour: u8,
     /// Its media, for an audio clip.
     pub media: Option<ContentHash>,
+    /// Whether it's a video clip, which draws sprocket holes along its title
+    /// bar (the video spec, R6).
+    pub video: bool,
 }
 
 /// One track's clips, sorted by start.
@@ -92,6 +95,7 @@ impl TrackClips {
                     ClipData::Audio(audio) => Some(audio.media),
                     ClipData::Midi(_) => None,
                 },
+                video: matches!(&clip.data, ClipData::Audio(audio) if audio.video),
             })
             .collect();
         clips.sort_by_key(|clip| (clip.start, clip.end));
@@ -328,6 +332,37 @@ fn ink(clip: Color32, waveform: Color32, h: f32) -> Color32 {
     }
     let shade = |c: u8| (f32::from(c) * 0.55).round() as u8;
     Color32::from_rgb(shade(clip.r()), shade(clip.g()), shade(clip.b()))
+}
+
+/// The width of a sprocket hole, and the distance from one to the next, in
+/// points.
+const HOLE: f32 = 4.0;
+const HOLE_PITCH: f32 = 8.0;
+/// The most holes drawn along one clip.
+const MOST_HOLES: usize = 600;
+
+/// A video clip's sprocket holes (the video spec, R6): a row of small
+/// squares in the lane's colour along the bottom edge of its title bar, laid
+/// out from the clip's left edge `x0` so they stay put as the view scrolls,
+/// and drawn only between `from` and `to`, the part of the clip in view.
+fn sprocket_holes(
+    out: &mut SlotData,
+    (x0, from, to): (f32, f32, f32),
+    (top, bottom): (f32, f32),
+    colour: Color32,
+) {
+    let height = ((bottom - top) / 4.0).clamp(1.0, 3.0);
+    let first = ((from - x0 - HOLE_PITCH / 2.0) / HOLE_PITCH).ceil().max(0.0);
+    for n in 0..MOST_HOLES {
+        let left = x0 + HOLE_PITCH / 2.0 + (first + n as f32) * HOLE_PITCH;
+        if left + HOLE > to {
+            break;
+        }
+        out.rects.push(RectInst {
+            rect: [left, bottom - height - 1.0, left + HOLE, bottom - 1.0],
+            color: rgba(colour),
+        });
+    }
 }
 
 /// The height of a clip's title row, where its name goes, for a lane `h`
@@ -573,6 +608,9 @@ pub fn build_lanes(
                         if title > 0.0 {
                             rect(out, [ux0, top, ux1, top + title], colour);
                         }
+                    }
+                    if span.video && title > 0.0 {
+                        sprocket_holes(out, (x0, dx0, dx1), (top, top + title), colors.lane.0);
                     }
                     // The clip's left edge, on lanes tall enough to show it.
                     let edge = if h >= 6.0 { px } else { 0.0 };

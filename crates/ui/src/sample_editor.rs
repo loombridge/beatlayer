@@ -426,6 +426,11 @@ impl SampleEditorUi {
             } else {
                 bl_shell::TransientList::default()
             },
+            cues: if audio.video {
+                shell.clip_cues(clip)
+            } else {
+                Vec::new()
+            },
             selected_markers: if own { sample.markers() } else { &[] },
             selected_transients: if own { sample.transients() } else { &[] },
             span_chosen: span.is_some(),
@@ -604,6 +609,8 @@ struct Frame<'a> {
     audio: &'a AudioData,
     geometry: &'a Geometry,
     transients: bl_shell::TransientList,
+    /// A video clip's movie's markers (video R12).
+    cues: Vec<bl_shell::sample_editor_commands::Cue>,
     selected_markers: &'a [u32],
     selected_transients: &'a [f64],
     /// Whether the span in view was chosen, rather than fitted to the whole
@@ -1087,6 +1094,22 @@ impl SampleEditorUi {
         };
         flag(frame.audio.start, frame.start_selected);
         flag(frame.end(), false);
+        // Spec: video R12. The movie's markers are cues: a line with the
+        // name the movie gives it, which can't be dragged.
+        for cue in &frame.cues {
+            let x = g.x_of_time(cue.time);
+            painter.line_segment(
+                [pos2(x, g.strip.top()), pos2(x, g.strip.bottom())],
+                Stroke::new(1.0, colours.text_dim.0),
+            );
+            painter.text(
+                pos2(x + 3.0, g.strip.top() + 1.0),
+                Align2::LEFT_TOP,
+                &cue.name,
+                frame.theme.small_font(),
+                colours.text_dim.0,
+            );
+        }
         let (from, to) = frame.brace();
         let brace = Rect::from_min_max(
             pos2(g.axis.x_of(from), g.strip.bottom() - 6.0),
@@ -2262,6 +2285,17 @@ impl SampleEditorUi {
                         .iter()
                         .any(|&t| (t - time).abs() <= TRANSIENT_MATCH),
                 ),
+            );
+        }
+        for (index, cue) in frame.cues.iter().enumerate() {
+            let x = g.x_of_time(cue.time);
+            node(
+                Id::new(("sample-cue", clip, index)),
+                Rect::from_min_max(pos2(x - 1.0, g.strip.top()), pos2(x + 1.0, g.strip.bottom())),
+                egui::accesskit::Role::ListItem,
+                format!("Cue {}", cue.name),
+                describe(cue.time),
+                None,
             );
         }
         let at = |value: f64| g.axis.x_of(value);

@@ -8878,6 +8878,7 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
 | `sidechain` | [`Sidechain`](#sidechain) or null | no | The device's sidechain input, if its type declares one (WP-2.19b): where its detector can listen other than its own input. Left out of the saved set for a device without one. |
 | `slices` | array of integer, at least 0 | no | Manual slice markers in frames into the sample, for devices that support manual slicing (WP-5.15b, Simpler). Kept in increasing order of frame. Left out of the saved set when empty. |
 | `warp` | [`DeviceWarp`](#devicewarp) | no | Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default. |
+| `wavetables` | array of [`WavetableChoice`](#wavetablechoice) or null | no | What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7, R8): oscillator 1's choice first. A user table's file is the media in the oscillator's own sample slot, so the set's media table, missing files and Collect All and Save treat it as a sample. An oscillator with no choice plays the device's default table, and the list never ends in one. Left out of the saved set for a device that has none. |
 
 <details><summary>JSON Schema</summary>
 
@@ -9112,6 +9113,20 @@ A device in a track's chain: a native instrument or effect, or a plug-in.
     "warp": {
       "$ref": "#/$defs/DeviceWarp",
       "description": "Warp settings for devices that play warped media (WP-5.15b, Simpler). Left out of the saved set when default."
+    },
+    "wavetables": {
+      "description": "What each wavetable oscillator plays (WP-8.8; the wavetable spec, R7, R8): oscillator 1's choice first. A user table's file is the media in the oscillator's own sample slot, so the set's media table, missing files and Collect All and Save treat it as a sample. An oscillator with no choice plays the device's default table, and the list never ends in one. Left out of the saved set for a device that has none.",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/WavetableChoice"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "type": "array"
     }
   },
   "required": [
@@ -10552,7 +10567,7 @@ The open dialog.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `step` | [`DialogStep`](#dialogstep) | yes | What it shows. |
-| `clip` | [`ClipId`](#clipid) | yes | The clip it separates. |
+| `source` | [`StemSource`](#stemsource) | yes | What it separates. |
 
 <details><summary>JSON Schema</summary>
 
@@ -10560,9 +10575,9 @@ The open dialog.
 {
   "description": "The open dialog.",
   "properties": {
-    "clip": {
-      "$ref": "#/$defs/ClipId",
-      "description": "The clip it separates."
+    "source": {
+      "$ref": "#/$defs/StemSource",
+      "description": "What it separates."
     },
     "step": {
       "$ref": "#/$defs/DialogStep",
@@ -10571,7 +10586,7 @@ The open dialog.
   },
   "required": [
     "step",
-    "clip"
+    "source"
   ],
   "type": "object"
 }
@@ -18701,6 +18716,58 @@ What `device.load_sample` returns.
 
 </details>
 
+### `LoadWavetableResult`
+
+What `device.load_wavetable` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `device` | [`DeviceId`](#deviceid) | yes | The device that took the table. |
+| `oscillator` | integer from 0 to 255 | yes | The oscillator that took it. |
+| `choice` | [`WavetableChoice`](#wavetablechoice) | yes | What the oscillator plays now. |
+| `frames` | integer from 0 to 65535 | yes | How many frames the table has. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.load_wavetable` returns.",
+  "properties": {
+    "choice": {
+      "$ref": "#/$defs/WavetableChoice",
+      "description": "What the oscillator plays now."
+    },
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device that took the table."
+    },
+    "frames": {
+      "description": "How many frames the table has.",
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "oscillator": {
+      "description": "The oscillator that took it.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "device",
+    "oscillator",
+    "choice",
+    "frames"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `Location`
 
 Where a file is (R11).
@@ -25666,6 +25733,309 @@ A chain on one of the lower buttons while a rack's button is held.
 
 </details>
 
+### `PushClipArea`
+
+The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `fit` | string | yes | How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`. |
+| `from` | [`Ticks`](#ticks) | yes | Where the page of steps starts, in ticks. |
+| `to` | [`Ticks`](#ticks) | yes | Where it ends. |
+| `low` | integer from 0 to 255 | yes | The lowest pitch the pads edit. |
+| `high` | integer from 0 to 255 | yes | The highest. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "The sequenceable area the pads edit in a step sequencing layout (push-2-tracks R51).",
+  "properties": {
+    "fit": {
+      "description": "How the display fits the clip: `folded`, `sequencer`, `sequencer_notes` or `pad`.",
+      "type": "string"
+    },
+    "from": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where the page of steps starts, in ticks."
+    },
+    "high": {
+      "description": "The highest.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "low": {
+      "description": "The lowest pitch the pads edit.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "to": {
+      "$ref": "#/$defs/Ticks",
+      "description": "Where it ends."
+    }
+  },
+  "required": [
+    "fit",
+    "from",
+    "to",
+    "low",
+    "high"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipControl`
+
+One control on an encoder in Clip Mode (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `encoder` | integer from 0 to 255 | yes | The encoder, from 1. |
+| `name` | string | yes | The control's name. |
+| `value` | string | yes | Its value as the display shows it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One control on an encoder in Clip Mode (push-2-tracks R58).",
+  "properties": {
+    "encoder": {
+      "description": "The encoder, from 1.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "The control's name.",
+      "type": "string"
+    },
+    "value": {
+      "description": "Its value as the display shows it.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "encoder",
+    "name",
+    "value"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushClipMode`
+
+What Clip Mode shows (push-2-tracks R58).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The clip shown. |
+| `shows` | string | yes | What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`. |
+| `name` | string | yes | The clip's name. |
+| `looping` | boolean or null | yes | Whether the clip's Loop is on. |
+| `controls` | array of [`PushClipControl`](#pushclipcontrol) | yes | The controls on the encoders, left to right. |
+| `zoom` | number | yes | The zoom: 1 shows the whole clip. |
+| `view` | array of number, at least 2 | yes | The span of beats of the clip's contents the display shows. |
+| `folded` | boolean | yes | Whether the display is folded to the pitches that hold notes. |
+| `area` | [`PushClipArea`](#pushcliparea) or null | yes | The sequenceable area the pads edit. |
+| `held_steps` | array of [`PushHeldStep`](#pushheldstep) | yes | The steps held, whose notes the encoders set. |
+| `select_pad` | integer or null | yes | The drum pad whose every note the encoders set while Select holds it, as a MIDI note. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Clip Mode shows (push-2-tracks R58).",
+  "properties": {
+    "area": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipArea"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The sequenceable area the pads edit."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The clip shown."
+    },
+    "controls": {
+      "description": "The controls on the encoders, left to right.",
+      "items": {
+        "$ref": "#/$defs/PushClipControl"
+      },
+      "type": "array"
+    },
+    "folded": {
+      "description": "Whether the display is folded to the pitches that hold notes.",
+      "type": "boolean"
+    },
+    "held_steps": {
+      "description": "The steps held, whose notes the encoders set.",
+      "items": {
+        "$ref": "#/$defs/PushHeldStep"
+      },
+      "type": "array"
+    },
+    "looping": {
+      "description": "Whether the clip's Loop is on.",
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "name": {
+      "description": "The clip's name.",
+      "type": "string"
+    },
+    "select_pad": {
+      "description": "The drum pad whose every note the encoders set while Select holds it, as a MIDI note.",
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "shows": {
+      "description": "What the mode shows: `midi`, `audio`, `empty_midi`, `empty_audio` or `nothing`.",
+      "type": "string"
+    },
+    "view": {
+      "description": "The span of beats of the clip's contents the display shows.",
+      "items": {
+        "format": "double",
+        "type": "number"
+      },
+      "maxItems": 2,
+      "minItems": 2,
+      "type": "array"
+    },
+    "zoom": {
+      "description": "The zoom: 1 shows the whole clip.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "clip",
+    "shows",
+    "name",
+    "looping",
+    "controls",
+    "zoom",
+    "view",
+    "folded",
+    "area",
+    "held_steps",
+    "select_pad"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushConvertTo`
+
+What `push.convert` makes a new MIDI track or drum rack of.
+
+One of:
+
+- `"simpler"`: A new MIDI track with a Simpler holding the audio clip's sample.
+- `"drum_rack"`: A new MIDI track with a drum rack holding the sample in a Simpler on its first pad.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.convert` makes a new MIDI track or drum rack of.",
+  "oneOf": [
+    {
+      "const": "simpler",
+      "description": "A new MIDI track with a Simpler holding the audio clip's sample.",
+      "type": "string"
+    },
+    {
+      "const": "drum_rack",
+      "description": "A new MIDI track with a drum rack holding the sample in a Simpler on its first pad.",
+      "type": "string"
+    }
+  ]
+}
+```
+
+</details>
+
+### `PushConverted`
+
+What `push.convert` made.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `from` | string | yes | What was converted: `simpler` (a Classic or One-Shot Simpler made a new track with a drum rack), `slices` (a slicing Simpler became a drum rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio clip made a new track). |
+| `track` | [`TrackId`](#trackid) or null | yes | The new track, unless the Simpler became a drum rack in its place. |
+| `device` | [`DeviceId`](#deviceid) | yes | The device made: the drum rack, or the Simpler the track holds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `push.convert` made.",
+  "properties": {
+    "device": {
+      "$ref": "#/$defs/DeviceId",
+      "description": "The device made: the drum rack, or the Simpler the track holds."
+    },
+    "from": {
+      "description": "What was converted: `simpler` (a Classic or One-Shot Simpler made a new track with a drum rack), `slices` (a slicing Simpler became a drum rack), `pad` (a drum rack's pad made a new track) or `clip` (an audio clip made a new track).",
+      "type": "string"
+    },
+    "track": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TrackId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The new track, unless the Simpler became a drum rack in its place."
+    }
+  },
+  "required": [
+    "from",
+    "track",
+    "device"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `PushDevice`
 
 A device on one of the upper buttons in Device Mode (push-2-tracks R27).
@@ -25758,6 +26128,7 @@ What Device Mode shows (push-2-tracks R27).
 | `params` | array of [`PushParam`](#pushparam) | yes | The parameters on the eight encoders. |
 | `chains` | array of [`PushChain`](#pushchain) | yes | The chains the lower buttons show while a rack's button is held. |
 | `mute_locked` | boolean | yes | Whether Mute is locked, so each device button switches its device. |
+| `simpler` | [`PushSimpler`](#pushsimpler) or null | yes | Simpler's main bank and Edit Mode, while a Simpler is in focus (push-2-notes R67 to R76). |
 
 <details><summary>JSON Schema</summary>
 
@@ -25830,6 +26201,17 @@ What Device Mode shows (push-2-tracks R27).
     "right_arrow": {
       "description": "Whether the last upper button is an arrow that moves them on.",
       "type": "boolean"
+    },
+    "simpler": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushSimpler"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Simpler's main bank and Edit Mode, while a Simpler is in focus (push-2-notes R67 to R76)."
     }
   },
   "required": [
@@ -25844,7 +26226,8 @@ What Device Mode shows (push-2-tracks R27).
     "bank_pages",
     "params",
     "chains",
-    "mute_locked"
+    "mute_locked",
+    "simpler"
   ],
   "type": "object"
 }
@@ -26084,6 +26467,7 @@ One connected Push 2.
 | `display` | [`PushDisplay`](#pushdisplay) | yes | The display. |
 | `browse` | [`PushBrowse`](#pushbrowse) or null | yes | What Browse Mode shows, while it is the display mode. |
 | `device` | [`PushDeviceMode`](#pushdevicemode) or null | yes | What Device Mode shows, while it is the display mode. |
+| `clip` | [`PushClipMode`](#pushclipmode) or null | yes | What Clip Mode shows, while it is the display mode. |
 | `session` | [`PushSession`](#pushsession) or null | yes | What Session Mode shows, while it is the pad mode. |
 | `mix_mode` | [`PushMix`](#pushmix) or null | yes | What Mix Mode shows, while it is the display mode. |
 | `note` | [`PushNote`](#pushnote) or null | yes | What Note Mode shows, while it is the pad mode. |
@@ -26104,6 +26488,17 @@ One connected Push 2.
         }
       ],
       "description": "What Browse Mode shows, while it is the display mode."
+    },
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PushClipMode"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "What Clip Mode shows, while it is the display mode."
     },
     "colour_picker": {
       "description": "Whether the colour picker is open.",
@@ -26278,6 +26673,7 @@ One connected Push 2.
     "display",
     "browse",
     "device",
+    "clip",
     "session",
     "mix_mode",
     "note"
@@ -26481,6 +26877,7 @@ One of:
 
 - `"setup"`: Setup.
 - `"scale"`: Scale.
+- `"convert"`: The choices Convert offers for an audio clip.
 
 <details><summary>JSON Schema</summary>
 
@@ -26496,6 +26893,11 @@ One of:
     {
       "const": "scale",
       "description": "Scale.",
+      "type": "string"
+    },
+    {
+      "const": "convert",
+      "description": "The choices Convert offers for an audio clip.",
       "type": "string"
     }
   ]
@@ -27247,6 +27649,157 @@ The Setup menu's values (R31).
     "display_light",
     "led_brightness",
     "workflow"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSimpler`
+
+What Device Mode shows of a Simpler (push-2-notes R67 to R76).
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `empty` | boolean | yes | Whether it has no sample, which the display says. |
+| `mode` | string | yes | Its mode: `classic`, `one_shot` or `slice`. |
+| `main_bank` | boolean | yes | Whether the main bank is on the encoders. |
+| `zoom` | string | yes | How far the waveform is zoomed in, as `×1.0` for the whole sample. |
+| `zoom_around` | string | yes | What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or `slice`. |
+| `region` | pair of integer, at least 0 and integer, at least 0 | yes | The Start and End flags, in frames of the sample. |
+| `slices` | integer, at least 0 | yes | How many slices Slice mode has. |
+| `selected_slice` | integer, at least 0 | yes | The selected slice, from 0. |
+| `pad_slicing` | boolean | yes | Whether Pad Slicing is on. |
+| `edit_buttons` | array of [`PushSimplerButton`](#pushsimplerbutton) | yes | Edit Mode's buttons after Back, with the upper button each is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What Device Mode shows of a Simpler (push-2-notes R67 to R76).",
+  "properties": {
+    "edit_buttons": {
+      "description": "Edit Mode's buttons after Back, with the upper button each is on.",
+      "items": {
+        "$ref": "#/$defs/PushSimplerButton"
+      },
+      "type": "array"
+    },
+    "empty": {
+      "description": "Whether it has no sample, which the display says.",
+      "type": "boolean"
+    },
+    "main_bank": {
+      "description": "Whether the main bank is on the encoders.",
+      "type": "boolean"
+    },
+    "mode": {
+      "description": "Its mode: `classic`, `one_shot` or `slice`.",
+      "type": "string"
+    },
+    "pad_slicing": {
+      "description": "Whether Pad Slicing is on.",
+      "type": "boolean"
+    },
+    "region": {
+      "description": "The Start and End flags, in frames of the sample.",
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "type": "array"
+    },
+    "selected_slice": {
+      "description": "The selected slice, from 0.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "slices": {
+      "description": "How many slices Slice mode has.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "zoom": {
+      "description": "How far the waveform is zoomed in, as `×1.0` for the whole sample.",
+      "type": "string"
+    },
+    "zoom_around": {
+      "description": "What Zoom zooms around: `start`, `end`, `s_start`, `s_length` or `slice`.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "empty",
+    "mode",
+    "main_bank",
+    "zoom",
+    "zoom_around",
+    "region",
+    "slices",
+    "selected_slice",
+    "pad_slicing",
+    "edit_buttons"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `PushSimplerButton`
+
+One of Simpler's Edit Mode buttons.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `button` | integer, at least 0 | yes | The upper button, from 1. |
+| `name` | string | yes | What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`, `warp_as`, `half`, `double`, `crop` or `reverse`. |
+| `text` | string | yes | Its text. |
+| `on` | boolean | yes | Whether the setting it stands for is on. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "One of Simpler's Edit Mode buttons.",
+  "properties": {
+    "button": {
+      "description": "The upper button, from 1.",
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "name": {
+      "description": "What it does: `loop`, `trigger_gate`, `pad_slicing`, `split_slice`, `warp_as`, `half`, `double`, `crop` or `reverse`.",
+      "type": "string"
+    },
+    "on": {
+      "description": "Whether the setting it stands for is on.",
+      "type": "boolean"
+    },
+    "text": {
+      "description": "Its text.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "button",
+    "name",
+    "text",
+    "on"
   ],
   "type": "object"
 }
@@ -34353,6 +34906,95 @@ One of:
 
 </details>
 
+### `StemSource`
+
+What a separation works on (the stem separation spec, R22).
+
+One of:
+
+- an object with `kind` = `"clip"`, `clip` ([`ClipId`](#clipid)): An audio clip in the Arrangement or in a Session slot.
+- an object with `kind` = `"file"`, `path` (string): An audio file, separated whole: what the browser's menu runs.
+- an object with `kind` = `"time_selection"`, `tracks` (array of [`TrackId`](#trackid)), `start` ([`Ticks`](#ticks)), `end` ([`Ticks`](#ticks)): The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a separation works on (the stem separation spec, R22).",
+  "oneOf": [
+    {
+      "description": "An audio clip in the Arrangement or in a Session slot.",
+      "properties": {
+        "clip": {
+          "$ref": "#/$defs/ClipId",
+          "description": "The clip."
+        },
+        "kind": {
+          "const": "clip",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "clip"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "An audio file, separated whole: what the browser's menu runs.",
+      "properties": {
+        "kind": {
+          "const": "file",
+          "type": "string"
+        },
+        "path": {
+          "description": "Its path.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "The audio the clips of audio tracks play inside the Arrangement's time selection, each track on its own.",
+      "properties": {
+        "end": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's end."
+        },
+        "kind": {
+          "const": "time_selection",
+          "type": "string"
+        },
+        "start": {
+          "$ref": "#/$defs/Ticks",
+          "description": "The range's start."
+        },
+        "tracks": {
+          "description": "The tracks; those with no audio in the range are skipped.",
+          "items": {
+            "$ref": "#/$defs/TrackId"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "tracks",
+        "start",
+        "end"
+      ],
+      "type": "object"
+    }
+  ]
+}
+```
+
+</details>
+
 ### `StemsStatus`
 
 What `stems.status` returns.
@@ -34364,6 +35006,7 @@ What `stems.status` returns.
 | `packages` | array of [`PackageStatus`](#packagestatus) | yes | The packages. |
 | `install` | [`JobStatus`](#jobstatus) | yes | The download. |
 | `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
+| `created_clips` | array of [`ClipId`](#clipid) | no | The clips the last separation made, in the order of their tracks. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
 | `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
@@ -34374,6 +35017,13 @@ What `stems.status` returns.
 {
   "description": "What `stems.status` returns.",
   "properties": {
+    "created_clips": {
+      "description": "The clips the last separation made, in the order of their tracks.",
+      "items": {
+        "$ref": "#/$defs/ClipId"
+      },
+      "type": "array"
+    },
     "created_tracks": {
       "description": "The tracks the last separation made, the group first if it made one.",
       "items": {
@@ -39892,6 +40542,76 @@ Every mode's controls (R2). Re-Pitch and Complex have none.
     }
   },
   "type": "object"
+}
+```
+
+</details>
+
+### `WavetableChoice`
+
+What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).
+
+One of:
+
+- an object with `kind` = `"factory"`, `category` (string), `name` (string): One of Beatlayer's factory tables, by category and name.
+- an object with `kind` = `"user"`, `raw` (boolean), `frames` (integer from 0 to 65535): A table made from the file in the oscillator's sample slot.
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a wavetable oscillator plays (WP-8.8; the wavetable spec, R6 to R8).",
+  "oneOf": [
+    {
+      "description": "One of Beatlayer's factory tables, by category and name.",
+      "properties": {
+        "category": {
+          "description": "The table's category.",
+          "type": "string"
+        },
+        "kind": {
+          "const": "factory",
+          "type": "string"
+        },
+        "name": {
+          "description": "The table's name in it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "category",
+        "name"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "A table made from the file in the oscillator's sample slot.",
+      "properties": {
+        "frames": {
+          "description": "How many frames the file made.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "user",
+          "type": "string"
+        },
+        "raw": {
+          "description": "Whether the file's frames are used as they are, with no clean-up.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "raw",
+        "frames"
+      ],
+      "type": "object"
+    }
+  ]
 }
 ```
 

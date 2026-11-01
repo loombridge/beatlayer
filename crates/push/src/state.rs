@@ -94,6 +94,8 @@ pub enum Menu {
     Setup,
     /// Scale.
     Scale,
+    /// The choices Convert offers for an audio clip (push-2-notes R76).
+    Convert,
 }
 
 impl Menu {
@@ -103,6 +105,7 @@ impl Menu {
         match self {
             Self::Setup => "Setup",
             Self::Scale => "Scale",
+            Self::Convert => "Convert",
         }
     }
 }
@@ -152,6 +155,8 @@ pub struct Snapshot {
     pub session: Option<crate::session::State>,
     /// What Mix Mode shows, while it is the display mode.
     pub mix: Option<crate::mix::State>,
+    /// What Clip Mode shows, while it is the display mode.
+    pub clip: Option<crate::clip::State>,
     /// What the display's thread is doing.
     pub display: Status,
 }
@@ -180,6 +185,7 @@ impl Snapshot {
             device: None,
             session: None,
             mix: None,
+            clip: None,
             display: Status::default(),
         }
     }

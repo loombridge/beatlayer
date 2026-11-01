@@ -58,9 +58,25 @@ pub(super) struct SurfaceHost {
     /// The browser's lists a surface that browses reads, what they were made
     /// from and their revision (push-2-tracks R13).
     catalogue: Option<CatalogueCopy>,
+    /// The waveform a surface that shows the selected audio clip reads, and
+    /// what it was made from (push-2-tracks R44).
+    waveform: Option<(u64, Arc<bl_control::Waveform>)>,
     /// The first selected track's In/Out section as a surface reads it, and
     /// the document revision and track it was made for (push-2-tracks R31).
     in_out: Option<((u64, TrackId), Option<bl_control::mix::InOut>)>,
+    /// What each Simpler a surface reaches shows of its sample, made again
+    /// only when what it depends on changes (push-2-notes R67).
+    samples: std::collections::HashMap<bl_model::DeviceId, SampleCache>,
+}
+
+/// A Simpler's sample as last read for the surfaces, and what it was made
+/// from.
+struct SampleCache {
+    media: (bl_model::ContentHash, Vec<bl_model::SampleEdit>),
+    audio: Arc<bl_media::SampleData>,
+    peaks: Arc<bl_media::Peaks>,
+    slices_from: Vec<u64>,
+    slices: Arc<Vec<u64>>,
 }
 
 /// The lists as last copied, the browser's state they were made from, and
@@ -70,6 +86,32 @@ type CatalogueCopy = (
     Arc<crate::browser::catalogue::Catalogue>,
     u64,
 );
+
+/// Where Slice mode's slices after the first start: Manual's are the manual
+/// slices inside the region, the others' the boundaries between the first and
+/// the last.
+fn slice_starts(
+    audio: &bl_media::SampleData,
+    region: (u64, u64),
+    value: &dyn Fn(bl_model::ParamId) -> f64,
+    sixteenth: f64,
+    manual: &[u64],
+) -> Vec<u64> {
+    if value(bl_devices::sampler::SLICE_BY) as usize == 3 {
+        return manual
+            .iter()
+            .copied()
+            .filter(|&frame| frame > region.0 && frame < region.1)
+            .collect();
+    }
+    let bounds = bl_devices::slice_boundaries(audio, region, value, sixteenth, manual);
+    let inner = bounds.len().saturating_sub(1);
+    bounds
+        .into_iter()
+        .skip(1)
+        .take(inner.saturating_sub(1))
+        .collect()
+}
 
 fn info(report: RowReport, row: usize) -> ids::RowInfo {
     let port = |name: Option<String>, present: Option<bool>| {
@@ -468,11 +510,13 @@ impl Shell {
         let rows = self.row_views();
         let browse = self.surface_browse();
         let mix = self.surface_mix();
+        let samples = self.surface_samples(&rows);
         let doc = self.editor.document();
         let shown = crate::devices::shown_track(&self.arrangement, doc);
         let drum = shown.and_then(|track| self.devices.drum_view(doc, track));
         let devices = self.devices.surface_views(doc, shown);
-        ReadModel {
+        let clip_view = self.clip_view.shown_any_clip(doc, &self.arrangement);
+        let mut model = ReadModel {
             document,
             slots: self.session_states().to_vec(),
             transport: Transport {
@@ -508,7 +552,191 @@ impl Shell {
             selection_armed: self.surface.selection_armed.iter().copied().collect(),
             devices,
             mix,
+            samples,
+            convert: self.surface_convert(),
+            clip_view,
+            waveform: None,
+        };
+        model.waveform = self.surface_waveform(&model);
+        model
+    }
+
+    /// The waveform of the audio clip Push 2's Clip Mode shows, along the
+    /// beats of its contents; made again only when the clip, its warping or
+    /// the tempo change, and absent until the peaks are built (push-2-tracks
+    /// R44).
+    fn surface_waveform(&mut self, model: &ReadModel) -> Option<Arc<bl_control::Waveform>> {
+        let id = bl_push::clip::shown(model)?;
+        let clip = model.document.clip(id)?;
+        let bl_model::ClipData::Audio(audio) = &clip.data else {
+            return None;
+        };
+        let tempo = model.tempo.get();
+        let key = {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            (id, audio.media, audio.warp, audio.tempo.map(f64::to_bits)).hash(&mut hasher);
+            tempo.to_bits().hash(&mut hasher);
+            for marker in &audio.warp_markers {
+                (marker.time.to_bits(), marker.beat.get()).hash(&mut hasher);
+            }
+            hasher.finish()
+        };
+        if let Some((made, waveform)) = &self.surface.waveform
+            && *made == key
+        {
+            return Some(Arc::clone(waveform));
         }
+        let hash = bl_media::ContentHash::from_bytes(audio.media.0);
+        let cache = self.peak_cache()?;
+        cache.request(hash);
+        let peaks = cache.get(hash)?;
+        let beats = |seconds: f64| match audio.warp_map() {
+            Ok(map) if audio.warp => {
+                map.time_to_beat(seconds) / bl_core::time::TICKS_PER_QUARTER as f64
+            }
+            _ => seconds * tempo / 60.0,
+        };
+        let rate = f64::from(peaks.sample_rate().max(1));
+        let level = (0..peaks.level_count())
+            .find(|&level| peaks.run(level, 0).is_some_and(|run| run.len <= 4096))
+            .unwrap_or(0);
+        let points: Vec<[f32; 2]> = (0..peaks.run(level, 0)?.len as usize)
+            .map(|at| {
+                let mut range = [0.0f32, 0.0f32];
+                for channel in 0..usize::from(peaks.channels()) {
+                    if let Some([low, high]) = peaks.peak(level, channel, at) {
+                        range[0] = range[0].min(f32::from(low) / 127.0);
+                        range[1] = range[1].max(f32::from(high) / 127.0);
+                    }
+                }
+                range
+            })
+            .collect();
+        let waveform = Arc::new(bl_control::Waveform {
+            clip: id,
+            from: beats(0.0),
+            to: beats(peaks.frames() as f64 / rate),
+            peaks: points,
+        });
+        self.surface.waveform = Some((key, Arc::clone(&waveform)));
+        Some(waveform)
+    }
+
+    /// The sample of each Simpler the rows' device controls reach (push-2-notes
+    /// R67): its peaks, and in Slice mode where its slices start.
+    fn surface_samples(
+        &mut self,
+        rows: &[bl_control::RowView],
+    ) -> Arc<std::collections::BTreeMap<bl_model::DeviceId, bl_control::SampleView>> {
+        use bl_devices::sampler as s;
+        let doc = self.editor.document();
+        let mut found = std::collections::BTreeMap::new();
+        let mut cache = std::mem::take(&mut self.surface.samples);
+        let bpm = self.current_tempo().get();
+        // The devices the rows reach, and the Simplers of the track shown:
+        // its pads play their slices (push-2-notes R75).
+        let shown = crate::devices::shown_track(&self.arrangement, doc)
+            .and_then(|track| doc.track(track))
+            .into_iter()
+            .flat_map(bl_model::Track::devices)
+            .map(|device| device.id);
+        let reached = rows
+            .iter()
+            .filter_map(|row| row.focus.as_ref().map(|f| f.device));
+        for id in reached.chain(shown) {
+            let Some(device) = doc.device(id) else {
+                continue;
+            };
+            let simpler = matches!(
+                &device.kind,
+                bl_model::DeviceKind::Native { device_type } if device_type == s::SAMPLER
+            );
+            let (Some(media), true, Some(description)) = (
+                device.media_at(0),
+                simpler,
+                self.devices.description(&device.kind),
+            ) else {
+                continue;
+            };
+            let key = (media, device.sample_edits.clone());
+            if cache.get(&id).is_none_or(|c| c.media != key) {
+                let Some(audio) = self.edited_audio(media, &key.1) else {
+                    cache.remove(&id);
+                    continue;
+                };
+                let Ok(peaks) = bl_media::Peaks::from_samples(&audio) else {
+                    continue;
+                };
+                cache.insert(
+                    id,
+                    SampleCache {
+                        media: key,
+                        audio,
+                        peaks: Arc::new(peaks),
+                        slices_from: Vec::new(),
+                        slices: Arc::default(),
+                    },
+                );
+            }
+            let Some(entry) = cache.get_mut(&id) else {
+                continue;
+            };
+            let frames = entry.audio.frames() as u64;
+            let (start, end) = device
+                .region
+                .map_or((0, frames), |region| region.frames_in(frames));
+            let value = |param| description.value(&device.params, param).unwrap_or(0.0);
+            let slicing = value(s::MODE) >= 2.0;
+            if slicing {
+                let rate = f64::from(entry.audio.sample_rate());
+                let tempo = if device.warp.warp {
+                    device.warp.bpm.unwrap_or(120.0)
+                } else {
+                    bpm
+                };
+                let sixteenth = rate * 60.0 / tempo / 4.0;
+                let from: Vec<u64> = [
+                    s::SLICE_BY,
+                    s::SLICE_SENSITIVITY,
+                    s::SLICE_DIVISION,
+                    s::SLICE_REGIONS,
+                ]
+                .iter()
+                .map(|param| value(*param).to_bits())
+                .chain([sixteenth.to_bits(), start, end])
+                .chain(device.slices.iter().copied())
+                .collect();
+                if entry.slices_from != from {
+                    entry.slices = Arc::new(slice_starts(
+                        &entry.audio,
+                        (start, end),
+                        &value,
+                        sixteenth,
+                        &device.slices,
+                    ));
+                    entry.slices_from = from;
+                }
+            } else {
+                entry.slices_from.clear();
+            }
+            found.insert(
+                id,
+                bl_control::SampleView {
+                    peaks: Arc::clone(&entry.peaks),
+                    frames,
+                    rate: entry.audio.sample_rate(),
+                    slices: if slicing {
+                        Arc::clone(&entry.slices)
+                    } else {
+                        Arc::default()
+                    },
+                },
+            );
+        }
+        cache.retain(|id, _| found.contains_key(id));
+        self.surface.samples = cache;
+        Arc::new(found)
     }
 
     /// The folds Mix Mode acts on, and the In/Out section of the first

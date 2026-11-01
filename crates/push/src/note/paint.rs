@@ -10,7 +10,7 @@ use bl_engine::SlotState;
 use bl_model::{Clip, MidiData, TrackId, swatch_rgb};
 
 use super::grid::{self, Role, lighter, scaled};
-use super::{Down, Frame, Kind, Melodic, Melody, Note, State, bit, clip, melodic, pads};
+use super::{Area, Down, Fit, Frame, Kind, Melodic, Melody, Note, State, bit, clip, melodic, pads};
 use crate::content::Paint;
 use crate::controls::cc;
 use crate::leds::{Led, fixed};
@@ -75,11 +75,11 @@ impl Note {
     /// What `push.state` and the surface read of Note Mode: its summary, and
     /// the pads with reduced sensitivity (R31).
     pub(super) fn summarise(&mut self, frame: &Frame) {
-        let drum = matches!(frame.kind, Kind::Rack { .. } | Kind::Slices);
+        let drum = matches!(frame.kind, Kind::Rack { .. } | Kind::Slices { .. });
         let melodic = matches!(frame.kind, Kind::Melodic);
         let (layout, bank) = match frame.kind {
             Kind::Rack { first, .. } => (frame.layout.name(), Some(first)),
-            Kind::Slices => (frame.layout.name(), None),
+            Kind::Slices { .. } => (frame.layout.name(), None),
             Kind::Melodic => (frame.melodic.name(), None),
             Kind::Silent => ("None", None),
         };
@@ -116,8 +116,44 @@ impl Note {
             following: self.following,
             velocity: self.velocity,
             held_steps: crate::content::Content::held_steps(self),
+            area: self.area(frame),
             melody: melodic.then(|| Self::melody(frame, self.strip)),
         };
+    }
+
+    /// What the layout lets the display show of the clip (push-2-tracks R50
+    /// to R54).
+    fn area(&self, frame: &Frame) -> Option<Area> {
+        let (from, to) = (
+            frame.pages.step_start(self.pair, 0),
+            frame.pages.step_start(self.pair + 1, 0),
+        );
+        let (fit, low, high) = match frame.kind {
+            Kind::Silent => return None,
+            Kind::Rack { .. } | Kind::Slices { .. } => {
+                let key = frame.selected.unwrap_or(36);
+                match frame.layout {
+                    grid::Layout::Pads => (Fit::Folded, 0, 127),
+                    _ => (Fit::Pad, key, key),
+                }
+            }
+            Kind::Melodic => {
+                let (low, high) = frame.view().range().unwrap_or((frame.low, frame.low));
+                match frame.melodic {
+                    Melodic::Notes => (Fit::Folded, 0, 127),
+                    Melodic::Sequencer => (Fit::Sequencer, low, high),
+                    Melodic::SequencerNotes => (Fit::SequencerNotes, low, high),
+                }
+            }
+        };
+        Some(Area {
+            fit,
+            from,
+            to,
+            low,
+            high,
+            step: frame.size.ticks(),
+        })
     }
 
     /// What a melodic layout shows, for `push.state` (R32 to R44).
@@ -174,10 +210,7 @@ impl Note {
             } => Some(*note),
             _ => None,
         }));
-        let held = self.down.values().find_map(|down| match down {
-            Down::Step(step) => Some(*step),
-            _ => None,
-        });
+        let held = self.down.values().find_map(Down::step);
         for row in 0..8 {
             for column in 0..8 {
                 let shade = match Self::role(&frame, row, column) {
@@ -304,8 +337,13 @@ impl Note {
                     !chains.is_empty() && chains.iter().all(|c| !c.mixer.enabled),
                 )
             }
+            Kind::Slices { filled, .. } => (filled >> note & 1 == 1, None, false, false),
             _ => (true, None, false, false),
         };
+        // A pad past the last slice is dark (R75).
+        if matches!(frame.kind, Kind::Slices { .. }) && !filled {
+            return Shade::Fixed(fixed::BLACK);
+        }
         let base = own.map_or(track_colour, swatch);
         if sound.contains(&note) {
             Shade::Fixed(fixed::GREEN)
@@ -500,7 +538,7 @@ impl Note {
         let held = self
             .down
             .values()
-            .any(|down| matches!(down, Down::Step(step) if step.start == start));
+            .any(|down| down.step().is_some_and(|step| step.start == start));
         if held {
             return Shade::Fixed(fixed::WHITE);
         }

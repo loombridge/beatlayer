@@ -161,7 +161,7 @@ impl Note {
                 StripUse::PitchBend
             }),
             Kind::Melodic => Some(StripUse::Range),
-            Kind::Slices | Kind::Silent => None,
+            Kind::Slices { .. } | Kind::Silent => None,
         }
     }
 }

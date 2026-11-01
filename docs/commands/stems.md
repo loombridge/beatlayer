@@ -53,9 +53,9 @@ Result: [`StemsStatus`](#stemsstatus).
 
 ### `stems.open`
 
-**Separate Stems to New Audio Tracks**. Permission: `read`. Contexts: `arrangement`.
+**Separate Stems to New Audio Tracks**. Permission: `read`. Contexts: `global`.
 
-Opens the Separate Stems dialog for an audio clip in the Arrangement (`clip`, or the selected clip). The first time, the dialog lists the packages stem separation needs (ONNX Runtime and the Demucs model), their sizes and where they install, with Download Required Packages Now and Cancel; once they're installed it offers Vocals, Drums, Bass and Others, High Speed or High Quality, and Separate. Changes nothing in the set: an agent calls `stems.separate` instead.
+Opens the Separate Stems dialog for a source: `source` (an audio clip in the Arrangement or a Session slot by ID, an audio file by path, or an Arrangement time selection by its tracks and range), `clip` for a clip alone, or, with neither, what is selected. The first time, the dialog lists the packages stem separation needs (ONNX Runtime and the Demucs model), their sizes and where they install, with Download Required Packages Now and Cancel; once they're installed it offers Vocals, Drums, Bass and Others, High Speed or High Quality, and Separate. Changes nothing in the set: an agent calls `stems.separate` instead.
 
 Default keys: none.
 
@@ -63,7 +63,8 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `clip` | [`ClipId`](README.md#clipid) or null | no | The audio clip to separate; the selected clip if left out. |
+| `clip` | [`ClipId`](README.md#clipid) or null | no | The audio clip to separate, in either view: shorthand for a `clip` source. |
+| `source` | [`StemSource`](README.md#stemsource) or null | no | What to separate. With neither it nor `clip`, what is selected: one audio clip in the Arrangement, a time selection that holds audio, one audio clip shown from the Session View, or one audio file in the browser, in that order. |
 
 Result: [`StemsStatus`](#stemsstatus).
 
@@ -71,7 +72,7 @@ Result: [`StemsStatus`](#stemsstatus).
 
 **Separate Stems**. Permission: `edit`. Contexts: `global`.
 
-Separates an audio clip in the Arrangement into stems on new audio tracks, with a Demucs network running on this computer. `stems` chooses the parts (`vocals`, `drums`, `bass`, `others`; all four if left out); `quality` is `high_speed` (one pass) or `high_quality` (two passes averaged, about twice as long); `merge` puts two or three parts together on one track. The audio between the clip's Start and End markers, or through its loop, is separated at 44.1 kHz and written to the project's Samples/Processed/Stems folder. Each part gets a track below the clip's track, inside a new group track when there's more than one, with a copy of the clip playing that part; the original clip is deactivated. Playback stops first. Returns at once; `stems.status` reports the progress and the new tracks, and the whole edit is one undo step. Needs the packages `stems.install` downloads.
+Separates audio into stems on new audio tracks, with a Demucs network running on this computer. `source` is an audio clip in the Arrangement or a Session slot (`{"kind":"clip","clip":<ID>}`, or `clip` alone), an audio file (`{"kind":"file","path":...}`), or a time selection (`{"kind":"time_selection","tracks":[...],"start":...,"end":...}`, in ticks). `stems` chooses the parts (`vocals`, `drums`, `bass`, `others`; all four if left out); `quality` is `high_speed` (one pass) or `high_quality` (two passes averaged, about twice as long); `merge` puts two or three parts together on one track. The audio is written at 44.1 kHz to the project's Samples/Processed/Stems folder: for a clip, between its Start and End markers or through its loop; for a file, the whole file; for a time selection, what each audio track's clips play inside the range, before the track's devices and mixer. Each part gets a track after the source, inside a new group track when there's more than one, coloured by its part; the group (or the one new track) holds a copy of the source track's devices, mixer settings and Arrangement automation. An Arrangement clip's parts are copies of it, a Session clip's go in its scene's slots, a file's start at the insert marker, and a time selection's span the range; the source clip (or the part of a track's clips inside the range) is deactivated. Playback stops first. Returns at once; `stems.status` reports the progress and the new tracks and clips, and the whole edit is one undo step. Needs the packages `stems.install` downloads.
 
 Default keys: none.
 
@@ -79,9 +80,10 @@ Arguments:
 
 | Name | Type | Required | Description |
 |---|---|---|---|
-| `clip` | [`ClipId`](README.md#clipid) | yes | The audio clip in the Arrangement to separate. |
+| `clip` | [`ClipId`](README.md#clipid) or null | no | The audio clip, in the Arrangement or a Session slot, to separate: shorthand for a `clip` source. |
 | `merge` | boolean | no | Put the chosen parts together on one track: only with two or three parts. |
 | `quality` | [`StemQuality`](README.md#stemquality) | no | `high_speed` (the default) or `high_quality`. |
+| `source` | [`StemSource`](README.md#stemsource) or null | no | What to separate: a clip by ID, a file by path, or a time selection by its tracks and range. One of `source` and `clip` is needed. |
 | `stems` | array of [`StemKind`](README.md#stemkind) | no | Which parts to put on new tracks, one or more; all four if left out. |
 
 Result: [`StemsStatus`](#stemsstatus).

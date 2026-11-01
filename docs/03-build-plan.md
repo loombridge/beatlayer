@@ -971,7 +971,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.21 | done | 1 November 2026 | [#563](https://github.com/loombridge/beatlayer/pull/563): Note Mode on Push 2 arms the selected track and plays its drum rack through the Loop Selector, 16 Velocities and 64 Pads layouts tied to the pad view, with pad options, step sequencing with loop pads and pages, and `push.state` reading it back |
 | 7.22 | done | 1 November 2026 | [#696](https://github.com/loombridge/beatlayer/pull/696): Melodies on Push 2 with pad pressure as polyphonic key pressure, the touch strip's bend and modulation, 64 Notes, In Key and Chromatic in every layout saved with the set (`song.set_pad_layout`), the Scale menu, the Melodic Sequencer and its + 32 Notes variant, Note Mode navigation, and `session.launch` taking `legato` |
 | 7.23 | todo |  |  |
-| 7.24 | todo |  |  |
+| 7.24 | done | 1 November 2026 | [#711](https://github.com/loombridge/beatlayer/pull/711): Simpler on Push 2 with its main bank over the waveform in Classic, One-Shot and Slice, Edit Mode's buttons, slicing from the pads and Convert, read back in `push.state` |
 | 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
 | 7.27 | todo |  |  |
@@ -989,7 +989,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.5 | done | 31 October 2026 | [#644](https://github.com/loombridge/beatlayer/pull/644): `bl_dsp::physical` has modal banks for Beam, Marimba, Cantilever, Membrane, Circular Membrane and Plate and waveguides for String, Tube and Pipe on the kit's SIMD lanes, tuned within 1 cent from 40 Hz to 4 kHz at 44.1 to 96 kHz and stable to 192 kHz; the R11 damper and finger and fret positions wait on Tension |
 | 8.6 | todo |  |  |
 | 8.7 | todo |  |  |
-| 8.8 | todo |  |  |
+| 8.8 | done | 1 November 2026 | [#645](https://github.com/loombridge/beatlayer/pull/645): a generator in the repository makes 26 factory wavetables in 7 categories bit-identically, built on first use into the kit's shared cache; user wavetables load from WAV (with or without a frame-size chunk), AIFF or raw files as media the set references and Collect All and Save collects; `device.load_wavetable` and `device.set_wavetable` are one undo step each and read back; the device itself comes with WP-8.9 |
 | 8.9 | todo |  |  |
 | 8.10 | todo |  |  |
 | 8.11 | todo |  |  |
@@ -1035,7 +1035,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.51 | done | 1 November 2026 | [#653](https://github.com/loombridge/beatlayer/pull/653): Gated Delay (a delay fed through a 16-step gate sequencer on the tempo map, with random steps and feedback) and Pitch Hack (a pitch-shifting delay line on the Shifter's line, with reverse, random intervals and feedback) are native devices with their pages |
 | 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
 | 9.1 | done | 1 November 2026 | [#658](https://github.com/loombridge/beatlayer/pull/658): one Packages manager installs each feature's ONNX Runtime build and models from a manifest on one installer thread, with a record per package, the shared download page, and `packages.list`, `packages.install` and `packages.remove`; stem separation's download runs through it |
-| 9.2 | todo |  |  |
+| 9.2 | done | 1 November 2026 | [#688](https://github.com/loombridge/beatlayer/pull/688): stem separation takes a Session clip, a file from the browser or an Arrangement time selection as its source (`source` on `stems.open` and `stems.separate`, with menu entries for each), gives the stems their track colours and copies the source track's devices, mixer and automation to the group |
 | 9.3 | done | 1 November 2026 | [#683](https://github.com/loombridge/beatlayer/pull/683): the split stems model runs with the STFT and its inverse in Rust, on Core ML on macOS with the CPU as fallback (named in `stems.status`), and `bl-cli bench stems` separates a 3-minute generated mix in High Speed in about 7 seconds on an M5 Max, reporting the first compile apart |
 | 9.4 | todo |  |  |
 | 9.5 | done | 1 November 2026 | [#684](https://github.com/loombridge/beatlayer/pull/684): basic-pitch's note step is ported in `bl_analysis::transcribe` with the Melody rule and the clean-up (weak re-onsets merged, confident onsets snapped, velocity from onset strength), its model is the `pitch-model` package, and `cargo xtask transcribe-bench` scores Melody and Harmony above the spec's F-measure targets |

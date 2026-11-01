@@ -998,6 +998,7 @@ pub fn display(
     let length = format!("{}.{}.{}", data[7] as i64, data[8] as u32, data[9] as u32);
     let tempo = format!("{:.1} BPM", data[10]);
     DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: true,
         view: None,
@@ -1024,6 +1025,7 @@ fn reading(name: &str, value: f32, text: String) -> DisplayReading {
 /// A Looper with no engine running yet draws nothing.
 fn empty(device: DeviceId) -> DeviceDisplay {
     DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: false,
         view: None,

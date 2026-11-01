@@ -1058,6 +1058,7 @@ pub fn wave_display(
         })
         .collect();
     bl_model::DeviceDisplay {
+        spectrograms: Vec::new(),
         device,
         live: false,
         view: None,

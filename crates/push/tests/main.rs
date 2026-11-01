@@ -7,6 +7,7 @@ bl_rt::install_trap!();
 mod browse;
 mod connect;
 mod controls;
+mod devices;
 mod display;
 mod leds;
 mod mix;

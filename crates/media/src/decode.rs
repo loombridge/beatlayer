@@ -142,14 +142,40 @@ impl Decoder {
     /// # Errors
     ///
     /// As for [`Decoder::open`].
-    pub fn from_reader<R>(mut reader: R, extension: Option<&str>) -> Result<Self, MediaError>
+    pub fn from_reader<R>(reader: R, extension: Option<&str>) -> Result<Self, MediaError>
+    where
+        R: Read + Seek + Send + 'static,
+    {
+        Self::open_reader(reader, extension, true)
+    }
+
+    /// Like [`Decoder::from_reader`], but a MPEG-4 file's encoder delay and
+    /// padding stay: every frame the codec decodes is returned. A caller that
+    /// places the audio by the file's own edit list, as a QuickTime movie's
+    /// player does (WP-9.24), applies the list itself.
+    ///
+    /// # Errors
+    ///
+    /// As for [`Decoder::open`].
+    pub fn from_reader_untrimmed<R>(reader: R, extension: Option<&str>) -> Result<Self, MediaError>
+    where
+        R: Read + Seek + Send + 'static,
+    {
+        Self::open_reader(reader, extension, false)
+    }
+
+    fn open_reader<R>(
+        mut reader: R,
+        extension: Option<&str>,
+        trim: bool,
+    ) -> Result<Self, MediaError>
     where
         R: Read + Seek + Send + 'static,
     {
         let mut magic = [0; 8];
         reader.seek(SeekFrom::Start(0))?;
         let got = read_up_to(&mut reader, &mut magic)?;
-        let trim = if got == 8 && &magic[4..8] == b"ftyp" {
+        let trim = if trim && got == 8 && &magic[4..8] == b"ftyp" {
             mp4::read_trim(&mut reader)
         } else {
             None

@@ -6,6 +6,57 @@
 //! and sends a frame when it differs from the one before. `push.state` reads
 //! the same data back as text.
 
+/// A picture beside or in place of a label's text: Beatlayer's own icons for
+/// the four kinds of rack, the arrows that move a window of devices or banks
+/// (push-2-tracks R15, R17, R22), and a group's or a rack's beside a track
+/// that unfolds (R37).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Icon {
+    /// Nothing.
+    #[default]
+    None,
+    /// A group track that unfolds.
+    Group,
+    /// A track holding an instrument rack or a drum rack, which unfolds.
+    Rack,
+    /// An instrument rack.
+    InstrumentRack,
+    /// An audio effect rack.
+    AudioEffectRack,
+    /// A MIDI effect rack.
+    MidiEffectRack,
+    /// A drum rack.
+    DrumRack,
+    /// An arrow pointing left.
+    Left,
+    /// An arrow pointing right.
+    Right,
+}
+
+impl Icon {
+    /// The icon's name, for `push.state`'s text.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "",
+            Self::Group => "group",
+            Self::Rack => "rack",
+            Self::InstrumentRack => "instrument rack",
+            Self::AudioEffectRack => "audio effect rack",
+            Self::MidiEffectRack => "MIDI effect rack",
+            Self::DrumRack => "drum rack",
+            Self::Left => "left arrow",
+            Self::Right => "right arrow",
+        }
+    }
+
+    /// Whether the icon is an arrow, which stands alone in its label.
+    #[must_use]
+    pub const fn is_arrow(self) -> bool {
+        matches!(self, Self::Left | Self::Right)
+    }
+}
+
 /// What a display button's label shows (R18): empty means the button does
 /// nothing and its LED is off.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -16,20 +67,10 @@ pub struct Label {
     pub colour: [u8; 3],
     /// Whether it stands for the selected one.
     pub selected: bool,
-    /// The icon drawn with it, for a track that unfolds (push-2-tracks R37).
+    /// The picture that goes with it: an arrow or a rack's icon in Device
+    /// Mode, a group's or a rack's beside a track that unfolds in Mix Mode
+    /// (push-2-tracks R22, R37).
     pub icon: Icon,
-}
-
-/// What a label that unfolds is drawn with (Beatlayer's own icons).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Icon {
-    /// Nothing.
-    #[default]
-    None,
-    /// A group track.
-    Group,
-    /// A track holding an instrument rack or a drum rack.
-    Rack,
 }
 
 impl Label {
@@ -44,7 +85,7 @@ impl Label {
         }
     }
 
-    /// The same label drawn with `icon`.
+    /// The same label with `icon` beside its text.
     #[must_use]
     pub const fn with_icon(mut self, icon: Icon) -> Self {
         self.icon = icon;
@@ -54,7 +95,7 @@ impl Label {
     /// Whether the button under it does anything (R18).
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.text.is_empty()
+        self.text.is_empty() && matches!(self.icon, Icon::None)
     }
 }
 
@@ -82,6 +123,18 @@ pub enum Dot {
     Automated,
     /// Automation that is overridden: a grey dot.
     Overridden,
+}
+
+/// How strongly a column is drawn (push-2-tracks R18).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Shade {
+    /// As any column.
+    #[default]
+    Normal,
+    /// Dimmed: a parameter a macro holds, which the encoder doesn't move.
+    Dimmed,
+    /// Grey: a parameter of a device that is switched off.
+    Grey,
 }
 
 /// One column of the content band, under an encoder (R20). A column whose
@@ -133,6 +186,8 @@ pub struct Screen {
     pub lower: [Label; 8],
     /// The content band's columns.
     pub columns: [Column; 8],
+    /// How strongly each column is drawn.
+    pub shades: [Shade; 8],
     /// Lists drawn in place of a column's parameter, as Browse Mode does.
     pub lists: [Option<List>; 8],
     /// A short message over the content band for 1.5 s (R19).
@@ -147,6 +202,9 @@ pub struct Screen {
     pub title: Option<String>,
     /// The Setup menu's velocity curve, drawn over columns 4 and 5 (R31).
     pub curve: Option<Vec<u8>>,
+    /// Lines under the upper band, each from a rack's column to the column of
+    /// the last device it holds, both from 0 (push-2-tracks R22).
+    pub folds: Vec<(usize, usize)>,
     /// Lines under the lower labels from one column to another, inclusive,
     /// in a colour: the tracks inside an unfolded group or rack (push-2-tracks
     /// R37).
@@ -166,9 +224,9 @@ impl Screen {
             for (n, label) in labels.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
                 let selected = if label.selected { " (selected)" } else { "" };
                 let icon = match label.icon {
-                    Icon::None => "",
-                    Icon::Group => " [group]",
-                    Icon::Rack => " [rack]",
+                    Icon::None => String::new(),
+                    i if i.is_arrow() => format!("<{}>", i.name()),
+                    i => format!(" [{}]", i.name()),
                 };
                 lines.push(format!("{name} {}: {}{icon}{selected}", n + 1, label.text));
             }
@@ -186,8 +244,13 @@ impl Screen {
                 Dot::Overridden => " [grey dot]",
             };
             let touched = if column.touched { " (touched)" } else { "" };
+            let shade = match self.shades[n] {
+                Shade::Normal => "",
+                Shade::Dimmed => " (dimmed)",
+                Shade::Grey => " (grey)",
+            };
             lines.push(format!(
-                "column {}: {} = {}{dot}{touched}",
+                "column {}: {} = {}{dot}{touched}{shade}",
                 n + 1,
                 column.name,
                 column.value
@@ -208,6 +271,9 @@ impl Screen {
                 .collect();
             let in_use = if list.in_use { " (in use)" } else { "" };
             lines.push(format!("list {}{in_use}: {}", n + 1, rows.join(", ")));
+        }
+        for (from, to) in &self.folds {
+            lines.push(format!("fold: {} to {}", from + 1, to + 1));
         }
         band("lower", &self.lower, &mut lines);
         for (n, progress) in self.progress.iter().enumerate() {

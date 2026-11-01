@@ -3158,6 +3158,10 @@ impl Processor {
         if let Some(program) = &self.program {
             program.get().modulated(&mut state.modulated);
         }
+        state.matrix_played.clear();
+        if let Some(program) = &self.program {
+            program.get().matrix_played(&mut state.matrix_played);
+        }
         state.latency_changes.clear();
         if let Some(program) = &self.program {
             program.get().latency_changes(&mut state.latency_changes);

@@ -69,6 +69,18 @@ impl Shell {
         self.device_commands.get(&device).map_or(&[], Vec::as_slice)
     }
 
+    /// The modulation matrix of `device`: its type's sources and destinations
+    /// and every slot as the device has it (the instrument modulation spec,
+    /// R11), or none for a device without one.
+    #[must_use]
+    pub fn device_matrix(
+        &self,
+        device: &bl_model::Device,
+    ) -> Option<bl_model::matrix::MatrixState> {
+        let layout = self.devices.device_type(&device.kind)?.matrix.as_ref()?;
+        Some(layout.state(device))
+    }
+
     /// The kit plug-ins compiled in as native devices: their instances, on
     /// this thread.
     #[must_use]

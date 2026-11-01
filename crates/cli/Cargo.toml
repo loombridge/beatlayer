@@ -16,6 +16,8 @@ asio = ["bl-audio-io/asio"]
 # `bl-cli mcp`: the agent API over stdio, on a headless shell (WP-1.15).
 bl-agent.workspace = true
 bl-shell.workspace = true
+# `bl-cli bench stems`: the stem separation network and its generated mixes.
+bl-analysis = { workspace = true, features = ["stems"] }
 # `bl-cli assistant`: one assistant turn, headless, with its key from the
 # OS keychain (WP-2.23, T107).
 bl-assistant.workspace = true

@@ -33599,6 +33599,7 @@ What `stems.status` returns.
 | `separation` | [`JobStatus`](#jobstatus) | yes | The separation. |
 | `created_tracks` | array of [`TrackId`](#trackid) | no | The tracks the last separation made, the group first if it made one. |
 | `dialog` | [`DialogStatus`](#dialogstatus) or null | no | The dialog, if it's open. |
+| `provider` | string | no | What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used. |
 
 <details><summary>JSON Schema</summary>
 
@@ -33642,6 +33643,10 @@ What `stems.status` returns.
         "$ref": "#/$defs/PackageStatus"
       },
       "type": "array"
+    },
+    "provider": {
+      "description": "What the current or last separation ran on, such as `Core ML`, or `CPU (not the GPU: ...)` with the reason a GPU wasn't used.",
+      "type": "string"
     },
     "separation": {
       "$ref": "#/$defs/JobStatus",

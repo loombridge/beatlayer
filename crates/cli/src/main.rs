@@ -6,6 +6,7 @@
 #[cfg(debug_assertions)]
 bl_rt::install_trap!();
 
+mod bench;
 mod device_changes;
 mod devices;
 mod engine_smoke;
@@ -99,6 +100,8 @@ enum Command {
     /// keychain, where the Agents page stores it, and from nowhere else.
     /// --record writes the exchange as a JSON transcript.
     Assistant(bl_cli::assistant::AssistantArgs),
+    /// Time an on-device feature, and print the result as JSON.
+    Bench(bench::BenchArgs),
 }
 
 fn main() -> ExitCode {
@@ -113,6 +116,7 @@ fn main() -> ExitCode {
         Command::Golden(args) => bl_cli::golden::run(args),
         Command::Mcp(args) => mcp::run(args),
         Command::Assistant(args) => bl_cli::assistant::run(args),
+        Command::Bench(args) => bench::run(args),
     };
     outcome.unwrap_or_else(|message| {
         eprintln!("error: {message}");

@@ -84,6 +84,22 @@
       ]
     },
     {
+      "id": "htdemucs-split",
+      "name": "Demucs (HTDemucs), split for the GPU",
+      "version": "4.1.0",
+      "project": "https://github.com/adefossez/demucs",
+      "purpose": "The separation model without its transform, which runs on the GPU",
+      "platform": "macos-aarch64",
+      "role": "stems-model",
+      "url": "",
+      "size": 177081443,
+      "sha256": "b91c5bf733f0353a5ba6e9150593d0774b7a6db90cf27917790f9541a37dab44",
+      "unpack": "file",
+      "folder": "demucs-split-4.1.0",
+      "files": [{ "name": "htdemucs-split.onnx" }],
+      "disabled": true
+    },
+    {
       "id": "htdemucs",
       "name": "Demucs (HTDemucs)",
       "version": "4.1.0",

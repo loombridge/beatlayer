@@ -85,6 +85,10 @@ pub struct Package {
     pub folder: String,
     /// The files kept; the first is the main file, the one a feature loads.
     pub files: Vec<Kept>,
+    /// Listed but not offered: no feature asks for it and `packages.list`
+    /// leaves it out, until whatever it waits on is settled.
+    #[serde(default)]
+    pub disabled: bool,
 }
 
 /// A feature that runs an on-device model, and the roles it needs.
@@ -143,7 +147,7 @@ impl Manifest {
         let here = platform();
         self.packages
             .iter()
-            .filter(|p| p.platform == "any" || p.platform == here)
+            .filter(|p| !p.disabled && (p.platform == "any" || p.platform == here))
             .collect()
     }
 
@@ -220,6 +224,13 @@ pub fn folder(config_dir: Option<&Path>) -> PathBuf {
     config_dir
         .map_or_else(|| std::env::temp_dir().join("Beatlayer"), Path::to_path_buf)
         .join("Packages")
+}
+
+/// The folder the stem separation model's compiled forms are cached in
+/// (spec R34): `Cache` beside `Packages`.
+#[must_use]
+pub fn cache_folder(config_dir: Option<&Path>) -> PathBuf {
+    folder(config_dir).with_file_name("Cache")
 }
 
 /// An installed package's record (R18).
@@ -568,6 +579,7 @@ mod tests {
                 name: "model.bin".to_owned(),
                 path: None,
             }],
+            disabled: false,
         };
         (package, dir.join("Packages"))
     }
@@ -623,6 +635,34 @@ mod tests {
         assert!(
             !load(None).feature_packages("stems", None).is_empty() || !cfg!(target_os = "macos")
         );
+    }
+
+    // Spec: stem-separation R38. The split model is in the manifest, in
+    // the role of the whole network, and isn't offered while it's disabled.
+    #[test]
+    fn a_disabled_package_is_listed_but_never_offered() {
+        let manifest = Manifest::parse(BUILT_IN).unwrap();
+        let split = manifest
+            .packages
+            .iter()
+            .find(|p| p.id == "htdemucs-split")
+            .expect("the manifest lists the split model");
+        assert_eq!((split.role.as_str(), split.disabled), ("stems-model", true));
+        assert!(manifest.for_platform().iter().all(|p| p.id != split.id));
+        if let Some(model) = manifest.for_role("stems-model", None) {
+            assert_eq!(model.id, "htdemucs");
+        }
+        // Enabled, it takes the role on its own platform, ahead of the
+        // whole network.
+        let enabled = BUILT_IN.replace(r#""disabled": true"#, r#""disabled": false"#);
+        let manifest = Manifest::parse(&enabled).unwrap();
+        let model = manifest.for_role("stems-model", None).unwrap();
+        let expected = if platform() == split.platform {
+            "htdemucs-split"
+        } else {
+            "htdemucs"
+        };
+        assert_eq!(model.id, expected);
     }
 
     #[test]

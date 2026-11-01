@@ -35,6 +35,13 @@ filter = """
 threads-required = 4
 priority = 90
 
+# This times sixteen filter voices against real time, a wall-clock result
+# too, so it takes the CI runner to itself like the dropout tests above.
+[[profile.default.overrides]]
+filter = "package(bl-devices) & test(=instrument_filter::sixteen_voices_render_faster_than_the_device_budget_with_no_allocation)"
+threads-required = 4
+priority = 90
+
 # The slowest tests, at either BL_TEST_DEPTH, start next, so a run doesn't
 # end waiting for one that started late.
 [[profile.default.overrides]]

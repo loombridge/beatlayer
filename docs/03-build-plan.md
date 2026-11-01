@@ -1026,7 +1026,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.42 | todo |  |  |
 | 8.43 | done | 1 November 2026 | [#670](https://github.com/loombridge/beatlayer/pull/670): Resonators is a native device with its input filter, five tuned comb resonators (I by note and fine, II to V by interval), Decay, Const, Color, Mode A and B, Width, Gain and Dry/Wet, following the current scale and the set's tuning |
 | 8.44 | done | 1 November 2026 | [#659](https://github.com/loombridge/beatlayer/pull/659): Corpus is a native device with its seven resonator types on the shared physical models, the LFO, the input filter, the global controls and Bleed, and its frequency set by notes from a MIDI sidechain (routing R39) |
-| 8.45 | todo |  |  |
+| 8.45 | done | 1 November 2026 | [#715](https://github.com/loombridge/beatlayer/pull/715): Vocoder is a native device with its filter bank of 4 to 40 bands, the Noise, External, Modulator and Pitch Tracking carriers, Enhance, Unvoiced, Gate, Level, Depth, Attack, Release, Formant, the channel modes and its band display |
 | 8.46 | todo |  |  |
 | 8.47 | done | 1 November 2026 | [#699](https://github.com/loombridge/beatlayer/pull/699): Spectral Time, an STFT effect with the Freezer (Manual and Retrigger on onsets or synced divisions, crossfade and envelope fades), the spectral delay (time in milliseconds, notes or sixteenths, Feedback, Tilt, Spray, Mask, Stereo), the order switch, Resolution with a crossfade, the global controls and a headless spectrogram, its banks covering every parameter |
 | 8.48 | todo |  |  |

@@ -32,15 +32,15 @@
     },
     "h264.mov": {
       "frames": 24,
-      "command": "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgb24 -s 64x48 -r 30000/1001 -i - -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -c:v libx264 -preset veryslow -crf 6 -bf 2 -g 12 -tag:v avc1 -an -f mov /Users/blworker/.local/share/beatlayer-worktrees/ws-3/tests/fixtures/video/h264.mov"
+      "command": "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgb24 -s 64x48 -r 30000/1001 -i - -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -c:v libx264 -preset veryslow -crf 6 -bf 2 -g 12 -tag:v avc1 -an -f mov h264.mov"
     },
     "hevc.mov": {
       "frames": 24,
-      "command": "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgb24 -s 64x48 -r 30000/1001 -i - -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -c:v libx265 -preset veryslow -crf 6 -g 12 -tag:v hvc1 -x265-params log-level=error -an -f mov /Users/blworker/.local/share/beatlayer-worktrees/ws-3/tests/fixtures/video/hevc.mov"
+      "command": "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgb24 -s 64x48 -r 30000/1001 -i - -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv420p -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -c:v libx265 -preset veryslow -crf 6 -g 12 -tag:v hvc1 -x265-params log-level=error -an -f mov hevc.mov"
     },
     "prores.mov": {
       "frames": 24,
-      "command": "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgb24 -s 64x48 -r 30000/1001 -i - -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv422p10le -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -c:v prores_ks -profile:v 3 -vendor apl0 -an -f mov /Users/blworker/.local/share/beatlayer-worktrees/ws-3/tests/fixtures/video/prores.mov"
+      "command": "ffmpeg -y -loglevel error -f rawvideo -pix_fmt rgb24 -s 64x48 -r 30000/1001 -i - -vf scale=out_color_matrix=bt709:out_range=tv,format=yuv422p10le -colorspace bt709 -color_primaries bt709 -color_trc bt709 -color_range tv -c:v prores_ks -profile:v 3 -vendor apl0 -an -f mov prores.mov"
     }
   },
   "ffmpeg": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers"

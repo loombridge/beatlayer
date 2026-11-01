@@ -272,7 +272,8 @@ def ffmpeg_movie(name: str, codec_args, count=24):
            "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-color_range", "tv",
            *codec_args, "-an", "-f", "mov", str(OUT / name)]
     subprocess.run(cmd, input=raw, check=True)
-    return " ".join(cmd)
+    # Recorded with the output's name alone, so no local path is kept.
+    return " ".join(cmd[:-1] + [name])
 
 
 def main():

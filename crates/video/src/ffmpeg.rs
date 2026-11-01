@@ -4,7 +4,8 @@
 //! the reason, and Motion JPEG still decodes in Rust.
 //!
 //! Only the parts of FFmpeg's structures whose layout has held from FFmpeg 4
-//! to 8 are read directly (the head of `AVFrame` and of `AVPacket`); the rest
+//! to 8 are read directly (the head of `AVFrame` and of `AVPacket`, and their
+//! `pts`, which labels each picture with its frame's time); the rest
 //! is reached through functions and `AVOption`s. The decoders are fed
 //! start-code streams ([`crate::annexb`]), so they need no codec context
 //! fields set, and the pictures are converted to RGBA by `libswscale`.
@@ -249,14 +250,14 @@ pub(crate) fn open_codec(
 }
 
 impl Ffmpeg {
-    /// Sends one packet, or `None` to start the drain. Returns whether the
-    /// decoder took it.
-    fn send(&mut self, data: Option<&[u8]>) -> bool {
+    /// Sends one packet with its presentation time, or `None` to start the
+    /// drain. Returns whether the decoder took it.
+    fn send(&mut self, data: Option<&[u8]>, pts: i64) -> bool {
         let api = &self.api;
         // SAFETY: the packet is FFmpeg's own, allocated and filled through its
-        // API: `av_new_packet` gives `size` writable bytes at `data`, whose
-        // offset in an `AVPacket` (after a pointer and two `int64_t`) has
-        // held since FFmpeg 2.
+        // API: `av_new_packet` gives `size` writable bytes at `data`. Its
+        // offset in an `AVPacket` (after a pointer and two `int64_t`), and
+        // that of `pts` (after the pointer), have held since FFmpeg 2.
         unsafe {
             let Some(data) = data else {
                 return (api.send_packet)(self.context, std::ptr::null()) >= 0;
@@ -269,6 +270,11 @@ impl Ffmpeg {
                 return false;
             }
             let taken = if (api.new_packet)(packet, size) >= 0 {
+                packet
+                    .cast::<u8>()
+                    .add(8)
+                    .cast::<i64>()
+                    .write_unaligned(pts);
                 let bytes = packet
                     .cast::<u8>()
                     .add(24)
@@ -285,14 +291,10 @@ impl Ffmpeg {
     }
 
     /// Takes every picture the decoder has ready, giving each to `sink` under
-    /// the next frame in presentation order.
-    fn receive(
-        &mut self,
-        order: &[usize],
-        next: &mut usize,
-        samples: &[CodedSample<'_>],
-        sink: &mut dyn FnMut(usize, Frame),
-    ) {
+    /// the frame whose presentation time it carries. A picture the decoder
+    /// leaves out (a leading picture of the open group decoding started at,
+    /// or a damaged one) so moves no other picture to the wrong frame.
+    fn receive(&mut self, samples: &[CodedSample<'_>], sink: &mut dyn FnMut(usize, Frame)) {
         loop {
             // SAFETY: `frame` is an `AVFrame` from `av_frame_alloc`.
             let received = unsafe { (self.api.receive_frame)(self.context, self.frame) };
@@ -300,10 +302,21 @@ impl Ffmpeg {
             if received != 0 {
                 return;
             }
-            if let (Some(&at), Some(picture)) = (order.get(*next), self.convert()) {
-                sink(samples[at].index, picture);
+            // SAFETY: `pts` follows `format` and `pict_type` (and, before
+            // FFmpeg 8, `key_frame`) and a two-`int` `sample_aspect_ratio`;
+            // either way it lands, aligned, at 136.
+            let pts = unsafe {
+                self.frame
+                    .cast::<u8>()
+                    .add(136)
+                    .cast::<i64>()
+                    .read_unaligned()
+            };
+            if let (Some(sample), Some(picture)) =
+                (samples.iter().find(|s| s.pts == pts), self.convert())
+            {
+                sink(sample.index, picture);
             }
-            *next += 1;
             // SAFETY: as above.
             unsafe { (self.api.frame_unref)(self.frame) };
         }
@@ -471,25 +484,17 @@ impl VideoDecoder for Ffmpeg {
         // SAFETY: `context` is an open codec context. Flushing also leaves
         // the draining state of the call before.
         unsafe { (self.api.flush_buffers)(self.context) };
-        // The decoder returns pictures in presentation order, so the k-th is
-        // the k-th of the samples by presentation time.
-        let mut order: Vec<usize> = (0..samples.len()).collect();
-        order.sort_by_key(|&i| samples[i].pts);
-        let mut next = 0;
         for (position, sample) in samples.iter().enumerate() {
             let data = match &self.config {
                 Some(config) => config.to_annex_b(sample.data, position == 0),
                 None => sample.data.to_vec(),
             };
-            if !self.send(Some(&data)) {
-                // A frame the decoder refused has no picture to match.
-                order.retain(|&i| i != position);
-                continue;
+            if self.send(Some(&data), sample.pts) {
+                self.receive(samples, sink);
             }
-            self.receive(&order, &mut next, samples, sink);
         }
-        self.send(None);
-        self.receive(&order, &mut next, samples, sink);
+        self.send(None, 0);
+        self.receive(samples, sink);
         Ok(())
     }
 }

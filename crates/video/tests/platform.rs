@@ -15,17 +15,24 @@ fn required(codec: &str) -> bool {
     cfg!(target_os = "macos") || (cfg!(windows) && codec == "h264")
 }
 
-fn assert_frames(frames: &[Option<Frame>], movie: &Movie) {
+/// Checks the frames decoded from stored frame `from` on; a leading picture
+/// of the group decoding started at may be missing, but none may be wrong.
+fn assert_frames(frames: &[Option<Frame>], movie: &Movie, from: usize) {
     let video = movie.video().expect("video");
-    for (decode, frame) in frames.iter().enumerate() {
+    for (decode, frame) in frames.iter().enumerate().skip(from) {
         let display = video
             .presentation_order()
             .iter()
             .position(|&i| i as usize == decode)
             .expect("in the order");
-        let frame = frame
-            .as_ref()
-            .unwrap_or_else(|| panic!("frame {decode} wasn't decoded"));
+        let start = video.sample(from).expect("sample").pts;
+        let Some(frame) = frame else {
+            assert!(
+                from > 0 && video.sample(decode).expect("sample").pts < start,
+                "frame {decode} wasn't decoded from {from}"
+            );
+            continue;
+        };
         assert_eq!(index_of(frame), display as u32, "stored frame {decode}");
         assert_colours(frame);
     }
@@ -64,9 +71,9 @@ fn the_platforms_decoders_decode_every_frame_exactly() {
     }
 }
 
-/// Decodes a whole movie's frames with `decoder`, in one call from its first
-/// frame, and returns them by stored index.
-fn decode_whole(decoder: &mut dyn VideoDecoder, movie: &Movie) -> Vec<Option<Frame>> {
+/// Decodes a movie's frames with `decoder`, in one call from stored frame
+/// `from` to the end, and returns them by stored index.
+fn decode_from(decoder: &mut dyn VideoDecoder, movie: &Movie, from: usize) -> Vec<Option<Frame>> {
     let video = movie.video().expect("video");
     let mut reader = movie.reader().expect("a reader");
     let coded: Vec<Vec<u8>> = (0..video.frame_count())
@@ -75,13 +82,14 @@ fn decode_whole(decoder: &mut dyn VideoDecoder, movie: &Movie) -> Vec<Option<Fra
     let samples: Vec<CodedSample<'_>> = coded
         .iter()
         .enumerate()
+        .skip(from)
         .map(|(index, data)| CodedSample {
             index,
             pts: video.sample(index).expect("sample").pts,
             data,
         })
         .collect();
-    let mut frames = vec![None; samples.len()];
+    let mut frames = vec![None; coded.len()];
     decoder
         .decode(&samples, &mut |index, frame| frames[index] = Some(frame))
         .expect("decoded");
@@ -108,7 +116,11 @@ fn ffmpegs_libraries_decode_every_frame_where_installed() {
             eprintln!("FFmpeg's libraries aren't installed: {codec} skipped");
             continue;
         };
-        assert_frames(&decode_whole(&mut *decoder, &movie), &movie);
+        // From each sync frame, as the video thread decodes: an open group's
+        // leading pictures that are left out mustn't shift the others.
+        for from in (0..video.frame_count()).filter(|&i| video.sample(i).expect("sample").sync) {
+            assert_frames(&decode_from(&mut *decoder, &movie, from), &movie, from);
+        }
         decoded += 1;
     }
     eprintln!("{decoded} of 3 codecs decoded through FFmpeg");

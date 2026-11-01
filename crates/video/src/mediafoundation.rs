@@ -6,9 +6,9 @@
 //!
 //! Each call to [`VideoDecoder::decode`] flushes the transform and starts
 //! afresh. The transform is fed start-code streams ([`crate::annexb`]) and
-//! returns NV12, which [`crate::convert`] makes RGBA. Pictures come back in
-//! presentation order, so the k-th is the k-th of the samples by presentation
-//! time, as with FFmpeg.
+//! returns NV12, which [`crate::convert`] makes RGBA. Each picture comes back
+//! with its frame's presentation time as its sample time, which says whose it
+//! is, as with FFmpeg.
 
 use std::cell::Cell;
 use std::mem::ManuallyDrop;
@@ -206,14 +206,9 @@ impl MediaFoundation {
         }
     }
 
-    /// Takes every picture ready, in presentation order.
-    fn drain(
-        &mut self,
-        order: &[usize],
-        next: &mut usize,
-        samples: &[CodedSample<'_>],
-        sink: &mut dyn FnMut(usize, Frame),
-    ) {
+    /// Takes every picture ready, each under the frame whose presentation
+    /// time it carries, so one the transform leaves out moves no other.
+    fn drain(&mut self, samples: &[CodedSample<'_>], sink: &mut dyn FnMut(usize, Frame)) {
         loop {
             // SAFETY: the output buffer struct is filled and read as the API
             // documents: an output sample if the transform doesn't provide
@@ -253,12 +248,17 @@ impl MediaFoundation {
                     }
                 }
             };
-            if let (Some(&at), Some(frame)) =
-                (order.get(*next), sample.and_then(|s| self.picture(&s)))
-            {
-                sink(samples[at].index, frame);
+            let Some(sample) = sample else {
+                continue;
+            };
+            // SAFETY: a sample the transform gave back.
+            let pts = unsafe { sample.GetSampleTime() }.ok();
+            if let (Some(at), Some(frame)) = (
+                samples.iter().find(|s| Some(s.pts) == pts),
+                self.picture(&sample),
+            ) {
+                sink(at.index, frame);
             }
-            *next += 1;
         }
     }
 
@@ -337,21 +337,15 @@ impl VideoDecoder for MediaFoundation {
                     .map_err(|e| VideoError::Decode(format!("Media Foundation's decoder: {e}")))?;
             }
         }
-        let mut order: Vec<usize> = (0..samples.len()).collect();
-        order.sort_by_key(|&i| samples[i].pts);
-        let mut next = 0;
         for (position, sample) in samples.iter().enumerate() {
             let data = self.config.to_annex_b(sample.data, position == 0);
-            if self.feed(&data, sample.pts).is_err() {
-                // A frame the decoder refused has no picture to match.
-                order.retain(|&i| i != position);
-                continue;
+            if self.feed(&data, sample.pts).is_ok() {
+                self.drain(samples, sink);
             }
-            self.drain(&order, &mut next, samples, sink);
         }
         // SAFETY: as above.
         let _ = unsafe { self.transform.ProcessMessage(MFT_MESSAGE_COMMAND_DRAIN, 0) };
-        self.drain(&order, &mut next, samples, sink);
+        self.drain(samples, sink);
         Ok(())
     }
 }

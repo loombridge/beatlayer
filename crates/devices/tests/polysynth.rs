@@ -610,6 +610,52 @@ fn sixteen_voices_render_faster_than_the_device_budget() {
     }
 }
 
+// Spec: bass and Poli R16 (Poli's voice budget; this file measures a synth's
+// real-time load)
+#[test]
+fn sixteen_voices_of_poli_render_faster_than_the_device_budget() {
+    use bl_devices::poli::{
+        CHORUS, CIRCUIT, ENV_AMOUNT, LFO_FILTER, LFO_PITCH, LFO_PW, OSC1_SHAPE, OSC2_LEVEL, RES,
+        VOICES, poli_type,
+    };
+    let mut registry = Registry::empty();
+    bl_devices::register(&mut registry);
+    // Every part at work: two pulses, the PRD circuit with resonance, the
+    // envelope and the LFO on three destinations, and the chorus.
+    let params = [
+        (VOICES, 16.0),
+        (OSC1_SHAPE, 2.0),
+        (OSC2_LEVEL, 1.0),
+        (CIRCUIT, 2.0),
+        (RES, 60.0),
+        (ENV_AMOUNT, 50.0),
+        (LFO_PITCH, 10.0),
+        (LFO_PW, 30.0),
+        (LFO_FILTER, 30.0),
+        (CHORUS, 1.0),
+    ];
+    let mut node = node(&registry, &device(&poli_type(), &params), 128);
+    let seconds = 10;
+    let frames = seconds * HZ as usize;
+    let chord: Vec<NoteEvent> = (0..16).map(|i| on(0, 36 + i * 4, 0.8)).collect();
+    let start = Instant::now();
+    let signal = play_blocks(node.as_mut(), frames, 128, &chord);
+    let elapsed = start.elapsed().as_secs_f64();
+    let realtime = seconds as f64 / elapsed;
+    println!(
+        "Poli, 16 voices: {seconds} s of audio in {elapsed:.3} s, {realtime:.0}x real time (debug)"
+    );
+    assert!(rms(&signal) > 0.01, "the chord sounds");
+    if full_depth() {
+        // As Drift's: a debug build on a loaded machine; 16 voices mustn't
+        // eat more than a quarter of the time they play.
+        assert!(
+            realtime >= 4.0,
+            "16 voices ran at {realtime:.1}x real time in a debug build"
+        );
+    }
+}
+
 // ---- WP-2.17, part 2: the LFO, the modulation routes and MPE ----
 
 /// The index of `name` in a chooser's list, as a parameter value.

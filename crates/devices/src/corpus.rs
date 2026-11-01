@@ -940,8 +940,8 @@ pub fn display(device: DeviceId, data: Option<&[f32]>) -> DeviceDisplay {
         live: data.is_some(),
         view: None,
         series: Vec::new(),
-        markers: Vec::new(),
         spectrograms: Vec::new(),
+        markers: Vec::new(),
         readings,
     }
 }

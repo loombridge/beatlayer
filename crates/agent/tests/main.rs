@@ -4,6 +4,7 @@
 //! `cargo xtask check` fails on a file in tests/ that isn't listed.
 
 mod analog;
+mod bass_and_poli;
 mod clip_edge_fades;
 mod comping;
 mod control_surfaces;
@@ -20,6 +21,7 @@ mod linked_tracks;
 mod midi_clock;
 mod midi_effects;
 mod midi_tools;
+mod operator;
 mod perception;
 mod permissions;
 mod plugin_lv2;

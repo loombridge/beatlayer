@@ -1944,3 +1944,55 @@ fn the_cv_modulators_panels_have_a_cv_output_and_min_max_depth_and_no_mapping() 
         h.settle();
     }
 }
+
+// Spec: meld R3, R5, R19 (the macros under the type's names, one engine's
+// controls at a time, and Semitones in scale degrees)
+#[test]
+fn meld_draws_its_macros_under_the_types_names_one_engine_at_a_time() {
+    use bl_devices::meld::{SEMITONES, TYPE, USE_SCALE, param};
+
+    let mut h = harness();
+    let t = bl_devices::meld::meld_type();
+    let device = add(
+        &mut h,
+        json!({ "kind": t.kind, "name": t.name, "role": t.role }),
+    );
+    let set = |h: &mut Harness, id, value: f64| {
+        h.shell
+            .run(
+                "device.set_param",
+                json!({ "device": device, "param": id, "value": value }),
+            )
+            .unwrap();
+    };
+    let labels = |h: &mut Harness| -> Vec<(String, String)> {
+        Harness::nodes(&h.settle())
+            .iter()
+            .map(|n| (n.label.clone(), n.value.clone()))
+            .collect()
+    };
+    let has = |labels: &[(String, String)], name: &str| labels.iter().any(|(l, _)| l == name);
+    // Basic Shapes: Shape and Tone; engine B's controls are on its page.
+    let first = labels(&mut h);
+    assert!(has(&first, "Shape") && has(&first, "Tone"));
+    assert!(has(&first, "A Type") && !has(&first, "B Type"));
+    // Sub names them Tone and Aux, and Semitones read in degrees with Use
+    // Current Scale on.
+    set(&mut h, param(0, TYPE), 5.0);
+    set(&mut h, param(0, SEMITONES), 2.0);
+    let second = labels(&mut h);
+    assert!(has(&second, "Tone") && has(&second, "Aux") && !has(&second, "Shape"));
+    assert!(second.iter().any(|(l, v)| l == "Semitones" && v == "2 st"));
+    set(&mut h, USE_SCALE, 1.0);
+    let third = labels(&mut h);
+    assert!(third.iter().any(|(l, v)| l == "Semitones" && v == "2 sd"));
+    // Showing engine B's page swaps the controls.
+    h.shell
+        .run(
+            "device.set_page",
+            json!({ "device": device, "node": "Engine", "page": "B" }),
+        )
+        .unwrap();
+    let fourth = labels(&mut h);
+    assert!(has(&fourth, "B Type") && !has(&fourth, "A Type"));
+}

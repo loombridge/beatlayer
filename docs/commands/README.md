@@ -9264,6 +9264,7 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
 | `banks` | array of [`Bank`](#bank) | no | The banks the type declares for control surfaces, its main controls first; empty for a type that leaves them to [`DeviceDescription::banks`]' generic ones. They hold neither the menu options nor the title switch. |
 | `display_drag` | array of [`ParamId`](#paramid) | no | The parameter a vertical drag on the display changes, one for each of `views`, in their order (Roar's shaper display drags the shown stage's Shaper Amount); empty for a display that isn't dragged. |
 | `menu_options` | array of [`ParamId`](#paramid) | no | The switches the device lists as its own items in its Show Options menu, after Save as Default Preset (C-DEVICE-015), in this order. They are parameters like any other, but the layout places no control for them. |
+| `relabels` | array of [`Relabel`](#relabel) | no | The parameters whose names follow another parameter's value. |
 | `spectrogram` | [`SpectrogramGrid`](#spectrogramgrid) or null | no | The grid of the spectrogram its display holds, if it holds one (the device framework spec, R46). |
 | `title_switch` | [`ParamId`](#paramid) or null | no | The switch the device draws in its title bar instead of its panel (L-DEV-004): Use Current Scale, on the five scale-aware devices. It is a parameter like any other, which the layout places no control for. |
 | `views` | array of string | no | The views its display offers, such as `Transfer Curve`, the first being the one it starts in; empty for a display with one view. Which is shown is view state (`device.set_display_view`). |
@@ -9310,6 +9311,13 @@ What a kind of device is to the framework: its parameters' descriptors, in the o
       "description": "Its parameters.",
       "items": {
         "$ref": "#/$defs/ParamDescriptor"
+      },
+      "type": "array"
+    },
+    "relabels": {
+      "description": "The parameters whose names follow another parameter's value.",
+      "items": {
+        "$ref": "#/$defs/Relabel"
       },
       "type": "array"
     },
@@ -15471,6 +15479,34 @@ A row, as `set.save_history` reports it.
     "kind",
     "time",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `HitPreviewed`
+
+What `device.preview_hit` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | boolean | yes | Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.preview_hit` returns.",
+  "properties": {
+    "sent": {
+      "description": "Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sent"
   ],
   "type": "object"
 }
@@ -24297,6 +24333,42 @@ One of:
 
 </details>
 
+### `ParamLabel`
+
+What a [`Relabel`] gives a parameter.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `name` | string | yes | Its name. |
+| `unit` | string or null | no | The unit its number reads in instead of its own, as text. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What a [`Relabel`] gives a parameter.",
+  "properties": {
+    "name": {
+      "description": "Its name.",
+      "type": "string"
+    },
+    "unit": {
+      "description": "The unit its number reads in instead of its own, as text.",
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `ParamUnit`
 
 What a parameter's value measures, which says how it reads.
@@ -29666,6 +29738,49 @@ A tuning's reference pitch (the tunings spec, R7): a note, and the frequency in 
     "octave",
     "degree",
     "frequency"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `Relabel`
+
+A parameter whose name, and the unit its value reads in, follow a choice or switch of the same device: Meld's macros are named by their oscillator's type, and its Semitones read in scale degrees while Use Current Scale is on. The parameter keeps its ID, value, lane and place.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `param` | [`ParamId`](#paramid) | yes | The parameter relabelled. |
+| `by` | [`ParamId`](#paramid) | yes | The choice or switch whose value picks the label. |
+| `labels` | array of [`ParamLabel`](#paramlabel) | yes | The labels, by that value; a value past the last takes the last. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A parameter whose name, and the unit its value reads in, follow a choice or switch of the same device: Meld's macros are named by their oscillator's type, and its Semitones read in scale degrees while Use Current Scale is on. The parameter keeps its ID, value, lane and place.",
+  "properties": {
+    "by": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The choice or switch whose value picks the label."
+    },
+    "labels": {
+      "description": "The labels, by that value; a value past the last takes the last.",
+      "items": {
+        "$ref": "#/$defs/ParamLabel"
+      },
+      "type": "array"
+    },
+    "param": {
+      "$ref": "#/$defs/ParamId",
+      "description": "The parameter relabelled."
+    }
+  },
+  "required": [
+    "param",
+    "by",
+    "labels"
   ],
   "type": "object"
 }

@@ -428,6 +428,12 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "device.select_slot",
             main(a_drum_sampler, device_view, "Slot 2", Key::Enter),
         ),
+        // A Drum Synth's display (drum synths R6): Tab to its upper half,
+        // then Enter plays a hit.
+        (
+            "device.preview_hit",
+            main(a_drum_synth, device_view, "Preview Hit", Key::Enter),
+        ),
         // A device's sidechain strip and section (routing R29): Enter on
         // its buttons, Up and Down on its chooser and number boxes.
         (

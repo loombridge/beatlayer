@@ -25,10 +25,12 @@
 
 pub mod alignment_delay;
 pub mod analog;
+mod analogue;
 pub mod arpeggiator;
 pub mod articulation_map;
 pub mod auto_filter;
 pub mod auto_pan_tremolo;
+pub mod bass;
 pub mod beat_repeat;
 pub mod bus_compressor;
 pub mod channel_eq;
@@ -50,6 +52,11 @@ pub mod delay;
 pub mod dice;
 pub mod drum_bus;
 pub mod drum_sampler;
+pub mod drum_synth;
+pub mod ds_clap;
+pub mod ds_kick;
+pub mod ds_snare;
+pub mod ds_tom;
 mod dynamics;
 pub mod echo;
 pub mod eq;
@@ -93,6 +100,7 @@ pub mod phaser_flanger;
 pub mod pitch_hack;
 pub mod pitchloop89;
 pub mod play_mod;
+pub mod poli;
 pub mod polysynth;
 pub mod re_enveloper;
 pub mod remap;
@@ -128,6 +136,7 @@ pub use analog::{ANALOG, Analog, analog_type};
 pub use arpeggiator::{ARPEGGIATOR, arpeggiator_type};
 pub use auto_filter::{AUTO_FILTER, AutoFilter, auto_filter_type};
 pub use auto_pan_tremolo::{AUTO_PAN_TREMOLO, auto_pan_tremolo_type};
+pub use bass::{BASS, bass_type};
 pub use beat_repeat::{BEAT_REPEAT, beat_repeat_type};
 pub use bus_compressor::{BUS_COMPRESSOR, Bond, bus_compressor_type};
 pub use channel_eq::{CHANNEL_EQ, Strip, channel_eq_type};
@@ -176,6 +185,7 @@ pub use pedal::{PEDAL, pedal_type};
 pub use phaser_flanger::{PHASER_FLANGER, phaser_flanger_type};
 pub use pitch_hack::{PITCH_HACK, pitch_hack_type};
 pub use pitchloop89::{PITCHLOOP89, pitchloop89_type};
+pub use poli::{POLI, poli_type};
 pub use polysynth::{POLYSYNTH, PolySynth, polysynth_type};
 pub use re_enveloper::{RE_ENVELOPER, ReEnveloper, re_enveloper_type};
 pub use remap::{REMAP, remap_type};
@@ -258,6 +268,10 @@ pub fn display_in(
         AUTO_FILTER => Some(auto_filter::display(device, description, values, data)),
         AUTO_PAN_TREMOLO => Some(auto_pan_tremolo::display(device, description, values, data)),
         DRUM_BUSS => Some(drum_bus::display(device, description, values, data)),
+        ds_kick::DS_KICK => Some(ds_kick::display(device, description, values)),
+        ds_snare::DS_SNARE => Some(ds_snare::display(device, description, values)),
+        ds_tom::DS_TOM => Some(ds_tom::display(device, description, values)),
+        ds_clap::DS_CLAP => Some(ds_clap::display(device, description, values)),
         SATURATOR => Some(saturator::display(device, description, values, data)),
         OVERDRIVE => Some(overdrive::display(device, description, values, data)),
         TUBE => Some(tube::display(device, description, values, data)),
@@ -349,6 +363,10 @@ pub fn register(registry: &mut Registry) {
     sampler::register(registry);
     multisampler::register(registry);
     drum_sampler::register(registry);
+    ds_kick::register(registry);
+    ds_snare::register(registry);
+    ds_tom::register(registry);
+    ds_clap::register(registry);
     kitbag::register(registry);
     modulator::register(registry);
     level_mod::register(registry);
@@ -406,6 +424,8 @@ pub fn register(registry: &mut Registry) {
     pitchloop89::register(registry);
     vector_delay::register(registry);
     vocoder::register(registry);
+    bass::register(registry);
+    poli::register(registry);
     spectral_blur::register(registry);
 }
 

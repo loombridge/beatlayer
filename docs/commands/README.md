@@ -82,6 +82,7 @@ The commands, by the part of their ID before its first dot:
 - [`track`](track.md)
 - [`transport`](transport.md)
 - [`tuning`](tuning.md)
+- [`video`](video.md)
 - [`view`](view.md)
 - [`window`](window.md)
 
@@ -1814,6 +1815,7 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
 | `tempo_leader` | boolean | no | The Lead/Follow switch (the warping spec, R43): whether this Arrangement clip leads the set's tempo instead of following it. Off unless given, a follower. Only a warped Arrangement clip can lead. |
 | `transient_edits` | [`TransientEdits`](#transientedits) | no | The clip's edits to its file's detected transients (the warping spec, R23): none unless given. They belong to the file, so replacing the file drops them (R27). |
 | `transpose` | integer from -48 to 48 | no | The clip's Transpose, in whole semitones, from −48 to 48 (R2): 0 unless given. It shifts the clip's pitch in every mode but Re-Pitch (R10, R26). |
+| `video` | boolean | no | Whether the clip is a video clip (the video spec, R5): its media is a QuickTime movie, whose sound the clip plays and whose picture follows the sound's time. Off unless given; only an Arrangement clip is one. |
 | `warp` | boolean | no | The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file. |
 | `warp_markers` | array of [`WarpMarker`](#warpmarker) | no | The warp markers, in increasing order of both fields: a warped clip has at least one. Switching Warp off keeps them (R3). |
 | `warp_mode` | [`WarpMode`](#warpmode) | no | The warp mode (the warp modes spec, R1): Beats unless given. An unwarped clip keeps it for when Warp goes back on. |
@@ -1955,6 +1957,10 @@ An audio clip's data: the audio file it plays, named by content hash, and how it
       "maximum": 48,
       "minimum": -48,
       "type": "integer"
+    },
+    "video": {
+      "description": "Whether the clip is a video clip (the video spec, R5): its media is a QuickTime movie, whose sound the clip plays and whose picture follows the sound's time. Off unless given; only an Arrangement clip is one.",
+      "type": "boolean"
     },
     "warp": {
       "description": "The Warp switch (the warping spec, R1): off unless given. On, the clip follows the set's tempo through its warp map, and `start`, `end`, `loop_start` and `loop_end` are whole ticks of its contents, counted from the clip's 1.1.1, instead of seconds in the file.",
@@ -8464,6 +8470,41 @@ One of:
 
 </details>
 
+### `Cue`
+
+A cue the Sample Editor shows (the video spec, R12): a marker embedded in a video clip's movie.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `time` | number | yes | Where it is in the movie, in seconds. |
+| `name` | string | yes | The name the movie gives it. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "A cue the Sample Editor shows (the video spec, R12): a marker embedded in a video clip's movie.",
+  "properties": {
+    "name": {
+      "description": "The name the movie gives it.",
+      "type": "string"
+    },
+    "time": {
+      "description": "Where it is in the movie, in seconds.",
+      "format": "double",
+      "type": "number"
+    }
+  },
+  "required": [
+    "time",
+    "name"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `CvCalibration`
 
 A calibration: `octaves_per_volt` and `hz_at_zero_volts` of the fitted line and the `steps` it was fitted to, each with the pitch it gave and its error in cents.
@@ -14110,6 +14151,72 @@ What `tempo_follower.set_enabled` and `settings.set_show_tempo_follower_toggle` 
 
 </details>
 
+### `FrameAt`
+
+What `video.frame_at` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `clip` | [`ClipId`](#clipid) or null | yes | The video clip, or `null` where none plays: the picture is black. |
+| `movie_time` | number or null | yes | The time in the movie, in seconds, the clip plays at `at`, through its warp map, or the `movie_time` asked for; `null` outside the clip or before the movie. |
+| `frame` | integer or null | yes | The index of the movie's frame shown then, counting from 0 in the order they show; `null` where the movie has no picture: black. |
+| `frame_time` | number or null | yes | When that frame starts to show on the movie's timeline, in seconds. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `video.frame_at` returns.",
+  "properties": {
+    "clip": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ClipId"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The video clip, or `null` where none plays: the picture is black."
+    },
+    "frame": {
+      "description": "The index of the movie's frame shown then, counting from 0 in the order they show; `null` where the movie has no picture: black.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "frame_time": {
+      "description": "When that frame starts to show on the movie's timeline, in seconds.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "movie_time": {
+      "description": "The time in the movie, in seconds, the clip plays at `at`, through its warp map, or the `movie_time` asked for; `null` outside the clip or before the movie.",
+      "format": "double",
+      "type": [
+        "number",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "clip",
+    "movie_time",
+    "frame",
+    "frame_time"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
 ### `FreezeResult`
 
 What a freeze did.
@@ -15360,6 +15467,34 @@ A row, as `set.save_history` reports it.
     "kind",
     "time",
     "label"
+  ],
+  "type": "object"
+}
+```
+
+</details>
+
+### `HitPreviewed`
+
+What `device.preview_hit` returns.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `sent` | boolean | yes | Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays. |
+
+<details><summary>JSON Schema</summary>
+
+```json
+{
+  "description": "What `device.preview_hit` returns.",
+  "properties": {
+    "sent": {
+      "description": "Whether the audio engine took it: it is off, or has no such device, when this is `false`, and nothing plays.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "sent"
   ],
   "type": "object"
 }
@@ -31777,6 +31912,7 @@ What the Sample Editor shows and has selected, for the clip it shows.
 | `time_selection` | array or null | yes | The time selection's start and end, if there is one. |
 | `view` | array or null | yes | The span shown, in seconds in the file, or in ticks of the clip's contents when it is warped (`warped`); `null` shows the whole file. |
 | `fit_height` | boolean | yes | Whether the waveform is fitted to the editor's height. |
+| `cues` | array of [`Cue`](#cue) | yes | The markers embedded in a video clip's movie, shown as cues that can't be moved (the video spec, R12); none for any other clip. |
 
 <details><summary>JSON Schema</summary>
 
@@ -31794,6 +31930,14 @@ What the Sample Editor shows and has selected, for the clip it shows.
         }
       ],
       "description": "The audio clip the editor shows; `null` when it shows none."
+    },
+    "cues": {
+      "default": [],
+      "description": "The markers embedded in a video clip's movie, shown as cues that can't be moved (the video spec, R12); none for any other clip.",
+      "items": {
+        "$ref": "#/$defs/Cue"
+      },
+      "type": "array"
     },
     "fit_height": {
       "description": "Whether the waveform is fitted to the editor's height.",
@@ -31881,7 +32025,8 @@ What the Sample Editor shows and has selected, for the clip it shows.
     "insert_marker",
     "time_selection",
     "view",
-    "fit_height"
+    "fit_height",
+    "cues"
   ],
   "type": "object"
 }

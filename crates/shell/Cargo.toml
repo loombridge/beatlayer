@@ -49,6 +49,7 @@ bl-model.workspace = true
 bl-plugin-host.workspace = true
 bl-project.workspace = true
 bl-shell-spec.workspace = true
+bl-video.workspace = true
 # The agent server's token (WP-1.15): the operating system's secure random
 # source. The version egui's hashing already brings in, so nothing new enters
 # the build.

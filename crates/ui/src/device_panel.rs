@@ -402,6 +402,23 @@ pub fn show(
             continue;
         }
         let _ = ui.interact(rect, id, Sense::hover());
+        // Spec: drum-synths R6. A click in the upper half of a Drum Synth's
+        // display plays a hit.
+        if bl_devices::drum_synth::is_drum_synth(&frame.kind)
+            && name == bl_devices::drum_synth::ENVELOPE
+        {
+            let upper = Rect::from_min_max(rect.min, pos2(rect.right(), rect.center().y));
+            let preview = id.with("preview");
+            let response = ui.interact(upper, preview, Sense::click());
+            crate::focus::register(ui.ctx(), preview, bl_shell::Area::Detail, None);
+            response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Preview Hit"));
+            if response.clicked() {
+                events.push(UiEvent::Invoke(Invocation::new(
+                    "device.preview_hit",
+                    json!({ "device": frame.id }),
+                )));
+            }
+        }
         // Spec: modulation R15, R23. A modulator's cells show its slots'
         // mappings and, for the Shaper, its shape.
         if let Some(modulator) = &frame.modulator {

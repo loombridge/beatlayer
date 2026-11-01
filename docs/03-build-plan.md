@@ -997,7 +997,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.13 | todo |  |  |
 | 8.14 | done | 1 November 2026 | [#731](https://github.com/loombridge/beatlayer/pull/731): Analog has two band-limited oscillators (sine, saw, rectangle with pulse width, noise) with sub, sync and a pitch envelope, the noise generator with Color, two filters with ten modes, Drive, key tracking and serial or parallel routing, two amplifiers with pan, and four envelopes with their loop modes, on the shell-and-display pages; the LFO amounts act on nothing until part 2, and factory presets wait on a preset mechanism |
 | 8.15 | todo |  |  |
-| 8.16 | todo |  |  |
+| 8.16 | done | 1 November 2026 | [#729](https://github.com/loombridge/beatlayer/pull/729): Bass, a monophonic synthesiser with legato glide and no retrigger, and Poli, a polyphonic one with detunable oscillators, its modulation section and the Chorus-Ensemble core as its chorus, on the instruments' voice section and filter, listed under Instruments with banks holding every parameter; their presets exist as code with no loader yet, and exact block-size identity while pitch moves waits on the kit as for Drift |
 | 8.17 | todo |  |  |
 | 8.18 | todo |  |  |
 | 8.19 | todo |  |  |
@@ -1005,7 +1005,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.21 | todo |  |  |
 | 8.22 | todo |  |  |
 | 8.23 | todo |  |  |
-| 8.24 | todo |  |  |
+| 8.24 | done | 1 November 2026 | [#734](https://github.com/loombridge/beatlayer/pull/734): DS Kick, DS Snare, DS Tom and DS Clap, drum voices on a shared drum-synth core with the manual's controls and an envelope display, playing from a Drum Rack pad and choking with its group, listed under Instruments with banks holding every parameter; their presets exist as code with no loader yet |
 | 8.25 | todo |  |  |
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |
@@ -1058,7 +1058,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.22 | todo |  |  |
 | 9.23 | todo |  |  |
 | 9.24 | done | 1 November 2026 | [#665](https://github.com/loombridge/beatlayer/pull/665): a new `bl-video` crate reads QuickTime movies with exact frame times and edit lists, decodes frames ahead of the playhead on a video thread through VideoToolbox, Media Foundation, FFmpeg or its own MJPEG decoder, decodes the movie's audio through `bl-media`, and gives black and silence in gaps |
-| 9.25 | todo |  |  |
+| 9.25 | done | 1 November 2026 | [#689](https://github.com/loombridge/beatlayer/pull/689): a movie dropped on an audio track in the Arrangement becomes a video clip (an audio clip with a video flag, schema 14) with warp and Lead on, sprocket holes and the movie's chapter markers as cues; Session slots, Reverse, Crop, Consolidate and stems give audio clips and leave the movie untouched; DAWproject video timelines import as video clips; `video.frame_at` reads the frame through the warp map, the bottom-most leader leading; Live set video clips (R66) wait on the Live set importer |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |
 | 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |

@@ -174,6 +174,7 @@ mod transport;
 mod tunings;
 mod tunings_browser;
 mod undo_history;
+mod video_clips;
 mod warping;
 mod wavetables;
 mod whole_tracks;

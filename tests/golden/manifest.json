@@ -349,9 +349,9 @@
       "made_on": "macos-aarch64",
       "sample_rate": 48000,
       "channels": 2,
-      "frames": 288000,
+      "frames": 216000,
       "bits": 24,
-      "render_hash": "fnv1a64:afc28cae8412384d"
+      "render_hash": "fnv1a64:ebaf26b329d2bbc5"
     },
     "fader-gesture": {
       "made_on": "macos-aarch64",

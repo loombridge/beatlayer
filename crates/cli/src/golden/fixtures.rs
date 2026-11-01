@@ -969,7 +969,7 @@ fn electric() -> Scene {
         (TINE_COLOR, 20.0),
         (SYMMETRY, 35.0),
         (DISTANCE, 30.0),
-        (RELEASE, 600.0),
+        (RELEASE, 350.0),
     ] {
         device.params.insert(param, value);
     }
@@ -1007,7 +1007,7 @@ fn electric() -> Scene {
             ClipData::Midi(bl_model::MidiData::new(notes)),
         ),
     });
-    song.finish(6.0)
+    song.finish(4.5)
 }
 
 /// Spec: echo R19. A drum loop through Echo with every stage on.

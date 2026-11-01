@@ -158,9 +158,16 @@ fn difference(ours: &[i32], reference: &[i32]) -> (usize, f64) {
 
 /// Whether a fixture plays as a saved set plays: from the start, nothing
 /// scheduled, and (since an export plays straight through) its loop off.
+///
+/// A fixture whose device reports latency is left out: an export lines the
+/// song up with song time by dropping the main output's leading latency (the
+/// delay compensation spec, R10), and the golden render keeps it.
 fn exports_as_rendered(fixture: &Fixture) -> bool {
+    const REPORTS_LATENCY: [&str; 1] = ["electric"];
     let scene = fixture.scene();
-    scene.plays_as_saved() && !scene.document().settings().arrangement_loop.enabled
+    scene.plays_as_saved()
+        && !scene.document().settings().arrangement_loop.enabled
+        && !REPORTS_LATENCY.contains(&fixture.name)
 }
 
 /// Spec: export R2, R4, R12.

@@ -572,6 +572,7 @@ impl DeviceView {
                 banks: Vec::new(),
                 spectrogram: None,
                 alternates: Vec::new(),
+                relabels: Vec::new(),
             },
             plugin: true,
             configured: knob_params,
@@ -704,12 +705,20 @@ impl DeviceView {
                     )
                 })
                 .flatten();
+                // Spec: meld R3, R5. A relabelled parameter reads under its
+                // label's name and unit.
+                let read = |id| {
+                    description
+                        .value(&device.params, id)
+                        .or_else(|| description.param(id).map(|p| p.default))
+                        .unwrap_or_default()
+                };
                 description
                     .params
                     .iter()
                     .map(|p| {
                         let value = description.value(&device.params, p.id).unwrap_or(p.default);
-                        let mut text = p.format(value);
+                        let mut text = description.text(&read, p, value);
                         if capped == Some(p.id) {
                             text.push_str(&format!(
                                 " (held at {} s)",
@@ -717,7 +726,7 @@ impl DeviceView {
                             ));
                         }
                         ParameterState {
-                            descriptor: p.clone(),
+                            descriptor: description.described(&read, p).into_owned(),
                             value,
                             text,
                             menu_option: description.menu_options.contains(&p.id),

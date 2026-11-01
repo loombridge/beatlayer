@@ -80,6 +80,8 @@ pub mod lfo;
 pub mod lift;
 pub mod limiter;
 pub mod looper;
+pub mod meld;
+mod meld_osc;
 pub mod midi_cc;
 mod midi_fx;
 pub mod midi_monitor;
@@ -344,6 +346,7 @@ pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     corpus::register(registry);
     polysynth::register(registry);
+    meld::register(registry);
     operator::register(registry);
     analog::register(registry);
     limiter::register(registry);

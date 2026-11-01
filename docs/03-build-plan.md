@@ -972,7 +972,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.22 | todo |  |  |
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
-| 7.25 | todo |  |  |
+| 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
 | 7.27 | todo |  |  |
 | 7.28 | done | 31 October 2026 | [#635](https://github.com/loombridge/beatlayer/pull/635): Session Mode on Push 2 launches, records and colours slots from the pads and scenes from the scene buttons, moves the ring with the arrows, Octave and Page, runs Stop Clip in every mode and shows the Session Overview, read back in `push.state`; R71 comes with Clip Mode (WP-7.27) |

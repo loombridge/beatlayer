@@ -194,3 +194,78 @@ fn an_agent_sets_the_pad_layout_and_reads_the_melodic_state() {
         "{read}"
     );
 }
+
+// Spec: push-2-notes R48, R50, R54, R55, R56. An agent sets Fixed Length and
+// the swing amount, presses Accent and Repeat on a simulated Push 2, and reads
+// them and Record's state back in `push.state`.
+#[test]
+fn an_agent_reads_recording_state_and_sets_fixed_length_and_swing() {
+    let test = TestBackend::new();
+    let clock = TestClock::new();
+    let mut sim = Simulated::new(&test, &clock);
+    let mut shell = Shell::headless();
+    shell.use_midi_backend(Box::new(test.clone()));
+    shell.use_test_clock(clock.clone());
+    shell.use_push_display(sim.frames().claim());
+    let track = shell
+        .editor()
+        .document()
+        .tracks()
+        .find(|t| t.kind() == TrackKind::Midi)
+        .map(bl_model::Track::id)
+        .unwrap();
+    shell
+        .invoke("arrangement.select_tracks", json!({ "tracks": [track] }))
+        .unwrap();
+    sim.plug_in();
+    shell.refresh_midi();
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("test-agent").unwrap();
+    let settle = |client: &mut Client<InProcess>, sim: &mut Simulated| {
+        for _ in 0..6 {
+            client.transport().shell.poll();
+            client.transport().shell.midi().surfaces().tick();
+            loop {
+                run(client, "control_surface.list", json!({}));
+                if sim.pump() == 0 {
+                    break;
+                }
+            }
+            clock.advance(std::time::Duration::from_millis(30));
+        }
+    };
+    settle(&mut client, &mut sim);
+
+    let push = run(&mut client, "push.state", json!({}))["pushes"][0].clone();
+    let recording = &push["recording"];
+    assert_eq!(recording["record"], "off", "{push}");
+    assert_eq!(
+        recording["fixed_length"],
+        json!({ "on": false, "length": "1 bar", "phrase_sync": false })
+    );
+    assert_eq!(recording["swing"], 0);
+    assert_eq!(push["note"]["accent"], false);
+    assert_eq!(push["note"]["repeat"], false);
+
+    run(
+        &mut client,
+        "push.set_fixed_length",
+        json!({ "enabled": true, "length": "8 bars", "phrase_sync": true }),
+    );
+    run(&mut client, "push.set_swing", json!({ "amount": 40 }));
+    for button in ["accent", "repeat"] {
+        assert!(sim.press(button));
+        settle(&mut client, &mut sim);
+        assert!(sim.let_go(button));
+        settle(&mut client, &mut sim);
+    }
+    let push = run(&mut client, "push.state", json!({}))["pushes"][0].clone();
+    assert_eq!(
+        push["recording"]["fixed_length"],
+        json!({ "on": true, "length": "8 bars", "phrase_sync": true }),
+        "{push}"
+    );
+    assert_eq!(push["recording"]["swing"], 40);
+    assert_eq!(push["note"]["accent"], true);
+    assert_eq!(push["note"]["repeat"], true);
+}

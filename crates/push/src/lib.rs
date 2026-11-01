@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use bl_control::{Kind, Ring};
 
+pub mod automation;
 pub mod browse;
 pub mod buttons;
 pub mod clip;
@@ -25,6 +26,7 @@ pub mod mix;
 pub mod note;
 pub mod paint;
 pub mod ports;
+pub mod recording;
 pub mod screen;
 pub mod session;
 pub mod sim;

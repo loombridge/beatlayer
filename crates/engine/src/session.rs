@@ -297,6 +297,18 @@ pub enum SessionCommand {
     ///
     /// [`RecordingPlan::session`]: crate::RecordingPlan::session
     Record,
+    /// Starts the Session recording as [`SessionCommand::Record`] does, and
+    /// ends it on its own `length` ticks after the take starts, launching
+    /// the new clips there (the notes on Push 2 spec, R51). With
+    /// `phrase_sync` the take lasts only to the end of the phrase of that
+    /// length the song position is in, counted from the song's start.
+    RecordFixed {
+        /// How long the clip is.
+        length: Ticks,
+        /// Whether the take starts at the place in the clip the song
+        /// position has in a phrase of that length.
+        phrase_sync: bool,
+    },
     /// Ends the Session recording on the next grid line: the new clips it
     /// made play on as loops from there (WP-3.11).
     StopRecording,
@@ -583,6 +595,24 @@ impl SessionLauncher {
     /// global grid (R26).
     pub(crate) fn frame_for(&self, playhead: Playhead<'_>) -> Frames {
         playhead.frames(self.line_for(None, playhead))
+    }
+
+    /// The song frames a take that lasts `length` ticks starts and ends at:
+    /// the grid line it starts on, and the end of the phrase from there
+    /// (the notes on Push 2 spec, R51).
+    pub(crate) fn fixed_take(
+        &self,
+        playhead: Playhead<'_>,
+        length: Ticks,
+        phrase_sync: bool,
+    ) -> (Frames, Frames) {
+        let line = self.line_for(None, playhead);
+        let left = if phrase_sync {
+            length - Ticks(line.0.rem_euclid(length.0))
+        } else {
+            length
+        };
+        (playhead.frames(line), playhead.frames(line + left))
     }
 
     /// Whether Repeat has a step to repeat at: with quantisation off it acts

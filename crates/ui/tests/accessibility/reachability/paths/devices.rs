@@ -671,6 +671,33 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
                  (sampler R22)",
             )),
         ),
+        // An instrument's modulation matrix (WP-8.4): the route commands are
+        // the Matrix tabs' grids, which come with Wavetable and Meld; the
+        // model's commands write a slot as given.
+        (
+            "device.write_route",
+            Exception(Equivalent(
+                "`device.set_route`, which checks the names against the device's matrix",
+            )),
+        ),
+        (
+            "device.erase_route",
+            Exception(Equivalent(
+                "`device.clear_route`, which puts the slot's amount back to 0 %",
+            )),
+        ),
+        (
+            "device.set_route",
+            Exception(LaterView(
+                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            )),
+        ),
+        (
+            "device.clear_route",
+            Exception(LaterView(
+                "the Matrix tabs of Wavetable and Meld (WP-8.10, WP-8.20)",
+            )),
+        ),
         // Manual slicing in the sample display, and the Warp controls
         // (WP-5.15b): the slicing gestures have no keyboard form yet, and
         // the Warp controls are in the Device View's Tab order.

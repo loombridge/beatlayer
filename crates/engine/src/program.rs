@@ -361,6 +361,13 @@ impl Instance {
         }
     }
 
+    /// What a device's matrix moved in the instance's last block.
+    fn matrix_played(&self, report: &mut dyn FnMut(ParamId, f64, f64)) {
+        if let Self::Device(node) = self {
+            node.matrix_played(report);
+        }
+    }
+
     /// Hands the instance node data, whatever it is: a route takes the
     /// envelope driving its level (WP-2.12) the way a node does.
     pub(crate) fn receive_data(&mut self, data: NodeData) {
@@ -1185,6 +1192,25 @@ impl EngineProgram {
         for slot in self.slots.iter() {
             let Some(instance) = &slot.node else { continue };
             instance.modulated(&mut |param, base, played| {
+                if out.len() < out.capacity() {
+                    out.push(PlayedParam {
+                        node: slot.key,
+                        param,
+                        base,
+                        played,
+                    });
+                }
+            });
+        }
+    }
+
+    /// Adds to `out`, up to its capacity, every parameter an instrument's
+    /// matrix moved in the last block, with the value it played for the
+    /// newest voice. Real-time safe: `out` was made with room for them.
+    pub(crate) fn matrix_played(&self, out: &mut Vec<PlayedParam>) {
+        for slot in self.slots.iter() {
+            let Some(instance) = &slot.node else { continue };
+            instance.matrix_played(&mut |param, base, played| {
                 if out.len() < out.capacity() {
                     out.push(PlayedParam {
                         node: slot.key,

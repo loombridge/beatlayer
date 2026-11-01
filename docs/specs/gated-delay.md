@@ -21,14 +21,14 @@ Live's Gated Delay comes in its Creative Extensions pack as a Max device; Beatla
 ## Rules
 
 - **R1.** Gated Delay (`beatlayer.gated_delay`) is an audio effect with Live's name, Beatlayer's own layout and one display cell, the step row (R9). (S1; the layout is Beatlayer's own)
-- **R2.** The sequencer has 16 steps, each a switch parameter (Step 1 to Step 16; steps 1, 4, 7, 11 and 14 on in a new device), automatable (rule G2); Steps (1 to 16, 16) sets how many play before the row repeats, and Rate (1/32, 1/16, 1/8, 1/4 note, with triplet and dotted forms; 1/16 by default) the length of a step. Step 1 begins on each bar line, counted on the song's grid through the tempo map, so a step opens on its frame at any tempo and block size. (S1, S2; the count, the defaults and the bar alignment are Beatlayer's own)
+- **R2.** The sequencer has 16 steps, each a switch parameter (Step 1 to Step 16; steps 1, 4, 7, 11 and 14 on in a new device), automatable (rule G2); Steps (1 to 16, 16) sets how many play before the row repeats, and Rate (1/32, 1/16, 1/8, 1/4 note, with triplet and dotted forms; 1/16 by default) the length of a step. Step 1 begins on each bar line, counted on the song's grid through the tempo map, so a step opens on its frame at any tempo and block size. The sequencer runs while the song is stopped, counting on from where the song stands. (S1, S2; the count, the defaults and the bar alignment are Beatlayer's own)
 - **R3.** While a step is on, the input (raised by Input, a gain from −∞ to +12 dB, 0 dB, rule G1 and IMP-08) enters the delay line; while it is off nothing enters, the gate opening and closing over 2 ms so no click is heard. (S1; the ramp is Beatlayer's own)
 - **R4.** The delay's time is Delay Steps (1 to 16, 3) steps of Rate, so an echo lands exactly that many steps after its step, through the tempo map. Feedback, 0 to 100 % (40 %), returns the line's output to its input; the echoes already in the line repeat whether the current step is on or off. (S1, S2; the ranges are Beatlayer's own)
 - **R5.** With Dry on Rests on (the default), the dry signal plays during off steps and the gate's on steps send it only to the delay; with it off, the dry signal plays throughout. (S1; the reading is Beatlayer's own)
 - **R6.** Random, 0 to 100 % (0), is the chance each step is turned over for one pass of the row, drawn at the start of each pass from the device's seed (device framework R29) counted from the song's bar, so a render repeats run after run and the same bar draws the same steps. The step switches themselves aren't changed. (S1, S2; the law is Beatlayer's own)
 - **R7.** Dry/Wet, 0 to 100 % (50 %), balances the dry signal against the echoes. (S1; Beatlayer's own)
 - **R8.** The delay line is made with the node for 16 steps of a dotted quarter note at the slowest tempo the transport allows; nothing on the audio thread allocates, locks or blocks. A render is bit-identical at block sizes 1, 64, 512 and 4,096. (S2)
-- **R9.** The step row draws the 16 steps lit while on and the playing step marked; a click turns a step over, one undo step named after it. Its data (the steps, the playing step, which steps Random turned over this pass) is published and read by `device.display`. (S2; the look is Beatlayer's own)
+- **R9.** The step row draws the 16 steps lit while on, in two rows of eight, and the playing step marked; a click turns a step over, one undo step named after it (the switches are the step row cell's own controls, so a click is a change of the parameter). Its data (the steps, the playing step, which steps Random turned over this pass) is published and read by `device.display`. (S2; the look is Beatlayer's own)
 - **R10.** Every parameter is automatable and modulatable (rule G2) and set and read back through the agent API; every gain reaches −∞ dB. (S2)
 - **R11.** Gated Delay declares its banks of eight ([control surfaces](control-surfaces.md) R19): Main (Steps, Rate, Delay Steps, Feedback, Random, Dry on Rests, Input, Dry/Wet), Steps 1–8 and Steps 9–16. (S2; Beatlayer's own)
 - **R12.** A set with the device saves and reopens with every parameter. (S2)
@@ -37,8 +37,14 @@ Live's Gated Delay comes in its Creative Extensions pack as a Max device; Beatla
 
 | Rule | Test | Kind |
 |---|---|---|
-| R1, R2 | to be written in WP-8.51 | unit (description; steps on their frames through a tempo change at four block sizes) |
-| R3 to R7 | to be written in WP-8.51 | unit (the gate's ramp; echoes at Delay Steps; Feedback; Dry on Rests; Random follows the seed run after run; Input at −∞) |
-| R8 | to be written in WP-8.51 | real-time trap; golden renders at four block sizes |
-| R9 | to be written in WP-8.51 | agent API (`device.display`); UI script (a click is one undo step) |
-| R10 to R12 | to be written in WP-8.51 | `crates/devices/tests/rules.rs`; agent API; `crates/devices/tests/banks.rs`; save and reopen |
+| R1, R2, R11 | `crates/devices/tests/gated_delay.rs`, `gated_delay_is_described_with_its_steps_in_the_layout_and_no_latency`, `the_gate_opens_on_its_steps_frames_through_a_tempo_change_at_four_block_sizes`, `step_one_begins_on_each_bar_line_whatever_the_rows_length` | unit |
+| R3 | `crates/devices/tests/gated_delay.rs`, `the_gate_ramps_over_two_milliseconds_so_no_click_is_heard`, `input_reaches_silence_and_gains_up_to_twelve_decibels` | unit |
+| R4 | `crates/devices/tests/gated_delay.rs`, `an_echo_lands_delay_steps_later_and_only_from_an_on_step`, `feedback_repeats_the_echoes_on_whether_the_step_is_on_or_off` | unit |
+| R5 | `crates/devices/tests/gated_delay.rs`, `dry_on_rests_plays_the_dry_signal_on_the_off_steps_only` | unit |
+| R6 | `crates/devices/tests/gated_delay.rs`, `random_turns_steps_over_by_the_seed_and_the_bar_so_a_render_repeats` | unit |
+| R7 | `crates/devices/tests/gated_delay.rs`, `dry_on_rests_plays_the_dry_signal_on_the_off_steps_only`, `an_echo_lands_delay_steps_later_and_only_from_an_on_step` | unit |
+| R8 | `crates/devices/tests/gated_delay.rs`, `renders_are_bit_identical_at_four_block_sizes_and_run_after_run`; `rtsan/tests/devices.rs`, `gated_delay_and_pitch_hack_pass_under_rtsan` | unit, real-time trap, RealtimeSanitizer |
+| R9 | `crates/devices/tests/gated_delay.rs`, `the_step_row_publishes_its_steps_the_pass_and_the_step_playing`; `crates/ui/tests/gated_delay.rs`, `a_click_on_a_step_turns_it_over_as_one_undo_step_and_the_row_reads_back`; `crates/cli/tests/agent.rs`, `an_agent_adds_sets_and_reads_gated_delay_and_pitch_hack_and_reopens_them` | unit, UI script, agent API |
+| R10 | `crates/devices/tests/rules.rs`, `every_parameter_is_automatable_to_the_frame`, `every_parameter_is_modulatable_to_the_frame`, `every_gain_parameter_reaches_minus_infinity`; the agent test above | unit, agent API |
+| R11 | `crates/devices/tests/banks.rs`, `every_native_device_types_banks_hold_every_parameter_and_none_more_than_eight` | unit |
+| R12 | `crates/cli/tests/agent.rs`, `an_agent_adds_sets_and_reads_gated_delay_and_pitch_hack_and_reopens_them` | agent API |

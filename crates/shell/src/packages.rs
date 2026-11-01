@@ -602,6 +602,28 @@ mod tests {
         }
     }
 
+    // Spec: audio-to-midi R18. Audio to MIDI needs the pitch model and the
+    // runtime stem separation uses, the same package.
+    #[test]
+    fn the_built_in_manifest_gives_audio_to_midi_the_pitch_model_and_the_shared_runtime() {
+        let manifest = Manifest::parse(BUILT_IN).unwrap();
+        let pitch = manifest.for_role("pitch-model", None).unwrap();
+        assert_eq!(pitch.id, "basic-pitch");
+        assert!(pitch.size > 0 && pitch.sha256.len() == 64);
+        if let Some(runtime) = manifest.for_role("onnx-runtime", None) {
+            assert_eq!(
+                manifest.features_needing(&runtime),
+                ["stems", "audio-to-midi"]
+            );
+            let roles: Vec<_> = manifest
+                .feature_packages("audio-to-midi", None)
+                .iter()
+                .map(|p| p.role.clone())
+                .collect();
+            assert_eq!(roles, ["onnx-runtime", "pitch-model"]);
+        }
+    }
+
     // Spec: stem-separation R21. The file `BL_PACKAGES_MANIFEST` names
     // replaces the built-in manifest.
     #[test]

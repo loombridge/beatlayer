@@ -96,6 +96,7 @@ pub mod mixer_view;
 mod modulation;
 pub mod multi_clip;
 pub mod note_filters;
+pub mod packages;
 pub mod perception;
 pub mod permission;
 pub mod placeholders;
@@ -194,6 +195,9 @@ pub use bl_shell_spec::note_filters as note_filter_commands;
 /// The Clip View's note-editing command IDs and their argument and result
 /// types (WP-2.3).
 pub use bl_shell_spec::notes as note_commands;
+/// The Packages manager's command IDs and their argument and result types
+/// (WP-9.1).
+pub use bl_shell_spec::packages as package_commands;
 /// A drum rack's pad view and the commands on pads (WP-5.6).
 pub use bl_shell_spec::pads as pad_commands;
 /// The perception commands' IDs and their argument and result types

@@ -1236,6 +1236,33 @@ fn echo_passes_under_rtsan() {
     );
 }
 
+// Spec: resonators R11
+#[test]
+fn resonators_passes_under_rtsan() {
+    use bl_devices::resonators::*;
+    run_lo_fi_device(
+        RESONATORS,
+        &[
+            (FILTER_TYPE, &[0.0, 1.0, 2.0, 3.0]),
+            (FILTER_FREQ, &[50.0, 1_000.0, 18_000.0]),
+            (MODE, &[0.0, 1.0]),
+            (DECAY, &[0.01, 1.0, 30.0]),
+            (CONST, &[0.0, 1.0]),
+            (COLOR, &[-100.0, 0.0, 100.0]),
+            (USE_SCALE, &[0.0, 1.0]),
+            (WIDTH, &[0.0, 100.0]),
+            (GAIN, &[0.0, 1.0, 3.9]),
+            (DRY_WET, &[0.0, 50.0, 100.0]),
+            (voice_param(0, PITCH), &[0.0, 60.0, 84.0]),
+            (voice_param(0, FINE), &[-50.0, 50.0]),
+            (voice_param(1, PITCH), &[-24.0, 12.0, 24.0]),
+            (voice_param(3, ON), &[1.0, 0.0]),
+            (voice_param(4, ON), &[1.0, 0.0]),
+            (voice_param(2, LEVEL), &[0.0, 1.0]),
+        ],
+    );
+}
+
 // Spec: auto-pan-tremolo R15
 #[test]
 fn auto_pan_tremolo_passes_under_rtsan() {

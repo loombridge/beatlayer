@@ -651,6 +651,12 @@ impl Push {
                     self.display_mode = DisplayMode::Browse;
                     self.enter(Enter::AddTrack, cx);
                 }
+                // Add Device leads to Browse Mode with every device the
+                // track can hold (push-2-tracks R25).
+                if button == cc::ADD_DEVICE {
+                    self.display_mode = DisplayMode::Browse;
+                    self.enter(Enter::AddDevice, cx);
+                }
                 // Stop Clip stops the selected track's clip (push-2-tracks
                 // R68).
                 if button == cc::STOP_CLIP
@@ -1503,6 +1509,7 @@ impl Push {
         snapshot.setup = self.shared.setup();
         snapshot.screen = self.screen.clone();
         snapshot.browse = self.display_content().browse_state();
+        snapshot.device = self.display_content().device_state();
         if self.pad_mode == PadMode::Session {
             snapshot.session = self.pad_content().session_state();
         }

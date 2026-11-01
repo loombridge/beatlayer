@@ -2,9 +2,8 @@
 //! spec, R1 to R7): a modal over the main window, in four steps the shell
 //! keeps (`stems.status`'s `dialog`).
 //!
-//! - **Packages**, the first time: what stem separation downloads, with
-//!   each package's project page and size and where it installs, and
-//!   Download Required Packages Now or Cancel.
+//! - **Packages**, the first time: what stem separation downloads, on the
+//!   shared package page ([`crate::packages_page`]).
 //! - **Installing**: the download's progress, and Cancel.
 //! - **Options**: Vocals, Drums, Bass and Others, Merge to Single Track,
 //!   High Speed or High Quality, and Separate or Cancel, as Live's.
@@ -14,9 +13,7 @@
 //! `stems.separate`.
 
 use bl_shell::Shell;
-use bl_shell::stems_commands::{
-    self as ids, DialogStep, JobStatus, StemKind, StemQuality, StemsStatus,
-};
+use bl_shell::stems_commands::{self as ids, DialogStep, JobStatus, StemKind, StemQuality};
 use egui::{Align2, Color32, Context, Id, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 use serde_json::json;
 
@@ -84,7 +81,19 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
         });
         ui.add_space(8.0);
         match dialog.step {
-            DialogStep::Packages => packages(ui, theme, &status, events),
+            DialogStep::Packages => crate::packages_page::show(
+                ui,
+                theme,
+                &crate::packages_page::Page {
+                    feature: "Stem separation",
+                    packages: &status.packages,
+                    folder: &status.folder,
+                    install: &status.install,
+                    install_command: ids::INSTALL,
+                    close_command: ids::CLOSE,
+                },
+                events,
+            ),
             DialogStep::Installing => progress(
                 ui,
                 theme,
@@ -112,79 +121,6 @@ pub fn show(ctx: &Context, shell: &Shell, theme: &Theme, events: &mut Vec<UiEven
     if matches!(dialog.step, DialogStep::Installing | DialogStep::Separating) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
-}
-
-/// The first time (R2, R3): what's downloaded, from where, how big, and
-/// where it goes.
-fn packages(ui: &mut Ui, theme: &Theme, status: &StemsStatus, events: &mut Vec<UiEvent>) {
-    ui.label(
-        "Stem separation runs on this computer, with open-source software that doesn't come \
-         with Beatlayer. These packages need to be downloaded once:",
-    );
-    ui.add_space(6.0);
-    let total: u64 = status
-        .packages
-        .iter()
-        .filter(|p| !p.installed)
-        .map(|p| p.size)
-        .sum();
-    for package in &status.packages {
-        ui.horizontal(|ui| {
-            let size = if package.installed {
-                "Installed".to_owned()
-            } else {
-                megabytes(package.size)
-            };
-            let name_width = ui.available_width() - 80.0;
-            ui.allocate_ui_with_layout(
-                Vec2::new(name_width, 0.0),
-                egui::Layout::top_down(egui::Align::LEFT),
-                |ui| {
-                    ui.set_width(name_width);
-                    ui.hyperlink_to(
-                        format!("{} {}", package.name, package.version),
-                        &package.url,
-                    );
-                    ui.label(
-                        egui::RichText::new(&package.purpose)
-                            .font(theme.small_font())
-                            .color(theme.colors.text_dim.0),
-                    );
-                },
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(size);
-            });
-        });
-        ui.add_space(4.0);
-    }
-    ui.add_space(6.0);
-    ui.label(format!(
-        "{} in all. They'll be installed in:",
-        megabytes(total)
-    ));
-    ui.label(
-        egui::RichText::new(&status.folder)
-            .font(theme.small_font())
-            .monospace(),
-    );
-    if let Some(error) = &status.install.error {
-        ui.add_space(6.0);
-        ui.colored_label(theme.colors.error_text.0, error);
-    }
-    ui.add_space(12.0);
-    ui.horizontal(|ui| {
-        if ui.button("Download Required Packages Now").clicked() {
-            invoke(events, ids::INSTALL, json!({}));
-        }
-        if ui.button("Cancel").clicked() {
-            invoke(events, ids::CLOSE, json!({}));
-        }
-    });
-}
-
-fn megabytes(bytes: u64) -> String {
-    format!("{:.0} MB", bytes as f64 / 1_000_000.0)
 }
 
 /// A download's or a separation's progress, with Cancel (R4, R12).

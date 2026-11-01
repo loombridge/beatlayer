@@ -4219,6 +4219,154 @@ fn an_agent_sets_the_vocoder_by_id_reads_its_bands_and_finds_it_after_a_reopen()
     );
 }
 
+// Spec: granulator iii R2, R14, R15 (WP-8.26): an agent adds Granulator III,
+// loads a sample into it with `device.load_sample`, sets parameters by ID,
+// reads them and the waveform, grain positions and dropped count with
+// `device.display`, and finds the values and the sample referenced by the set
+// after it is saved and reopened.
+#[test]
+fn an_agent_loads_a_sample_into_granulator_iii_reads_its_display_and_finds_it_after_a_reopen() {
+    use bl_devices::granulator_iii::{self, GRANULATOR_III};
+
+    let dir = TempDir::new("granulator-iii");
+    let file = dir.0.join("Stem.wav");
+    write_stem(&file, 220.0);
+    let mut client = Client::new(InProcess::new(Agent::headless(true), Shell::headless()));
+    client.initialize("granulator-iii").unwrap();
+    let one = |client: &mut Client<InProcess>, command: &str, args: Value| -> Value {
+        call(
+            client,
+            "run",
+            json!({ "commands": [{ "command": command, "args": args }] }),
+        )["results"][0]["result"]
+            .clone()
+    };
+    one(
+        &mut client,
+        "track.create",
+        json!({ "id": {"$new": "grains"}, "kind": "midi", "name": "Grains", "index": 0 }),
+    );
+    let track = {
+        let document = client.transport().shell.editor().document();
+        document
+            .tracks()
+            .find(|t| t.name() == "Grains")
+            .unwrap()
+            .id()
+    };
+    one(
+        &mut client,
+        "arrangement.select_tracks",
+        json!({ "tracks": [track] }),
+    );
+    one(
+        &mut client,
+        "device.add",
+        json!({ "device": {
+            "kind": { "native": { "device_type": GRANULATOR_III } },
+            "name": "Granulator III", "role": "instrument" } }),
+    );
+    let id = {
+        let document = client.transport().shell.editor().document();
+        document.track(track).unwrap().devices().next().unwrap().id
+    };
+    one(
+        &mut client,
+        "device.load_sample",
+        json!({ "device": id, "path": file.to_string_lossy() }),
+    );
+    let sets = [
+        (granulator_iii::MODE, 2.0),
+        (granulator_iii::POSITION, 40.0),
+        (granulator_iii::SIZE, 250.0),
+        (granulator_iii::SPRAY, 20.0),
+        (granulator_iii::DENSITY, 6.0),
+        (granulator_iii::SLIDE_AMOUNT, -30.0),
+    ];
+    for (param, value) in &sets {
+        one(
+            &mut client,
+            "device.set_param",
+            json!({ "device": id, "param": param.0, "value": value }),
+        );
+    }
+    let read = one(&mut client, "device.parameters", json!({ "device": id }));
+    let params = read["params"].as_array().unwrap();
+    assert_eq!(params.len(), 30);
+    assert!(params.iter().all(|p| p["automatable"] == json!(true)));
+    for (param, value) in &sets {
+        let found = params.iter().find(|p| p["id"] == param.0).unwrap();
+        assert_eq!(found["value"], json!(value), "parameter {}", param.0);
+    }
+
+    // What the engine publishes: the source's length, two sounding grains,
+    // three dropped, and peaks of a loud first half.
+    let mut data = vec![0.0f32; granulator_iii::DISPLAY_LEN];
+    data[0] = 3.0;
+    data[1] = 2.0;
+    data[2] = 1.0;
+    data[3] = 0.25;
+    data[4] = 0.75;
+    for (n, peak) in data[3 + granulator_iii::POOL..].iter_mut().enumerate() {
+        *peak = if n < granulator_iii::PEAKS / 2 {
+            1.0
+        } else {
+            0.1
+        };
+    }
+    client.transport().shell.set_device_display_data(id, &data);
+    let shown = one(&mut client, "device.display", json!({ "device": id }));
+    let waveform = shown["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["name"] == "Waveform")
+        .unwrap();
+    assert_eq!(
+        waveform["values"].as_array().unwrap().len(),
+        granulator_iii::PEAKS
+    );
+    let markers = shown["markers"].as_array().unwrap();
+    let names: Vec<_> = markers
+        .iter()
+        .map(|m| m["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names[0], "Position");
+    assert!(names.contains(&"Spray End"));
+    assert_eq!(names.iter().filter(|n| n.starts_with("Grain")).count(), 2);
+    let dropped = shown["readings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "Dropped Grains")
+        .unwrap();
+    assert_eq!(dropped["text"], "3");
+
+    let saved = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "set.save_as",
+                               "args": { "path": dir.0.join("Grains.blset").to_string_lossy() } }] }),
+    );
+    let (project, _) = bl_project::load(saved_path(&saved)).unwrap();
+    let reopened = project
+        .document
+        .device(id)
+        .expect("Granulator III is in the set");
+    assert!(
+        reopened.media_at(0).is_some(),
+        "the set references the sample"
+    );
+    for (param, value) in &sets {
+        assert_eq!(
+            reopened.params.get(param),
+            Some(value),
+            "parameter {}",
+            param.0
+        );
+    }
+}
+
 // Spec: digital-degradation R9, bit-crusher R10, vinyl-distortion R8
 // (WP-5.24): an agent adds Erosion, Redux and Vinyl Distortion, sets a parameter of each
 // by ID, reads them back, and finds them as they were when the set is saved

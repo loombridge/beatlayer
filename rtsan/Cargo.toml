@@ -33,6 +33,8 @@ bl-analysis = { path = "../crates/analysis" }
 bl-audio-io = { path = "../crates/audio-io" }
 bl-audio-engine = { path = "../crates/audio-engine" }
 bl-core = { path = "../crates/core" }
+# The partitioned convolver's blocks, swaps and resets (WP-8.29).
+bl-dsp = { path = "../crates/dsp" }
 # The framework's test effects device (WP-5.42), the MIDI effects (WP-5.30),
 # which run in a chain on the audio thread, and EQ Eight and Compressor, whose
 # displays publish after each block (WP-5.43), the eight-slot drum

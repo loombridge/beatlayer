@@ -865,6 +865,8 @@ dependencies = [
  "lspk-rt",
  "proptest",
  "realfft",
+ "rtrb",
+ "rustfft",
 ]
 
 [[package]]

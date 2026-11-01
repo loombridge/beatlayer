@@ -711,26 +711,18 @@ fn every_factory_preset_sets_parameters_in_range_and_plays() {
     }
 }
 
-/// The frames of the golden render, and Poli's samples at them in each
-/// channel: its still phrase, rendered when the device was written.
-const GOLDEN_AT: [usize; 7] = [1, 500, 4_000, 7_000, 12_000, 20_000, 26_000];
-const GOLDEN_LEFT: [f32; 7] = [
-    6.927473e-7,
-    0.17373198,
-    0.63709646,
-    -1.2622328,
-    0.90463185,
-    -0.9793303,
-    0.9966753,
+/// The windows of the golden render, each [`GOLDEN_WINDOW`] frames from its
+/// start, and the RMS of Poli's still phrase over them in each channel,
+/// rendered when the device was written. A window's level, not a sample,
+/// is compared: the platforms' maths libraries differ in the last bit, and
+/// the resonant filter carries that into single samples.
+const GOLDEN_AT: [usize; 7] = [0, 500, 4_000, 7_000, 12_000, 20_000, 26_000];
+const GOLDEN_WINDOW: usize = 512;
+const GOLDEN_LEFT: [f64; 7] = [
+    0.74824584, 0.81367847, 1.2468131, 0.96082344, 0.81128887, 0.7859888, 1.3153281,
 ];
-const GOLDEN_RIGHT: [f32; 7] = [
-    6.927473e-7,
-    0.17373198,
-    0.052476943,
-    -1.3947883,
-    1.4138151,
-    -1.5436617,
-    -0.14150363,
+const GOLDEN_RIGHT: [f64; 7] = [
+    0.74824584, 1.0764424, 1.1629638, 0.96594234, 1.351002, 0.8291039, 1.0599068,
 ];
 
 // Spec: bass and Poli R9 to R14 (the golden render)
@@ -743,10 +735,10 @@ fn a_phrase_renders_as_it_did_when_the_device_was_written() {
             ("left", &left, GOLDEN_LEFT[n]),
             ("right", &right, GOLDEN_RIGHT[n]),
         ] {
+            let level = rms(&signal[at..at + GOLDEN_WINDOW]);
             assert!(
-                (signal[at] - want).abs() < 1e-4,
-                "{channel} frame {at}: {} isn't {want}",
-                signal[at]
+                (level / want - 1.0).abs() < 1e-3,
+                "{channel} frames {at}+: RMS {level} isn't {want}"
             );
         }
     }

@@ -1005,7 +1005,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.21 | todo |  |  |
 | 8.22 | todo |  |  |
 | 8.23 | todo |  |  |
-| 8.24 | todo |  |  |
+| 8.24 | done | 1 November 2026 | [#734](https://github.com/loombridge/beatlayer/pull/734): DS Kick, DS Snare, DS Tom and DS Clap, drum voices on a shared drum-synth core with the manual's controls and an envelope display, playing from a Drum Rack pad and choking with its group, listed under Instruments with banks holding every parameter; their presets exist as code with no loader yet |
 | 8.25 | todo |  |  |
 | 8.26 | todo |  |  |
 | 8.27 | todo |  |  |

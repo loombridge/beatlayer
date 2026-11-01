@@ -602,6 +602,17 @@ fn mono_returns_to_the_older_note_that_is_still_held() {
     assert!(cents(crossing_hz(&signal[50_000..59_990]), hz(57.0)).abs() < 5.0);
 }
 
+// Spec: spectral-resonator R6. Polyphony is Poly's: in Mono, holding more
+// notes than it counts doesn't cut the voice that sounds.
+#[test]
+fn polyphony_leaves_mono_alone() {
+    let notes = [on(2_000, 57), on(20_000, 60), on(40_000, 64)];
+    let params = |voices: f64| [(MIDI_GATE, 1.0), (DECAY, 5.0), (POLYPHONY, voices)];
+    let two = midi(&params(2.0), &notes, &[], 60_000, 512);
+    let sixteen = midi(&params(16.0), &notes, &[], 60_000, 512);
+    assert_eq!(two, sixteen);
+}
+
 // Spec: spectral-resonator R6. With MIDI Gate on, the resonances sound only
 // while a note is held and ring out after it; with it off they ring at the
 // last note.

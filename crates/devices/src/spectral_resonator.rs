@@ -762,7 +762,11 @@ impl SpectralResonator {
         match note.kind {
             NoteKind::On => {
                 self.mono.press(note.key, self.pos, glide);
-                self.take_voice(note.key, p.polyphony);
+                // Only Poly gives notes voices of their own: elsewhere a
+                // note taking a voice would clear the one that sounds.
+                if p.poly && !p.internal {
+                    self.take_voice(note.key, p.polyphony);
+                }
             }
             NoteKind::Off | NoteKind::Choke => {
                 self.mono.release(note.key, self.pos, glide);

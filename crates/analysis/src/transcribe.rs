@@ -188,7 +188,7 @@ pub fn transcribe(
     let failed = |e: bl_media::MediaError| Error::Failed(e.to_string());
     let data = SampleData::new(audio.rate(), vec![mono]).map_err(failed)?;
     let data = convert_sample_rate(&data, RATE).map_err(failed)?;
-    let samples = data.channels().next().map_or(&[][..], |c| &c[..]);
+    let samples = data.channels().next().unwrap_or(&[]);
     let grams = posteriorgrams(samples, network, progress)?;
     Ok(notes(&grams, kind, grid))
 }
@@ -247,7 +247,9 @@ fn posteriorgrams(
     let round = |x: f32| (x * 1e4).round() / 1e4;
     let join = |sums: &[f32]| -> Vec<f32> {
         sums[LEAD * KEYS..(LEAD + frames) * KEYS]
-            .chunks_exact(KEYS)
+            .as_chunks::<KEYS>()
+            .0
+            .iter()
             .zip(&weights[LEAD..])
             .flat_map(|(row, &w)| row.iter().map(move |&x| round(x / w)))
             .collect()

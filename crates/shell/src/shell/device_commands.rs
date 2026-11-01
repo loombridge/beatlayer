@@ -395,13 +395,11 @@ impl Shell {
             );
         }
         // Spec: drum-synths R6. A click in a Drum Synth's display plays a hit.
-        if !outcome.hits.is_empty() {
-            let sent = outcome.hits.iter().fold(false, |sent, &device| {
-                self.audio
-                    .send_node_data(bl_engine::NodeKey::Device(device), PreviewHit)
-                    .is_ok()
-                    || sent
-            });
+        if let Some(device) = outcome.hit.take() {
+            let sent = self
+                .audio
+                .send_node_data(bl_engine::NodeKey::Device(device), PreviewHit)
+                .is_ok();
             outcome.value = to_value(&device_ids::HitPreviewed { sent });
         }
         // Spec: racks R42. Samples a rack or chain preset brought in.

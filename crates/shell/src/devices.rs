@@ -200,9 +200,9 @@ pub struct Outcome {
     /// Preview buttons pressed (true) and released (false), which the shell
     /// tells the engine (the drum racks spec, R5).
     pub previews: Vec<(ChainId, bool)>,
-    /// Drum Synths to play a hit of, which the shell tells the engine (the
+    /// A Drum Synth to play a hit of, which the shell tells the engine (the
     /// drum synths spec, R6).
-    pub hits: Vec<DeviceId>,
+    pub hit: Option<DeviceId>,
     /// Folders for the browser to open, outermost first, with the User
     /// Library's label chosen: hot-swapping's way to the device's presets.
     pub browse: Option<Vec<PathBuf>>,
@@ -2579,7 +2579,7 @@ impl DeviceView {
                         "{device} isn't a Drum Synth"
                     )));
                 }
-                outcome.hits.push(device);
+                outcome.hit = Some(device);
             }
             ids::SET_DISPLAY_VIEW => {
                 let ids::SetDisplayViewArgs { device, view } = parse(args)?;

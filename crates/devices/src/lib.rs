@@ -60,6 +60,7 @@ pub mod gate;
 pub mod gate_mod;
 pub mod gated_delay;
 pub mod grain_delay;
+pub mod granulator_iii;
 pub mod hardware;
 pub mod hardware_effect;
 pub mod hold;
@@ -290,6 +291,7 @@ pub fn display_in(
         LOOPER => Some(looper::display(device, description, values, data)),
         VECTOR_DELAY => Some(vector_delay::display(device, description, values, data)),
         VOCODER => Some(vocoder::display(device, description, values, data)),
+        granulator_iii::GRANULATOR_III => Some(granulator_iii::display(device, description, values, data)),
         SPECTRAL_BLUR => Some(spectral_blur::display(device, description, values, data)),
         CV_INSTRUMENT => Some(cv_instrument::display(device, data)),
         CV_TRIGGERS => Some(cv_triggers::display(device, data)),
@@ -392,6 +394,7 @@ pub fn register(registry: &mut Registry) {
     pitchloop89::register(registry);
     vector_delay::register(registry);
     vocoder::register(registry);
+    granulator_iii::register(registry);
     spectral_blur::register(registry);
 }
 
@@ -417,13 +420,13 @@ pub fn relative_clip_envelopes(document: &mut bl_model::Document) {
 }
 
 /// Whether the native device type `device_type` plays samples that
-/// `device.load_sample` loads into it: the sampler and the two drum
-/// samplers.
+/// `device.load_sample` loads into it: the sampler, the two drum samplers
+/// and Granulator III.
 #[must_use]
 pub fn plays_samples(device_type: &str) -> bool {
     matches!(
         device_type,
-        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER
+        sampler::SAMPLER | kitbag::KITBAG | DRUM_SAMPLER | granulator_iii::GRANULATOR_III
     )
 }
 

@@ -70,6 +70,12 @@ pub fn control_id(name: &str) -> Id {
     Id::new(("browser-control", name))
 }
 
+/// The reference token in the search field (spec: sound-similarity R12).
+#[must_use]
+pub fn similar_token_id() -> Id {
+    Id::new("browser-similar-token")
+}
+
 /// The search field's ID.
 #[must_use]
 pub fn search_id() -> Id {
@@ -889,6 +895,66 @@ impl BrowserUi {
         response
     }
 
+    /// The reference token of a similarity search, at the left of the search
+    /// field (spec: sound-similarity R12, R18); returns where it is.
+    fn similar_token(
+        ui: &mut Ui,
+        theme: &Theme,
+        field: Rect,
+        reference: &Path,
+        events: &mut Vec<UiEvent>,
+    ) -> Rect {
+        let name = file_name(&reference.to_string_lossy());
+        let text = format!("Similar to {name}");
+        let galley =
+            ui.painter()
+                .layout_no_wrap(text.clone(), theme.small_font(), theme.colors.text.0);
+        let width = (galley.size().x + 22.0).min(field.width() * 0.6);
+        let rect = Rect::from_min_size(
+            field.left_top() + vec2(2.0, 2.0),
+            vec2(width, field.height() - 4.0),
+        );
+        let id = similar_token_id();
+        let response = ui.interact(rect, id, Sense::click());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(
+            rect,
+            theme.sizes.corner,
+            if response.hovered() {
+                theme.colors.control_hover.0
+            } else {
+                theme.colors.control.0
+            },
+        );
+        painter
+            .with_clip_rect(Rect::from_min_max(
+                rect.min,
+                pos2(rect.right() - 14.0, rect.bottom()),
+            ))
+            .galley(
+                pos2(rect.left() + 5.0, rect.center().y - galley.size().y / 2.0),
+                galley,
+                theme.colors.text.0,
+            );
+        glyph(
+            &painter,
+            Rect::from_center_size(pos2(rect.right() - 8.0, rect.center().y), vec2(10.0, 10.0)),
+            Glyph::Cross,
+            theme.colors.text_dim.0,
+        );
+        if response.clicked() {
+            invoke(events, ids::SHOW_SIMILAR, json!({ "end": true }));
+        }
+        response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, &text));
+        ui.ctx().accesskit_node_builder(id, |node| {
+            node.set_role(Role::Button);
+            node.set_label(text);
+            node.set_description("Ends the similarity search".to_owned());
+            node.set_bounds(bounds(rect));
+        });
+        rect
+    }
+
     fn top_row(
         &mut self,
         ui: &mut Ui,
@@ -939,12 +1005,21 @@ impl BrowserUi {
                 i.key_pressed(Key::Escape),
             )
         });
+        // Spec: sound-similarity R12, R14, R18. The reference of a similarity
+        // search is a token at the field's left: clicking it, or Backspace
+        // in an empty field, ends the search.
+        let mut field = layout.search;
+        let reference = view.similar_reference();
+        if let Some(reference) = reference {
+            let token = Self::similar_token(ui, theme, layout.search, reference, events);
+            field.min.x = token.right() + 2.0;
+        }
         let edit = egui::TextEdit::singleline(&mut self.search)
             .id(search_id())
-            .hint_text("Search")
+            .hint_text(if reference.is_some() { "" } else { "Search" })
             .font(theme.small_font())
             .margin(vec2(4.0, 2.0));
-        let response = ui.put(layout.search, edit);
+        let response = ui.put(field, edit);
         // Tab's order in the browser (the accessibility spec, R3;
         // I-FOCUS-007): the search field, the Filter View toggle and menu,
         // the sidebar, the Filter View, then the list.
@@ -960,6 +1035,14 @@ impl BrowserUi {
         if response.changed() {
             invoke(events, ids::SEARCH, json!({ "query": self.search }));
             self.search_seen.clone_from(&self.search);
+        }
+        if reference.is_some()
+            && response.has_focus()
+            && !response.changed()
+            && self.search.is_empty()
+            && ui.input(|i| i.key_pressed(Key::Backspace))
+        {
+            invoke(events, ids::SHOW_SIMILAR, json!({ "end": true }));
         }
         // The Filter View toggle and its menu (spec: browser-tags R18,
         // R21).
@@ -1037,7 +1120,7 @@ impl BrowserUi {
             self.go_to_results(shell, events);
         } else if response.lost_focus()
             && escape
-            && (!self.search.is_empty() || view.filter_count() > 0)
+            && (!self.search.is_empty() || view.filter_count() > 0 || reference.is_some())
         {
             // Spec: browser-tags R22. Esc clears the search words and the
             // selected tags.
@@ -2285,6 +2368,34 @@ impl BrowserUi {
             }
         }
 
+        // Spec: sound-similarity R11, R18, browser R32. With one compatible
+        // item selected, an icon at the right end of its row shows similar
+        // files.
+        if selected
+            && view
+                .selected_reference()
+                .is_ok_and(|p| p == Path::new(&item.path))
+        {
+            let icon = Rect::from_center_size(
+                pos2(rect.right() - 12.0, rect.center().y),
+                vec2(16.0, 16.0),
+            );
+            let id = control_id("Show Similar Files");
+            let hit = ui.interact(icon, id, Sense::click());
+            if hit.hovered() {
+                painter.rect_filled(icon, theme.sizes.corner, theme.colors.control_hover.0);
+            }
+            glyph(&painter, icon, Glyph::Similar, theme.colors.text.0);
+            if hit.clicked() {
+                invoke(events, ids::SHOW_SIMILAR, json!({ "path": item.path }));
+            }
+            hit.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "Show Similar Files"));
+            ui.ctx().accesskit_node_builder(id, |node| {
+                node.set_role(Role::Button);
+                node.set_label("Show Similar Files".to_owned());
+                node.set_bounds(bounds(icon));
+            });
+        }
         if item.kind == ItemKind::Folder {
             drop_chains(ui, theme, rect, &item.path, events);
             drop_tracks(ui, shell, theme, rect, &item.path, events);
@@ -3546,6 +3657,7 @@ enum Glyph {
     Plugin,
     Clip,
     Speaker,
+    Similar,
 }
 
 fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
@@ -3634,6 +3746,12 @@ fn glyph(painter: &egui::Painter, rect: Rect, glyph: Glyph, colour: Color32) {
                 1.0,
                 colour,
             );
+        }
+        Glyph::Similar => {
+            // Beatlayer's own mark for Show Similar Files: two overlapping
+            // rings, two sounds that are alike.
+            painter.circle_stroke(c + vec2(-s * 0.45, 0.0), s * 0.85, Stroke::new(1.0, colour));
+            painter.circle_stroke(c + vec2(s * 0.45, 0.0), s * 0.85, Stroke::new(1.0, colour));
         }
         Glyph::Speaker => {
             let w = rect.width();

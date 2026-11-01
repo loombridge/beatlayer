@@ -3502,6 +3502,11 @@ impl StripParts<'_> {
             Switch::Activator => ("Track Activator", self.activator, c.accent.0),
             Switch::Solo if cue => ("Cue", "", c.accent.0),
             Switch::Solo => ("Solo", "S", c.accent.0),
+            // Spec: push-2-notes R3. An arm a control surface made by
+            // selection is drawn in the theme's pink.
+            Switch::Arm if self.shell.armed_by_selection(self.track) => {
+                ("Arm Recording", "●", c.arm_selection.0)
+            }
             Switch::Arm => ("Arm Recording", "●", c.record.0),
         };
         let painter = ui.painter_at(rect.expand(2.0));

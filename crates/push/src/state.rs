@@ -126,6 +126,8 @@ pub struct Snapshot {
     pub mix_page: MixPage,
     /// The menu that is open.
     pub menu: Option<Menu>,
+    /// What Note Mode shows while it is the pad mode.
+    pub note: Option<crate::note::State>,
     /// The buttons held, by name.
     pub held: Vec<&'static str>,
     /// The buttons locked on, by name.
@@ -165,6 +167,7 @@ impl Snapshot {
             display_mode: DisplayMode::default(),
             mix_page: MixPage::default(),
             menu: None,
+            note: None,
             held: Vec::new(),
             locked: Vec::new(),
             picker: false,

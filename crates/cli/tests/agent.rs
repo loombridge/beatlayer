@@ -1452,7 +1452,7 @@ fn with_result_format_toon_a_long_table_is_toon_and_anything_else_stays_compact_
     assert!(plain.text.starts_with("{\"tracks\":"), "{}", plain.text);
     assert!(
         long.text
-            .starts_with("tracks:\n  items[11]{clips,colour,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass,tuning_layout.layout}:"),
+            .starts_with("tracks:\n  items[11]{clips,colour,delay.unit,delay.value,devices,frozen,group,id,keep_monitoring_latency,kind,mixer.arm,mixer.arm_by_selection,mixer.mute,mixer.pan,mixer.pan_mode,mixer.solo,mixer.split_left,mixer.split_right,mixer.volume,mixer.volume_db,name,tracks_inside,tuning_bypass,tuning_layout.layout}:"),
         "{}",
         long.text
     );
@@ -3143,6 +3143,110 @@ fn an_agent_inserts_veer_sets_its_parameters_and_points_its_midi_sidechain_at_a_
         )
         .unwrap();
     assert!(refused.ok().is_err());
+}
+
+// Spec: corpus R11, R15 and routing R39: an agent adds Corpus, sets every
+// parameter by ID, points its MIDI source at a MIDI track with a tapping
+// point and reads them all back.
+#[test]
+fn an_agent_sets_every_corpus_parameter_and_its_midi_source_with_its_tapping_point_and_reads_them_back()
+ {
+    use bl_devices::corpus::{CORPUS, corpus_type};
+
+    let mut shell = Shell::headless();
+    shell.set_device_types(bl_devices::device_types());
+    let mut client = Client::new(InProcess::new(Agent::headless(true), shell));
+    client.initialize("corpus-agent").unwrap();
+    let tracks = default_tracks(&mut client);
+    let (keys, audio) = (tracks[0], tracks[2]);
+    let reply = call(
+        &mut client,
+        "run",
+        json!({ "label": "Add Corpus", "commands": [
+            { "command": "device.add",
+              "args": { "track": audio,
+                        "device": { "kind": { "native": { "device_type": CORPUS } },
+                                    "name": "Corpus", "role": "audio_effect",
+                                    "midi_sidechain": true } } },
+        ] }),
+    );
+    let device = reply["results"][0]["result"]["device"].clone();
+    // Every parameter moved to a value other than its default.
+    let description = corpus_type().description;
+    let wanted: Vec<(bl_model::ParamId, f64)> = description
+        .params
+        .iter()
+        .map(|p| {
+            let (lo, hi) = (p.min(), p.max());
+            let value = if (p.default - hi).abs() > (p.default - lo).abs() {
+                lo + 0.75 * (hi - lo)
+            } else {
+                lo + 0.25 * (hi - lo)
+            };
+            (p.id, p.clamp(value))
+        })
+        .collect();
+    let mut commands: Vec<Value> = wanted
+        .iter()
+        .map(|(param, value)| {
+            json!({ "command": "device.set_param",
+                    "args": { "device": device, "param": param, "value": value } })
+        })
+        .collect();
+    commands.push(json!({ "command": "device.set_midi_sidechain_source",
+                          "args": { "device": device, "track": keys, "tap": "pre_fx" } }));
+    call(
+        &mut client,
+        "run",
+        json!({ "label": "Set Corpus", "commands": commands }),
+    );
+    let read = call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.parameters", "args": { "device": device } }] }),
+    );
+    let params = read["results"][0]["result"]["params"].as_array().unwrap();
+    assert_eq!(
+        params.len(),
+        description.params.len(),
+        "every parameter is listed"
+    );
+    for (id, value) in &wanted {
+        let found = params
+            .iter()
+            .find(|p| p["id"] == json!(id.0))
+            .unwrap_or_else(|| panic!("parameter {id:?}"));
+        assert_eq!(found["value"], json!(value), "{}", found["name"]);
+        assert_eq!(found["automatable"], json!(true));
+    }
+    // The source and its tapping point read back from the device.
+    let query =
+        || json!({ "path": format!("device {}", device.as_u64().unwrap()), "detail": "full" });
+    let found = call(&mut client, "query", query());
+    assert_eq!(found["saved"]["midi_sidechain"]["source"], json!(keys));
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("pre_fx"));
+    // Left out, the tapping point stays; the source goes with its track.
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "device.set_midi_sidechain_source",
+                                "args": { "device": device, "track": keys, "tap": "post_mixer" } }] }),
+    );
+    assert_eq!(
+        call(&mut client, "query", query())["saved"]["midi_sidechain"]["tap"],
+        json!("post_mixer")
+    );
+    call(
+        &mut client,
+        "run",
+        json!({ "commands": [{ "command": "track.delete", "args": { "track": keys } }] }),
+    );
+    let found = call(&mut client, "query", query());
+    assert!(
+        found["saved"]["midi_sidechain"].get("source").is_none(),
+        "{found}"
+    );
+    assert_eq!(found["saved"]["midi_sidechain"]["tap"], json!("post_mixer"));
 }
 
 // Spec: one-shot-drum-sampler R22 and R23 (WP-5.18): an agent adds Drum Sampler,

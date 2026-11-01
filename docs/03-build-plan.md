@@ -972,7 +972,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 7.22 | todo |  |  |
 | 7.23 | todo |  |  |
 | 7.24 | todo |  |  |
-| 7.25 | todo |  |  |
+| 7.25 | done | 1 November 2026 | [#633](https://github.com/loombridge/beatlayer/pull/633): Device Mode on Push 2 with its banks and Edit Mode, adding, deleting, switching off and moving devices, unfolding racks with their macros and chains, read back in `push.state` |
 | 7.26 | done | 31 October 2026 | [#634](https://github.com/loombridge/beatlayer/pull/634): Mix Mode on Push 2 with Track Mix, Global Mix, Input & Output and Master, unfolding groups, drum racks and rack chains, and Mute, Solo, Delete and Duplicate on the lower buttons, read back in `push.state` |
 | 7.27 | todo |  |  |
 | 7.28 | done | 31 October 2026 | [#635](https://github.com/loombridge/beatlayer/pull/635): Session Mode on Push 2 launches, records and colours slots from the pads and scenes from the scene buttons, moves the ring with the arrows, Octave and Page, runs Stop Clip in every mode and shows the Session Overview, read back in `push.state`; R71 comes with Clip Mode (WP-7.27) |
@@ -1034,7 +1034,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 8.50 | done | 1 November 2026 | [#654](https://github.com/loombridge/beatlayer/pull/654): Color Limiter (Loudness, Ceiling, Lookahead, Release, Saturation, Color, built on the shared limiter stage) and Re-Enveloper (three bands on the shared crossover, each with its C/E Factor) are native devices with their pages |
 | 8.51 | todo |  |  |
 | 8.52 | done | 1 November 2026 | [#657](https://github.com/loombridge/beatlayer/pull/657): PitchLoop89 (two pitch-shifting looping voices with loop, jitter and seeded random controls) and Vector Delay (taps that move as particles on its display, with drag, arrow keys and accessible tap positions) are native devices with their pages |
-| 9.1 | todo |  |  |
+| 9.1 | done | 1 November 2026 | [#658](https://github.com/loombridge/beatlayer/pull/658): one Packages manager installs each feature's ONNX Runtime build and models from a manifest on one installer thread, with a record per package, the shared download page, and `packages.list`, `packages.install` and `packages.remove`; stem separation's download runs through it |
 | 9.2 | todo |  |  |
 | 9.3 | todo |  |  |
 | 9.4 | todo |  |  |
@@ -1042,7 +1042,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.6 | todo |  |  |
 | 9.7 | todo |  |  |
 | 9.8 | done | 1 November 2026 | [#660](https://github.com/loombridge/beatlayer/pull/660): every sample up to 60 seconds and every instrument and drum preset gets a sound descriptor in the background, kept in the browser's database by content hash, with the Status Bar's progress and Pause and agents reading the progress |
-| 9.9 | todo |  |  |
+| 9.9 | done | 1 November 2026 | [#677](https://github.com/loombridge/beatlayer/pull/677): Show Similar Files from the icon beside a selected file, the item menu and the View menu (Cmd-Shift-F) puts the reference in the search field and lists its neighbours most similar first, with `browser.similar` for agents and saved labels keeping the reference first. |
 | 9.10 | todo |  |  |
 | 9.11 | todo |  |  |
 | 9.12 | done | 1 November 2026 | [#661](https://github.com/loombridge/beatlayer/pull/661): a real-time tempo tracker in `bl-analysis` copies incoming audio off the audio thread and estimates tempo and beat phase, measured on generated straight and swung drum loops from 80 to 180 BPM |
@@ -1057,7 +1057,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.21 | todo |  |  |
 | 9.22 | todo |  |  |
 | 9.23 | todo |  |  |
-| 9.24 | todo |  |  |
+| 9.24 | done | 1 November 2026 | [#665](https://github.com/loombridge/beatlayer/pull/665): a new `bl-video` crate reads QuickTime movies with exact frame times and edit lists, decodes frames ahead of the playhead on a video thread through VideoToolbox, Media Foundation, FFmpeg or its own MJPEG decoder, decodes the movie's audio through `bl-media`, and gives black and silence in gaps |
 | 9.25 | todo |  |  |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |

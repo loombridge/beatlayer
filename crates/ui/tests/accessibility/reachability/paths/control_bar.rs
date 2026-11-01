@@ -353,6 +353,34 @@ pub(crate) fn entries() -> Vec<(&'static str, Path)> {
             "link.set_show_toggle",
             settings("link", nothing, "Show Link Toggle", Key::ArrowUp),
         ),
+        ("tempo_follower.state", Exception(Query)),
+        (
+            "tempo_follower.set_enabled",
+            main(
+                the_follow_toggle_shown,
+                control_bar,
+                "Tempo Follower",
+                Key::Enter,
+            ),
+        ),
+        (
+            "settings.set_show_tempo_follower_toggle",
+            settings(
+                "tempo-midi",
+                nothing,
+                "Show Tempo Follower Toggle",
+                Key::ArrowUp,
+            ),
+        ),
+        (
+            "settings.set_tempo_follower_input",
+            settings(
+                "tempo-midi",
+                the_follow_toggle_shown,
+                "Input Channel",
+                Key::ArrowDown,
+            ),
+        ),
         // Link Audio (the Link Audio spec, R2): the Link page's section.
         (
             "link.set_audio",

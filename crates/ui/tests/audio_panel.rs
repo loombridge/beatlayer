@@ -443,6 +443,50 @@ fn ext_disables_the_lead_follow_switch_and_it_keeps_showing_lead() {
     assert!(!Harness::node(&all, "Lead/Follow").disabled, "EXT off");
 }
 
+// Spec: tempo-follower R8; warping R55. While Tempo Follower is on every clip
+// follows, as under EXT: the Lead/Follow switch is disabled and keeps showing
+// what the clip is, and it is live again with Follow off.
+#[test]
+fn tempo_follower_disables_the_lead_follow_switch_and_it_keeps_showing_lead() {
+    let mut p = Panel::new("follow");
+    p.h.shell
+        .run("clip.set_warp", json!({ "clip": p.clip, "warp": true }))
+        .unwrap();
+    p.h.shell
+        .run(
+            "clip.set_tempo_leader",
+            json!({ "clip": p.clip, "leader": true }),
+        )
+        .unwrap();
+    p.h.shell
+        .run("audio.configure", json!({ "input_device": "null:null" }))
+        .unwrap();
+    p.h.shell
+        .run(
+            "settings.set_show_tempo_follower_toggle",
+            json!({ "on": true }),
+        )
+        .unwrap();
+    let all = p.nodes();
+    assert!(!Harness::node(&all, "Lead/Follow").disabled);
+
+    p.h.shell
+        .run("tempo_follower.set_enabled", json!({ "on": true }))
+        .unwrap();
+    let all = p.nodes();
+    let switch = Harness::node(&all, "Lead/Follow");
+    assert!(switch.disabled, "Follow on");
+    assert_eq!(switch.value, "On", "it still shows Lead");
+    assert!(switch.description.contains("Tempo Follower"));
+    assert!(p.audio().tempo_leader, "nothing in the set changed");
+
+    p.h.shell
+        .run("tempo_follower.set_enabled", json!({ "on": false }))
+        .unwrap();
+    let all = p.nodes();
+    assert!(!Harness::node(&all, "Lead/Follow").disabled, "Follow off");
+}
+
 // The header shows the file's name, sample rate, bit depth and channel
 // count (R2).
 #[test]

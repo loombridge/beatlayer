@@ -87,8 +87,11 @@ pub struct Parts {
     pub glide_legato: Option<ParamId>,
     /// Whether Glide works in Poly, each note from the one before (R8).
     pub poly_glide: bool,
-    /// Glissando's Use Current Scale switch (R10).
+    /// The device's Use Current Scale switch (R10, scales R16), and a second
+    /// switch that must be on beside it for a Glissando to step degrees
+    /// (Meld's Oscillator Scale Awareness).
     pub use_scale: Option<ParamId>,
+    pub scale_and: Option<ParamId>,
     /// Retrigger ([`retrigger`]).
     pub retrigger: Option<ParamId>,
     /// Unison's copies, Detune, Spread and Delay (R11 to R13).
@@ -349,6 +352,8 @@ pub struct Config {
     pub glide_always: bool,
     pub poly_glide: bool,
     pub scale_aware: bool,
+    /// Whether Glissando steps degrees: `scale_aware` and the second switch.
+    pub glide_scale: bool,
     /// Unison copies, Detune in cents, Spread (0 to 1) and Delay in ms.
     pub copies: usize,
     pub detune: f32,
@@ -391,6 +396,7 @@ impl Config {
             glide_always: get(parts.glide_legato, 0.0) < 0.5,
             poly_glide: parts.poly_glide,
             scale_aware: get(parts.use_scale, 0.0) >= 0.5,
+            glide_scale: get(parts.use_scale, 0.0) >= 0.5 && get(parts.scale_and, 1.0) >= 0.5,
             copies: (get(parts.unison_voices, 1.0) as usize).clamp(1, copies_max),
             detune: get(parts.unison_detune, 0.0) as f32,
             spread: (get(parts.unison_spread, 0.0) / 100.0) as f32,
@@ -472,6 +478,7 @@ impl State {
                 glide_always: true,
                 poly_glide: false,
                 scale_aware: false,
+                glide_scale: false,
                 copies: 1,
                 detune: 0.0,
                 spread: 0.0,
@@ -519,6 +526,14 @@ impl State {
     #[must_use]
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    /// The scale the device counts degrees of at the frame being played: its
+    /// current scale while its scale switches are on, else the chromatic
+    /// one (scales R15, R16).
+    #[must_use]
+    pub fn scale(&self) -> &Scale {
+        &self.scale
     }
 
     /// How far above its key's twelve-step pitch the voice started, in
@@ -815,7 +830,7 @@ impl State {
     fn fill_steps(&mut self, voice: usize, keys: &KeyPitches, from: f64, to: f64) -> usize {
         let (low, high) = (from.min(to), from.max(to));
         let scale = self.scale;
-        let wanted = |key: u8| !self.cfg.scale_aware || scale.holds(key);
+        let wanted = |key: u8| !self.cfg.glide_scale || scale.holds(key);
         let steps = &mut self.steps[voice * STEPS..(voice + 1) * STEPS];
         steps[0] = from as f32;
         let mut count = 1;
@@ -931,10 +946,17 @@ impl Section {
         self.state.stretch_start = self.voices.clock();
         self.apply_settings();
         self.plan(audio);
+        self.state.scale = self.scale_at(audio, 0);
+        let mut changes = audio.scale_changes().peekable();
         let mut done = 0;
         for i in 0..self.planned.len() {
             let Planned { time, event, bend } = self.planned[i];
             let time = time as usize;
+            // The scale changes on its frame, so the stretch is played in
+            // pieces that each have one.
+            while let Some(at) = changes.next_if(|&at| at as usize <= time) {
+                self.advance(instrument, audio, at as usize, &mut done);
+            }
             if time > done {
                 self.play(instrument, std::iter::empty(), time - done, done);
                 done = time;
@@ -943,7 +965,36 @@ impl Section {
                 self.play(instrument, std::iter::once(event), 0, done);
             }
         }
+        for at in changes {
+            self.advance(instrument, audio, at as usize, &mut done);
+        }
         self.play(instrument, std::iter::empty(), frames - done, done);
+    }
+
+    /// The scale `at` frames into the stretch: the device's current scale
+    /// while its scale switches are on and the set's tuning doesn't hide
+    /// scales, else the chromatic one.
+    fn scale_at(&self, audio: &Audio<'_, '_>, at: usize) -> Scale {
+        if self.state.cfg.scale_aware && !audio.scales_hidden() {
+            audio.scale_at(at as u32)
+        } else {
+            Scale::default()
+        }
+    }
+
+    /// Plays up to frame `to` of the stretch and takes up the scale there.
+    fn advance<I: Instrument>(
+        &mut self,
+        instrument: &mut I,
+        audio: &Audio<'_, '_>,
+        to: usize,
+        done: &mut usize,
+    ) {
+        if to > *done {
+            self.play(instrument, std::iter::empty(), to - *done, *done);
+            *done = to;
+        }
+        self.state.scale = self.scale_at(audio, to);
     }
 
     /// Plays `frames` frames with `events` from `offset` frames into the
@@ -1130,11 +1181,7 @@ impl Section {
     fn admit_note(&mut self, note: Note, audio: &Audio<'_, '_>, time: usize) -> bool {
         let cfg = self.state.cfg;
         let key = note.key.unwrap_or(0);
-        self.state.scale = if cfg.scale_aware && audio.scales_hidden() {
-            Scale::default()
-        } else {
-            audio.scale_at(time as u32)
-        };
+        self.state.scale = self.scale_at(audio, time);
         let block = self.voices.block();
         let active = block.active_count();
         let sounding = |v: &usize| block.info(*v).state.is_gated();

@@ -55,6 +55,7 @@ mod level_mod;
 mod lift;
 mod limiter;
 mod looper;
+mod meld;
 mod midi_cc;
 mod midi_monitor;
 mod midi_mpe;

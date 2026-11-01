@@ -258,6 +258,16 @@ impl<'a> Audio<'_, 'a> {
         self.block.scale_at(self.range.start + offset as usize)
     }
 
+    /// The frames within the stretch where the device's current scale
+    /// changes, after its first.
+    pub fn scale_changes(&self) -> impl Iterator<Item = u32> + '_ {
+        let (start, end) = (self.range.start as u32, self.range.end as u32);
+        self.block
+            .scale_changes()
+            .filter(move |&at| at > start && at < end)
+            .map(move |at| at - start)
+    }
+
     /// Whether the set's tuning hides the scales (the tunings spec, R16): a
     /// device's Use Current Scale switch then acts as off.
     #[must_use]

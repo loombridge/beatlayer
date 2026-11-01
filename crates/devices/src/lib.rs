@@ -70,6 +70,8 @@ pub mod kitbag;
 pub mod level_mod;
 pub mod lfo;
 pub mod lift;
+pub mod meld;
+mod meld_osc;
 pub mod limiter;
 pub mod looper;
 pub mod midi_cc;
@@ -317,6 +319,7 @@ pub fn register(registry: &mut Registry) {
     compressor::register(registry);
     corpus::register(registry);
     polysynth::register(registry);
+    meld::register(registry);
     limiter::register(registry);
     delay::register(registry);
     filter_delay::register(registry);

@@ -34,6 +34,7 @@ impl Shell {
         // The lamp follows the test clock when a test paces the engine by
         // hand.
         changed |= self.track_link(self.midi.now());
+        changed |= self.track_tempo_follower(self.midi.now());
         changed | self.track_sync_activity(self.midi.now())
     }
 
@@ -191,6 +192,14 @@ impl Shell {
         let id = transport_ids::SET_EXTERNAL_SYNC;
         let transport_ids::SetExternalSyncArgs { on } = Self::args(id, args)?;
         let on = on.unwrap_or(!self.external_sync());
+        // Spec: tempo-follower R5, midi-clock R28. Follow and EXT exclude
+        // each other.
+        if on && self.tempo_follow_on {
+            return Err(ShellError::Unavailable {
+                command: id.to_owned(),
+                reason: "Tempo Follower is on: switch it off before External Sync".to_owned(),
+            });
+        }
         if on && !self.sync_lamps_shown() {
             return Err(ShellError::Failed {
                 command: id.to_owned(),

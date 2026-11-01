@@ -17,8 +17,9 @@ use bl_project::preset::Preset;
 use bl_shell_spec::devices::{ChainRow, Grouped, NewDevice};
 use bl_shell_spec::pads::{
     DrumRow, ExtractChainArgs, Extracted, GroupToDrumRackArgs, MovePadsArgs, PADS_PER_ROW,
-    PADS_SHOWN, PadArgs, PadDropArgs, PadDropped, PadFrame, PadHotSwapArgs, PadKind, PadRenameArgs,
-    PadState, PadSwapArgs, PadSwitch, PadSwitchArgs, ReturnChoice, ReturnRow,
+    PADS_SHOWN, PadArgs, PadCopyArgs, PadDropArgs, PadDropped, PadFrame, PadHotSwapArgs, PadKind,
+    PadPushColourArgs, PadRenameArgs, PadState, PadSwapArgs, PadSwitch, PadSwitchArgs,
+    ReturnChoice, ReturnRow,
 };
 
 use super::{DeviceError, DeviceView, Outcome, new_device, preset_path};
@@ -1055,6 +1056,80 @@ impl DeviceView {
             self.pads_selected.insert(rack.id, to);
         }
         Ok(())
+    }
+
+    /// `pad.copy` (notes on Push 2 R17): replaces the chains of pad `to` with
+    /// copies of pad `from`'s, as one undo step.
+    pub(super) fn copy_pad(
+        &mut self,
+        editor: &mut Editor,
+        args: PadCopyArgs,
+    ) -> Result<(), DeviceError> {
+        let PadCopyArgs { rack, from, to } = args;
+        if from > 127 || to > 127 {
+            return Err(DeviceError::InvalidArgs("a pad is a MIDI note".to_owned()));
+        }
+        let rack = self.drum_rack(editor.document(), rack)?.clone();
+        let source: Vec<Chain> = pad_chains(&rack, from).into_iter().cloned().collect();
+        if source.is_empty() {
+            return Err(DeviceError::Unavailable(format!(
+                "the pad on {} holds no chain",
+                bl_model::note_name(from)
+            )));
+        }
+        if from == to {
+            return Ok(());
+        }
+        let old: Vec<ChainId> = pad_chains(&rack, to).iter().map(|c| c.id).collect();
+        editor
+            .transact("Copy Pad", |editor| {
+                for chain in old {
+                    editor.apply(Command::RemoveChain { chain })?;
+                }
+                let end = editor
+                    .document()
+                    .device(rack.id)
+                    .map_or(0, Self::drum_chain_end);
+                for (index, mut chain) in (end..).zip(source) {
+                    chain.reassign_ids(&mut || editor.new_id::<DeviceId>().0);
+                    chain.id = editor.new_id();
+                    chain.receive = Receive::Note(to);
+                    chain.devices.iter_mut().for_each(Device::clear_mappings);
+                    editor.apply(Command::AddChain {
+                        rack: rack.id,
+                        index,
+                        chain,
+                    })?;
+                }
+                Ok::<_, bl_model::EditError>(())
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))
+    }
+
+    /// `pad.set_push_colour` (notes on Push 2 R19): the swatch Push 2 shows
+    /// for the pad's chains, as one undo step.
+    pub(super) fn set_pad_push_colour(
+        &mut self,
+        editor: &mut Editor,
+        args: PadPushColourArgs,
+    ) -> Result<(), DeviceError> {
+        let PadPushColourArgs { rack, note, colour } = args;
+        let chains = self.pad_chain_ids(editor.document(), rack, note)?;
+        if chains.is_empty() {
+            return Err(DeviceError::Unavailable(format!(
+                "the pad on {} holds no chain",
+                bl_model::note_name(note)
+            )));
+        }
+        editor
+            .transact("Change Pad Color on Push", |editor| {
+                chains.into_iter().try_for_each(|chain| {
+                    editor
+                        .apply(Command::SetChainPushColour { chain, colour })
+                        .map(|_| ())
+                })
+            })
+            .map_err(|e| DeviceError::Failed(e.to_string()))
     }
 
     /// `pad.hot_swap`: makes a pad the hot-swap target, or ends it.

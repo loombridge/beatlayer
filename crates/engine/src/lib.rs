@@ -128,6 +128,7 @@ pub mod sidechain;
 mod sources;
 mod state;
 mod sync_out;
+pub mod tempo_follower;
 mod timecode_in;
 pub mod transport;
 mod tuned;
@@ -193,6 +194,7 @@ pub use state::{
     PointReading, TrackMeter,
 };
 pub use sync_out::{MAX_SYNC_OUTPUTS, SyncOutState};
+pub use tempo_follower::{Heard, Leader, TempoFollower, Tracker};
 pub use tuned::{KeyMap, KeyPitches};
 pub use tuned_notes::TunedNotes;
 

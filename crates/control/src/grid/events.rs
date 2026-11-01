@@ -667,6 +667,10 @@ mod tests {
     use super::*;
     use crate::surface::Ask;
 
+    fn played(cx: &Cx) -> Vec<MidiMessage> {
+        cx.played.iter().map(|(_, message)| *message).collect()
+    }
+
     // Spec: supported-controllers R4. A surface stopped with pads down lets
     // their notes and slots go, since the releases can no longer arrive.
     #[test]
@@ -689,11 +693,11 @@ mod tests {
         };
         grid.message(now, &[0x98, note(0, 7), 100], &mut cx);
         grid.message(now, &[0x90, note(0, 0), 100], &mut cx);
-        assert_eq!(cx.played, [MidiMessage::note_on(0, 36, 100)]);
+        assert_eq!(played(&cx), [MidiMessage::note_on(0, 36, 100)]);
 
         let mut cx = Cx::new(0, now);
         grid.stop(&mut cx);
-        assert_eq!(cx.played, [MidiMessage::note_off(0, 36)]);
+        assert_eq!(played(&cx), [MidiMessage::note_off(0, 36)]);
         assert!(cx.requests.iter().any(|ask| matches!(
             ask,
             Ask::Control(c) if c.role == (Role::Slot { column: 0, row: 0 })

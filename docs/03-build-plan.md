@@ -1058,7 +1058,7 @@ The 35 packages fall in eight epics: the plug-in sandbox and bridge (WP-10.1 to 
 | 9.22 | todo |  |  |
 | 9.23 | todo |  |  |
 | 9.24 | done | 1 November 2026 | [#665](https://github.com/loombridge/beatlayer/pull/665): a new `bl-video` crate reads QuickTime movies with exact frame times and edit lists, decodes frames ahead of the playhead on a video thread through VideoToolbox, Media Foundation, FFmpeg or its own MJPEG decoder, decodes the movie's audio through `bl-media`, and gives black and silence in gaps |
-| 9.25 | todo |  |  |
+| 9.25 | done | 1 November 2026 | [#689](https://github.com/loombridge/beatlayer/pull/689): a movie dropped on an audio track in the Arrangement becomes a video clip (an audio clip with a video flag, schema 14) with warp and Lead on, sprocket holes and the movie's chapter markers as cues; Session slots, Reverse, Crop, Consolidate and stems give audio clips and leave the movie untouched; DAWproject video timelines import as video clips; `video.frame_at` reads the frame through the warp map, the bottom-most leader leading; Live set video clips (R66) wait on the Live set importer |
 | 9.26 | todo |  |  |
 | 9.27 | todo |  |  |
 | 9.28 | done | 1 November 2026 | [#690](https://github.com/loombridge/beatlayer/pull/690): a spike under `spikes/ext-wasmtime` runs a component's process function under `wasmtime` with a pooling allocator on a real-time thread on all three platforms: no allocation after instantiation, about 0.4 to 1.3 µs per 32-frame block, runaways stopped by epoch interruption, and `cargo deny` passing; its report on D12 is with the maintainer |

@@ -539,6 +539,18 @@ pub fn modulated_text(base: String, played: Option<String>) -> String {
     )
 }
 
+/// What assistive technology reads of a control an instrument's matrix
+/// moves: its text, and the sources routed into it.
+// Spec: instrument modulation R12
+#[must_use]
+pub fn routed_text(text: String, sources: &[String]) -> String {
+    if sources.is_empty() {
+        text
+    } else {
+        format!("{text}, routed from {}", sources.join(", "))
+    }
+}
+
 /// A chooser (a drop-down) in the Settings window: a box showing the
 /// current choice that opens a list when clicked. With the keyboard focus on
 /// it, Up and Down step through the choices (S-SET-003). Returns the newly

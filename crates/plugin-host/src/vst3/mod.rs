@@ -614,6 +614,7 @@ impl Vst3Host {
                     midi_tap: false,
                     note_output,
                     outputs: Vec::new(),
+                    matrix: None,
                 },
                 vendor,
                 version,

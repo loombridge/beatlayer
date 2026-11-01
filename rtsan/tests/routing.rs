@@ -565,23 +565,28 @@ fn midi_sidechains_pass_under_rtsan() {
             20 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[0]),
+                tap: None,
             }),
             200 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[1]),
+                tap: None,
             }),
             400 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: None,
+                tap: None,
             }),
             600 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[2]),
+                tap: None,
             }),
             900 => Some(Command::DeleteTrack { track: keys[2] }),
             1_000 => Some(Command::SetMidiSidechainSource {
                 device: hear,
                 track: Some(keys[0]),
+                tap: None,
             }),
             _ => None,
         };

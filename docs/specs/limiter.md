@@ -1,6 +1,6 @@
 # The limiter
 
-- **Status:** partial (R1 to R9 each have a passing test; R10 to R13 are WP-8.33's)
+- **Status:** implemented
 - **Work packages:** WP-2.18a (part 3; the limiter with a true-peak look-ahead: R1 to R9); WP-8.33 (Maximize, from Live 12.1, and the device's banks: R10 to R13)
 - **Parity-matrix row:** Devices: EQ Eight, Compressor, Limiter, Reverb, Delay, Utility
 - **Checked against:** Live 12.1's reference manual, section "Limiter"; the Live 12 reference manual (online edition), section 29.24 "Limiter", and the Live 12.1 release notes, read 30 October 2026
@@ -36,9 +36,9 @@ The device delays the signal by the look-ahead time and, over that same window, 
 ### Maximize (WP-8.33)
 
 - **R10.** Maximize is a switch, off in a new device, automatable like every parameter. With it on, the device shows Threshold in Ceiling's place and Output in Gain's: two parameters of their own (because a descriptor's range and unit are fixed), Threshold from −24 to 0 dB (default 0 dB) and Output a gain from −∞ to 0 dB (default −0.3 dB, rule G1). Ceiling and Gain keep their values while Maximize is on, and Threshold and Output keep theirs while it is off. (S4; the separate parameters, ranges and defaults are Beatlayer's own)
-- **R11.** With Maximize on, the input is raised by Output minus Threshold, in dB, and limited at Output in the chosen Ceiling Mode, with Release, Auto, Lookahead, Link and Routing Mode as R3 to R7 say: lowering Threshold by 6 dB raises everything below the limiting by 6 dB, and the output's sample peak (or true peak, in True Peak) never passes Output. At Threshold 0 dB and Output −0.3 dB a signal peaking below −0.3 dB passes unchanged. (S4; the law is Beatlayer's own)
-- **R12.** A set or preset saved before WP-8.33 opens with Maximize off and renders sample-identically. Switching Maximize is one undo step named Change "Maximize", and the controls' labels follow it in the device's body, in `device.parameters` (each parameter with whether it is shown) and in the accessibility tree. (S4)
-- **R13.** Limiter declares its banks of eight (S5): Main (Ceiling, Gain, Release, Auto, Lookahead, Link, Ceiling Mode, Routing Mode) and Maximize (Maximize, Threshold, Output), so every automatable parameter is in a bank. (S5; the banks are Beatlayer's own)
+- **R11.** With Maximize on, the input is raised by Output minus Threshold, in dB, and limited at Output in the chosen Ceiling Mode, with Release, Auto, Lookahead, Link and Routing Mode as R3 to R7 say: lowering Threshold by 6 dB raises everything below the limiting by 6 dB, and the output's sample peak (or true peak, in True Peak) never passes Output. A signal that peaks at Threshold leaves at Output, so at Threshold 0 dB and Output −0.3 dB the whole signal is 0.3 dB quieter. (S4; the law is Beatlayer's own)
+- **R12.** A set or preset saved before WP-8.33 opens with Maximize off and renders sample-identically. Switching Maximize is one undo step named Change "Maximize", and the controls' labels follow it in the device's body, in `device.parameters` (each parameter with whether it is shown) and in the accessibility tree, through [the device framework](device-framework.md) R50. (S4)
+- **R13.** Limiter declares its banks of eight (S5): Limiter (Ceiling, Gain, Release, Auto, Lookahead, Link, Ceiling Mode, Routing Mode) and Maximize (Maximize, Threshold, Output), so every automatable parameter is in a bank. (S5; the banks are Beatlayer's own)
 
 ## Tests
 
@@ -53,9 +53,10 @@ The device delays the signal by the look-ahead time and, over that same window, 
 | R7 | `crates/devices/tests/limiter.rs`, `mid_side_routing_keeps_the_left_and_right_under_the_ceiling` | unit, real-time trap |
 | R8 | `crates/devices/tests/limiter.rs`, `soft_clip_keeps_the_output_below_the_ceiling` | unit, real-time trap |
 | R9 | `crates/devices/tests/rules.rs`, `every_gain_parameter_reaches_minus_infinity`, `every_parameter_is_automatable_to_the_frame` | real-time trap |
-| R10, R11 | to be written in WP-8.33 | unit, real-time trap (the output peak never above Output; the gain below the limiting; golden renders at block sizes 1, 64 and 4,096) |
-| R12 | to be written in WP-8.33 | unit (an old set renders identically); shell test (undo label, shown labels); UI script |
-| R13 | to be written in WP-8.33 | `crates/devices/tests/banks.rs` |
+| R10 | `crates/devices/tests/limiter.rs`, `maximize_is_off_in_a_new_limiter_and_threshold_and_output_have_their_own_ranges` | unit |
+| R11 | `crates/devices/tests/limiter.rs`, `maximize_lifts_by_output_minus_threshold_and_a_lower_threshold_is_louder_by_as_much`, `with_maximize_the_output_never_passes_output_in_any_ceiling_mode`, `a_maximize_render_is_the_same_at_block_sizes_1_64_and_4096` | unit, real-time trap |
+| R12 | `crates/devices/tests/limiter.rs`, `a_limiter_saved_before_maximize_renders_identically_with_it_off`, `maximize_turns_a_control_between_two_parameters_that_keep_their_values`; `crates/ui/tests/delay_limiter.rs`, `maximize_relabels_ceiling_and_gain_in_the_body_the_tree_and_the_parameters` | unit, UI script, accessibility tree |
+| R13 | `crates/devices/tests/banks.rs`, `every_native_device_types_banks_hold_every_parameter_and_none_more_than_eight`; `crates/devices/tests/limiter.rs`, `maximize_turns_a_control_between_two_parameters_that_keep_their_values` | unit |
 
 ## Not built yet
 

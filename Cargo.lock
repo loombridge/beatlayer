@@ -715,9 +715,11 @@ version = "0.2.0"
 dependencies = [
  "bl-dsp",
  "bl-media",
+ "bl-rt",
  "ort",
  "rayon",
  "realfft",
+ "rtrb",
 ]
 
 [[package]]
@@ -858,7 +860,9 @@ dependencies = [
 name = "bl-dsp"
 version = "0.2.0"
 dependencies = [
+ "lspk-dsp",
  "lspk-params",
+ "lspk-rt",
 ]
 
 [[package]]
@@ -1099,6 +1103,7 @@ dependencies = [
  "bl-test-vst3",
  "flate2",
  "getrandom 0.3.4",
+ "libc",
  "lspk-example-gain",
  "midly",
  "objc2 0.6.5",
@@ -1110,6 +1115,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "windows-sys 0.52.0",
  "zip",
 ]
 
